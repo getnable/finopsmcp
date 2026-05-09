@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FinOps MCP — Setup Documentation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" />
+  <style>
+    :root {
+      --bg:       #edf2fb;
+      --surface:  #f4f8fe;
+      --surface2: #e3ecf8;
+      --border:   #c0d4ec;
+      --border2:  #96b8e0;
+      --blue:     #2d5fa8;
+      --blue-dim: #1e4a8c;
+      --blue-hi:  #3b72c0;
+      --text:     #0c1e38;
+      --muted:    #3d587a;
+      --dim:      #6e90b8;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; }
+    nav { border-bottom: 1px solid var(--border); background: rgba(237,242,251,0.92); backdrop-filter: blur(14px); }
+    .sidebar { position: sticky; top: 64px; height: calc(100vh - 64px); overflow-y: auto; }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+    .nav-link { display: block; padding: 5px 12px; border-radius: 7px; font-size: 13px; color: var(--muted); transition: all 0.12s; text-decoration: none; }
+    .nav-link:hover { color: var(--text); background: var(--surface2); }
+    .nav-link.active { color: var(--blue); background: rgba(45,95,168,0.09); font-weight: 600; }
+    .nav-group { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); padding: 16px 12px 4px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+    .code-block { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12.5px; line-height: 1.7; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; background: rgba(45,95,168,0.08); border: 1px solid rgba(45,95,168,0.22); color: var(--blue); border-radius: 6px; font-size: 11px; font-weight: 600; padding: 2px 8px; }
+    .badge-green { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.3); color: #0d7a56; }
+    .badge-yellow { background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.3); color: #8a6000; }
+    .badge-red { background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.3); color: #9b1c1c; }
+    .step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--blue); color: #eef4fd; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .perm-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .perm-row:last-child { border-bottom: none; }
+    .connector-logo { width: 28px; height: 28px; object-fit: contain; }
+    .section-anchor { padding-top: 80px; margin-top: -80px; }
+    h2.section-title { font-size: 1.5rem; font-weight: 800; color: var(--text); margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+    .env-key { color: var(--blue-hi); font-family: monospace; font-size: 12px; }
+    .env-val { color: #c8a96e; font-family: monospace; font-size: 12px; }
+    .check { color: #0d7a56; font-weight: 700; }
+    .warn-box { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.28); border-radius: 10px; padding: 12px 16px; font-size: 13px; color: var(--muted); }
+    .info-box { background: rgba(45,95,168,0.06); border: 1px solid rgba(45,95,168,0.2); border-radius: 10px; padding: 12px 16px; font-size: 13px; color: var(--muted); }
+    .btn-primary { background: linear-gradient(135deg, var(--blue), #2245a0); color: #eef4fd; font-weight: 700; border-radius: 9px; padding: 8px 18px; font-size: 13px; display: inline-block; text-decoration: none; }
+  </style>
+</head>
+<body class="antialiased">
+
+<!-- Nav -->
+<nav class="sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <a href="index.html" class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,var(--blue),#2245a0)">
+          <svg width="18" height="18" viewBox="0 0 22 20" fill="none">
+            <rect x="0" y="13" width="4.5" height="7" rx="1.2" fill="#eef4fd" opacity="0.55"/>
+            <rect x="6" y="8.5" width="4.5" height="11.5" rx="1.2" fill="#eef4fd" opacity="0.78"/>
+            <rect x="12" y="4" width="4.5" height="16" rx="1.2" fill="#eef4fd"/>
+            <path d="M19.5 0 L20.4 2.4 L22 3 L20.4 3.6 L19.5 6 L18.6 3.6 L17 3 L18.6 2.4 Z" fill="#eef4fd" opacity="0.92"/>
+          </svg>
+        </div>
+        <span class="font-bold text-lg tracking-tight" style="color:var(--text)">FinOps MCP</span>
+      </a>
+      <span class="text-xs px-2 py-0.5 rounded-md font-semibold ml-1" style="background:var(--surface2);color:var(--blue);border:1px solid var(--border)">Docs</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="index.html#pricing" class="text-sm font-medium" style="color:var(--muted)">← Back to site</a>
+      <a href="mailto:hello@finmcp.tech" class="btn-primary">Get help</a>
+    </div>
+  </div>
+</nav>
+
+<div class="max-w-7xl mx-auto px-6 flex gap-10 pt-8 pb-24">
+
+  <!-- Sidebar -->
+  <aside class="sidebar w-56 flex-shrink-0 hidden lg:block">
+    <div class="pr-2">
+      <div class="nav-group">Getting started</div>
+      <a href="#quickstart"    class="nav-link active">Quick start</a>
+      <a href="#install"       class="nav-link">Installation</a>
+      <a href="#ai-clients"    class="nav-link">AI client setup</a>
+
+      <div class="nav-group">Cloud providers</div>
+      <a href="#aws"           class="nav-link">AWS</a>
+      <a href="#azure"         class="nav-link">Azure</a>
+      <a href="#gcp"           class="nav-link">GCP</a>
+
+      <div class="nav-group">SaaS tools</div>
+      <a href="#datadog"       class="nav-link">Datadog</a>
+      <a href="#snowflake"     class="nav-link">Snowflake</a>
+      <a href="#github"        class="nav-link">GitHub</a>
+      <a href="#stripe"        class="nav-link">Stripe</a>
+      <a href="#mongodb"       class="nav-link">MongoDB Atlas</a>
+      <a href="#twilio"        class="nav-link">Twilio</a>
+      <a href="#cloudflare"    class="nav-link">Cloudflare</a>
+      <a href="#vercel"        class="nav-link">Vercel</a>
+      <a href="#pagerduty"     class="nav-link">PagerDuty</a>
+      <a href="#newrelic"      class="nav-link">New Relic</a>
+      <a href="#invoices"      class="nav-link">Invoice emails</a>
+
+      <div class="nav-group">Alerts & automation</div>
+      <a href="#slack"         class="nav-link">Slack</a>
+      <a href="#teams"         class="nav-link">Microsoft Teams</a>
+      <a href="#email"         class="nav-link">Email digest</a>
+      <a href="#ticketing"     class="nav-link">Jira / Linear / GitHub</a>
+
+      <div class="nav-group">Reference</div>
+      <a href="#env"           class="nav-link">All env variables</a>
+      <a href="#troubleshoot"  class="nav-link">Troubleshooting</a>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="flex-1 min-w-0 max-w-3xl">
+
+    <!-- Quick start -->
+    <div id="quickstart" class="section-anchor">
+      <div class="badge mb-4">Getting started</div>
+      <h1 class="text-3xl font-black mb-3" style="color:var(--text)">Setup guide</h1>
+      <p class="text-base leading-relaxed mb-8" style="color:var(--muted)">This guide walks you through connecting every provider. You don't need all 13 — start with the two or three you care about most, and add more later.</p>
+
+      <div class="card p-6 mb-6">
+        <h3 class="font-bold mb-4" style="color:var(--text)">What you'll need before starting</h3>
+        <div class="space-y-3">
+          <div class="perm-row">
+            <span class="check mt-0.5">✓</span>
+            <div><span class="font-medium text-sm" style="color:var(--text)">Python 3.10+</span><span class="text-sm ml-2" style="color:var(--muted)">— check with <code class="text-xs bg-gray-100 px-1 py-0.5 rounded">python3 --version</code></span></div>
+          </div>
+          <div class="perm-row">
+            <span class="check mt-0.5">✓</span>
+            <div><span class="font-medium text-sm" style="color:var(--text)">An AI client</span><span class="text-sm ml-2" style="color:var(--muted)">— Claude Desktop, Cursor, Windsurf, or any MCP-compatible app</span></div>
+          </div>
+          <div class="perm-row">
+            <span class="check mt-0.5">✓</span>
+            <div><span class="font-medium text-sm" style="color:var(--text)">Read-only credentials</span><span class="text-sm ml-2" style="color:var(--muted)">— for each provider you want to connect (details below)</span></div>
+          </div>
+          <div class="perm-row">
+            <span class="check mt-0.5">✓</span>
+            <div><span class="font-medium text-sm" style="color:var(--text)">Your Pro license key</span><span class="text-sm ml-2" style="color:var(--muted)">— from your confirmation email after subscribing</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-box mb-8">
+        <strong style="color:var(--blue)">Security note:</strong> All credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine.
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Installation -->
+    <div id="install" class="section-anchor">
+      <h2 class="section-title">Installation</h2>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Install the package and run the setup wizard. The wizard walks you through each provider interactively.</p>
+
+      <div class="space-y-4">
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">1</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install from PyPI</p>
+            <div class="code-block p-4">
+              <span style="color:var(--dim)"># With all optional extras</span><br/>
+              <span style="color:var(--blue-hi)">pip install</span> <span style="color:var(--text)">finops-mcp[pdf,snowflake,keyring]</span>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">2</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Run the setup wizard</p>
+            <div class="code-block p-4">
+              <span style="color:var(--blue-hi)">finops setup</span><br/>
+              <span style="color:var(--dim)"># Interactive — walks through each provider</span><br/>
+              <span style="color:var(--dim)"># Skip any you don't need</span>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">3</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Verify everything is configured</p>
+            <div class="code-block p-4">
+              <span style="color:var(--blue-hi)">finops status</span><br/>
+              <span style="color:#34d399">✓ aws</span> &nbsp;&nbsp;&nbsp;configured<br/>
+              <span style="color:#34d399">✓ datadog</span> configured<br/>
+              <span style="color:var(--dim)">– azure</span> &nbsp;&nbsp;not configured
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- AI clients -->
+    <div id="ai-clients" class="section-anchor">
+      <h2 class="section-title">AI client setup</h2>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Add the MCP server to your AI client's config. You only need to do this once.</p>
+
+      <div class="space-y-4">
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">Claude Desktop</p>
+          <p class="text-xs mb-3" style="color:var(--muted)">Edit <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></p>
+          <div class="code-block p-4 text-xs">
+            {<br/>
+            &nbsp;&nbsp;<span style="color:#7da8d4">"mcpServers"</span>: {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--blue-hi)">"finops"</span>: {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#7da8d4">"command"</span>: <span style="color:#c8a96e">"finops-mcp"</span><br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;}<br/>
+            &nbsp;&nbsp;}<br/>
+            }
+          </div>
+        </div>
+
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">Cursor</p>
+          <p class="text-xs mb-3" style="color:var(--muted)">Settings → MCP → Add server, or edit <code>~/.cursor/mcp.json</code></p>
+          <div class="code-block p-4 text-xs">
+            {<br/>
+            &nbsp;&nbsp;<span style="color:#7da8d4">"mcpServers"</span>: {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--blue-hi)">"finops"</span>: { <span style="color:#7da8d4">"command"</span>: <span style="color:#c8a96e">"finops-mcp"</span> }<br/>
+            &nbsp;&nbsp;}<br/>
+            }
+          </div>
+        </div>
+
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">Windsurf</p>
+          <p class="text-xs mb-3" style="color:var(--muted)">Edit <code>~/.codeium/windsurf/mcp_config.json</code></p>
+          <div class="code-block p-4 text-xs">
+            {<br/>
+            &nbsp;&nbsp;<span style="color:#7da8d4">"mcpServers"</span>: {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--blue-hi)">"finops"</span>: { <span style="color:#7da8d4">"command"</span>: <span style="color:#c8a96e">"finops-mcp"</span> }<br/>
+            &nbsp;&nbsp;}<br/>
+            }
+          </div>
+        </div>
+
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">OpenAI Codex / other MCP clients</p>
+          <p class="text-xs mb-3" style="color:var(--muted)">Run the server manually and point your client at the stdio transport.</p>
+          <div class="code-block p-4 text-xs">
+            <span style="color:var(--blue-hi)">finops-mcp</span> <span style="color:var(--dim)"># listens on stdio</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+    <p class="text-xs font-bold uppercase tracking-widest mb-6" style="color:var(--blue)">Cloud Providers</p>
+
+    <!-- AWS -->
+    <div id="aws" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/amazonaws/FF9900" class="connector-logo" alt="AWS"/>
+        AWS
+      </h2>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Connects to Cost Explorer for spend data, and CloudWatch for rightsizing metrics. Supports IAM keys, IAM Identity Center SSO, and cross-account role assumption.</p>
+
+      <div class="warn-box mb-5">
+        <strong>Cost Explorer must be enabled</strong> in your AWS account before the API will work. Go to <strong>Billing → Cost Explorer → Enable</strong>. It takes up to 24 hours to activate on a new account.
+      </div>
+
+      <div class="card p-5 mb-4">
+        <p class="font-semibold text-sm mb-3" style="color:var(--text)">Required IAM permissions</p>
+        <div class="code-block p-4 text-xs">
+          ce:GetCostAndUsage<br/>
+          ce:GetSavingsPlansUtilization<br/>
+          ce:GetSavingsPlansCoverage<br/>
+          ce:GetReservationUtilization<br/>
+          ce:GetReservationCoverage<br/>
+          sts:GetCallerIdentity<br/>
+          cloudwatch:GetMetricStatistics &nbsp;<span style="color:var(--dim)"># rightsizing only</span><br/>
+          ec2:DescribeInstances &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--dim)"># rightsizing only</span>
+        </div>
+        <p class="text-xs mt-3" style="color:var(--dim)">Attach the AWS managed policy <strong>ReadOnlyAccess</strong> as a quick alternative — it covers all of the above.</p>
+      </div>
+
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Create an IAM user with the permissions above, or use an existing SSO role.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup aws</span></div></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Enter your Access Key ID and Secret Access Key when prompted. For SSO, enter your profile name.</p></div></div>
+      </div>
+
+      <div class="card p-5">
+        <p class="font-semibold text-xs mb-2" style="color:var(--muted)">Manual env vars (alternative to wizard)</p>
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">AWS_ACCESS_KEY_ID</span>=<span class="env-val">AKIA...</span><br/>
+          <span class="env-key">AWS_SECRET_ACCESS_KEY</span>=<span class="env-val">your-secret</span><br/>
+          <span class="env-key">AWS_DEFAULT_REGION</span>=<span class="env-val">us-east-1</span> &nbsp;<span style="color:var(--dim)"># CE requires us-east-1</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Azure -->
+    <div id="azure" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/microsoftazure/0078D4" class="connector-logo" alt="Azure"/>
+        Azure
+      </h2>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Connects to Azure Cost Management API. Supports Service Principal (recommended for automation) and device code flow (interactive login).</p>
+
+      <div class="card p-5 mb-4">
+        <p class="font-semibold text-sm mb-3" style="color:var(--text)">Required Azure role</p>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">Cost Management Reader</span><span class="text-sm ml-2" style="color:var(--muted)">— scoped to your Subscription or Management Group</span></div></div>
+      </div>
+
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Create a Service Principal: <code class="text-xs bg-blue-50 px-1 rounded">az ad sp create-for-rbac --name finops-mcp --role "Cost Management Reader" --scopes /subscriptions/YOUR_SUB_ID</code></p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup azure</span></div></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Enter Tenant ID, Client ID, Client Secret, and Subscription ID when prompted.</p></div></div>
+      </div>
+
+      <div class="card p-5">
+        <p class="font-semibold text-xs mb-2" style="color:var(--muted)">Manual env vars</p>
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">AZURE_TENANT_ID</span>=<span class="env-val">your-tenant-id</span><br/>
+          <span class="env-key">AZURE_CLIENT_ID</span>=<span class="env-val">your-client-id</span><br/>
+          <span class="env-key">AZURE_CLIENT_SECRET</span>=<span class="env-val">your-client-secret</span><br/>
+          <span class="env-key">AZURE_SUBSCRIPTION_ID</span>=<span class="env-val">your-subscription-id</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- GCP -->
+    <div id="gcp" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/googlecloud/4285F4" class="connector-logo" alt="GCP"/>
+        GCP
+      </h2>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Primary path: BigQuery billing export (recommended — richer data). Fallback: Cloud Billing API. Both use a service account JSON key stored encrypted in your vault.</p>
+
+      <div class="card p-5 mb-4">
+        <p class="font-semibold text-sm mb-3" style="color:var(--text)">Required IAM roles</p>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">roles/billing.viewer</span><span class="text-sm ml-2" style="color:var(--muted)">— Billing API access</span></div></div>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">roles/bigquery.dataViewer</span><span class="text-sm ml-2" style="color:var(--muted)">— only if using BigQuery export</span></div></div>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">roles/bigquery.jobUser</span><span class="text-sm ml-2" style="color:var(--muted)">— only if using BigQuery export</span></div></div>
+      </div>
+
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Create a service account in GCP Console → IAM → Service Accounts. Assign roles above. Download the JSON key file.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">(Recommended) Enable billing export to BigQuery: Billing → Billing export → BigQuery export.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup gcp</span></div></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">4</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Paste the path to your JSON key file and your GCP Project ID when prompted.</p></div></div>
+      </div>
+
+      <div class="card p-5">
+        <p class="font-semibold text-xs mb-2" style="color:var(--muted)">Manual env vars</p>
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">GOOGLE_APPLICATION_CREDENTIALS</span>=<span class="env-val">/path/to/key.json</span><br/>
+          <span class="env-key">GCP_PROJECT_ID</span>=<span class="env-val">my-project-123</span><br/>
+          <span class="env-key">GCP_BIGQUERY_DATASET</span>=<span class="env-val">billing_export</span> &nbsp;<span style="color:var(--dim)"># if using BQ export</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+    <p class="text-xs font-bold uppercase tracking-widest mb-6" style="color:var(--blue)">SaaS Tools</p>
+
+    <!-- Datadog -->
+    <div id="datadog" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/datadog/632CA6" class="connector-logo" alt="Datadog"/>
+        Datadog
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Real cost data via the Usage Metering API v2. Returns host counts, APM hosts, log ingestion, and dollar amounts where available. Supports EU site.</p>
+
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Organization Settings → API Keys</strong> → New Key. Name it <code>finops-mcp</code>.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Organization Settings → Application Keys</strong> → New Key.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup datadog</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">DD_API_KEY</span>=<span class="env-val">your-api-key</span><br/>
+          <span class="env-key">DD_APP_KEY</span>=<span class="env-val">your-app-key</span><br/>
+          <span class="env-key">DD_SITE</span>=<span class="env-val">datadoghq.com</span> &nbsp;<span style="color:var(--dim)"># or datadoghq.eu</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Snowflake -->
+    <div id="snowflake" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/snowflake/29B5E8" class="connector-logo" alt="Snowflake"/>
+        Snowflake
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Queries <code>ACCOUNT_USAGE.METERING_HISTORY</code> for real credit consumption. Set your contract credit price to convert to USD.</p>
+
+      <div class="card p-5 mb-4">
+        <p class="font-semibold text-sm mb-2" style="color:var(--text)">Required privilege</p>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">IMPORTED PRIVILEGES on database SNOWFLAKE</span><span class="text-sm ml-2" style="color:var(--muted)">— grants access to ACCOUNT_USAGE schema</span></div></div>
+      </div>
+
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Create a read-only role and user: <code class="text-xs">GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE finops_role;</code></p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup snowflake</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">SNOWFLAKE_ACCOUNT</span>=<span class="env-val">xy12345.us-east-1</span><br/>
+          <span class="env-key">SNOWFLAKE_USER</span>=<span class="env-val">finops_user</span><br/>
+          <span class="env-key">SNOWFLAKE_PASSWORD</span>=<span class="env-val">your-password</span><br/>
+          <span class="env-key">SNOWFLAKE_WAREHOUSE</span>=<span class="env-val">COMPUTE_WH</span><br/>
+          <span class="env-key">SNOWFLAKE_CREDIT_PRICE</span>=<span class="env-val">3.00</span> &nbsp;<span style="color:var(--dim)"># your contract rate per credit</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- GitHub -->
+    <div id="github" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/github/0c1e38" class="connector-logo" alt="GitHub"/>
+        GitHub
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns paid Actions minutes used and Copilot seat counts. Requires org-level access.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Settings → Developer settings → Personal access tokens → Fine-grained tokens</strong>. Select your org. Set permissions: <code>read:billing</code>, <code>read:org</code>.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup github</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">GITHUB_TOKEN</span>=<span class="env-val">github_pat_...</span><br/>
+          <span class="env-key">GITHUB_ORG</span>=<span class="env-val">your-org-name</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Stripe -->
+    <div id="stripe" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/stripe/635BFF" class="connector-logo" alt="Stripe"/>
+        Stripe
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns actual fees paid to Stripe via the Balance Transactions API. Use a restricted key — no write permissions needed.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Stripe Dashboard → Developers → API Keys → Create restricted key</strong>. Enable: <code>Balance → Read</code> only.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup stripe</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">STRIPE_API_KEY</span>=<span class="env-val">rk_live_...</span> &nbsp;<span style="color:var(--dim)"># restricted key, not secret key</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Twilio -->
+    <div id="twilio" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/twilio/F22F46" class="connector-logo" alt="Twilio"/>
+        Twilio
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Paginated usage records with real billing amounts. Uses your main Account SID and Auth Token.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Find your Account SID and Auth Token on the <strong>Twilio Console homepage</strong>.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup twilio</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">TWILIO_ACCOUNT_SID</span>=<span class="env-val">ACxxxxxx</span><br/>
+          <span class="env-key">TWILIO_AUTH_TOKEN</span>=<span class="env-val">your-auth-token</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- MongoDB -->
+    <div id="mongodb" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/mongodb/47A248" class="connector-logo" alt="MongoDB"/>
+        MongoDB Atlas
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Invoice API with line-item breakdown. Uses Digest Auth with an org-level API key.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Atlas → Access Manager → Organization Access → API Keys → Create API Key</strong>. Role: <code>Organization Billing Viewer</code>.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup mongodb</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">MONGODB_ATLAS_PUBLIC_KEY</span>=<span class="env-val">your-public-key</span><br/>
+          <span class="env-key">MONGODB_ATLAS_PRIVATE_KEY</span>=<span class="env-val">your-private-key</span><br/>
+          <span class="env-key">MONGODB_ATLAS_ORG_ID</span>=<span class="env-val">your-org-id</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Cloudflare -->
+    <div id="cloudflare" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/cloudflare/F38020" class="connector-logo" alt="Cloudflare"/>
+        Cloudflare
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Billing history and active subscriptions via the Cloudflare API.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Cloudflare Dashboard → My Profile → API Tokens → Create Token</strong>. Use the "Read billing info" template.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup cloudflare</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">CLOUDFLARE_API_TOKEN</span>=<span class="env-val">your-api-token</span><br/>
+          <span class="env-key">CLOUDFLARE_ACCOUNT_ID</span>=<span class="env-val">your-account-id</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Vercel -->
+    <div id="vercel" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/vercel/0c1e38" class="connector-logo" alt="Vercel"/>
+        Vercel
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Invoice API — requires a Vercel Enterprise plan. Returns invoices with line items. Returns a descriptive message if no invoice data is available.</p>
+      <div class="warn-box mb-4">Invoice data is only available on <strong>Enterprise plans</strong>. Pro/Hobby plans won't return billing data via the API.</div>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Vercel Dashboard → Settings → Tokens → Create</strong>. Scope: Full Account.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup vercel</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">VERCEL_API_TOKEN</span>=<span class="env-val">your-token</span><br/>
+          <span class="env-key">VERCEL_TEAM_ID</span>=<span class="env-val">team_xxxxxxx</span> &nbsp;<span style="color:var(--dim)"># optional, for team accounts</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- PagerDuty -->
+    <div id="pagerduty" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/pagerduty/06AC38" class="connector-logo" alt="PagerDuty"/>
+        PagerDuty
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns seat count and user data. For actual dollar amounts, use the <a href="#invoices" style="color:var(--blue)">Invoice email parser</a> — PagerDuty doesn't expose billing amounts via API.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>My Profile → User Settings → Create API User Token</strong>. Read-only access is sufficient.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup pagerduty</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">PAGERDUTY_API_TOKEN</span>=<span class="env-val">your-token</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- New Relic -->
+    <div id="newrelic" class="section-anchor">
+      <h2 class="section-title">
+        <img src="https://cdn.simpleicons.org/newrelic/008C99" class="connector-logo" alt="New Relic"/>
+        New Relic
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns data ingest (GB) and full platform user counts. Set your contract ingest price to convert to USD.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>New Relic → API Keys → Create key</strong>. Type: User key.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup newrelic</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">NEW_RELIC_API_KEY</span>=<span class="env-val">NRAK-...</span><br/>
+          <span class="env-key">NEW_RELIC_ACCOUNT_ID</span>=<span class="env-val">1234567</span><br/>
+          <span class="env-key">NEW_RELIC_INGEST_PRICE_PER_GB</span>=<span class="env-val">0.35</span> &nbsp;<span style="color:var(--dim)"># your contract rate</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Invoice emails -->
+    <div id="invoices" class="section-anchor">
+      <h2 class="section-title">📧 Invoice email parsing</h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">For vendors with no billing API (PagerDuty, New Relic, GitHub Enterprise, etc.), FinOps MCP can connect to your billing inbox via IMAP, parse PDF and HTML invoices, and extract real dollar amounts automatically.</p>
+      <div class="info-box mb-4">Create a dedicated <strong>billing@yourcompany.com</strong> mailbox and forward all vendor invoices there. This keeps it clean and avoids scanning your main inbox.</div>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Enable IMAP access on your mailbox (Gmail: Settings → See all settings → Forwarding and POP/IMAP).</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">If using Gmail, create an <strong>App Password</strong> (requires 2FA): Google Account → Security → App passwords.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup invoice</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">FINOPS_IMAP_HOST</span>=<span class="env-val">imap.gmail.com</span><br/>
+          <span class="env-key">FINOPS_IMAP_PORT</span>=<span class="env-val">993</span><br/>
+          <span class="env-key">FINOPS_IMAP_USER</span>=<span class="env-val">billing@yourcompany.com</span><br/>
+          <span class="env-key">FINOPS_IMAP_PASSWORD</span>=<span class="env-val">your-app-password</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+    <p class="text-xs font-bold uppercase tracking-widest mb-6" style="color:var(--blue)">Alerts & Automation</p>
+
+    <!-- Slack -->
+    <div id="slack" class="section-anchor">
+      <h2 class="section-title">Slack alerts</h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Sends anomaly alerts and daily digests to a Slack channel. Uses an incoming webhook — no bot scopes needed.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>api.slack.com/apps → Create app → Incoming Webhooks → Add webhook to workspace</strong>. Select your #finops channel.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Copy the webhook URL and add to your env:</p></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">SLACK_WEBHOOK_URL</span>=<span class="env-val">https://hooks.slack.com/services/T.../B.../...</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Teams -->
+    <div id="teams" class="section-anchor">
+      <h2 class="section-title">Microsoft Teams alerts</h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Sends anomaly alerts and daily digests via an Incoming Webhook connector.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">In Teams, go to your channel → <strong>⋯ → Connectors → Incoming Webhook → Configure</strong>. Copy the webhook URL.</p></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">TEAMS_WEBHOOK_URL</span>=<span class="env-val">https://yourorg.webhook.office.com/webhookb2/...</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Email digest -->
+    <div id="email" class="section-anchor">
+      <h2 class="section-title">Weekly email digest</h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Sends a standalone HTML email every Monday at 09:00 UTC with last week's spend, anomalies, and rightsizing recommendations. No AI client session required — fires from the scheduler.</p>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">FINOPS_SMTP_HOST</span>=<span class="env-val">smtp.gmail.com</span><br/>
+          <span class="env-key">FINOPS_SMTP_PORT</span>=<span class="env-val">587</span><br/>
+          <span class="env-key">FINOPS_SMTP_USER</span>=<span class="env-val">you@yourcompany.com</span><br/>
+          <span class="env-key">FINOPS_SMTP_PASSWORD</span>=<span class="env-val">your-app-password</span><br/>
+          <span class="env-key">FINOPS_DIGEST_TO</span>=<span class="env-val">team@yourcompany.com</span><br/>
+          <span class="env-key">FINOPS_WEEKLY_CRON</span>=<span class="env-val">"0 9 * * 1"</span> &nbsp;<span style="color:var(--dim)"># optional — default Mon 09:00 UTC</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Ticketing -->
+    <div id="ticketing" class="section-anchor">
+      <h2 class="section-title">Auto-ticketing</h2>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">When a high or medium-severity anomaly is detected, FinOps MCP automatically creates a ticket in your tracker. Configure one or more — the first configured is used by default.</p>
+
+      <div class="space-y-4">
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-3" style="color:var(--text)">Jira</p>
+          <p class="text-xs mb-3" style="color:var(--muted)">Create an API token at <strong>id.atlassian.com → Security → API tokens</strong>.</p>
+          <div class="code-block p-3 text-xs">
+            <span class="env-key">JIRA_URL</span>=<span class="env-val">https://yourorg.atlassian.net</span><br/>
+            <span class="env-key">JIRA_EMAIL</span>=<span class="env-val">you@yourcompany.com</span><br/>
+            <span class="env-key">JIRA_API_TOKEN</span>=<span class="env-val">your-api-token</span><br/>
+            <span class="env-key">JIRA_PROJECT_KEY</span>=<span class="env-val">FINOPS</span>
+          </div>
+        </div>
+
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-3" style="color:var(--text)">Linear</p>
+          <p class="text-xs mb-3" style="color:var(--muted)">Create an API key at <strong>Linear → Settings → API → Personal API keys</strong>.</p>
+          <div class="code-block p-3 text-xs">
+            <span class="env-key">LINEAR_API_KEY</span>=<span class="env-val">lin_api_...</span><br/>
+            <span class="env-key">LINEAR_TEAM_ID</span>=<span class="env-val">your-team-id</span>
+          </div>
+        </div>
+
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-3" style="color:var(--text)">GitHub Issues</p>
+          <p class="text-xs mb-3" style="color:var(--muted)">Needs a fine-grained token with <code>issues: write</code> on the target repo.</p>
+          <div class="code-block p-3 text-xs">
+            <span class="env-key">GITHUB_TOKEN</span>=<span class="env-val">github_pat_...</span><br/>
+            <span class="env-key">GITHUB_ISSUES_REPO</span>=<span class="env-val">yourorg/finops-alerts</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- All env vars -->
+    <div id="env" class="section-anchor">
+      <h2 class="section-title">All environment variables</h2>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Full reference. The wizard sets these for you — use this table if you're deploying in CI/CD or Docker.</p>
+      <div class="card overflow-hidden">
+        <table class="w-full text-xs">
+          <thead>
+            <tr style="background:var(--surface2);border-bottom:1px solid var(--border)">
+              <th class="text-left px-4 py-3 font-semibold" style="color:var(--muted)">Variable</th>
+              <th class="text-left px-4 py-3 font-semibold" style="color:var(--muted)">Provider</th>
+              <th class="text-left px-4 py-3 font-semibold" style="color:var(--muted)">Required</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">AWS_ACCESS_KEY_ID</td><td class="px-4 py-2.5" style="color:var(--muted)">AWS</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">AWS_SECRET_ACCESS_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">AWS</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">AWS_DEFAULT_REGION</td><td class="px-4 py-2.5" style="color:var(--muted)">AWS</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">AZURE_TENANT_ID</td><td class="px-4 py-2.5" style="color:var(--muted)">Azure</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">AZURE_CLIENT_ID</td><td class="px-4 py-2.5" style="color:var(--muted)">Azure</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">AZURE_CLIENT_SECRET</td><td class="px-4 py-2.5" style="color:var(--muted)">Azure</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">AZURE_SUBSCRIPTION_ID</td><td class="px-4 py-2.5" style="color:var(--muted)">Azure</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GOOGLE_APPLICATION_CREDENTIALS</td><td class="px-4 py-2.5" style="color:var(--muted)">GCP</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GCP_PROJECT_ID</td><td class="px-4 py-2.5" style="color:var(--muted)">GCP</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GCP_BIGQUERY_DATASET</td><td class="px-4 py-2.5" style="color:var(--muted)">GCP</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DD_API_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Datadog</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DD_APP_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Datadog</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DD_SITE</td><td class="px-4 py-2.5" style="color:var(--muted)">Datadog</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_ACCOUNT</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_CREDIT_PRICE</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GITHUB_TOKEN</td><td class="px-4 py-2.5" style="color:var(--muted)">GitHub</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">STRIPE_API_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Stripe</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SLACK_WEBHOOK_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Slack</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">TEAMS_WEBHOOK_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Teams</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">FINOPS_DIGEST_TO</td><td class="px-4 py-2.5" style="color:var(--muted)">Email</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">JIRA_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Jira</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">LINEAR_API_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Linear</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GITHUB_ISSUES_REPO</td><td class="px-4 py-2.5" style="color:var(--muted)">GitHub Issues</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Troubleshooting -->
+    <div id="troubleshoot" class="section-anchor">
+      <h2 class="section-title">Troubleshooting</h2>
+      <div class="space-y-4">
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">"Cost Explorer must be enabled"</p>
+          <p class="text-sm" style="color:var(--muted)">Go to <strong>AWS Console → Billing → Cost Explorer → Enable Cost Explorer</strong>. Takes up to 24 hours. This is required even if you have an active account.</p>
+        </div>
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">MCP server not showing in Claude / Cursor</p>
+          <p class="text-sm" style="color:var(--muted)">Fully quit and reopen the app after editing the config file — most clients only read config at startup. Run <code class="text-xs bg-blue-50 px-1 rounded">finops-mcp</code> manually in terminal to confirm there are no Python errors.</p>
+        </div>
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">Credentials not persisting after restart</p>
+          <p class="text-sm" style="color:var(--muted)">Install the keyring extra: <code class="text-xs bg-blue-50 px-1 rounded">pip install finops-mcp[keyring]</code>. Without it, credentials fall back to a local encrypted file. Re-run <code class="text-xs bg-blue-50 px-1 rounded">finops setup</code> after installing.</p>
+        </div>
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">Snowflake: "Object does not exist"</p>
+          <p class="text-sm" style="color:var(--muted)">The user needs <code>IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE</code> granted to their role. Run as ACCOUNTADMIN: <code class="text-xs bg-blue-50 px-1 rounded">GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE your_role;</code></p>
+        </div>
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">Still stuck?</p>
+          <p class="text-sm mb-3" style="color:var(--muted)">Email us with your <code class="text-xs bg-blue-50 px-1 rounded">finops status</code> output and we'll debug with you.</p>
+          <a href="mailto:hello@finmcp.tech" class="btn-primary">hello@finmcp.tech</a>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // Highlight active sidebar link on scroll
+  const links = document.querySelectorAll('.nav-link');
+  const sections = Array.from(links).map(l => document.querySelector(l.getAttribute('href'))).filter(Boolean);
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector(`.nav-link[href="#${e.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-80px 0px -60% 0px' });
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

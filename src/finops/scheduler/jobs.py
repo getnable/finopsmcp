@@ -1,0 +1,386 @@
+"""
+APScheduler jobs that run on a schedule to:
+  1. Take daily cost snapshots from all active connectors
+  2. Detect anomalies and send alerts
+  3. Send a daily digest to Slack/Teams
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from datetime import date, timedelta
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+log = logging.getLogger("finops.scheduler")
+
+_scheduler: BackgroundScheduler | None = None
+
+
+# ── Core job functions ────────────────────────────────────────────────────────
+
+async def _snapshot_all() -> dict:
+    """Fetch today's costs from all configured providers and persist snapshots."""
+    from ..connectors.aws import AWSConnector
+    from ..connectors.azure import AzureConnector
+    from ..connectors.gcp import GCPConnector
+    from ..connectors.saas.datadog import DatadogConnector
+    from ..connectors.saas.mongodb_atlas import MongoDBAtlasConnector
+    from ..connectors.saas.stripe import StripeConnector
+    from ..connectors.saas.twilio import TwilioConnector
+    from ..storage.snapshots import store_snapshot
+
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    connectors = {
+        "aws": AWSConnector(),
+        "azure": AzureConnector(),
+        "gcp": GCPConnector(),
+        "datadog": DatadogConnector(),
+        "mongodb_atlas": MongoDBAtlasConnector(),
+        "stripe": StripeConnector(),
+        "twilio": TwilioConnector(),
+    }
+
+    results: dict[str, str] = {}
+    for name, connector in connectors.items():
+        if not await connector.is_configured():
+            continue
+        try:
+            summary = await connector.get_costs(yesterday, today, granularity="DAILY")
+            for entry in summary.entries:
+                if entry.amount > 0:
+                    store_snapshot(
+                        provider=entry.provider,
+                        service=entry.service,
+                        account_id=entry.account_id,
+                        region=entry.region,
+                        snapshot_date=yesterday,
+                        amount_usd=entry.amount,
+                        granularity="DAILY",
+                    )
+            results[name] = f"ok — {len(summary.entries)} entries"
+            log.info("Snapshot: %s — %d entries, $%.2f", name, len(summary.entries), summary.total_usd)
+        except Exception as exc:
+            results[name] = f"error: {exc}"
+            log.exception("Snapshot failed for %s", name)
+
+    return results
+
+
+async def _detect_and_alert() -> list[dict]:
+    """Run anomaly detection on yesterday's snapshot and send alerts for new ones."""
+    from ..anomaly.seasonality import detect_with_seasonality
+    from ..anomaly.detector import (
+        AnomalyResult, get_active_anomalies,
+        mark_notified, persist_anomaly,
+    )
+    from ..integrations.ticketing import create_ticket
+    from ..notifications import slack, teams
+    from ..storage.db import cost_snapshots, get_engine
+    from sqlalchemy import select, and_
+
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    engine = get_engine()
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(cost_snapshots)
+            .where(cost_snapshots.c.snapshot_date == yesterday)
+        ).fetchall()
+
+    alerted: list[dict] = []
+    for row in rows:
+        r = dict(row._mapping)
+        anomaly = detect_with_seasonality(
+            provider=r["provider"],
+            service=r["service"],
+            account_id=r["account_id"],
+            snapshot_date=date.fromisoformat(r["snapshot_date"]),
+            current_amount=r["amount_usd"],
+        )
+        if anomaly is None:
+            continue
+        anomaly_id = persist_anomaly(anomaly)
+        anomaly_dict = {
+            "id": anomaly_id,
+            "provider": anomaly.provider,
+            "service": anomaly.service,
+            "account_id": anomaly.account_id,
+            "severity": anomaly.severity,
+            "direction": anomaly.direction,
+            "pct_change": anomaly.pct_change,
+            "z_score": anomaly.z_score,
+            "baseline_mean": anomaly.baseline_mean,
+            "current_amount": anomaly.current_amount,
+            "detected_at": str(date.today()),
+        }
+        # Send alerts (fire-and-forget, don't crash on failure)
+        notified = False
+        if slack.is_configured():
+            try:
+                ok = await slack.send_anomaly_alert(anomaly_dict)
+                notified = notified or ok
+            except Exception:
+                log.exception("Slack alert failed for anomaly %d", anomaly_id)
+        if teams.is_configured():
+            try:
+                ok = await teams.send_anomaly_alert(anomaly_dict)
+                notified = notified or ok
+            except Exception:
+                log.exception("Teams alert failed for anomaly %d", anomaly_id)
+        if notified:
+            mark_notified(anomaly_id)
+
+        # Auto-create ticket for high/medium severity
+        if anomaly.severity in ("high", "medium"):
+            try:
+                ticket_url = create_ticket(anomaly_dict)
+                if ticket_url:
+                    anomaly_dict["ticket_url"] = ticket_url
+                    log.info("Ticket created: %s", ticket_url)
+            except Exception:
+                log.exception("Ticket creation failed for anomaly %d", anomaly_id)
+
+        alerted.append(anomaly_dict)
+        log.info("Anomaly: %s", anomaly.summary())
+
+    return alerted
+
+
+async def _send_daily_digest() -> bool:
+    from ..anomaly.detector import get_active_anomalies
+    from ..notifications import slack, teams
+    from ..storage.db import cost_snapshots, get_engine
+    from sqlalchemy import func, select
+
+    if not slack.is_configured() and not teams.is_configured():
+        return False
+
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    two_days_ago = today - timedelta(days=2)
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        def day_total(d: date) -> float:
+            row = conn.execute(
+                select(func.sum(cost_snapshots.c.amount_usd))
+                .where(cost_snapshots.c.snapshot_date == d.isoformat())
+            ).scalar()
+            return float(row or 0)
+
+        grand_total = day_total(yesterday)
+        prev_total = day_total(two_days_ago)
+
+        # by provider
+        rows = conn.execute(
+            select(
+                cost_snapshots.c.provider,
+                func.sum(cost_snapshots.c.amount_usd).label("total"),
+            )
+            .where(cost_snapshots.c.snapshot_date == yesterday.isoformat())
+            .group_by(cost_snapshots.c.provider)
+        ).fetchall()
+        by_provider = {r.provider: float(r.total) for r in rows}
+
+        # top services
+        svc_rows = conn.execute(
+            select(
+                cost_snapshots.c.service,
+                func.sum(cost_snapshots.c.amount_usd).label("total"),
+            )
+            .where(cost_snapshots.c.snapshot_date == yesterday.isoformat())
+            .group_by(cost_snapshots.c.service)
+            .order_by(func.sum(cost_snapshots.c.amount_usd).desc())
+            .limit(5)
+        ).fetchall()
+        top_services = [
+            {
+                "service": r.service,
+                "amount_usd": float(r.total),
+                "pct": float(r.total) / grand_total * 100 if grand_total else 0,
+            }
+            for r in svc_rows
+        ]
+
+    active = get_active_anomalies()
+
+    sent = False
+    if slack.is_configured():
+        try:
+            sent = await slack.send_daily_digest(yesterday, grand_total, prev_total, by_provider, top_services, len(active))
+        except Exception:
+            log.exception("Slack daily digest failed")
+    if teams.is_configured():
+        try:
+            sent = await teams.send_daily_digest(yesterday, grand_total, prev_total, by_provider, top_services, len(active))
+        except Exception:
+            log.exception("Teams daily digest failed")
+
+    return sent
+
+
+# ── Sync wrappers for APScheduler ─────────────────────────────────────────────
+
+def _run(coro) -> None:
+    try:
+        asyncio.run(coro)
+    except Exception:
+        log.exception("Scheduled job failed")
+
+
+def job_snapshot() -> None:
+    _run(_snapshot_all())
+
+
+def job_detect_and_alert() -> None:
+    _run(_detect_and_alert())
+
+
+def job_daily_digest() -> None:
+    _run(_send_daily_digest())
+
+
+def job_invoice_fetch() -> None:
+    """Fetch and parse invoice emails from the configured IMAP mailbox."""
+    try:
+        from ..connectors.invoice.parser import fetch_and_store_invoices
+        stored = fetch_and_store_invoices()
+        if stored:
+            log.info("Invoice fetch: stored %d invoices", len(stored))
+    except Exception:
+        log.exception("Invoice fetch job failed")
+
+
+def job_weekly_email_digest() -> None:
+    """Send the standalone weekly email digest (no AI client required)."""
+    try:
+        from ..notifications.email_digest import send_weekly_digest
+        from ..anomaly.detector import get_active_anomalies
+        from ..storage.db import cost_snapshots, get_engine
+        from ..recommendations.rightsizing import analyze_rightsizing, rightsizing_summary
+        from sqlalchemy import func, select
+        from datetime import date, timedelta
+
+        today = date.today()
+        week_start = (today - timedelta(days=7)).isoformat()
+        prev_week_start = (today - timedelta(days=14)).isoformat()
+        prev_week_end = (today - timedelta(days=7)).isoformat()
+
+        engine = get_engine()
+        with engine.connect() as conn:
+            def week_total(start: str, end: str) -> float:
+                row = conn.execute(
+                    select(func.sum(cost_snapshots.c.amount_usd))
+                    .where(cost_snapshots.c.snapshot_date >= start)
+                    .where(cost_snapshots.c.snapshot_date < end)
+                ).scalar()
+                return float(row or 0)
+
+            current_week_total = week_total(week_start, today.isoformat())
+            prev_week_total = week_total(prev_week_start, prev_week_end)
+
+            rows = conn.execute(
+                select(
+                    cost_snapshots.c.provider,
+                    func.sum(cost_snapshots.c.amount_usd).label("total"),
+                )
+                .where(cost_snapshots.c.snapshot_date >= week_start)
+                .group_by(cost_snapshots.c.provider)
+                .order_by(func.sum(cost_snapshots.c.amount_usd).desc())
+            ).fetchall()
+
+            top_providers = [
+                {
+                    "provider": r.provider,
+                    "amount": float(r.total),
+                    "pct": float(r.total) / current_week_total * 100 if current_week_total else 0,
+                }
+                for r in rows
+            ]
+
+        anomalies = get_active_anomalies(limit=10)
+
+        try:
+            rs = analyze_rightsizing()
+            recs = rightsizing_summary(rs)["recommendations"][:5]
+            rec_list = [
+                {
+                    "title": r["title"],
+                    "description": r["description"],
+                    "monthly_savings": r["monthly_savings"],
+                }
+                for r in recs
+            ]
+        except Exception:
+            rec_list = []
+
+        send_weekly_digest(
+            total_spend=current_week_total,
+            prev_total=prev_week_total,
+            top_providers=top_providers,
+            anomalies=anomalies,
+            recommendations=rec_list,
+        )
+    except Exception:
+        log.exception("Weekly email digest job failed")
+
+
+# ── Scheduler lifecycle ───────────────────────────────────────────────────────
+
+def start_scheduler() -> BackgroundScheduler:
+    global _scheduler
+    if _scheduler and _scheduler.running:
+        return _scheduler
+
+    _scheduler = BackgroundScheduler(timezone="UTC")
+
+    # Daily snapshot at 01:00 UTC
+    snapshot_cron = os.environ.get("FINOPS_SNAPSHOT_CRON", "0 1 * * *")
+    h, m = snapshot_cron.split()[1], snapshot_cron.split()[0]
+    _scheduler.add_job(job_snapshot, CronTrigger.from_crontab(snapshot_cron), id="snapshot", replace_existing=True)
+
+    # Anomaly check at 02:00 UTC (after snapshot)
+    anomaly_cron = os.environ.get("FINOPS_ANOMALY_CRON", "0 2 * * *")
+    _scheduler.add_job(job_detect_and_alert, CronTrigger.from_crontab(anomaly_cron), id="anomaly", replace_existing=True)
+
+    # Daily digest at 09:00 UTC
+    digest_cron = os.environ.get("FINOPS_DIGEST_CRON", "0 9 * * *")
+    _scheduler.add_job(job_daily_digest, CronTrigger.from_crontab(digest_cron), id="digest", replace_existing=True)
+
+    # Invoice email fetch every 6 hours
+    invoice_cron = os.environ.get("FINOPS_INVOICE_CRON", "0 */6 * * *")
+    _scheduler.add_job(job_invoice_fetch, CronTrigger.from_crontab(invoice_cron), id="invoice_fetch", replace_existing=True)
+
+    # Weekly email digest every Monday at 09:00 UTC
+    weekly_cron = os.environ.get("FINOPS_WEEKLY_CRON", "0 9 * * 1")
+    _scheduler.add_job(job_weekly_email_digest, CronTrigger.from_crontab(weekly_cron), id="weekly_digest", replace_existing=True)
+
+    _scheduler.start()
+    log.info("Scheduler started (snapshot=%s, anomaly=%s, digest=%s)", snapshot_cron, anomaly_cron, digest_cron)
+    return _scheduler
+
+
+def stop_scheduler() -> None:
+    global _scheduler
+    if _scheduler and _scheduler.running:
+        _scheduler.shutdown(wait=False)
+        _scheduler = None
+
+
+# ── Manual triggers (used by MCP tools) ──────────────────────────────────────
+
+async def run_snapshot_now() -> dict:
+    return await _snapshot_all()
+
+
+async def run_anomaly_check_now() -> list[dict]:
+    return await _detect_and_alert()
+
+
+async def run_digest_now() -> bool:
+    return await _send_daily_digest()

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "finops": {
+      "command": "/Users/chandan/finops/.venv/bin/python",
+      "args": ["-m", "finops.server"],
+      "cwd": "/Users/chandan/finops",
+      "env": {
+        "AWS_DEFAULT_REGION": "us-east-1"
+      }
+    }
+  }
+}
