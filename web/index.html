@@ -195,6 +195,21 @@
   .price .cta a:hover{border-bottom-color:var(--fg)}
   .price.feat{background:var(--bg-2);margin:0 -1px;border-left:1px solid var(--line);padding-left:32px;padding-right:32px}
   .price.feat .cta a{color:var(--fg);font-weight:500}
+  .price .free-badge{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);border:1px solid var(--line);border-radius:4px;padding:2px 7px;margin-bottom:4px}
+  .free-setup-form{padding-top:4px}
+  .free-setup-form .fs-label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.03em;margin-bottom:10px}
+  .free-setup-form .fs-field{display:flex;gap:0;border-bottom:1px solid var(--fg);padding-bottom:8px}
+  .free-setup-form input[type=email]{flex:1;background:transparent;border:0;color:var(--fg);padding:6px 0;font-family:'Geist',sans-serif;font-size:14px;outline:none}
+  .free-setup-form input[type=email]::placeholder{color:var(--fg-3)}
+  .free-setup-form .fs-btn{background:transparent;border:0;color:var(--fg);font-size:13px;cursor:pointer;padding:0 2px;white-space:nowrap}
+  .free-setup-steps{padding-top:4px}
+  .free-setup-steps .fs-confirmed{font-family:var(--mono);font-size:11.5px;color:var(--hl);margin-bottom:14px}
+  .free-setup-steps ol{padding-left:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+  .free-setup-steps ol li{display:flex;flex-direction:column;gap:3px}
+  .free-setup-steps ol li .step-label{font-size:11.5px;color:var(--fg-3);font-family:var(--mono)}
+  .free-setup-steps ol li code{font-family:var(--mono);font-size:12.5px;background:var(--bg-3,#f0efec);color:var(--fg);padding:4px 7px;border-radius:4px;display:inline-block;margin-top:2px;word-break:break-all}
+  .free-setup-steps .fs-docs{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--fg);border-bottom:1px solid var(--line);margin-top:12px}
+  .free-setup-steps .fs-docs:hover{border-bottom-color:var(--fg)}
 
   /* CTA */
   .cta{padding:120px 0 110px;border-top:1px solid var(--line)}
@@ -342,7 +357,7 @@ function Nav({ dark, onToggle, onTrial }){
         <div className="right">
           <ThemeToggle dark={dark} onToggle={onToggle} />
           <a href="/docs" className="btn btn-ghost">Sign in</a>
-          <a href="#" onClick={onTrial} className="btn btn-primary">Start free trial <span className="arr">→</span></a>
+          <a href="#" onClick={onTrial} className="btn btn-primary">Try Pro free <span className="arr">→</span></a>
         </div>
       </div>
     </nav>
@@ -618,32 +633,114 @@ function Security(){
 }
 
 function Pricing({ onTrial }){
+  const [freeEmail, setFreeEmail] = React.useState('');
+  const [freeSetup, setFreeSetup] = React.useState(false);
+
+  function handleFreeSubmit(e){
+    e.preventDefault();
+    setFreeSetup(true);
+  }
+
+  const configSnippet = `{
+  "mcpServers": {
+    "finops": {
+      "command": "finops-mcp"
+    }
+  }
+}`;
+
   return (
     <section id="pricing" data-screen-label="06 Pricing">
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ Pricing</div>
           <h2>Plain pricing. No seat math.</h2>
-          <p>14 days free, every feature unlocked. $39.99 / month after.</p>
+          <p>Free forever for individuals and small teams. Pro adds automation, email reports, and org rollup.</p>
         </div>
 
         <div className="pricing">
+
+          {/* Free — permanent */}
+          <div className="price">
+            <div className="tier">Free · No card required</div>
+            <div>
+              <div className="amt">$0<span className="small"> / month</span></div>
+              <div className="amt-sub">forever · no credit card · no expiry</div>
+            </div>
+            <ul>
+              <li>All 13+ cloud &amp; SaaS connectors</li>
+              <li>Cost queries, trends &amp; history</li>
+              <li>Anomaly detection + Slack / Teams alerts</li>
+              <li>Rightsizing recommendations</li>
+              <li>K8s cost analysis &amp; Helm visibility</li>
+              <li>Efficiency scorecard with trend history</li>
+              <li>Budget enforcement + CI gate</li>
+              <li>Scheduled Slack reports</li>
+              <li>PR cost comments</li>
+              <li>Postgres shared mode for teams</li>
+            </ul>
+
+            {!freeSetup ? (
+              <div className="free-setup-form">
+                <div className="fs-label">Get your setup guide</div>
+                <form className="fs-field" onSubmit={handleFreeSubmit}>
+                  <input
+                    type="email"
+                    placeholder="you@company.com"
+                    value={freeEmail}
+                    onChange={e => setFreeEmail(e.target.value)}
+                    required
+                  />
+                  <button className="fs-btn" type="submit">Get started →</button>
+                </form>
+              </div>
+            ) : (
+              <div className="free-setup-steps">
+                <div className="fs-confirmed">✓ {freeEmail} — setup below</div>
+                <ol>
+                  <li>
+                    <span className="step-label">1 · Install</span>
+                    <code>pip install finops-mcp</code>
+                  </li>
+                  <li>
+                    <span className="step-label">2 · Add to Claude Desktop</span>
+                    <code style={{whiteSpace:'pre',display:'block',lineHeight:1.5}}>{"~/Library/Application Support/Claude/\nclaude_desktop_config.json"}</code>
+                  </li>
+                  <li>
+                    <span className="step-label">3 · Paste this config</span>
+                    <code style={{whiteSpace:'pre',display:'block',lineHeight:1.6,fontSize:11.5}}>{configSnippet}</code>
+                  </li>
+                  <li>
+                    <span className="step-label">4 · Set your cloud credentials</span>
+                    <code>AWS_ACCESS_KEY_ID=… finops-mcp</code>
+                  </li>
+                </ol>
+                <a className="fs-docs" href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener">
+                  Full docs &amp; connector setup →
+                </a>
+              </div>
+            )}
+          </div>
+
+          {/* Pro — featured */}
           <div className="price feat">
             <div className="tier">Pro · 14-day free trial</div>
             <div>
-              <div className="amt">$0<span className="small"> / 14 days</span></div>
-              <div className="amt-sub">then $39.99 / month · cancel any time</div>
+              <div className="amt">$39<span className="small">.99 / mo</span></div>
+              <div className="amt-sub">14 days free · cancel any time</div>
             </div>
             <ul>
-              <li>All 13 connectors</li>
-              <li>Anomaly detection, alerts &amp; auto-ticketing</li>
-              <li>Rightsizing &amp; commitment analysis</li>
-              <li>Slack bot, PR cost comments</li>
-              <li>Idle resource cleanup (opt-in)</li>
+              <li>Everything in Free</li>
+              <li>Ticket auto-creation — Jira, Linear, GitHub</li>
+              <li>Scheduled email reports</li>
+              <li>Commitment purchase recommendations + ROI</li>
+              <li>Org-wide multi-account cost rollup</li>
+              <li>OU breakdown &amp; account anomaly detection</li>
             </ul>
             <div className="cta"><a href="#" onClick={onTrial}>Start free trial →</a></div>
           </div>
 
+          {/* Enterprise */}
           <div className="price">
             <div className="tier">Enterprise</div>
             <div>
@@ -661,6 +758,7 @@ function Pricing({ onTrial }){
             </ul>
             <div className="cta"><a href="mailto:hello@nable.sh">Contact sales →</a></div>
           </div>
+
         </div>
       </div>
     </section>
@@ -676,7 +774,7 @@ function CTA(){
           <div>
             <div className="label" style={{marginBottom:18}}>/ Get started</div>
             <h2>Find out where the money actually went.</h2>
-            <p>14 days free, every Pro feature unlocked. Enter your email and card — you won't be charged until day 15, and you can cancel any time before.</p>
+            <p>Free forever — no card, no trial clock. Install in 30 seconds and ask Claude about your cloud costs. Upgrade to Pro when you're ready to automate.</p>
           </div>
 
           <form className="cta-form" onSubmit={(e)=>{e.preventDefault();setDone(true);}}>
@@ -787,8 +885,8 @@ function TrialModal({ onClose }){
         {/* Left: what's included */}
         <div className="modal-left">
           <div>
-            <div className="label" style={{marginBottom:12}}>/ 14-day free trial</div>
-            <h3>Full access, free for two weeks.</h3>
+            <div className="label" style={{marginBottom:12}}>/ Pro · 14-day free trial</div>
+            <h3>Try every Pro feature free for two weeks.</h3>
           </div>
           <div>
             <div className="price-row">
@@ -798,19 +896,21 @@ function TrialModal({ onClose }){
             <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Cancel before day 14. No charge.</div>
           </div>
           <ul>
-            <li>All 13 connectors — AWS, Azure, GCP and 10 SaaS</li>
-            <li>Seasonality-aware anomaly detection</li>
-            <li>EC2 rightsizing recommendations</li>
-            <li>Slack, Teams and email alerts</li>
-            <li>Auto Jira / Linear / GitHub tickets</li>
-            <li>Weekly digest, no AI session needed</li>
-            <li>12-month billing history</li>
+            <li>Everything in the free tier, plus —</li>
+            <li>Ticket auto-creation — Jira, Linear, GitHub Issues</li>
+            <li>Scheduled email reports at any frequency</li>
+            <li>Commitment purchase recommendations + ROI</li>
+            <li>Org-wide multi-account cost rollup</li>
+            <li>OU breakdown &amp; account anomaly detection</li>
           </ul>
+          <div style={{marginTop:"auto",paddingTop:16,borderTop:"1px solid var(--line)",fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>
+            Just want the free tier? Skip this — run <span style={{color:"var(--fg)"}}>pip install finops-mcp</span> and you're in.
+          </div>
         </div>
 
         {/* Right: email form + pip install */}
         <div className="modal-right">
-          <h4>Start your trial</h4>
+          <h4>Start your Pro trial</h4>
           <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
             <div>
               <label>EMAIL</label>
