@@ -1,5 +1,5 @@
 """
-License validation for FinOps MCP.
+License validation for nable (finops-mcp).
 
 Key format:  FINOPS-1-{b64_payload}-{b64_hmac}
   payload:   base64url(json: {"e": email, "d": issued_YYYYMMDD, "p": "pro"})
@@ -8,7 +8,7 @@ Key format:  FINOPS-1-{b64_payload}-{b64_hmac}
 Generate a key (run once per customer):
   python -c "from finops.license import generate_key; print(generate_key('user@example.com'))"
 
-Trial mode:  core cost-query tools work. Pro-only tools return an upgrade prompt.
+Trial mode:  14 days of full Pro access from first install, tracked in ~/.finops-mcp/trial_start
 Pro mode:    full access — anomaly alerts, digests, rightsizing, tickets, attribution.
 """
 from __future__ import annotations
@@ -21,23 +21,23 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import date, timedelta
+from pathlib import Path
 
 log = logging.getLogger("finops.license")
 
-# Rotate this secret before release; bake the new value into the published package.
-# Not cryptographically hidden from a determined reverse-engineer, but raises the bar
-# enough for a $40/mo tool — pair with Stripe webhook revocation for real enforcement.
 _SECRET = b"finops-mcp-license-v1-2026"
-
-_UPGRADE_URL = "https://finops-mcp.com/#pricing"
+_UPGRADE_URL = "https://finopsmcp.vercel.app/#pricing"
+_TRIAL_DAYS = 14
+_TRIAL_FILE = Path.home() / ".finops-mcp" / "trial_start"
 
 
 @dataclass
 class LicenseStatus:
-    mode: str          # "trial" | "pro" | "invalid"
+    mode: str          # "trial" | "trial_expired" | "pro" | "invalid"
     email: str
     issued: str        # YYYY-MM-DD or ""
-    message: str       # human-readable, shown at startup and in tool errors
+    message: str
+    days_remaining: int = -1   # trial days left; -1 means not applicable
 
 
 def _b64(data: bytes) -> str:
@@ -54,6 +54,20 @@ def _sign(version: str, payload_b64: str) -> str:
     return _b64(hmac.new(_SECRET, msg, hashlib.sha256).digest())
 
 
+def _get_or_create_trial_start() -> date:
+    """Return the trial start date, creating the marker file on first call."""
+    try:
+        _TRIAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if _TRIAL_FILE.exists():
+            raw = _TRIAL_FILE.read_text().strip()
+            return date.fromisoformat(raw)
+        today = date.today()
+        _TRIAL_FILE.write_text(today.isoformat())
+        return today
+    except Exception:
+        return date.today()
+
+
 def generate_key(email: str, plan: str = "pro") -> str:
     """Generate a license key for a paying customer. Run server-side."""
     payload = _b64(json.dumps({"e": email, "d": date.today().strftime("%Y%m%d"), "p": plan}).encode())
@@ -64,16 +78,34 @@ def generate_key(email: str, plan: str = "pro") -> str:
 def validate_key(key: str) -> LicenseStatus:
     """Parse and verify a license key string."""
     if not key:
-        return LicenseStatus(
-            mode="trial",
-            email="",
-            issued="",
-            message=(
-                "Running in trial mode — core cost queries are available. "
-                f"Upgrade to Pro at {_UPGRADE_URL} for anomaly alerts, digests, "
-                "rightsizing recommendations, and ticket creation."
-            ),
-        )
+        # No key — check trial status based on first-use date
+        trial_start = _get_or_create_trial_start()
+        days_used = (date.today() - trial_start).days
+        days_remaining = max(0, _TRIAL_DAYS - days_used)
+
+        if days_remaining > 0:
+            return LicenseStatus(
+                mode="trial",
+                email="",
+                issued=trial_start.isoformat(),
+                message=(
+                    f"Free trial — {days_remaining} day{'s' if days_remaining != 1 else ''} remaining. "
+                    f"All Pro features are unlocked. "
+                    f"Subscribe at {_UPGRADE_URL} to keep access after your trial."
+                ),
+                days_remaining=days_remaining,
+            )
+        else:
+            return LicenseStatus(
+                mode="trial_expired",
+                email="",
+                issued=trial_start.isoformat(),
+                message=(
+                    f"Your 14-day free trial has ended. "
+                    f"Subscribe at {_UPGRADE_URL} to restore full access."
+                ),
+                days_remaining=0,
+            )
 
     parts = key.strip().split("-", 3)
     if len(parts) != 4 or parts[0] != "FINOPS" or parts[1] != "1":
@@ -128,7 +160,9 @@ def check_license() -> LicenseStatus:
     key = os.environ.get("FINOPS_LICENSE_KEY", "").strip()
     status = validate_key(key)
     if status.mode == "trial":
-        log.info("License: trial mode")
+        log.info("License: trial — %d days remaining", status.days_remaining)
+    elif status.mode == "trial_expired":
+        log.warning("License: trial expired")
     elif status.mode == "pro":
         log.info("License: pro — %s", status.email)
     else:
@@ -136,7 +170,6 @@ def check_license() -> LicenseStatus:
     return status
 
 
-# Singleton loaded once at import time so every tool sees the same status.
 _status: LicenseStatus | None = None
 
 
@@ -150,23 +183,22 @@ def get_status() -> LicenseStatus:
 def require_pro(feature: str) -> dict | None:
     """
     Call at the top of Pro-only tools.
-    Returns an error dict if not Pro, None if access is granted.
+    Returns an error dict if access is denied, None if granted.
 
     Usage:
         if err := require_pro("anomaly alerts"):
             return err
     """
     s = get_status()
-    if s.mode == "pro":
+    if s.mode in ("pro", "trial"):
         return None
-    if s.mode == "trial":
+    if s.mode == "trial_expired":
         return {
-            "error": "pro_required",
+            "error": "trial_expired",
             "feature": feature,
             "message": (
-                f"'{feature}' requires a Pro license. "
-                f"You're currently in trial mode. "
-                f"Upgrade at {_UPGRADE_URL}"
+                f"Your 14-day free trial has ended. "
+                f"Subscribe at {_UPGRADE_URL} to restore access to '{feature}' and all Pro features."
             ),
             "upgrade_url": _UPGRADE_URL,
         }

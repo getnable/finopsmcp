@@ -1037,14 +1037,18 @@ def main() -> None:
     border = "=" * 56
     if status.mode == "pro":
         print(f"\n{border}")
-        print(f"  FinOps MCP  ✦  Pro  —  {status.email}")
+        print(f"  nable  ✦  Pro  —  {status.email}")
+        print(f"{border}\n")
+    elif status.mode == "trial":
+        print(f"\n{border}")
+        print(f"  nable  —  Free trial  ({status.days_remaining} days remaining)")
+        print("  All Pro features unlocked.")
+        print(f"  Subscribe → {_UPGRADE_URL}")
         print(f"{border}\n")
     else:
         print(f"\n{border}")
-        print("  FinOps MCP  —  Trial mode")
-        print("  Core cost queries enabled.")
-        print("  Anomaly alerts, digests, rightsizing & tickets")
-        print(f"  require Pro.  Upgrade → {_UPGRADE_URL}")
+        print("  nable  —  Trial expired")
+        print(f"  Subscribe to restore full access → {_UPGRADE_URL}")
         print(f"{border}\n")
 
     from .scheduler.jobs import start_scheduler
