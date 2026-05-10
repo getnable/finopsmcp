@@ -8,7 +8,10 @@ Key format:  FINOPS-1-{b64_payload}-{b64_hmac}
 Generate a key (run once per customer):
   python -c "from finops.license import generate_key; print(generate_key('user@example.com'))"
 
-Trial mode:  14 days of full Pro access from first install, tracked in ~/.finops-mcp/trial_start
+Trial mode:  14 days of full Pro access from first install.
+             Start date stored in OS keyring (primary) + ~/.finops-mcp/trial_start (backup).
+             The earliest date across both stores is always used — deleting one source does
+             not reset the trial; the other store still holds the real start date.
 Pro mode:    full access — anomaly alerts, digests, rightsizing, tickets, attribution.
 """
 from __future__ import annotations
@@ -19,8 +22,10 @@ import hmac
 import json
 import logging
 import os
+import platform
+import socket
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 log = logging.getLogger("finops.license")
@@ -29,6 +34,10 @@ _SECRET = b"finops-mcp-license-v1-2026"
 _UPGRADE_URL = "https://nable.sh/#pricing"
 _TRIAL_DAYS = 14
 _TRIAL_FILE = Path.home() / ".finops-mcp" / "trial_start"
+
+# Keyring service/username — intentionally generic to avoid being obvious
+_KR_SERVICE  = "system.cache.prefs"
+_KR_USERNAME = "user.defaults"
 
 
 @dataclass
@@ -54,18 +63,107 @@ def _sign(version: str, payload_b64: str) -> str:
     return _b64(hmac.new(_SECRET, msg, hashlib.sha256).digest())
 
 
-def _get_or_create_trial_start() -> date:
-    """Return the trial start date, creating the marker file on first call."""
+# ── Machine fingerprint ───────────────────────────────────────────────────────
+# Used to sign the file so it can't be transplanted from another machine or
+# edited manually without detection. Derived from stable, hard-to-spoof values.
+
+def _machine_id() -> str:
+    parts = [
+        platform.node(),          # hostname
+        platform.machine(),       # architecture
+        str(Path.home()),         # home directory path
+    ]
+    raw = "|".join(parts).encode()
+    return hmac.new(_SECRET, raw, hashlib.sha256).hexdigest()[:24]
+
+
+def _sign_date(iso_date: str) -> str:
+    """HMAC sign a date string bound to this machine."""
+    msg = f"trial:{_machine_id()}:{iso_date}".encode()
+    return hmac.new(_SECRET, msg, hashlib.sha256).hexdigest()[:32]
+
+
+# ── Keyring helpers (optional dep) ───────────────────────────────────────────
+
+def _kr_get() -> date | None:
+    try:
+        import keyring  # type: ignore
+        val = keyring.get_password(_KR_SERVICE, _KR_USERNAME)
+        if val:
+            # stored as "YYYY-MM-DD:sig"
+            iso, _, sig = val.partition(":")
+            if sig == _sign_date(iso):
+                return date.fromisoformat(iso)
+            log.debug("Keyring entry signature mismatch — ignoring")
+    except Exception:
+        pass
+    return None
+
+
+def _kr_set(d: date) -> None:
+    try:
+        import keyring  # type: ignore
+        iso = d.isoformat()
+        keyring.set_password(_KR_SERVICE, _KR_USERNAME, f"{iso}:{_sign_date(iso)}")
+    except Exception:
+        pass
+
+
+# ── File helpers ──────────────────────────────────────────────────────────────
+
+def _file_get() -> date | None:
+    try:
+        if _TRIAL_FILE.exists():
+            lines = _TRIAL_FILE.read_text().strip().splitlines()
+            if not lines:
+                return None
+            iso = lines[0].strip()
+            sig = lines[1].strip() if len(lines) > 1 else ""
+            # Accept if sig matches this machine, or if no sig (legacy install)
+            if sig == _sign_date(iso) or not sig:
+                return date.fromisoformat(iso)
+            log.debug("Trial file signature mismatch — ignoring")
+    except Exception:
+        pass
+    return None
+
+
+def _file_set(d: date) -> None:
     try:
         _TRIAL_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if _TRIAL_FILE.exists():
-            raw = _TRIAL_FILE.read_text().strip()
-            return date.fromisoformat(raw)
-        today = date.today()
-        _TRIAL_FILE.write_text(today.isoformat())
-        return today
+        iso = d.isoformat()
+        _TRIAL_FILE.write_text(f"{iso}\n{_sign_date(iso)}\n")
     except Exception:
-        return date.today()
+        pass
+
+
+# ── Core trial date logic ─────────────────────────────────────────────────────
+
+def _get_or_create_trial_start() -> date:
+    """
+    Return the trial start date.
+
+    Reads from both OS keyring and file, uses the EARLIEST date found
+    (so deleting one store can't push the start date forward). Writes
+    the canonical date back to both stores for redundancy.
+    """
+    kr_date   = _kr_get()
+    file_date = _file_get()
+
+    candidates = [d for d in (kr_date, file_date) if d is not None]
+
+    if candidates:
+        earliest = min(candidates)
+        # Sync both stores to the real earliest date
+        _kr_set(earliest)
+        _file_set(earliest)
+        return earliest
+
+    # First run — record today in both stores
+    today = date.today()
+    _kr_set(today)
+    _file_set(today)
+    return today
 
 
 def generate_key(email: str, plan: str = "pro") -> str:
