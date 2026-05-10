@@ -118,7 +118,7 @@
     .tag-red { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
 
     /* Pricing */
-    .pricing-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .pricing-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
     .price-card { border: 1px solid var(--border); border-radius: 14px; padding: 36px; }
     .price-card.featured { background: #111827; color: white; border-color: #111827; }
     .price-amount { font-size: 52px; font-weight: 900; line-height: 1; letter-spacing: -0.03em; }
@@ -131,6 +131,8 @@
     .price-card.featured .price-list li::before { color: #34d399; }
     .price-card:not(.featured) .price-list li { color: var(--muted); }
     .price-card:not(.featured) .price-list li::before { color: var(--blue); }
+    .price-list li.locked { color: var(--dim) !important; }
+    .price-list li.locked::before { content: '' !important; }
 
     /* CTA */
     .cta-section { background: #111827; color: white; text-align: center; }
@@ -152,6 +154,7 @@
 
     @media (max-width: 640px) {
       .pricing-grid { grid-template-columns: 1fr; }
+      .price-card { padding: 28px; }
       .steps { grid-template-columns: 1fr; }
       .step { border-right: none; border-bottom: 1px solid var(--border); }
       .step:last-child { border-bottom: none; }
@@ -540,19 +543,40 @@
 
 <!-- Pricing -->
 <section id="pricing" style="border-bottom: 1px solid var(--border);">
-  <div class="container-sm">
+  <div class="container">
     <div style="text-align:center; margin-bottom:44px;">
       <div class="section-label">Pricing</div>
       <h2 class="section-h2">Simple, honest pricing.</h2>
-      <p class="section-sub">One flat fee. All features. Cancel any time.</p>
+      <p class="section-sub">Start free. Upgrade when you need automation.</p>
     </div>
     <div class="pricing-grid">
-      <div class="price-card featured">
-        <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;margin-bottom:20px;">Pro</p>
-        <div class="price-amount">$39<span style="font-size:28px;">.99</span></div>
-        <div class="price-period">/month · 14-day free trial</div>
+
+      <!-- Free -->
+      <div class="price-card">
+        <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dim);margin-bottom:20px;">Free</p>
+        <div class="price-amount">$0</div>
+        <div class="price-period">forever · no credit card</div>
         <ul class="price-list">
-          <li><strong style="color:white;">All 13 connectors</strong></li>
+          <li>All 13 connectors</li>
+          <li>Cost summaries by provider &amp; service</li>
+          <li>Top cost drivers</li>
+          <li>Cross-provider comparisons</li>
+          <li>Cost trends over time</li>
+          <li>90-day history</li>
+          <li class="locked"><span style="color:#d1d5db;">—</span>&nbsp; Anomaly detection</li>
+          <li class="locked"><span style="color:#d1d5db;">—</span>&nbsp; Slack / Teams alerts</li>
+          <li class="locked"><span style="color:#d1d5db;">—</span>&nbsp; Rightsizing &amp; auto-ticketing</li>
+        </ul>
+        <a href="/docs" class="btn btn-outline" style="width:100%;padding:13px;font-size:14px;border-radius:8px;">Install free →</a>
+      </div>
+
+      <!-- Pro -->
+      <div class="price-card featured">
+        <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;margin-bottom:20px;">Pro <span style="background:#1f2937;border:1px solid #374151;border-radius:4px;padding:2px 8px;margin-left:4px;color:#34d399;">14-day trial</span></p>
+        <div class="price-amount">$39<span style="font-size:28px;">.99</span></div>
+        <div class="price-period">/month · cancel any time</div>
+        <ul class="price-list">
+          <li><strong style="color:white;">Everything in Free</strong></li>
           <li>12-month history &amp; daily granularity</li>
           <li>Seasonality-aware anomaly detection</li>
           <li>EC2 rightsizing recommendations</li>
@@ -560,10 +584,13 @@
           <li>Slack, Teams &amp; email alerts</li>
           <li>Auto Jira / Linear / GitHub tickets</li>
           <li>Invoice email parsing (IMAP)</li>
+          <li>Weekly cost digest (no AI session needed)</li>
         </ul>
-        <a href="https://buy.stripe.com/cNi5kC6XT2sSg804AG2Nq00" target="_blank" class="btn" style="width:100%;background:white;color:#111827;padding:13px;font-size:14px;border-radius:8px;font-weight:700;">Get started →</a>
-        <p style="font-size:11px;color:#4b5563;margin-top:10px;text-align:center;">No credit card required for trial</p>
+        <a href="https://buy.stripe.com/cNi5kC6XT2sSg804AG2Nq00" target="_blank" class="btn" style="width:100%;background:white;color:#111827;padding:13px;font-size:14px;border-radius:8px;font-weight:700;">Start free trial →</a>
+        <p style="font-size:11px;color:#4b5563;margin-top:10px;text-align:center;">All Pro features unlocked for 14 days. No card needed.</p>
       </div>
+
+      <!-- Enterprise -->
       <div class="price-card">
         <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dim);margin-bottom:20px;">Enterprise</p>
         <div class="price-amount" style="font-size:44px;">Custom</div>
@@ -579,6 +606,7 @@
         </ul>
         <a href="mailto:hello@nable.sh" class="btn btn-outline" style="width:100%;padding:13px;font-size:14px;border-radius:8px;">Contact sales →</a>
       </div>
+
     </div>
   </div>
 </section>
