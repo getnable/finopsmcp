@@ -1,0 +1,1049 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>nable — cloud cost intelligence for your AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--fg);font-family:'Geist','Inter',system-ui,sans-serif;font-feature-settings:"ss01","cv11";-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px}
+  :root{
+    --bg:#0e0d0b;
+    --bg-2:#15140f;
+    --bg-3:#1c1a14;
+    --fg:#f3efe6;
+    --fg-2:#cdc6b4;
+    --fg-3:#807a6b;
+    --fg-4:#4a4639;
+    --line:#27241c;
+    --line-2:#33301f;
+    --accent:#9bd17a;          /* oklch(0.82 0.14 140) */
+    --accent-ink:#0e0d0b;
+    --warn:#e7a274;            /* oklch(0.78 0.11 60) */
+    --alert:#e98060;           /* oklch(0.74 0.15 35) */
+    --serif:'Instrument Serif',Georgia,serif;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --r:6px;
+  }
+  ::selection{background:var(--accent);color:var(--accent-ink)}
+  a{color:inherit;text-decoration:none}
+  hr{border:0;border-top:1px solid var(--line)}
+  .mono{font-family:var(--mono);font-feature-settings:"calt","ss01"}
+  .serif{font-family:var(--serif)}
+  .it{font-style:italic}
+  .micro{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3)}
+  .num{font-family:var(--mono);font-feature-settings:"tnum"}
+
+  /* layout */
+  .wrap{max-width:1200px;margin:0 auto;padding:0 28px}
+  .grid{display:grid;gap:24px}
+  .row{display:flex;align-items:center;gap:14px}
+  .col{display:flex;flex-direction:column}
+  .between{justify-content:space-between}
+  .hairline{border-top:1px solid var(--line)}
+  .vline{border-left:1px solid var(--line)}
+
+  /* nav */
+  .nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 78%,transparent);backdrop-filter:saturate(140%) blur(14px);-webkit-backdrop-filter:saturate(140%) blur(14px);border-bottom:1px solid var(--line)}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:56px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.01em}
+  .logo .glyph{width:22px;height:22px;border-radius:5px;background:var(--accent);display:grid;place-items:center;color:var(--accent-ink);font-family:var(--serif);font-style:italic;font-size:18px;line-height:1}
+  .nav ul{display:flex;list-style:none;gap:26px;color:var(--fg-2);font-size:13.5px}
+  .nav ul a:hover{color:var(--fg)}
+  .nav .right{display:flex;gap:10px;align-items:center}
+  .pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--fg-2)}
+  .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 22%,transparent)}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:7px;font-size:13.5px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:.18s}
+  .btn-primary{background:var(--accent);color:var(--accent-ink)}
+  .btn-primary:hover{filter:brightness(1.05);transform:translateY(-1px)}
+  .btn-ghost{color:var(--fg-2);border-color:var(--line)}
+  .btn-ghost:hover{color:var(--fg);border-color:var(--line-2)}
+  .btn .arr{transition:transform .2s}
+  .btn:hover .arr{transform:translateX(2px)}
+
+  /* ticker */
+  .ticker{border-bottom:1px solid var(--line);overflow:hidden;background:var(--bg);position:relative}
+  .ticker-track{display:flex;gap:48px;padding:9px 0;white-space:nowrap;animation:scrollx 60s linear infinite;font-family:var(--mono);font-size:12px;color:var(--fg-3)}
+  .ticker-track b{color:var(--fg-2);font-weight:500;letter-spacing:.02em;margin-right:8px}
+  .ticker-track .up{color:var(--alert)}
+  .ticker-track .down{color:var(--accent)}
+  @keyframes scrollx{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+  /* hero */
+  .hero{padding:80px 0 56px;position:relative}
+  .eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3);margin-bottom:30px}
+  .eyebrow .bar{width:24px;height:1px;background:var(--fg-3);display:inline-block}
+  h1.headline{font-family:var(--serif);font-weight:400;font-size:clamp(56px,8vw,116px);line-height:.95;letter-spacing:-.02em;color:var(--fg);max-width:14ch}
+  h1.headline em{font-style:italic;color:var(--accent)}
+  h1.headline .strike{color:var(--fg-3);text-decoration:line-through;text-decoration-thickness:1px;text-decoration-color:var(--alert)}
+  .lede{font-size:18px;color:var(--fg-2);max-width:46ch;margin-top:34px;line-height:1.55}
+  .hero-cta{display:flex;align-items:center;gap:14px;margin-top:34px;flex-wrap:wrap}
+  .install{display:inline-flex;align-items:center;gap:14px;border:1px solid var(--line);border-radius:8px;padding:9px 14px;font-family:var(--mono);font-size:13px;color:var(--fg-2)}
+  .install .prompt{color:var(--accent)}
+  .install button{margin-left:6px;border:1px solid var(--line);border-radius:5px;background:transparent;color:var(--fg-3);padding:3px 8px;font-family:var(--mono);font-size:11px;cursor:pointer}
+  .install button:hover{color:var(--fg);border-color:var(--line-2)}
+
+  /* hero stats */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-top:64px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .stat{padding:24px 22px;border-right:1px solid var(--line)}
+  .stat:last-child{border-right:0}
+  .stat .v{font-family:var(--serif);font-size:44px;line-height:1;letter-spacing:-.02em;color:var(--fg)}
+  .stat .v em{font-style:italic;color:var(--accent)}
+  .stat .l{margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.06em}
+
+  /* terminal */
+  .terminal{margin-top:56px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg-2);box-shadow:0 30px 80px -30px rgba(0,0,0,.6),0 0 0 1px color-mix(in oklab,var(--accent) 6%,transparent) inset}
+  .term-bar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--bg-3),var(--bg-2))}
+  .term-bar .dots{display:flex;gap:6px}
+  .term-bar .dots i{width:9px;height:9px;border-radius:50%;background:var(--line-2)}
+  .term-bar .dots i:nth-child(1){background:#3a3528}
+  .term-bar .dots i:nth-child(2){background:#3a3528}
+  .term-bar .dots i:nth-child(3){background:#3a3528}
+  .term-title{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.04em}
+  .term-status{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--fg-3)}
+  .term-status .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  .term-body{padding:0;display:grid;grid-template-columns:200px 1fr;min-height:430px}
+  .term-side{border-right:1px solid var(--line);padding:18px 14px;background:var(--bg-2)}
+  .term-side .group{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;color:var(--fg-4);letter-spacing:.08em;margin:14px 8px 8px}
+  .term-side .group:first-child{margin-top:0}
+  .term-side .item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:5px;font-size:12.5px;color:var(--fg-2);font-family:var(--mono);cursor:pointer}
+  .term-side .item:hover{background:var(--bg-3);color:var(--fg)}
+  .term-side .item.active{background:var(--bg-3);color:var(--fg)}
+  .term-side .item .num{color:var(--fg-3);font-size:11px}
+  .term-side .item .ok{color:var(--accent)}
+  .term-chat{padding:22px 26px;display:flex;flex-direction:column;gap:18px;font-size:14px}
+  .msg{display:flex;gap:14px;align-items:flex-start}
+  .av{width:24px;height:24px;border-radius:5px;flex:0 0 auto;display:grid;place-items:center;font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.05em;margin-top:2px}
+  .av.user{background:var(--bg-3);color:var(--fg-2)}
+  .av.ai{background:color-mix(in oklab,var(--accent) 18%,var(--bg-2));color:var(--accent)}
+  .bubble{flex:1;color:var(--fg)}
+  .bubble.user{color:var(--fg-2)}
+  .bubble .who{font-family:var(--mono);font-size:10.5px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+  .bubble p{line-height:1.6}
+  .bubble .table{margin-top:12px;border:1px solid var(--line);border-radius:7px;overflow:hidden;font-family:var(--mono);font-size:12.5px}
+  .bubble .table .r{display:grid;grid-template-columns:1fr auto auto;gap:14px;padding:8px 14px;border-bottom:1px solid var(--line);align-items:center}
+  .bubble .table .r:last-child{border-bottom:0}
+  .bubble .table .r.hd{background:var(--bg-3);color:var(--fg-3);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em}
+  .bubble .table .r .delta{color:var(--fg-3)}
+  .bubble .table .r .delta.up{color:var(--alert)}
+  .bubble .table .r .delta.down{color:var(--accent)}
+  .bubble .table .r.total{background:linear-gradient(180deg,transparent,color-mix(in oklab,var(--accent) 7%,transparent))}
+  .bubble .table .r.total b{color:var(--fg)}
+  .anomaly{display:inline-flex;align-items:center;gap:6px;background:color-mix(in oklab,var(--alert) 12%,var(--bg-2));border:1px solid color-mix(in oklab,var(--alert) 30%,var(--line));color:var(--alert);padding:2px 9px;border-radius:4px;font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  .anomaly::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--alert);box-shadow:0 0 6px var(--alert)}
+  .input-row{margin-top:auto;border-top:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:13px;color:var(--fg-3);background:var(--bg-2)}
+  .input-row .caret{color:var(--accent);animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* section */
+  section{padding:96px 0;border-top:1px solid var(--line)}
+  .section-head{display:grid;grid-template-columns:280px 1fr;gap:48px;align-items:flex-start;margin-bottom:48px}
+  .section-head .label{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.08em}
+  .section-head h2{font-family:var(--serif);font-weight:400;font-size:clamp(36px,4.6vw,60px);line-height:1.02;letter-spacing:-.015em;max-width:18ch}
+  .section-head h2 em{font-style:italic;color:var(--accent)}
+  .section-head .sub{margin-top:18px;color:var(--fg-2);max-width:52ch;font-size:16px;line-height:1.55}
+
+  /* how it works */
+  .steps{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg-2)}
+  .step{padding:26px 24px;border-right:1px solid var(--line);position:relative}
+  .step:last-child{border-right:0}
+  .step .n{font-family:var(--serif);font-style:italic;font-size:34px;color:var(--accent);line-height:1}
+  .step h4{margin-top:14px;font-size:15px;font-weight:600;letter-spacing:-.005em}
+  .step p{margin-top:6px;font-size:13.5px;color:var(--fg-2);line-height:1.55}
+  .step .cmd{margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--fg-2);background:var(--bg-3);border:1px solid var(--line);border-radius:5px;padding:7px 10px}
+  .step .cmd .c{color:var(--accent)}
+
+  /* config */
+  .config{margin-top:32px;display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  .codecard{border:1px solid var(--line);border-radius:10px;background:var(--bg-2);overflow:hidden}
+  .codecard .hd{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.06em}
+  .codecard pre{padding:18px 20px;font-family:var(--mono);font-size:12.5px;line-height:1.7;color:var(--fg-2);overflow:auto}
+  .codecard .k{color:var(--accent)}
+  .codecard .s{color:var(--warn)}
+  .codecard .c{color:var(--fg-4)}
+
+  /* features */
+  .features{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg-2)}
+  .feature{padding:32px 28px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:14px;min-height:280px}
+  .feature:nth-child(3n){border-right:0}
+  .feature:nth-last-child(-n+3){border-bottom:0}
+  .feature .ix{display:flex;align-items:center;justify-content:space-between}
+  .feature .ix .ix-num{font-family:var(--mono);font-size:11px;color:var(--fg-4);letter-spacing:.06em}
+  .feature .ix .pip{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .feature h4{font-family:var(--serif);font-size:26px;font-weight:400;line-height:1.05;letter-spacing:-.01em}
+  .feature h4 em{font-style:italic;color:var(--accent)}
+  .feature p{color:var(--fg-2);font-size:14px;line-height:1.55}
+  .feature .data{margin-top:auto;border-top:1px dashed var(--line);padding-top:14px;font-family:var(--mono);font-size:11.5px;color:var(--fg-3);display:flex;flex-direction:column;gap:5px}
+  .feature .data .ln{display:flex;justify-content:space-between;gap:12px}
+  .feature .data .ln b{color:var(--fg)}
+  .feature .data .ln .red{color:var(--alert)}
+  .feature .data .ln .grn{color:var(--accent)}
+  .feature .data .ln .dim{color:var(--fg-4)}
+
+  /* connectors */
+  .connectors{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .conn-hd{display:grid;grid-template-columns:1.5fr 1fr 1fr 1.2fr 90px;padding:11px 18px;background:var(--bg-2);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10.5px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase}
+  .conn-row{display:grid;grid-template-columns:1.5fr 1fr 1fr 1.2fr 90px;padding:14px 18px;border-bottom:1px solid var(--line);align-items:center;font-size:13.5px;transition:background .15s}
+  .conn-row:hover{background:var(--bg-2)}
+  .conn-row:last-child{border-bottom:0}
+  .conn-row .name{display:flex;align-items:center;gap:12px;color:var(--fg)}
+  .conn-row .lg{width:22px;height:22px;border-radius:5px;background:var(--bg-3);display:grid;place-items:center;font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--fg-2)}
+  .conn-row .meta{font-family:var(--mono);font-size:12px;color:var(--fg-2)}
+  .conn-row .meta.dim{color:var(--fg-3)}
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:4px;font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;border:1px solid var(--line)}
+  .badge.ok{background:color-mix(in oklab,var(--accent) 12%,transparent);color:var(--accent);border-color:color-mix(in oklab,var(--accent) 28%,var(--line))}
+  .badge.warn{background:color-mix(in oklab,var(--warn) 10%,transparent);color:var(--warn);border-color:color-mix(in oklab,var(--warn) 26%,var(--line))}
+  .badge.partial{background:transparent;color:var(--fg-3);border-color:var(--line)}
+
+  /* security pull */
+  .pull{padding:20px 0 0;display:grid;grid-template-columns:280px 1fr;gap:48px;align-items:start}
+  .pull .marg{font-family:var(--mono);font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.08em}
+  .pull blockquote{font-family:var(--serif);font-weight:400;font-size:clamp(28px,3.2vw,42px);line-height:1.18;letter-spacing:-.012em;color:var(--fg);max-width:28ch}
+  .pull blockquote em{font-style:italic;color:var(--accent)}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px}
+  .chip{padding:7px 12px;border:1px solid var(--line);border-radius:999px;font-size:12.5px;color:var(--fg-2);font-family:var(--mono)}
+
+  /* pricing */
+  .pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .price{padding:36px 30px;border-right:1px solid var(--line);background:var(--bg-2);display:flex;flex-direction:column;gap:20px;position:relative}
+  .price:last-child{border-right:0}
+  .price.feat{background:linear-gradient(180deg,color-mix(in oklab,var(--accent) 9%,var(--bg-2)),var(--bg-2) 60%)}
+  .price.feat::before{content:"";position:absolute;inset:0;pointer-events:none;border:1px solid color-mix(in oklab,var(--accent) 35%,transparent);border-radius:0}
+  .price .tier{display:flex;align-items:center;justify-content:space-between}
+  .price .tier .nm{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3)}
+  .price .tier .nm.on{color:var(--accent)}
+  .price .amt{font-family:var(--serif);font-size:64px;line-height:1;letter-spacing:-.02em}
+  .price .amt em{font-style:italic;color:var(--accent)}
+  .price .amt .small{font-size:24px;color:var(--fg-3);font-style:normal;font-family:var(--serif)}
+  .price .amt-sub{font-size:13px;color:var(--fg-3);margin-top:6px;font-family:var(--mono)}
+  .price ul{list-style:none;display:flex;flex-direction:column;gap:9px;font-size:13.5px;color:var(--fg-2)}
+  .price ul li{display:flex;gap:10px}
+  .price ul li::before{content:"+";color:var(--accent);font-family:var(--mono);font-weight:600}
+  .price ul li.locked{color:var(--fg-4)}
+  .price ul li.locked::before{content:"−";color:var(--fg-4)}
+  .price .cta{margin-top:auto}
+  .price .cta a{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:7px;padding:12px 14px;font-size:13.5px;color:var(--fg);transition:.15s}
+  .price .cta a:hover{border-color:var(--line-2);background:var(--bg-3)}
+  .price.feat .cta a{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+  .price.feat .cta a:hover{filter:brightness(1.05)}
+
+  /* CTA */
+  .cta{padding:120px 0 110px;text-align:left;border-top:1px solid var(--line);position:relative;overflow:hidden}
+  .cta::before{content:"";position:absolute;inset:0;background:radial-gradient(700px 320px at 18% 50%,color-mix(in oklab,var(--accent) 10%,transparent),transparent 70%);pointer-events:none}
+  .cta .inner{position:relative;display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center}
+  .cta h2{font-family:var(--serif);font-size:clamp(48px,6vw,84px);line-height:.98;letter-spacing:-.02em;font-weight:400;max-width:14ch}
+  .cta h2 em{font-style:italic;color:var(--accent)}
+  .cta-form{border:1px solid var(--line);border-radius:10px;background:var(--bg-2);padding:22px}
+  .cta-form .lab{font-family:var(--mono);font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.08em}
+  .cta-form .field{margin-top:14px;display:flex;gap:8px}
+  .cta-form input{flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:7px;color:var(--fg);padding:11px 12px;font-family:'Geist',sans-serif;font-size:14px;outline:none}
+  .cta-form input:focus{border-color:color-mix(in oklab,var(--accent) 50%,var(--line))}
+  .cta-form .helper{margin-top:14px;font-size:12.5px;color:var(--fg-3)}
+  .cta-form .row{display:flex;gap:18px;margin-top:14px;flex-wrap:wrap}
+  .cta-form .row span{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.5px;color:var(--fg-3)}
+  .cta-form .row span::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+
+  /* footer */
+  footer{border-top:1px solid var(--line);padding:30px 0 60px}
+  .foot{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:36px}
+  .foot h5{font-family:var(--mono);font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px}
+  .foot a{display:block;color:var(--fg-2);font-size:13.5px;padding:3px 0}
+  .foot a:hover{color:var(--fg)}
+  .foot-bottom{margin-top:48px;display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:11.5px;color:var(--fg-4)}
+  .wordmark{font-family:var(--serif);font-style:italic;font-size:144px;line-height:.85;letter-spacing:-.04em;color:var(--bg-3);margin-top:60px;user-select:none;overflow:hidden;white-space:nowrap}
+
+  @media (max-width:980px){
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .stat:nth-child(2){border-right:0}
+    .stat:nth-child(1),.stat:nth-child(2){border-bottom:1px solid var(--line)}
+    .term-body{grid-template-columns:1fr}
+    .term-side{display:none}
+    .features,.steps{grid-template-columns:1fr}
+    .feature{border-right:0}
+    .step{border-right:0;border-bottom:1px solid var(--line)}
+    .step:last-child{border-bottom:0}
+    .pricing{grid-template-columns:1fr}
+    .price{border-right:0;border-bottom:1px solid var(--line)}
+    .conn-hd,.conn-row{grid-template-columns:1.4fr 1fr 80px;}
+    .conn-hd .h-coverage,.conn-hd .h-access,.conn-row .c-coverage,.conn-row .c-access{display:none}
+    .section-head{grid-template-columns:1fr}
+    .config{grid-template-columns:1fr}
+    .cta .inner{grid-template-columns:1fr}
+    .nav ul{display:none}
+    .pull{grid-template-columns:1fr}
+    .foot{grid-template-columns:1fr 1fr}
+  }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect, useMemo } = React;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "palette": "obsidian",
+  "accent": "lime",
+  "displayFont": "instrument"
+}/*EDITMODE-END*/;
+
+const PALETTES = {
+  obsidian: { bg:"#0e0d0b", bg2:"#15140f", bg3:"#1c1a14", fg:"#f3efe6", fg2:"#cdc6b4", fg3:"#807a6b", fg4:"#4a4639", line:"#27241c", line2:"#33301f" },
+  ink:      { bg:"#0a0b0d", bg2:"#101216", bg3:"#171a1f", fg:"#eef1f5", fg2:"#c1c8d2", fg3:"#79818d", fg4:"#3f4651", line:"#1f2329", line2:"#2a2f37" },
+  parchment:{ bg:"#f4efe5", bg2:"#ece6d8", bg3:"#e2dac8", fg:"#1c1a13", fg2:"#3d3a2f", fg3:"#6b6655", fg4:"#9a9381", line:"#d6cdb6", line2:"#c2b89c" },
+};
+const ACCENTS = {
+  lime:    { accent:"#9bd17a", ink:"#0e0d0b" },   // savings green
+  amber:   { accent:"#e6b25c", ink:"#0e0d0b" },   // warm gold
+  electric:{ accent:"#7aa6f5", ink:"#0e0d0b" },   // cool blue
+  coral:   { accent:"#e98060", ink:"#0e0d0b" },
+};
+const FONTS = {
+  instrument: "'Instrument Serif',Georgia,serif",
+  geist:      "'Geist','Inter',system-ui,sans-serif",
+};
+
+function applyTheme(t){
+  const r = document.documentElement;
+  const p = PALETTES[t.palette] || PALETTES.obsidian;
+  const a = ACCENTS[t.accent] || ACCENTS.lime;
+  Object.entries(p).forEach(([k,v])=>r.style.setProperty(`--${k.replace(/([A-Z])/g,'-$1').toLowerCase()}`, v));
+  // fix names
+  r.style.setProperty('--bg', p.bg);
+  r.style.setProperty('--bg-2', p.bg2);
+  r.style.setProperty('--bg-3', p.bg3);
+  r.style.setProperty('--fg', p.fg);
+  r.style.setProperty('--fg-2', p.fg2);
+  r.style.setProperty('--fg-3', p.fg3);
+  r.style.setProperty('--fg-4', p.fg4);
+  r.style.setProperty('--line', p.line);
+  r.style.setProperty('--line-2', p.line2);
+  r.style.setProperty('--accent', a.accent);
+  r.style.setProperty('--accent-ink', a.ink);
+  r.style.setProperty('--serif', FONTS[t.displayFont]||FONTS.instrument);
+}
+
+function Logo(){
+  return (
+    <a href="#" className="logo">
+      <span className="glyph">n</span>
+      <span style={{fontFamily:"var(--serif)",fontStyle:"italic",fontSize:20,letterSpacing:"-0.02em"}}>nable</span>
+    </a>
+  );
+}
+
+function Nav(){
+  return (
+    <nav className="nav">
+      <div className="wrap nav-inner">
+        <Logo />
+        <ul>
+          <li><a href="#product">Product</a></li>
+          <li><a href="#connectors">Connectors</a></li>
+          <li><a href="#pricing">Pricing</a></li>
+          <li><a href="#docs">Docs</a></li>
+          <li><a href="mailto:hello@nable.sh">Contact</a></li>
+        </ul>
+        <div className="right">
+          <span className="pill"><span className="dot"></span>v0.4 — public beta</span>
+          <a href="#install" className="btn btn-primary">Start free trial <span className="arr">→</span></a>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+const TICKER_ITEMS = [
+  ["AWS","up","+12.3%","us-east-1 ec2"],
+  ["DDOG","up","+127%","apm spike"],
+  ["GCP","down","-3.4%","bq commits"],
+  ["AZUR","up","+4.1%","cosmos db"],
+  ["SNOW","up","+6.0%","warehouse XL"],
+  ["STRP","down","-1.2%","fees"],
+  ["MNGO","flat","±0.0%","atlas m30"],
+  ["TWLO","up","+8.7%","sms throughput"],
+  ["CLDF","down","-0.8%","workers"],
+  ["GHUB","up","+22%","actions minutes"],
+  ["VRCL","flat","—","ent invoice"],
+  ["NEWR","up","+5.3%","ingest gb"],
+];
+function Ticker(){
+  const items = [...TICKER_ITEMS, ...TICKER_ITEMS];
+  return (
+    <div className="ticker">
+      <div className="ticker-track">
+        {items.map((it, i)=>(
+          <span key={i}>
+            <b>{it[0]}</b>
+            <span className={it[1]}>{it[2]}</span>
+            <span style={{color:"var(--fg-4)",margin:"0 8px"}}>·</span>
+            <span style={{color:"var(--fg-3)"}}>{it[3]}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Hero(){
+  return (
+    <header className="hero" data-screen-label="01 Hero">
+      <div className="wrap">
+        <div className="eyebrow"><span className="bar"></span> MCP server · v0.4 · 13 connectors live</div>
+        <h1 className="headline">
+          Your <span className="strike">dashboard</span><br/>
+          is your <em>AI.</em>
+        </h1>
+        <p className="lede">
+          nable connects Claude, Cursor and any MCP client to real billing data across AWS, Azure, GCP and ten SaaS providers — answers in plain English, no SQL, no console hopping.
+        </p>
+        <div className="hero-cta">
+          <a href="#install" className="btn btn-primary">Start 14-day trial <span className="arr">→</span></a>
+          <a href="#product" className="btn btn-ghost">See live demo</a>
+          <span className="install" style={{marginLeft:8}}>
+            <span className="prompt">$</span>
+            <span>pip install finops-mcp</span>
+            <button onClick={(e)=>{
+              navigator.clipboard?.writeText("pip install finops-mcp");
+              e.currentTarget.textContent="copied";
+              setTimeout(()=>{ if(e.currentTarget) e.currentTarget.textContent="copy"; }, 1100);
+            }}>copy</button>
+          </span>
+        </div>
+
+        <div className="stats">
+          <div className="stat">
+            <div className="v"><em>13</em></div>
+            <div className="l">Live connectors</div>
+          </div>
+          <div className="stat">
+            <div className="v">7<span style={{color:"var(--fg-3)"}}>m</span></div>
+            <div className="l">Median setup time</div>
+          </div>
+          <div className="stat">
+            <div className="v">100<span style={{color:"var(--fg-3)"}}>%</span></div>
+            <div className="l">Local credentials</div>
+          </div>
+          <div className="stat">
+            <div className="v"><em>$0</em></div>
+            <div className="l">Until you upgrade</div>
+          </div>
+        </div>
+
+        <Terminal />
+      </div>
+    </header>
+  );
+}
+
+function Terminal(){
+  const [active, setActive] = useState("compute-q2");
+  return (
+    <div className="terminal" id="product" data-screen-label="02 Terminal">
+      <div className="term-bar">
+        <div className="dots"><i></i><i></i><i></i></div>
+        <span className="term-title" style={{marginLeft:10}}>~/work/finops · claude-desktop · mcp[finops] connected</span>
+        <span className="term-status"><span className="dot"></span>nable · streaming</span>
+      </div>
+      <div className="term-body">
+        <aside className="term-side">
+          <div className="group">Sessions</div>
+          {[
+            ["compute-q2","Q2 compute review","2m"],
+            ["ddog-spike","Datadog spike","17m"],
+            ["rightsize","Rightsizing pass","1h"],
+            ["weekly","Weekly digest","Mon"],
+          ].map(([id,t,n])=>(
+            <div key={id} className={"item " + (active===id?"active":"")} onClick={()=>setActive(id)}>
+              <span>{t}</span><span className="num">{n}</span>
+            </div>
+          ))}
+          <div className="group">Connectors</div>
+          {[
+            ["aws","AWS","ok"],
+            ["gcp","GCP","ok"],
+            ["azure","Azure","ok"],
+            ["ddog","Datadog","ok"],
+            ["snow","Snowflake","ok"],
+            ["stripe","Stripe","ok"],
+            ["pdy","PagerDuty","na"],
+          ].map(([id,t,s])=>(
+            <div key={id} className="item">
+              <span>{t}</span>
+              <span className={s==="ok"?"num ok":"num"}>{s==="ok"?"●":"○"}</span>
+            </div>
+          ))}
+        </aside>
+
+        <main className="term-chat">
+          <div className="msg">
+            <div className="av user">YOU</div>
+            <div className="bubble user">
+              <div className="who">11:42 · you</div>
+              <p>How much did we spend on compute last month across all providers, and where did it grow?</p>
+            </div>
+          </div>
+
+          <div className="msg">
+            <div className="av ai">AI</div>
+            <div className="bubble">
+              <div className="who">11:42 · claude · via nable.compute_summary</div>
+              <p>April 2026 compute, normalized to USD across all three clouds:</p>
+              <div className="table">
+                <div className="r hd"><span>Provider</span><span>Spend</span><span>Δ vs Mar</span></div>
+                <div className="r"><span>AWS · EC2 + Fargate</span><span className="num"><b>$18,420</b></span><span className="num delta up">+18.6%</span></div>
+                <div className="r"><span>Azure · Virtual Machines</span><span className="num"><b>$6,310</b></span><span className="num delta up">+4.2%</span></div>
+                <div className="r"><span>GCP · Compute Engine</span><span className="num"><b>$4,870</b></span><span className="num delta down">−3.4%</span></div>
+                <div className="r total"><span><b>Total</b></span><span className="num"><b>$29,600</b></span><span className="num delta up">+12.0%</span></div>
+              </div>
+              <p style={{marginTop:14,color:"var(--fg-2)"}}>
+                Three new c6i.4xlarge instances in us-east-1 account for $1,890 of the AWS delta. Want me to check if they're tagged?
+              </p>
+            </div>
+          </div>
+
+          <div className="msg">
+            <div className="av user">YOU</div>
+            <div className="bubble user">
+              <div className="who">11:43 · you</div>
+              <p>Any anomalies this week?</p>
+            </div>
+          </div>
+
+          <div className="msg">
+            <div className="av ai">AI</div>
+            <div className="bubble">
+              <div className="who">11:43 · claude · via nable.detect_anomalies</div>
+              <p>
+                <span className="anomaly">High · z = 3.8</span>
+                {" "}Datadog usage is up <b style={{color:"var(--alert)"}}>+127%</b> versus your same-weekday baseline. $4,100 today vs $1,810 average. Spike began Tuesday 02:14 UTC. I've opened <span className="mono" style={{color:"var(--accent)"}}>JIRA-2841</span> and tagged @sre.
+              </p>
+            </div>
+          </div>
+
+          <div className="input-row">
+            <span className="caret">▍</span>
+            <span style={{color:"var(--fg-2)"}}>show me the top 5 cost drivers by team this quarter…</span>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function HowItWorks(){
+  return (
+    <section data-screen-label="03 How it works">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ 02 — How it works</div>
+          <div>
+            <h2>One <em>local</em> server.<br/>All your billing data.</h2>
+            <p className="sub">nable runs as an MCP server on your machine. Your AI client queries normalized cost data the same way it calls any other tool. Credentials are encrypted with Fernet and stored in your OS keyring — they never leave the laptop.</p>
+          </div>
+        </div>
+
+        <div className="steps">
+          <div className="step">
+            <div className="n">i.</div>
+            <h4>Install</h4>
+            <p>One pip install. Python 3.10+. No services to provision.</p>
+            <div className="cmd"><span className="c">$</span> pip install finops-mcp</div>
+          </div>
+          <div className="step">
+            <div className="n">ii.</div>
+            <h4>Connect providers</h4>
+            <p>Interactive wizard walks you through each provider's keys. Read-only scopes only.</p>
+            <div className="cmd"><span className="c">$</span> finops setup</div>
+          </div>
+          <div className="step">
+            <div className="n">iii.</div>
+            <h4>Register with your client</h4>
+            <p>One config line in Claude, Cursor or Windsurf. Restart the app.</p>
+            <div className="cmd" style={{whiteSpace:"nowrap",overflow:"auto"}}><span style={{color:"var(--accent)"}}>"finops"</span>: {"{"} <span style={{color:"var(--accent)"}}>"command"</span>: <span style={{color:"var(--warn)"}}>"finops-mcp"</span> {"}"}</div>
+          </div>
+          <div className="step">
+            <div className="n">iv.</div>
+            <h4>Ask in English</h4>
+            <p>From "what drove AWS up?" to "file a ticket for any anomaly over $500".</p>
+            <div className="cmd" style={{color:"var(--fg-3)"}}>// no dashboards. no SQL.</div>
+          </div>
+        </div>
+
+        <div className="config">
+          <div className="codecard">
+            <div className="hd"><span>~/.config/Claude/claude_desktop_config.json</span><span>.json</span></div>
+<pre><span className="c">{"// add this block, restart Claude Desktop"}</span>{`
+{
+  `}<span className="k">"mcpServers"</span>{`: {
+    `}<span className="k">"finops"</span>{`: {
+      `}<span className="k">"command"</span>{`: `}<span className="s">"finops-mcp"</span>{`
+    }
+  }
+}`}</pre>
+          </div>
+          <div className="codecard">
+            <div className="hd"><span>example session</span><span>.txt</span></div>
+<pre><span className="c">{"# in any MCP-compatible client"}</span>{`
+
+`}<span style={{color:"var(--fg-3)"}}>{"›"}</span>{` `}<span style={{color:"var(--fg)"}}>"What drove our AWS bill up 40%?"</span>{`
+
+`}<span style={{color:"var(--accent)"}}>{"●"}</span>{` `}<span className="c">{"calling nable.cost_drivers(provider='aws',"}</span>{`
+`}<span className="c">{"                          window='28d')"}</span>{`
+
+`}<span style={{color:"var(--fg-2)"}}>{"  m6i.8xlarge in us-east-1 — +$3,240"}</span>{`
+`}<span style={{color:"var(--fg-2)"}}>{"  RDS aurora-prod-2 read replicas — +$1,108"}</span>{`
+`}<span style={{color:"var(--fg-2)"}}>{"  S3 inter-region transfer — +$840"}</span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const FEATURES = [
+  {
+    n:"01",
+    h:"Anomaly detection,",
+    em:"seasonality-aware.",
+    p:"Compares same-weekday baselines, not flat rolling averages. Catches real spikes before the invoice arrives — and tells the difference between a Friday deploy and a Tuesday outage.",
+    rows:[
+      ["EVENT","High · z=3.8","red"],
+      ["Datadog","+127%","red"],
+      ["baseline avg","$1,810/day","dim"],
+      ["today","$4,100","b"],
+    ]
+  },
+  {
+    n:"02",
+    h:"Tag-based",
+    em:"attribution.",
+    p:"Map resource tags to teams via a single YAML file. Get ranked spend by team across every cloud and SaaS in one breath.",
+    rows:[
+      ["platform","$12,400","b"],
+      ["growth","$8,200","b"],
+      ["data","$6,800","b"],
+      ["ungrouped","$1,300","dim"],
+    ]
+  },
+  {
+    n:"03",
+    h:"Rightsizing,",
+    em:"actually filed.",
+    p:"Reads 14 days of CloudWatch CPU metrics, finds the chronically idle, calculates exact savings, and opens the Jira / Linear / GitHub ticket for you.",
+    rows:[
+      ["m5.2xlarge → m5.xl","savings","grn"],
+      ["avg CPU","8% / max 22%","dim"],
+      ["est. saving","$192/mo","grn"],
+      ["JIRA-2841","filed","grn"],
+    ]
+  },
+  {
+    n:"04",
+    h:"RI &",
+    em:"Savings Plan analysis.",
+    p:"Real Cost Explorer data for coverage, utilization, and waste. Recommends Compute Savings Plan purchases with projected ROI and breakeven.",
+    rows:[
+      ["coverage","61%","b"],
+      ["utilization","94%","grn"],
+      ["wasted/mo","$612","red"],
+      ["1-yr SP ROI","+$8,400","grn"],
+    ]
+  },
+  {
+    n:"05",
+    h:"Proactive",
+    em:"alerts & digests.",
+    p:"Anomaly pushes and daily digests fan out to Slack or Teams without an AI session. A weekly summary lands every Monday at 9am.",
+    rows:[
+      ["channels","Slack · Teams · Email","b"],
+      ["digest","Mon 09:00 UTC","dim"],
+      ["last sent","yesterday 09:00","dim"],
+      ["queued","2 anomalies","red"],
+    ]
+  },
+  {
+    n:"06",
+    h:"Invoice email",
+    em:"parsing (IMAP).",
+    p:"For vendors with no billing API — PagerDuty, GitHub Enterprise, New Relic — connect a billing inbox and we parse the PDFs for you.",
+    rows:[
+      ["mailbox","billing@…","dim"],
+      ["parsed","132 invoices","b"],
+      ["matched","$48,212","grn"],
+      ["unmatched","2 PDFs","red"],
+    ]
+  },
+];
+
+function Features(){
+  return (
+    <section data-screen-label="04 Features">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ 03 — What it does</div>
+          <div>
+            <h2>Not a wrapper around <em>get_cost_and_usage.</em></h2>
+            <p className="sub">nable layers analysis on top of raw billing — the things you'd otherwise pay a FinOps platform or hire an analyst for. Six concrete capabilities, each callable as a single MCP tool.</p>
+          </div>
+        </div>
+
+        <div className="features">
+          {FEATURES.map((f,i)=>(
+            <article className="feature" key={i}>
+              <div className="ix"><span className="ix-num">— {f.n}</span><span className="pip"></span></div>
+              <h4>{f.h} <em>{f.em}</em></h4>
+              <p>{f.p}</p>
+              <div className="data">
+                {f.rows.map(([k,v,kind],j)=>(
+                  <div className="ln" key={j}>
+                    <span className="dim">{k}</span>
+                    <span className={kind==="grn"?"grn":kind==="red"?"red":kind==="dim"?"dim":""}>{kind==="b"?<b>{v}</b>:v}</span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const CONNECTORS = [
+  ["AWS","cloud","Cost Explorer","IAM / SSO","ok","Real"],
+  ["Azure","cloud","Cost Management","SP / device flow","ok","Real"],
+  ["GCP","cloud","Billing + BigQuery","Service account","ok","Real"],
+  ["Datadog","obs","Usage Metering v2","API key + app key","ok","Real"],
+  ["Snowflake","data","ACCOUNT_USAGE","User + warehouse","ok","Credits"],
+  ["Stripe","saas","Balance Transactions","Restricted key","ok","Real"],
+  ["MongoDB Atlas","data","Invoice API","Org API key","ok","Real"],
+  ["Twilio","saas","Usage Records","Account SID","ok","Real"],
+  ["Cloudflare","saas","Billing API","Token","ok","Real"],
+  ["GitHub","dev","Actions + Copilot","PAT","partial","Minutes"],
+  ["Vercel","dev","Invoice API","Bearer","warn","Enterprise"],
+  ["PagerDuty","obs","Seats only","API key","partial","Seats"],
+  ["New Relic","obs","NerdGraph ingest","User API key","warn","Estimated"],
+];
+
+function Connectors(){
+  return (
+    <section id="connectors" data-screen-label="05 Connectors">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ 04 — 13 connectors</div>
+          <div>
+            <h2>Every cost source,<br/><em>one</em> normalized schema.</h2>
+            <p className="sub">Not every provider has a real billing API. We're honest about what each connector returns — green is full dollar amounts, amber is gated or estimated, neutral means usage-only.</p>
+          </div>
+        </div>
+
+        <div className="connectors">
+          <div className="conn-hd">
+            <span>Provider</span>
+            <span className="h-coverage">Coverage</span>
+            <span className="h-access">Access</span>
+            <span>Status</span>
+            <span style={{textAlign:"right"}}>Returns</span>
+          </div>
+          {CONNECTORS.map(([n,cat,cov,acc,st,ret],i)=>(
+            <div className="conn-row" key={i}>
+              <div className="name">
+                <span className="lg">{n.slice(0,2).toUpperCase()}</span>
+                <span>{n} <span style={{color:"var(--fg-4)",fontFamily:"var(--mono)",fontSize:11,marginLeft:6}}>{cat}</span></span>
+              </div>
+              <div className="meta c-coverage">{cov}</div>
+              <div className="meta dim c-access">{acc}</div>
+              <div>
+                <span className={"badge " + (st==="ok"?"ok":st==="warn"?"warn":"partial")}>
+                  {st==="ok"?"Full":st==="warn"?"Gated":"Partial"}
+                </span>
+              </div>
+              <div className="meta" style={{textAlign:"right"}}>{ret}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Security(){
+  return (
+    <section data-screen-label="06 Security">
+      <div className="wrap">
+        <div className="pull">
+          <div className="marg">/ 05 — Security</div>
+          <div>
+            <blockquote>
+              Every other FinOps tool asks for your cloud keys. We <em>don't.</em> Your credentials never leave your machine.
+            </blockquote>
+            <p style={{marginTop:24,color:"var(--fg-2)",maxWidth:"58ch",fontSize:15.5,lineHeight:1.65}}>
+              All credentials are encrypted with Fernet and stored in your OS keyring — macOS Keychain, Windows Credential Manager, libsecret on Linux. The vault key lives on your hardware, not our servers. There is no cloud sync. There is nothing to breach on our end.
+            </p>
+            <div className="chips">
+              <span className="chip">Fernet encryption</span>
+              <span className="chip">OS keyring storage</span>
+              <span className="chip">Read-only API scopes</span>
+              <span className="chip">Local audit log</span>
+              <span className="chip">No vendor cloud access</span>
+              <span className="chip">SOC 2 in progress</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Pricing(){
+  return (
+    <section id="pricing" data-screen-label="07 Pricing">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ 06 — Pricing</div>
+          <div>
+            <h2>Plain pricing,<br/><em>no</em> seat math.</h2>
+            <p className="sub">Free forever for the read path. Pay only when you turn on automation — anomaly alerts, rightsizing tickets, weekly digests. Cancel any time.</p>
+          </div>
+        </div>
+
+        <div className="pricing">
+          <div className="price">
+            <div className="tier"><span className="nm">Free</span><span className="micro">no card</span></div>
+            <div>
+              <div className="amt">$0</div>
+              <div className="amt-sub">forever · 90-day history</div>
+            </div>
+            <ul>
+              <li>All 13 connectors</li>
+              <li>Cost summaries by provider &amp; service</li>
+              <li>Top cost drivers</li>
+              <li>Cross-provider comparisons</li>
+              <li>Cost trends over time</li>
+              <li className="locked">Anomaly detection</li>
+              <li className="locked">Slack / Teams alerts</li>
+              <li className="locked">Auto-ticketing</li>
+            </ul>
+            <div className="cta"><a href="#install">Install free <span>↗</span></a></div>
+          </div>
+
+          <div className="price feat">
+            <div className="tier">
+              <span className="nm on">Pro · 14-day trial</span>
+              <span className="micro" style={{color:"var(--accent)"}}>● recommended</span>
+            </div>
+            <div>
+              <div className="amt"><em>$39</em><span className="small">.99</span></div>
+              <div className="amt-sub">/ month · cancel any time</div>
+            </div>
+            <ul>
+              <li><b style={{color:"var(--fg)"}}>Everything in Free</b></li>
+              <li>12-month history &amp; daily granularity</li>
+              <li>Seasonality-aware anomaly detection</li>
+              <li>EC2 rightsizing recommendations</li>
+              <li>RI / Savings Plan analysis</li>
+              <li>Slack, Teams &amp; email alerts</li>
+              <li>Auto Jira / Linear / GitHub tickets</li>
+              <li>Invoice email parsing (IMAP)</li>
+              <li>Weekly digest, no AI session needed</li>
+            </ul>
+            <div className="cta"><a href="#install">Start free trial <span>→</span></a></div>
+          </div>
+
+          <div className="price">
+            <div className="tier"><span className="nm">Enterprise</span><span className="micro">contact</span></div>
+            <div>
+              <div className="amt" style={{fontSize:46}}>Custom</div>
+              <div className="amt-sub">volume · dedicated support</div>
+            </div>
+            <ul>
+              <li>Everything in Pro</li>
+              <li>Unlimited connectors &amp; history</li>
+              <li>Custom connector development</li>
+              <li>SSO / SAML</li>
+              <li>Dedicated Slack channel</li>
+              <li>SLA &amp; uptime guarantee</li>
+              <li>On-prem / private VPC deploy</li>
+            </ul>
+            <div className="cta"><a href="mailto:hello@nable.sh">Contact sales <span>↗</span></a></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CTA(){
+  const [done, setDone] = useState(false);
+  return (
+    <section className="cta" id="install" data-screen-label="08 CTA">
+      <div className="wrap inner">
+        <div>
+          <div className="micro" style={{marginBottom:24}}>/ 07 — Get started</div>
+          <h2>Find out where the money <em>actually</em> went.</h2>
+          <p className="lede" style={{maxWidth:"40ch"}}>14 days free, every Pro feature unlocked, no card required. One pip install and a single config line away.</p>
+          <div style={{marginTop:28}} className="install">
+            <span className="prompt">$</span>
+            <span>pip install finops-mcp[pdf,snowflake,keyring]</span>
+          </div>
+        </div>
+
+        <form className="cta-form" onSubmit={(e)=>{e.preventDefault();setDone(true);}}>
+          <div className="lab">/ updates &amp; new connectors</div>
+          {!done ? (
+            <>
+              <div className="field">
+                <input type="email" placeholder="you@company.com" required />
+                <button className="btn btn-primary" type="submit">Subscribe <span className="arr">→</span></button>
+              </div>
+              <div className="helper">No spam. Roadmap notes, new connectors, occasional cost-anatomy posts.</div>
+              <div className="row">
+                <span>Trial unlocks all Pro</span>
+                <span>No credit card</span>
+                <span>Local install</span>
+              </div>
+            </>
+          ) : (
+            <div style={{padding:"22px 4px",fontFamily:"var(--mono)",fontSize:13,color:"var(--accent)"}}>
+              ● subscribed — see you Monday.
+            </div>
+          )}
+        </form>
+      </div>
+
+      <div className="wrap">
+        <div className="wordmark">nable.</div>
+      </div>
+    </section>
+  );
+}
+
+function Footer(){
+  return (
+    <footer>
+      <div className="wrap">
+        <div className="foot">
+          <div>
+            <Logo />
+            <p style={{marginTop:14,color:"var(--fg-3)",fontSize:13,maxWidth:"30ch",lineHeight:1.55}}>
+              Cloud cost intelligence delivered through MCP. Made for teams who'd rather ask than open another dashboard.
+            </p>
+          </div>
+          <div>
+            <h5>Product</h5>
+            <a href="#product">Live demo</a>
+            <a href="#connectors">Connectors</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#install">Install guide</a>
+          </div>
+          <div>
+            <h5>Resources</h5>
+            <a href="#">Docs</a>
+            <a href="#">Changelog</a>
+            <a href="#">MCP overview</a>
+            <a href="#">Status</a>
+          </div>
+          <div>
+            <h5>Company</h5>
+            <a href="mailto:hello@nable.sh">hello@nable.sh</a>
+            <a href="#">Security</a>
+            <a href="#">Privacy</a>
+            <a href="#">Terms</a>
+          </div>
+        </div>
+        <div className="foot-bottom">
+          <span>© 2026 nable inc. · stored locally, served fresh.</span>
+          <span>v0.4.2 · 13 connectors · last sync 04:17 UTC</span>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+function Tweaks({ open }){
+  const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
+  useEffect(()=>{ applyTheme(t); },[t]);
+  if(!open) return null;
+  return (
+    <window.TweaksPanel title="Tweaks">
+      <window.TweakSection title="Palette">
+        <window.TweakRadio label="Background"
+          value={t.palette}
+          options={[
+            {value:"obsidian",label:"Obsidian"},
+            {value:"ink",label:"Ink"},
+            {value:"parchment",label:"Parchment"},
+          ]}
+          onChange={(v)=>setTweak("palette",v)} />
+      </window.TweakSection>
+      <window.TweakSection title="Accent">
+        <window.TweakColor
+          label="Accent"
+          value={t.accent}
+          options={[
+            {value:"lime",color:"#9bd17a"},
+            {value:"amber",color:"#e6b25c"},
+            {value:"electric",color:"#7aa6f5"},
+            {value:"coral",color:"#e98060"},
+          ]}
+          onChange={(v)=>setTweak("accent",v)} />
+      </window.TweakSection>
+      <window.TweakSection title="Display font">
+        <window.TweakRadio label="Display"
+          value={t.displayFont}
+          options={[
+            {value:"instrument",label:"Instrument Serif"},
+            {value:"geist",label:"Geist Sans"},
+          ]}
+          onChange={(v)=>setTweak("displayFont",v)} />
+      </window.TweakSection>
+    </window.TweaksPanel>
+  );
+}
+
+function App(){
+  const [tweaksOpen, setTweaksOpen] = useState(false);
+  // initial theme
+  useEffect(()=>{ applyTheme(TWEAK_DEFAULTS); },[]);
+  // host protocol — register listener BEFORE announcing
+  useEffect(()=>{
+    function onMsg(e){
+      const d = e.data || {};
+      if(d.type === "__activate_edit_mode") setTweaksOpen(true);
+      if(d.type === "__deactivate_edit_mode") setTweaksOpen(false);
+    }
+    window.addEventListener("message", onMsg);
+    window.parent.postMessage({type:"__edit_mode_available"}, "*");
+    return ()=>window.removeEventListener("message", onMsg);
+  },[]);
+  return (
+    <>
+      <Nav />
+      <Ticker />
+      <Hero />
+      <HowItWorks />
+      <Features />
+      <Connectors />
+      <Security />
+      <Pricing />
+      <CTA />
+      <Footer />
+      <Tweaks open={tweaksOpen} />
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("app")).render(<App />);
+</script>
+
+</body>
+</html>

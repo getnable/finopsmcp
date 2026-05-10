@@ -1026,6 +1026,124 @@ async def send_weekly_digest_now() -> dict:
         return {"error": str(e)}
 
 
+@mcp.tool()
+async def list_idle_resources(
+    resource_types: list[str] | None = None,
+    regions: list[str] | None = None,
+    min_idle_days: int = 7,
+) -> dict:
+    """
+    Scan for idle/wasted AWS resources that are costing money but doing nothing.
+
+    Finds: unattached EBS volumes, unused Elastic IPs, old snapshots with no AMI
+    dependency, stopped EC2 instances (still paying for EBS), load balancers
+    with no healthy targets.
+
+    Results are sorted by monthly waste descending. Protected resources
+    (tagged env=prod, protected=true, etc.) are flagged but never acted on.
+
+    Examples:
+        - "Find idle resources wasting money in AWS"
+        - "List any unattached EBS volumes older than 90 days"
+        - "What stopped EC2 instances are we still paying for?"
+    """
+    if err := require_pro("idle resource detection"):
+        return err
+    try:
+        from .cleanup.idle import scan_idle_resources, idle_resources_summary
+        resources = scan_idle_resources(
+            resource_types=resource_types,
+            regions=regions,
+            min_idle_days=min_idle_days,
+        )
+        return idle_resources_summary(resources)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def cleanup_idle_resources(
+    resource_ids: list[str] | None = None,
+    resource_types: list[str] | None = None,
+    regions: list[str] | None = None,
+    min_idle_days: int = 7,
+    dry_run: bool = True,
+) -> dict:
+    """
+    Delete or release idle AWS resources. ALWAYS confirm with the user before
+    setting dry_run=False. Protected resources are never touched.
+
+    Requires FINOPS_CLEANUP_ENABLED=true in the environment (opt-in).
+    Every action is written to ~/.finops-mcp/cleanup_audit.jsonl.
+
+    dry_run=True (default): shows what WOULD be deleted, nothing is changed.
+    dry_run=False: actually deletes. Only set this after explicit user confirmation.
+
+    Examples:
+        - "Show me what would happen if I cleaned up unattached EBS volumes"
+        - "Delete the EBS volumes we just listed" (then confirm → dry_run=False)
+        - "Clean up all unused Elastic IPs in us-east-1"
+    """
+    if err := require_pro("resource cleanup"):
+        return err
+    try:
+        from .cleanup.actions import cleanup_resources
+        return cleanup_resources(
+            resource_ids=resource_ids or [],
+            dry_run=dry_run,
+            resource_types=resource_types,
+            regions=regions,
+            min_idle_days=min_idle_days,
+        )
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_effective_rate_profile() -> dict:
+    """
+    Auto-detect the account's effective private rates by comparing actual
+    billed amounts against public on-demand prices.
+
+    Captures EDP discounts, MOSA/negotiated rates, and private pricing
+    automatically from Cost Explorer or CUR — no manual input needed.
+
+    Used internally by the commitment optimizer and PR cost estimator.
+    Useful for understanding how large your negotiated discount actually is.
+
+    Examples:
+        - "What's our effective AWS discount?"
+        - "Do we have private pricing on AWS?"
+        - "How does our actual rate compare to on-demand list prices?"
+    """
+    if err := require_pro("rate profile"):
+        return err
+    try:
+        from .recommendations.rate_detector import detect_effective_rates
+        profile = detect_effective_rates()
+        result: dict = {
+            "source": profile.source,
+            "confidence": profile.confidence,
+            "has_private_pricing": profile.has_private_pricing,
+            "overall_discount_pct": round(profile.overall_discount_pct * 100, 1),
+            "note": (
+                f"Your effective rate is {profile.overall_discount_pct*100:.1f}% below public "
+                f"on-demand prices (detected from {profile.source}, confidence: {profile.confidence})."
+            ) if profile.has_private_pricing else (
+                "No significant private pricing detected. Public on-demand rates apply."
+            ),
+        }
+        if profile.per_service_discount:
+            top = sorted(profile.per_service_discount.items(), key=lambda x: x[1], reverse=True)[:8]
+            result["top_service_discounts"] = [
+                {"service": k, "discount_pct": round(v * 100, 1)} for k, v in top
+            ]
+        result["metadata"] = profile.metadata
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── entry point ──────────────────────────────────────────────────────────────
 
 
