@@ -26,7 +26,7 @@ from pathlib import Path
 log = logging.getLogger("finops.license")
 
 _SECRET = b"finops-mcp-license-v1-2026"
-_UPGRADE_URL = "https://finopsmcp.vercel.app/#pricing"
+_UPGRADE_URL = "https://nable.sh/#pricing"
 _TRIAL_DAYS = 14
 _TRIAL_FILE = Path.home() / ".finops-mcp" / "trial_start"
 

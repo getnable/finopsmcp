@@ -4,8 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.3.0"
-description = "Headless FinOps MCP server — cloud + SaaS cost intelligence for Claude"
+version = "0.3.1"
+description = "Ask Claude about your cloud costs — AWS, Azure, GCP, Datadog, Snowflake, and 8 more"
+readme = "README.md"
+license = { text = "MIT" }
+keywords = ["mcp", "finops", "claude", "aws", "cloud-cost", "ai"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Topic :: Office/Business :: Financial",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.3.0",
