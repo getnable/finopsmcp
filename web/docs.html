@@ -120,10 +120,13 @@
       <a href="#invoices"      class="nav-link">Invoice emails</a>
 
       <div class="nav-group">Alerts & automation</div>
-      <a href="#slack"         class="nav-link">Slack</a>
+      <a href="#slack"         class="nav-link">Slack alerts</a>
+      <a href="#slack-bot"     class="nav-link">Slack bot</a>
       <a href="#teams"         class="nav-link">Microsoft Teams</a>
       <a href="#email"         class="nav-link">Email digest</a>
       <a href="#ticketing"     class="nav-link">Jira / Linear / GitHub</a>
+      <a href="#pr-comments"   class="nav-link">PR cost comments</a>
+      <a href="#cleanup"       class="nav-link">Idle resource cleanup</a>
 
       <div class="nav-group">Reference</div>
       <a href="#env"           class="nav-link">All env variables</a>
@@ -716,6 +719,120 @@
 
     <hr class="divider"/>
 
+    <!-- Slack bot -->
+    <div id="slack-bot" class="section-anchor">
+      <h2 class="section-title">🤖 Slack bot (conversational)</h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">A persistent bot you can talk to directly in Slack — just DM <strong>@nable</strong> or mention it in any channel. It calls the same nable tools under the hood and responds with cost analysis, anomaly summaries, rightsizing recommendations, and more. Different from the webhook alerts above — this is conversational.</p>
+
+      <div class="warn-box mb-4">
+        <strong>Requires the Slack bot extra:</strong> <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[slack]</code>
+      </div>
+
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>api.slack.com/apps → Create app → From scratch</strong>. Name it <em>nable</em>.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Under <strong>OAuth &amp; Permissions</strong>, add bot token scopes: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">app_mentions:read</code>, <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">chat:write</code>, <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">im:history</code>, <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">im:read</code>. Install the app to your workspace and copy the <strong>Bot User OAuth Token</strong>.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Under <strong>Socket Mode</strong>, enable it and generate an <strong>App-Level Token</strong> with the <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">connections:write</code> scope. Copy that token too.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">4</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Under <strong>Event Subscriptions</strong>, enable events and subscribe to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">app_mention</code> and <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">message.im</code>.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">5</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Set your env vars and start the bot:</p></div></div>
+      </div>
+
+      <div class="card p-5 mb-4">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">SLACK_BOT_TOKEN</span>=<span class="env-val">xoxb-...</span><br/>
+          <span class="env-key">SLACK_APP_TOKEN</span>=<span class="env-val">xapp-...</span><br/>
+          <span class="env-key">ANTHROPIC_API_KEY</span>=<span class="env-val">sk-ant-...</span><br/>
+          <span class="env-key">SLACK_DAILY_CHANNEL</span>=<span class="env-val">#finops</span> &nbsp;<span style="color:var(--dim)"># optional — sends daily digest at 09:00 UTC</span>
+        </div>
+      </div>
+
+      <div class="code-wrap mb-2">
+        <div class="code-block p-3 text-xs">
+          <span style="color:var(--blue-hi)">finops-slack</span>
+        </div>
+      </div>
+      <p class="text-xs mb-0" style="color:var(--dim)">Uses Socket Mode — no public URL or reverse proxy needed. Keep it running in the background (systemd, screen, or Docker).</p>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- PR cost comments -->
+    <div id="pr-comments" class="section-anchor">
+      <h2 class="section-title">🔀 PR cost comments</h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Automatically posts a cost estimate on GitHub pull requests when infrastructure files change (Terraform, CloudFormation, CDK, Helm). The comment is updated — not duplicated — on each push. Only fires if the estimated impact exceeds your configured threshold.</p>
+
+      <div class="warn-box mb-4">
+        <strong>Requires the pr-comments extra:</strong> <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[pr-comments]</code>
+      </div>
+
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Create a GitHub fine-grained personal access token with <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pull_requests: write</code> on the target repos.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Set your env vars and start the webhook server:</p></div></div>
+      </div>
+
+      <div class="card p-5 mb-4">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">GITHUB_TOKEN</span>=<span class="env-val">github_pat_...</span><br/>
+          <span class="env-key">GITHUB_WEBHOOK_SECRET</span>=<span class="env-val">your-secret</span> &nbsp;<span style="color:var(--dim)"># recommended — validates webhook payloads</span><br/>
+          <span class="env-key">PR_COST_THRESHOLD_USD</span>=<span class="env-val">10</span> &nbsp;<span style="color:var(--dim)"># skip comment if impact is under $10/mo</span><br/>
+          <span class="env-key">PR_WEBHOOK_PORT</span>=<span class="env-val">8080</span> &nbsp;<span style="color:var(--dim)"># optional — default 8080</span>
+        </div>
+      </div>
+
+      <div class="code-wrap mb-4">
+        <div class="code-block p-3 text-xs">
+          <span style="color:var(--blue-hi)">finops-pr-webhook</span>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">In your GitHub repo, go to <strong>Settings → Webhooks → Add webhook</strong>. Set the payload URL to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">http://your-host:8080/webhook/github</code>, content type to <code>application/json</code>, and choose the <strong>Pull requests</strong> event.</p></div></div>
+      </div>
+
+      <div class="info-box mt-4">Cost estimates are factual and account-aware — the comment shows current instance counts, estimated monthly delta, and your effective discount rate (auto-detected from Cost Explorer). No editorial commentary.</div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Idle resource cleanup -->
+    <div id="cleanup" class="section-anchor">
+      <h2 class="section-title">🧹 Idle resource cleanup</h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Scans for AWS resources that are running but not being used: unattached EBS volumes, unassociated Elastic IPs, stale snapshots, stopped EC2 instances, and load balancers with no healthy targets. Cleanup actions are opt-in and always dry-run by default.</p>
+
+      <div class="warn-box mb-4">
+        <strong>Cleanup is disabled by default.</strong> Set <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">FINOPS_CLEANUP_ENABLED=true</code> to enable delete/terminate actions. Without it, the scan tool works but cleanup returns a dry-run preview only.
+      </div>
+
+      <p class="text-sm font-semibold mb-2" style="color:var(--text)">Example workflow in Claude / Cursor</p>
+      <div class="code-block p-3 text-xs mb-4">
+        <span style="color:var(--dim)"># Step 1 — see what's idle</span><br/>
+        <span style="color:var(--blue-hi)">list_idle_resources</span>(resource_types=["ebs","eip"], min_idle_days=90)<br/><br/>
+        <span style="color:var(--dim)"># Step 2 — preview what cleanup would do (dry_run=True by default)</span><br/>
+        <span style="color:var(--blue-hi)">cleanup_idle_resources</span>(resource_ids=["vol-abc123","vol-def456"], dry_run=True)<br/><br/>
+        <span style="color:var(--dim)"># Step 3 — actually clean up</span><br/>
+        <span style="color:var(--blue-hi)">cleanup_idle_resources</span>(resource_ids=["vol-abc123","vol-def456"], dry_run=False)
+      </div>
+
+      <p class="text-sm font-semibold mb-2" style="color:var(--text)">Protected resource tags</p>
+      <p class="text-sm mb-3" style="color:var(--muted)">Resources tagged with any of the following are never touched, regardless of idle status:</p>
+      <div class="card p-4 mb-4">
+        <div class="code-block p-3 text-xs">
+          env=prod &nbsp; protected=true &nbsp; do-not-delete=true &nbsp; finops-skip=true
+        </div>
+      </div>
+
+      <p class="text-sm mb-3" style="color:var(--muted)">Override the default protected tag set via env:</p>
+      <div class="card p-5 mb-4">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">FINOPS_CLEANUP_ENABLED</span>=<span class="env-val">true</span><br/>
+          <span class="env-key">FINOPS_PROTECTED_TAGS</span>=<span class="env-val">env=prod,protected=true,keep=yes</span> &nbsp;<span style="color:var(--dim)"># comma-separated key=value pairs</span>
+        </div>
+      </div>
+
+      <div class="info-box">Every cleanup action — including dry runs — is appended to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">~/.finops-mcp/cleanup_audit.jsonl</code> for auditing.</div>
+    </div>
+
+    <hr class="divider"/>
+
     <!-- All env vars -->
     <div id="env" class="section-anchor">
       <h2 class="section-title">All environment variables</h2>
@@ -752,7 +869,22 @@
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">FINOPS_DIGEST_TO</td><td class="px-4 py-2.5" style="color:var(--muted)">Email</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">JIRA_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Jira</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">LINEAR_API_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Linear</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
-            <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GITHUB_ISSUES_REPO</td><td class="px-4 py-2.5" style="color:var(--muted)">GitHub Issues</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GITHUB_ISSUES_REPO</td><td class="px-4 py-2.5" style="color:var(--muted)">GitHub Issues</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border);background:rgba(45,95,168,0.02)"><td class="px-4 py-2.5 font-mono text-xs font-semibold" colspan="3" style="color:var(--blue)">Slack bot</td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SLACK_BOT_TOKEN</td><td class="px-4 py-2.5" style="color:var(--muted)">Slack bot</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SLACK_APP_TOKEN</td><td class="px-4 py-2.5" style="color:var(--muted)">Slack bot</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">ANTHROPIC_API_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Slack bot</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SLACK_DAILY_CHANNEL</td><td class="px-4 py-2.5" style="color:var(--muted)">Slack bot</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border);background:rgba(45,95,168,0.02)"><td class="px-4 py-2.5 font-mono text-xs font-semibold" colspan="3" style="color:var(--blue)">PR cost comments</td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GITHUB_WEBHOOK_SECRET</td><td class="px-4 py-2.5" style="color:var(--muted)">PR comments</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">PR_COST_THRESHOLD_USD</td><td class="px-4 py-2.5" style="color:var(--muted)">PR comments</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">PR_WEBHOOK_PORT</td><td class="px-4 py-2.5" style="color:var(--muted)">PR comments</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border);background:rgba(45,95,168,0.02)"><td class="px-4 py-2.5 font-mono text-xs font-semibold" colspan="3" style="color:var(--blue)">Idle resource cleanup</td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">FINOPS_CLEANUP_ENABLED</td><td class="px-4 py-2.5" style="color:var(--muted)">Cleanup</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">FINOPS_PROTECTED_TAGS</td><td class="px-4 py-2.5" style="color:var(--muted)">Cleanup</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border);background:rgba(45,95,168,0.02)"><td class="px-4 py-2.5 font-mono text-xs font-semibold" colspan="3" style="color:var(--blue)">Rate detection (CUR / Athena)</td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">CUR_ATHENA_DATABASE</td><td class="px-4 py-2.5" style="color:var(--muted)">Rate detection</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">CUR_ATHENA_TABLE</td><td class="px-4 py-2.5" style="color:var(--muted)">Rate detection</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
           </tbody>
         </table>
       </div>
