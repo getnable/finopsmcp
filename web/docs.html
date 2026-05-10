@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FinOps MCP — Setup Documentation</title>
+  <title>nable — Setup Documentation</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" />
@@ -66,7 +66,7 @@
             <path d="M19.5 0 L20.4 2.4 L22 3 L20.4 3.6 L19.5 6 L18.6 3.6 L17 3 L18.6 2.4 Z" fill="#eef4fd" opacity="0.92"/>
           </svg>
         </div>
-        <span class="font-bold text-lg tracking-tight" style="color:var(--text)">FinOps MCP</span>
+        <span class="font-bold text-lg tracking-tight" style="color:var(--text)">nable</span>
       </a>
       <span class="text-xs px-2 py-0.5 rounded-md font-semibold ml-1" style="background:var(--surface2);color:var(--blue);border:1px solid var(--border)">Docs</span>
     </div>
@@ -594,7 +594,7 @@
     <!-- Invoice emails -->
     <div id="invoices" class="section-anchor">
       <h2 class="section-title">📧 Invoice email parsing</h2>
-      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">For vendors with no billing API (PagerDuty, New Relic, GitHub Enterprise, etc.), FinOps MCP can connect to your billing inbox via IMAP, parse PDF and HTML invoices, and extract real dollar amounts automatically.</p>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">For vendors with no billing API (PagerDuty, New Relic, GitHub Enterprise, etc.), nable can connect to your billing inbox via IMAP, parse PDF and HTML invoices, and extract real dollar amounts automatically.</p>
       <div class="info-box mb-4">Create a dedicated <strong>billing@yourcompany.com</strong> mailbox and forward all vendor invoices there. This keeps it clean and avoids scanning your main inbox.</div>
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Enable IMAP access on your mailbox (Gmail: Settings → See all settings → Forwarding and POP/IMAP).</p></div></div>
@@ -668,7 +668,7 @@
     <!-- Ticketing -->
     <div id="ticketing" class="section-anchor">
       <h2 class="section-title">Auto-ticketing</h2>
-      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">When a high or medium-severity anomaly is detected, FinOps MCP automatically creates a ticket in your tracker. Configure one or more — the first configured is used by default.</p>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">When a high or medium-severity anomaly is detected, nable automatically creates a ticket in your tracker. Configure one or more — the first configured is used by default.</p>
 
       <div class="space-y-4">
         <div class="card p-5">
