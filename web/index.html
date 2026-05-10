@@ -198,6 +198,32 @@
   .cta-form .submit{background:transparent;border:0;color:var(--fg);font-size:14px;cursor:pointer;padding:0 4px;display:inline-flex;align-items:center;gap:6px}
   .cta-form .helper{margin-top:14px;font-size:12.5px;color:var(--fg-3)}
 
+  /* Trial modal */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px}
+  .modal{background:var(--bg);border:1px solid var(--line);border-radius:12px;width:100%;max-width:780px;overflow:hidden;display:grid;grid-template-columns:1fr 1fr}
+  .modal-left{padding:44px 40px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:28px}
+  .modal-left h3{font-size:22px;font-weight:400;letter-spacing:-.02em;line-height:1.2}
+  .modal-left .price-row{display:flex;align-items:baseline;gap:6px}
+  .modal-left .price-big{font-size:42px;font-weight:400;letter-spacing:-.03em}
+  .modal-left .price-after{font-size:13px;color:var(--fg-3);font-family:var(--mono)}
+  .modal-left ul{list-style:none;display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:var(--fg-2)}
+  .modal-left ul li::before{content:"·";margin-right:10px;color:var(--fg-4)}
+  .modal-right{padding:44px 40px;display:flex;flex-direction:column;gap:20px}
+  .modal-right h4{font-size:15px;font-weight:500;letter-spacing:-.01em}
+  .modal-right label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.04em;display:block;margin-bottom:6px}
+  .modal-right input[type=email]{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:'Geist',sans-serif;font-size:14px;color:var(--fg);outline:none}
+  .modal-right input[type=email]:focus{border-color:var(--fg-2)}
+  .modal-right .modal-submit{width:100%;background:var(--fg);color:var(--bg);border:0;border-radius:6px;padding:11px;font-family:'Geist',sans-serif;font-size:14px;font-weight:500;cursor:pointer;margin-top:4px}
+  .modal-right .modal-submit:hover{background:#000}
+  .modal-right .modal-note{font-size:11.5px;color:var(--fg-3);line-height:1.5;font-family:var(--mono)}
+  .modal-pip{margin-top:auto;padding-top:20px;border-top:1px solid var(--line)}
+  .modal-pip .step-label{font-family:var(--mono);font-size:10.5px;color:var(--fg-4);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
+  .modal-pip .install{font-family:var(--mono);font-size:12.5px;color:var(--fg-2);background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 14px;display:flex;align-items:center;gap:10px}
+  .modal-pip .install .prompt{color:var(--fg-4)}
+  .modal-close{position:absolute;top:16px;right:18px;background:transparent;border:0;font-size:20px;cursor:pointer;color:var(--fg-3);line-height:1}
+  .modal-close:hover{color:var(--fg)}
+  @media(max-width:640px){.modal{grid-template-columns:1fr}.modal-left{border-right:0;border-bottom:1px solid var(--line);padding:32px 24px}.modal-right{padding:32px 24px}}
+
   /* footer */
   footer{border-top:1px solid var(--line);padding:36px 0 56px}
   .foot{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:36px}
@@ -293,7 +319,7 @@ function ThemeToggle({ dark, onToggle }){
   );
 }
 
-function Nav({ dark, onToggle }){
+function Nav({ dark, onToggle, onTrial }){
   return (
     <nav className="nav">
       <div className="wrap nav-inner">
@@ -302,19 +328,19 @@ function Nav({ dark, onToggle }){
           <li><a href="#product">Product</a></li>
           <li><a href="#connectors">Connectors</a></li>
           <li><a href="#pricing">Pricing</a></li>
-          <li><a href="#docs">Docs</a></li>
+          <li><a href="/docs">Docs</a></li>
         </ul>
         <div className="right">
           <ThemeToggle dark={dark} onToggle={onToggle} />
-          <a href="#docs" className="btn btn-ghost">Sign in</a>
-          <a href="#install" className="btn btn-primary">Start free trial <span className="arr">→</span></a>
+          <a href="/docs" className="btn btn-ghost">Sign in</a>
+          <a href="#" onClick={onTrial} className="btn btn-primary">Start free trial <span className="arr">→</span></a>
         </div>
       </div>
     </nav>
   );
 }
 
-function Hero(){
+function Hero({ onTrial }){
   return (
     <header className="hero" data-screen-label="01 Hero">
       <div className="wrap">
@@ -324,17 +350,8 @@ function Hero(){
           nable connects Claude, Cursor and any MCP client to real billing data across AWS, Azure, GCP and ten SaaS providers. Answers in plain English. No dashboards. No SQL.
         </p>
         <div className="hero-cta">
-          <a href="#install" className="btn btn-primary">Start 14-day trial <span className="arr">→</span></a>
+          <a href="#" onClick={onTrial} className="btn btn-primary">Start 14-day trial <span className="arr">→</span></a>
           <a href="#product" className="btn btn-ghost">See how it works</a>
-          <span className="install" style={{marginLeft:6}}>
-            <span className="prompt">$</span>
-            <span>pip install finops-mcp</span>
-            <button onClick={(e)=>{
-              navigator.clipboard?.writeText("pip install finops-mcp");
-              e.currentTarget.textContent="copied";
-              setTimeout(()=>{ if(e.currentTarget) e.currentTarget.textContent="copy"; }, 1100);
-            }}>copy</button>
-          </span>
         </div>
 
         <div className="clients">
@@ -591,44 +608,25 @@ function Security(){
   );
 }
 
-function Pricing(){
+function Pricing({ onTrial }){
   return (
     <section id="pricing" data-screen-label="06 Pricing">
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ Pricing</div>
           <h2>Plain pricing. No seat math.</h2>
-          <p>Free forever for the read path. Pay only when you turn on automation.</p>
+          <p>14 days free, every feature unlocked. $39.99 / month after.</p>
         </div>
 
         <div className="pricing">
-          <div className="price">
-            <div className="tier">Free</div>
+          <div className="price feat">
+            <div className="tier">Pro · 14-day free trial</div>
             <div>
-              <div className="amt">$0</div>
-              <div className="amt-sub">forever · 90-day history</div>
+              <div className="amt">$0<span className="small"> / 14 days</span></div>
+              <div className="amt-sub">then $39.99 / month · cancel any time</div>
             </div>
             <ul>
               <li>All 13 connectors</li>
-              <li>Cost summaries by provider &amp; service</li>
-              <li>Top cost drivers</li>
-              <li>Cross-provider comparisons</li>
-              <li>Cost trends over time</li>
-              <li className="locked">Anomaly detection</li>
-              <li className="locked">Slack / Teams alerts</li>
-              <li className="locked">Auto-ticketing</li>
-            </ul>
-            <div className="cta"><a href="#install">Install free →</a></div>
-          </div>
-
-          <div className="price feat">
-            <div className="tier">Pro · 14-day trial</div>
-            <div>
-              <div className="amt">$39<span className="small">.99</span></div>
-              <div className="amt-sub">/ month · cancel any time</div>
-            </div>
-            <ul>
-              <li>Everything in Free</li>
               <li>12-month history &amp; daily granularity</li>
               <li>Seasonality-aware anomaly detection</li>
               <li>EC2 rightsizing recommendations</li>
@@ -638,7 +636,7 @@ function Pricing(){
               <li>Invoice email parsing (IMAP)</li>
               <li>Weekly digest, no AI session needed</li>
             </ul>
-            <div className="cta"><a href="#install">Start free trial →</a></div>
+            <div className="cta"><a href="#" onClick={onTrial}>Start free trial →</a></div>
           </div>
 
           <div className="price">
@@ -673,11 +671,7 @@ function CTA(){
           <div>
             <div className="label" style={{marginBottom:18}}>/ Get started</div>
             <h2>Find out where the money actually went.</h2>
-            <p>14 days free, every Pro feature unlocked, no card required. One pip install, one config line.</p>
-            <div style={{marginTop:24}} className="install">
-              <span className="prompt">$</span>
-              <span>pip install finops-mcp[pdf,snowflake,keyring]</span>
-            </div>
+            <p>14 days free, every Pro feature unlocked. Enter your email and card — you won't be charged until day 15, and you can cancel any time before.</p>
           </div>
 
           <form className="cta-form" onSubmit={(e)=>{e.preventDefault();setDone(true);}}>
@@ -772,8 +766,82 @@ function Tweaks({ open, t, setTweak }){
   );
 }
 
+function TrialModal({ onClose }){
+  const [email, setEmail] = useState("");
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const base = "https://buy.stripe.com/cNi5kC6XT2sSg804AG2Nq00";
+    const url = email ? `${base}?prefilled_email=${encodeURIComponent(email)}` : base;
+    window.location.href = url;
+  };
+  return (
+    <div className="modal-backdrop" onClick={(e)=>{ if(e.target===e.currentTarget) onClose(); }}>
+      <div className="modal" style={{position:"relative"}}>
+        <button className="modal-close" onClick={onClose}>×</button>
+
+        {/* Left: what's included */}
+        <div className="modal-left">
+          <div>
+            <div className="label" style={{marginBottom:12}}>/ 14-day free trial</div>
+            <h3>Full access, free for two weeks.</h3>
+          </div>
+          <div>
+            <div className="price-row">
+              <span className="price-big">$0</span>
+              <span className="price-after">for 14 days, then $39.99 / mo</span>
+            </div>
+            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Cancel before day 14. No charge.</div>
+          </div>
+          <ul>
+            <li>All 13 connectors — AWS, Azure, GCP and 10 SaaS</li>
+            <li>Seasonality-aware anomaly detection</li>
+            <li>EC2 rightsizing recommendations</li>
+            <li>Slack, Teams and email alerts</li>
+            <li>Auto Jira / Linear / GitHub tickets</li>
+            <li>Weekly digest, no AI session needed</li>
+            <li>12-month billing history</li>
+          </ul>
+        </div>
+
+        {/* Right: email form + pip install */}
+        <div className="modal-right">
+          <h4>Start your trial</h4>
+          <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div>
+              <label>EMAIL</label>
+              <input
+                type="email"
+                placeholder="you@company.com"
+                value={email}
+                onChange={(e)=>setEmail(e.target.value)}
+                required
+              />
+            </div>
+            <button className="modal-submit" type="submit">
+              Continue to checkout →
+            </button>
+            <div className="modal-note">
+              You'll enter your card on the next screen.<br/>
+              Not charged for 14 days. Cancel any time.
+            </div>
+          </form>
+
+          <div className="modal-pip">
+            <div className="step-label">Step 1 — after checkout</div>
+            <div className="install">
+              <span className="prompt">$</span>
+              <span>pip install finops-mcp</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
   useEffect(()=>{ applyTheme(t); },[t]);
   const dark = t.palette === "graphite";
@@ -788,18 +856,20 @@ function App(){
     window.parent.postMessage({type:"__edit_mode_available"}, "*");
     return ()=>window.removeEventListener("message", onMsg);
   },[]);
+  const openModal = (e) => { e.preventDefault(); setModalOpen(true); };
   return (
     <>
-      <Nav dark={dark} onToggle={toggle} />
-      <Hero />
+      <Nav dark={dark} onToggle={toggle} onTrial={openModal} />
+      <Hero onTrial={openModal} />
       <HowItWorks />
       <Features />
       <Connectors />
       <Security />
-      <Pricing />
+      <Pricing onTrial={openModal} />
       <CTA />
       <Footer />
       <Tweaks open={tweaksOpen} t={t} setTweak={setTweak} />
+      {modalOpen && <TrialModal onClose={()=>setModalOpen(false)} />}
     </>
   );
 }
