@@ -1,677 +1,811 @@
-<!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
+<!doctype html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>nable · Cloud cost intelligence for your AI</title>
-  <meta name="description" content="Connect your AI to real cloud billing data. Ask about AWS, Azure, GCP, Datadog, Snowflake and 8 more in plain English." />
-  <meta property="og:title" content="nable · Cloud cost intelligence for your AI" />
-  <meta property="og:description" content="Connect your AI to real cloud billing data. Ask about AWS, Azure, GCP, Datadog, Snowflake and 8 more in plain English." />
-  <meta property="og:url" content="https://nable.sh" />
-  <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="nable" />
-  <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="nable · Cloud cost intelligence for your AI" />
-  <meta name="twitter:description" content="Connect your AI to real cloud billing data. Ask about AWS, Azure, GCP, Datadog and 9 more in plain English." />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg:      #ffffff;
-      --surface: #f7f8fa;
-      --border:  #e5e7eb;
-      --blue:    #2563eb;
-      --blue-dk: #1d4ed8;
-      --text:    #111827;
-      --muted:   #6b7280;
-      --dim:     #9ca3af;
-      --red:     #ef4444;
-      --green:   #10b981;
-    }
-    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; line-height: 1.6; -webkit-font-smoothing: antialiased; }
-    a { text-decoration: none; color: inherit; }
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>nable · cloud cost intelligence for your AI</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--fg);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-feature-settings:"ss01","cv11";-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px;letter-spacing:-0.005em}
+  :root{
+    --bg:#fbfaf7;
+    --bg-2:#f4f2ec;
+    --bg-3:#ebe8e0;
+    --fg:#1a1915;
+    --fg-2:#54524a;
+    --fg-3:#8b8879;
+    --fg-4:#c1bdaf;
+    --line:#e6e2d6;
+    --line-2:#d9d4c4;
+    --accent:#1a1915;
+    --accent-ink:#fbfaf7;
+    --hl:#3b6e3a;     /* very subdued green for status only */
+    --alert:#b8533a;  /* subdued rust for anomalies */
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --r:6px;
+  }
+  ::selection{background:#1a1915;color:#fbfaf7}
+  a{color:inherit;text-decoration:none}
+  .mono{font-family:var(--mono)}
+  .num{font-family:var(--mono);font-feature-settings:"tnum"}
 
-    /* Nav */
-    nav { position: sticky; top: 0; z-index: 50; background: rgba(255,255,255,0.95); border-bottom: 1px solid var(--border); backdrop-filter: blur(10px); }
-    .nav-inner { max-width: 1100px; margin: 0 auto; padding: 0 24px; height: 60px; display: flex; align-items: center; justify-content: space-between; }
-    .nav-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; color: var(--text); }
-    .nav-links { display: flex; align-items: center; gap: 28px; font-size: 14px; color: var(--muted); }
-    .nav-links a:hover { color: var(--text); }
-    .btn { display: inline-flex; align-items: center; justify-content: center; font-weight: 600; border-radius: 8px; transition: all 0.15s; cursor: pointer; font-size: 14px; }
-    .btn-primary { background: var(--blue); color: white; padding: 9px 18px; }
-    .btn-primary:hover { background: var(--blue-dk); }
-    .btn-outline { border: 1px solid var(--border); color: var(--muted); padding: 9px 18px; }
-    .btn-outline:hover { border-color: #9ca3af; color: var(--text); }
+  /* layout */
+  .wrap{max-width:1140px;margin:0 auto;padding:0 32px}
 
-    /* Sections */
-    section { padding: 80px 24px; }
-    .container { max-width: 1100px; margin: 0 auto; }
-    .container-sm { max-width: 720px; margin: 0 auto; }
+  /* nav */
+  .nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 86%,transparent);backdrop-filter:saturate(140%) blur(14px);-webkit-backdrop-filter:saturate(140%) blur(14px);border-bottom:1px solid var(--line)}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:500;letter-spacing:-.02em;font-size:16px}
+  .logo .glyph{width:18px;height:18px;border-radius:5px;background:var(--fg);display:grid;place-items:center;color:var(--bg);font-weight:600;font-size:11px;line-height:1}
+  .nav ul{display:flex;list-style:none;gap:28px;color:var(--fg-2);font-size:14px}
+  .nav ul a:hover{color:var(--fg)}
+  .nav .right{display:flex;gap:10px;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:6px;font-size:13.5px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:.15s;letter-spacing:-.005em}
+  .btn-primary{background:var(--fg);color:var(--bg)}
+  .btn-primary:hover{background:#000}
+  .btn-ghost{color:var(--fg-2);border-color:var(--line)}
+  .btn-ghost:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
+  /* theme toggle */
+  .theme-tog{background:transparent;border:0;padding:6px;cursor:pointer;color:var(--fg-3);display:inline-flex;align-items:center;border-radius:999px}
+  .theme-tog:hover{color:var(--fg)}
+  .theme-tog-track{position:relative;display:inline-flex;align-items:center;justify-content:space-between;width:46px;height:22px;border:1px solid var(--line);border-radius:999px;background:var(--bg-2);padding:0 5px}
+  .theme-tog-sun,.theme-tog-moon{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;color:var(--fg-3);transition:color .2s}
+  .theme-tog-knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--fg);transition:transform .22s ease}
+  .theme-tog-knob.on{transform:translateX(22px)}
+  .btn .arr{transition:transform .18s}
+  .btn:hover .arr{transform:translateX(2px)}
 
-    /* Hero */
-    .hero { padding: 100px 24px 80px; text-align: center; border-bottom: 1px solid var(--border); }
-    .hero h1 { font-size: clamp(40px, 6vw, 72px); font-weight: 900; line-height: 1.05; letter-spacing: -0.03em; color: var(--text); margin-bottom: 20px; }
-    .hero h1 em { font-style: normal; color: var(--blue); }
-    .hero p { font-size: 18px; color: var(--muted); max-width: 520px; margin: 0 auto 36px; line-height: 1.6; }
-    .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  /* type */
+  h1,h2,h3,h4{font-weight:500;letter-spacing:-.025em;color:var(--fg)}
+  h1{font-size:clamp(40px,5.6vw,68px);line-height:1.04;letter-spacing:-.035em;font-weight:400}
+  h2{font-size:clamp(30px,3.6vw,44px);line-height:1.08;letter-spacing:-.03em;font-weight:400}
+  h3{font-size:18px}
+  p{color:var(--fg-2);line-height:1.6}
+  .label{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em}
 
-    /* Install strip */
-    .install-strip { background: #111827; border-radius: 10px; padding: 14px 20px; display: inline-flex; align-items: center; gap: 12px; font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; color: #9ca3af; margin-bottom: 56px; }
-    .install-strip span { color: #34d399; }
+  /* hero */
+  .hero{padding:84px 0 80px}
+  .hero .lede{margin-top:24px;font-size:17px;max-width:50ch;color:var(--fg-2);line-height:1.55}
+  .hero-cta{margin-top:32px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .install{display:inline-flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:7px;padding:8px 12px;font-family:var(--mono);font-size:13px;color:var(--fg-2);background:var(--bg)}
+  .install .prompt{color:var(--fg-3)}
+  .install button{margin-left:4px;border:1px solid var(--line);border-radius:5px;background:transparent;color:var(--fg-3);padding:2px 8px;font-family:var(--mono);font-size:11px;cursor:pointer}
+  .install button:hover{color:var(--fg);border-color:var(--line-2)}
+  .clients{margin-top:64px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;color:var(--fg-3);font-size:13px}
+  .clients .l{font-family:var(--mono);font-size:11.5px;color:var(--fg-4);letter-spacing:.04em}
+  .clients .c{display:inline-flex;align-items:center;gap:8px;color:var(--fg-2)}
+  .clients .c::before{content:"";width:14px;height:14px;border-radius:3px;background:var(--bg-3);border:1px solid var(--line)}
 
-    /* Demo */
-    .demo-window { max-width: 680px; margin: 0 auto; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: white; box-shadow: 0 4px 24px rgba(0,0,0,0.06); }
-    .demo-bar { background: #f3f4f6; border-bottom: 1px solid var(--border); padding: 10px 16px; display: flex; align-items: center; gap: 7px; }
-    .demo-dot { width: 11px; height: 11px; border-radius: 50%; }
-    .demo-label { margin-left: 8px; font-size: 12px; color: var(--dim); font-family: monospace; }
-    .demo-status { margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--green); font-weight: 600; }
-    .demo-status::before { content: ''; display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
-    .demo-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-    .msg { display: flex; gap: 10px; align-items: flex-start; }
-    .msg-avatar { width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
-    .msg-avatar.user { background: #f3f4f6; color: var(--muted); }
-    .msg-avatar.ai { background: #eff6ff; color: var(--blue); }
-    .msg-bubble { padding: 10px 14px; border-radius: 10px; font-size: 13.5px; line-height: 1.6; max-width: calc(100% - 36px); }
-    .msg-bubble.user { background: #f3f4f6; color: var(--text); border-radius: 10px 10px 4px 10px; }
-    .msg-bubble.ai { background: #eff6ff; border: 1px solid #dbeafe; color: var(--text); border-radius: 10px 10px 10px 4px; }
-    .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-    .anomaly-pill { display: inline-block; background: #fef2f2; border: 1px solid #fecaca; color: var(--red); border-radius: 5px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
+  /* terminal */
+  .terminal{margin-top:56px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg);box-shadow:0 1px 0 rgba(0,0,0,.02),0 16px 40px -22px rgba(0,0,0,.12)}
+  .term-bar{display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--line);background:var(--bg-2)}
+  .term-bar .dots{display:flex;gap:6px}
+  .term-bar .dots i{width:9px;height:9px;border-radius:50%;background:var(--line-2)}
+  .term-title{margin-left:6px;font-family:var(--mono);font-size:11.5px;color:var(--fg-3)}
+  .term-status{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--fg-3)}
+  .term-status .dot{width:6px;height:6px;border-radius:50%;background:var(--hl)}
+  .term-body{padding:30px 36px;display:flex;flex-direction:column;gap:22px}
+  .msg{display:flex;gap:14px;align-items:flex-start}
+  .av{font-family:var(--mono);font-size:11px;color:var(--fg-3);min-width:34px;padding-top:3px;letter-spacing:.04em;text-transform:uppercase}
+  .bubble{flex:1}
+  .bubble p{color:var(--fg);font-size:14.5px;line-height:1.6}
+  .bubble.user p{color:var(--fg-2)}
+  .bubble .table{margin-top:14px;font-family:var(--mono);font-size:13px;display:flex;flex-direction:column}
+  .bubble .table .r{display:grid;grid-template-columns:1fr auto auto;gap:24px;padding:9px 0;border-bottom:1px dashed var(--line);align-items:center}
+  .bubble .table .r:last-child{border-bottom:0}
+  .bubble .table .r.hd{color:var(--fg-3);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;border-bottom-style:solid}
+  .bubble .table .r .delta{color:var(--fg-3)}
+  .bubble .table .r .delta.up{color:var(--alert)}
+  .bubble .table .r .delta.down{color:var(--hl)}
+  .bubble .table .r.total{padding-top:12px;border-bottom:0}
+  .bubble .table .r.total b{color:var(--fg)}
+  .anomaly{display:inline-flex;align-items:center;gap:6px;color:var(--alert);font-family:var(--mono);font-size:11.5px;letter-spacing:.04em}
+  .anomaly::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--alert)}
 
-    /* Section headers */
-    .section-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--blue); margin-bottom: 12px; }
-    .section-h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; color: var(--text); margin-bottom: 16px; }
-    .section-sub { font-size: 16px; color: var(--muted); line-height: 1.65; }
+  /* sections */
+  section{padding:96px 0;border-top:1px solid var(--line)}
+  .section-head{margin-bottom:48px;max-width:760px}
+  .section-head .label{display:block;margin-bottom:14px}
+  .section-head h2{margin-bottom:14px}
+  .section-head p{font-size:16px;max-width:56ch}
 
-    /* Feature grid */
-    .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-    .feature-cell { background: white; padding: 32px; }
-    .feature-cell:hover { background: #fafafa; }
-    .feature-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
-    .feature-cell h3 { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
-    .feature-cell p { font-size: 13.5px; color: var(--muted); line-height: 1.65; }
-    .code-sample { margin-top: 16px; background: #f7f8fa; border: 1px solid var(--border); border-radius: 7px; padding: 10px 14px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 1.8; color: var(--muted); }
-    .code-sample .hi { color: var(--blue); }
-    .code-sample .red { color: var(--red); font-weight: 700; }
-    .code-sample .green { color: var(--green); }
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid var(--line)}
+  .step{padding:28px 28px 28px 0;border-right:1px solid var(--line)}
+  .step:nth-child(1){padding-left:0}
+  .step:nth-child(4){border-right:0;padding-right:0}
+  .step:not(:nth-child(1)){padding-left:28px}
+  .step .n{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.04em;margin-bottom:18px}
+  .step h3{margin-bottom:6px;font-size:16px;font-weight:500}
+  .step p{font-size:14px}
+  .step .cmd{margin-top:18px;font-family:var(--mono);font-size:12.5px;color:var(--fg-2)}
+  .step .cmd .c{color:var(--fg-3)}
 
-    /* Steps */
-    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0; }
-    .step { padding: 32px; border-right: 1px solid var(--border); }
-    .step:last-child { border-right: none; }
-    .step-num { font-size: 12px; font-weight: 700; color: var(--blue); margin-bottom: 12px; }
-    .step h3 { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
-    .step p { font-size: 13px; color: var(--muted); line-height: 1.6; }
-    .step code { background: #f3f4f6; border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 12px; font-family: monospace; color: var(--text); }
+  /* config */
+  .config{margin-top:36px}
+  .codecard{border:1px solid var(--line);border-radius:10px;background:var(--bg);overflow:hidden}
+  .codecard .hd{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:var(--fg-3);background:var(--bg-2)}
+  .codecard pre{padding:20px 22px;font-family:var(--mono);font-size:13px;line-height:1.75;color:var(--fg);overflow:auto}
+  .codecard .k{color:var(--fg)}
+  .codecard .s{color:var(--alert)}
+  .codecard .c{color:var(--fg-3)}
 
-    /* Connectors */
-    .connector-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-    .connector-tile { background: white; padding: 20px 16px; text-align: center; cursor: pointer; transition: background 0.1s; }
-    .connector-tile:hover { background: #f7f8fa; }
-    .connector-tile img { width: 28px; height: 28px; object-fit: contain; margin: 0 auto 8px; display: block; }
-    .connector-tile .c-name { font-size: 12.5px; font-weight: 600; color: var(--text); }
-    .connector-tile .c-sub { font-size: 11px; color: var(--dim); margin-top: 2px; }
-    .connector-panel { display: none; margin-top: 1px; background: white; border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
-    .connector-panel.active { display: block; }
-    .tag { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 4px; padding: 2px 8px; margin-left: 8px; }
-    .tag-yellow { background: #fef9c3; color: #854d0e; border: 1px solid #fde047; }
-    .tag-red { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
+  /* features */
+  .features{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--line)}
+  .feature{padding:36px 36px 36px 0;border-bottom:1px solid var(--line);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:14px}
+  .feature:nth-child(2n){border-right:0;padding-right:0;padding-left:36px}
+  .feature:nth-last-child(-n+2){border-bottom:0}
+  .feature .num{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.04em}
+  .feature h3{font-size:22px;font-weight:500;letter-spacing:-.02em;line-height:1.2;color:var(--fg)}
+  .feature p{font-size:14.5px;line-height:1.6;max-width:46ch}
 
-    /* Pricing */
-    .pricing-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
-    .price-card { border: 1px solid var(--border); border-radius: 14px; padding: 36px; }
-    .price-card.featured { background: #111827; color: white; border-color: #111827; }
-    .price-amount { font-size: 52px; font-weight: 900; line-height: 1; letter-spacing: -0.03em; }
-    .price-period { font-size: 14px; color: var(--dim); margin-top: 4px; }
-    .price-card.featured .price-period { color: #6b7280; }
-    .price-list { list-style: none; margin: 28px 0; display: flex; flex-direction: column; gap: 10px; }
-    .price-list li { font-size: 14px; display: flex; gap: 10px; }
-    .price-list li::before { content: '✓'; font-weight: 700; flex-shrink: 0; }
-    .price-card.featured .price-list li { color: #d1d5db; }
-    .price-card.featured .price-list li::before { color: #34d399; }
-    .price-card:not(.featured) .price-list li { color: var(--muted); }
-    .price-card:not(.featured) .price-list li::before { color: var(--blue); }
-    .price-list li.locked { color: var(--dim) !important; }
-    .price-list li.locked::before { content: '' !important; }
+  /* connectors */
+  .connectors{border-top:1px solid var(--line)}
+  .conn-row{display:grid;grid-template-columns:200px 1fr 110px 110px;padding:18px 0;border-bottom:1px solid var(--line);align-items:center;font-size:14px}
+  .conn-row .name{color:var(--fg);letter-spacing:-.01em;font-weight:500}
+  .conn-row .meta{font-family:var(--mono);font-size:13px;color:var(--fg-2)}
+  .conn-row .ret{font-family:var(--mono);font-size:12px;color:var(--fg-3)}
+  .badge{font-family:var(--mono);font-size:11.5px;letter-spacing:.02em}
+  .badge.ok::before, .badge.warn::before, .badge.partial::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;vertical-align:1px}
+  .badge.ok{color:var(--fg)}
+  .badge.ok::before{background:var(--hl)}
+  .badge.warn{color:var(--fg-2)}
+  .badge.warn::before{background:var(--alert);opacity:.8}
+  .badge.partial{color:var(--fg-3)}
+  .badge.partial::before{background:var(--fg-4)}
 
-    /* CTA */
-    .cta-section { background: #111827; color: white; text-align: center; }
-    .cta-section h2 { font-size: clamp(28px, 4vw, 44px); font-weight: 900; letter-spacing: -0.025em; margin-bottom: 14px; line-height: 1.1; }
-    .cta-section p { color: #9ca3af; font-size: 16px; margin-bottom: 32px; }
-    .email-form { display: flex; gap: 8px; max-width: 420px; margin: 0 auto 12px; }
-    .email-form input { flex: 1; padding: 11px 16px; border-radius: 8px; border: 1px solid #374151; background: #1f2937; color: white; font-size: 14px; outline: none; }
-    .email-form input::placeholder { color: #6b7280; }
-    .email-form input:focus { border-color: #3b82f6; }
-    .btn-white { background: white; color: #111827; padding: 11px 20px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; border: none; transition: opacity 0.15s; }
-    .btn-white:hover { opacity: 0.9; }
+  /* security */
+  .pull blockquote{font-size:clamp(26px,3vw,38px);line-height:1.25;letter-spacing:-.025em;font-weight:400;color:var(--fg);max-width:36ch}
+  .pull p{margin-top:24px;font-size:15.5px;max-width:60ch;line-height:1.65}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:32px}
+  .chip{padding:6px 12px;border:1px solid var(--line);border-radius:999px;font-size:12.5px;color:var(--fg-2);font-family:var(--mono)}
 
-    /* Footer */
-    footer { border-top: 1px solid var(--border); padding: 28px 24px; }
-    .footer-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-    .footer-left { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); }
-    .footer-right { display: flex; gap: 20px; font-size: 13px; color: var(--dim); }
-    .footer-right a:hover { color: var(--text); }
+  /* pricing */
+  .pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .price{padding:36px 32px 36px 0;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:22px}
+  .price:not(:first-child){padding-left:32px}
+  .price:last-child{border-right:0;padding-right:0}
+  .price .tier{font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--fg-3);text-transform:uppercase}
+  .price .amt{font-size:46px;line-height:1;letter-spacing:-.03em;font-weight:400;color:var(--fg)}
+  .price .amt .small{font-size:22px;color:var(--fg-3)}
+  .price .amt-sub{font-size:13px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)}
+  .price ul{list-style:none;display:flex;flex-direction:column;gap:9px;font-size:14px;color:var(--fg-2)}
+  .price ul li{display:flex;gap:10px;line-height:1.5}
+  .price ul li::before{content:"·";color:var(--fg-3);width:8px;text-align:center}
+  .price ul li.locked{color:var(--fg-4)}
+  .price ul li.locked::before{content:"·"}
+  .price .cta{margin-top:auto;padding-top:8px}
+  .price .cta a{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--fg);border-bottom:1px solid var(--line)}
+  .price .cta a:hover{border-bottom-color:var(--fg)}
+  .price.feat{background:var(--bg-2);margin:0 -1px;border-left:1px solid var(--line);padding-left:32px;padding-right:32px}
+  .price.feat .cta a{color:var(--fg);font-weight:500}
 
-    @media (max-width: 640px) {
-      .pricing-grid { grid-template-columns: 1fr; }
-      .price-card { padding: 28px; }
-      .steps { grid-template-columns: 1fr; }
-      .step { border-right: none; border-bottom: 1px solid var(--border); }
-      .step:last-child { border-bottom: none; }
-      .nav-links { display: none; }
-    }
-  </style>
+  /* CTA */
+  .cta{padding:120px 0 110px;border-top:1px solid var(--line)}
+  .cta h2{max-width:18ch;margin-bottom:22px}
+  .cta .row{display:grid;grid-template-columns:1.4fr 1fr;gap:80px;align-items:end}
+  .cta-form .lab{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em;margin-bottom:12px}
+  .cta-form .field{display:flex;gap:8px;border-bottom:1px solid var(--fg);padding-bottom:8px}
+  .cta-form input{flex:1;background:transparent;border:0;color:var(--fg);padding:6px 0;font-family:'Geist',sans-serif;font-size:16px;outline:none}
+  .cta-form input::placeholder{color:var(--fg-3)}
+  .cta-form .submit{background:transparent;border:0;color:var(--fg);font-size:14px;cursor:pointer;padding:0 4px;display:inline-flex;align-items:center;gap:6px}
+  .cta-form .helper{margin-top:14px;font-size:12.5px;color:var(--fg-3)}
+
+  /* footer */
+  footer{border-top:1px solid var(--line);padding:36px 0 56px}
+  .foot{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:36px}
+  .foot h5{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em;margin-bottom:14px;font-weight:400}
+  .foot a{display:block;color:var(--fg-2);font-size:14px;padding:3px 0}
+  .foot a:hover{color:var(--fg)}
+  .foot-bottom{margin-top:48px;display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:11.5px;color:var(--fg-3);padding-top:18px;border-top:1px solid var(--line)}
+
+  @media (max-width:920px){
+    .features{grid-template-columns:1fr}
+    .feature{border-right:0;padding-right:0;padding-left:0!important;padding-top:32px;padding-bottom:32px}
+    .steps{grid-template-columns:1fr 1fr}
+    .step{padding:24px!important;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+    .step:nth-child(2n){border-right:0}
+    .step:nth-last-child(-n+2){border-bottom:0}
+    .pricing{grid-template-columns:1fr}
+    .price{padding:32px 0!important;border-right:0;border-bottom:1px solid var(--line)}
+    .price.feat{margin:0;padding:32px 0!important;border-left:0}
+    .price:last-child{border-bottom:0}
+    .conn-row{grid-template-columns:1fr 110px;}
+    .conn-row .meta,.conn-row .ret{display:none}
+    .nav ul{display:none}
+    .cta .row{grid-template-columns:1fr;gap:48px}
+    .foot{grid-template-columns:1fr 1fr}
+  }
+</style>
 </head>
 <body>
 
-<!-- Nav -->
-<nav>
-  <div class="nav-inner">
-    <a href="/" class="nav-logo">
-      <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
-        <defs>
-          <linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#3b82f6"/>
-            <stop offset="100%" stop-color="#1d4ed8"/>
-          </linearGradient>
-        </defs>
-        <rect width="32" height="32" rx="8" fill="url(#lg)"/>
-        <path d="M8 23V10h3.8l5.6 8.2V10H21v13h-3.8L11.6 14.8V23H8z" fill="white"/>
-      </svg>
-      nable
+<div id="app"></div>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect } = React;
+
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "palette": "linen",
+  "accentMode": "neutral"
+}/*EDITMODE-END*/;
+
+const PALETTES = {
+  linen:    { bg:"#fbfaf7", bg2:"#f4f2ec", bg3:"#ebe8e0", fg:"#1a1915", fg2:"#54524a", fg3:"#8b8879", fg4:"#c1bdaf", line:"#e6e2d6", line2:"#d9d4c4" },
+  paper:    { bg:"#ffffff", bg2:"#f7f7f5", bg3:"#eeeeea", fg:"#161616", fg2:"#525252", fg3:"#8a8a85", fg4:"#c4c4be", line:"#ebebe6", line2:"#dedeD8" },
+  graphite: { bg:"#15140f", bg2:"#1c1a14", bg3:"#23211a", fg:"#f3efe6", fg2:"#bbb6a4", fg3:"#7e7a6c", fg4:"#4a4639", line:"#262318", line2:"#33301f" },
+};
+const ACCENTS = {
+  neutral: { hl:"#3b6e3a", alert:"#b8533a" },
+  forest:  { hl:"#2f5f2e", alert:"#9d4630" },
+  cobalt:  { hl:"#365a9b", alert:"#b8533a" },
+};
+
+function applyTheme(t){
+  const r = document.documentElement;
+  const p = PALETTES[t.palette] || PALETTES.linen;
+  const a = ACCENTS[t.accentMode] || ACCENTS.neutral;
+  r.style.setProperty('--bg', p.bg);
+  r.style.setProperty('--bg-2', p.bg2);
+  r.style.setProperty('--bg-3', p.bg3);
+  r.style.setProperty('--fg', p.fg);
+  r.style.setProperty('--fg-2', p.fg2);
+  r.style.setProperty('--fg-3', p.fg3);
+  r.style.setProperty('--fg-4', p.fg4);
+  r.style.setProperty('--line', p.line);
+  r.style.setProperty('--line-2', p.line2);
+  r.style.setProperty('--hl', a.hl);
+  r.style.setProperty('--alert', a.alert);
+  r.style.setProperty('--accent', p.fg);
+  r.style.setProperty('--accent-ink', p.bg);
+}
+
+function Logo(){
+  return (
+    <a href="#" className="logo">
+      <span className="glyph">n</span>
+      <span>nable</span>
     </a>
-    <div class="nav-links">
-      <a href="#how-it-works">How it works</a>
-      <a href="#connectors">Connectors</a>
-      <a href="#pricing">Pricing</a>
-      <a href="mailto:hello@nable.sh">Contact</a>
-    </div>
-    <a href="/docs" class="btn btn-primary">Start free trial</a>
-  </div>
-</nav>
+  );
+}
 
-<!-- Hero -->
-<div class="hero">
-  <h1>Your AWS bill went up.<br/><em>Ask your AI why.</em></h1>
-  <p>nable connects your AI to real cloud and SaaS billing data. Works with Claude, Cursor, Windsurf, and any MCP client. No dashboards. No SQL.</p>
+function ThemeToggle({ dark, onToggle }){
+  return (
+    <button className="theme-tog" onClick={onToggle} aria-label={dark?"Switch to linen":"Switch to graphite"} title={dark?"Switch to linen":"Switch to graphite"}>
+      <span className="theme-tog-track">
+        <span className="theme-tog-sun" aria-hidden>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        </span>
+        <span className="theme-tog-moon" aria-hidden>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </span>
+        <span className={"theme-tog-knob " + (dark ? "on" : "")}></span>
+      </span>
+    </button>
+  );
+}
 
-  <div class="hero-actions" style="margin-bottom: 20px;">
-    <a href="/docs" class="btn btn-primary" style="padding: 12px 24px; font-size: 15px;">Start free trial, 14 days free</a>
-    <a href="#how-it-works" class="btn btn-outline" style="padding: 12px 24px; font-size: 15px;">See how it works</a>
-  </div>
-
-  <div style="margin-bottom: 56px;">
-    <div class="install-strip">
-      <span>$</span> pip install finops-mcp
-    </div>
-  </div>
-
-  <!-- Demo window -->
-  <div class="demo-window">
-    <div class="demo-bar">
-      <div class="demo-dot" style="background:#f87171"></div>
-      <div class="demo-dot" style="background:#fbbf24"></div>
-      <div class="demo-dot" style="background:#34d399"></div>
-      <span class="demo-label">AI client · nable connected</span>
-      <span class="demo-status">nable active</span>
-    </div>
-    <div class="demo-body">
-      <div class="msg">
-        <div class="msg-avatar user">You</div>
-        <div class="msg-bubble user">How much did we spend on compute last month across all providers?</div>
+function Nav({ dark, onToggle }){
+  return (
+    <nav className="nav">
+      <div className="wrap nav-inner">
+        <Logo />
+        <ul>
+          <li><a href="#product">Product</a></li>
+          <li><a href="#connectors">Connectors</a></li>
+          <li><a href="#pricing">Pricing</a></li>
+          <li><a href="#docs">Docs</a></li>
+        </ul>
+        <div className="right">
+          <ThemeToggle dark={dark} onToggle={onToggle} />
+          <a href="#docs" className="btn btn-ghost">Sign in</a>
+          <a href="#install" className="btn btn-primary">Start free trial <span className="arr">→</span></a>
+        </div>
       </div>
-      <div class="msg">
-        <div class="msg-avatar ai">AI</div>
-        <div class="msg-bubble ai">
-          Here's your compute breakdown for April 2025:<br/><br/>
-          <div class="mono" style="display:flex; flex-direction:column; gap:3px;">
-            <span>AWS EC2 + Fargate <span style="color:var(--dim)">··········</span> <strong>$18,420</strong></span>
-            <span>Azure Virtual Machines <span style="color:var(--dim)">······</span> <strong>$6,310</strong></span>
-            <span>GCP Compute Engine <span style="color:var(--dim)">·········</span> <strong>$4,870</strong></span>
-            <span style="border-top:1px solid var(--border); margin:6px 0; display:block;"></span>
-            <span>Total <span style="color:var(--dim)">·····················</span> <strong style="color:var(--blue)">$29,600</strong></span>
+    </nav>
+  );
+}
+
+function Hero(){
+  return (
+    <header className="hero" data-screen-label="01 Hero">
+      <div className="wrap">
+        <div className="label" style={{marginBottom:18}}>MCP server · v0.4 · 13 connectors</div>
+        <h1>Cloud cost intelligence,<br/>asked, not queried.</h1>
+        <p className="lede">
+          nable connects Claude, Cursor and any MCP client to real billing data across AWS, Azure, GCP and ten SaaS providers. Answers in plain English. No dashboards. No SQL.
+        </p>
+        <div className="hero-cta">
+          <a href="#install" className="btn btn-primary">Start 14-day trial <span className="arr">→</span></a>
+          <a href="#product" className="btn btn-ghost">See how it works</a>
+          <span className="install" style={{marginLeft:6}}>
+            <span className="prompt">$</span>
+            <span>pip install finops-mcp</span>
+            <button onClick={(e)=>{
+              navigator.clipboard?.writeText("pip install finops-mcp");
+              e.currentTarget.textContent="copied";
+              setTimeout(()=>{ if(e.currentTarget) e.currentTarget.textContent="copy"; }, 1100);
+            }}>copy</button>
+          </span>
+        </div>
+
+        <div className="clients">
+          <span className="l">Works with</span>
+          <span className="c">Claude Desktop</span>
+          <span className="c">Cursor</span>
+          <span className="c">Windsurf</span>
+          <span className="c">Cline</span>
+          <span className="c">Zed</span>
+        </div>
+
+        <Terminal />
+      </div>
+    </header>
+  );
+}
+
+function Terminal(){
+  return (
+    <div className="terminal" id="product">
+      <div className="term-bar">
+        <div className="dots"><i></i><i></i><i></i></div>
+        <span className="term-title">claude · mcp[finops] connected</span>
+        <span className="term-status"><span className="dot"></span>nable active</span>
+      </div>
+      <div className="term-body">
+        <div className="msg">
+          <div className="av">you</div>
+          <div className="bubble user">
+            <p>How much did we spend on compute last month across all providers?</p>
           </div>
-          <br/>AWS is your largest provider at 62%. Spend is up 12% vs March, driven by 3 new EC2 instances in us-east-1.
         </div>
-      </div>
-      <div class="msg">
-        <div class="msg-avatar user">You</div>
-        <div class="msg-bubble user">Any anomalies this week?</div>
-      </div>
-      <div class="msg">
-        <div class="msg-avatar ai">AI</div>
-        <div class="msg-bubble ai">
-          <span class="anomaly-pill">● HIGH</span> Datadog is up <strong style="color:var(--red)">+127%</strong> vs your 28-day baseline. $4,100 today vs avg $1,810. Spike started Tuesday. I've filed a Jira ticket automatically.
+
+        <div className="msg">
+          <div className="av">ai</div>
+          <div className="bubble">
+            <p>April 2026 compute, normalized to USD across all three clouds:</p>
+            <div className="table">
+              <div className="r hd"><span>Provider</span><span>Spend</span><span>Δ vs Mar</span></div>
+              <div className="r"><span>AWS · EC2 + Fargate</span><span className="num">$18,420</span><span className="num delta up">+18.6%</span></div>
+              <div className="r"><span>Azure · Virtual Machines</span><span className="num">$6,310</span><span className="num delta up">+4.2%</span></div>
+              <div className="r"><span>GCP · Compute Engine</span><span className="num">$4,870</span><span className="num delta down">−3.4%</span></div>
+              <div className="r total"><span><b>Total</b></span><span className="num"><b>$29,600</b></span><span className="num delta up">+12.0%</span></div>
+            </div>
+            <p style={{marginTop:14}}>
+              Three new c6i.4xlarge instances in us-east-1 account for $1,890 of the AWS delta.
+            </p>
+          </div>
+        </div>
+
+        <div className="msg">
+          <div className="av">you</div>
+          <div className="bubble user">
+            <p>Any anomalies this week?</p>
+          </div>
+        </div>
+
+        <div className="msg">
+          <div className="av">ai</div>
+          <div className="bubble">
+            <p>
+              <span className="anomaly">High · z = 3.8</span>{" "}
+              Datadog usage is up <span style={{color:"var(--alert)"}}>+127%</span> versus your same-weekday baseline. $4,100 today vs $1,810 average. I've opened JIRA-2841 and tagged @sre.
+            </p>
+          </div>
         </div>
       </div>
     </div>
-  </div>
-</div>
+  );
+}
 
-<!-- How it works -->
-<section id="how-it-works" style="border-bottom: 1px solid var(--border);">
-  <div class="container">
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: center;">
-      <div>
-        <div class="section-label">How it works</div>
-        <h2 class="section-h2">One local server.<br/>All your billing data.</h2>
-        <p class="section-sub">nable runs as an MCP server on your machine. Your AI client queries your real cost data from 13 providers, normalized into a single schema, the same way it calls any other tool.</p>
-        <p class="section-sub" style="margin-top:16px;">Works with Claude, Cursor, Windsurf, and any MCP-compatible client. Your credentials never leave your machine.</p>
-      </div>
-      <div style="border: 1px solid var(--border); border-radius: 12px; overflow: hidden;">
-        <div style="background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 16px; font-size: 12px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em;">MCP client config (Claude / Cursor / Windsurf)</div>
-        <pre style="padding: 20px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.8; color: var(--muted); overflow-x: auto;">{
-  <span style="color:var(--blue)">"mcpServers"</span>: {
-    <span style="color:var(--blue)">"finops"</span>: {
-      <span style="color:var(--blue)">"command"</span>: <span style="color:#059669">"finops-mcp"</span>
+function HowItWorks(){
+  return (
+    <section data-screen-label="02 How it works">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ How it works</div>
+          <h2>One local server. All your billing data.</h2>
+          <p>nable runs as an MCP server on your machine. Your AI client queries normalized cost data across 13 providers. Credentials are encrypted with Fernet and stored in your OS keyring; they never leave the laptop.</p>
+        </div>
+
+        <div className="steps">
+          <div className="step">
+            <div className="n">01</div>
+            <h3>Install</h3>
+            <p>One pip install. Python 3.10+.</p>
+            <div className="cmd"><span className="c">$</span> pip install finops-mcp</div>
+          </div>
+          <div className="step">
+            <div className="n">02</div>
+            <h3>Connect providers</h3>
+            <p>Interactive wizard for each provider. Read-only scopes only.</p>
+            <div className="cmd"><span className="c">$</span> finops setup</div>
+          </div>
+          <div className="step">
+            <div className="n">03</div>
+            <h3>Register with your client</h3>
+            <p>One config line in Claude, Cursor or Windsurf.</p>
+            <div className="cmd c">// see config →</div>
+          </div>
+          <div className="step">
+            <div className="n">04</div>
+            <h3>Ask in English</h3>
+            <p>"What drove AWS up?" "File a ticket for any anomaly over $500."</p>
+            <div className="cmd c">// no SQL.</div>
+          </div>
+        </div>
+
+        <div className="config">
+          <div className="codecard">
+            <div className="hd"><span>~/.config/Claude/claude_desktop_config.json</span><span>.json</span></div>
+<pre><span className="c">{"// add this block, restart Claude Desktop"}</span>{`
+{
+  `}<span className="k">"mcpServers"</span>{`: {
+    `}<span className="k">"finops"</span>{`: {
+      `}<span className="k">"command"</span>{`: `}<span className="s">"finops-mcp"</span>{`
     }
   }
-}</pre>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Setup steps -->
-<section style="border-bottom: 1px solid var(--border); padding: 0;">
-  <div class="container" style="padding: 0;">
-    <div class="steps" style="border-bottom: 1px solid var(--border);">
-      <div class="step">
-        <div class="step-num">Step 1</div>
-        <h3>Install</h3>
-        <p><code>pip install finops-mcp</code><br/>Requires Python 3.10+</p>
-      </div>
-      <div class="step">
-        <div class="step-num">Step 2</div>
-        <h3>Run the wizard</h3>
-        <p><code>finops setup</code><br/>Pick your providers. Follow the prompts. ~15 min.</p>
-      </div>
-      <div class="step">
-        <div class="step-num">Step 3</div>
-        <h3>Add to your AI client</h3>
-        <p>One config line in Claude Desktop, Cursor, or Windsurf.</p>
-      </div>
-      <div class="step">
-        <div class="step-num">Step 4</div>
-        <h3>Start asking</h3>
-        <p>Every provider, one conversation. Ask in plain English.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Features -->
-<section style="border-bottom: 1px solid var(--border);">
-  <div class="container">
-    <div style="text-align:center; margin-bottom: 48px;">
-      <div class="section-label">Features</div>
-      <h2 class="section-h2">Not just data retrieval.</h2>
-      <p class="section-sub" style="max-width:480px; margin:0 auto;">nable layers analysis on top of raw billing data. The things you'd normally need a dedicated FinOps tool or analyst for.</p>
-    </div>
-    <div class="feature-grid">
-      <div class="feature-cell">
-        <div class="feature-icon" style="background:#fef2f2; border:1px solid #fecaca;">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" fill="#ef4444"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round"/></svg>
-        </div>
-        <h3>Anomaly detection</h3>
-        <p>Seasonality-aware. Compares the same weekday vs prior weeks, not a flat rolling average. Catches real spikes before the invoice arrives.</p>
-        <div class="code-sample">
-          <div class="red">ANOMALY · HIGH</div>
-          <div>Datadog +127% vs same-weekday avg</div>
-          <div style="color:var(--dim)">$4,100 today · avg $1,810 · z=3.8</div>
+}`}</pre>
+          </div>
         </div>
       </div>
-      <div class="feature-cell">
-        <div class="feature-icon" style="background:#eff6ff; border:1px solid #bfdbfe;">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="4" width="14" height="2" rx="1" fill="#3b82f6"/><rect x="1" y="7" width="10" height="2" rx="1" fill="#93c5fd"/><rect x="1" y="10" width="12" height="2" rx="1" fill="#93c5fd"/></svg>
+    </section>
+  );
+}
+
+const FEATURES = [
+  {
+    n:"01",
+    h:"Anomaly detection, seasonality-aware.",
+    p:"Compares same-weekday baselines, not flat rolling averages. Catches real spikes before the invoice arrives, and tells the difference between a Friday deploy and a Tuesday outage."
+  },
+  {
+    n:"02",
+    h:"Tag-based attribution.",
+    p:"Map resource tags to teams via a single YAML file. Get ranked spend by team across every cloud and SaaS in one breath."
+  },
+  {
+    n:"03",
+    h:"Rightsizing, actually filed.",
+    p:"Reads 14 days of CloudWatch CPU metrics, finds the chronically idle, calculates exact savings, and opens the Jira / Linear / GitHub ticket for you."
+  },
+  {
+    n:"04",
+    h:"RI & Savings Plan analysis.",
+    p:"Real Cost Explorer data for coverage, utilization, and waste. Recommends Compute Savings Plan purchases with projected ROI and breakeven."
+  },
+  {
+    n:"05",
+    h:"Proactive alerts & digests.",
+    p:"Anomaly pushes and daily digests fan out to Slack or Teams without an AI session. A weekly summary lands every Monday at 9am."
+  },
+  {
+    n:"06",
+    h:"Invoice email parsing (IMAP).",
+    p:"For vendors with no billing API like PagerDuty, GitHub Enterprise, or New Relic, connect a billing inbox and we parse the PDFs for you."
+  },
+];
+
+function Features(){
+  return (
+    <section data-screen-label="03 Features">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ Capabilities</div>
+          <h2>Not a wrapper around get_cost_and_usage.</h2>
+          <p>nable layers analysis on top of raw billing. The things you'd otherwise pay a FinOps platform or hire an analyst for. Six concrete capabilities, each callable as a single MCP tool.</p>
         </div>
-        <h3>Tag-based attribution</h3>
-        <p>Map resource tags to teams via YAML rules. Ask which team is burning the most and get a ranked breakdown across all your cloud providers at once.</p>
-        <div class="code-sample">
-          <div><span class="hi">platform</span> · $12,400/mo</div>
-          <div><span class="hi">growth</span> &nbsp;· $8,200/mo</div>
-          <div><span class="hi">data</span> &nbsp;&nbsp;· $6,800/mo</div>
+
+        <div className="features">
+          {FEATURES.map((f,i)=>(
+            <article className="feature" key={i}>
+              <div className="num">/ {f.n}</div>
+              <h3>{f.h}</h3>
+              <p>{f.p}</p>
+            </article>
+          ))}
         </div>
       </div>
-      <div class="feature-cell">
-        <div class="feature-icon" style="background:#f0fdf4; border:1px solid #bbf7d0;">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 12l4-4 3 3 5-6" stroke="#10b981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </section>
+  );
+}
+
+const CONNECTORS = [
+  ["AWS","Cost Explorer","Real",            "ok"],
+  ["Azure","Cost Management","Real",        "ok"],
+  ["GCP","Billing + BigQuery","Real",       "ok"],
+  ["Datadog","Usage Metering v2","Real",    "ok"],
+  ["Snowflake","ACCOUNT_USAGE","Credits",   "ok"],
+  ["Stripe","Balance Transactions","Real",  "ok"],
+  ["MongoDB Atlas","Invoice API","Real",    "ok"],
+  ["Twilio","Usage Records","Real",         "ok"],
+  ["Cloudflare","Billing API","Real",       "ok"],
+  ["GitHub","Actions + Copilot","Minutes",  "partial"],
+  ["Vercel","Invoice API","Enterprise",     "warn"],
+  ["PagerDuty","Seats only","Seats",        "partial"],
+  ["New Relic","NerdGraph ingest","Estimated","warn"],
+];
+
+function Connectors(){
+  return (
+    <section id="connectors" data-screen-label="04 Connectors">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ 13 connectors</div>
+          <h2>Every cost source, one normalized schema.</h2>
+          <p>Not every provider has a real billing API. We're honest about what each connector returns.</p>
         </div>
-        <h3>Rightsizing recommendations</h3>
-        <p>Finds EC2 instances running at low CPU over 14 days. Calculates exact savings from downsizing. Files a Jira, Linear, or GitHub ticket for each one.</p>
-        <div class="code-sample">
-          <div class="hi">m5.2xlarge → m5.xlarge</div>
-          <div>avg CPU 8% · max 22%</div>
-          <div class="green">save $192/mo per instance</div>
+
+        <div className="connectors">
+          {CONNECTORS.map(([n,cov,ret,st],i)=>(
+            <div className="conn-row" key={i}>
+              <div className="name">{n}</div>
+              <div className="meta">{cov}</div>
+              <div className="ret">{ret}</div>
+              <div>
+                <span className={"badge " + (st==="ok"?"ok":st==="warn"?"warn":"partial")}>
+                  {st==="ok"?"Full":st==="warn"?"Gated":"Partial"}
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
-      <div class="feature-cell">
-        <div class="feature-icon" style="background:#fdf4ff; border:1px solid #e9d5ff;">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1L10 5.5H15L11 8.5L12.5 13L8 10L3.5 13L5 8.5L1 5.5H6L8 1Z" fill="#a855f7"/></svg>
+    </section>
+  );
+}
+
+function Security(){
+  return (
+    <section data-screen-label="05 Security">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ Security</div>
         </div>
-        <h3>Proactive alerts</h3>
-        <p>Anomaly alerts and daily digests push to Slack or Teams, no AI session needed. Weekly email summary lands every Monday morning.</p>
-        <div class="code-sample">
-          <div><span class="hi">Slack</span> · <span class="hi">Teams</span> · <span class="hi">Email</span></div>
-          <div>Daily digest · Anomaly push</div>
-          <div>Weekly report · Mon 9am UTC</div>
+        <div className="pull">
+          <blockquote>
+            Every other FinOps tool asks for your cloud keys. We don't.
+          </blockquote>
+          <p>
+            All credentials are encrypted with Fernet and stored in your OS keyring: macOS Keychain, Windows Credential Manager, or libsecret on Linux. The vault key lives on your hardware, not our servers. There is no cloud sync. There is nothing to breach on our end.
+          </p>
+          <div className="chips">
+            <span className="chip">Fernet encryption</span>
+            <span className="chip">OS keyring</span>
+            <span className="chip">Read-only API scopes</span>
+            <span className="chip">Local audit log</span>
+            <span className="chip">No vendor cloud access</span>
+            <span className="chip">SOC 2 in progress</span>
+          </div>
         </div>
       </div>
-      <div class="feature-cell">
-        <div class="feature-icon" style="background:#fffbeb; border:1px solid #fde68a;">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="2" stroke="#f59e0b" stroke-width="1.5"/><path d="M1 6h14" stroke="#f59e0b" stroke-width="1.5"/></svg>
+    </section>
+  );
+}
+
+function Pricing(){
+  return (
+    <section id="pricing" data-screen-label="06 Pricing">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ Pricing</div>
+          <h2>Plain pricing. No seat math.</h2>
+          <p>Free forever for the read path. Pay only when you turn on automation.</p>
         </div>
-        <h3>RI &amp; Savings Plan analysis</h3>
-        <p>Real Cost Explorer data for coverage, utilization, and waste. Recommends Compute Savings Plan purchases with projected ROI and breakeven timeline.</p>
-      </div>
-      <div class="feature-cell">
-        <div class="feature-icon" style="background:#f0fdf4; border:1px solid #bbf7d0;">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="9" rx="1.5" stroke="#10b981" stroke-width="1.5"/><path d="M5 7h6M5 9.5h4" stroke="#10b981" stroke-width="1.2" stroke-linecap="round"/></svg>
+
+        <div className="pricing">
+          <div className="price">
+            <div className="tier">Free</div>
+            <div>
+              <div className="amt">$0</div>
+              <div className="amt-sub">forever · 90-day history</div>
+            </div>
+            <ul>
+              <li>All 13 connectors</li>
+              <li>Cost summaries by provider &amp; service</li>
+              <li>Top cost drivers</li>
+              <li>Cross-provider comparisons</li>
+              <li>Cost trends over time</li>
+              <li className="locked">Anomaly detection</li>
+              <li className="locked">Slack / Teams alerts</li>
+              <li className="locked">Auto-ticketing</li>
+            </ul>
+            <div className="cta"><a href="#install">Install free →</a></div>
+          </div>
+
+          <div className="price feat">
+            <div className="tier">Pro · 14-day trial</div>
+            <div>
+              <div className="amt">$39<span className="small">.99</span></div>
+              <div className="amt-sub">/ month · cancel any time</div>
+            </div>
+            <ul>
+              <li>Everything in Free</li>
+              <li>12-month history &amp; daily granularity</li>
+              <li>Seasonality-aware anomaly detection</li>
+              <li>EC2 rightsizing recommendations</li>
+              <li>RI / Savings Plan analysis</li>
+              <li>Slack, Teams &amp; email alerts</li>
+              <li>Auto Jira / Linear / GitHub tickets</li>
+              <li>Invoice email parsing (IMAP)</li>
+              <li>Weekly digest, no AI session needed</li>
+            </ul>
+            <div className="cta"><a href="#install">Start free trial →</a></div>
+          </div>
+
+          <div className="price">
+            <div className="tier">Enterprise</div>
+            <div>
+              <div className="amt" style={{fontSize:34}}>Custom</div>
+              <div className="amt-sub">volume · dedicated support</div>
+            </div>
+            <ul>
+              <li>Everything in Pro</li>
+              <li>Unlimited connectors &amp; history</li>
+              <li>Custom connector development</li>
+              <li>SSO / SAML</li>
+              <li>Dedicated Slack channel</li>
+              <li>SLA &amp; uptime guarantee</li>
+              <li>On-prem / private VPC deploy</li>
+            </ul>
+            <div className="cta"><a href="mailto:hello@nable.sh">Contact sales →</a></div>
+          </div>
         </div>
-        <h3>Invoice email parsing</h3>
-        <p>Connects to your billing inbox via IMAP. Parses PDFs and HTML invoices from vendors with no billing API: PagerDuty, New Relic, GitHub Enterprise.</p>
       </div>
-    </div>
-  </div>
-</section>
+    </section>
+  );
+}
 
-<!-- Security -->
-<section style="border-bottom: 1px solid var(--border);">
-  <div class="container-sm" style="text-align:center;">
-    <div class="section-label">Security</div>
-    <h2 class="section-h2">Your credentials never leave your machine.</h2>
-    <p class="section-sub">Every SaaS FinOps tool asks you to hand your cloud keys to a vendor. We don't. nable stores all credentials encrypted with Fernet in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). The vault key lives on your hardware, not our servers. There is no cloud sync. There is nothing to breach on our end.</p>
-    <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:28px;">
-      <span style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;color:var(--muted);">Fernet encryption</span>
-      <span style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;color:var(--muted);">OS keyring storage</span>
-      <span style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;color:var(--muted);">Audit log</span>
-      <span style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;color:var(--muted);">Read-only API keys only</span>
-      <span style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;color:var(--muted);">No vendor cloud access</span>
-    </div>
-  </div>
-</section>
+function CTA(){
+  const [done, setDone] = useState(false);
+  return (
+    <section className="cta" id="install" data-screen-label="07 CTA">
+      <div className="wrap">
+        <div className="row">
+          <div>
+            <div className="label" style={{marginBottom:18}}>/ Get started</div>
+            <h2>Find out where the money actually went.</h2>
+            <p>14 days free, every Pro feature unlocked, no card required. One pip install, one config line.</p>
+            <div style={{marginTop:24}} className="install">
+              <span className="prompt">$</span>
+              <span>pip install finops-mcp[pdf,snowflake,keyring]</span>
+            </div>
+          </div>
 
-<!-- Connectors -->
-<section id="connectors" style="border-bottom: 1px solid var(--border);">
-  <div class="container">
-    <div style="margin-bottom:36px;">
-      <div class="section-label">13 connectors</div>
-      <h2 class="section-h2">Every cost source, one interface.</h2>
-      <p class="section-sub">Click any connector for setup details. Not every provider has a full billing API. We're honest about what each one returns.</p>
-    </div>
-    <div class="connector-grid">
-      <div class="connector-tile" onclick="showConn('aws')">
-        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/amazonwebservices/amazonwebservices-plain-wordmark.svg" alt="AWS" onerror="this.src='https://cdn.simpleicons.org/amazonaws/FF9900'"/>
-        <div class="c-name">AWS</div><div class="c-sub">Cost Explorer</div>
+          <form className="cta-form" onSubmit={(e)=>{e.preventDefault();setDone(true);}}>
+            <div className="lab">Updates &amp; new connectors</div>
+            {!done ? (
+              <>
+                <div className="field">
+                  <input type="email" placeholder="you@company.com" required />
+                  <button className="submit" type="submit">Subscribe →</button>
+                </div>
+                <div className="helper">No spam. Roadmap notes, occasional cost-anatomy posts.</div>
+              </>
+            ) : (
+              <div style={{padding:"10px 0",fontFamily:"var(--mono)",fontSize:13,color:"var(--hl)"}}>
+                ● subscribed. see you Monday.
+              </div>
+            )}
+          </form>
+        </div>
       </div>
-      <div class="connector-tile" onclick="showConn('azure')">
-        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/azure/azure-original.svg" alt="Azure" onerror="this.src='https://cdn.simpleicons.org/microsoftazure/0078D4'"/>
-        <div class="c-name">Azure</div><div class="c-sub">Cost Management</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('gcp')">
-        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg" alt="GCP" onerror="this.src='https://cdn.simpleicons.org/googlecloud/4285F4'"/>
-        <div class="c-name">GCP</div><div class="c-sub">Billing / BigQuery</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('datadog')">
-        <img src="https://cdn.simpleicons.org/datadog/632CA6" alt="Datadog"/>
-        <div class="c-name">Datadog</div><div class="c-sub">Real billing</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('snowflake')">
-        <img src="https://cdn.simpleicons.org/snowflake/29B5E8" alt="Snowflake"/>
-        <div class="c-name">Snowflake</div><div class="c-sub">Credit usage</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('stripe')">
-        <img src="https://cdn.simpleicons.org/stripe/635BFF" alt="Stripe"/>
-        <div class="c-name">Stripe</div><div class="c-sub">Real billing</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('mongodb')">
-        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/mongodb/mongodb-original.svg" alt="MongoDB" onerror="this.src='https://cdn.simpleicons.org/mongodb/47A248'"/>
-        <div class="c-name">MongoDB Atlas</div><div class="c-sub">Invoice API</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('twilio')">
-        <img src="https://cdn.simpleicons.org/twilio/F22F46" alt="Twilio"/>
-        <div class="c-name">Twilio</div><div class="c-sub">Usage Records</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('cloudflare')">
-        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/cloudflare/cloudflare-original.svg" alt="Cloudflare" onerror="this.src='https://cdn.simpleicons.org/cloudflare/F38020'"/>
-        <div class="c-name">Cloudflare</div><div class="c-sub">Billing API</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('github')">
-        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/github/github-original.svg" alt="GitHub" onerror="this.src='https://cdn.simpleicons.org/github/24292f'"/>
-        <div class="c-name">GitHub</div><div class="c-sub">Minutes only</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('vercel')">
-        <img src="https://cdn.simpleicons.org/vercel/111827" alt="Vercel"/>
-        <div class="c-name">Vercel</div><div class="c-sub">Enterprise only</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('pagerduty')">
-        <img src="https://cdn.simpleicons.org/pagerduty/06AC38" alt="PagerDuty"/>
-        <div class="c-name">PagerDuty</div><div class="c-sub">No billing API</div>
-      </div>
-      <div class="connector-tile" onclick="showConn('newrelic')">
-        <img src="https://cdn.simpleicons.org/newrelic/008C99" alt="New Relic"/>
-        <div class="c-name">New Relic</div><div class="c-sub">Estimated</div>
-      </div>
-    </div>
+    </section>
+  );
+}
 
-    <!-- Detail panels -->
-    <div id="conn-detail">
-      <div id="panel-aws" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">AWS: Cost Explorer</h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Supports IAM keys and Identity Center SSO. Multi-account via role assumption.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);margin-bottom:12px;">$ finops setup aws</pre>
-        <p style="font-size:12px;color:var(--muted);">Required: <code>ce:GetCostAndUsage</code>, <code>ce:GetSavingsPlansUtilization</code>, <code>sts:GetCallerIdentity</code>, <code>cloudwatch:GetMetricStatistics</code> (rightsizing). Or attach <strong>ReadOnlyAccess</strong>.</p>
+function Footer(){
+  return (
+    <footer>
+      <div className="wrap">
+        <div className="foot">
+          <div>
+            <Logo />
+            <p style={{marginTop:14,color:"var(--fg-3)",fontSize:13.5,maxWidth:"32ch",lineHeight:1.55}}>
+              Cloud cost intelligence over MCP. For teams who'd rather ask than open another dashboard.
+            </p>
+          </div>
+          <div>
+            <h5>Product</h5>
+            <a href="#product">Live demo</a>
+            <a href="#connectors">Connectors</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#install">Install guide</a>
+          </div>
+          <div>
+            <h5>Resources</h5>
+            <a href="#">Docs</a>
+            <a href="#">Changelog</a>
+            <a href="#">MCP overview</a>
+            <a href="#">Status</a>
+          </div>
+          <div>
+            <h5>Company</h5>
+            <a href="mailto:hello@nable.sh">hello@nable.sh</a>
+            <a href="#">Security</a>
+            <a href="#">Privacy</a>
+            <a href="#">Terms</a>
+          </div>
+        </div>
+        <div className="foot-bottom">
+          <span>© 2026 nable inc.</span>
+          <span>v0.4.2 · 13 connectors</span>
+        </div>
       </div>
-      <div id="panel-azure" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">Azure: Cost Management</h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Service Principal or device code flow. Multi-subscription.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);margin-bottom:12px;">$ finops setup azure</pre>
-        <p style="font-size:12px;color:var(--muted);">Required role: <strong>Cost Management Reader</strong> on your Subscription or Management Group.</p>
-      </div>
-      <div id="panel-gcp" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">GCP: Cloud Billing</h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Primary: BigQuery billing export. Fallback: Cloud Billing API. Service account JSON, stored encrypted.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);margin-bottom:12px;">$ finops setup gcp</pre>
-        <p style="font-size:12px;color:var(--muted);">Required: <code>roles/billing.viewer</code>, <code>roles/bigquery.dataViewer</code> (if using export).</p>
-      </div>
-      <div id="panel-datadog" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">Datadog: Usage Metering v2</h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Real dollar amounts via Usage Metering API v2. Supports EU site.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup datadog</pre>
-      </div>
-      <div id="panel-snowflake" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">Snowflake: Credit Usage</h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Queries ACCOUNT_USAGE.METERING_HISTORY. Set <code>SNOWFLAKE_CREDIT_PRICE</code> to convert credits to USD at your contract rate.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup snowflake</pre>
-      </div>
-      <div id="panel-stripe" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">Stripe: Processing Fees</h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Actual fees paid to Stripe via the Balance Transactions API. Use a restricted key with Balance → Read only.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup stripe</pre>
-      </div>
-      <div id="panel-mongodb" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">MongoDB Atlas: Invoices</h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Invoice API with line-item breakdown. Role: Organization Billing Viewer.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup mongodb</pre>
-      </div>
-      <div id="panel-twilio" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">Twilio: Usage Records</h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Paginated usage records with real billing amounts.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup twilio</pre>
-      </div>
-      <div id="panel-cloudflare" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">Cloudflare: Billing History</h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Billing history and subscriptions via Cloudflare API.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup cloudflare</pre>
-      </div>
-      <div id="panel-github" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">GitHub <span class="tag tag-yellow">Partial: no dollar totals</span></h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">GitHub's API reports billable minutes for Actions and Packages storage, but does not expose invoice dollar amounts. For dollar totals, forward your GitHub billing emails to the invoice parser.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup github</pre>
-      </div>
-      <div id="panel-vercel" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">Vercel <span class="tag tag-yellow">Enterprise only</span></h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Vercel's invoice API requires an Enterprise plan. Pro/Hobby plans return no billing data. On free plans, use the invoice email parser instead.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup vercel</pre>
-      </div>
-      <div id="panel-pagerduty" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">PagerDuty <span class="tag tag-red">No billing API</span></h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">PagerDuty's API exposes no invoice or billing data. The connector returns seat count only. For dollar amounts, forward your PagerDuty invoices to the invoice email parser.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup invoice</pre>
-      </div>
-      <div id="panel-newrelic" class="connector-panel">
-        <button onclick="hideConn()" style="float:right;font-size:13px;color:var(--muted);background:none;border:none;cursor:pointer;">✕ Close</button>
-        <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;">New Relic <span class="tag tag-yellow">Estimated</span></h3>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Queries GB ingested and user counts via NerdGraph. Converts to USD using your contract rate, not New Relic's invoice directly. Set <code>NEW_RELIC_INGEST_PRICE_PER_GB</code> to your rate.</p>
-        <pre style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--blue);">$ finops setup</pre>
-      </div>
-    </div>
-  </div>
-</section>
+    </footer>
+  );
+}
 
-<!-- Pricing -->
-<section id="pricing" style="border-bottom: 1px solid var(--border);">
-  <div class="container">
-    <div style="text-align:center; margin-bottom:44px;">
-      <div class="section-label">Pricing</div>
-      <h2 class="section-h2">Simple, honest pricing.</h2>
-      <p class="section-sub">Start free. Upgrade when you need automation.</p>
-    </div>
-    <div class="pricing-grid">
+function Tweaks({ open, t, setTweak }){
+  if(!open) return null;
+  return (
+    <window.TweaksPanel title="Tweaks">
+      <window.TweakSection title="Palette">
+        <window.TweakRadio label="Background"
+          value={t.palette}
+          options={[
+            {value:"linen",label:"Linen"},
+            {value:"paper",label:"Paper"},
+            {value:"graphite",label:"Graphite"},
+          ]}
+          onChange={(v)=>setTweak("palette",v)} />
+      </window.TweakSection>
+      <window.TweakSection title="Status accents">
+        <window.TweakRadio label="Mood"
+          value={t.accentMode}
+          options={[
+            {value:"neutral",label:"Sage / Rust"},
+            {value:"forest",label:"Forest"},
+            {value:"cobalt",label:"Cobalt"},
+          ]}
+          onChange={(v)=>setTweak("accentMode",v)} />
+      </window.TweakSection>
+    </window.TweaksPanel>
+  );
+}
 
-      <!-- Free -->
-      <div class="price-card">
-        <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dim);margin-bottom:20px;">Free</p>
-        <div class="price-amount">$0</div>
-        <div class="price-period">forever · no credit card</div>
-        <ul class="price-list">
-          <li>All 13 connectors</li>
-          <li>Cost summaries by provider &amp; service</li>
-          <li>Top cost drivers</li>
-          <li>Cross-provider comparisons</li>
-          <li>Cost trends over time</li>
-          <li>90-day history</li>
-          <li class="locked"><span style="color:#d1d5db;">—</span>&nbsp; Anomaly detection</li>
-          <li class="locked"><span style="color:#d1d5db;">—</span>&nbsp; Slack / Teams alerts</li>
-          <li class="locked"><span style="color:#d1d5db;">—</span>&nbsp; Rightsizing &amp; auto-ticketing</li>
-        </ul>
-        <a href="/docs" class="btn btn-outline" style="width:100%;padding:13px;font-size:14px;border-radius:8px;">Install free →</a>
-      </div>
-
-      <!-- Pro -->
-      <div class="price-card featured">
-        <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;margin-bottom:20px;">Pro <span style="background:#1f2937;border:1px solid #374151;border-radius:4px;padding:2px 8px;margin-left:4px;color:#34d399;">14-day trial</span></p>
-        <div class="price-amount">$39<span style="font-size:28px;">.99</span></div>
-        <div class="price-period">/month · cancel any time</div>
-        <ul class="price-list">
-          <li><strong style="color:white;">Everything in Free</strong></li>
-          <li>12-month history &amp; daily granularity</li>
-          <li>Seasonality-aware anomaly detection</li>
-          <li>EC2 rightsizing recommendations</li>
-          <li>RI / Savings Plan analysis</li>
-          <li>Slack, Teams &amp; email alerts</li>
-          <li>Auto Jira / Linear / GitHub tickets</li>
-          <li>Invoice email parsing (IMAP)</li>
-          <li>Weekly cost digest (no AI session needed)</li>
-        </ul>
-        <a href="https://buy.stripe.com/cNi5kC6XT2sSg804AG2Nq00" target="_blank" class="btn" style="width:100%;background:white;color:#111827;padding:13px;font-size:14px;border-radius:8px;font-weight:700;">Start free trial →</a>
-        <p style="font-size:11px;color:#4b5563;margin-top:10px;text-align:center;">All Pro features unlocked for 14 days. No card needed.</p>
-      </div>
-
-      <!-- Enterprise -->
-      <div class="price-card">
-        <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--dim);margin-bottom:20px;">Enterprise</p>
-        <div class="price-amount" style="font-size:44px;">Custom</div>
-        <div class="price-period">Volume discounts · Dedicated support</div>
-        <ul class="price-list">
-          <li>Everything in Pro</li>
-          <li>Unlimited connectors &amp; history</li>
-          <li>Custom connector development</li>
-          <li>SSO / SAML</li>
-          <li>Dedicated Slack channel</li>
-          <li>SLA + uptime guarantee</li>
-          <li>On-prem / private VPC deployment</li>
-        </ul>
-        <a href="mailto:hello@nable.sh" class="btn btn-outline" style="width:100%;padding:13px;font-size:14px;border-radius:8px;">Contact sales →</a>
-      </div>
-
-    </div>
-  </div>
-</section>
-
-<!-- CTA -->
-<section class="cta-section">
-  <div class="container-sm">
-    <h2>Your bill went up.<br/>Find out why in 10 minutes.</h2>
-    <p>Free for 14 days. No credit card. One pip install.</p>
-    <div class="hero-actions" style="margin-bottom:28px;">
-      <a href="/docs" class="btn" style="background:white;color:#111827;padding:13px 28px;font-size:15px;font-weight:700;border-radius:9px;">Read the install guide →</a>
-    </div>
-    <form id="cta-email-form" class="email-form" onsubmit="submitEmail(event,'cta-email-form')">
-      <input type="email" placeholder="your@email.com" required />
-      <button type="submit" class="btn-white">Get updates</button>
-    </form>
-    <p style="font-size:12px;color:#4b5563;">No spam. Updates on new connectors and features.</p>
-  </div>
-</section>
-
-<!-- Footer -->
-<footer>
-  <div class="footer-inner">
-    <div class="footer-left">
-      <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
-        <rect width="32" height="32" rx="8" fill="#2563eb"/>
-        <path d="M8 23V10h3.8l5.6 8.2V10H21v13h-3.8L11.6 14.8V23H8z" fill="white"/>
-      </svg>
-      <span style="color:#374151;font-weight:600;">nable</span>
-      <span>© 2025 nable</span>
-    </div>
-    <div class="footer-right">
-      <a href="#pricing">Pricing</a>
-      <a href="/docs">Docs</a>
-      <a href="mailto:hello@nable.sh">hello@nable.sh</a>
-    </div>
-  </div>
-</footer>
-
-<script>
-  function showConn(id) {
-    document.querySelectorAll('.connector-panel').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.connector-tile').forEach(t => t.style.background = '');
-    const panel = document.getElementById('panel-' + id);
-    if (panel) {
-      panel.classList.add('active');
-      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function App(){
+  const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
+  useEffect(()=>{ applyTheme(t); },[t]);
+  const dark = t.palette === "graphite";
+  const toggle = () => setTweak("palette", dark ? "linen" : "graphite");
+  useEffect(()=>{
+    function onMsg(e){
+      const d = e.data || {};
+      if(d.type === "__activate_edit_mode") setTweaksOpen(true);
+      if(d.type === "__deactivate_edit_mode") setTweaksOpen(false);
     }
-  }
-  function hideConn() {
-    document.querySelectorAll('.connector-panel').forEach(p => p.classList.remove('active'));
-  }
-  function submitEmail(e, formId) {
-    e.preventDefault();
-    const form = document.getElementById(formId);
-    const email = form.querySelector('input[type="email"]').value;
-    fetch('https://formspree.io/f/xovdjqpw', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ email, source: formId })
-    }).finally(() => {
-      form.innerHTML = '<p style="color:#34d399;font-size:14px;font-weight:600;">✓ You\'re on the list.</p>';
-    });
-  }
+    window.addEventListener("message", onMsg);
+    window.parent.postMessage({type:"__edit_mode_available"}, "*");
+    return ()=>window.removeEventListener("message", onMsg);
+  },[]);
+  return (
+    <>
+      <Nav dark={dark} onToggle={toggle} />
+      <Hero />
+      <HowItWorks />
+      <Features />
+      <Connectors />
+      <Security />
+      <Pricing />
+      <CTA />
+      <Footer />
+      <Tweaks open={tweaksOpen} t={t} setTweak={setTweak} />
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("app")).render(<App />);
 </script>
+
 </body>
 </html>
