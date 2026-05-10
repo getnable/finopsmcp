@@ -3,7 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>nable — Cloud Cost Intelligence for Claude</title>
+  <title>nable — Ask Claude about your cloud costs</title>
+  <meta name="description" content="Connect AWS, Azure, GCP, Datadog, Snowflake and 8 more to Claude. Ask about spend in plain English. 14-day free trial." />
+  <meta property="og:title" content="nable — Ask Claude about your cloud costs" />
+  <meta property="og:description" content="Connect AWS, Azure, GCP, Datadog, Snowflake and 8 more to Claude. Ask about spend in plain English. 14-day free trial." />
+  <meta property="og:url" content="https://nable.sh" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="nable" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="nable — Ask Claude about your cloud costs" />
+  <meta name="twitter:description" content="Connect AWS, Azure, GCP, Datadog, Snowflake and 8 more to Claude. Ask about spend in plain English." />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://js.stripe.com/v3/"></script>
   <script>
@@ -171,16 +180,16 @@
 <nav class="sticky top-0 z-50">
   <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
     <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,var(--blue),#2245a0)">
-        <svg width="18" height="18" viewBox="0 0 22 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <!-- ascending bars -->
-          <rect x="0" y="13" width="4.5" height="7" rx="1.2" fill="#eef4fd" opacity="0.55"/>
-          <rect x="6" y="8.5" width="4.5" height="11.5" rx="1.2" fill="#eef4fd" opacity="0.78"/>
-          <rect x="12" y="4" width="4.5" height="16" rx="1.2" fill="#eef4fd"/>
-          <!-- 4-pointed sparkle (AI) -->
-          <path d="M19.5 0 L20.4 2.4 L22 3 L20.4 3.6 L19.5 6 L18.6 3.6 L17 3 L18.6 2.4 Z" fill="#eef4fd" opacity="0.92"/>
-        </svg>
-      </div>
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#4a7fe0"/>
+            <stop offset="100%" stop-color="#1a3fa0"/>
+          </linearGradient>
+        </defs>
+        <rect width="32" height="32" rx="9" fill="url(#logo-grad)"/>
+        <path d="M8 23V10h3.8l5.6 8.2V10H21v13h-3.8L11.6 14.8V23H8z" fill="white"/>
+      </svg>
       <span class="font-bold text-lg tracking-tight" style="color:var(--text)">nable</span>
     </div>
     <div class="hidden md:flex items-center gap-7 text-sm font-medium px-6 py-2 rounded-full" style="color:var(--muted);background:rgba(255,255,255,0.55);border:1px solid rgba(192,212,236,0.5);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);">
@@ -189,7 +198,7 @@
       <a href="#pricing"      class="hover:opacity-70 transition-opacity">Pricing</a>
       <a href="mailto:hello@finmcp.tech" class="hover:opacity-70 transition-opacity">Contact</a>
     </div>
-    <a href="#pricing" class="btn-primary text-sm px-4 py-2">Start free trial</a>
+    <a href="/docs" class="btn-primary text-sm px-4 py-2">Start free trial</a>
   </div>
 </nav>
 
@@ -199,11 +208,6 @@
   <div class="dot-grid absolute inset-0 opacity-40 pointer-events-none"></div>
 
   <div class="relative max-w-5xl mx-auto text-center">
-    <div class="inline-flex items-center gap-2 badge text-xs font-semibold px-3.5 py-1.5 rounded-full mb-8">
-      <span class="w-1.5 h-1.5 rounded-full animate-pulse" style="background:var(--blue-hi)"></span>
-      MCP-native · Claude, Cursor, Codex &amp; more
-    </div>
-
     <h1 class="text-5xl md:text-[72px] font-black leading-[1.02] tracking-tight mb-6" style="color:var(--text)">
       Ask your AI anything<br/>
       <span style="color:var(--blue-hi)">about your <span id="dynamic-word" class="fade-in">AWS</span> bill.</span>
@@ -213,10 +217,17 @@
       Query your entire cloud spend in plain English — no dashboards, no SQL, no exports.
     </p>
 
-    <div class="flex flex-wrap gap-3 justify-center mb-16">
-      <a href="#pricing" class="btn-primary px-6 py-3 text-sm">Connect your first provider →</a>
+    <div class="flex flex-wrap gap-3 justify-center mb-6">
+      <a href="/docs" class="btn-primary px-6 py-3 text-sm">Start free trial →</a>
       <a href="#how-it-works" class="btn-ghost px-6 py-3 text-sm">See how it works</a>
     </div>
+    <!-- Email capture -->
+    <form id="hero-email-form" class="flex gap-2 justify-center max-w-sm mx-auto mb-16" onsubmit="submitEmail(event, 'hero-email-form')">
+      <input type="email" placeholder="you@company.com" required
+        class="flex-1 px-4 py-2.5 rounded-lg text-sm border outline-none"
+        style="background:white;border-color:var(--border);color:var(--text)"/>
+      <button type="submit" class="btn-primary px-4 py-2.5 text-sm whitespace-nowrap">Notify me</button>
+    </form>
 
     <!-- Chat demo -->
     <div class="card max-w-2xl mx-auto text-left overflow-hidden" style="background:var(--surface)">
@@ -742,12 +753,22 @@
   <div class="glow-hero" style="opacity:0.5"></div>
   <div class="relative max-w-3xl mx-auto text-center">
     <h2 class="text-4xl font-black tracking-tight mb-4" style="color:var(--text)">Ready to stop guessing<br/>what your cloud costs?</h2>
-    <p class="text-base mb-8" style="color:var(--muted)">Set up in 10 minutes. Ask Claude anything.<br/>14-day free trial, no credit card required.</p>
-    <div class="flex flex-wrap gap-3 justify-center">
-      <a href="#pricing" class="btn-primary px-7 py-3 text-sm">Start free trial →</a>
+    <p class="text-base mb-6" style="color:var(--muted)">Set up in 10 minutes. Ask Claude anything.<br/>14-day free trial, no credit card required.</p>
+    <div class="flex flex-wrap gap-3 justify-center mb-6">
+      <a href="/docs" class="btn-primary px-7 py-3 text-sm">Start free trial →</a>
       <a href="mailto:hello@finmcp.tech" class="btn-ghost px-7 py-3 text-sm">Talk to us</a>
     </div>
-    <p class="text-xs mt-6" style="color:var(--dim)">14-day trial · No credit card · Cancel anytime</p>
+    <!-- Email capture -->
+    <div class="max-w-sm mx-auto">
+      <form id="cta-email-form" class="flex gap-2" onsubmit="submitEmail(event, 'cta-email-form')">
+        <input type="email" placeholder="Drop your email for updates" required
+          class="flex-1 px-4 py-2.5 rounded-lg text-sm border outline-none"
+          style="background:white;border-color:var(--border);color:var(--text)"/>
+        <button type="submit" class="btn-primary px-4 py-2.5 text-sm whitespace-nowrap">Get updates</button>
+      </form>
+      <p id="cta-email-thanks" class="text-sm mt-2 hidden" style="color:#0d7a56">✓ You're on the list!</p>
+    </div>
+    <p class="text-xs mt-5" style="color:var(--dim)">14-day trial · No credit card · Cancel anytime</p>
   </div>
 </section>
 
@@ -755,14 +776,10 @@
 <footer class="py-10 px-6" style="border-top:1px solid var(--border)">
   <div class="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
     <div class="flex items-center gap-2.5">
-      <div class="w-7 h-7 rounded-md flex items-center justify-center" style="background:linear-gradient(135deg,var(--blue),#2245a0)">
-        <svg width="14" height="14" viewBox="0 0 22 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="0" y="13" width="4.5" height="7" rx="1.2" fill="#eef4fd" opacity="0.55"/>
-          <rect x="6" y="8.5" width="4.5" height="11.5" rx="1.2" fill="#eef4fd" opacity="0.78"/>
-          <rect x="12" y="4" width="4.5" height="16" rx="1.2" fill="#eef4fd"/>
-          <path d="M19.5 0 L20.4 2.4 L22 3 L20.4 3.6 L19.5 6 L18.6 3.6 L17 3 L18.6 2.4 Z" fill="#eef4fd" opacity="0.92"/>
-        </svg>
-      </div>
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect width="32" height="32" rx="9" fill="url(#logo-grad)"/>
+        <path d="M8 23V10h3.8l5.6 8.2V10H21v13h-3.8L11.6 14.8V23H8z" fill="white"/>
+      </svg>
       <span class="font-bold text-sm" style="color:var(--text)">nable</span>
       <span class="text-xs" style="color:var(--dim)">© 2025 nable</span>
     </div>
@@ -815,6 +832,22 @@
       }, 200);
     }, 2000);
   })();
+
+  // ── Email capture ────────────────────────────────────────────────────────
+  function submitEmail(e, formId) {
+    e.preventDefault();
+    const form = document.getElementById(formId);
+    const email = form.querySelector('input[type="email"]').value;
+    fetch('https://formspree.io/f/xovdjqpw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ email, source: formId })
+    }).then(() => {
+      form.innerHTML = '<p style="color:#0d7a56;font-size:14px;font-weight:600;">✓ You\'re on the list!</p>';
+    }).catch(() => {
+      form.innerHTML = '<p style="color:#0d7a56;font-size:14px;font-weight:600;">✓ You\'re on the list!</p>';
+    });
+  }
 </script>
 </body>
 </html>

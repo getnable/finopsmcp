@@ -69,14 +69,16 @@
   <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
     <div class="flex items-center gap-3">
       <a href="index.html" class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg flex items-center justify-center" style="background:linear-gradient(135deg,var(--blue),#2245a0)">
-          <svg width="18" height="18" viewBox="0 0 22 20" fill="none">
-            <rect x="0" y="13" width="4.5" height="7" rx="1.2" fill="#eef4fd" opacity="0.55"/>
-            <rect x="6" y="8.5" width="4.5" height="11.5" rx="1.2" fill="#eef4fd" opacity="0.78"/>
-            <rect x="12" y="4" width="4.5" height="16" rx="1.2" fill="#eef4fd"/>
-            <path d="M19.5 0 L20.4 2.4 L22 3 L20.4 3.6 L19.5 6 L18.6 3.6 L17 3 L18.6 2.4 Z" fill="#eef4fd" opacity="0.92"/>
-          </svg>
-        </div>
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="logo-grad-d" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#4a7fe0"/>
+              <stop offset="100%" stop-color="#1a3fa0"/>
+            </linearGradient>
+          </defs>
+          <rect width="32" height="32" rx="9" fill="url(#logo-grad-d)"/>
+          <path d="M8 23V10h3.8l5.6 8.2V10H21v13h-3.8L11.6 14.8V23H8z" fill="white"/>
+        </svg>
         <span class="font-bold text-lg tracking-tight" style="color:var(--text)">nable</span>
       </a>
       <span class="text-xs px-2 py-0.5 rounded-md font-semibold ml-1" style="background:var(--surface2);color:var(--blue);border:1px solid var(--border)">Docs</span>
