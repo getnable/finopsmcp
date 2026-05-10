@@ -1,3 +1,13 @@
+"""
+Storage layer — SQLite (default, local) or Postgres (shared team mode).
+
+Single-engineer setup:  no config needed → SQLite at ~/.finops/finops.db
+Shared team setup:      set DATABASE_URL=postgresql://user:pass@host/dbname
+                        → connects directly, all engineers share one DB
+
+The DATABASE_URL env var is the only config change needed to go from local
+to shared mode. All table definitions work on both backends.
+"""
 from __future__ import annotations
 
 import os
@@ -5,7 +15,7 @@ import stat
 from pathlib import Path
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Float, Integer, MetaData,
+    Boolean, Column, DateTime, Float, Index, Integer, JSON, MetaData,
     String, Table, Text, create_engine, text,
 )
 from sqlalchemy.engine import Engine
@@ -14,6 +24,8 @@ _DATA_DIR: Path | None = None
 _ENGINE: Engine | None = None
 
 metadata = MetaData()
+
+# ── Core tables ───────────────────────────────────────────────────────────────
 
 cost_snapshots = Table(
     "cost_snapshots", metadata,
@@ -44,6 +56,7 @@ anomalies = Table(
     Column("current_amount", Float, nullable=False),
     Column("acknowledged", Boolean, nullable=False, default=False),
     Column("notified", Boolean, nullable=False, default=False),
+    Column("metadata", Text, nullable=True),               # JSON: ticket_url, ack_by, etc.
 )
 
 tag_rules = Table(
@@ -81,6 +94,181 @@ audit_log = Table(
     Column("detail", Text, nullable=True),
 )
 
+# ── Moat tables — data that accumulates value over time ───────────────────────
+
+effective_rates = Table(
+    "effective_rates", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("provider", String(64), nullable=False),
+    Column("account_id", String(128), nullable=False),
+    Column("snapshot_date", String(10), nullable=False),
+    Column("list_price_usd", Float, nullable=False),
+    Column("actual_usd", Float, nullable=False),
+    Column("discount_pct", Float, nullable=False),
+    Column("source", String(64), nullable=False, default=""),
+    Column("captured_at", DateTime, nullable=False),
+)
+
+resource_inventory = Table(
+    "resource_inventory", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("provider", String(64), nullable=False),
+    Column("account_id", String(128), nullable=False),
+    Column("region", String(64), nullable=False, default=""),
+    Column("resource_id", String(512), nullable=False),
+    Column("resource_type", String(256), nullable=False),
+    Column("resource_name", String(512), nullable=False, default=""),
+    Column("tags", Text, nullable=False, default="{}"),
+    Column("monthly_cost_usd", Float, nullable=False, default=0.0),
+    Column("first_seen", String(10), nullable=False),
+    Column("last_seen", String(10), nullable=False),
+    Column("is_active", Boolean, nullable=False, default=True),
+    Column("metadata", Text, nullable=False, default="{}"),
+)
+
+cost_trends = Table(
+    "cost_trends", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("provider", String(64), nullable=False),
+    Column("service", String(256), nullable=False),
+    Column("account_id", String(128), nullable=False),
+    Column("computed_date", String(10), nullable=False),
+    Column("avg_7d", Float, nullable=True),
+    Column("avg_30d", Float, nullable=True),
+    Column("avg_90d", Float, nullable=True),
+    Column("pct_change_7d", Float, nullable=True),
+    Column("pct_change_30d", Float, nullable=True),
+    Column("trend_slope", Float, nullable=True),
+    Column("seasonality_detected", Boolean, nullable=False, default=False),
+    Column("updated_at", DateTime, nullable=False),
+)
+
+kubernetes_costs = Table(
+    "kubernetes_costs", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("cluster", String(256), nullable=False),
+    Column("namespace", String(256), nullable=False),
+    Column("workload_kind", String(64), nullable=False, default=""),
+    Column("workload_name", String(256), nullable=False, default=""),
+    Column("snapshot_date", String(10), nullable=False),
+    Column("cpu_requested_cores", Float, nullable=False, default=0.0),
+    Column("cpu_used_cores", Float, nullable=True),
+    Column("mem_requested_gib", Float, nullable=False, default=0.0),
+    Column("mem_used_gib", Float, nullable=True),
+    Column("node_count", Integer, nullable=False, default=0),
+    Column("pod_count", Integer, nullable=False, default=0),
+    Column("monthly_cost_usd", Float, nullable=False, default=0.0),
+    Column("cpu_efficiency_pct", Float, nullable=True),
+    Column("mem_efficiency_pct", Float, nullable=True),
+    Column("wasted_usd", Float, nullable=False, default=0.0),
+    Column("labels", Text, nullable=False, default="{}"),
+    Column("captured_at", DateTime, nullable=False),
+)
+
+# ── Budget tables ─────────────────────────────────────────────────────────────
+
+budgets = Table(
+    "budgets", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", String(256), nullable=False),             # human-readable label
+    Column("scope_type", String(32), nullable=False),        # "team" | "provider" | "service" | "total"
+    Column("scope_value", String(256), nullable=False, default="*"),
+    Column("period", String(16), nullable=False, default="monthly"), # monthly | weekly
+    Column("limit_usd", Float, nullable=False),
+    Column("alert_at_pct", Float, nullable=False, default=80.0),   # warn at 80%
+    Column("block_at_pct", Float, nullable=False, default=100.0),  # fail CI at 100%
+    Column("created_at", DateTime, nullable=False),
+    Column("updated_at", DateTime, nullable=False),
+    Column("created_by", String(256), nullable=False, default=""),
+    Column("is_active", Boolean, nullable=False, default=True),
+)
+
+budget_alerts = Table(
+    "budget_alerts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("budget_id", Integer, nullable=False),
+    Column("alert_date", String(10), nullable=False),        # YYYY-MM-DD
+    Column("period_start", String(10), nullable=False),
+    Column("period_end", String(10), nullable=False),
+    Column("spent_usd", Float, nullable=False),
+    Column("limit_usd", Float, nullable=False),
+    Column("pct_used", Float, nullable=False),
+    Column("alert_type", String(16), nullable=False),        # "warning" | "exceeded"
+    Column("notified", Boolean, nullable=False, default=False),
+    Column("created_at", DateTime, nullable=False),
+)
+
+# ── Report subscription tables ────────────────────────────────────────────────
+
+report_subscriptions = Table(
+    "report_subscriptions", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", String(256), nullable=False),
+    # Delivery
+    Column("slack_channels", Text, nullable=False, default="[]"),  # JSON list
+    Column("email_addresses", Text, nullable=False, default="[]"), # JSON list
+    Column("teams_webhook", String(512), nullable=False, default=""),
+    # Schedule
+    Column("cron", String(64), nullable=False),              # "0 9 * * 1" = Mon 9am
+    Column("timezone", String(64), nullable=False, default="UTC"),
+    # Content
+    Column("sections", Text, nullable=False, default='["spend","anomalies"]'),  # JSON list
+    # sections: spend | anomalies | scorecard | k8s | commitments | rightsizing | budgets | teams
+    Column("filters", Text, nullable=False, default="{}"),   # JSON: {team, provider, env}
+    Column("lookback_days", Integer, nullable=False, default=7),
+    # Meta
+    Column("created_at", DateTime, nullable=False),
+    Column("last_sent_at", DateTime, nullable=True),
+    Column("is_active", Boolean, nullable=False, default=True),
+    Column("created_by", String(256), nullable=False, default=""),
+)
+
+# ── Org / multi-account tables ────────────────────────────────────────────────
+
+org_accounts = Table(
+    "org_accounts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("cloud_provider", String(32), nullable=False),    # aws | azure | gcp
+    Column("account_id", String(128), nullable=False),
+    Column("account_name", String(256), nullable=False, default=""),
+    Column("parent_id", String(128), nullable=False, default=""),  # OU / folder / MG
+    Column("status", String(32), nullable=False, default="ACTIVE"),
+    Column("tags", Text, nullable=False, default="{}"),
+    Column("assume_role_arn", String(512), nullable=False, default=""),  # for cross-account
+    Column("last_synced", String(10), nullable=True),
+    Column("is_management_account", Boolean, nullable=False, default=False),
+)
+
+
+# ── Indexes — keep hot query paths O(log n) instead of O(n) ──────────────────
+# cost_snapshots: every budget check and spend query filters by date + provider/service
+Index("ix_cs_date_provider",  cost_snapshots.c.snapshot_date, cost_snapshots.c.provider)
+Index("ix_cs_date_service",   cost_snapshots.c.snapshot_date, cost_snapshots.c.service)
+Index("ix_cs_provider",       cost_snapshots.c.provider)
+
+# attributed_costs: team budget checks and team cost queries
+Index("ix_ac_date_team",      attributed_costs.c.snapshot_date, attributed_costs.c.team)
+Index("ix_ac_team",           attributed_costs.c.team)
+
+# anomalies: report sections filter by date and ack status
+Index("ix_anom_date",         anomalies.c.snapshot_date)
+Index("ix_anom_ack",          anomalies.c.acknowledged)
+
+# org_accounts: sync looks up by (account_id, provider) — must be unique
+Index("ix_org_acct_provider", org_accounts.c.account_id, org_accounts.c.cloud_provider,
+      unique=True)
+
+# budgets: list_budgets filters by is_active; sync_from_yaml looks up by name
+Index("ix_budgets_active",    budgets.c.is_active)
+Index("ix_budgets_name",      budgets.c.name, unique=True)
+
+# report_subscriptions: scheduler filters by is_active
+Index("ix_rsub_active",       report_subscriptions.c.is_active)
+
+# cost_trends: trend queries filter by provider + service
+Index("ix_trends_prov_svc",   cost_trends.c.provider, cost_trends.c.service)
+
+# ── Engine factory ────────────────────────────────────────────────────────────
 
 def data_dir() -> Path:
     global _DATA_DIR
@@ -88,21 +276,70 @@ def data_dir() -> Path:
         raw = os.environ.get("FINOPS_DATA_DIR", "")
         _DATA_DIR = Path(raw).expanduser() if raw else Path.home() / ".finops"
         _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        # Restrict directory to owner only
         _DATA_DIR.chmod(stat.S_IRWXU)
     return _DATA_DIR
 
 
+def _is_postgres(url: str) -> bool:
+    return url.startswith(("postgresql://", "postgres://", "postgresql+", "postgres+"))
+
+
 def get_engine() -> Engine:
+    """
+    Return the database engine.
+
+    Priority:
+      1. DATABASE_URL env var → connect to Postgres (shared team mode)
+      2. FINOPS_DB_PATH env var → SQLite at custom path
+      3. Default → SQLite at ~/.finops/finops.db
+
+    Postgres shared mode:
+      Set DATABASE_URL=postgresql://user:pass@host:5432/finops
+      All engineers sharing this URL use the same database — no sync needed.
+      Credentials never leave the machine; only the DB connection is shared.
+    """
     global _ENGINE
-    if _ENGINE is None:
-        db_path = data_dir() / "finops.db"
-        _ENGINE = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    if _ENGINE is not None:
+        return _ENGINE
+
+    database_url = os.environ.get("DATABASE_URL", "")
+
+    if database_url and _is_postgres(database_url):
+        # Shared Postgres mode
+        # psycopg2 or asyncpg must be installed: pip install finops-mcp[postgres]
+        _ENGINE = create_engine(
+            database_url,
+            pool_pre_ping=True,          # detect stale connections
+            pool_size=5,
+            max_overflow=10,
+            connect_args={"connect_timeout": 10},
+        )
         metadata.create_all(_ENGINE)
-        # SQLite WAL mode for concurrent readers
+    else:
+        # Local SQLite mode (default)
+        db_path_env = os.environ.get("FINOPS_DB_PATH", "")
+        db_path = Path(db_path_env).expanduser() if db_path_env else data_dir() / "finops.db"
+        _ENGINE = create_engine(
+            f"sqlite:///{db_path}",
+            connect_args={"check_same_thread": False},
+        )
+        metadata.create_all(_ENGINE)
         with _ENGINE.connect() as conn:
             conn.execute(text("PRAGMA journal_mode=WAL"))
             conn.execute(text("PRAGMA foreign_keys=ON"))
-        # Restrict DB file to owner only
         db_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
     return _ENGINE
+
+
+def storage_mode() -> dict:
+    """Return info about the current storage backend."""
+    database_url = os.environ.get("DATABASE_URL", "")
+    if database_url and _is_postgres(database_url):
+        # Mask credentials for display
+        import re
+        masked = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", database_url)
+        return {"mode": "postgres", "url": masked, "shared": True}
+    db_path_env = os.environ.get("FINOPS_DB_PATH", "")
+    db_path = Path(db_path_env).expanduser() if db_path_env else data_dir() / "finops.db"
+    return {"mode": "sqlite", "path": str(db_path), "shared": False}
