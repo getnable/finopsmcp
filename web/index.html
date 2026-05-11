@@ -212,6 +212,20 @@
   .free-setup-steps .fs-docs{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--fg);border-bottom:1px solid var(--line);margin-top:12px}
   .free-setup-steps .fs-docs:hover{border-bottom-color:var(--fg)}
 
+  /* for teams strip */
+  .for-teams-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line)}
+  .ft-card{padding:32px 32px 32px 0;border-right:1px solid var(--line)}
+  .ft-card:nth-child(2){padding-left:32px}
+  .ft-card:last-child{border-right:0;padding-right:0;padding-left:32px}
+  .ft-n{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.04em;margin-bottom:16px}
+  .ft-card h3{font-size:18px;font-weight:500;letter-spacing:-.02em;line-height:1.25;margin-bottom:10px;color:var(--fg)}
+  .ft-card p{font-size:14px;line-height:1.6;color:var(--fg-2);max-width:34ch}
+  @media(max-width:920px){
+    .for-teams-grid{grid-template-columns:1fr}
+    .ft-card{padding:24px 0!important;border-right:0;border-bottom:1px solid var(--line)}
+    .ft-card:last-child{border-bottom:0}
+  }
+
   /* CTA */
   .cta{padding:120px 0 110px;border-top:1px solid var(--line)}
   .cta h2{max-width:18ch;margin-bottom:22px}
@@ -372,7 +386,7 @@ function Hero({ onTrial }){
         <div className="label" style={{marginBottom:18}}>MCP server · v0.4 · 13 connectors</div>
         <h1>Cloud cost intelligence,<br/>asked, not queried.</h1>
         <p className="lede">
-          nable connects Claude, Cursor and any MCP client to real billing data across AWS, Azure, GCP and ten SaaS providers. Answers in plain English. No dashboards. No SQL.
+          Connect 13 billing APIs once. Then ask: why did we spike, which team is over budget, what can we cut. nable catches anomalies before the invoice lands, enforces budgets in CI, and opens the Jira ticket when something needs action.
         </p>
         <div className="hero-cta">
           <a href="#" onClick={onTrial} className="btn btn-primary">Start 14-day trial <span className="arr">→</span></a>
@@ -445,6 +459,37 @@ function Terminal(){
         </div>
       </div>
     </div>
+  );
+}
+
+function ForTeams(){
+  return (
+    <section data-screen-label="01b For teams">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ For teams</div>
+          <h2>Built for the team that owns the bill.</h2>
+          <p>One server. Every engineer with access. No extra service, no shared credentials, no one-person bottleneck.</p>
+        </div>
+        <div className="for-teams-grid">
+          <div className="ft-card">
+            <div className="ft-n">Attribution</div>
+            <h3>Tag once. Know forever who spent what.</h3>
+            <p>Map resource tags to teams in a single YAML file. Every cost query breaks down by team across all 13 providers automatically.</p>
+          </div>
+          <div className="ft-card">
+            <div className="ft-n">Budget gates</div>
+            <h3>Budgets that enforce themselves.</h3>
+            <p>Set a limit in budget.yml and the CI step exits non-zero when you go over. No more end-of-month surprises because nobody checked the dashboard.</p>
+          </div>
+          <div className="ft-card">
+            <div className="ft-n">Access control</div>
+            <h3>Platform team sees platform costs. Full stop.</h3>
+            <p>Issue API keys per engineer with viewer, analyst, or admin roles. Scope any key to a team or provider. Every write goes to a local audit log.</p>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -553,7 +598,7 @@ function Features(){
         <div className="section-head">
           <div className="label">/ Capabilities</div>
           <h2>Not a wrapper around get_cost_and_usage.</h2>
-          <p>nable layers analysis on top of raw billing data.</p>
+          <p>Every other tool gives you the data and leaves. nable runs the analysis, catches what matters, and takes action on it.</p>
         </div>
 
         <div className="features">
@@ -627,7 +672,7 @@ function Security(){
             Every other FinOps tool asks for your cloud keys. We don't.
           </blockquote>
           <p>
-            All credentials are encrypted with Fernet and stored in your OS keyring: macOS Keychain, Windows Credential Manager, or libsecret on Linux. The vault key lives on your hardware, not our servers. There is no cloud sync. There is nothing to breach on our end.
+            Credentials are encrypted with Fernet and stored in your OS keyring: macOS Keychain, Windows Credential Manager, or libsecret on Linux. The vault key lives on your hardware. There is no cloud sync. Nothing to breach on our end because there is nothing on our end.
           </p>
           <div className="chips">
             <span className="chip">Fernet encryption</span>
@@ -981,6 +1026,7 @@ function App(){
     <>
       <Nav dark={dark} onToggle={toggle} onTrial={openModal} />
       <Hero onTrial={openModal} />
+      <ForTeams />
       <HowItWorks />
       <Features />
       <Connectors />
