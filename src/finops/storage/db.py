@@ -223,6 +223,24 @@ report_subscriptions = Table(
     Column("created_by", String(256), nullable=False, default=""),
 )
 
+# ── RBAC tables ───────────────────────────────────────────────────────────────
+
+api_keys = Table(
+    "api_keys", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("key_hash", String(64), nullable=False),           # SHA-256 of raw key
+    Column("name", String(256), nullable=False),              # human label ("Alice — analyst")
+    Column("email", String(256), nullable=False, default=""),
+    Column("role", String(32), nullable=False, default="viewer"),  # viewer|analyst|admin
+    Column("scope_team", String(256), nullable=True),         # NULL = all teams
+    Column("scope_provider", String(64), nullable=True),      # NULL = all providers
+    Column("created_at", DateTime, nullable=False),
+    Column("last_used_at", DateTime, nullable=True),
+    Column("created_by", String(256), nullable=False, default=""),
+    Column("is_active", Boolean, nullable=False, default=True),
+)
+
+
 # ── Org / multi-account tables ────────────────────────────────────────────────
 
 org_accounts = Table(
@@ -261,6 +279,10 @@ Index("ix_org_acct_provider", org_accounts.c.account_id, org_accounts.c.cloud_pr
 # budgets: list_budgets filters by is_active; sync_from_yaml looks up by name
 Index("ix_budgets_active",    budgets.c.is_active)
 Index("ix_budgets_name",      budgets.c.name, unique=True)
+
+# api_keys: auth middleware looks up by key_hash; admin lists active keys
+Index("ix_keys_hash",         api_keys.c.key_hash, unique=True)
+Index("ix_keys_active",       api_keys.c.is_active)
 
 # report_subscriptions: scheduler filters by is_active
 Index("ix_rsub_active",       report_subscriptions.c.is_active)

@@ -534,6 +534,16 @@ const FEATURES = [
     h:"Invoice email parsing (IMAP).",
     p:"For vendors with no billing API like PagerDuty, GitHub Enterprise, or New Relic, connect a billing inbox and we parse the PDFs for you."
   },
+  {
+    n:"07",
+    h:"Role-based access control.",
+    p:"Three roles — viewer, analyst, admin — each scoped to a team or provider. A platform engineer sees only platform costs. An SRE can't touch budget limits. An admin key manages the rest. All writes go to a local audit log."
+  },
+  {
+    n:"08",
+    h:"Shared Postgres mode for teams.",
+    p:"Point DATABASE_URL at a shared Postgres instance and every engineer with a key queries the same normalized cost data. No sync step. No separate service. Swap one env var."
+  },
 ];
 
 function Features(){
@@ -623,6 +633,8 @@ function Security(){
             <span className="chip">Fernet encryption</span>
             <span className="chip">OS keyring</span>
             <span className="chip">Read-only API scopes</span>
+            <span className="chip">Role-based access control</span>
+            <span className="chip">Team-scoped keys</span>
             <span className="chip">Local audit log</span>
             <span className="chip">No vendor cloud access</span>
             <span className="chip">SOC 2 in progress</span>
@@ -679,6 +691,8 @@ function Pricing({ onTrial }){
               <li>Scheduled Slack reports</li>
               <li>PR cost comments</li>
               <li>Postgres shared mode for teams</li>
+              <li>Role-based access control (viewer / analyst / admin)</li>
+              <li>Team-scoped API keys + audit log</li>
             </ul>
 
             {!freeSetup ? (
