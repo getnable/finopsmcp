@@ -358,7 +358,7 @@ function ThemeToggle({ dark, onToggle }){
   );
 }
 
-function Nav({ dark, onToggle, onTrial }){
+function Nav({ dark, onToggle, onTrial, onSignIn }){
   return (
     <nav className="nav">
       <div className="wrap nav-inner">
@@ -371,7 +371,7 @@ function Nav({ dark, onToggle, onTrial }){
         </ul>
         <div className="right">
           <ThemeToggle dark={dark} onToggle={onToggle} />
-          <a href="/docs" className="btn btn-ghost">Sign in</a>
+          <button className="btn btn-ghost" onClick={onSignIn}>Sign in</button>
           <a href="#" onClick={onTrial} className="btn btn-primary">Try Pro free <span className="arr">→</span></a>
         </div>
       </div>
@@ -453,8 +453,15 @@ function Terminal(){
           <div className="bubble">
             <p>
               <span className="anomaly">High · z = 3.8</span>{" "}
-              Datadog usage is up <span style={{color:"var(--alert)"}}>+127%</span> versus your same-weekday baseline. $4,100 today vs $1,810 average. I've opened JIRA-2841 and tagged @sre.
+              Datadog usage is up <span style={{color:"var(--alert)"}}>+127%</span> versus your same-weekday baseline. $4,100 today vs $1,810 average.
             </p>
+            <div className="table" style={{marginTop:12}}>
+              <div className="r hd"><span>Tag driver</span><span>Delta</span><span>% of spike</span></div>
+              <div className="r"><span>team=platform</span><span className="num delta up">+$2,290</span><span className="num delta up">78%</span></div>
+              <div className="r"><span>team=infra</span><span className="num delta up">+$480</span><span className="num delta up">16%</span></div>
+              <div className="r"><span>(untagged)</span><span className="num delta up">+$180</span><span className="num delta up">6%</span></div>
+            </div>
+            <p style={{marginTop:12}}>I've opened JIRA-2841 and tagged @sre.</p>
           </div>
         </div>
       </div>
@@ -475,12 +482,12 @@ function ForTeams(){
           <div className="ft-card">
             <div className="ft-n">Attribution</div>
             <h3>Tag once. Know forever who spent what.</h3>
-            <p>Map resource tags to teams in a single YAML file. Every cost query breaks down by team across all 13 providers automatically.</p>
+            <p>Tell nable which tags mean which team — once — and every cost query breaks down by owner across all 13 providers automatically.</p>
           </div>
           <div className="ft-card">
             <div className="ft-n">Budget gates</div>
             <h3>Budgets that enforce themselves.</h3>
-            <p>Set a limit in budget.yml and the CI step exits non-zero when you go over. No more end-of-month surprises because nobody checked the dashboard.</p>
+            <p>Set a spend limit and your CI pipeline fails automatically when you go over. No more end-of-month surprises because nobody checked the dashboard.</p>
           </div>
           <div className="ft-card">
             <div className="ft-n">Access control</div>
@@ -551,18 +558,18 @@ function HowItWorks(){
 const FEATURES = [
   {
     n:"01",
-    h:"Anomaly detection, seasonality-aware.",
-    p:"Compares same-weekday baselines, not flat rolling averages. Catches real spikes before the invoice arrives, and tells the difference between a Friday deploy and a Tuesday outage."
+    h:"Anomaly detection that tells you who, not just what.",
+    p:"Compares same-weekday baselines, not flat rolling averages. When something spikes, it drills into Cost Explorer by tag and tells you which team, environment, or service drove it — and by how much."
   },
   {
     n:"02",
     h:"Tag-based attribution.",
-    p:"Map resource tags to teams via a single YAML file. Get ranked spend by team across every cloud and SaaS in one breath."
+    p:"Tell nable which tags belong to which team and get ranked spend by owner across every cloud and SaaS in one breath — no spreadsheets."
   },
   {
     n:"03",
     h:"Rightsizing, actually filed.",
-    p:"Reads 14 days of CloudWatch CPU metrics, finds the chronically idle, calculates exact savings, and opens the Jira / Linear / GitHub ticket for you."
+    p:"Pulls recommendations from AWS Compute Optimizer — CPU, memory, network, and disk, not just CPU. Covers EC2 and Lambda. Calculates exact savings and opens the Jira, Linear, or GitHub ticket for you."
   },
   {
     n:"04",
@@ -1004,9 +1011,44 @@ function TrialModal({ onClose }){
   );
 }
 
+function SignInModal({ onClose }){
+  const [email, setEmail] = useState("");
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    window.location.href = "/docs";
+  };
+  return (
+    <div className="modal-backdrop" onClick={(e)=>{ if(e.target===e.currentTarget) onClose(); }}>
+      <div className="modal" style={{position:"relative",gridTemplateColumns:"1fr",maxWidth:440}}>
+        <button className="modal-close" onClick={onClose}>×</button>
+        <div className="modal-right" style={{padding:"44px 40px"}}>
+          <h4>Sign in to nable</h4>
+          <p style={{fontFamily:"var(--mono)",fontSize:12,color:"var(--fg-3)",marginTop:4}}>Enter your email to continue to the docs.</p>
+          <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16,marginTop:20}}>
+            <div>
+              <label>EMAIL</label>
+              <input
+                type="email"
+                placeholder="you@company.com"
+                value={email}
+                onChange={(e)=>setEmail(e.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+            <button className="modal-submit" type="submit">Continue to docs →</button>
+            <div className="modal-note">We'll use this to link your account and send setup tips.</div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
   const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
   useEffect(()=>{ applyTheme(t); },[t]);
   const dark = t.palette === "graphite";
@@ -1022,9 +1064,10 @@ function App(){
     return ()=>window.removeEventListener("message", onMsg);
   },[]);
   const openModal = (e) => { e.preventDefault(); setModalOpen(true); };
+  const openSignIn = (e) => { e.preventDefault(); setSignInOpen(true); };
   return (
     <>
-      <Nav dark={dark} onToggle={toggle} onTrial={openModal} />
+      <Nav dark={dark} onToggle={toggle} onTrial={openModal} onSignIn={openSignIn} />
       <Hero onTrial={openModal} />
       <ForTeams />
       <HowItWorks />
@@ -1036,6 +1079,7 @@ function App(){
       <Footer />
       <Tweaks open={tweaksOpen} t={t} setTweak={setTweak} />
       {modalOpen && <TrialModal onClose={()=>setModalOpen(false)} />}
+      {signInOpen && <SignInModal onClose={()=>setSignInOpen(false)} />}
     </>
   );
 }
