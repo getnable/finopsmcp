@@ -1,121 +1,273 @@
 """
-EC2 rightsizing recommendations via CloudWatch.
+Rightsizing recommendations via AWS Compute Optimizer (primary) with
+CloudWatch CPU fallback for accounts that haven't opted in.
 
-Identifies instances running at low CPU/network utilization over the past 14
-days and calculates projected monthly savings from downsizing one tier.
+Compute Optimizer considers CPU, memory, network, and disk — not just CPU.
+It covers EC2, Lambda, and ECS services. We surface its findings directly
+rather than rebuilding the same logic ourselves.
 
-Approach:
-  - Pull all running EC2 instances per region
-  - For each: fetch CloudWatch avg/max CPU over 14 days
-  - Flag instances where avg CPU < threshold AND max CPU < spike_threshold
-  - Look up on-demand pricing for current + next-smaller instance type
-  - Return recommendations sorted by monthly savings (descending)
-
-This is pure read-only — we never modify resources.
+Fallback (CloudWatch only):
+  Used when Compute Optimizer returns no data or opt-in is required.
+  CPU-only, EC2 only, less accurate — clearly labelled in output.
 """
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
 
-# Tunable thresholds
-_AVG_CPU_THRESHOLD = 20.0   # flag if avg CPU < 20%
-_MAX_CPU_THRESHOLD = 50.0   # AND max CPU never exceeded 50% (true idle, not just off-peak)
-_LOOKBACK_DAYS = 14
+_LOOKBACK_DAYS     = 14
+_AVG_CPU_THRESHOLD = 20.0
+_MAX_CPU_THRESHOLD = 50.0
+_HOURS_PER_MONTH   = 730.0
 
-# Simplified instance family downsize map (current → next smaller)
-# In production this would be loaded from a pricing API / embedded JSON
-_DOWNSIZE_MAP: dict[str, str] = {
-    "t3.medium": "t3.small",   "t3.large": "t3.medium",
-    "t3.xlarge": "t3.large",   "t3.2xlarge": "t3.xlarge",
-    "t3a.medium": "t3a.small", "t3a.large": "t3a.medium",
-    "m5.large": "m5.large",    "m5.xlarge": "m5.large",
-    "m5.2xlarge": "m5.xlarge", "m5.4xlarge": "m5.2xlarge",
-    "m6i.large": "m6i.large",  "m6i.xlarge": "m6i.large",
-    "m6i.2xlarge": "m6i.xlarge","m6i.4xlarge": "m6i.2xlarge",
-    "c5.large": "c5.large",    "c5.xlarge": "c5.large",
-    "c5.2xlarge": "c5.xlarge", "c5.4xlarge": "c5.2xlarge",
-    "r5.large": "r5.large",    "r5.xlarge": "r5.large",
-    "r5.2xlarge": "r5.xlarge", "r5.4xlarge": "r5.2xlarge",
-}
-
-# Approximate on-demand hourly prices (us-east-1) — snapshot used for estimation.
-# Real implementation would call the AWS Pricing API.
+# Fallback on-demand hourly prices (us-east-1) used only when Compute
+# Optimizer savings estimates are unavailable.
 _HOURLY_PRICE: dict[str, float] = {
-    "t3.nano": 0.0052,   "t3.micro": 0.0104,  "t3.small": 0.0208,
-    "t3.medium": 0.0416, "t3.large": 0.0832,  "t3.xlarge": 0.1664, "t3.2xlarge": 0.3328,
-    "t3a.nano": 0.0047,  "t3a.micro": 0.0094, "t3a.small": 0.0188,
-    "t3a.medium": 0.0376,"t3a.large": 0.0752, "t3a.xlarge": 0.1504,"t3a.2xlarge": 0.3008,
-    "m5.large": 0.096,   "m5.xlarge": 0.192,  "m5.2xlarge": 0.384,
-    "m5.4xlarge": 0.768, "m5.8xlarge": 1.536,
-    "m6i.large": 0.096,  "m6i.xlarge": 0.192, "m6i.2xlarge": 0.384,
-    "m6i.4xlarge": 0.768,"m6i.8xlarge": 1.536,
-    "c5.large": 0.085,   "c5.xlarge": 0.17,   "c5.2xlarge": 0.34,
-    "c5.4xlarge": 0.68,  "c5.9xlarge": 1.53,
-    "r5.large": 0.126,   "r5.xlarge": 0.252,  "r5.2xlarge": 0.504,
-    "r5.4xlarge": 1.008, "r5.8xlarge": 2.016,
+    "t3.nano": 0.0052,    "t3.micro": 0.0104,   "t3.small": 0.0208,
+    "t3.medium": 0.0416,  "t3.large": 0.0832,   "t3.xlarge": 0.1664,
+    "t3.2xlarge": 0.3328,
+    "t3a.nano": 0.0047,   "t3a.micro": 0.0094,  "t3a.small": 0.0188,
+    "t3a.medium": 0.0376, "t3a.large": 0.0752,  "t3a.xlarge": 0.1504,
+    "t3a.2xlarge": 0.3008,
+    "m5.large": 0.096,    "m5.xlarge": 0.192,   "m5.2xlarge": 0.384,
+    "m5.4xlarge": 0.768,  "m5.8xlarge": 1.536,
+    "m6i.large": 0.096,   "m6i.xlarge": 0.192,  "m6i.2xlarge": 0.384,
+    "m6i.4xlarge": 0.768, "m6i.8xlarge": 1.536,
+    "c5.large": 0.085,    "c5.xlarge": 0.17,    "c5.2xlarge": 0.34,
+    "c5.4xlarge": 0.68,   "c5.9xlarge": 1.53,
+    "r5.large": 0.126,    "r5.xlarge": 0.252,   "r5.2xlarge": 0.504,
+    "r5.4xlarge": 1.008,  "r5.8xlarge": 2.016,
 }
 
-_HOURS_PER_MONTH = 730.0
+_DOWNSIZE_MAP: dict[str, str] = {
+    "t3.medium": "t3.small",    "t3.large": "t3.medium",
+    "t3.xlarge": "t3.large",    "t3.2xlarge": "t3.xlarge",
+    "t3a.medium": "t3a.small",  "t3a.large": "t3a.medium",
+    "m5.xlarge": "m5.large",    "m5.2xlarge": "m5.xlarge",
+    "m5.4xlarge": "m5.2xlarge",
+    "m6i.xlarge": "m6i.large",  "m6i.2xlarge": "m6i.xlarge",
+    "m6i.4xlarge": "m6i.2xlarge",
+    "c5.xlarge": "c5.large",    "c5.2xlarge": "c5.xlarge",
+    "c5.4xlarge": "c5.2xlarge",
+    "r5.xlarge": "r5.large",    "r5.2xlarge": "r5.xlarge",
+    "r5.4xlarge": "r5.2xlarge",
+}
 
 
 @dataclass
 class RightsizingRecommendation:
     instance_id: str
-    instance_type: str
+    instance_type: str          # current type (or "Lambda" / "ECS")
     name: str
     region: str
     account_id: str
-    avg_cpu_pct: float
-    max_cpu_pct: float
-    recommended_type: str
-    current_monthly_cost: float
-    recommended_monthly_cost: float
-    monthly_savings: float
-    confidence: str  # "high" | "medium"
-    metadata: dict[str, Any] = field(default_factory=dict)
+    resource_type: str          # "ec2" | "lambda" | "ecs"
+    source: str                 # "compute_optimizer" | "cloudwatch_fallback"
+
+    # Utilisation metrics — populated from Compute Optimizer when available
+    avg_cpu_pct: float          = 0.0
+    max_cpu_pct: float          = 0.0
+    avg_mem_pct: float | None   = None   # None = not available
+    avg_net_mbps: float | None  = None
+
+    recommended_type: str       = ""
+    current_monthly_cost: float = 0.0
+    recommended_monthly_cost: float = 0.0
+    monthly_savings: float      = 0.0
+    confidence: str             = "medium"   # "high" | "medium" | "low"
+    finding: str                = ""         # Compute Optimizer finding label
+    metadata: dict[str, Any]    = field(default_factory=dict)
 
     @property
     def title(self) -> str:
-        return (
-            f"Downsize {self.name or self.instance_id} "
-            f"({self.instance_type} → {self.recommended_type})"
-        )
+        label = self.name or self.instance_id
+        if self.recommended_type:
+            return f"Downsize {label} ({self.instance_type} → {self.recommended_type})"
+        return f"Right-size {label} ({self.instance_type})"
 
     @property
     def description(self) -> str:
-        return (
-            f"Avg CPU {self.avg_cpu_pct:.1f}%, max {self.max_cpu_pct:.1f}% "
-            f"over {_LOOKBACK_DAYS} days. "
-            f"Downsizing saves ~${self.monthly_savings:,.0f}/mo."
-        )
+        parts = [f"Avg CPU {self.avg_cpu_pct:.1f}%"]
+        if self.avg_mem_pct is not None:
+            parts.append(f"mem {self.avg_mem_pct:.1f}%")
+        parts.append(f"over {_LOOKBACK_DAYS}d.")
+        if self.monthly_savings:
+            parts.append(f"Saving ~${self.monthly_savings:,.0f}/mo.")
+        if self.source == "cloudwatch_fallback":
+            parts.append("(CPU-only estimate — enable Compute Optimizer for full analysis)")
+        return " ".join(parts)
 
+
+# ── Compute Optimizer (primary) ───────────────────────────────────────────────
+
+def _co_utilization(metrics: list[dict]) -> dict[str, float]:
+    """Extract named utilization metrics from a Compute Optimizer metrics list."""
+    out: dict[str, float] = {}
+    for m in metrics:
+        name = m.get("name", "")
+        value = m.get("value", 0.0)
+        if name == "Cpu":
+            out["cpu"] = round(float(value), 1)
+        elif name == "Memory":
+            out["mem"] = round(float(value), 1)
+        elif name in ("NetworkInBytesPerSecond", "NetworkOutBytesPerSecond"):
+            out.setdefault("net_mbps", 0.0)
+            out["net_mbps"] = round(out["net_mbps"] + float(value) / 1_000_000, 3)
+    return out
+
+
+def _fetch_ec2_from_co(co_client: Any, account_id: str) -> list[RightsizingRecommendation]:
+    results = []
+    paginator = co_client.get_paginator("get_ec2_instance_recommendations")
+    pages = paginator.paginate(
+        filters=[{"name": "Finding", "values": ["OVER_PROVISIONED", "VERY_OVER_PROVISIONED"]}]
+    )
+    for page in pages:
+        for rec in page.get("instanceRecommendations", []):
+            arn        = rec.get("instanceArn", "")
+            iid        = arn.split("/")[-1] if "/" in arn else arn
+            itype      = rec.get("currentInstanceType", "")
+            name       = rec.get("instanceName", "")
+            region     = arn.split(":")[3] if ":" in arn else ""
+            finding    = rec.get("finding", "")
+            util       = _co_utilization(rec.get("utilizationMetrics", []))
+
+            # Best recommendation = rank 1
+            options = sorted(
+                rec.get("recommendationOptions", []),
+                key=lambda o: o.get("rank", 99)
+            )
+            if not options:
+                continue
+            best   = options[0]
+            rtype  = best.get("instanceType", "")
+            savings_info = (
+                best.get("savingsOpportunity", {})
+                    .get("estimatedMonthlySavings", {})
+            )
+            monthly_savings = float(savings_info.get("value", 0.0))
+            currency        = savings_info.get("currency", "USD")
+            if currency != "USD":
+                monthly_savings = 0.0  # don't guess FX
+
+            rec_util  = _co_utilization(best.get("projectedUtilizationMetrics", []))
+            confidence = "high" if finding == "VERY_OVER_PROVISIONED" else "medium"
+
+            results.append(RightsizingRecommendation(
+                instance_id=iid,
+                instance_type=itype,
+                name=name,
+                region=region,
+                account_id=account_id,
+                resource_type="ec2",
+                source="compute_optimizer",
+                avg_cpu_pct=util.get("cpu", 0.0),
+                avg_mem_pct=util.get("mem"),
+                avg_net_mbps=util.get("net_mbps"),
+                recommended_type=rtype,
+                monthly_savings=round(monthly_savings, 2),
+                confidence=confidence,
+                finding=finding,
+                metadata={"options_count": len(options)},
+            ))
+    return results
+
+
+def _fetch_lambda_from_co(co_client: Any, account_id: str) -> list[RightsizingRecommendation]:
+    results = []
+    try:
+        paginator = co_client.get_paginator("get_lambda_function_recommendations")
+        pages = paginator.paginate(
+            filters=[{"name": "Finding", "values": ["OVER_PROVISIONED"]}]
+        )
+        for page in pages:
+            for rec in page.get("lambdaFunctionRecommendations", []):
+                arn      = rec.get("functionArn", "")
+                fname    = arn.split(":")[-1] if ":" in arn else arn
+                region   = arn.split(":")[3] if ":" in arn else ""
+                current_mb = rec.get("currentMemorySize", 0)
+                finding    = rec.get("finding", "")
+                util       = _co_utilization(rec.get("utilizationMetrics", []))
+
+                options = rec.get("memorySizeRecommendationOptions", [])
+                options_sorted = sorted(options, key=lambda o: o.get("rank", 99))
+                if not options_sorted:
+                    continue
+                best        = options_sorted[0]
+                rec_mb      = best.get("memorySize", current_mb)
+                savings_info = (
+                    best.get("savingsOpportunity", {})
+                        .get("estimatedMonthlySavings", {})
+                )
+                monthly_savings = float(savings_info.get("value", 0.0))
+
+                results.append(RightsizingRecommendation(
+                    instance_id=arn,
+                    instance_type=f"Lambda {current_mb}MB",
+                    name=fname,
+                    region=region,
+                    account_id=account_id,
+                    resource_type="lambda",
+                    source="compute_optimizer",
+                    avg_cpu_pct=util.get("cpu", 0.0),
+                    avg_mem_pct=util.get("mem"),
+                    recommended_type=f"Lambda {rec_mb}MB",
+                    monthly_savings=round(monthly_savings, 2),
+                    confidence="medium",
+                    finding=finding,
+                ))
+    except Exception as e:
+        log.debug("Lambda Compute Optimizer recommendations unavailable: %s", e)
+    return results
+
+
+def _analyze_compute_optimizer(account_id: str) -> list[RightsizingRecommendation]:
+    """Fetch EC2 + Lambda rightsizing from Compute Optimizer."""
+    try:
+        import boto3
+        co = boto3.client("compute-optimizer", region_name="us-east-1")
+        # Verify opt-in status first — avoids a confusing AccessDeniedException
+        status = co.get_enrollment_status()
+        if status.get("status") not in ("Active", "active"):
+            log.info(
+                "Compute Optimizer not opted in (status=%s). "
+                "Enable it at: https://console.aws.amazon.com/compute-optimizer/",
+                status.get("status"),
+            )
+            return []
+
+        ec2_recs    = _fetch_ec2_from_co(co, account_id)
+        lambda_recs = _fetch_lambda_from_co(co, account_id)
+        return ec2_recs + lambda_recs
+
+    except Exception as e:
+        log.warning("Compute Optimizer unavailable: %s", e)
+        return []
+
+
+# ── CloudWatch fallback (CPU-only, EC2 only) ──────────────────────────────────
 
 def _get_cloudwatch_cpu(cw_client: Any, instance_id: str, days: int) -> tuple[float, float]:
-    """Return (avg_cpu, max_cpu) for an instance over the past `days` days."""
-    end = datetime.now(timezone.utc)
+    end   = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
-
-    resp = cw_client.get_metric_statistics(
+    resp  = cw_client.get_metric_statistics(
         Namespace="AWS/EC2",
         MetricName="CPUUtilization",
         Dimensions=[{"Name": "InstanceId", "Value": instance_id}],
         StartTime=start,
         EndTime=end,
-        Period=3600,  # hourly points
+        Period=3600,
         Statistics=["Average", "Maximum"],
     )
-    datapoints = resp.get("Datapoints", [])
-    if not datapoints:
+    dps = resp.get("Datapoints", [])
+    if not dps:
         return 0.0, 0.0
-
-    avgs = [d["Average"] for d in datapoints]
-    maxs = [d["Maximum"] for d in datapoints]
+    avgs = [d["Average"] for d in dps]
+    maxs = [d["Maximum"] for d in dps]
     return sum(avgs) / len(avgs), max(maxs)
 
 
@@ -123,14 +275,74 @@ def _monthly_cost(instance_type: str) -> float:
     return _HOURLY_PRICE.get(instance_type, 0.0) * _HOURS_PER_MONTH
 
 
+def _analyze_cloudwatch_fallback(
+    regions: list[str],
+    account_id: str,
+    avg_cpu_threshold: float,
+    max_cpu_threshold: float,
+) -> list[RightsizingRecommendation]:
+    """CPU-only EC2 scan when Compute Optimizer is not available."""
+    import boto3
+    results = []
+    for region in regions:
+        try:
+            ec2 = boto3.client("ec2",        region_name=region)
+            cw  = boto3.client("cloudwatch", region_name=region)
+            pag = ec2.get_paginator("describe_instances")
+            for page in pag.paginate(
+                Filters=[{"Name": "instance-state-name", "Values": ["running"]}]
+            ):
+                for reservation in page["Reservations"]:
+                    for inst in reservation["Instances"]:
+                        iid   = inst["InstanceId"]
+                        itype = inst["InstanceType"]
+                        name  = next(
+                            (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
+                        )
+                        avg_cpu, max_cpu = _get_cloudwatch_cpu(cw, iid, _LOOKBACK_DAYS)
+                        if avg_cpu >= avg_cpu_threshold or max_cpu >= max_cpu_threshold:
+                            continue
+                        recommended = _DOWNSIZE_MAP.get(itype)
+                        if not recommended or recommended == itype:
+                            continue
+                        savings = _monthly_cost(itype) - _monthly_cost(recommended)
+                        if savings <= 0:
+                            continue
+                        results.append(RightsizingRecommendation(
+                            instance_id=iid,
+                            instance_type=itype,
+                            name=name,
+                            region=region,
+                            account_id=account_id,
+                            resource_type="ec2",
+                            source="cloudwatch_fallback",
+                            avg_cpu_pct=round(avg_cpu, 1),
+                            max_cpu_pct=round(max_cpu, 1),
+                            recommended_type=recommended,
+                            current_monthly_cost=round(_monthly_cost(itype), 2),
+                            recommended_monthly_cost=round(_monthly_cost(recommended), 2),
+                            monthly_savings=round(savings, 2),
+                            confidence="high" if avg_cpu < 10 and max_cpu < 30 else "medium",
+                        ))
+        except Exception as e:
+            log.warning("CloudWatch fallback failed for region %s: %s", region, e)
+    return results
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
 def analyze_rightsizing(
     regions: list[str] | None = None,
     avg_cpu_threshold: float = _AVG_CPU_THRESHOLD,
     max_cpu_threshold: float = _MAX_CPU_THRESHOLD,
+    min_monthly_savings: float = 10.0,
 ) -> list[RightsizingRecommendation]:
     """
-    Scan all running EC2 instances across given regions and return rightsizing
-    recommendations sorted by monthly savings descending.
+    Return rightsizing recommendations sorted by monthly savings (descending).
+
+    Uses AWS Compute Optimizer as the primary source (CPU + memory + network +
+    disk, covers EC2 and Lambda). Falls back to a CloudWatch CPU-only scan
+    for accounts that haven't opted into Compute Optimizer.
     """
     try:
         import boto3
@@ -138,98 +350,79 @@ def analyze_rightsizing(
         log.error("boto3 not installed")
         return []
 
-    if regions is None:
-        ec2_global = boto3.client("ec2", region_name="us-east-1")
-        try:
-            resp = ec2_global.describe_regions(Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}])
-            regions = [r["RegionName"] for r in resp.get("Regions", [])]
-        except Exception:
-            regions = ["us-east-1", "us-west-2", "eu-west-1"]
-
-    recommendations: list[RightsizingRecommendation] = []
     sts = boto3.client("sts")
     try:
         account_id = sts.get_caller_identity()["Account"]
     except Exception:
         account_id = "unknown"
 
-    for region in regions:
-        try:
-            ec2 = boto3.client("ec2", region_name=region)
-            cw = boto3.client("cloudwatch", region_name=region)
+    # Try Compute Optimizer first
+    recommendations = _analyze_compute_optimizer(account_id)
 
-            paginator = ec2.get_paginator("describe_instances")
-            for page in paginator.paginate(
-                Filters=[{"Name": "instance-state-name", "Values": ["running"]}]
-            ):
-                for reservation in page["Reservations"]:
-                    for inst in reservation["Instances"]:
-                        iid = inst["InstanceId"]
-                        itype = inst["InstanceType"]
-                        name = next(
-                            (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
-                        )
+    if not recommendations:
+        # Fall back to CloudWatch CPU scan
+        if regions is None:
+            try:
+                ec2g = boto3.client("ec2", region_name="us-east-1")
+                resp = ec2g.describe_regions(
+                    Filters=[{"Name": "opt-in-status",
+                              "Values": ["opt-in-not-required", "opted-in"]}]
+                )
+                regions = [r["RegionName"] for r in resp.get("Regions", [])]
+            except Exception:
+                regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
-                        avg_cpu, max_cpu = _get_cloudwatch_cpu(cw, iid, _LOOKBACK_DAYS)
+        recommendations = _analyze_cloudwatch_fallback(
+            regions, account_id, avg_cpu_threshold, max_cpu_threshold
+        )
 
-                        if avg_cpu >= avg_cpu_threshold or max_cpu >= max_cpu_threshold:
-                            continue  # instance is actively used
-
-                        recommended = _DOWNSIZE_MAP.get(itype)
-                        if not recommended or recommended == itype:
-                            continue  # no smaller option mapped
-
-                        current_cost = _monthly_cost(itype)
-                        rec_cost = _monthly_cost(recommended)
-                        savings = current_cost - rec_cost
-
-                        if savings <= 0:
-                            continue
-
-                        confidence = "high" if avg_cpu < 10 and max_cpu < 30 else "medium"
-
-                        recommendations.append(
-                            RightsizingRecommendation(
-                                instance_id=iid,
-                                instance_type=itype,
-                                name=name,
-                                region=region,
-                                account_id=account_id,
-                                avg_cpu_pct=round(avg_cpu, 1),
-                                max_cpu_pct=round(max_cpu, 1),
-                                recommended_type=recommended,
-                                current_monthly_cost=round(current_cost, 2),
-                                recommended_monthly_cost=round(rec_cost, 2),
-                                monthly_savings=round(savings, 2),
-                                confidence=confidence,
-                            )
-                        )
-        except Exception as e:
-            log.warning("Rightsizing scan failed for region %s: %s", region, e)
-
+    # Filter out noise and sort
+    recommendations = [r for r in recommendations if r.monthly_savings >= min_monthly_savings]
     recommendations.sort(key=lambda r: r.monthly_savings, reverse=True)
     return recommendations
 
 
 def rightsizing_summary(recommendations: list[RightsizingRecommendation]) -> dict[str, Any]:
     total_savings = sum(r.monthly_savings for r in recommendations)
+    co_count  = sum(1 for r in recommendations if r.source == "compute_optimizer")
+    cw_count  = sum(1 for r in recommendations if r.source == "cloudwatch_fallback")
+
+    by_type: dict[str, float] = {}
+    for r in recommendations:
+        by_type[r.resource_type] = by_type.get(r.resource_type, 0) + r.monthly_savings
+
     return {
         "total_instances_flagged": len(recommendations),
-        "total_monthly_savings": round(total_savings, 2),
-        "total_annual_savings": round(total_savings * 12, 2),
+        "total_monthly_savings":   round(total_savings, 2),
+        "total_annual_savings":    round(total_savings * 12, 2),
+        "source": {
+            "compute_optimizer": co_count,
+            "cloudwatch_fallback": cw_count,
+            "note": (
+                "Compute Optimizer recommendations include CPU, memory, network, and disk. "
+                "CloudWatch fallback is CPU-only."
+                if cw_count > 0 else
+                "All recommendations sourced from AWS Compute Optimizer."
+            ),
+        },
+        "savings_by_resource_type": {k: round(v, 2) for k, v in by_type.items()},
         "recommendations": [
             {
-                "instance_id": r.instance_id,
-                "name": r.name,
-                "region": r.region,
-                "current_type": r.instance_type,
+                "instance_id":    r.instance_id,
+                "name":           r.name,
+                "region":         r.region,
+                "resource_type":  r.resource_type,
+                "source":         r.source,
+                "current_type":   r.instance_type,
                 "recommended_type": r.recommended_type,
-                "avg_cpu_pct": r.avg_cpu_pct,
-                "max_cpu_pct": r.max_cpu_pct,
+                "avg_cpu_pct":    r.avg_cpu_pct,
+                "avg_mem_pct":    r.avg_mem_pct,
+                "avg_net_mbps":   r.avg_net_mbps,
                 "monthly_savings": r.monthly_savings,
-                "confidence": r.confidence,
-                "title": r.title,
-                "description": r.description,
+                "confidence":     r.confidence,
+                "finding":        r.finding,
+                "title":          r.title,
+                "description":    r.description,
             }
             for r in recommendations
         ],
