@@ -3,15 +3,18 @@
 finops setup — interactive CLI wizard for configuring providers securely.
 
 Usage:
-  finops setup                  # walk through all providers
-  finops setup aws              # configure AWS only
-  finops setup azure            # configure Azure only
-  finops setup gcp              # configure GCP only
-  finops setup slack            # configure Slack notifications
-  finops setup teams            # configure Teams notifications
-  finops setup vault list       # list stored credential keys
-  finops setup vault delete KEY # delete a stored credential
-  finops setup vault rotate     # rotate the master encryption key
+  finops setup                        # walk through all providers
+  finops setup aws                    # configure AWS only
+  finops setup aws --iam-template     # print least-privilege IAM CloudFormation
+  finops setup aws --iam-terraform    # print least-privilege IAM Terraform snippet
+  finops setup aws --check-scope      # verify your AWS key is read-only
+  finops setup azure                  # configure Azure only
+  finops setup gcp                    # configure GCP only
+  finops setup slack                  # configure Slack notifications
+  finops setup teams                  # configure Teams notifications
+  finops setup vault list             # list stored credential keys
+  finops setup vault delete KEY       # delete a stored credential
+  finops setup vault rotate           # rotate the master encryption key
 """
 from __future__ import annotations
 
@@ -310,6 +313,44 @@ def main(args: list[str] | None = None) -> None:
                 vault_delete(parsed.key)
         elif parsed.action == "rotate":
             vault_rotate()
+    elif parsed.cmd == "iam-template":
+        # Standalone alias: finops setup iam-template
+        from .security.iam_setup import print_iam_template
+        fmt = "terraform" if (parsed.action == "terraform") else "cloudformation"
+        print_iam_template(fmt)
+        return
+    elif parsed.cmd == "aws" and parsed.action in ("--iam-template", "iam-template"):
+        from .security.iam_setup import print_iam_template
+        print_iam_template("cloudformation")
+        return
+    elif parsed.cmd == "aws" and parsed.action in ("--iam-terraform", "iam-terraform"):
+        from .security.iam_setup import print_iam_template
+        print_iam_template("terraform")
+        return
+    elif parsed.cmd == "aws" and parsed.action in ("--check-scope", "check-scope"):
+        from .security.iam_setup import check_credential_scope
+        print("\n  Checking AWS credential scope...\n")
+        result = check_credential_scope()
+        if "error" in result:
+            _err(result["error"])
+            return
+        print(f"  Account:      {result['account_id']}")
+        print(f"  Identity:     {result['identity_arn']}")
+        print(f"  Correctly scoped: {'✓ Yes' if result['scoped_correctly'] else '✗ No'}")
+        if result.get("required_denied"):
+            print(f"\n  Missing permissions ({len(result['required_denied'])}):")
+            for a in result["required_denied"]:
+                print(f"    ✗ {a}")
+        if result.get("dangerous_allowed"):
+            print(f"\n  ⚠ Over-provisioned — write permissions detected:")
+            for a in result["dangerous_allowed"]:
+                print(f"    ⚠ {a}")
+            print()
+            print("  Run `finops setup aws --iam-template` to generate a scoped policy.")
+        elif not result.get("required_denied"):
+            print("\n  ✓ Credentials are read-only and correctly scoped for nable.")
+        print()
+        return
     elif parsed.cmd in dispatch:
         dispatch[parsed.cmd]()
     else:

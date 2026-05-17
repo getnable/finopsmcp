@@ -264,6 +264,8 @@
   @media(max-width:640px){.modal{grid-template-columns:1fr}.modal-left{border-right:0;border-bottom:1px solid var(--line);padding:32px 24px}.modal-right{padding:32px 24px}}
 
   /* footer */
+  .foot-subscribe{display:flex;align-items:center;justify-content:space-between;gap:32px;padding:32px 0;border-bottom:1px solid var(--line);margin-bottom:48px}
+  @media(max-width:640px){.foot-subscribe{flex-direction:column;align-items:flex-start}}
   footer{border-top:1px solid var(--line);padding:36px 0 56px}
   .foot{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:36px}
   .foot h5{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em;margin-bottom:14px;font-weight:400}
@@ -367,6 +369,7 @@ function Nav({ dark, onToggle, onTrial, onSignIn }){
           <li><a href="#product">Product</a></li>
           <li><a href="#connectors">Connectors</a></li>
           <li><a href="#pricing">Pricing</a></li>
+          <li><a href="/vs-cloudhealth.html">Compare</a></li>
           <li><a href="/docs">Docs</a></li>
         </ul>
         <div className="right">
@@ -469,85 +472,30 @@ function Terminal(){
   );
 }
 
-function ForTeams(){
+function QuickStart(){
   return (
-    <section data-screen-label="01b For teams">
+    <section data-screen-label="02 Quick start" style={{paddingTop:0}}>
       <div className="wrap">
-        <div className="section-head">
-          <div className="label">/ For teams</div>
-          <h2>Built for the team that owns the bill.</h2>
-          <p>One server. Every engineer with access. No extra service, no shared credentials, no one-person bottleneck.</p>
-        </div>
-        <div className="for-teams-grid">
-          <div className="ft-card">
-            <div className="ft-n">Attribution</div>
-            <h3>Tag once. Know forever who spent what.</h3>
-            <p>Tell nable which tags mean which team — once — and every cost query breaks down by owner across all 13 providers automatically.</p>
-          </div>
-          <div className="ft-card">
-            <div className="ft-n">Budget gates</div>
-            <h3>Budgets that enforce themselves.</h3>
-            <p>Set a spend limit and your CI pipeline fails automatically when you go over. No more end-of-month surprises because nobody checked the dashboard.</p>
-          </div>
-          <div className="ft-card">
-            <div className="ft-n">Access control</div>
-            <h3>Platform team sees platform costs. Full stop.</h3>
-            <p>Issue API keys per engineer with viewer, analyst, or admin roles. Scope any key to a team or provider. Every write goes to a local audit log.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function HowItWorks(){
-  return (
-    <section data-screen-label="02 How it works">
-      <div className="wrap">
-        <div className="section-head">
-          <div className="label">/ How it works</div>
-          <h2>One local server. All your billing data.</h2>
-          <p>nable runs as an MCP server on your machine. Your AI client queries normalized cost data across 13 providers. Credentials are encrypted with Fernet and stored in your OS keyring; they never leave the laptop.</p>
-        </div>
-
         <div className="steps">
           <div className="step">
             <div className="n">01</div>
             <h3>Install</h3>
-            <p>One pip install. Python 3.10+.</p>
             <div className="cmd"><span className="c">$</span> pip install finops-mcp</div>
           </div>
           <div className="step">
             <div className="n">02</div>
-            <h3>Connect providers</h3>
-            <p>Interactive wizard for each provider. Read-only scopes only.</p>
-            <div className="cmd"><span className="c">$</span> finops setup</div>
+            <h3>Scope your IAM key</h3>
+            <div className="cmd"><span className="c">$</span> finops setup aws --iam-template</div>
           </div>
           <div className="step">
             <div className="n">03</div>
-            <h3>Register with your client</h3>
-            <p>One config line in Claude, Cursor or Windsurf.</p>
-            <div className="cmd c">// see config →</div>
+            <h3>Store credentials</h3>
+            <div className="cmd"><span className="c">$</span> finops setup aws</div>
           </div>
           <div className="step">
             <div className="n">04</div>
-            <h3>Ask in English</h3>
-            <p>"What drove AWS up?" "File a ticket for any anomaly over $500."</p>
-            <div className="cmd c">// no SQL.</div>
-          </div>
-        </div>
-
-        <div className="config">
-          <div className="codecard">
-            <div className="hd"><span>~/.config/Claude/claude_desktop_config.json</span><span>.json</span></div>
-<pre><span className="c">{"// add this block, restart Claude Desktop"}</span>{`
-{
-  `}<span className="k">"mcpServers"</span>{`: {
-    `}<span className="k">"finops"</span>{`: {
-      `}<span className="k">"command"</span>{`: `}<span className="s">"finops-mcp"</span>{`
-    }
-  }
-}`}</pre>
+            <h3>Ask Claude</h3>
+            <div className="cmd c">// one config line → done</div>
           </div>
         </div>
       </div>
@@ -559,42 +507,27 @@ const FEATURES = [
   {
     n:"01",
     h:"Anomaly detection that tells you who, not just what.",
-    p:"Compares same-weekday baselines, not flat rolling averages. When something spikes, it drills into Cost Explorer by tag and tells you which team, environment, or service drove it — and by how much."
+    p:"Compares same-weekday baselines, not flat rolling averages. When something spikes, nable drills into Cost Explorer by tag and tells you which team, environment, or service drove it — and by how much."
   },
   {
     n:"02",
-    h:"Tag-based attribution.",
-    p:"Tell nable which tags belong to which team and get ranked spend by owner across every cloud and SaaS in one breath — no spreadsheets."
+    h:"Tag-based cost attribution across every provider.",
+    p:"Tell nable which tags map to which team — once — and every cost query breaks down by owner across all 13 cloud and SaaS providers automatically. No spreadsheets."
   },
   {
     n:"03",
-    h:"Rightsizing, actually filed.",
-    p:"Pulls recommendations from AWS Compute Optimizer — CPU, memory, network, and disk, not just CPU. Covers EC2 and Lambda. Calculates exact savings and opens the Jira, Linear, or GitHub ticket for you."
+    h:"Rightsizing recommendations, actually filed.",
+    p:"Pulls from AWS Compute Optimizer — CPU, memory, network, and disk. Covers EC2 and Lambda. Calculates exact savings and opens the Jira, Linear, or GitHub ticket automatically."
   },
   {
     n:"04",
-    h:"RI & Savings Plan analysis.",
-    p:"Real Cost Explorer data for coverage, utilization, and waste. Recommends Compute Savings Plan purchases with projected ROI and breakeven."
+    h:"Budgets that block your CI pipeline.",
+    p:"Set a spend limit per team or provider. Your CI pipeline fails automatically when you hit it. No more end-of-month surprises because nobody checked a dashboard."
   },
   {
     n:"05",
-    h:"Proactive alerts & digests.",
-    p:"Anomaly pushes and daily digests fan out to Slack or Teams without an AI session. A weekly summary lands every Monday at 9am."
-  },
-  {
-    n:"06",
-    h:"Invoice email parsing (IMAP).",
-    p:"For vendors with no billing API like PagerDuty, GitHub Enterprise, or New Relic, connect a billing inbox and we parse the PDFs for you."
-  },
-  {
-    n:"07",
-    h:"Role-based access control.",
-    p:"Three roles — viewer, analyst, admin — each scoped to a team or provider. A platform engineer sees only platform costs. An SRE can't touch budget limits. An admin key manages the rest. All writes go to a local audit log."
-  },
-  {
-    n:"08",
-    h:"Shared Postgres mode for teams.",
-    p:"Point DATABASE_URL at a shared Postgres instance and every engineer with a key queries the same normalized cost data. No sync step. No separate service. Swap one env var."
+    h:"Role-based access. Every engineer scoped correctly.",
+    p:"Viewer, analyst, or admin — each key scoped to a team or provider. Platform engineer sees only platform costs. All writes go to a local audit log. One env var to share a Postgres instance across the whole team."
   },
 ];
 
@@ -676,19 +609,24 @@ function Security(){
         </div>
         <div className="pull">
           <blockquote>
-            Every other FinOps tool asks for your cloud keys. We don't.
+            Nothing leaves your machine. Queries go direct from your laptop to your cloud APIs.
           </blockquote>
           <p>
-            Credentials are encrypted with Fernet and stored in your OS keyring: macOS Keychain, Windows Credential Manager, or libsecret on Linux. The vault key lives on your hardware. There is no cloud sync. Nothing to breach on our end because there is nothing on our end.
+            Credentials are encrypted with Fernet and stored in your OS keyring — macOS Keychain, Windows Credential Manager, or libsecret on Linux. The vault key lives on your hardware. There is no nable server in the middle. There is no cloud sync. Nothing to breach on our end because there is nothing on our end.
+          </p>
+          <p style={{marginTop:16}}>
+            Run <code style={{fontFamily:"var(--mono)",fontSize:13,background:"var(--bg-2)",padding:"2px 7px",borderRadius:4}}>finops setup aws --iam-template</code> to generate a least-privilege IAM policy with exactly the permissions nable needs — nothing more. <code style={{fontFamily:"var(--mono)",fontSize:13,background:"var(--bg-2)",padding:"2px 7px",borderRadius:4}}>finops-doctor</code> verifies your credentials are read-only and your vault is locked down.
           </p>
           <div className="chips">
             <span className="chip">Fernet encryption</span>
             <span className="chip">OS keyring</span>
-            <span className="chip">Read-only API scopes</span>
+            <span className="chip">Read-only IAM policy generator</span>
+            <span className="chip">Credential scope validator</span>
             <span className="chip">Role-based access control</span>
             <span className="chip">Team-scoped keys</span>
             <span className="chip">Local audit log</span>
             <span className="chip">No vendor cloud access</span>
+            <span className="chip">finops-doctor health check</span>
             <span className="chip">SOC 2 in progress</span>
           </div>
         </div>
@@ -719,8 +657,8 @@ function Pricing({ onTrial }){
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ Pricing</div>
-          <h2>Plain pricing. No seat math.</h2>
-          <p>Free forever for individuals and small teams. Pro adds automation, email reports, and org rollup.</p>
+          <h2>Simple pricing. Free to start.</h2>
+          <p>Free forever for individuals. Team plan adds automation, email reports, and org rollup — billed per seat so it grows with you.</p>
         </div>
 
         <div className="pricing">
@@ -770,16 +708,27 @@ function Pricing({ onTrial }){
                     <code>pip install finops-mcp</code>
                   </li>
                   <li>
-                    <span className="step-label">2 · Add to Claude Desktop</span>
+                    <span className="step-label">2 · Generate a least-privilege IAM policy</span>
+                    <code>finops setup aws --iam-template</code>
+                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Outputs a CloudFormation template scoped to exactly what nable needs.</span>
+                  </li>
+                  <li>
+                    <span className="step-label">3 · Store credentials securely</span>
+                    <code>finops setup aws</code>
+                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Credentials go into your OS keyring — never a .env file.</span>
+                  </li>
+                  <li>
+                    <span className="step-label">4 · Add to Claude Desktop</span>
                     <code style={{whiteSpace:'pre',display:'block',lineHeight:1.5}}>{"~/Library/Application Support/Claude/\nclaude_desktop_config.json"}</code>
                   </li>
                   <li>
-                    <span className="step-label">3 · Paste this config</span>
+                    <span className="step-label">5 · Paste this config</span>
                     <code style={{whiteSpace:'pre',display:'block',lineHeight:1.6,fontSize:11.5}}>{configSnippet}</code>
                   </li>
                   <li>
-                    <span className="step-label">4 · Set your cloud credentials</span>
-                    <code>AWS_ACCESS_KEY_ID=… finops-mcp</code>
+                    <span className="step-label">6 · Verify your setup</span>
+                    <code>finops-doctor</code>
+                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Confirms credentials are read-only, vault is locked, no telemetry.</span>
                   </li>
                 </ol>
                 <a className="fs-docs" href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener">
@@ -789,15 +738,16 @@ function Pricing({ onTrial }){
             )}
           </div>
 
-          {/* Pro — featured */}
+          {/* Team — featured */}
           <div className="price feat">
-            <div className="tier">Pro · 14-day free trial</div>
+            <div className="tier">Team · 14-day free trial</div>
             <div>
-              <div className="amt">$39<span className="small">.99 / mo</span></div>
-              <div className="amt-sub">14 days free · cancel any time</div>
+              <div className="amt">$29<span className="small"> / seat / mo</span></div>
+              <div className="amt-sub">From $87/mo · 14 days free · cancel any time</div>
             </div>
             <ul>
               <li>Everything in Free</li>
+              <li>Minimum 3 seats</li>
               <li>Ticket auto-creation — Jira, Linear, GitHub</li>
               <li>Scheduled email reports</li>
               <li>Commitment purchase recommendations + ROI</li>
@@ -832,44 +782,26 @@ function Pricing({ onTrial }){
   );
 }
 
-function CTA(){
-  const [done, setDone] = useState(false);
-  return (
-    <section className="cta" id="install" data-screen-label="07 CTA">
-      <div className="wrap">
-        <div className="row">
-          <div>
-            <div className="label" style={{marginBottom:18}}>/ Get started</div>
-            <h2>Find out where the money actually went.</h2>
-            <p>Free forever — no card, no trial clock. Install in 30 seconds and ask Claude about your cloud costs. Upgrade to Pro when you're ready to automate.</p>
-          </div>
-
-          <form className="cta-form" onSubmit={(e)=>{e.preventDefault();setDone(true);}}>
-            <div className="lab">Updates &amp; new connectors</div>
-            {!done ? (
-              <>
-                <div className="field">
-                  <input type="email" placeholder="you@company.com" required />
-                  <button className="submit" type="submit">Subscribe →</button>
-                </div>
-                <div className="helper">No spam. Roadmap notes, occasional cost-anatomy posts.</div>
-              </>
-            ) : (
-              <div style={{padding:"10px 0",fontFamily:"var(--mono)",fontSize:13,color:"var(--hl)"}}>
-                ● subscribed. see you Monday.
-              </div>
-            )}
-          </form>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 function Footer(){
+  const [done, setDone] = React.useState(false);
   return (
     <footer>
       <div className="wrap">
+        <div className="foot-subscribe">
+          <div>
+            <div style={{fontFamily:"var(--mono)",fontSize:11,letterSpacing:".06em",color:"var(--fg-3)",textTransform:"uppercase",marginBottom:8}}>Stay in the loop</div>
+            <p style={{fontSize:13.5,color:"var(--fg-2)",margin:0}}>New connectors, cost-anatomy posts. No spam.</p>
+          </div>
+          {!done ? (
+            <form style={{display:"flex",gap:8}} onSubmit={(e)=>{e.preventDefault();setDone(true);}}>
+              <input type="email" placeholder="you@company.com" required style={{flex:1,background:"var(--bg-2)",border:"1px solid var(--line)",borderRadius:6,padding:"8px 12px",fontFamily:"var(--sans, inherit)",fontSize:13.5,color:"var(--fg)",outline:"none"}} />
+              <button type="submit" style={{background:"var(--fg)",color:"var(--bg)",border:0,borderRadius:6,padding:"8px 16px",fontSize:13.5,cursor:"pointer",whiteSpace:"nowrap"}}>Subscribe →</button>
+            </form>
+          ) : (
+            <div style={{fontFamily:"var(--mono)",fontSize:13,color:"var(--hl)"}}>● subscribed. see you Monday.</div>
+          )}
+        </div>
         <div className="foot">
           <div>
             <Logo />
@@ -901,7 +833,11 @@ function Footer(){
         </div>
         <div className="foot-bottom">
           <span>© 2026 nable inc.</span>
-          <span>v0.4.2 · 13 connectors</span>
+          <span style={{display:"flex",gap:16}}>
+            <a href="/vs-cloudhealth.html" style={{color:"var(--fg-3)",textDecoration:"none",fontSize:12}}>vs CloudHealth</a>
+            <a href="/vs-vantage.html" style={{color:"var(--fg-3)",textDecoration:"none",fontSize:12}}>vs Vantage</a>
+            <span style={{color:"var(--fg-4)"}}>v0.5.0 · 13 connectors</span>
+          </span>
         </div>
       </div>
     </footer>
@@ -952,15 +888,15 @@ function TrialModal({ onClose }){
         {/* Left: what's included */}
         <div className="modal-left">
           <div>
-            <div className="label" style={{marginBottom:12}}>/ Pro · 14-day free trial</div>
-            <h3>Try every Pro feature free for two weeks.</h3>
+            <div className="label" style={{marginBottom:12}}>/ Team · 14-day free trial</div>
+            <h3>Try every Team feature free for two weeks.</h3>
           </div>
           <div>
             <div className="price-row">
               <span className="price-big">$0</span>
-              <span className="price-after">for 14 days, then $39.99 / mo</span>
+              <span className="price-after">for 14 days, then $29 / seat / mo</span>
             </div>
-            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Cancel before day 14. No charge.</div>
+            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Min 3 seats ($87/mo). Cancel before day 14. No charge.</div>
           </div>
           <ul>
             <li>Everything in the free tier, plus —</li>
@@ -977,7 +913,7 @@ function TrialModal({ onClose }){
 
         {/* Right: email form + pip install */}
         <div className="modal-right">
-          <h4>Start your Pro trial</h4>
+          <h4>Start your Team trial</h4>
           <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
             <div>
               <label>EMAIL</label>
@@ -1069,13 +1005,11 @@ function App(){
     <>
       <Nav dark={dark} onToggle={toggle} onTrial={openModal} onSignIn={openSignIn} />
       <Hero onTrial={openModal} />
-      <ForTeams />
-      <HowItWorks />
+      <QuickStart />
       <Features />
       <Connectors />
       <Security />
       <Pricing onTrial={openModal} />
-      <CTA />
       <Footer />
       <Tweaks open={tweaksOpen} t={t} setTweak={setTweak} />
       {modalOpen && <TrialModal onClose={()=>setModalOpen(false)} />}
