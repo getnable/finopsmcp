@@ -3140,6 +3140,62 @@ async def get_llm_unit_economics(
 
 
 @mcp.tool()
+async def get_kubernetes_costs(
+    cluster_name: str = "",
+    context: str | None = None,
+) -> dict:
+    """
+    Break down Kubernetes cluster costs to pod → deployment → namespace → team.
+
+    AWS charges a single EC2 line for EKS node groups. This tool allocates that
+    cost proportionally by pod CPU/memory requests, giving you per-team and
+    per-namespace cost attribution that AWS doesn't provide natively.
+
+    Requires: kubernetes Python package + valid kubeconfig
+    Optional: NABLE_K8S_TEAM_LABEL env var for team attribution (default: "team")
+
+    Returns pod-level breakdown, idle node cost, team totals, and recommendations.
+    """
+    try:
+        from .connectors.kubernetes_costs import allocate_to_dict
+        return allocate_to_dict(cluster_name=cluster_name, context=context)
+    except ImportError:
+        return {
+            "error": "kubernetes package not installed.",
+            "fix": "pip install 'finops-mcp[kubernetes]'",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def benchmark_costs(
+    account_id: str,
+    vertical: str = "default",
+    days: int = 30,
+) -> dict:
+    """
+    Compare this account's spend profile against anonymised peer group medians.
+
+    Shows where you're above or below the median for companies in your industry
+    vertical across metrics like: EC2%, RDS%, savings plan coverage, idle
+    resource %, LLM spend %, data transfer %, and rightsizing opportunity %.
+
+    Args:
+        account_id: AWS account ID to analyse
+        vertical:   industry peer group — saas, ecommerce, fintech, media, ai_ml, default
+        days:       lookback period for metric calculation
+
+    Returns per-metric comparisons with assessments (better/similar/worse) and insights.
+    """
+    try:
+        from .analytics.benchmarks import compare
+        return compare(account_id=account_id, vertical=vertical, days=days)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def forecast_costs(
     account_id: str,
     service: str | None = None,

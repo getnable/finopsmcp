@@ -1,0 +1,79 @@
+{
+  "name": "nable-finops",
+  "displayName": "nable — Cloud Cost Estimates",
+  "description": "See estimated monthly AWS costs inline while writing Terraform. Powered by nable.",
+  "version": "0.1.0",
+  "publisher": "nable",
+  "icon": "assets/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chaandannn/finopsmcp"
+  },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other", "Linters"],
+  "keywords": ["terraform", "aws", "finops", "cloud cost", "cost estimate", "iac"],
+  "activationEvents": [
+    "onLanguage:terraform",
+    "workspaceContains:**/*.tf"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "nable Cost Estimates",
+      "properties": {
+        "nable.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline cost estimates in Terraform files."
+        },
+        "nable.region": {
+          "type": "string",
+          "default": "us-east-1",
+          "enum": ["us-east-1","us-east-2","us-west-1","us-west-2","eu-west-1","eu-west-2","eu-central-1","ap-southeast-1","ap-southeast-2","ap-northeast-1"],
+          "description": "AWS region for pricing lookups."
+        },
+        "nable.currency": {
+          "type": "string",
+          "default": "USD",
+          "description": "Currency for cost display."
+        },
+        "nable.showAnnual": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also show annual cost estimate alongside monthly."
+        },
+        "nable.minCostToShow": {
+          "type": "number",
+          "default": 1,
+          "description": "Only show estimates above this monthly USD threshold (reduces noise for tiny resources)."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "nable.refreshCosts",
+        "title": "nable: Refresh Cost Estimates"
+      },
+      {
+        "command": "nable.showSummary",
+        "title": "nable: Show File Cost Summary"
+      },
+      {
+        "command": "nable.openDocs",
+        "title": "nable: Open Pricing Docs"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

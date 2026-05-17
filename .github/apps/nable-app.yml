@@ -1,0 +1,25 @@
+# GitHub App manifest for nable
+# Deploy at: https://github.com/settings/apps/new?state=abc123
+# Or use the GitHub API: POST /app-manifests/{code}/conversions
+
+name: nable
+description: >
+  Automated cloud cost estimates on every Terraform PR.
+  Shows monthly cost delta, flags expensive resources, and
+  suggests cheaper alternatives — before you apply.
+url: https://nable.dev
+hook_attributes:
+  url: https://api.nable.dev/webhooks/github
+  active: true
+redirect_url: https://nable.dev/github/callback
+setup_url: https://nable.dev/github/setup
+public: true
+default_permissions:
+  contents: read           # read Terraform files
+  pull_requests: write     # post cost comments
+  checks: write            # post check run with cost summary
+  statuses: write          # optional: cost gate status
+default_events:
+  - pull_request
+  - pull_request_review
+  - push

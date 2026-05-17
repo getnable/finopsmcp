@@ -4,15 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>nable · cost intelligence, reimagined</title>
-<meta name="description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 8 more. No dashboards. No SQL." />
+<meta name="description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 13 more. No dashboards. No SQL." />
 <meta property="og:title" content="nable · cost intelligence, reimagined" />
-<meta property="og:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 8 more. No dashboards. No SQL." />
+<meta property="og:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 13 more. No dashboards. No SQL." />
 <meta property="og:url" content="https://nable.sh" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="nable" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="nable · cost intelligence, reimagined" />
-<meta name="twitter:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 8 more." />
+<meta name="twitter:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 13 more." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <script defer src="/_vercel/insights/script.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -386,7 +386,7 @@ function Hero({ onTrial }){
   return (
     <header className="hero" data-screen-label="01 Hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>MCP server · v0.4 · 13 connectors</div>
+        <div className="label" style={{marginBottom:18}}>MCP server · v0.6.0 · 17 connectors</div>
         <h1>Cloud cost intelligence,<br/>asked, not queried.</h1>
         <p className="lede">
           Connect 13 billing APIs once. Then ask: why did we spike, which team is over budget, what can we cut. nable catches anomalies before the invoice lands, enforces budgets in CI, and opens the Jira ticket when something needs action.
@@ -507,27 +507,32 @@ const FEATURES = [
   {
     n:"01",
     h:"Anomaly detection that tells you who, not just what.",
-    p:"Compares same-weekday baselines, not flat rolling averages. When something spikes, nable drills into Cost Explorer by tag and tells you which team, environment, or service drove it — and by how much."
+    p:"Multi-signal detection: z-score + CUSUM drift + day-of-week seasonal normalisation. When something spikes, nable drills into Cost Explorer by tag and tells you which team, environment, or service drove it — and by how much."
   },
   {
     n:"02",
-    h:"Tag-based cost attribution across every provider.",
-    p:"Tell nable which tags map to which team — once — and every cost query breaks down by owner across all 13 cloud and SaaS providers automatically. No spreadsheets."
+    h:"Kubernetes costs AWS doesn't show you.",
+    p:"EKS charges a single EC2 line for your whole cluster. nable allocates that cost to every pod, deployment, namespace, and team label — proportionally by CPU and memory requests. The breakdown AWS was never going to give you."
   },
   {
     n:"03",
-    h:"Rightsizing recommendations, actually filed.",
-    p:"Pulls from AWS Compute Optimizer — CPU, memory, network, and disk. Covers EC2 and Lambda. Calculates exact savings and opens the Jira, Linear, or GitHub ticket automatically."
+    h:"Cost estimates before terraform apply.",
+    p:"Run terraform plan and pipe it to nable. Get a per-resource cost delta — adds, removes, and changes — with savings tips inline. Catch a $2,000/mo mistake before it hits your bill."
   },
   {
     n:"04",
-    h:"Budgets that block your CI pipeline.",
-    p:"Set a spend limit per team or provider. Your CI pipeline fails automatically when you hit it. No more end-of-month surprises because nobody checked a dashboard."
+    h:"AI and LLM spend, tracked like everything else.",
+    p:"OpenAI, Anthropic, and AWS Bedrock costs broken down by model. See which teams are spending on GPT-4o when GPT-4o-mini does the job. Unit economics: cost per 1,000 requests, cost per user, benchmark against your projected growth."
   },
   {
     n:"05",
-    h:"Role-based access. Every engineer scoped correctly.",
-    p:"Viewer, analyst, or admin — each key scoped to a team or provider. Platform engineer sees only platform costs. All writes go to a local audit log. One env var to share a Postgres instance across the whole team."
+    h:"Forecasting with tuned Holt-Winters models.",
+    p:"Fits a triple exponential smoothing model to your account's own spend history — no generic formula. Returns 30-day point forecasts with 80% prediction intervals. Model parameters improve as history accumulates."
+  },
+  {
+    n:"06",
+    h:"Peer benchmarking. Know where you stand.",
+    p:"Opt-in anonymised pool: see how your EC2%, savings plan coverage, idle resource rate, and LLM spend compare to companies in your vertical and size band. Differential-private — raw numbers never leave your machine."
   },
 ];
 
@@ -559,16 +564,20 @@ const CONNECTORS = [
   ["AWS","Cost Explorer","Real",            "ok"],
   ["Azure","Cost Management","Real",        "ok"],
   ["GCP","Billing + BigQuery","Real",       "ok"],
+  ["OpenAI","Usage + Costs API","Real",     "ok"],
+  ["Anthropic","Usage API","Real",          "ok"],
+  ["AWS Bedrock","Cost Explorer","Real",    "ok"],
   ["Datadog","Usage Metering v2","Real",    "ok"],
   ["Snowflake","ACCOUNT_USAGE","Credits",   "ok"],
   ["Stripe","Balance Transactions","Real",  "ok"],
   ["MongoDB Atlas","Invoice API","Real",    "ok"],
   ["Twilio","Usage Records","Real",         "ok"],
   ["Cloudflare","Billing API","Real",       "ok"],
+  ["Kubernetes","Metrics API","Allocated",  "ok"],
   ["GitHub","Actions + Copilot","Minutes",  "partial"],
   ["Vercel","Invoice API","Enterprise",     "warn"],
-  ["PagerDuty","Seats only","Seats",        "partial"],
-  ["New Relic","NerdGraph ingest","Estimated","warn"],
+  ["Together AI","Usage API","Real",        "ok"],
+  ["Cohere","Usage API","Real",             "ok"],
 ];
 
 function Connectors(){
@@ -576,7 +585,7 @@ function Connectors(){
     <section id="connectors" data-screen-label="04 Connectors">
       <div className="wrap">
         <div className="section-head">
-          <div className="label">/ 13 connectors</div>
+          <div className="label">/ 17 connectors</div>
           <h2>Every cost source, one normalized schema.</h2>
           <p>Not every provider has a real billing API. We're honest about what each connector returns.</p>
         </div>
@@ -671,7 +680,7 @@ function Pricing({ onTrial }){
               <div className="amt-sub">forever · no credit card · no expiry</div>
             </div>
             <ul>
-              <li>All 13+ cloud &amp; SaaS connectors</li>
+              <li>All 17 cloud, SaaS &amp; AI connectors</li>
               <li>Cost queries, trends &amp; history</li>
               <li>Anomaly detection</li>
               <li>Rightsizing recommendations</li>
@@ -828,7 +837,7 @@ function Footer(){
           <span style={{display:"flex",gap:16}}>
             <a href="/vs-cloudhealth.html" style={{color:"var(--fg-3)",textDecoration:"none",fontSize:12}}>vs CloudHealth</a>
             <a href="/vs-vantage.html" style={{color:"var(--fg-3)",textDecoration:"none",fontSize:12}}>vs Vantage</a>
-            <span style={{color:"var(--fg-4)"}}>v0.5.0 · 13 connectors</span>
+            <span style={{color:"var(--fg-4)"}}>v0.6.0 · 17 connectors</span>
           </span>
         </div>
       </div>
