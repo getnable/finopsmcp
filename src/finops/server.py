@@ -7,10 +7,13 @@ Run via:  finops-mcp  or  python -m finops.server
 
 from __future__ import annotations
 
+import logging
 import os
 import statistics
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -126,6 +129,10 @@ async def _gather_costs(
                     continue
                 grand_by_service[svc] = grand_by_service.get(svc, 0.0) + amt
         except Exception as exc:
+            log.error(
+                "Connector fetch failed: connector=%s error_type=%s error=%s timestamp=%s",
+                name, type(exc).__name__, exc, datetime.utcnow().isoformat(),
+            )
             by_provider[name] = {"error": str(exc)}
 
     return grand_total, by_provider, grand_by_service
@@ -607,6 +614,8 @@ async def acknowledge_anomaly(anomaly_id: int) -> dict:
         - "Dismiss anomaly 42 — it was a planned migration"
         - "Acknowledge that spike, it was expected"
     """
+    if err := require_role("analyst"):
+        return err
 
     from .anomaly.detector import acknowledge_anomaly as _ack
     ok = _ack(anomaly_id)
@@ -815,6 +824,8 @@ async def send_digest_now() -> dict:
         - "Send the daily cost digest to Slack"
         - "Push the current cost summary to Teams"
     """
+    if err := require_role("analyst"):
+        return err
 
     from .scheduler.jobs import run_digest_now
     sent = await run_digest_now()
@@ -1068,62 +1079,71 @@ async def create_kubernetes_waste_tickets(
         return err
 
     try:
-        from .connectors.kubernetes import analyze_all_clusters
-        from .connectors.helm import discover_helm_releases, attribute_costs_to_releases
+        from .connectors.kubernetes import KubernetesConnector
+        from .connectors.helm import discover_helm_releases
         from .integrations.ticketing import create_kubernetes_waste_ticket
 
         urls = []
+        k8s_conn = KubernetesConnector()
 
         # Idle nodes and over-provisioned workloads
-        reports = analyze_all_clusters()
+        # report is a ClusterReport dataclass; node_utilization is list[dict]
+        reports = k8s_conn.analyze_all_clusters()
         for report in reports:
-            # Idle nodes
-            for node in report.get("node_utilization", []):
-                if node.get("is_idle") and node.get("monthly_cost_usd", 0) >= min_monthly_waste:
+            # Idle nodes — idle_nodes is list[str] of node names
+            for node in report.node_utilization:
+                if node["node"] in report.idle_nodes and node["monthly_cost"] >= min_monthly_waste:
                     finding = {
                         "kind": "idle_node",
-                        "cluster": report["cluster"],
-                        "name": node["node_name"],
-                        "monthly_waste_usd": node["monthly_cost_usd"],
-                        "detail": f"CPU: {node.get('cpu_request_pct', 0):.0f}%, Mem: {node.get('mem_request_pct', 0):.0f}% utilized",
+                        "cluster": report.cluster,
+                        "name": node["node"],
+                        "monthly_waste_usd": node["monthly_cost"],
+                        "detail": (
+                            f"CPU: {node.get('cpu_requested_pct', 0):.0f}%, "
+                            f"Mem: {node.get('mem_requested_pct', 0):.0f}% utilized"
+                        ),
                     }
                     url = create_kubernetes_waste_ticket(finding)
                     if url:
-                        urls.append({"type": "idle_node", "name": node["node_name"], "url": url})
+                        urls.append({"type": "idle_node", "name": node["node"], "url": url})
 
-            # Over-provisioned workloads
-            for opp in report.get("rightsizing_opportunities", []):
-                waste = opp.get("monthly_waste_usd", 0)
+            # Over-provisioned workloads — rightsizing_opportunities is list[dict]
+            for opp in report.rightsizing_opportunities:
+                waste = opp.get("potential_savings_usd", 0)
                 if waste >= min_monthly_waste:
                     finding = {
                         "kind": "over_requested",
-                        "cluster": report["cluster"],
+                        "cluster": report.cluster,
                         "namespace": opp.get("namespace", ""),
                         "name": opp.get("workload", ""),
                         "monthly_waste_usd": waste,
-                        "detail": opp.get("recommendation", ""),
+                        "detail": "; ".join(opp.get("issues", [])),
                     }
                     url = create_kubernetes_waste_ticket(finding)
                     if url:
                         urls.append({"type": "over_provisioned", "name": opp.get("workload"), "url": url})
 
-        # Orphaned Helm releases
+        # Orphaned Helm releases — discover_helm_releases requires a k8s client
         try:
-            releases = discover_helm_releases()
+            k8s_client = k8s_conn._load_client()
+            releases = discover_helm_releases(k8s_client)
             for rel in releases:
-                if rel.is_orphaned:
+                if rel.is_orphaned and rel.monthly_cost >= min_monthly_waste:
                     finding = {
                         "kind": "orphaned_helm",
                         "cluster": "default",
                         "namespace": rel.namespace,
                         "name": rel.name,
-                        "monthly_waste_usd": rel.estimated_monthly_cost_usd,
-                        "detail": f"Chart: {rel.chart}, deployed {rel.deployed_at[:10] if rel.deployed_at else 'unknown'}, 0 running pods",
+                        "monthly_waste_usd": rel.monthly_cost,
+                        "detail": (
+                            f"Chart: {rel.chart}, deployed "
+                            f"{rel.deployed_at[:10] if rel.deployed_at else 'unknown'}, "
+                            f"0 running pods"
+                        ),
                     }
-                    if rel.estimated_monthly_cost_usd >= min_monthly_waste:
-                        url = create_kubernetes_waste_ticket(finding)
-                        if url:
-                            urls.append({"type": "orphaned_helm", "name": rel.name, "url": url})
+                    url = create_kubernetes_waste_ticket(finding)
+                    if url:
+                        urls.append({"type": "orphaned_helm", "name": rel.name, "url": url})
         except Exception:
             pass  # Helm optional
 
@@ -1301,6 +1321,8 @@ async def cleanup_idle_resources(
         - "Delete the EBS volumes we just listed" (then confirm → dry_run=False)
         - "Clean up all unused Elastic IPs in us-east-1"
     """
+    if err := require_role("admin"):
+        return err
     try:
         from .cleanup.actions import cleanup_resources
         return cleanup_resources(
@@ -2097,6 +2119,8 @@ async def subscribe_to_report(
         - "Create a monthly rightsizing report emailed to cfo@company.com"
         - "Subscribe to a daily digest in #cost-alerts with spend, anomalies, and budgets"
     """
+    if err := require_role("analyst"):
+        return err
     try:
         from .notifications.reports import create_subscription, VALID_SECTIONS
         invalid = [s for s in sections if s not in VALID_SECTIONS]
@@ -2191,6 +2215,8 @@ async def send_report_now(subscription_id: int) -> dict:
         - "Run the platform team report immediately"
         - "Trigger report subscription 1"
     """
+    if err := require_role("analyst"):
+        return err
     try:
         from .notifications.reports import run_subscription
         result = await run_subscription(subscription_id)
@@ -2212,6 +2238,8 @@ async def cancel_report_subscription(subscription_id: int) -> dict:
         - "Stop the weekly platform report"
         - "Disable subscription 3"
     """
+    if err := require_role("analyst"):
+        return err
     try:
         from .notifications.reports import cancel_subscription
         ok = cancel_subscription(subscription_id)
@@ -2254,6 +2282,8 @@ async def set_budget(
         - "Set a $20,000 budget for EC2 with warnings at 75%"
         - "Add a total monthly budget of $100,000"
     """
+    if err := require_role("analyst"):
+        return err
     try:
         from .budget.enforcer import create_budget
         b = create_budget(
@@ -2345,6 +2375,8 @@ async def delete_budget(budget_id: int) -> dict:
         - "Delete budget #3"
         - "Remove the platform team budget"
     """
+    if err := require_role("analyst"):
+        return err
     try:
         from .budget.enforcer import delete_budget as _del
         ok = _del(budget_id)
@@ -2378,6 +2410,8 @@ async def sync_budgets_from_yaml(yaml_path: str) -> dict:
         - "Sync budgets from /path/to/budget.yml"
         - "Import the budget configuration file"
     """
+    if err := require_role("analyst"):
+        return err
     try:
         from .budget.enforcer import sync_from_yaml
         return sync_from_yaml(yaml_path)
@@ -2660,6 +2694,257 @@ def whoami() -> dict:
     }
 
 
+# ── Terraform tagging tools ───────────────────────────────────────────────────
+
+
+@mcp.tool()
+async def audit_terraform_tags(
+    tf_dir: str,
+    state_path: str | None = None,
+) -> dict:
+    """
+    Scan Terraform state for resources missing required tags.
+    Runs `terraform show -json` in tf_dir (or reads state_path directly).
+    Required tags configured via FINOPS_REQUIRED_TAGS env var (comma-separated,
+    default: team,environment,service).
+
+    Args:
+        tf_dir: Path to the Terraform working directory (must be initialized).
+        state_path: Optional path to a .tfstate file. Skips terraform CLI if provided.
+
+    Examples:
+        - "Audit tags in our infra repo"
+        - "Which resources are missing the team tag?"
+    """
+    if err := require_role("analyst"):
+        return err
+
+    from .connectors.terraform import audit_tags, persist_violations, _required_tags
+
+    try:
+        violations = audit_tags(tf_dir, state_path)
+    except Exception as exc:
+        return {"error": str(exc), "tf_dir": tf_dir}
+
+    stored = persist_violations(tf_dir, violations)
+
+    return {
+        "tf_dir": tf_dir,
+        "required_tags": _required_tags(),
+        "violations_found": len(violations),
+        "stored_in_db": stored,
+        "violations": violations,
+    }
+
+
+@mcp.tool()
+async def generate_terraform_tag_fixes(
+    tf_dir: str,
+) -> dict:
+    """
+    Generate HCL patches for all open tag violations in tf_dir.
+    Shows a unified diff per .tf file — does NOT write to disk.
+    Run audit_terraform_tags first to populate violations.
+
+    Args:
+        tf_dir: Same directory passed to audit_terraform_tags.
+
+    Examples:
+        - "Show me the tag fixes needed"
+        - "What HCL changes are required to fix our tagging?"
+    """
+    if err := require_role("analyst"):
+        return err
+
+    import json as _json
+    from sqlalchemy import select
+    from .storage.db import terraform_tag_audits, get_engine
+    from .tagging.hcl_patcher import generate_all_fixes
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(terraform_tag_audits).where(
+                terraform_tag_audits.c.tf_dir == tf_dir,
+                terraform_tag_audits.c.status == "open",
+            )
+        ).fetchall()
+
+    if not rows:
+        return {
+            "message": "No open violations found. Run audit_terraform_tags first.",
+            "diffs": {},
+        }
+
+    violations = [
+        {
+            "address": r.resource_address,
+            "type": r.resource_type,
+            "name": r.resource_name,
+            "current_tags": _json.loads(r.current_tags),
+            "missing_tags": _json.loads(r.missing_tags),
+            "file_path": r.file_path or "",
+        }
+        for r in rows
+    ]
+
+    try:
+        diffs = generate_all_fixes(tf_dir, violations)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    return {
+        "violations_count": len(violations),
+        "files_to_patch": len(diffs),
+        "diffs": diffs,
+    }
+
+
+@mcp.tool()
+async def open_terraform_tag_pr(
+    tf_dir: str,
+    github_repo: str,
+    branch: str = "fix/add-required-tags",
+    base_branch: str = "main",
+    pr_title: str = "fix: add required tags to Terraform resources",
+) -> dict:
+    """
+    Apply tag fixes to .tf files and open a GitHub PR.
+    Requires GITHUB_TOKEN env var and a git remote configured for github_repo.
+
+    Args:
+        tf_dir: Path to the Terraform working directory (must be a git repo).
+        github_repo: GitHub repo in "owner/repo" format.
+        branch: Branch name to create. Defaults to "fix/add-required-tags".
+        base_branch: Target branch for the PR. Defaults to "main".
+        pr_title: PR title.
+
+    Examples:
+        - "Open a PR to fix the tagging gaps"
+        - "Create the tag fix PR against main"
+    """
+    if err := require_role("analyst"):
+        return err
+
+    import json as _json
+    import subprocess as _sp
+    from sqlalchemy import select
+    from .storage.db import terraform_tag_audits, get_engine
+    from .tagging.hcl_patcher import apply_fixes
+    from .integrations.ticketing import create_github_pr
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(terraform_tag_audits).where(
+                terraform_tag_audits.c.tf_dir == tf_dir,
+                terraform_tag_audits.c.status == "open",
+            )
+        ).fetchall()
+
+    if not rows:
+        return {
+            "message": "No open violations. Run audit_terraform_tags first.",
+            "pr_url": None,
+        }
+
+    violations = [
+        {
+            "address": r.resource_address,
+            "type": r.resource_type,
+            "name": r.resource_name,
+            "current_tags": _json.loads(r.current_tags),
+            "missing_tags": _json.loads(r.missing_tags),
+            "file_path": r.file_path or "",
+        }
+        for r in rows
+    ]
+
+    # 1. Apply fixes to disk
+    try:
+        modified_files = apply_fixes(tf_dir, violations)
+    except Exception as exc:
+        return {"error": f"Failed to apply fixes: {exc}"}
+
+    if not modified_files:
+        return {
+            "message": (
+                "No .tf files were modified. Violations may not be locatable in source — "
+                "ensure tf_dir contains .tf files with matching resource declarations."
+            ),
+            "pr_url": None,
+        }
+
+    # 2. Git: checkout branch, stage, commit, push
+    def _git(*args: str) -> str:
+        result = _sp.run(
+            ["git", *args], cwd=tf_dir, capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+        return result.stdout.strip()
+
+    try:
+        _git("checkout", "-b", branch)
+        _git("add", "--", *modified_files)
+        _git(
+            "commit", "-m",
+            f"fix: add required tags to Terraform resources\n\n"
+            f"Fixed {len(violations)} missing tag violations across "
+            f"{len(modified_files)} file(s).\n\n"
+            f"Co-Authored-By: nable FinOps MCP <noreply@nable.dev>",
+        )
+        _git("push", "-u", "origin", branch)
+    except Exception as exc:
+        return {"error": f"Git operation failed: {exc}", "branch": branch}
+
+    # 3. Open GitHub PR
+    violation_lines = "\n".join(
+        f"- `{v['address']}` — missing: {', '.join(v['missing_tags'])}"
+        for v in violations[:30]
+    )
+    if len(violations) > 30:
+        violation_lines += f"\n\n_...and {len(violations) - 30} more_"
+
+    pr_body = (
+        f"## Summary\n\n"
+        f"Adds missing required tags to {len(violations)} Terraform resource(s) "
+        f"across {len(modified_files)} file(s).\n\n"
+        f"### Resources fixed\n\n"
+        f"{violation_lines}\n\n"
+        f"---\n"
+        f"🤖 Generated by [nable FinOps MCP](https://github.com/nable-finops/nable)"
+    )
+
+    try:
+        pr_resp = create_github_pr(
+            repo=github_repo,
+            title=pr_title,
+            body=pr_body,
+            head=branch,
+            base=base_branch,
+        )
+        pr_url = pr_resp.get("html_url", "")
+    except Exception as exc:
+        return {"error": f"PR creation failed: {exc}", "branch": branch}
+
+    # 4. Mark violations as fixed in DB
+    ids = [r.id for r in rows]
+    with engine.begin() as conn:
+        conn.execute(
+            terraform_tag_audits.update()
+            .where(terraform_tag_audits.c.id.in_(ids))
+            .values(status="fixed", pr_url=pr_url)
+        )
+
+    return {
+        "pr_url": pr_url,
+        "branch": branch,
+        "violations_fixed": len(violations),
+        "files_modified": modified_files,
+    }
+
+
 def main() -> None:
     import logging
     logging.basicConfig(level=logging.INFO)
@@ -2688,9 +2973,170 @@ def main() -> None:
         print(f"  Subscribe to restore full access → {_UPGRADE_URL}")
         print(f"{border}\n")
 
+    # Warn if running in Postgres mode without auth enforcement
+    if os.getenv("DATABASE_URL") and os.getenv("FINOPS_REQUIRE_AUTH") != "1":
+        log.warning(
+            "WARNING: Running in shared/Postgres mode without FINOPS_REQUIRE_AUTH=1. "
+            "All users have full access. Set FINOPS_REQUIRE_AUTH=1 to enforce RBAC."
+        )
+
     from .scheduler.jobs import start_scheduler
     start_scheduler()
     mcp.run()
+
+
+# ── AI / LLM cost tools ───────────────────────────────────────────────────────
+
+@mcp.tool()
+async def get_llm_costs(
+    days: int = 30,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """
+    Aggregate AI/LLM spend across all configured providers — OpenAI, Anthropic,
+    AWS Bedrock, Azure OpenAI, and Vertex AI.
+
+    Shows total spend, breakdown by provider, breakdown by model, daily trend,
+    and model-switching recommendations to reduce costs.
+
+    Args:
+        days: Lookback window in days (default 30). Ignored if start_date set.
+        start_date: ISO date string (YYYY-MM-DD). Optional.
+        end_date: ISO date string (YYYY-MM-DD). Defaults to today.
+
+    Examples:
+        - "How much have we spent on AI APIs this month?"
+        - "What's our total LLM spend across OpenAI and Bedrock?"
+        - "Show AI cost breakdown by model for the last 7 days"
+        - "Which AI models are we spending the most on?"
+    """
+    try:
+        from datetime import date as _date
+        sd = _date.fromisoformat(start_date) if start_date else None
+        ed = _date.fromisoformat(end_date) if end_date else _date.today()
+        from .connectors.llm_costs import get_all_llm_costs
+        return get_all_llm_costs(start_date=sd, end_date=ed, days=days)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_llm_cost_by_model(
+    days: int = 30,
+    provider: str | None = None,
+) -> dict:
+    """
+    Break down AI/LLM costs by individual model with efficiency metrics.
+
+    Shows cost per model, estimated tokens consumed, cost per 1M tokens,
+    and which models have cheaper alternatives for the same task class.
+
+    Args:
+        days: Lookback window in days (default 30).
+        provider: Filter to a specific provider — "openai", "anthropic", "bedrock".
+                  Leave blank to see all providers.
+
+    Examples:
+        - "Which of our AI models costs the most?"
+        - "Show me OpenAI model cost breakdown"
+        - "How much are we spending on GPT-4o vs GPT-4o-mini?"
+        - "What would we save switching from Claude Opus to Sonnet?"
+    """
+    try:
+        from datetime import date as _date, timedelta
+        ed = _date.today()
+        sd = ed - timedelta(days=days)
+        from .connectors.llm_costs import get_all_llm_costs
+        result = get_all_llm_costs(start_date=sd, end_date=ed)
+
+        if provider:
+            # Filter to specific provider
+            prov_cost = result["by_provider"].get(provider, 0.0)
+            return {
+                "provider":    provider,
+                "total_usd":   prov_cost,
+                "by_model":    {k: v for k, v in result["by_model"].items()},
+                "period":      result["period"],
+                "recommendations": result.get("recommendations", []),
+            }
+
+        return {
+            "period":          result["period"],
+            "total_usd":       result["total_usd"],
+            "by_provider":     result["by_provider"],
+            "by_model":        result["by_model"],
+            "top_spenders":    result["top_spenders"],
+            "recommendations": result.get("recommendations", []),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_llm_unit_economics(
+    metric_name: str = "request",
+    metric_count: float | None = None,
+    days: int = 30,
+) -> dict:
+    """
+    Calculate cost per unit of business value from AI APIs.
+
+    Divides total LLM spend by a business metric to give you cost-per-X:
+    cost per API request, cost per user, cost per document processed, etc.
+
+    Args:
+        metric_name:  What you're dividing by — "request", "user", "document",
+                      "transaction", or any label. Default: "request".
+        metric_count: How many units occurred in the period. If omitted, returns
+                      total spend only and asks for the metric count.
+        days:         Lookback window (default 30).
+
+    Examples:
+        - "What's our cost per API request for AI features?"
+        - "We processed 50000 documents this month. What's our cost per doc?"
+        - "Cost per active user for our AI features last 30 days — we had 1200 users"
+    """
+    try:
+        from datetime import date as _date, timedelta
+        ed = _date.today()
+        sd = ed - timedelta(days=days)
+        from .connectors.llm_costs import get_all_llm_costs
+        result = get_all_llm_costs(start_date=sd, end_date=ed)
+        total = result["total_usd"]
+
+        out: dict = {
+            "period":           result["period"],
+            "total_llm_usd":    total,
+            "by_provider":      result["by_provider"],
+        }
+
+        if metric_count and metric_count > 0:
+            out["metric"]           = metric_name
+            out["metric_count"]     = metric_count
+            out[f"cost_per_{metric_name}"] = round(total / metric_count, 6)
+            out["monthly_projection"] = round(total / days * 30, 2)
+
+            # Contextual benchmarks
+            cpm = round(total / metric_count * 1000, 4)
+            out["cost_per_1000"] = cpm
+            if cpm < 0.10:
+                out["benchmark"] = "Excellent — under $0.10 per 1,000 units"
+            elif cpm < 0.50:
+                out["benchmark"] = "Good — under $0.50 per 1,000 units"
+            elif cpm < 2.00:
+                out["benchmark"] = "Moderate — consider model optimisation"
+            else:
+                out["benchmark"] = "High — review model selection and prompt efficiency"
+        else:
+            out["next_step"] = (
+                f"Provide metric_count (how many {metric_name}s in this period) "
+                f"to calculate cost per {metric_name}."
+            )
+
+        return out
+    except Exception as e:
+        return {"error": str(e)}
 
 
 if __name__ == "__main__":

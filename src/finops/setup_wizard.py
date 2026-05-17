@@ -301,6 +301,26 @@ def main(args: list[str] | None = None) -> None:
             ("VERCEL_TOKEN", "Access Token", True),
             ("VERCEL_TEAM_ID", "Team ID (optional, blank for personal)", False),
         ]),
+        # ── AI / LLM providers ────────────────────────────────────────────────
+        "openai": lambda: setup_saas_api_key("OpenAI", [
+            ("OPENAI_API_KEY", "API Key (sk-...)", True),
+            ("OPENAI_ADMIN_KEY", "Admin/Org Key for billing data (sk-admin-..., optional)", True),
+            ("OPENAI_ORG_ID", "Organization ID (org-..., optional)", False),
+        ]),
+        "anthropic": lambda: setup_saas_api_key("Anthropic", [
+            ("ANTHROPIC_API_KEY", "API Key (sk-ant-...)", True),
+            ("ANTHROPIC_ADMIN_KEY", "Admin Key for org usage data (optional)", True),
+            ("ANTHROPIC_ORGANIZATION_ID", "Organization ID (optional)", False),
+        ]),
+        "together": lambda: setup_saas_api_key("Together AI", [
+            ("TOGETHER_API_KEY", "API Key", True),
+        ]),
+        "cohere": lambda: setup_saas_api_key("Cohere", [
+            ("COHERE_API_KEY", "API Key", True),
+        ]),
+        "mistral": lambda: setup_saas_api_key("Mistral AI", [
+            ("MISTRAL_API_KEY", "API Key", True),
+        ]),
     }
 
     if parsed.cmd == "vault":
@@ -355,7 +375,7 @@ def main(args: list[str] | None = None) -> None:
         dispatch[parsed.cmd]()
     else:
         # Interactive full setup
-        providers = ["aws", "azure", "gcp", "datadog", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "slack", "teams"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "together", "cohere", "mistral", "slack", "teams"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")
