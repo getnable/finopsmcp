@@ -10,15 +10,19 @@ to shared mode. All table definitions work on both backends.
 """
 from __future__ import annotations
 
+import logging
 import os
 import stat
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, Index, Integer, JSON, MetaData,
-    String, Table, Text, create_engine, text,
+    String, Table, Text, create_engine, text, select, delete,
 )
 from sqlalchemy.engine import Engine
+
+log = logging.getLogger(__name__)
 
 _DATA_DIR: Path | None = None
 _ENGINE: Engine | None = None
@@ -35,6 +39,19 @@ cost_snapshots = Table(
     Column("account_id", String(128), nullable=False),
     Column("region", String(64), nullable=False, default=""),
     Column("snapshot_date", String(10), nullable=False),   # YYYY-MM-DD
+    Column("amount_usd", Float, nullable=False, default=0.0),
+    Column("granularity", String(16), nullable=False, default="DAILY"),
+    Column("captured_at", DateTime, nullable=False),
+)
+
+cost_snapshots_archive = Table(
+    "cost_snapshots_archive", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("provider", String(64), nullable=False),
+    Column("service", String(256), nullable=False),
+    Column("account_id", String(128), nullable=False),
+    Column("region", String(64), nullable=False, default=""),
+    Column("snapshot_date", String(10), nullable=False),
     Column("amount_usd", Float, nullable=False, default=0.0),
     Column("granularity", String(16), nullable=False, default="DAILY"),
     Column("captured_at", DateTime, nullable=False),
@@ -258,6 +275,44 @@ org_accounts = Table(
 )
 
 
+terraform_tag_audits = Table(
+    "terraform_tag_audits", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("tf_dir", String(512), nullable=False),
+    Column("audit_date", String(10), nullable=False),          # YYYY-MM-DD
+    Column("resource_address", String(512), nullable=False),   # "aws_instance.web"
+    Column("resource_type", String(256), nullable=False),
+    Column("resource_name", String(256), nullable=False),
+    Column("current_tags", Text, nullable=False, default="{}"),   # JSON dict
+    Column("missing_tags", Text, nullable=False, default="[]"),   # JSON list[str]
+    Column("status", String(16), nullable=False, default="open"), # open|fixed|ignored
+    Column("pr_url", String(512), nullable=True),
+    Column("file_path", String(512), nullable=False, default=""),
+)
+
+# ── ML / intelligence tables ──────────────────────────────────────────────────
+
+forecast_models = Table(
+    "forecast_models", metadata,
+    Column("model_key", String(256), primary_key=True),   # "account:service"
+    Column("params_json", Text, nullable=False),           # {"alpha": 0.3, "beta": 0.1, ...}
+    Column("updated_at", DateTime, nullable=False),
+)
+
+pattern_findings = Table(
+    "pattern_findings", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("account_id", String(128), nullable=False),
+    Column("pattern_id", String(64), nullable=False),
+    Column("detected_at", DateTime, nullable=False),
+    Column("severity", String(16), nullable=False),
+    Column("monthly_waste_usd", Float, nullable=False, default=0.0),
+    Column("status", String(16), nullable=False, default="open"),   # open|resolved|ignored
+    Column("evidence_json", Text, nullable=False, default="[]"),
+    Column("resources_json", Text, nullable=False, default="[]"),
+    Column("dedup_key", String(64), nullable=False),   # SHA256 of account+pattern
+)
+
 # ── Indexes — keep hot query paths O(log n) instead of O(n) ──────────────────
 # cost_snapshots: every budget check and spend query filters by date + provider/service
 Index("ix_cs_date_provider",  cost_snapshots.c.snapshot_date, cost_snapshots.c.provider)
@@ -289,6 +344,15 @@ Index("ix_rsub_active",       report_subscriptions.c.is_active)
 
 # cost_trends: trend queries filter by provider + service
 Index("ix_trends_prov_svc",   cost_trends.c.provider, cost_trends.c.service)
+
+# terraform_tag_audits: queries filter by tf_dir + date and by status
+Index("ix_tfa_dir_date", terraform_tag_audits.c.tf_dir, terraform_tag_audits.c.audit_date)
+Index("ix_tfa_status",   terraform_tag_audits.c.status)
+
+# pattern_findings: queries filter by account and status
+Index("ix_pf_account",  pattern_findings.c.account_id)
+Index("ix_pf_status",   pattern_findings.c.status)
+Index("ix_pf_dedup",    pattern_findings.c.dedup_key, unique=True)
 
 # ── Engine factory ────────────────────────────────────────────────────────────
 
@@ -352,6 +416,60 @@ def get_engine() -> Engine:
         db_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
     return _ENGINE
+
+
+def archive_old_snapshots(days_to_keep: int = 365) -> int:
+    """Move cost_snapshots older than days_to_keep to cost_snapshots_archive.
+
+    Returns the number of rows archived.
+    """
+    engine = get_engine()
+    cutoff = (datetime.utcnow() - timedelta(days=days_to_keep)).strftime("%Y-%m-%d")
+
+    with engine.begin() as conn:
+        # Select rows to archive
+        old_rows = conn.execute(
+            select(
+                cost_snapshots.c.provider,
+                cost_snapshots.c.service,
+                cost_snapshots.c.account_id,
+                cost_snapshots.c.region,
+                cost_snapshots.c.snapshot_date,
+                cost_snapshots.c.amount_usd,
+                cost_snapshots.c.granularity,
+                cost_snapshots.c.captured_at,
+            ).where(cost_snapshots.c.snapshot_date < cutoff)
+        ).fetchall()
+
+        if not old_rows:
+            return 0
+
+        # Insert into archive
+        conn.execute(
+            cost_snapshots_archive.insert(),
+            [
+                {
+                    "provider": r.provider,
+                    "service": r.service,
+                    "account_id": r.account_id,
+                    "region": r.region,
+                    "snapshot_date": r.snapshot_date,
+                    "amount_usd": r.amount_usd,
+                    "granularity": r.granularity,
+                    "captured_at": r.captured_at,
+                }
+                for r in old_rows
+            ],
+        )
+
+        # Delete from source
+        conn.execute(
+            delete(cost_snapshots).where(cost_snapshots.c.snapshot_date < cutoff)
+        )
+
+    count = len(old_rows)
+    log.info("Archived %d cost snapshots older than %s", count, cutoff)
+    return count
 
 
 def storage_mode() -> dict:

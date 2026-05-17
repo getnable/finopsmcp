@@ -3140,6 +3140,104 @@ async def get_llm_unit_economics(
 
 
 @mcp.tool()
+async def forecast_costs(
+    account_id: str,
+    service: str | None = None,
+    horizon_days: int = 30,
+    history_days: int = 90,
+) -> dict:
+    """
+    Forecast future cloud spend using Holt-Winters time-series modelling.
+
+    Automatically tunes forecast parameters (alpha/beta/gamma) to your account's
+    historical spend patterns and returns a daily point forecast with 80%
+    prediction intervals.
+
+    Args:
+        account_id:   AWS account ID or provider account identifier
+        service:      specific service to forecast (e.g. "EC2", "RDS") — omit for total
+        horizon_days: number of days to forecast (default 30)
+        history_days: days of history to fit the model (default 90, need ≥14)
+
+    Returns forecast including method used, MAPE accuracy %, monthly projection,
+    and day-by-day point/lower/upper estimates.
+    """
+    try:
+        from .ml.forecasting import Forecaster
+        f = Forecaster.for_account(account_id, service=service, days=history_days)
+        if not f._series:
+            return {
+                "error": "No historical data found for this account/service.",
+                "hint": "Run `take_snapshot_now` first to populate cost history.",
+            }
+        return f.predict_dict(horizon_days)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def scan_waste_patterns(
+    account_id: str,
+    min_monthly_waste: float = 20.0,
+    categories: str | None = None,
+) -> dict:
+    """
+    Scan for cloud cost waste patterns using nable's proprietary pattern library.
+
+    Runs 13 waste fingerprints across compute, storage, database, network, AI,
+    and governance categories. Each finding includes confidence score, monthly
+    waste estimate, and specific remediation steps.
+
+    Args:
+        account_id:        AWS account ID to scan
+        min_monthly_waste: only return findings above this monthly USD threshold
+        categories:        comma-separated filter e.g. "compute,storage" (omit for all)
+
+    Returns structured findings sorted by monthly waste descending, with
+    total_monthly_waste and total_annual_waste summary.
+    """
+    try:
+        from .ml.patterns import PatternContext, scan_dict
+        from .storage.db import get_engine
+        from sqlalchemy import text as sql_text
+
+        engine = get_engine()
+        cat_list = [c.strip() for c in categories.split(",")] if categories else None
+
+        # Pull daily cost series per service (last 90 days)
+        with engine.connect() as conn:
+            rows = conn.execute(sql_text("""
+                SELECT service, snapshot_date, SUM(amount_usd) as total
+                FROM cost_snapshots
+                WHERE account_id = :aid
+                  AND snapshot_date >= date('now', '-90 days')
+                GROUP BY service, snapshot_date
+                ORDER BY service, snapshot_date
+            """), {"aid": account_id}).fetchall()
+
+        daily_costs: dict[str, list[float]] = {}
+        for service, _date, total in rows:
+            daily_costs.setdefault(service, []).append(float(total))
+
+        ctx = PatternContext(
+            daily_costs=daily_costs,
+            by_resource=[],
+            snapshots=[],
+            account_id=account_id,
+        )
+
+        result = scan_dict(ctx, min_monthly_waste=min_monthly_waste, categories=cat_list)
+        result["account_id"] = account_id
+        result["note"] = (
+            "Findings based on cost time-series only. "
+            "Connect EC2/RDS/Lambda metadata for higher-confidence results."
+        )
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def estimate_terraform_cost(
     plan_json: str | None = None,
     plan_file: str | None = None,
