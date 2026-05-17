@@ -18,23 +18,64 @@ No dashboards. No SQL. Just ask.
 ## Quick start
 
 ```bash
-pip install finops-mcp[pdf,snowflake,keyring]
-finops setup   # interactive wizard — connects your providers
+pip install finops-mcp
+finops setup        # connects your providers + auto-configures Claude Desktop
 ```
 
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+That's it. `finops setup` detects Claude Desktop, resolves the correct binary path,
+and writes `claude_desktop_config.json` automatically. Restart Claude Desktop and ask:
+*"What are my AWS costs this month?"*
 
+**14-day free trial, all features unlocked. No credit card required.**
+
+---
+
+### Manual Claude Desktop config (if needed)
+
+If `finops setup` doesn't auto-configure, run:
+
+```bash
+finops setup claude
+```
+
+Or add manually — use the **absolute path** from `which finops-mcp`:
+
+**macOS / Linux:**
 ```json
 {
   "mcpServers": {
-    "finops": { "command": "finops-mcp" }
+    "finops": { "command": "/usr/local/bin/finops-mcp" }
   }
 }
 ```
 
-Restart Claude Desktop and ask: *"What are my AWS costs this month?"*
+Config file locations:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
-**14-day free trial, all features unlocked. No credit card required.**
+> **Why absolute path?** Claude Desktop is a GUI app — it doesn't inherit your
+> shell's `$PATH`. A bare `finops-mcp` command will fail unless it's in `/usr/bin`.
+> Always use the full path from `which finops-mcp`.
+
+---
+
+### Troubleshooting
+
+```bash
+finops-doctor          # checks credentials, DB, network, audit log
+finops setup claude    # re-run Claude Desktop configuration only
+```
+
+**Common issues:**
+
+| Symptom | Fix |
+|---|---|
+| Tools don't appear in Claude | Use absolute path in config (`which finops-mcp`) |
+| `command not found: finops-mcp` | Re-install: `pip install finops-mcp` |
+| Python 3.8/3.9 errors | nable requires Python ≥ 3.10: `python3.10 -m pip install finops-mcp` |
+| Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
+| Permission denied | Install to user: `pip install --user finops-mcp` |
 
 ---
 

@@ -983,33 +983,6 @@ async def create_anomaly_tickets(limit: int = 20) -> dict:
 
 
 @mcp.tool()
-async def check_notification_config() -> dict:
-    """
-    Check which ticketing providers (Jira, Linear, GitHub Issues) are
-    configured via environment variables.
-
-    Examples:
-        - "Is Jira connected?"
-        - "Which ticket providers are set up?"
-        - "Check my notification config"
-    """
-    try:
-        from .integrations.ticketing import list_configured_providers
-        providers = list_configured_providers()
-        return {
-            "configured_providers": providers,
-            "active_provider": providers[0] if providers else None,
-            "setup_instructions": {
-                "jira": "Set JIRA_BASE_URL, JIRA_API_TOKEN, JIRA_USER_EMAIL, JIRA_PROJECT_KEY",
-                "linear": "Set LINEAR_API_KEY, LINEAR_TEAM_ID",
-                "github": "Set GITHUB_TOKEN, GITHUB_FINOPS_REPO (e.g. myorg/finops-alerts)",
-            } if not providers else {},
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@mcp.tool()
 async def create_rightsizing_tickets(
     min_monthly_savings: float = 100.0,
     provider: str = "aws",
@@ -2424,7 +2397,7 @@ async def sync_budgets_from_yaml(yaml_path: str) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @mcp.tool()
-async def list_accounts() -> dict:
+async def list_org_accounts() -> dict:
     """
     List all AWS Organization member accounts, discovering them via the
     AWS Organizations API. Syncs account metadata to local DB for future queries.
@@ -2434,9 +2407,9 @@ async def list_accounts() -> dict:
     (management account or delegated admin).
 
     Examples:
-        - "List all accounts in the org"
-        - "Show me all AWS accounts"
-        - "How many accounts do we have?"
+        - "List all accounts in the AWS org"
+        - "Show me all AWS member accounts"
+        - "How many AWS accounts do we have?"
     """
     try:
         from .connectors.aws_org import list_org_accounts
@@ -3135,35 +3108,6 @@ async def get_llm_unit_economics(
             )
 
         return out
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@mcp.tool()
-async def get_kubernetes_costs(
-    cluster_name: str = "",
-    context: str | None = None,
-) -> dict:
-    """
-    Break down Kubernetes cluster costs to pod → deployment → namespace → team.
-
-    AWS charges a single EC2 line for EKS node groups. This tool allocates that
-    cost proportionally by pod CPU/memory requests, giving you per-team and
-    per-namespace cost attribution that AWS doesn't provide natively.
-
-    Requires: kubernetes Python package + valid kubeconfig
-    Optional: NABLE_K8S_TEAM_LABEL env var for team attribution (default: "team")
-
-    Returns pod-level breakdown, idle node cost, team totals, and recommendations.
-    """
-    try:
-        from .connectors.kubernetes_costs import allocate_to_dict
-        return allocate_to_dict(cluster_name=cluster_name, context=context)
-    except ImportError:
-        return {
-            "error": "kubernetes package not installed.",
-            "fix": "pip install 'finops-mcp[kubernetes]'",
-        }
     except Exception as e:
         return {"error": str(e)}
 

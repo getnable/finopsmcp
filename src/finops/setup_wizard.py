@@ -247,6 +247,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("vercel")
     sub.add_parser("slack")
     sub.add_parser("teams")
+    sub.add_parser("claude")    # configure Claude Desktop MCP entry
 
     vault_p = sub.add_parser("vault")
     vault_p.add_argument("action", choices=["list", "delete", "rotate"])
@@ -371,6 +372,9 @@ def main(args: list[str] | None = None) -> None:
             print("\n  ✓ Credentials are read-only and correctly scoped for nable.")
         print()
         return
+    elif parsed.cmd == "claude":
+        _configure_claude_desktop()
+        return
     elif parsed.cmd in dispatch:
         dispatch[parsed.cmd]()
     else:
@@ -391,7 +395,104 @@ def main(args: list[str] | None = None) -> None:
             except KeyboardInterrupt:
                 print("\n  Skipped.")
 
-    print("\n  Done. Run 'finops-mcp' to start the MCP server.\n")
+    # Always offer to configure Claude Desktop at the end of setup
+    _configure_claude_desktop()
+
+    print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'\n")
+
+
+# ── Claude Desktop auto-configuration ─────────────────────────────────────────
+
+def _configure_claude_desktop() -> None:
+    """
+    Auto-detect claude_desktop_config.json and inject the nable MCP server
+    with the correct absolute path to finops-mcp.
+
+    This is the #1 reason nable doesn't work on company computers — Claude
+    Desktop is a GUI app that doesn't inherit the user's shell PATH, so
+    'finops-mcp' as a bare command fails unless it's in /usr/bin or /bin.
+
+    We resolve the absolute path at setup time and write it to the config.
+    """
+    import json
+    import shutil
+
+    # Platform-specific config paths
+    config_paths = [
+        # macOS
+        Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+        # Windows
+        Path.home() / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json",
+        # Linux (some distributions)
+        Path.home() / ".config" / "Claude" / "claude_desktop_config.json",
+        Path.home() / ".config" / "claude-desktop" / "claude_desktop_config.json",
+    ]
+
+    config_path = next((p for p in config_paths if p.parent.exists()), None)
+
+    if config_path is None:
+        print("\n  ──────────────────────────────────────────────────")
+        print("  Claude Desktop not found. To finish setup manually:")
+        print("  1. Install Claude Desktop from https://claude.ai/download")
+        print("  2. Run 'finops setup claude' after installing")
+        print("  ──────────────────────────────────────────────────")
+        return
+
+    # Find absolute path to finops-mcp binary
+    finops_bin = shutil.which("finops-mcp")
+    if not finops_bin:
+        # Fall back to same directory as the current Python executable
+        finops_bin = str(Path(sys.executable).parent / "finops-mcp")
+
+    # Load existing config or start fresh
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            config = {}
+    else:
+        config = {}
+
+    config.setdefault("mcpServers", {})
+
+    existing = config["mcpServers"].get("finops", {})
+    if existing.get("command") == finops_bin:
+        _ok(f"Claude Desktop already configured: {finops_bin}")
+        return
+
+    print(f"\n  ──────────────────────────────────────────────────")
+    print(f"  Configure Claude Desktop to use nable?")
+    print(f"  Config file: {config_path}")
+    print(f"  Command:     {finops_bin}")
+    if existing:
+        print(f"  (replaces existing: {existing.get('command', '?')})")
+    print(f"  ──────────────────────────────────────────────────")
+
+    ans = _prompt("  Write config? [Y/n]", default="y").lower()
+    if ans not in ("y", "yes", ""):
+        print("  Skipped. Add manually:")
+        _print_manual_config(finops_bin)
+        return
+
+    config["mcpServers"]["finops"] = {"command": finops_bin}
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+
+    _ok(f"Claude Desktop configured → {config_path}")
+    print("  Restart Claude Desktop for the changes to take effect.")
+
+
+def _print_manual_config(finops_bin: str) -> None:
+    import json
+    snippet = json.dumps({"mcpServers": {"finops": {"command": finops_bin}}}, indent=2)
+    print(f"\n  Add to your claude_desktop_config.json:\n")
+    for line in snippet.splitlines():
+        print(f"    {line}")
+    print()
 
 
 if __name__ == "__main__":
