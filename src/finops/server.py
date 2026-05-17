@@ -3139,5 +3139,49 @@ async def get_llm_unit_economics(
         return {"error": str(e)}
 
 
+@mcp.tool()
+async def estimate_terraform_cost(
+    plan_json: str | None = None,
+    plan_file: str | None = None,
+    tf_dir: str | None = None,
+) -> dict:
+    """
+    Estimate the monthly AWS cost change from a Terraform plan BEFORE applying it.
+
+    Provide one of:
+      - plan_json: raw JSON string from `terraform show -json plan.tfplan`
+      - plan_file: path to a saved plan JSON file
+      - tf_dir:    directory to run `terraform plan` in automatically
+
+    Returns a cost delta breakdown per resource with adds, changes, and removes.
+    Prices: AWS on-demand us-east-1. Supports EC2, RDS, Aurora, ElastiCache,
+    EKS, NAT Gateways, ALB/NLB, ECS Fargate, Lambda, EBS, OpenSearch, MSK, Redshift.
+    """
+    try:
+        from .connectors.terraform_estimate import estimate_plan, estimate_from_file, estimate_from_dir
+        import json as _json
+
+        if plan_json:
+            data = _json.loads(plan_json)
+            result = estimate_plan(data)
+        elif plan_file:
+            result = estimate_from_file(plan_file)
+        elif tf_dir:
+            result = estimate_from_dir(tf_dir)
+        else:
+            return {
+                "error": "Provide plan_json, plan_file, or tf_dir.",
+                "usage": (
+                    "Run: terraform plan -out=plan.tfplan && "
+                    "terraform show -json plan.tfplan > plan.json, "
+                    "then pass the file path as plan_file."
+                ),
+            }
+
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
 if __name__ == "__main__":
     main()

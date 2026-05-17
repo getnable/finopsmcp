@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.5.0"
+version = "0.6.0"
 description = "Ask Claude about your cloud costs — AWS, Azure, GCP, Datadog, Snowflake, and 8 more"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "Elastic License 2.0" }
 keywords = ["mcp", "finops", "claude", "aws", "cloud-cost", "ai"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "License :: Other/Proprietary License",
 ]
 requires-python = ">=3.10"
 dependencies = [
@@ -83,6 +84,7 @@ finops            = "finops.setup_wizard:main"
 finops-slack      = "finops.slack_bot.app:main"
 finops-pr-webhook = "finops.pr_comments.webhook:main"
 finops-doctor     = "finops.doctor:main"
+finops-estimate   = "finops.connectors.terraform_estimate:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/finops"]
