@@ -35,8 +35,12 @@ COMMENT_TAG = "<!-- nable-cost-comment -->"
 
 def _verify_github_signature(payload: bytes, sig_header: str) -> bool:
     if not WEBHOOK_SECRET:
-        return True  # skip verification if no secret configured
-    expected = "sha256=" + hmac.new(
+        log.error(
+            "GITHUB_WEBHOOK_SECRET is not set — rejecting all webhook requests. "
+            "Set this env var to enable the PR cost webhook."
+        )
+        return False  # fail closed: never skip verification
+    expected = "sha256=" + hmac.HMAC(
         WEBHOOK_SECRET.encode(), payload, hashlib.sha256
     ).hexdigest()
     return hmac.compare_digest(expected, sig_header or "")

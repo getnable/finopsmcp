@@ -34,7 +34,7 @@ from typing import Optional
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
-_POSTHOG_KEY  = "POSTHOG_API_KEY"          # replaced at build time by CI
+_POSTHOG_KEY  = os.environ.get("NABLE_POSTHOG_KEY", "")  # set in env; telemetry silently disabled if absent
 _POSTHOG_HOST = "https://us.i.posthog.com"
 _ID_FILE      = Path.home() / ".config" / "finops" / ".install_id"
 _OPT_OUT_ENV  = "NABLE_NO_TELEMETRY"
@@ -61,6 +61,8 @@ def _get_install_id() -> str:
 
 
 def _is_opted_out() -> bool:
+    if not _POSTHOG_KEY:
+        return True  # no key configured — silently skip all telemetry
     return bool(os.environ.get(_OPT_OUT_ENV, "").strip())
 
 

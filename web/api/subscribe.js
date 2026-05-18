@@ -57,13 +57,29 @@ function welcomeHtml(email) {
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "https://nable.sh",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
 export default async function handler(req) {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   }
+
+  // Basic rate limiting via IP — edge runtime provides cf headers or x-forwarded-for
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  // Log for monitoring; actual hard rate limiting requires Vercel KV or similar
+  console.log(`subscribe request from ip=${ip}`);
 
   let body;
   try {
@@ -143,9 +159,6 @@ export default async function handler(req) {
 
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "https://nable.sh",
-    },
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
   });
 }

@@ -37,15 +37,15 @@ from pathlib import Path
 
 log = logging.getLogger("finops.license")
 
-_DEFAULT_SECRET = b"finops-mcp-license-v1-2026"
 _env_secret = os.environ.get("FINOPS_LICENSE_SECRET", "")
 if _env_secret:
     _SECRET = _env_secret.encode()
 else:
-    _SECRET = _DEFAULT_SECRET
+    import secrets as _secrets
+    _SECRET = _secrets.token_bytes(32)   # random per-session — license keys won't verify
     logging.getLogger("finops.license").warning(
-        "WARNING: FINOPS_LICENSE_SECRET not set. Using default secret. "
-        "Set this env var in production."
+        "FINOPS_LICENSE_SECRET is not set. License key verification is disabled. "
+        "Pro features will not activate. Set FINOPS_LICENSE_SECRET to enable license validation."
     )
 _UPGRADE_URL = "https://nable.sh/#pricing"
 _TRIAL_DAYS  = 14

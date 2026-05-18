@@ -11,8 +11,12 @@
 
 import crypto from "node:crypto";
 
-// Must match src/finops/license.py _SECRET
-const LICENSE_SECRET = "finops-mcp-license-v1-2026";
+// Set FINOPS_LICENSE_SECRET in Vercel project environment variables.
+// Must match the FINOPS_LICENSE_SECRET env var on the MCP server side.
+const LICENSE_SECRET = process.env.FINOPS_LICENSE_SECRET;
+if (!LICENSE_SECRET) {
+  throw new Error("FINOPS_LICENSE_SECRET environment variable is not set.");
+}
 
 // ─── License key generation ──────────────────────────────────────────────────
 // Mirrors generate_key() in license.py exactly so keys are valid in the MCP server.
@@ -32,9 +36,20 @@ function generateKey(email) {
 
 // ─── Stripe signature verification ───────────────────────────────────────────
 
+const STRIPE_TIMESTAMP_TOLERANCE_S = 300; // 5 minutes — reject replays
+
 function verifyStripe(rawBody, sigHeader, secret) {
   // sigHeader format: t=timestamp,v1=hex_sig[,v0=...]
   const parts = Object.fromEntries(sigHeader.split(",").map((p) => p.split("=", 2)));
+
+  // Replay attack prevention: reject if timestamp is more than 5 minutes old
+  const ts = parseInt(parts.t, 10);
+  const now = Math.floor(Date.now() / 1000);
+  if (isNaN(ts) || Math.abs(now - ts) > STRIPE_TIMESTAMP_TOLERANCE_S) {
+    console.error(`Stripe webhook timestamp out of tolerance: ts=${ts} now=${now}`);
+    return false;
+  }
+
   const signed = `${parts.t}.${rawBody}`;
   const expected = crypto.createHmac("sha256", secret).update(signed).digest("hex");
   // timingSafeEqual needs same-length buffers
