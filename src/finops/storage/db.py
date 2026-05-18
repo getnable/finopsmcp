@@ -192,8 +192,8 @@ budgets = Table(
     Column("scope_value", String(256), nullable=False, default="*"),
     Column("period", String(16), nullable=False, default="monthly"), # monthly | weekly
     Column("limit_usd", Float, nullable=False),
-    Column("alert_at_pct", Float, nullable=False, default=80.0),   # warn at 80%
-    Column("block_at_pct", Float, nullable=False, default=100.0),  # fail CI at 100%
+    Column("alert_at_pct", Float, nullable=False, default=80.0),      # warning alert at 80%
+    Column("critical_at_pct", Float, nullable=False, default=100.0), # critical alert at 100% (never blocks)
     Column("created_at", DateTime, nullable=False),
     Column("updated_at", DateTime, nullable=False),
     Column("created_by", String(256), nullable=False, default=""),

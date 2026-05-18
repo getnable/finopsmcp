@@ -1,5 +1,5 @@
 """
-Budget enforcement engine.
+Budget alerting engine.
 
 Budgets are stored in the DB (budgets table) and checked against actual spend
 from cost_snapshots / attributed_costs. Supports:
@@ -9,9 +9,12 @@ from cost_snapshots / attributed_costs. Supports:
   - Per-team budget (via attributed_costs)
   - Per-service budget
 
-Two-tier alerting:
-  alert_at_pct  (default 80%) → send notification, create warning ticket
-  block_at_pct  (default 100%) → fail CI (budget check exits non-zero)
+Two-tier alerting (alerts only — nable never blocks your pipeline):
+  alert_at_pct    (default 80%)  → warning notification
+  critical_at_pct (default 100%) → critical notification
+
+Teams decide what to do when a budget is exceeded. nable surfaces the data,
+not the decision.
 
 budget.yml format (committed alongside infra code):
 ────────────────────────────────────────────────────
@@ -22,7 +25,6 @@ budgets:
     period: monthly
     limit_usd: 15000
     alert_at_pct: 80
-    block_at_pct: 100
 
   - name: AWS Total
     scope_type: provider
@@ -40,10 +42,7 @@ budgets:
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
-import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -60,7 +59,7 @@ def create_budget(
     scope_value: str = "*",
     period: str = "monthly",
     alert_at_pct: float = 80.0,
-    block_at_pct: float = 100.0,
+    critical_at_pct: float = 100.0,
     created_by: str = "mcp",
 ) -> dict[str, Any]:
     from ..storage.db import budgets, get_engine
@@ -75,7 +74,7 @@ def create_budget(
             period=period,
             limit_usd=limit_usd,
             alert_at_pct=alert_at_pct,
-            block_at_pct=block_at_pct,
+            critical_at_pct=critical_at_pct,
             created_at=now,
             updated_at=now,
             created_by=created_by,
@@ -91,7 +90,7 @@ def create_budget(
         "limit_usd": limit_usd,
         "period": period,
         "alert_at_pct": alert_at_pct,
-        "block_at_pct": block_at_pct,
+        "critical_at_pct": critical_at_pct,
     }
 
 
@@ -123,26 +122,20 @@ def _period_dates(period: str) -> tuple[str, str]:
     today = date.today()
     if period == "monthly":
         start = today.replace(day=1)
-        # end of month
         if today.month == 12:
             end = date(today.year + 1, 1, 1) - timedelta(days=1)
         else:
             end = date(today.year, today.month + 1, 1) - timedelta(days=1)
         return start.isoformat(), end.isoformat()
     elif period == "weekly":
-        start = today - timedelta(days=today.weekday())  # Monday
+        start = today - timedelta(days=today.weekday())
         end = start + timedelta(days=6)
         return start.isoformat(), end.isoformat()
     else:
-        # Default: last 30 days
         return (today - timedelta(days=30)).isoformat(), today.isoformat()
 
 
 def _fetch_spend(budget: dict[str, Any], start: str, end: str, conn: Any) -> float:
-    """
-    Fetch actual spend for a budget using a caller-provided connection.
-    Accepts pre-computed (start, end) so we never call _period_dates twice.
-    """
     from ..storage.db import cost_snapshots, attributed_costs
     from sqlalchemy import func, select
 
@@ -182,7 +175,12 @@ def _fetch_spend(budget: dict[str, Any], start: str, end: str, conn: Any) -> flo
 
 def check_budget(budget: dict[str, Any], conn: Any = None) -> dict[str, Any]:
     """Check a single budget against actual spend. Returns status dict.
-    Pass an open SQLAlchemy connection to avoid opening a new one."""
+
+    Status levels (all informational — none block execution):
+      ok       → under alert threshold
+      warning  → past alert_at_pct, approaching limit
+      exceeded → past critical_at_pct (over budget — alert only)
+    """
     from ..storage.db import get_engine
     start, end = _period_dates(budget["period"])
     if conn is None:
@@ -190,21 +188,23 @@ def check_budget(budget: dict[str, Any], conn: Any = None) -> dict[str, Any]:
             spent = _fetch_spend(budget, start, end, _conn)
     else:
         spent = _fetch_spend(budget, start, end, conn)
-    limit = budget["limit_usd"]
-    pct_used = (spent / limit * 100) if limit else 0.0
-    alert_pct = budget.get("alert_at_pct", 80.0)
-    block_pct = budget.get("block_at_pct", 100.0)
 
-    if pct_used >= block_pct:
-        status = "exceeded"
+    limit        = budget["limit_usd"]
+    pct_used     = (spent / limit * 100) if limit else 0.0
+    alert_pct    = budget.get("alert_at_pct", 80.0)
+    # back-compat: honour block_at_pct from old configs, treat as critical_at_pct
+    critical_pct = budget.get("critical_at_pct", budget.get("block_at_pct", 100.0))
+
+    if pct_used >= critical_pct:
+        status = "exceeded"   # alert only, never blocks
     elif pct_used >= alert_pct:
         status = "warning"
     else:
         status = "ok"
 
-    days_elapsed = (date.today() - date.fromisoformat(start)).days + 1
+    days_elapsed   = (date.today() - date.fromisoformat(start)).days + 1
     days_in_period = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1
-    run_rate_monthly = (spent / days_elapsed * days_in_period) if days_elapsed > 0 else 0
+    run_rate       = (spent / days_elapsed * days_in_period) if days_elapsed > 0 else 0
 
     return {
         "id": budget.get("id"),
@@ -219,20 +219,19 @@ def check_budget(budget: dict[str, Any], conn: Any = None) -> dict[str, Any]:
         "remaining": round(max(0, limit - spent), 2),
         "pct_used": round(pct_used, 1),
         "status": status,
-        "run_rate_monthly": round(run_rate_monthly, 2),
-        "projected_overage": round(max(0, run_rate_monthly - limit), 2),
+        "run_rate_monthly": round(run_rate, 2),
+        "projected_overage": round(max(0, run_rate - limit), 2),
     }
 
 
 def check_all_budgets() -> list[dict[str, Any]]:
-    """Check all active budgets using a single shared DB connection — O(n) queries
-    instead of O(n) connections. Returns list sorted by % used descending."""
+    """Check all active budgets. Returns list sorted by % used descending."""
     from ..storage.db import get_engine
     budget_list = list_budgets(active_only=True)
     if not budget_list:
         return []
     results = []
-    with get_engine().connect() as conn:          # one connection for all budgets
+    with get_engine().connect() as conn:
         for b in budget_list:
             try:
                 results.append(check_budget(b, conn=conn))
@@ -245,8 +244,7 @@ def check_all_budgets() -> list[dict[str, Any]]:
 
 def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
     """
-    Read a budget.yml file and upsert budgets into the DB.
-    Idempotent — running twice doesn't create duplicates.
+    Read a budget.yml file and upsert budgets into the DB. Idempotent.
 
     budget.yml format:
         budgets:
@@ -255,8 +253,8 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
             scope_value: platform
             period: monthly
             limit_usd: 15000
-            alert_at_pct: 80
-            block_at_pct: 100
+            alert_at_pct: 80       # warning alert (default 80%)
+            critical_at_pct: 100   # critical alert (default 100%)
     """
     try:
         import yaml
@@ -278,11 +276,8 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
     from sqlalchemy import select, update, insert
 
     engine = get_engine()
-    created = []
-    updated_list = []
-    now = datetime.now(timezone.utc)
+    now    = datetime.now(timezone.utc)
 
-    # Single read to get all existing names — O(1) instead of O(n) round-trips
     with engine.connect() as conn:
         existing_names: set[str] = {
             r.name for r in conn.execute(select(budgets_table.c.name)).fetchall()
@@ -290,7 +285,6 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
 
     valid = [(b, b.get("name", "")) for b in raw_budgets if b.get("name")]
 
-    # Batch INSERT all new budgets in one execute() call
     to_insert = [
         dict(
             name=name,
@@ -299,7 +293,7 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
             period=b.get("period", "monthly"),
             limit_usd=float(b.get("limit_usd", 0)),
             alert_at_pct=float(b.get("alert_at_pct", 80)),
-            block_at_pct=float(b.get("block_at_pct", 100)),
+            critical_at_pct=float(b.get("critical_at_pct", b.get("block_at_pct", 100))),
             created_at=now,
             updated_at=now,
             created_by="budget.yml",
@@ -307,13 +301,14 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
         )
         for b, name in valid if name not in existing_names
     ]
+    created = []
     if to_insert:
         with engine.begin() as conn:
             conn.execute(insert(budgets_table), to_insert)
         created = [r["name"] for r in to_insert]
 
-    # Batch UPDATE existing budgets in a single transaction
-    to_update = [(b, name) for b, name in valid if name in existing_names]
+    to_update    = [(b, name) for b, name in valid if name in existing_names]
+    updated_list = []
     if to_update:
         with engine.begin() as conn:
             for b, name in to_update:
@@ -324,7 +319,7 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
                         period=b.get("period", "monthly"),
                         limit_usd=float(b.get("limit_usd", 0)),
                         alert_at_pct=float(b.get("alert_at_pct", 80)),
-                        block_at_pct=float(b.get("block_at_pct", 100)),
+                        critical_at_pct=float(b.get("critical_at_pct", b.get("block_at_pct", 100))),
                         updated_at=now,
                         is_active=True,
                     )
@@ -339,17 +334,19 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
     }
 
 
-# ── CI gate — used by GitHub Actions ─────────────────────────────────────────
+# ── CI report — informational only, never blocks ──────────────────────────────
 
 def ci_gate(
     budget_yaml: str | None = None,
-    fail_on_exceeded: bool = True,
+    fail_on_exceeded: bool = False,
 ) -> int:
     """
-    CI gate: check all budgets and exit non-zero if any are exceeded.
-    Used by the GitHub Actions budget check step.
+    CI budget report: prints budget status to stdout. Always exits 0.
 
-    Returns exit code: 0 = all good, 1 = budget exceeded
+    nable surfaces cost data — it never blocks your pipeline. Your team
+    decides what action to take when a budget is exceeded.
+
+    Returns exit code: always 0
     """
     if budget_yaml and Path(budget_yaml).exists():
         sync_from_yaml(budget_yaml)
@@ -364,20 +361,23 @@ def ci_gate(
     ok        = [b for b in results if b["status"] == "ok"]
 
     print(f"\n{'─'*60}")
-    print(f"  nable Budget Check — {date.today().isoformat()}")
+    print(f"  nable Budget Report — {date.today().isoformat()}")
     print(f"{'─'*60}")
     for b in results:
-        icon = "❌" if b["status"] == "exceeded" else "⚠️ " if b["status"] == "warning" else "✅"
+        icon = "🔴" if b["status"] == "exceeded" else "🟡" if b["status"] == "warning" else "🟢"
         print(f"  {icon} {b['name']}: ${b['spent']:,.0f} / ${b['limit']:,.0f} ({b['pct_used']:.0f}%)")
+        if b["projected_overage"] > 0:
+            print(f"      ↳ projected overage: ${b['projected_overage']:,.0f} by end of period")
     print(f"{'─'*60}")
     print(f"  {len(ok)} OK · {len(warnings)} warnings · {len(exceeded)} exceeded")
     print(f"{'─'*60}\n")
 
-    if exceeded and fail_on_exceeded:
-        print("❌ Budget gate FAILED — one or more budgets exceeded")
-        return 1
+    if exceeded:
+        print("🔴 Budget alert — the following budgets are exceeded:")
+        for b in exceeded:
+            print(f"   • {b['name']}: ${b['spent']:,.0f} spent (${b['remaining']:,.0f} over limit)")
+        print("   nable does not block your pipeline. Your team decides the next step.\n")
+    elif warnings:
+        print("🟡 Budget warning — approaching limit on some budgets\n")
 
-    if warnings:
-        print("⚠️  Budget warnings — review spend")
-
-    return 0
+    return 0  # never block
