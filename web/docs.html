@@ -372,20 +372,59 @@
         <strong>Cost Explorer must be enabled</strong> in your AWS account before the API will work. Go to <strong>Billing → Cost Explorer → Enable</strong>. It takes up to 24 hours to activate on a new account.
       </div>
 
-      <div class="card p-5 mb-4">
-        <p class="font-semibold text-sm mb-3" style="color:var(--text)">Required IAM permissions</p>
-        <div class="code-block p-4 text-xs">
-          ce:GetCostAndUsage<br/>
-          ce:GetSavingsPlansUtilization<br/>
-          ce:GetSavingsPlansCoverage<br/>
-          ce:GetReservationUtilization<br/>
-          ce:GetReservationCoverage<br/>
-          sts:GetCallerIdentity<br/>
-          cloudwatch:GetMetricStatistics &nbsp;<span style="color:var(--dim)"># rightsizing only</span><br/>
-          ec2:DescribeInstances &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--dim)"># rightsizing only</span>
+      <p class="text-sm mb-3" style="color:var(--muted)">nable works with whatever permissions you're comfortable giving it. Start with Cost Explorer read-only and you get cost queries, anomaly detection, and budget tracking. Add the audit permissions when you're ready and you unlock the deep waste scanner.</p>
+
+      <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;background:var(--surface2);border-bottom:1px solid var(--border)">
+          <div style="padding:10px 16px;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.05em;text-transform:uppercase">Bare bones</div>
+          <div style="padding:10px 16px;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.05em;text-transform:uppercase;border-left:1px solid var(--border)">Full audit</div>
         </div>
-        <p class="text-xs mt-3" style="color:var(--dim)">Attach the AWS managed policy <strong>ReadOnlyAccess</strong> as a quick alternative. It covers all of the above.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr">
+          <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
+            <p class="text-xs font-semibold mb-2" style="color:var(--text)">What you get</p>
+            <ul style="font-size:12.5px;color:var(--muted);line-height:1.7;list-style:none">
+              <li>Cost queries across all services</li>
+              <li>Anomaly detection</li>
+              <li>Budget enforcement</li>
+              <li>Savings plan coverage</li>
+              <li>Forecasting</li>
+            </ul>
+          </div>
+          <div style="padding:14px 16px;border-bottom:1px solid var(--border);border-left:1px solid var(--border)">
+            <p class="text-xs font-semibold mb-2" style="color:var(--text)">Everything above, plus</p>
+            <ul style="font-size:12.5px;color:var(--muted);line-height:1.7;list-style:none">
+              <li>Deep waste audit (10 pattern types)</li>
+              <li>CloudWatch rightsizing per instance</li>
+              <li>Idle NAT / EIP / EBS detection</li>
+              <li>Lambda memory analysis</li>
+              <li>S3 storage class optimization</li>
+            </ul>
+          </div>
+          <div style="padding:14px 16px">
+            <div class="code-block p-3 text-xs">
+              ce:GetCostAndUsage<br/>
+              ce:GetSavingsPlans*<br/>
+              ce:GetReservation*<br/>
+              sts:GetCallerIdentity
+            </div>
+          </div>
+          <div style="padding:14px 16px;border-left:1px solid var(--border)">
+            <div class="code-block p-3 text-xs">
+              <span style="color:var(--dim)"># everything on the left, plus:</span><br/>
+              cloudwatch:GetMetricData<br/>
+              ec2:Describe{Instances,Volumes,<br/>
+              &nbsp;&nbsp;Snapshots,Addresses,NatGateways}<br/>
+              rds:Describe{DBInstances,DBSnapshots}<br/>
+              lambda:ListFunctions<br/>
+              logs:DescribeLogGroups<br/>
+              s3:ListAllMyBuckets<br/>
+              compute-optimizer:Get*
+            </div>
+          </div>
+        </div>
       </div>
+
+      <div class="info-box mb-4">All permissions are read-only. nable never writes to your AWS account unless you explicitly enable cleanup mode with <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">FINOPS_CLEANUP_ENABLED=true</code>. Run <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">finops setup aws --iam-template</code> to generate a least-privilege CloudFormation policy for either tier.</div>
 
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Create an IAM user with the permissions above, or use an existing SSO role.</p></div></div>
