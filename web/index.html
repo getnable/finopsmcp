@@ -805,6 +805,59 @@ function Pricing({ onTrial }){
 }
 
 
+function Compare(){
+  const rows = [
+    { label:"Price",          them:"$150k+/year on $1M+ cloud spend",   us:"$0 – $79/mo flat" },
+    { label:"Pricing model",  them:"% of cloud spend · quote required",  us:"Flat rate, no surprises" },
+    { label:"Contract",       them:"Multi-year lock-in",                 us:"Cancel any time" },
+    { label:"Setup time",     them:"3 – 6 month onboarding",             us:"< 5 minutes" },
+    { label:"Data access",    them:"Upload bills to vendor cloud",        us:"Credentials stay on your machine" },
+    { label:"AI queries",     them:"Pre-built dashboards only",           us:"Ask anything in plain English" },
+    { label:"Connectors",     them:"AWS + Azure (limited)",              us:"17 clouds, SaaS &amp; AI providers" },
+    { label:"Ticket creation",them:"Manual export → paste → file",       us:"Auto-creates Jira, Linear, GitHub issues" },
+    { label:"Budget alerts",  them:"Email after the invoice",             us:"Blocks deploy before the spike" },
+  ];
+  return (
+    <section data-screen-label="07 Compare">
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ Why nable</div>
+          <h2>Traditional FinOps tools cost more than your cloud bill.</h2>
+          <p>Platforms like Apptio, Cloudability, and CloudHealth charge a percentage of cloud spend. On $1M+ in AWS/GCP/Azure, that's $150k+ a year — before professional services. nable is a flat monthly fee.</p>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:14.5}}>
+            <thead>
+              <tr>
+                <th style={{textAlign:"left",padding:"10px 16px",color:"var(--fg-3)",fontWeight:500,fontFamily:"var(--mono)",fontSize:12,letterSpacing:".05em",borderBottom:"1px solid var(--line)"}}>Category</th>
+                <th style={{textAlign:"left",padding:"10px 16px",color:"var(--fg-3)",fontWeight:500,fontFamily:"var(--mono)",fontSize:12,letterSpacing:".05em",borderBottom:"1px solid var(--line)"}}>Traditional FinOps platform</th>
+                <th style={{textAlign:"left",padding:"10px 16px",color:"var(--hl)",fontWeight:500,fontFamily:"var(--mono)",fontSize:12,letterSpacing:".05em",borderBottom:"1px solid var(--line)"}}>nable</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r,i)=>(
+                <tr key={i} style={{borderBottom:"1px solid var(--line)"}}>
+                  <td style={{padding:"13px 16px",color:"var(--fg-2)",fontWeight:500}}>{r.label}</td>
+                  <td style={{padding:"13px 16px",color:"var(--fg-3)"}} dangerouslySetInnerHTML={{__html:r.them}}/>
+                  <td style={{padding:"13px 16px",color:"var(--fg)",fontWeight:500}} dangerouslySetInnerHTML={{__html:r.us}}/>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{marginTop:32,padding:"20px 24px",background:"var(--bg-2)",borderRadius:10,border:"1px solid var(--line)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontWeight:600,fontSize:15,marginBottom:4}}>Start free — no card, no contract, no cloud spend clause.</div>
+            <div style={{color:"var(--fg-3)",fontSize:13.5}}>Free tier is permanent. Upgrade to Pro at $79/mo when you want ticket automation and org reports.</div>
+          </div>
+          <a href="#pricing" style={{background:"var(--fg)",color:"var(--bg)",padding:"10px 22px",borderRadius:8,fontSize:14,fontWeight:500,whiteSpace:"nowrap",textDecoration:"none"}}>See pricing →</a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
 function Footer(){
   const [footEmail, setFootEmail] = React.useState('');
   const [done, setDone] = React.useState(false);
@@ -1052,6 +1105,7 @@ function App(){
       <Connectors />
       <Security />
       <Pricing onTrial={openModal} />
+      <Compare />
       <Footer />
       <Tweaks open={tweaksOpen} t={t} setTweak={setTweak} />
       {modalOpen && <TrialModal onClose={()=>setModalOpen(false)} />}
