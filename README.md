@@ -31,7 +31,7 @@ finops setup            # connects your providers and auto-configures Claude Des
 
 `finops setup` detects Claude Desktop and writes `claude_desktop_config.json` automatically. It picks `uvx` if available, otherwise uses the absolute binary path. Restart Claude Desktop and ask: *"What are my AWS costs this month?"*
 
-**14-day free trial, all features unlocked. No credit card required.**
+**1-month free trial, all features unlocked. No credit card required.**
 
 ---
 
@@ -100,7 +100,7 @@ finops setup claude    # re-run Claude Desktop configuration only
 | GCP | Cloud Billing API + BigQuery export |
 | Datadog | Usage Metering API v2: real dollar amounts |
 | Snowflake | ACCOUNT_USAGE.METERING_HISTORY |
-| Stripe | Balance Transactions API |
+| Langfuse | Daily metrics API: model cost, token usage, trace volume |
 | MongoDB Atlas | Invoice API |
 | Twilio | Usage Records API |
 | Cloudflare | Billing API |
@@ -135,7 +135,7 @@ nable is not just a connector that pipes billing data into Claude. It runs activ
 - Org-wide multi-account cost rollup
 - Invoice email parsing via IMAP for vendors without APIs
 
-$39.99/mo, 14-day free trial. Subscribe at [nable.sh](https://nable.sh).
+$39.99/mo, 1-month free trial. Subscribe at [nable.sh](https://nable.sh).
 
 ---
 
