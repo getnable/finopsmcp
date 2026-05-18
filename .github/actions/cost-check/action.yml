@@ -1,0 +1,70 @@
+name: "nable Cost Check"
+description: "Estimate the monthly cloud cost impact of infrastructure changes in a PR and post a comment."
+
+branding:
+  icon: "dollar-sign"
+  color: "orange"
+
+inputs:
+  finops-license-key:
+    description: "nable Pro license key (FINOPS_LICENSE_KEY). Omit to run in trial mode."
+    required: false
+    default: ""
+
+  threshold-usd:
+    description: "Minimum monthly cost change (USD) to trigger a comment. Default: 10."
+    required: false
+    default: "10"
+
+  region:
+    description: "Primary AWS region for pricing lookups. Default: us-east-1."
+    required: false
+    default: "us-east-1"
+
+  # Cloud credentials — pass whatever you have. Unset ones are simply skipped.
+  aws-access-key-id:
+    description: "AWS access key ID (for effective-rate detection and EC2 pricing)."
+    required: false
+    default: ""
+  aws-secret-access-key:
+    description: "AWS secret access key."
+    required: false
+    default: ""
+  aws-region:
+    description: "AWS region override."
+    required: false
+    default: ""
+
+  github-token:
+    description: "GitHub token for posting the PR comment. Defaults to secrets.GITHUB_TOKEN."
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install nable
+      shell: bash
+      run: pip install --quiet "finops-mcp>=0.1"
+
+    - name: Run cost check
+      shell: bash
+      env:
+        FINOPS_LICENSE_KEY: ${{ inputs.finops-license-key }}
+        PR_COST_THRESHOLD_USD: ${{ inputs.threshold-usd }}
+        PRICING_REGION: ${{ inputs.region }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.aws-access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.aws-secret-access-key }}
+        AWS_DEFAULT_REGION: ${{ inputs.aws-region || inputs.region }}
+        # GitHub context — always available in Actions
+        GH_REPO: ${{ github.repository }}
+        GH_PR_NUMBER: ${{ github.event.pull_request.number }}
+        GH_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        GH_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: python "${{ github.action_path }}/entrypoint.py"
