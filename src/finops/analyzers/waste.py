@@ -621,13 +621,23 @@ def check_s3_storage_class(
     lookback_days: int = 30,
 ) -> list[dict]:
     """
-    Detect S3 buckets storing >10 GB in STANDARD storage class with low access
-    frequency (GetRequests < threshold). These should be in INTELLIGENT_TIERING
-    or STANDARD_IA.
+    Detect S3 buckets storing data in STANDARD storage class with low access
+    frequency where a cheaper storage class would actually save money.
 
-    STANDARD: $0.023/GB-mo
-    INTELLIGENT_TIERING: $0.0125/GB-mo (frequent) → $0.01/GB-mo (infrequent after 30d)
-    Potential saving: ~45% on inactive data.
+    We do NOT blindly recommend Intelligent-Tiering — its $0.0025/1k objects/month
+    monitoring fee can exceed the storage savings for buckets with many small objects
+    or high request rates. Instead:
+
+    1. Calculate Intelligent-Tiering monitoring cost from object count.
+    2. Only recommend IT if net savings (storage reduction minus monitoring) > $5/mo.
+    3. For write-once / read-rarely patterns (very low GETs), recommend STANDARD-IA
+       instead ($0.0125/GB-mo, no monitoring fee, retrieval fee applies).
+    4. If object count is unavailable, skip rather than give a bad recommendation.
+
+    STANDARD:           $0.023/GB-mo
+    STANDARD-IA:        $0.0125/GB-mo + $0.01/GB retrieval
+    INTELLIGENT-TIERING: $0.023/GB-mo (frequent) / $0.0125/GB-mo (infrequent)
+                         + $0.0025/1000 objects/mo monitoring
     """
     findings: list[dict] = []
 
@@ -690,34 +700,88 @@ def check_s3_storage_class(
             # S3 request metrics require request metrics to be enabled on the bucket
             avg_daily_gets = None
 
-        # Flag if large and either low-access or access metrics not available
-        # Conservative: only flag if we can confirm low-access or metrics aren't set up
+        # Only flag confirmed low-access buckets — skip if we can't verify
         is_low_access = avg_daily_gets is not None and avg_daily_gets < 100
-        if not is_low_access and avg_daily_gets is not None:
+        if not is_low_access:
             continue
 
         monthly_standard_cost = size_gb * _S3_STANDARD_PER_GB_MONTH
-        monthly_it_cost = size_gb * _S3_INT_TIER_PER_GB_MONTH
-        monthly_savings = monthly_standard_cost - monthly_it_cost
+
+        # Get object count to compute Intelligent-Tiering monitoring cost
+        try:
+            obj_resp = cw_client.get_metric_statistics(
+                Namespace="AWS/S3",
+                MetricName="NumberOfObjects",
+                Dimensions=[
+                    {"Name": "BucketName", "Value": bucket_name},
+                    {"Name": "StorageType", "Value": "AllStorageTypes"},
+                ],
+                StartTime=start,
+                EndTime=now,
+                Period=86400,
+                Statistics=["Average"],
+            )
+            obj_datapoints = obj_resp.get("Datapoints", [])
+            object_count = max((dp.get("Average", 0) for dp in obj_datapoints), default=0)
+        except Exception:
+            object_count = 0
+
+        # Intelligent-Tiering: monitoring fee = $0.0025 per 1,000 objects/mo
+        it_monitoring_cost = (object_count / 1000) * 0.0025
+        monthly_it_storage_cost = size_gb * _S3_INT_TIER_PER_GB_MONTH
+        monthly_it_total = monthly_it_storage_cost + it_monitoring_cost
+        it_net_savings = monthly_standard_cost - monthly_it_total
+
+        # STANDARD-IA: no monitoring fee, retrieval cost applies but negligible for low-access
+        monthly_ia_cost = size_gb * 0.0125
+        ia_net_savings = monthly_standard_cost - monthly_ia_cost
+
+        # Only flag if there's meaningful ROI (>$5/mo net) and we can be specific
+        if object_count > 0 and it_net_savings > 5:
+            # IT makes sense: savings outweigh monitoring cost
+            recommendation = "INTELLIGENT_TIERING"
+            net_savings = it_net_savings
+            detail = (
+                f"S3 bucket '{bucket_name}': {size_gb:.1f} GB in STANDARD "
+                f"(${monthly_standard_cost:.2f}/mo). {int(object_count):,} objects. "
+                f"IT monitoring cost: ${it_monitoring_cost:.2f}/mo. "
+                f"Net saving with Intelligent-Tiering: ${it_net_savings:.2f}/mo. "
+                f"Command: aws s3api put-bucket-intelligent-tiering-configuration "
+                f"--bucket {bucket_name} --id default --intelligent-tiering-configuration "
+                f"'{{\"Id\":\"default\",\"Status\":\"Enabled\",\"Tierings\":[{{\"Days\":90,\"AccessTier\":\"ARCHIVE_ACCESS\"}}]}}'"
+            )
+        elif ia_net_savings > 5 and avg_daily_gets < 10:
+            # Very low access: STANDARD-IA is better — no monitoring fee, retrieval is cheap
+            recommendation = "STANDARD_IA"
+            net_savings = ia_net_savings
+            detail = (
+                f"S3 bucket '{bucket_name}': {size_gb:.1f} GB in STANDARD "
+                f"(${monthly_standard_cost:.2f}/mo), avg {avg_daily_gets:.0f} GETs/day. "
+                f"STANDARD-IA costs ${monthly_ia_cost:.2f}/mo with no monitoring fee. "
+                f"Net saving: ${ia_net_savings:.2f}/mo. "
+                f"Note: Intelligent-Tiering monitoring would cost ${it_monitoring_cost:.2f}/mo "
+                f"{'(not worth it for this object count)' if object_count > 0 else '(object count unknown)'}. "
+                f"Command: aws s3 cp s3://{bucket_name} s3://{bucket_name} "
+                f"--recursive --storage-class STANDARD_IA"
+            )
+        else:
+            # Either monitoring cost eats the savings or bucket is too small to matter
+            continue
 
         findings.append({
             "resource_id": bucket_name,
             "resource_type": "S3 Bucket",
             "waste_type": "s3_suboptimal_storage_class",
-            "estimated_monthly_savings": round(monthly_savings, 2),
-            "detail": (
-                f"S3 bucket '{bucket_name}' stores {size_gb:.1f} GB in STANDARD storage "
-                f"(${monthly_standard_cost:.2f}/mo). "
-                f"Average daily GET requests: {avg_daily_gets:.0f}/day. "
-                f"INTELLIGENT_TIERING would cost ~${monthly_it_cost:.2f}/mo "
-                f"(saving ~${monthly_savings:.2f}/mo). "
-                f"Enable via: aws s3api put-bucket-intelligent-tiering-configuration"
-            ),
-            "severity": _severity_from_savings(monthly_savings),
+            "estimated_monthly_savings": round(net_savings, 2),
+            "recommendation": recommendation,
+            "detail": detail,
+            "severity": _severity_from_savings(net_savings),
             "region": region,
             "account_id": None,
             "size_gb": round(size_gb, 2),
-            "avg_daily_gets": round(avg_daily_gets, 1) if avg_daily_gets is not None else None,
+            "object_count": int(object_count) if object_count else None,
+            "avg_daily_gets": round(avg_daily_gets, 1),
+            "it_monitoring_cost_mo": round(it_monitoring_cost, 2) if object_count else None,
         })
 
     return findings

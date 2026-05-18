@@ -960,7 +960,8 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
           AWS deep audit
         </h2>
-        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Goes well beyond Cost Explorer. Pulls CloudWatch metrics for every running resource and flags waste patterns that never show up on your bill until it's too late.</p>
+        <p class="text-sm leading-relaxed mb-3" style="color:var(--muted)">The intent here is to give you two tools side by side: AWS Compute Optimizer for standard rightsizing, and nable's audit for the deeper layer underneath it. Optimizer will tell you to downsize an instance. nable will also tell you the EBS volume attached to it is gp2, the snapshot from 6 months ago is still accruing charges, and the CloudTrail trail recording data events in every region is costing you $400/mo nobody noticed.</p>
+        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">The patterns below are just what ships out of the box. The audit engine is built to be extended, and the tools are designed to be composed: ask Claude to "find every dollar of waste in us-east-1" and it will pull Compute Optimizer, run the deep audit, and cross-reference both.</p>
 
         <div class="mb-4" style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
           <div style="display:grid;grid-template-columns:200px 1fr;font-size:12px;font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:8px 16px;background:var(--surface2);border-bottom:1px solid var(--border)">
@@ -975,7 +976,7 @@
             <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">ChargedBackup</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">RDS backup retention &gt;7 days, accumulates silently</div>
             <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">CloudTrail data events</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Data events ($2/100k) enabled across all regions unnecessarily</div>
             <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Infinite log retention</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">CloudWatch Log Groups with no retention policy, grows forever</div>
-            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">S3 storage class</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Buckets &gt;10 GB in STANDARD with low access. Intelligent-Tiering saves 30%+</div>
+            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">S3 storage class</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Buckets in STANDARD with low access, only flagged when storage savings exceed Intelligent-Tiering's monitoring cost ($0.0025/1k objects/mo). Recommends STANDARD-IA for infrequent-access patterns instead.</div>
             <div style="padding:11px 16px;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Lambda memory</div><div style="padding:11px 16px;font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Configured memory &gt;2× p99 actual usage, direct billing waste</div>
           </div>
         </div>
@@ -1007,10 +1008,10 @@
 
         <div class="card p-5 mb-4">
           <div class="space-y-2 text-sm">
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">get_anomalies</span><span style="color:var(--muted)">All anomalies across every connected provider, last 7–30 days</span></div>
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">get_account_anomalies</span><span style="color:var(--muted)">Per-account breakdown, useful for multi-account AWS orgs</span></div>
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">acknowledge_anomaly</span><span style="color:var(--muted)">Mark as known / expected so it stops surfacing in digests</span></div>
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">create_anomaly_tickets</span><span style="color:var(--muted)">Auto-file Jira / Linear / GitHub issues for unacknowledged anomalies</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:180px">get_anomalies</span><span style="color:var(--muted)">All anomalies across every connected provider, last 7-30 days</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:180px">get_account_anomalies</span><span style="color:var(--muted)">Per-account breakdown, useful for multi-account AWS orgs</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:180px">acknowledge_anomaly</span><span style="color:var(--muted)">Mark as known / expected so it stops surfacing in digests</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:180px">create_anomaly_tickets</span><span style="color:var(--muted)">Auto-file Jira / Linear / GitHub issues for unacknowledged anomalies</span></div>
           </div>
         </div>
         <div class="info-box">Slack and Teams alerts fire automatically when a new anomaly is detected, no polling needed. Configure <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">SLACK_WEBHOOK_URL</code> or <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">TEAMS_WEBHOOK_URL</code> to enable.</div>
@@ -1028,9 +1029,9 @@
 
         <div class="card p-5 mb-4">
           <div class="space-y-2 text-sm">
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">get_rightsizing_recommendations</span><span style="color:var(--muted)">EC2, RDS, and Lambda rightsizing in one call</span></div>
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">create_rightsizing_tickets</span><span style="color:var(--muted)">Auto-file tickets for the top N recommendations by savings</span></div>
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">get_instance_deep_analysis</span><span style="color:var(--muted)">Per-instance CloudWatch p95/p99 utilization deep dive</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:200px">get_rightsizing_recommendations</span><span style="color:var(--muted)">EC2, RDS, and Lambda rightsizing in one call</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:200px">create_rightsizing_tickets</span><span style="color:var(--muted)">Auto-file tickets for the top N recommendations by savings</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:200px">get_instance_deep_analysis</span><span style="color:var(--muted)">Per-instance CloudWatch p95/p99 utilization deep dive</span></div>
           </div>
         </div>
       </div>
@@ -1048,9 +1049,9 @@
 
         <div class="card p-5 mb-4">
           <div class="space-y-2 text-sm">
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:220px">get_commitment_analysis</span><span style="color:var(--muted)">Current coverage, gaps, and purchase recommendations</span></div>
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:220px">get_commitment_coverage_by_tag</span><span style="color:var(--muted)">Coverage breakdown per team / environment / service tag</span></div>
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:220px">get_effective_rate_profile</span><span style="color:var(--muted)">Your blended and unblended effective rate vs on-demand</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:220px">get_commitment_analysis</span><span style="color:var(--muted)">Current coverage, gaps, and purchase recommendations</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:220px">get_commitment_coverage_by_tag</span><span style="color:var(--muted)">Coverage breakdown per team / environment / service tag</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:220px">get_effective_rate_profile</span><span style="color:var(--muted)">Your blended and unblended effective rate vs on-demand</span></div>
           </div>
         </div>
       </div>
