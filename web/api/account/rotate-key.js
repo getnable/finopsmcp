@@ -151,7 +151,7 @@ async function sendRotationEmail(to, licenseKey, resendKey) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: "nable <noreply@nable.sh>",
+      from: "nable <hello@nable.sh>",
       to: [to],
       subject: "Your nable license key has been rotated",
       html,

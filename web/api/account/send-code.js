@@ -147,7 +147,7 @@ export default async function handler(req) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: "nable <noreply@nable.sh>",
+          from: "nable <hello@nable.sh>",
           to: [email],
           subject: "Your nable sign-in code",
           html: signInEmailHtml(code),
