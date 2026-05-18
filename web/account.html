@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>nable · Account</title>
+<meta name="description" content="Manage your nable account, license key, and billing." />
+<meta name="robots" content="noindex" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--fg);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-feature-settings:"ss01","cv11";-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px;letter-spacing:-0.005em}
+  :root{
+    --bg:#fbfaf7;
+    --bg-2:#f4f2ec;
+    --bg-3:#ebe8e0;
+    --fg:#1a1915;
+    --fg-2:#54524a;
+    --fg-3:#8b8879;
+    --fg-4:#c1bdaf;
+    --line:#e6e2d6;
+    --line-2:#d9d4c4;
+    --accent:#1a1915;
+    --accent-ink:#fbfaf7;
+    --hl:#3b6e3a;
+    --alert:#b8533a;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --r:6px;
+  }
+  ::selection{background:#1a1915;color:#fbfaf7}
+  a{color:inherit;text-decoration:none}
+
+  /* layout */
+  .wrap{max-width:1140px;margin:0 auto;padding:0 32px}
+
+  /* nav */
+  .nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 86%,transparent);backdrop-filter:saturate(140%) blur(14px);-webkit-backdrop-filter:saturate(140%) blur(14px);border-bottom:1px solid var(--line)}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:500;letter-spacing:-.02em;font-size:16px}
+  .logo img{width:24px;height:24px;border-radius:6px;display:block}
+  .nav ul{display:flex;list-style:none;gap:28px;color:var(--fg-2);font-size:14px}
+  .nav ul a:hover{color:var(--fg)}
+  .nav ul a.active{color:var(--fg);font-weight:500}
+  .nav .right{display:flex;gap:10px;align-items:center}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:6px;font-size:13.5px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:.15s;letter-spacing:-.005em;font-family:'Geist',sans-serif}
+  .btn-primary{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+  .btn-primary:hover{background:#000;border-color:#000}
+  .btn-primary:disabled{opacity:.45;cursor:not-allowed}
+  .btn-ghost{color:var(--fg-2);border-color:var(--line);background:transparent}
+  .btn-ghost:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
+  .btn-ghost:disabled{opacity:.45;cursor:not-allowed}
+  .btn-sm{padding:5px 10px;font-size:12.5px}
+
+  /* theme toggle */
+  .theme-tog{background:transparent;border:0;padding:6px;cursor:pointer;color:var(--fg-3);display:inline-flex;align-items:center;border-radius:999px}
+  .theme-tog:hover{color:var(--fg)}
+  .theme-tog-track{position:relative;display:inline-flex;align-items:center;justify-content:space-between;width:46px;height:22px;border:1px solid var(--line);border-radius:999px;background:var(--bg-2);padding:0 5px}
+  .theme-tog-sun,.theme-tog-moon{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;color:var(--fg-3);transition:color .2s}
+  .theme-tog-knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--fg);transition:transform .22s ease}
+  .theme-tog-knob.on{transform:translateX(22px)}
+
+  /* type */
+  h1,h2,h3,h4{font-weight:500;letter-spacing:-.025em;color:var(--fg)}
+  p{color:var(--fg-2);line-height:1.6}
+  .label{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em}
+
+  /* main content area */
+  main{min-height:calc(100vh - 60px);padding:64px 0 96px}
+
+  /* centered card for auth states */
+  .auth-card{max-width:480px;margin:0 auto}
+  .auth-card .card-head{margin-bottom:32px}
+  .auth-card .card-head h1{font-size:26px;font-weight:500;letter-spacing:-.025em;margin-bottom:8px}
+  .auth-card .card-head p{font-size:15px;color:var(--fg-2)}
+
+  /* form elements */
+  .field-group{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+  .field-label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase}
+  .field-input{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;font-family:'Geist',sans-serif;font-size:14px;color:var(--fg);outline:none;transition:.15s}
+  .field-input:focus{border-color:var(--fg-2)}
+  .field-input.code-input{font-family:var(--mono);font-size:24px;letter-spacing:.18em;text-align:center;padding:14px 12px}
+  .field-input::placeholder{color:var(--fg-4)}
+  .btn-full{width:100%;justify-content:center;padding:10px 14px;font-size:14px;margin-top:8px}
+  .form-action{margin-top:20px}
+
+  /* inline error */
+  .inline-error{font-size:12.5px;color:var(--alert);font-family:var(--mono);margin-top:8px;display:none}
+  .inline-error.show{display:block}
+
+  /* resend link */
+  .resend-link{display:inline-block;font-size:13px;color:var(--fg-3);margin-top:16px;cursor:pointer;border-bottom:1px solid transparent}
+  .resend-link:hover{color:var(--fg-2);border-bottom-color:var(--line-2)}
+
+  /* account view */
+  .account-view{max-width:600px;margin:0 auto}
+  .account-view .page-head{margin-bottom:48px}
+  .account-view .page-head h1{font-size:24px;font-weight:500;letter-spacing:-.025em;margin-bottom:4px}
+  .account-view .page-head p{font-size:14px;color:var(--fg-3);font-family:var(--mono)}
+
+  .acct-section{border-top:1px solid var(--line);padding:28px 0}
+  .acct-section:last-child{border-bottom:1px solid var(--line)}
+  .acct-section .sect-label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:16px}
+
+  /* license key block */
+  .key-block{background:var(--fg);border-radius:8px;padding:16px 20px;margin-bottom:12px;position:relative}
+  .key-block code{font-family:var(--mono);font-size:12px;color:var(--accent-ink);word-break:break-all;line-height:1.7;display:block}
+  .key-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .copy-btn{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-2);background:transparent;border:1px solid var(--line);border-radius:5px;padding:5px 10px;cursor:pointer;font-family:'Geist',sans-serif;transition:.15s}
+  .copy-btn:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
+  .copy-btn.copied{color:var(--hl);border-color:var(--hl)}
+  .free-plan-note{font-size:13px;color:var(--fg-3);font-family:var(--mono);margin-top:4px}
+  .free-plan-note a{color:var(--fg-2);border-bottom:1px solid var(--line)}
+  .free-plan-note a:hover{color:var(--fg)}
+
+  /* billing section */
+  .plan-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:12px}
+  .plan-info{}
+  .plan-name{font-size:16px;font-weight:500;color:var(--fg);letter-spacing:-.01em}
+  .plan-status{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);margin-top:3px}
+  .plan-status .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:6px;vertical-align:1px}
+  .plan-status .dot.active{background:var(--hl)}
+  .plan-status .dot.free{background:var(--fg-4)}
+  .billing-note{font-size:12.5px;color:var(--fg-3);font-family:var(--mono);margin-top:8px}
+
+  /* quick links */
+  .links-grid{display:flex;flex-direction:column;gap:0}
+  .quick-link{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--fg-2);cursor:pointer;transition:color .15s}
+  .quick-link:first-child{border-top:1px solid var(--line)}
+  .quick-link:hover{color:var(--fg)}
+  .quick-link .ql-arrow{color:var(--fg-4);transition:transform .15s}
+  .quick-link:hover .ql-arrow{transform:translateX(2px);color:var(--fg-3)}
+  .quick-link.signout{color:var(--fg-3)}
+  .quick-link.signout:hover{color:var(--alert)}
+
+  /* confirm overlay */
+  .confirm-strip{background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-top:12px;display:none}
+  .confirm-strip.show{display:block}
+  .confirm-strip p{font-size:13px;color:var(--fg-2);margin-bottom:12px}
+  .confirm-strip .confirm-actions{display:flex;gap:8px}
+
+  /* footer */
+  footer{border-top:1px solid var(--line);padding:28px 0}
+  .foot-inner{display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:var(--fg-3)}
+
+  /* states */
+  #state-email, #state-code, #state-account{display:none}
+  #state-email.active, #state-code.active, #state-account.active{display:block}
+
+  @media(max-width:640px){
+    .wrap{padding:0 20px}
+    .nav ul{display:none}
+    main{padding:40px 0 72px}
+    .auth-card .card-head h1{font-size:22px}
+    .key-block code{font-size:11px}
+    .plan-row{flex-direction:column;align-items:flex-start}
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a href="/" class="logo">
+      <img src="/favicon.svg" alt="nable" />
+      <span>nable</span>
+    </a>
+    <ul>
+      <li><a href="/#product">Product</a></li>
+      <li><a href="/#connectors">Connectors</a></li>
+      <li><a href="/#pricing">Pricing</a></li>
+      <li><a href="/docs">Docs</a></li>
+      <li><a href="/account" class="active">Account</a></li>
+    </ul>
+    <div class="right">
+      <span id="nav-signout-wrap" style="display:none">
+        <button class="btn btn-ghost btn-sm" id="nav-signout-btn">Sign out</button>
+      </span>
+      <button class="theme-tog" id="theme-toggle" aria-label="Toggle theme" title="Toggle theme">
+        <span class="theme-tog-track">
+          <span class="theme-tog-sun" aria-hidden="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          </span>
+          <span class="theme-tog-moon" aria-hidden="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </span>
+          <span class="theme-tog-knob" id="theme-knob"></span>
+        </span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <div class="wrap">
+
+    <!-- STATE 1: Email entry -->
+    <div id="state-email" class="auth-card">
+      <div class="card-head">
+        <h1>Access your account</h1>
+        <p>Enter your email to receive a sign-in link.</p>
+      </div>
+      <form id="email-form" novalidate>
+        <div class="field-group">
+          <label class="field-label" for="email-input">Email address</label>
+          <input class="field-input" type="email" id="email-input" name="email" placeholder="you@company.com" autocomplete="email" required />
+        </div>
+        <div class="inline-error" id="email-error"></div>
+        <div class="form-action">
+          <button type="submit" class="btn btn-primary btn-full" id="email-submit-btn">Send link</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- STATE 2: Code entry -->
+    <div id="state-code" class="auth-card">
+      <div class="card-head">
+        <h1>Check your email</h1>
+        <p id="code-subtext">We sent a 6-digit code to your email. It expires in 10 minutes.</p>
+      </div>
+      <form id="code-form" novalidate>
+        <div class="field-group">
+          <label class="field-label" for="code-input">6-digit code</label>
+          <input class="field-input code-input" type="text" id="code-input" name="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code" />
+        </div>
+        <div class="inline-error" id="code-error"></div>
+        <div class="form-action">
+          <button type="submit" class="btn btn-primary btn-full" id="code-submit-btn">Verify</button>
+        </div>
+      </form>
+      <span class="resend-link" id="resend-link">Resend code</span>
+      <div class="inline-error" id="resend-error" style="margin-top:8px"></div>
+    </div>
+
+    <!-- STATE 3: Account view -->
+    <div id="state-account" class="account-view">
+      <div class="page-head">
+        <h1>Account</h1>
+        <p id="account-email-label"></p>
+      </div>
+
+      <!-- Section A: License key -->
+      <div class="acct-section">
+        <div class="sect-label">License key</div>
+        <div id="key-pro-view">
+          <div class="key-block">
+            <code id="license-key-display"></code>
+          </div>
+          <div class="key-actions">
+            <button class="copy-btn" id="copy-key-btn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+            <button class="btn btn-ghost btn-sm" id="rotate-key-btn">Rotate key</button>
+          </div>
+          <div class="confirm-strip" id="rotate-confirm">
+            <p>This will invalidate your current key. Are you sure?</p>
+            <div class="confirm-actions">
+              <button class="btn btn-primary btn-sm" id="rotate-confirm-btn">Yes, rotate</button>
+              <button class="btn btn-ghost btn-sm" id="rotate-cancel-btn">Cancel</button>
+            </div>
+          </div>
+          <div class="inline-error" id="rotate-error" style="margin-top:10px"></div>
+        </div>
+        <div id="key-free-view" style="display:none">
+          <p class="free-plan-note">You are on the free plan. <a href="/#pricing">Upgrade to Pro</a> to get a license key.</p>
+        </div>
+      </div>
+
+      <!-- Section B: Billing -->
+      <div class="acct-section">
+        <div class="sect-label">Subscription</div>
+        <div class="plan-row">
+          <div class="plan-info">
+            <div class="plan-name" id="plan-name-display">Free</div>
+            <div class="plan-status" id="plan-status-display">
+              <span class="dot free"></span>Free tier
+            </div>
+          </div>
+          <a href="https://billing.stripe.com/p/login/eVq3cY8qQ" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Manage billing</a>
+        </div>
+        <p class="billing-note">Update card, download invoices, or cancel.</p>
+      </div>
+
+      <!-- Section C: Quick links -->
+      <div class="acct-section">
+        <div class="sect-label">Quick links</div>
+        <div class="links-grid">
+          <a href="/docs" class="quick-link">
+            <span>Docs</span>
+            <span class="ql-arrow">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </span>
+          </a>
+          <a href="/docs#quickstart" class="quick-link">
+            <span>Setup guide</span>
+            <span class="ql-arrow">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </span>
+          </a>
+          <a href="mailto:hello@nable.sh" class="quick-link">
+            <span>hello@nable.sh</span>
+            <span class="ql-arrow">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </span>
+          </a>
+          <span class="quick-link signout" id="signout-link">
+            <span>Sign out</span>
+            <span class="ql-arrow">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+            </span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <span>nable &copy; 2026</span>
+    <span><a href="mailto:hello@nable.sh" style="color:inherit">hello@nable.sh</a></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── Theme ──────────────────────────────────────────────────────────────────
+
+  const PALETTES = {
+    linen:    { bg:'#fbfaf7', bg2:'#f4f2ec', bg3:'#ebe8e0', fg:'#1a1915', fg2:'#54524a', fg3:'#8b8879', fg4:'#c1bdaf', line:'#e6e2d6', line2:'#d9d4c4' },
+    graphite: { bg:'#15140f', bg2:'#1c1a14', bg3:'#23211a', fg:'#f3efe6', fg2:'#bbb6a4', fg3:'#7e7a6c', fg4:'#4a4639', line:'#262318', line2:'#33301f' },
+  };
+
+  function applyPalette(name) {
+    const p = PALETTES[name] || PALETTES.linen;
+    const r = document.documentElement;
+    r.style.setProperty('--bg', p.bg);
+    r.style.setProperty('--bg-2', p.bg2);
+    r.style.setProperty('--bg-3', p.bg3);
+    r.style.setProperty('--fg', p.fg);
+    r.style.setProperty('--fg-2', p.fg2);
+    r.style.setProperty('--fg-3', p.fg3);
+    r.style.setProperty('--fg-4', p.fg4);
+    r.style.setProperty('--line', p.line);
+    r.style.setProperty('--line-2', p.line2);
+    r.style.setProperty('--accent', p.fg);
+    r.style.setProperty('--accent-ink', p.bg);
+  }
+
+  const savedTheme = localStorage.getItem('nable-theme') || 'linen';
+  let isDark = savedTheme === 'graphite';
+  applyPalette(isDark ? 'graphite' : 'linen');
+  if (isDark) document.getElementById('theme-knob').classList.add('on');
+
+  document.getElementById('theme-toggle').addEventListener('click', function () {
+    isDark = !isDark;
+    const name = isDark ? 'graphite' : 'linen';
+    applyPalette(name);
+    localStorage.setItem('nable-theme', name);
+    document.getElementById('theme-knob').classList.toggle('on', isDark);
+  });
+
+  // ── State management ───────────────────────────────────────────────────────
+
+  let currentEmail = '';
+  let session = null; // { token, email, plan, license_key }
+
+  function showState(which) {
+    ['email', 'code', 'account'].forEach(function (s) {
+      document.getElementById('state-' + s).classList.toggle('active', s === which);
+    });
+  }
+
+  function showError(id, msg) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.classList.add('show');
+  }
+
+  function clearError(id) {
+    const el = document.getElementById(id);
+    el.textContent = '';
+    el.classList.remove('show');
+  }
+
+  function setLoading(btnId, loading) {
+    const btn = document.getElementById(btnId);
+    btn.disabled = loading;
+    btn.textContent = loading ? 'Please wait...' : btn.dataset.label;
+  }
+
+  // ── Session ────────────────────────────────────────────────────────────────
+
+  function saveSession(data) {
+    session = data;
+    sessionStorage.setItem('nable-session', JSON.stringify(data));
+  }
+
+  function loadSession() {
+    try {
+      const raw = sessionStorage.getItem('nable-session');
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearSession() {
+    session = null;
+    sessionStorage.removeItem('nable-session');
+  }
+
+  // ── Render account view ────────────────────────────────────────────────────
+
+  function renderAccount(data) {
+    document.getElementById('account-email-label').textContent = data.email;
+
+    const plan = (data.plan || 'free').toLowerCase();
+    const isPro = plan === 'pro';
+    const isTrial = plan === 'trial';
+
+    // License key section
+    document.getElementById('key-pro-view').style.display = (isPro || isTrial) ? '' : 'none';
+    document.getElementById('key-free-view').style.display = (!isPro && !isTrial) ? '' : 'none';
+    if ((isPro || isTrial) && data.license_key) {
+      document.getElementById('license-key-display').textContent = data.license_key;
+    }
+
+    // Plan display
+    const planLabel = isPro ? 'Pro' : isTrial ? 'Trial' : 'Free';
+    document.getElementById('plan-name-display').textContent = planLabel;
+    const statusEl = document.getElementById('plan-status-display');
+    if (isPro) {
+      statusEl.innerHTML = '<span class="dot active"></span>Active';
+    } else if (isTrial) {
+      statusEl.innerHTML = '<span class="dot active"></span>Trial active';
+    } else {
+      statusEl.innerHTML = '<span class="dot free"></span>Free tier';
+    }
+
+    // Nav signout
+    document.getElementById('nav-signout-wrap').style.display = '';
+
+    showState('account');
+  }
+
+  // ── API helpers ────────────────────────────────────────────────────────────
+
+  async function apiFetch(path, body) {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Something went wrong, try again.');
+    }
+    return data;
+  }
+
+  // ── Email form ─────────────────────────────────────────────────────────────
+
+  const emailForm = document.getElementById('email-form');
+  const emailInput = document.getElementById('email-input');
+  const emailSubmitBtn = document.getElementById('email-submit-btn');
+  emailSubmitBtn.dataset.label = 'Send link';
+
+  emailForm.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    clearError('email-error');
+    const email = emailInput.value.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showError('email-error', 'Please enter a valid email address.');
+      return;
+    }
+    setLoading('email-submit-btn', true);
+    try {
+      await apiFetch('/api/account/send-code', { email });
+      currentEmail = email;
+      document.getElementById('code-subtext').textContent =
+        'We sent a 6-digit code to ' + email + '. It expires in 10 minutes.';
+      showState('code');
+      setTimeout(function () { document.getElementById('code-input').focus(); }, 60);
+    } catch (err) {
+      showError('email-error', err.message);
+    } finally {
+      setLoading('email-submit-btn', false);
+    }
+  });
+
+  // ── Code form ─────────────────────────────────────────────────────────────
+
+  const codeForm = document.getElementById('code-form');
+  const codeInput = document.getElementById('code-input');
+  const codeSubmitBtn = document.getElementById('code-submit-btn');
+  codeSubmitBtn.dataset.label = 'Verify';
+
+  codeInput.addEventListener('input', function () {
+    this.value = this.value.replace(/\D/g, '').slice(0, 6);
+  });
+
+  codeForm.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    clearError('code-error');
+    const code = codeInput.value.trim();
+    if (code.length !== 6) {
+      showError('code-error', 'Please enter the 6-digit code from your email.');
+      return;
+    }
+    setLoading('code-submit-btn', true);
+    try {
+      const data = await apiFetch('/api/account/verify-code', {
+        email: currentEmail,
+        code,
+      });
+      saveSession(data);
+      renderAccount(data);
+    } catch (err) {
+      showError('code-error', err.message || 'Invalid or expired code. Try again.');
+    } finally {
+      setLoading('code-submit-btn', false);
+    }
+  });
+
+  // ── Resend ─────────────────────────────────────────────────────────────────
+
+  document.getElementById('resend-link').addEventListener('click', async function () {
+    clearError('resend-error');
+    this.textContent = 'Sending...';
+    this.style.pointerEvents = 'none';
+    const self = this;
+    try {
+      await apiFetch('/api/account/send-code', { email: currentEmail });
+      self.textContent = 'Sent!';
+      setTimeout(function () {
+        self.textContent = 'Resend code';
+        self.style.pointerEvents = '';
+      }, 3000);
+    } catch (err) {
+      showError('resend-error', 'Could not resend. Try again.');
+      self.textContent = 'Resend code';
+      self.style.pointerEvents = '';
+    }
+  });
+
+  // ── Copy key ───────────────────────────────────────────────────────────────
+
+  document.getElementById('copy-key-btn').addEventListener('click', function () {
+    const key = document.getElementById('license-key-display').textContent;
+    if (!key) return;
+    navigator.clipboard.writeText(key).then(() => {
+      const btn = document.getElementById('copy-key-btn');
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function () {
+        btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    }).catch(function () {
+      // fallback: select text
+      const range = document.createRange();
+      range.selectNode(document.getElementById('license-key-display'));
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    });
+  });
+
+  // ── Rotate key ────────────────────────────────────────────────────────────
+
+  document.getElementById('rotate-key-btn').addEventListener('click', function () {
+    document.getElementById('rotate-confirm').classList.add('show');
+    clearError('rotate-error');
+  });
+
+  document.getElementById('rotate-cancel-btn').addEventListener('click', function () {
+    document.getElementById('rotate-confirm').classList.remove('show');
+  });
+
+  document.getElementById('rotate-confirm-btn').addEventListener('click', async function () {
+    clearError('rotate-error');
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Rotating...';
+    try {
+      const sess = loadSession();
+      const data = await apiFetch('/api/account/rotate-key', { token: sess ? sess.token : '' });
+      if (data.license_key) {
+        document.getElementById('license-key-display').textContent = data.license_key;
+        // update stored session
+        const updated = Object.assign({}, sess, { license_key: data.license_key });
+        saveSession(updated);
+      }
+      document.getElementById('rotate-confirm').classList.remove('show');
+    } catch (err) {
+      showError('rotate-error', err.message || 'Rotation failed. Please try again.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Yes, rotate';
+    }
+  });
+
+  // ── Sign out ───────────────────────────────────────────────────────────────
+
+  function doSignOut() {
+    clearSession();
+    currentEmail = '';
+    document.getElementById('nav-signout-wrap').style.display = 'none';
+    emailInput.value = '';
+    codeInput.value = '';
+    showState('email');
+  }
+
+  document.getElementById('signout-link').addEventListener('click', doSignOut);
+  document.getElementById('nav-signout-btn').addEventListener('click', doSignOut);
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+
+  const existing = loadSession();
+  if (existing && existing.token) {
+    currentEmail = existing.email || '';
+    session = existing;
+    renderAccount(existing);
+  } else {
+    showState('email');
+    setTimeout(function () { emailInput.focus(); }, 60);
+  }
+
+})();
+</script>
+</body>
+</html>
