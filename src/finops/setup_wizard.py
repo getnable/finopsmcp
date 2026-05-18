@@ -254,6 +254,11 @@ def main(args: list[str] | None = None) -> None:
     vault_p.add_argument("key", nargs="?", default="")
 
     parsed = parser.parse_args(args)
+    # Ensure optional attrs exist for all subparsers (only `vault` defines `action`/`key`)
+    if not hasattr(parsed, "action"):
+        parsed.action = None
+    if not hasattr(parsed, "key"):
+        parsed.key = ""
 
     print("\n  ╔═══════════════════════════════════╗")
     print("  ║   FinOps MCP — Setup Wizard       ║")
@@ -438,11 +443,20 @@ def _configure_claude_desktop() -> None:
         print("  ──────────────────────────────────────────────────")
         return
 
-    # Find absolute path to finops-mcp binary
+    # Determine the best launch strategy:
+    # 1. uvx  — isolated venv, works in corporate environments with no PATH issues
+    # 2. absolute path to finops-mcp binary
+    uvx_bin = shutil.which("uvx")
     finops_bin = shutil.which("finops-mcp")
     if not finops_bin:
-        # Fall back to same directory as the current Python executable
         finops_bin = str(Path(sys.executable).parent / "finops-mcp")
+
+    if uvx_bin:
+        mcp_entry = {"command": uvx_bin, "args": ["finops-mcp"]}
+        display_cmd = f"uvx finops-mcp  (uvx found at {uvx_bin})"
+    else:
+        mcp_entry = {"command": finops_bin}
+        display_cmd = finops_bin
 
     # Load existing config or start fresh
     if config_path.exists():
@@ -457,14 +471,17 @@ def _configure_claude_desktop() -> None:
     config.setdefault("mcpServers", {})
 
     existing = config["mcpServers"].get("finops", {})
-    if existing.get("command") == finops_bin:
-        _ok(f"Claude Desktop already configured: {finops_bin}")
+    # Already up-to-date?
+    if existing == mcp_entry:
+        _ok(f"Claude Desktop already configured: {display_cmd}")
         return
 
     print(f"\n  ──────────────────────────────────────────────────")
     print(f"  Configure Claude Desktop to use nable?")
     print(f"  Config file: {config_path}")
-    print(f"  Command:     {finops_bin}")
+    print(f"  Command:     {display_cmd}")
+    if uvx_bin:
+        print(f"  (uvx mode: works on corporate machines without PATH changes)")
     if existing:
         print(f"  (replaces existing: {existing.get('command', '?')})")
     print(f"  ──────────────────────────────────────────────────")
@@ -472,10 +489,10 @@ def _configure_claude_desktop() -> None:
     ans = _prompt("  Write config? [Y/n]", default="y").lower()
     if ans not in ("y", "yes", ""):
         print("  Skipped. Add manually:")
-        _print_manual_config(finops_bin)
+        _print_manual_config(mcp_entry)
         return
 
-    config["mcpServers"]["finops"] = {"command": finops_bin}
+    config["mcpServers"]["finops"] = mcp_entry
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w") as f:
@@ -486,9 +503,9 @@ def _configure_claude_desktop() -> None:
     print("  Restart Claude Desktop for the changes to take effect.")
 
 
-def _print_manual_config(finops_bin: str) -> None:
+def _print_manual_config(mcp_entry: dict) -> None:
     import json
-    snippet = json.dumps({"mcpServers": {"finops": {"command": finops_bin}}}, indent=2)
+    snippet = json.dumps({"mcpServers": {"finops": mcp_entry}}, indent=2)
     print(f"\n  Add to your claude_desktop_config.json:\n")
     for line in snippet.splitlines():
         print(f"    {line}")

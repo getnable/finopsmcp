@@ -1,18 +1,26 @@
 """
 License validation for nable (finops-mcp).
 
+Tiers
+─────
+free         Permanent. ~90% of the platform. No key required.
+             Cost queries, anomaly detection, rightsizing, PR comments,
+             Slack/Teams alerts, all connectors, snapshots, attribution.
+
+trial        14 days of full Pro access from first install. Kicks in
+             automatically when no key is set. Uses the same dual-store
+             (OS keyring + file) so deleting one source can't reset it.
+
+pro          Full access. Unlocked by a signed license key.
+             Adds: ticket auto-creation, scheduled email digests,
+             commitment purchase recommendations, multi-team org reports.
+
 Key format:  FINOPS-1-{b64_payload}-{b64_hmac}
   payload:   base64url(json: {"e": email, "d": issued_YYYYMMDD, "p": "pro"})
   hmac:      HMAC-SHA256(_SECRET, "1:" + b64_payload)
 
 Generate a key (run once per customer):
   python -c "from finops.license import generate_key; print(generate_key('user@example.com'))"
-
-Trial mode:  14 days of full Pro access from first install.
-             Start date stored in OS keyring (primary) + ~/.finops-mcp/trial_start (backup).
-             The earliest date across both stores is always used — deleting one source does
-             not reset the trial; the other store still holds the real start date.
-Pro mode:    full access — anomaly alerts, digests, rightsizing, tickets, attribution.
 """
 from __future__ import annotations
 
@@ -23,31 +31,67 @@ import json
 import logging
 import os
 import platform
-import socket
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 log = logging.getLogger("finops.license")
 
-_SECRET = b"finops-mcp-license-v1-2026"
+_DEFAULT_SECRET = b"finops-mcp-license-v1-2026"
+_env_secret = os.environ.get("FINOPS_LICENSE_SECRET", "")
+if _env_secret:
+    _SECRET = _env_secret.encode()
+else:
+    _SECRET = _DEFAULT_SECRET
+    logging.getLogger("finops.license").warning(
+        "WARNING: FINOPS_LICENSE_SECRET not set. Using default secret. "
+        "Set this env var in production."
+    )
 _UPGRADE_URL = "https://nable.sh/#pricing"
-_TRIAL_DAYS = 14
-_TRIAL_FILE = Path.home() / ".finops-mcp" / "trial_start"
+_TRIAL_DAYS  = 14
+_TRIAL_FILE  = Path.home() / ".finops-mcp" / "trial_start"
 
 # Keyring service/username — intentionally generic to avoid being obvious
 _KR_SERVICE  = "system.cache.prefs"
 _KR_USERNAME = "user.defaults"
 
+# ── Pro-only features (the ~10%) ──────────────────────────────────────────────
+# Everything NOT in this set is available on the free tier.
+#
+# Free tier includes:
+#   All cost queries · Anomaly detection + Slack/Teams alerts · Rightsizing (view)
+#   PR cost comments + budget CI gate · All cloud + SaaS connectors
+#   Kubernetes cost analysis · Helm release visibility · Efficiency scorecard
+#   Budgets (create/track/alert) · Scheduled Slack reports · Postgres shared mode
+#   Commitment coverage analysis (view %) · Tag attribution · Idle resource detection
+#   Multi-account account listing · Storage info · Check notification config
+#
+PRO_FEATURES: set[str] = {
+    "ticket_creation",           # auto-create Jira / Linear / GitHub Issues from any finding
+    "scheduled_email_digests",   # email delivery of scheduled reports (Slack delivery is free)
+    "commitment_recommendations", # RI / SP purchase recommendations with $ amounts + ROI
+    "org_reports",               # full org-wide cost rollup across all accounts / OUs
+}
+
 
 @dataclass
 class LicenseStatus:
-    mode: str          # "trial" | "trial_expired" | "pro" | "invalid"
+    mode: str          # "free" | "trial" | "pro" | "invalid"
     email: str
     issued: str        # YYYY-MM-DD or ""
     message: str
-    days_remaining: int = -1   # trial days left; -1 means not applicable
+    days_remaining: int = -1   # trial days left (-1 = not applicable)
 
+    @property
+    def is_pro(self) -> bool:
+        return self.mode in ("pro", "trial")
+
+    @property
+    def is_free(self) -> bool:
+        return self.mode in ("free", "pro", "trial")
+
+
+# ── Crypto helpers ────────────────────────────────────────────────────────────
 
 def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
@@ -64,33 +108,25 @@ def _sign(version: str, payload_b64: str) -> str:
 
 
 # ── Machine fingerprint ───────────────────────────────────────────────────────
-# Used to sign the file so it can't be transplanted from another machine or
-# edited manually without detection. Derived from stable, hard-to-spoof values.
 
 def _machine_id() -> str:
-    parts = [
-        platform.node(),          # hostname
-        platform.machine(),       # architecture
-        str(Path.home()),         # home directory path
-    ]
+    parts = [platform.node(), platform.machine(), str(Path.home())]
     raw = "|".join(parts).encode()
     return hmac.new(_SECRET, raw, hashlib.sha256).hexdigest()[:24]
 
 
 def _sign_date(iso_date: str) -> str:
-    """HMAC sign a date string bound to this machine."""
     msg = f"trial:{_machine_id()}:{iso_date}".encode()
     return hmac.new(_SECRET, msg, hashlib.sha256).hexdigest()[:32]
 
 
-# ── Keyring helpers (optional dep) ───────────────────────────────────────────
+# ── Keyring helpers ───────────────────────────────────────────────────────────
 
 def _kr_get() -> date | None:
     try:
         import keyring  # type: ignore
         val = keyring.get_password(_KR_SERVICE, _KR_USERNAME)
         if val:
-            # stored as "YYYY-MM-DD:sig"
             iso, _, sig = val.partition(":")
             if sig == _sign_date(iso):
                 return date.fromisoformat(iso)
@@ -119,7 +155,6 @@ def _file_get() -> date | None:
                 return None
             iso = lines[0].strip()
             sig = lines[1].strip() if len(lines) > 1 else ""
-            # Accept if sig matches this machine, or if no sig (legacy install)
             if sig == _sign_date(iso) or not sig:
                 return date.fromisoformat(iso)
             log.debug("Trial file signature mismatch — ignoring")
@@ -137,48 +172,43 @@ def _file_set(d: date) -> None:
         pass
 
 
-# ── Core trial date logic ─────────────────────────────────────────────────────
+# ── Trial date logic ──────────────────────────────────────────────────────────
 
 def _get_or_create_trial_start() -> date:
     """
-    Return the trial start date.
-
-    Reads from both OS keyring and file, uses the EARLIEST date found
-    (so deleting one store can't push the start date forward). Writes
-    the canonical date back to both stores for redundancy.
+    Return the trial start date, using the EARLIEST date across both stores
+    so deleting one store can't push the start date forward.
     """
     kr_date   = _kr_get()
     file_date = _file_get()
-
     candidates = [d for d in (kr_date, file_date) if d is not None]
 
     if candidates:
         earliest = min(candidates)
-        # Sync both stores to the real earliest date
         _kr_set(earliest)
         _file_set(earliest)
         return earliest
 
-    # First run — record today in both stores
     today = date.today()
     _kr_set(today)
     _file_set(today)
     return today
 
 
+# ── Key generation / validation ───────────────────────────────────────────────
+
 def generate_key(email: str, plan: str = "pro") -> str:
-    """Generate a license key for a paying customer. Run server-side."""
+    """Generate a signed license key for a customer. Run server-side."""
     payload = _b64(json.dumps({"e": email, "d": date.today().strftime("%Y%m%d"), "p": plan}).encode())
-    sig = _sign("1", payload)
-    return f"FINOPS-1-{payload}-{sig}"
+    return f"FINOPS-1-{payload}-{_sign('1', payload)}"
 
 
 def validate_key(key: str) -> LicenseStatus:
     """Parse and verify a license key string."""
     if not key:
-        # No key — check trial status based on first-use date
-        trial_start = _get_or_create_trial_start()
-        days_used = (date.today() - trial_start).days
+        # No key — give a 14-day pro trial, then drop to free forever
+        trial_start   = _get_or_create_trial_start()
+        days_used     = (date.today() - trial_start).days
         days_remaining = max(0, _TRIAL_DAYS - days_used)
 
         if days_remaining > 0:
@@ -187,20 +217,26 @@ def validate_key(key: str) -> LicenseStatus:
                 email="",
                 issued=trial_start.isoformat(),
                 message=(
-                    f"Free trial — {days_remaining} day{'s' if days_remaining != 1 else ''} remaining. "
-                    f"All Pro features are unlocked. "
-                    f"Subscribe at {_UPGRADE_URL} to keep access after your trial."
+                    f"Pro trial — {days_remaining} day{'s' if days_remaining != 1 else ''} remaining. "
+                    f"All features unlocked. "
+                    f"Upgrade at {_UPGRADE_URL} to keep Pro features after your trial."
                 ),
                 days_remaining=days_remaining,
             )
         else:
+            # Trial over → free tier (not expired / blocked)
             return LicenseStatus(
-                mode="trial_expired",
+                mode="free",
                 email="",
                 issued=trial_start.isoformat(),
                 message=(
-                    f"Your 14-day free trial has ended. "
-                    f"Subscribe at {_UPGRADE_URL} to restore full access."
+                    f"Free tier — cost queries, anomaly detection, Slack/Teams alerts, "
+                    f"rightsizing, PR cost comments, budget enforcement, K8s cost analysis, "
+                    f"Helm visibility, efficiency scorecard, scheduled Slack reports, "
+                    f"Postgres shared mode, all cloud + SaaS connectors, and more are fully available. "
+                    f"Upgrade at {_UPGRADE_URL} to unlock: ticket auto-creation (Jira/Linear/GitHub), "
+                    f"scheduled email reports, commitment purchase recommendations, "
+                    f"and org-wide multi-account rollup."
                 ),
                 days_remaining=0,
             )
@@ -215,9 +251,7 @@ def validate_key(key: str) -> LicenseStatus:
         )
 
     _, version, payload_b64, provided_sig = parts
-    expected_sig = _sign(version, payload_b64)
-
-    if not hmac.compare_digest(expected_sig, provided_sig):
+    if not hmac.compare_digest(_sign(version, payload_b64), provided_sig):
         return LicenseStatus(
             mode="invalid",
             email="",
@@ -235,12 +269,12 @@ def validate_key(key: str) -> LicenseStatus:
             message="License key payload corrupt. Contact support.",
         )
 
-    email = payload.get("e", "")
+    email      = payload.get("e", "")
     issued_raw = payload.get("d", "")
-    plan = payload.get("p", "pro")
+    plan       = payload.get("p", "pro")
 
     try:
-        issued = date(int(issued_raw[:4]), int(issued_raw[4:6]), int(issued_raw[6:8]))
+        issued     = date(int(issued_raw[:4]), int(issued_raw[4:6]), int(issued_raw[6:8]))
         issued_str = issued.isoformat()
     except Exception:
         issued_str = issued_raw
@@ -253,18 +287,22 @@ def validate_key(key: str) -> LicenseStatus:
     )
 
 
+# ── Runtime helpers ───────────────────────────────────────────────────────────
+
 def check_license() -> LicenseStatus:
     """Read FINOPS_LICENSE_KEY from env and return validated status."""
-    key = os.environ.get("FINOPS_LICENSE_KEY", "").strip()
+    key    = os.environ.get("FINOPS_LICENSE_KEY", "").strip()
     status = validate_key(key)
+
     if status.mode == "trial":
-        log.info("License: trial — %d days remaining", status.days_remaining)
-    elif status.mode == "trial_expired":
-        log.warning("License: trial expired")
+        log.info("License: pro trial — %d days remaining", status.days_remaining)
+    elif status.mode == "free":
+        log.info("License: free tier")
     elif status.mode == "pro":
         log.info("License: pro — %s", status.email)
     else:
         log.warning("License: invalid key — %s", status.message)
+
     return status
 
 
@@ -280,28 +318,43 @@ def get_status() -> LicenseStatus:
 
 def require_pro(feature: str) -> dict | None:
     """
-    Call at the top of Pro-only tools.
-    Returns an error dict if access is denied, None if granted.
+    Gate a Pro-only feature. Returns an error dict if access is denied, None if granted.
+    Only the features listed in PRO_FEATURES are gated — everything else is free.
 
     Usage:
-        if err := require_pro("anomaly alerts"):
+        if err := require_pro("ticket_creation"):
             return err
     """
-    s = get_status()
-    if s.mode in ("pro", "trial"):
+    if feature not in PRO_FEATURES:
+        # Caller mistake — feature isn't in the pro set, allow it
+        log.warning("require_pro called for non-pro feature %r — allowing", feature)
         return None
-    if s.mode == "trial_expired":
-        return {
-            "error": "trial_expired",
-            "feature": feature,
-            "message": (
-                f"Your 14-day free trial has ended. "
-                f"Subscribe at {_UPGRADE_URL} to restore access to '{feature}' and all Pro features."
-            ),
-            "upgrade_url": _UPGRADE_URL,
-        }
+
+    s = get_status()
+    if s.is_pro:
+        return None
+
+    # Free tier — explain what they're missing and how to unlock it
+    friendly = feature.replace("_", " ")
     return {
-        "error": "license_invalid",
-        "message": s.message,
+        "error": "pro_required",
+        "feature": feature,
+        "message": (
+            f"'{friendly}' is a Pro feature. "
+            f"You're on the free tier — cost queries, anomaly detection, rightsizing, "
+            f"PR comments, Slack alerts, and all connectors are fully available. "
+            f"Upgrade at {_UPGRADE_URL} to unlock {friendly}."
+        ),
         "upgrade_url": _UPGRADE_URL,
+        "free_tier_available": True,
     }
+
+
+def feature_available(feature: str) -> bool:
+    """
+    Quick boolean check. Returns True for all free-tier features,
+    and for pro features only when the user has a pro/trial license.
+    """
+    if feature not in PRO_FEATURES:
+        return True
+    return get_status().is_pro

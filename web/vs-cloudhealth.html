@@ -24,8 +24,8 @@
 
   nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 88%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:14px 0}
   .nav-inner{display:flex;align-items:center;justify-content:space-between}
-  .logo{display:flex;align-items:center;gap:10px;font-weight:500;font-size:15px;text-decoration:none;color:var(--fg)}
-  .logo .glyph{width:18px;height:18px;border-radius:5px;background:var(--fg);display:grid;place-items:center;color:var(--bg);font-weight:600;font-size:11px}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:500;font-size:15px;text-decoration:none;color:var(--fg);letter-spacing:-.02em}
+  .logo img{width:24px;height:24px;border-radius:6px;display:block}
   .nav-links{display:flex;list-style:none;gap:24px;font-size:14px;color:var(--fg-2)}
   .nav-links a:hover{color:var(--fg)}
   .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:13.5px;font-weight:500;cursor:pointer;border:0}
@@ -102,12 +102,17 @@
     .nav-links{display:none}
   }
 </style>
+<!-- PostHog -->
+<script>
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  posthog.init("phc_zcaQqoAXrSghjtbE6VB83p4RjfmcpqezKWV9GdZy4dPv", {api_host:"https://us.i.posthog.com",person_profiles:"identified_only",capture_pageview:true});
+</script>
 </head>
 <body>
 
 <nav>
   <div class="wrap nav-inner">
-    <a href="/" class="logo"><div class="glyph">n</div> nable</a>
+    <a href="/" class="logo"><img src="/favicon.svg" alt="nable"> nable</a>
     <ul class="nav-links">
       <li><a href="/#product">Product</a></li>
       <li><a href="/#connectors">Connectors</a></li>
@@ -346,7 +351,7 @@
   <div class="wrap">
     <div class="foot-simple">
       <a href="/" class="logo" style="gap:8px">
-        <div class="glyph" style="width:16px;height:16px;font-size:10px;border-radius:4px">n</div>
+        <img src="/favicon.svg" alt="nable" style="width:20px;height:20px;border-radius:5px">
         <span style="color:var(--fg-3)">nable</span>
       </a>
       <div class="foot-links">

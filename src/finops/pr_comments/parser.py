@@ -32,7 +32,9 @@ class ResourceChange:
 # ─── Terraform ────────────────────────────────────────────────────────────────
 
 _TF_RESOURCE_RE = re.compile(
-    r'^\s*(?P<sign>[+\-~])\s+resource\s+"(?P<type>[^"]+)"\s+"(?P<name>[^"]+)"',
+    # Matches both git-diff format (+resource "type" "name")
+    # and Terraform plan format (  + resource "type" "name")
+    r'^\s*(?P<sign>[+\-~])\s*resource\s+"(?P<type>[^"]+)"\s+"(?P<name>[^"]+)"',
     re.MULTILINE,
 )
 _TF_ATTR_RE = re.compile(r'^\s*[+\-~]?\s*(?P<key>\w+)\s+=\s+"?(?P<value>[^"\n]+)"?', re.MULTILINE)
@@ -133,29 +135,88 @@ def _parse_cfn_diff(diff: str, file_path: str = "") -> list[ResourceChange]:
 
 # ─── Helm values ──────────────────────────────────────────────────────────────
 
-_HELM_INSTANCE_RE = re.compile(
-    r'[+\-]\s+instanceType:\s*(?P<type>\w+\.\w+)',
-    re.MULTILINE,
-)
-_HELM_REPLICA_RE = re.compile(
-    r'[+\-]\s+replicaCount:\s*(?P<count>\d+)',
-    re.MULTILINE,
-)
+_HELM_INSTANCE_RE  = re.compile(r'[+\-]\s*(?:instanceType|nodeType|machineType):\s*(\S+)', re.MULTILINE)
+_HELM_REPLICA_RE   = re.compile(r'[+\-]\s*replicaCount:\s*(\d+)', re.MULTILINE)
+_HELM_CPU_RE       = re.compile(r'[+\-]\s*cpu:\s*["\']?(\d+m|\d+(?:\.\d+)?)["\']?', re.MULTILINE)
+_HELM_MEMORY_RE    = re.compile(r'[+\-]\s*memory:\s*["\']?(\d+(?:Mi|Gi|Ki|M|G)?)["\']?', re.MULTILINE)
+_HELM_NODE_COUNT_RE = re.compile(r'[+\-]\s*(?:nodeCount|minSize|desiredSize|min_count):\s*(\d+)', re.MULTILINE)
 
 
 def _parse_helm_diff(diff: str, file_path: str = "") -> list[ResourceChange]:
     changes = []
-    for match in _HELM_INSTANCE_RE.finditer(diff):
-        sign = diff[diff.rfind("\n", 0, match.start()) + 1]
-        action = "add" if sign == "+" else "remove" if sign == "-" else "modify"
-        changes.append(ResourceChange(
-            action=action,
-            resource_type="aws_instance",
-            resource_name="helm_node",
-            provider="aws",
-            properties={"instance_type": match.group("type")},
-            file_path=file_path,
-        ))
+
+    # Instance type change → node cost change
+    instances: dict[str, str] = {}  # sign → value
+    for m in _HELM_INSTANCE_RE.finditer(diff):
+        sign = diff[m.start()]
+        instances[sign] = m.group(1)
+
+    if "+" in instances or "-" in instances:
+        old_type = instances.get("-", "")
+        new_type = instances.get("+", "")
+        if old_type != new_type:
+            changes.append(ResourceChange(
+                action="modify",
+                resource_type="aws_instance",
+                resource_name="helm_node",
+                provider="aws",
+                properties={"instance_type": new_type, "old_instance_type": old_type},
+                file_path=file_path,
+            ))
+
+    # Replica count change → scale cost
+    replicas: dict[str, int] = {}
+    for m in _HELM_REPLICA_RE.finditer(diff):
+        sign = diff[m.start()]
+        replicas[sign] = int(m.group(1))
+
+    if "+" in replicas and "-" in replicas:
+        old_r, new_r = replicas["-"], replicas["+"]
+        if old_r != new_r:
+            delta = new_r - old_r
+            # Parse cpu/mem from same diff to estimate per-pod cost
+            cpu_props: dict[str, str] = {}
+            for m in _HELM_CPU_RE.finditer(diff):
+                cpu_props[diff[m.start()]] = m.group(1)
+            mem_props: dict[str, str] = {}
+            for m in _HELM_MEMORY_RE.finditer(diff):
+                mem_props[diff[m.start()]] = m.group(1)
+
+            action = "add" if delta > 0 else "remove"
+            for _ in range(abs(delta)):
+                changes.append(ResourceChange(
+                    action=action,
+                    resource_type="helm_pod_replica",
+                    resource_name="replica",
+                    provider="k8s",
+                    properties={
+                        "cpu_request": cpu_props.get("+", cpu_props.get("-", "100m")),
+                        "mem_request": mem_props.get("+", mem_props.get("-", "128Mi")),
+                        "replica_delta": str(delta),
+                    },
+                    file_path=file_path,
+                ))
+
+    # Node count change
+    node_counts: dict[str, int] = {}
+    for m in _HELM_NODE_COUNT_RE.finditer(diff):
+        node_counts[diff[m.start()]] = int(m.group(1))
+
+    if "+" in node_counts and "-" in node_counts:
+        old_n, new_n = node_counts["-"], node_counts["+"]
+        if old_n != new_n:
+            action = "add" if new_n > old_n else "remove"
+            inst   = instances.get("+", instances.get("-", "m5.large"))
+            for _ in range(abs(new_n - old_n)):
+                changes.append(ResourceChange(
+                    action=action,
+                    resource_type="aws_instance",
+                    resource_name="helm_node",
+                    provider="aws",
+                    properties={"instance_type": inst},
+                    file_path=file_path,
+                ))
+
     return changes
 
 

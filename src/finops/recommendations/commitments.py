@@ -29,6 +29,45 @@ _RI_DISCOUNT = 0.60           # ~40% off on-demand (1yr no-upfront RI)
 
 
 @dataclass
+class TaggedCoverageEstimate:
+    """
+    Commitment coverage estimate for a tag slice where tag coverage is partial.
+
+    When only 70% of a domain's resources carry the tag, we can still produce
+    a meaningful estimate by solving:
+
+        account_coverage × total_spend =
+            tagged_coverage   × tagged_spend
+          + untagged_coverage × untagged_spend
+
+    Rearranging gives the untagged portion's coverage, which we blend back
+    to produce a full-domain estimate with an explicit confidence level.
+    """
+    tag_key: str
+    tag_value: str
+    tag_coverage_pct: float          # how complete the tagging is (e.g. 70.0)
+
+    # Directly measured (from CE tag-filtered query)
+    tagged_spend_usd: float
+    tagged_sp_coverage_pct: float
+    tagged_ri_coverage_pct: float
+
+    # Inferred for the untagged remainder
+    untagged_spend_usd: float
+    inferred_untagged_sp_coverage_pct: float
+    inferred_untagged_ri_coverage_pct: float
+
+    # Blended full-domain estimate
+    estimated_sp_coverage_pct: float
+    estimated_ri_coverage_pct: float
+    estimated_combined_coverage_pct: float
+
+    # Confidence reflects how much of spend is actually tagged
+    confidence: str                  # "high" | "medium" | "low"
+    confidence_note: str
+
+
+@dataclass
 class CommitmentAnalysis:
     # Current state
     savings_plan_coverage_pct: float
@@ -58,6 +97,57 @@ class CommitmentAnalysis:
         return "poor"
 
 
+def _ec2_spend_for_tag(
+    ce_client: Any,
+    start: str,
+    end: str,
+    tag_key: str,
+    tag_value: str,
+) -> float:
+    """Total EC2 compute spend (all purchase types) for resources with this tag."""
+    try:
+        resp = ce_client.get_cost_and_usage(
+            TimePeriod={"Start": start, "End": end},
+            Granularity="MONTHLY",
+            Filter={
+                "And": [
+                    {"Dimensions": {"Key": "SERVICE", "Values": [
+                        "Amazon Elastic Compute Cloud - Compute", "AWS Fargate"
+                    ]}},
+                    {"Tags": {"Key": tag_key, "Values": [tag_value]}},
+                ]
+            },
+            Metrics=["UnblendedCost"],
+        )
+        return sum(
+            float(p["Total"]["UnblendedCost"]["Amount"])
+            for p in resp.get("ResultsByTime", [])
+        )
+    except Exception as e:
+        log.warning("EC2 spend for tag fetch failed: %s", e)
+        return 0.0
+
+
+def _total_ec2_spend(ce_client: Any, start: str, end: str) -> float:
+    """Total EC2 compute spend for the account."""
+    try:
+        resp = ce_client.get_cost_and_usage(
+            TimePeriod={"Start": start, "End": end},
+            Granularity="MONTHLY",
+            Filter={"Dimensions": {"Key": "SERVICE", "Values": [
+                "Amazon Elastic Compute Cloud - Compute", "AWS Fargate"
+            ]}},
+            Metrics=["UnblendedCost"],
+        )
+        return sum(
+            float(p["Total"]["UnblendedCost"]["Amount"])
+            for p in resp.get("ResultsByTime", [])
+        )
+    except Exception as e:
+        log.warning("Total EC2 spend fetch failed: %s", e)
+        return 0.0
+
+
 def _get_date_range(months_back: int = 3) -> tuple[str, str]:
     end = date.today().replace(day=1) - timedelta(days=1)  # last day of prior month
     start = (end.replace(day=1) - timedelta(days=months_back * 30)).replace(day=1)
@@ -82,12 +172,33 @@ def _savings_plan_utilization(ce_client: Any, start: str, end: str) -> dict[str,
         return {"utilization_pct": 0.0, "unused_usd": 0.0, "total_commitment": 0.0}
 
 
-def _savings_plan_coverage(ce_client: Any, start: str, end: str) -> float:
+def _savings_plan_coverage(
+    ce_client: Any,
+    start: str,
+    end: str,
+    tag_filter: dict | None = None,
+) -> float:
+    """
+    Coverage % for the account — or for a specific tag slice when tag_filter is set.
+
+    tag_filter examples:
+        {"team": "platform"}   → coverage for instances tagged team=platform
+        {"env": "prod"}        → coverage for prod-tagged instances
+
+    Note: SP coverage filtered by tag shows what % of *that team's tagged EC2 usage*
+    is covered by any SP in the account. It does NOT split SP ownership between teams —
+    SPs are account-level instruments. This is the closest approximation AWS supports.
+    """
     try:
-        resp = ce_client.get_savings_plans_coverage(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="MONTHLY",
-        )
+        kwargs: dict[str, Any] = {
+            "TimePeriod": {"Start": start, "End": end},
+            "Granularity": "MONTHLY",
+        }
+        if tag_filter:
+            tag_key, tag_val = next(iter(tag_filter.items()))
+            kwargs["Filter"] = {"Tags": {"Key": tag_key, "Values": [tag_val]}}
+
+        resp = ce_client.get_savings_plans_coverage(**kwargs)
         totals = resp.get("Total", {}).get("CoverageHours", {})
         return float(totals.get("CoverageHoursPercentage", 0))
     except Exception as e:
@@ -115,12 +226,22 @@ def _ri_utilization(ce_client: Any, start: str, end: str) -> dict[str, float]:
         return {"utilization_pct": 0.0, "unused_usd": 0.0}
 
 
-def _ri_coverage(ce_client: Any, start: str, end: str) -> float:
+def _ri_coverage(
+    ce_client: Any,
+    start: str,
+    end: str,
+    tag_filter: dict | None = None,
+) -> float:
     try:
-        resp = ce_client.get_reservation_coverage(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="MONTHLY",
-        )
+        kwargs: dict[str, Any] = {
+            "TimePeriod": {"Start": start, "End": end},
+            "Granularity": "MONTHLY",
+        }
+        if tag_filter:
+            tag_key, tag_val = next(iter(tag_filter.items()))
+            kwargs["Filter"] = {"Tags": {"Key": tag_key, "Values": [tag_val]}}
+
+        resp = ce_client.get_reservation_coverage(**kwargs)
         total = resp.get("Total", {}).get("CoverageHours", {})
         return float(total.get("CoverageHoursPercentage", 0))
     except Exception as e:
@@ -128,18 +249,32 @@ def _ri_coverage(ce_client: Any, start: str, end: str) -> float:
         return 0.0
 
 
-def _uncovered_on_demand(ce_client: Any, start: str, end: str) -> float:
+def _uncovered_on_demand(
+    ce_client: Any,
+    start: str,
+    end: str,
+    tag_filter: dict | None = None,
+) -> float:
     """On-demand EC2 + Fargate spend not covered by any commitment."""
     try:
+        base_filter: dict = {
+            "And": [
+                {"Dimensions": {"Key": "SERVICE", "Values": [
+                    "Amazon Elastic Compute Cloud - Compute", "AWS Fargate"
+                ]}},
+                {"Dimensions": {"Key": "PURCHASE_TYPE", "Values": ["On Demand"]}},
+            ]
+        }
+        if tag_filter:
+            tag_key, tag_val = next(iter(tag_filter.items()))
+            base_filter["And"].append(
+                {"Tags": {"Key": tag_key, "Values": [tag_val]}}
+            )
+
         resp = ce_client.get_cost_and_usage(
             TimePeriod={"Start": start, "End": end},
             Granularity="MONTHLY",
-            Filter={
-                "And": [
-                    {"Dimensions": {"Key": "SERVICE", "Values": ["Amazon Elastic Compute Cloud - Compute", "AWS Fargate"]}},
-                    {"Dimensions": {"Key": "PURCHASE_TYPE", "Values": ["On Demand"]}},
-                ]
-            },
+            Filter=base_filter,
             Metrics=["UnblendedCost"],
         )
         total = sum(
@@ -215,9 +350,22 @@ def _build_recommendations(
     return recs
 
 
-def analyze_commitments() -> CommitmentAnalysis | None:
+def estimate_coverage_for_partial_tag(
+    tag_key: str,
+    tag_value: str,
+    tag_coverage_pct: float,      # how complete the tagging is, 0–100
+) -> TaggedCoverageEstimate | None:
     """
-    Run full RI/SP analysis. Returns None if AWS is not configured.
+    Estimate full-domain commitment coverage when tag coverage is partial.
+
+    At 70% tag coverage we can measure the tagged 70% directly, then solve
+    algebraically for the untagged 30% using account totals, producing a
+    blended full-domain estimate.
+
+    Confidence:
+        ≥ 90% tagged → high    (untagged <10%, rounding error level)
+        ≥ 60% tagged → medium  (meaningful estimate, uncertainty noted)
+        < 60% tagged → low     (too much unmeasured, treat as directional only)
     """
     try:
         import boto3
@@ -228,11 +376,121 @@ def analyze_commitments() -> CommitmentAnalysis | None:
         ce = boto3.client("ce", region_name="us-east-1")
         start, end = _get_date_range(months_back=3)
 
+        # ── Step 1: measure the tagged slice directly ─────────────────────────
+        tagged_sp_cov = _savings_plan_coverage(
+            ce, start, end, tag_filter={tag_key: tag_value}
+        )
+        tagged_ri_cov = _ri_coverage(
+            ce, start, end, tag_filter={tag_key: tag_value}
+        )
+        tagged_spend = _ec2_spend_for_tag(ce, start, end, tag_key, tag_value)
+
+        # ── Step 2: get account totals ────────────────────────────────────────
+        acct_sp_cov   = _savings_plan_coverage(ce, start, end)
+        acct_ri_cov   = _ri_coverage(ce, start, end)
+        total_spend   = _total_ec2_spend(ce, start, end)
+
+        # ── Step 3: infer untagged portion via residual ───────────────────────
+        # tagged_coverage_fraction  = tagged_sp_cov / 100
+        # account_coverage_fraction = acct_sp_cov / 100
+        # account_cov × total = tagged_cov × tagged + untagged_cov × untagged
+        # → untagged_cov = (account_cov × total - tagged_cov × tagged) / untagged
+
+        untagged_spend = max(0.0, total_spend - tagged_spend)
+
+        def _infer_untagged(acct_cov: float, tagged_cov: float) -> float:
+            if untagged_spend <= 0:
+                return acct_cov  # no untagged spend, account coverage applies
+            numerator = (acct_cov / 100 * total_spend) - (tagged_cov / 100 * tagged_spend)
+            raw = (numerator / untagged_spend) * 100
+            return max(0.0, min(100.0, raw))
+
+        inferred_untagged_sp = _infer_untagged(acct_sp_cov, tagged_sp_cov)
+        inferred_untagged_ri = _infer_untagged(acct_ri_cov, tagged_ri_cov)
+
+        # ── Step 4: blend for full-domain estimate ────────────────────────────
+        tagged_weight   = tag_coverage_pct / 100
+        untagged_weight = 1.0 - tagged_weight
+
+        blended_sp = tagged_sp_cov * tagged_weight + inferred_untagged_sp * untagged_weight
+        blended_ri = tagged_ri_cov * tagged_weight + inferred_untagged_ri * untagged_weight
+        blended    = (blended_sp + blended_ri) / 2
+
+        # ── Step 5: confidence ────────────────────────────────────────────────
+        if tag_coverage_pct >= 90:
+            confidence = "high"
+            note = (
+                f"{tag_coverage_pct:.0f}% of resources are tagged — "
+                f"the untagged {100 - tag_coverage_pct:.0f}% is a rounding-error level gap."
+            )
+        elif tag_coverage_pct >= 60:
+            confidence = "medium"
+            note = (
+                f"{tag_coverage_pct:.0f}% of resources are tagged. "
+                f"The untagged {100 - tag_coverage_pct:.0f}% is inferred from account totals "
+                f"(estimated coverage: {inferred_untagged_sp:.0f}% SP, {inferred_untagged_ri:.0f}% RI). "
+                f"Improve tagging to increase confidence."
+            )
+        else:
+            confidence = "low"
+            note = (
+                f"Only {tag_coverage_pct:.0f}% of resources carry the '{tag_key}' tag — "
+                f"the estimate is directional only. Bring tagging above 80% for a reliable number."
+            )
+
+        return TaggedCoverageEstimate(
+            tag_key=tag_key,
+            tag_value=tag_value,
+            tag_coverage_pct=tag_coverage_pct,
+            tagged_spend_usd=round(tagged_spend, 2),
+            tagged_sp_coverage_pct=round(tagged_sp_cov, 1),
+            tagged_ri_coverage_pct=round(tagged_ri_cov, 1),
+            untagged_spend_usd=round(untagged_spend, 2),
+            inferred_untagged_sp_coverage_pct=round(inferred_untagged_sp, 1),
+            inferred_untagged_ri_coverage_pct=round(inferred_untagged_ri, 1),
+            estimated_sp_coverage_pct=round(blended_sp, 1),
+            estimated_ri_coverage_pct=round(blended_ri, 1),
+            estimated_combined_coverage_pct=round(blended, 1),
+            confidence=confidence,
+            confidence_note=note,
+        )
+
+    except Exception as e:
+        log.error("Partial-tag coverage estimate failed: %s", e)
+        return None
+
+
+def analyze_commitments(
+    tag_filter: dict | None = None,
+) -> CommitmentAnalysis | None:
+    """
+    Run full RI/SP analysis. Returns None if AWS is not configured.
+
+    tag_filter: optional dict to scope coverage to a tag slice.
+        e.g. {"team": "platform"} or {"env": "prod"}
+
+    Important caveat when tag_filter is set:
+        SP/RI utilization figures are always account-level (AWS doesn't
+        support filtering utilization by tag). Only coverage and on-demand
+        figures are tag-filtered. The scorecard makes this explicit.
+    """
+    try:
+        import boto3
+    except ImportError:
+        return None
+
+    try:
+        ce = boto3.client("ce", region_name="us-east-1")
+        start, end = _get_date_range(months_back=3)
+
+        # Utilization is always account-level — AWS doesn't support tag filtering here
         sp_util_data = _savings_plan_utilization(ce, start, end)
-        sp_coverage = _savings_plan_coverage(ce, start, end)
-        ri_util_data = _ri_utilization(ce, start, end)
-        ri_coverage = _ri_coverage(ce, start, end)
-        uncovered_od = _uncovered_on_demand(ce, start, end)
+        ri_util_data  = _ri_utilization(ce, start, end)
+
+        # Coverage and on-demand CAN be filtered by tag
+        sp_coverage  = _savings_plan_coverage(ce, start, end, tag_filter)
+        ri_coverage  = _ri_coverage(ce, start, end, tag_filter)
+        uncovered_od = _uncovered_on_demand(ce, start, end, tag_filter)
 
         recs = _build_recommendations(
             sp_coverage,

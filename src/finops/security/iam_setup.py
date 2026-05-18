@@ -5,15 +5,23 @@ Two outputs:
   1. CloudFormation template  — paste into AWS Console or deploy via CLI
   2. Terraform snippet        — drop into your infra repo
 
-Minimum permissions nable ever needs (read-only, no mutations):
-  Cost Explorer  → ce:Get*, ce:Describe*, ce:List*
-  Compute Opt.   → compute-optimizer:Get*, compute-optimizer:Describe*
-  CloudWatch     → cloudwatch:GetMetricStatistics (fallback rightsizing)
-  EC2 read       → ec2:DescribeInstances, ec2:DescribeRegions
-  Organizations  → organizations:List*, organizations:Describe* (org rollup)
-  STS            → sts:GetCallerIdentity (account ID discovery)
+Permissions nable needs (read-only except logs:PutRetentionPolicy):
+  Cost Explorer   → ce:Get*, ce:Describe*, ce:List*
+  Compute Opt.    → compute-optimizer:Get* (EC2, Lambda, RDS, ECS)
+  CloudWatch      → cloudwatch:GetMetricData, GetMetricStatistics, ListMetrics
+  EC2 deep audit  → ec2:Describe{Instances,Regions,Volumes,Snapshots,
+                     Addresses,NatGateways,Images}
+  RDS deep audit  → rds:Describe{DBInstances,DBSnapshots}
+  Lambda audit    → lambda:ListFunctions, GetFunctionConfiguration
+  CW Logs audit   → logs:DescribeLogGroups, DescribeLogStreams,
+                     PutRetentionPolicy (optional — auto-remediation)
+  CloudTrail      → cloudtrail:DescribeTrails, GetTrailStatus, GetEventSelectors
+  S3              → s3:ListAllMyBuckets, GetBucketLocation,
+                     GetBucketIntelligentTieringConfiguration
+  Organizations   → organizations:List*, Describe* (org rollup)
+  STS             → sts:GetCallerIdentity, AssumeRole (cross-account)
 
-Nothing in this list can create, modify, or delete any resource.
+Nothing in this list can terminate, delete, modify, or create compute resources.
 """
 from __future__ import annotations
 
@@ -38,26 +46,52 @@ _REQUIRED_ACTIONS: list[str] = [
     "ce:GetRightsizingRecommendation",
     "ce:ListCostAllocationTags",
     "ce:DescribeCostCategoryDefinition",
-    # Compute Optimizer
+    # Compute Optimizer (deep audit)
     "compute-optimizer:GetEC2InstanceRecommendations",
     "compute-optimizer:GetLambdaFunctionRecommendations",
+    "compute-optimizer:GetRDSDatabaseRecommendations",
     "compute-optimizer:GetECSServiceRecommendations",
     "compute-optimizer:GetEnrollmentStatus",
     "compute-optimizer:GetRecommendationSummaries",
-    # CloudWatch (fallback rightsizing)
+    # CloudWatch (rightsizing + deep audit metrics)
+    "cloudwatch:GetMetricData",
     "cloudwatch:GetMetricStatistics",
     "cloudwatch:ListMetrics",
-    # EC2 (region + instance discovery)
+    # EC2 (region/instance discovery + deep audit)
     "ec2:DescribeInstances",
     "ec2:DescribeRegions",
+    "ec2:DescribeVolumes",
+    "ec2:DescribeSnapshots",
+    "ec2:DescribeAddresses",
+    "ec2:DescribeNatGateways",
+    "ec2:DescribeImages",
+    # RDS (deep audit — backup retention, utilization)
+    "rds:DescribeDBInstances",
+    "rds:DescribeDBSnapshots",
+    # Lambda (deep audit — memory analysis)
+    "lambda:ListFunctions",
+    "lambda:GetFunctionConfiguration",
+    # CloudWatch Logs (retention policy audit)
+    "logs:DescribeLogGroups",
+    "logs:DescribeLogStreams",
+    "logs:PutRetentionPolicy",  # needed if auto-remediation is desired
+    # CloudTrail (waste pattern detection)
+    "cloudtrail:DescribeTrails",
+    "cloudtrail:GetTrailStatus",
+    "cloudtrail:GetEventSelectors",
+    # S3 (storage class analysis)
+    "s3:ListAllMyBuckets",
+    "s3:GetBucketLocation",
+    "s3:GetBucketIntelligentTieringConfiguration",
     # Organizations (org rollup — optional but harmless to include)
     "organizations:ListAccounts",
     "organizations:ListRoots",
     "organizations:ListOrganizationalUnitsForParent",
     "organizations:DescribeOrganization",
     "organizations:DescribeAccount",
-    # STS (account ID)
+    # STS (account ID + role assumption)
     "sts:GetCallerIdentity",
+    "sts:AssumeRole",
 ]
 
 # Actions that WOULD indicate over-provisioned credentials
@@ -72,9 +106,11 @@ _DANGEROUS_ACTIONS_PREFIXES = [
 CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
     "AWSTemplateFormatVersion": "2010-09-09",
     "Description": (
-        "Least-privilege read-only IAM role for nable (finops-mcp). "
-        "Grants access to Cost Explorer, Compute Optimizer, CloudWatch metrics, "
-        "EC2 describe, and Organizations read. No write permissions of any kind."
+        "Least-privilege IAM role for nable (finops-mcp). "
+        "Grants read access to Cost Explorer, Compute Optimizer, CloudWatch metrics, "
+        "EC2/RDS/Lambda/S3/CloudTrail describe APIs, and CloudWatch Logs. "
+        "Includes logs:PutRetentionPolicy for optional auto-remediation of infinite log retention. "
+        "No compute create/modify/delete permissions of any kind."
     ),
     "Parameters": {
         "RoleName": {
@@ -373,7 +409,8 @@ def print_iam_template(fmt: str = "cloudformation") -> None:
 
     print()
     print("─" * 60)
-    print("  These permissions are read-only. nable cannot create,")
-    print("  modify, or delete any AWS resource with this policy.")
+    print("  These permissions are read-only (except logs:PutRetentionPolicy")
+    print("  for optional auto-remediation). nable cannot create, terminate,")
+    print("  or delete any compute resource with this policy.")
     print("─" * 60)
     print()

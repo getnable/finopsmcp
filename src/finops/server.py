@@ -46,6 +46,8 @@ from .connectors.saas.vercel import VercelConnector
 
 load_dotenv()
 
+from . import telemetry as _telemetry  # noqa: E402
+
 mcp = FastMCP("finops")
 
 # ── connector registry ───────────────────────────────────────────────────────
@@ -70,6 +72,14 @@ _SAAS_CONNECTORS: dict[str, Any] = {
 }
 
 _ALL_CONNECTORS: dict[str, Any] = {**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS}
+
+# ── startup telemetry (anonymous, opt-out via NABLE_NO_TELEMETRY=1) ──────────
+try:
+    _lic = get_status()
+    _plan = _lic.get("plan", "free") if isinstance(_lic, dict) else "free"
+    _telemetry.ping_startup(provider_count=len(_ALL_CONNECTORS), plan=_plan)
+except Exception:
+    pass  # telemetry must never crash the server
 
 
 async def _active(subset: dict | None = None) -> dict[str, Any]:
@@ -1235,6 +1245,118 @@ async def send_weekly_digest_now() -> dict:
             "note": "Check FINOPS_DIGEST_TO / FINOPS_SMTP_* env vars if not received.",
         }
     except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Deep AWS infrastructure audit tools ───────────────────────────────────────
+
+
+@mcp.tool()
+async def audit_aws_waste(
+    regions: list[str] | None = None,
+    checks: list[str] | None = None,
+    account_id: str | None = None,
+) -> dict:
+    """
+    Deep AWS waste audit: scans EC2, EBS, RDS, Lambda, NAT Gateways, CloudWatch
+    Logs, S3, and CloudTrail for waste patterns that Cost Explorer misses. Goes
+    beyond Compute Optimizer with checks like: gp2→gp3 migration, infinite log
+    retention, idle NAT gateways, over-retained RDS backups, and unassociated
+    Elastic IPs. Returns findings sorted by estimated monthly savings.
+
+    Args:
+        regions: List of AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
+                 Defaults to all opted-in regions — can be slow for large accounts.
+        checks: Subset of checks to run. Available: ebs, snapshots, eips, nat,
+                rds, cloudtrail, cloudwatch, s3, lambda, ec2. Defaults to all.
+        account_id: AWS account ID label (auto-discovered from STS if not provided).
+
+    Examples:
+        - "Run a full AWS waste audit"
+        - "Scan us-east-1 for EBS and Lambda waste"
+        - "Find all idle NAT gateways and unattached EBS volumes"
+        - "What AWS resources are we paying for but not using?"
+        - "Audit CloudWatch log groups for missing retention policies"
+    """
+    try:
+        from .analyzers.optimizer import run_deep_audit
+        report = run_deep_audit(
+            account_id=account_id,
+            regions=regions,
+            checks=checks,
+        )
+        # Add a human-readable summary at the top
+        report["summary"] = (
+            f"Found {report.get('total_findings', 0)} waste findings across "
+            f"{len(report.get('regions_scanned', []))} region(s). "
+            f"Estimated savings: ${report.get('total_estimated_monthly_savings', 0):,.2f}/mo "
+            f"(${report.get('total_estimated_annual_savings', 0):,.2f}/yr)."
+        )
+        return report
+    except Exception as e:
+        log.error("audit_aws_waste failed: %s", e, exc_info=True)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_instance_deep_analysis(
+    instance_id: str,
+    region: str = "us-east-1",
+    lookback_days: int = 14,
+) -> dict:
+    """
+    Deep CloudWatch analysis for a specific EC2 instance. Returns CPU, network,
+    disk utilization percentiles (avg/p95/max), a rightsizing recommendation with
+    estimated savings, and the AWS Compute Optimizer recommendation if available.
+
+    Args:
+        instance_id: EC2 instance ID (e.g. "i-0abc1234567890def")
+        region: AWS region where the instance lives (default: us-east-1)
+        lookback_days: Days of metrics history to analyze (default: 14, max: 63)
+
+    Examples:
+        - "Analyze instance i-0abc1234 in us-east-1"
+        - "Is i-0abc1234 over-provisioned?"
+        - "Show me CPU and memory trends for i-0abc1234 over the last 30 days"
+        - "What does Compute Optimizer recommend for i-0abc1234?"
+    """
+    try:
+        from .analyzers.optimizer import get_instance_deep_analysis as _analyze
+        return _analyze(
+            instance_id=instance_id,
+            region=region,
+            lookback_days=lookback_days,
+        )
+    except Exception as e:
+        log.error("get_instance_deep_analysis failed: %s", e, exc_info=True)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def scan_cloudwatch_waste(
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Scans all CloudWatch Log Groups for missing retention policies (infinite
+    retention is expensive at $0.03/GB-month). Returns groups with no retention
+    set, estimated monthly storage cost, and recommended retention periods by
+    log type (application, vpc-flow, cloudtrail, lambda, rds, etc). Also
+    generates ready-to-run AWS CLI commands to fix the top offenders.
+
+    Args:
+        regions: List of regions to scan. Defaults to all opted-in regions.
+
+    Examples:
+        - "Which CloudWatch log groups have no retention policy?"
+        - "How much are we spending on CloudWatch log storage?"
+        - "Scan for infinite log retention across all regions"
+        - "Show me log groups we should set expiry on"
+    """
+    try:
+        from .analyzers.optimizer import scan_cloudwatch_log_waste
+        return scan_cloudwatch_log_waste(regions=regions)
+    except Exception as e:
+        log.error("scan_cloudwatch_waste failed: %s", e, exc_info=True)
         return {"error": str(e)}
 
 

@@ -17,13 +17,19 @@ No dashboards. No SQL. Just ask.
 
 ## Quick start
 
+**Option A — uvx (recommended, works everywhere including corporate machines):**
 ```bash
-pip install finops-mcp
-finops setup        # connects your providers + auto-configures Claude Desktop
+pip install uv          # or: brew install uv
+uvx finops-mcp setup    # installs in isolated venv, no PATH issues
 ```
 
-That's it. `finops setup` detects Claude Desktop, resolves the correct binary path,
-and writes `claude_desktop_config.json` automatically. Restart Claude Desktop and ask:
+**Option B — pip:**
+```bash
+pip install finops-mcp
+finops setup            # connects your providers + auto-configures Claude Desktop
+```
+
+`finops setup` detects Claude Desktop and writes `claude_desktop_config.json` automatically — it picks `uvx` if available, otherwise uses the absolute binary path. Restart Claude Desktop and ask:
 *"What are my AWS costs this month?"*
 
 **14-day free trial, all features unlocked. No credit card required.**
@@ -38,9 +44,18 @@ If `finops setup` doesn't auto-configure, run:
 finops setup claude
 ```
 
-Or add manually — use the **absolute path** from `which finops-mcp`:
+Or add manually to `claude_desktop_config.json`:
 
-**macOS / Linux:**
+**With uvx (recommended — no PATH issues):**
+```json
+{
+  "mcpServers": {
+    "finops": { "command": "uvx", "args": ["finops-mcp"] }
+  }
+}
+```
+
+**With absolute path (alternative):**
 ```json
 {
   "mcpServers": {
@@ -48,15 +63,16 @@ Or add manually — use the **absolute path** from `which finops-mcp`:
   }
 }
 ```
+Use the path from `which finops-mcp`.
 
 Config file locations:
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 - **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
-> **Why absolute path?** Claude Desktop is a GUI app — it doesn't inherit your
-> shell's `$PATH`. A bare `finops-mcp` command will fail unless it's in `/usr/bin`.
-> Always use the full path from `which finops-mcp`.
+> **Why uvx?** Claude Desktop is a GUI app — it doesn't inherit your shell's `$PATH`.
+> `uvx` sidesteps this entirely by running finops-mcp in its own isolated environment.
+> It's the most reliable option on corporate machines with managed Python installs.
 
 ---
 
@@ -71,11 +87,12 @@ finops setup claude    # re-run Claude Desktop configuration only
 
 | Symptom | Fix |
 |---|---|
-| Tools don't appear in Claude | Use absolute path in config (`which finops-mcp`) |
-| `command not found: finops-mcp` | Re-install: `pip install finops-mcp` |
+| Tools don't appear in Claude | Switch to uvx config (see above) or use absolute path |
+| `command not found: finops-mcp` | Re-install: `pip install finops-mcp` or use `uvx` |
 | Python 3.8/3.9 errors | nable requires Python ≥ 3.10: `python3.10 -m pip install finops-mcp` |
 | Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
-| Permission denied | Install to user: `pip install --user finops-mcp` |
+| Permission denied | Install to user: `pip install --user finops-mcp` or use `uvx` |
+| Works at home, not at work | Use `uvx` — corporate IT often strips custom PATH entries |
 
 ---
 

@@ -1,0 +1,106 @@
+name: nable Budget Check
+description: >
+  Checks current cloud spend against budgets defined in budget.yml.
+  Fails the CI job if any budget is exceeded (configurable).
+
+inputs:
+  finops-license-key:
+    description: nable license key (optional, free tier works)
+    required: false
+    default: ""
+  budget-yaml-path:
+    description: Path to budget.yml file
+    required: false
+    default: budget.yml
+  fail-on-exceeded:
+    description: Fail the CI job if any budget is exceeded
+    required: false
+    default: "true"
+  aws-access-key-id:
+    description: AWS Access Key ID
+    required: false
+    default: ""
+  aws-secret-access-key:
+    description: AWS Secret Access Key
+    required: false
+    default: ""
+  aws-region:
+    description: AWS region for Cost Explorer
+    required: false
+    default: us-east-1
+  database-url:
+    description: Postgres DATABASE_URL for shared mode (optional)
+    required: false
+    default: ""
+  github-token:
+    description: GitHub token for posting PR comments
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  status:
+    description: "ok | warning | exceeded"
+  exceeded-budgets:
+    description: JSON list of exceeded budget names
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install nable
+      shell: bash
+      run: pip install finops-mcp --quiet
+
+    - name: Run budget check
+      shell: bash
+      id: budget
+      env:
+        AWS_ACCESS_KEY_ID: ${{ inputs.aws-access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.aws-secret-access-key }}
+        AWS_DEFAULT_REGION: ${{ inputs.aws-region }}
+        FINOPS_LICENSE_KEY: ${{ inputs.finops-license-key }}
+        DATABASE_URL: ${{ inputs.database-url }}
+      run: python ${{ github.action_path }}/entrypoint.py
+      continue-on-error: true
+
+    - name: Post PR comment
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const commentFile = '/tmp/nable-budget-comment.md';
+          if (!fs.existsSync(commentFile)) return;
+          const body = fs.readFileSync(commentFile, 'utf8');
+          const marker = '<!-- nable-budget-comment -->';
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner, repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find(c => c.body.includes(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              comment_id: existing.id, body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, body,
+            });
+          }
+
+    - name: Fail if budgets exceeded
+      if: ${{ inputs.fail-on-exceeded == 'true' }}
+      shell: bash
+      run: |
+        if [ -f /tmp/nable-budget-exceeded ]; then
+          echo "❌ Budget gate failed — one or more budgets exceeded"
+          cat /tmp/nable-budget-exceeded
+          exit 1
+        fi
