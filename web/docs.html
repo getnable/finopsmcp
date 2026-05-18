@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>nable — Setup Documentation</title>
+  <title>nable: Setup Documentation</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -94,7 +94,7 @@
     code.bg-blue-50 { background: var(--bg-3) !important; color: var(--fg) !important; }
     /* section category divider labels */
     p.cat-label { font-family: var(--mono); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-4); margin-bottom: 24px; }
-    /* provider lettermark badges — same language as the N logo */
+    /* provider lettermark badges - same language as the N logo */
     .pbadge { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:5px; background:var(--fg); color:var(--bg); font-family:var(--mono); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; flex-shrink:0; }
   </style>
 <!-- PostHog -->
@@ -230,11 +230,11 @@
     <div id="quickstart" class="section-anchor">
       <div class="badge mb-4">Getting started</div>
       <h1 class="text-3xl font-black mb-3" style="color:var(--text)">Setup guide</h1>
-      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">This guide walks you through connecting every provider. You don't need all 13 — start with the two or three you care about most, and add more later.</p>
+      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">This guide walks you through connecting every provider. You don't need all 13. Start with the two or three you care about most, and add more later.</p>
 
       <div class="trial-banner mb-6">
         <span class="trial-badge">14-day free trial</span>
-        <p class="text-sm" style="color:var(--muted)">All Team features are unlocked from the moment you install. No credit card, no license key — just install and go. Your trial clock starts on first run.</p>
+        <p class="text-sm" style="color:var(--muted)">All Team features are unlocked from the moment you install. No credit card, no license key. Just install and go. Your trial clock starts on first run.</p>
       </div>
 
       <div class="card p-6 mb-6">
@@ -242,15 +242,15 @@
         <div class="space-y-3">
           <div class="perm-row">
             <span class="check mt-0.5">✓</span>
-            <div><span class="font-medium text-sm" style="color:var(--text)">Python 3.10+</span><span class="text-sm ml-2" style="color:var(--muted)">— check with <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">python3 --version</code></span></div>
+            <div><span class="font-medium text-sm" style="color:var(--text)">Python 3.10+</span><span class="text-sm ml-2" style="color:var(--muted)">(check with <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">python3 --version</code>)</span></div>
           </div>
           <div class="perm-row">
             <span class="check mt-0.5">✓</span>
-            <div><span class="font-medium text-sm" style="color:var(--text)">An AI client</span><span class="text-sm ml-2" style="color:var(--muted)">— Claude Desktop, Cursor, Windsurf, or any MCP-compatible app</span></div>
+            <div><span class="font-medium text-sm" style="color:var(--text)">An AI client</span><span class="text-sm ml-2" style="color:var(--muted)">(Claude Desktop, Cursor, Windsurf, or any MCP-compatible app)</span></div>
           </div>
           <div class="perm-row">
             <span class="check mt-0.5">✓</span>
-            <div><span class="font-medium text-sm" style="color:var(--text)">Read-only credentials</span><span class="text-sm ml-2" style="color:var(--muted)">— for each provider you want to connect (details below)</span></div>
+            <div><span class="font-medium text-sm" style="color:var(--text)">Read-only credentials</span><span class="text-sm ml-2" style="color:var(--muted)">(for each provider you want to connect; details below)</span></div>
           </div>
         </div>
       </div>
@@ -283,7 +283,7 @@
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Run the setup wizard</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">finops setup</span><br/><span class="cm"># Interactive — walks through each provider, skip any you don't need</span></div>
+              <div class="code-block p-4"><span class="cmd">finops setup</span><br/><span class="cm"># Interactive - walks through each provider, skip any you don't need</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
           </div>
@@ -384,7 +384,7 @@
           cloudwatch:GetMetricStatistics &nbsp;<span style="color:var(--dim)"># rightsizing only</span><br/>
           ec2:DescribeInstances &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--dim)"># rightsizing only</span>
         </div>
-        <p class="text-xs mt-3" style="color:var(--dim)">Attach the AWS managed policy <strong>ReadOnlyAccess</strong> as a quick alternative — it covers all of the above.</p>
+        <p class="text-xs mt-3" style="color:var(--dim)">Attach the AWS managed policy <strong>ReadOnlyAccess</strong> as a quick alternative. It covers all of the above.</p>
       </div>
 
       <div class="space-y-3 mb-4">
@@ -415,7 +415,7 @@
 
       <div class="card p-5 mb-4">
         <p class="font-semibold text-sm mb-3" style="color:var(--text)">Required Azure role</p>
-        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">Cost Management Reader</span><span class="text-sm ml-2" style="color:var(--muted)">— scoped to your Subscription or Management Group</span></div></div>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">Cost Management Reader</span><span class="text-sm ml-2" style="color:var(--muted)">(scoped to your Subscription or Management Group)</span></div></div>
       </div>
 
       <div class="space-y-3 mb-4">
@@ -443,13 +443,13 @@
         <span class="pbadge">gcp</span>
         GCP
       </h2>
-      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Primary path: BigQuery billing export (recommended — richer data). Fallback: Cloud Billing API. Both use a service account JSON key stored encrypted in your vault.</p>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Primary path: BigQuery billing export (recommended, richer data). Fallback: Cloud Billing API. Both use a service account JSON key stored encrypted in your vault.</p>
 
       <div class="card p-5 mb-4">
         <p class="font-semibold text-sm mb-3" style="color:var(--text)">Required IAM roles</p>
-        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">roles/billing.viewer</span><span class="text-sm ml-2" style="color:var(--muted)">— Billing API access</span></div></div>
-        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">roles/bigquery.dataViewer</span><span class="text-sm ml-2" style="color:var(--muted)">— only if using BigQuery export</span></div></div>
-        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">roles/bigquery.jobUser</span><span class="text-sm ml-2" style="color:var(--muted)">— only if using BigQuery export</span></div></div>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">roles/billing.viewer</span><span class="text-sm ml-2" style="color:var(--muted)">Billing API access</span></div></div>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">roles/bigquery.dataViewer</span><span class="text-sm ml-2" style="color:var(--muted)">(only if using BigQuery export)</span></div></div>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">roles/bigquery.jobUser</span><span class="text-sm ml-2" style="color:var(--muted)">(only if using BigQuery export)</span></div></div>
       </div>
 
       <div class="space-y-3 mb-4">
@@ -506,7 +506,7 @@
 
       <div class="card p-5 mb-4">
         <p class="font-semibold text-sm mb-2" style="color:var(--text)">Required privilege</p>
-        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">IMPORTED PRIVILEGES on database SNOWFLAKE</span><span class="text-sm ml-2" style="color:var(--muted)">— grants access to ACCOUNT_USAGE schema</span></div></div>
+        <div class="perm-row"><span class="check">✓</span><div><span class="font-medium text-sm" style="color:var(--text)">IMPORTED PRIVILEGES on database SNOWFLAKE</span><span class="text-sm ml-2" style="color:var(--muted)">(grants access to ACCOUNT_USAGE schema)</span></div></div>
       </div>
 
       <div class="space-y-3 mb-4">
@@ -553,7 +553,7 @@
         <span class="pbadge">str</span>
         Stripe
       </h2>
-      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns actual fees paid to Stripe via the Balance Transactions API. Use a restricted key — no write permissions needed.</p>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns actual fees paid to Stripe via the Balance Transactions API. Use a restricted key with no write permissions needed.</p>
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Stripe Dashboard → Developers → API Keys → Create restricted key</strong>. Enable: <code>Balance → Read</code> only.</p></div></div>
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup stripe</span></div></div></div>
@@ -637,7 +637,7 @@
         <span class="pbadge">vcl</span>
         Vercel
       </h2>
-      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Invoice API — requires a Vercel Enterprise plan. Returns invoices with line items. Returns a descriptive message if no invoice data is available.</p>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Invoice API, requires a Vercel Enterprise plan. Returns invoices with line items. Returns a descriptive message if no invoice data is available.</p>
       <div class="warn-box mb-4">Invoice data is only available on <strong>Enterprise plans</strong>. Pro/Hobby plans won't return billing data via the API.</div>
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Vercel Dashboard → Settings → Tokens → Create</strong>. Scope: Full Account.</p></div></div>
@@ -659,7 +659,7 @@
         <span class="pbadge">pd</span>
         PagerDuty
       </h2>
-      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns seat count and user data. For actual dollar amounts, use the <a href="#invoices" style="color:var(--blue)">Invoice email parser</a> — PagerDuty doesn't expose billing amounts via API.</p>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns seat count and user data. For actual dollar amounts, use the <a href="#invoices" style="color:var(--blue)">Invoice email parser</a>, as PagerDuty doesn't expose billing amounts via API.</p>
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>My Profile → User Settings → Create API User Token</strong>. Read-only access is sufficient.</p></div></div>
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup pagerduty</span></div></div></div>
@@ -727,7 +727,7 @@
         <span class="pbadge">sl</span>
         Slack alerts
       </h2>
-      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Sends anomaly alerts and daily digests to a Slack channel. Uses an incoming webhook — no bot scopes needed.</p>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Sends anomaly alerts and daily digests to a Slack channel. Uses an incoming webhook, no bot scopes needed.</p>
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>api.slack.com/apps → Create app → Incoming Webhooks → Add webhook to workspace</strong>. Select your #finops channel.</p></div></div>
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Copy the webhook URL and add to your env:</p></div></div>
@@ -766,7 +766,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
         Weekly email digest
       </h2>
-      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Sends a standalone HTML email every Monday at 09:00 UTC with last week's spend, anomalies, and rightsizing recommendations. No AI client session required — fires from the scheduler.</p>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Sends a standalone HTML email every Monday at 09:00 UTC with last week's spend, anomalies, and rightsizing recommendations. No AI client session required. Fires from the scheduler.</p>
       <div class="card p-5">
         <div class="code-block p-3 text-xs">
           <span class="env-key">FINOPS_SMTP_HOST</span>=<span class="env-val">smtp.gmail.com</span><br/>
@@ -774,7 +774,7 @@
           <span class="env-key">FINOPS_SMTP_USER</span>=<span class="env-val">you@yourcompany.com</span><br/>
           <span class="env-key">FINOPS_SMTP_PASSWORD</span>=<span class="env-val">your-app-password</span><br/>
           <span class="env-key">FINOPS_DIGEST_TO</span>=<span class="env-val">team@yourcompany.com</span><br/>
-          <span class="env-key">FINOPS_WEEKLY_CRON</span>=<span class="env-val">"0 9 * * 1"</span> &nbsp;<span style="color:var(--dim)"># optional — default Mon 09:00 UTC</span>
+          <span class="env-key">FINOPS_WEEKLY_CRON</span>=<span class="env-val">"0 9 * * 1"</span> &nbsp;<span style="color:var(--dim)"># optional - default Mon 09:00 UTC</span>
         </div>
       </div>
     </div>
@@ -787,7 +787,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><path d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"/></svg>
         Auto-ticketing
       </h2>
-      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">When a high or medium-severity anomaly is detected, nable automatically creates a ticket in your tracker. Configure one or more — the first configured is used by default.</p>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">When a high or medium-severity anomaly is detected, nable automatically creates a ticket in your tracker. Configure one or more. The first configured is used by default.</p>
 
       <div class="space-y-4">
         <div class="card p-5">
@@ -829,7 +829,7 @@
         <span class="pbadge">sl</span>
         Slack bot
       </h2>
-      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">A persistent bot you can talk to directly in Slack — just DM <strong>@nable</strong> or mention it in any channel. It calls the same nable tools under the hood and responds with cost analysis, anomaly summaries, rightsizing recommendations, and more. Different from the webhook alerts above — this is conversational.</p>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">A persistent bot you can talk to directly in Slack. Just DM <strong>@nable</strong> or mention it in any channel. It calls the same nable tools under the hood and responds with cost analysis, anomaly summaries, rightsizing recommendations, and more. Different from the webhook alerts above: this is conversational.</p>
 
       <div class="info-box mb-4">
         <strong>Comes with Team.</strong> Install the Slack extra: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[slack]</code>
@@ -848,7 +848,7 @@
           <span class="env-key">SLACK_BOT_TOKEN</span>=<span class="env-val">xoxb-...</span><br/>
           <span class="env-key">SLACK_APP_TOKEN</span>=<span class="env-val">xapp-...</span><br/>
           <span class="env-key">ANTHROPIC_API_KEY</span>=<span class="env-val">sk-ant-...</span><br/>
-          <span class="env-key">SLACK_DAILY_CHANNEL</span>=<span class="env-val">#finops</span> &nbsp;<span style="color:var(--dim)"># optional — sends daily digest at 09:00 UTC</span>
+          <span class="env-key">SLACK_DAILY_CHANNEL</span>=<span class="env-val">#finops</span> &nbsp;<span style="color:var(--dim)"># optional - sends daily digest at 09:00 UTC</span>
         </div>
       </div>
 
@@ -857,7 +857,7 @@
           <span style="color:var(--blue-hi)">finops-slack</span>
         </div>
       </div>
-      <p class="text-xs mb-0" style="color:var(--dim)">Uses Socket Mode — no public URL or reverse proxy needed. Keep it running in the background (systemd, screen, or Docker).</p>
+      <p class="text-xs mb-0" style="color:var(--dim)">Uses Socket Mode, no public URL or reverse proxy needed. Keep it running in the background (systemd, screen, or Docker).</p>
     </div>
 
     <hr class="divider"/>
@@ -868,7 +868,7 @@
         <span class="pbadge">gh</span>
         PR cost comments
       </h2>
-      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Automatically posts a cost estimate on GitHub pull requests when infrastructure files change (Terraform, CloudFormation, CDK, Helm). The comment is updated — not duplicated — on each push. Only fires if the estimated impact exceeds your configured threshold.</p>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Automatically posts a cost estimate on GitHub pull requests when infrastructure files change (Terraform, CloudFormation, CDK, Helm). The comment is updated, not duplicated, on each push. Only fires if the estimated impact exceeds your configured threshold.</p>
 
       <div class="info-box mb-4">
         <strong>Comes with Team.</strong> Install the PR comments extra: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[pr-comments]</code>
@@ -882,9 +882,9 @@
       <div class="card p-5 mb-4">
         <div class="code-block p-3 text-xs">
           <span class="env-key">GITHUB_TOKEN</span>=<span class="env-val">github_pat_...</span><br/>
-          <span class="env-key">GITHUB_WEBHOOK_SECRET</span>=<span class="env-val">your-secret</span> &nbsp;<span style="color:var(--dim)"># recommended — validates webhook payloads</span><br/>
+          <span class="env-key">GITHUB_WEBHOOK_SECRET</span>=<span class="env-val">your-secret</span> &nbsp;<span style="color:var(--dim)"># recommended - validates webhook payloads</span><br/>
           <span class="env-key">PR_COST_THRESHOLD_USD</span>=<span class="env-val">10</span> &nbsp;<span style="color:var(--dim)"># skip comment if impact is under $10/mo</span><br/>
-          <span class="env-key">PR_WEBHOOK_PORT</span>=<span class="env-val">8080</span> &nbsp;<span style="color:var(--dim)"># optional — default 8080</span>
+          <span class="env-key">PR_WEBHOOK_PORT</span>=<span class="env-val">8080</span> &nbsp;<span style="color:var(--dim)"># optional - default 8080</span>
         </div>
       </div>
 
@@ -898,7 +898,7 @@
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">In your GitHub repo, go to <strong>Settings → Webhooks → Add webhook</strong>. Set the payload URL to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">http://your-host:8080/webhook/github</code>, content type to <code>application/json</code>, and choose the <strong>Pull requests</strong> event.</p></div></div>
       </div>
 
-      <div class="info-box mt-4">Cost estimates are factual and account-aware — the comment shows current instance counts, estimated monthly delta, and your effective discount rate (auto-detected from Cost Explorer). No editorial commentary.</div>
+      <div class="info-box mt-4">Cost estimates are factual and account-aware. The comment shows current instance counts, estimated monthly delta, and your effective discount rate (auto-detected from Cost Explorer). No editorial commentary.</div>
     </div>
 
     <hr class="divider"/>
@@ -917,11 +917,11 @@
 
       <p class="text-sm font-semibold mb-2" style="color:var(--text)">Example workflow in Claude / Cursor</p>
       <div class="code-block p-3 text-xs mb-4">
-        <span style="color:var(--dim)"># Step 1 — see what's idle</span><br/>
+        <span style="color:var(--dim)"># Step 1 - see what's idle</span><br/>
         <span style="color:var(--blue-hi)">list_idle_resources</span>(resource_types=["ebs","eip"], min_idle_days=90)<br/><br/>
-        <span style="color:var(--dim)"># Step 2 — preview what cleanup would do (dry_run=True by default)</span><br/>
+        <span style="color:var(--dim)"># Step 2 - preview what cleanup would do (dry_run=True by default)</span><br/>
         <span style="color:var(--blue-hi)">cleanup_idle_resources</span>(resource_ids=["vol-abc123","vol-def456"], dry_run=True)<br/><br/>
-        <span style="color:var(--dim)"># Step 3 — actually clean up</span><br/>
+        <span style="color:var(--dim)"># Step 3 - actually clean up</span><br/>
         <span style="color:var(--blue-hi)">cleanup_idle_resources</span>(resource_ids=["vol-abc123","vol-def456"], dry_run=False)
       </div>
 
@@ -941,7 +941,7 @@
         </div>
       </div>
 
-      <div class="info-box">Every cleanup action — including dry runs — is appended to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">~/.finops-mcp/cleanup_audit.jsonl</code> for auditing.</div>
+      <div class="info-box">Every cleanup action, including dry runs, is appended to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">~/.finops-mcp/cleanup_audit.jsonl</code> for auditing.</div>
     </div>
 
     <hr class="divider"/>
@@ -950,7 +950,7 @@
     <div id="features" class="section-anchor">
       <div class="badge mb-4">Intelligence</div>
       <h2 class="text-2xl font-black mb-3" style="color:var(--text)">What nable actually does</h2>
-      <p class="text-sm leading-relaxed mb-6" style="color:var(--muted)">nable isn't just a connector that pipes your billing data into Claude. It runs active analysis — anomaly detection, CloudWatch-based rightsizing, waste pattern scanning, and commitment modeling — and surfaces the output as MCP tools your AI client can query, reason about, and act on.</p>
+      <p class="text-sm leading-relaxed mb-6" style="color:var(--muted)">nable isn't just a connector that pipes your billing data into Claude. It runs active analysis (anomaly detection, CloudWatch-based rightsizing, waste pattern scanning, and commitment modeling) and surfaces the output as MCP tools your AI client can query, reason about, and act on.</p>
 
       <hr class="divider"/>
 
@@ -967,16 +967,16 @@
             <span>Pattern</span><span>What it catches</span>
           </div>
           <div style="display:grid;grid-template-columns:200px 1fr">
-            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">gp2 → gp3</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">EBS volumes on gp2 — same performance, 20% cheaper on gp3</div>
+            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">gp2 → gp3</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">EBS volumes on gp2. Same performance, 20% cheaper on gp3</div>
             <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Unattached EBS</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Volumes not mounted to any instance, paying for provisioned GB</div>
             <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Orphaned snapshots</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">EBS snapshots &gt;30 days old with no AMI reference</div>
-            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Unassociated EIPs</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Elastic IPs not attached to anything — $3.60/mo each, silent</div>
-            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Idle NAT Gateways</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">&lt;1 GB/day throughput over 7 days — $32/mo base charge wasted</div>
-            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">ChargedBackup</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">RDS backup retention &gt;7 days — accumulates silently</div>
+            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Unassociated EIPs</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Elastic IPs not attached to anything. $3.60/mo each, silent</div>
+            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Idle NAT Gateways</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">&lt;1 GB/day throughput over 7 days. $32/mo base charge wasted</div>
+            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">ChargedBackup</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">RDS backup retention &gt;7 days, accumulates silently</div>
             <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">CloudTrail data events</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Data events ($2/100k) enabled across all regions unnecessarily</div>
-            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Infinite log retention</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">CloudWatch Log Groups with no retention policy — grows forever</div>
-            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">S3 storage class</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Buckets &gt;10 GB in STANDARD with low access — Intelligent-Tiering saves 30%+</div>
-            <div style="padding:11px 16px;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Lambda memory</div><div style="padding:11px 16px;font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Configured memory &gt;2× p99 actual usage — direct billing waste</div>
+            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Infinite log retention</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">CloudWatch Log Groups with no retention policy, grows forever</div>
+            <div style="padding:11px 16px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">S3 storage class</div><div style="padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Buckets &gt;10 GB in STANDARD with low access. Intelligent-Tiering saves 30%+</div>
+            <div style="padding:11px 16px;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Lambda memory</div><div style="padding:11px 16px;font-size:13px;color:var(--muted);border-left:1px solid var(--border)">Configured memory &gt;2× p99 actual usage, direct billing waste</div>
           </div>
         </div>
 
@@ -992,7 +992,7 @@
           <span style="color:var(--blue-hi)">scan_cloudwatch_waste</span>()
         </div>
 
-        <div class="info-box">Results are sorted by estimated monthly savings. Each finding includes resource ID, region, waste type, severity, and a detail explanation — ready for Claude to triage and act on.</div>
+        <div class="info-box">Results are sorted by estimated monthly savings. Each finding includes resource ID, region, waste type, severity, and a detail explanation, ready for Claude to triage and act on.</div>
       </div>
 
       <hr class="divider"/>
@@ -1003,17 +1003,17 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           Anomaly detection
         </h2>
-        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Multi-signal detection using z-score, CUSUM drift, and day-of-week seasonal normalisation. When something spikes, nable drills into Cost Explorer by tag and tells you which team, environment, or service drove it — and by how much.</p>
+        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Multi-signal detection using z-score, CUSUM drift, and day-of-week seasonal normalisation. When something spikes, nable drills into Cost Explorer by tag and tells you which team, environment, or service drove it, and by how much.</p>
 
         <div class="card p-5 mb-4">
           <div class="space-y-2 text-sm">
             <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">get_anomalies</span><span style="color:var(--muted)">All anomalies across every connected provider, last 7–30 days</span></div>
-            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">get_account_anomalies</span><span style="color:var(--muted)">Per-account breakdown — useful for multi-account AWS orgs</span></div>
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">get_account_anomalies</span><span style="color:var(--muted)">Per-account breakdown, useful for multi-account AWS orgs</span></div>
             <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">acknowledge_anomaly</span><span style="color:var(--muted)">Mark as known / expected so it stops surfacing in digests</span></div>
             <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">create_anomaly_tickets</span><span style="color:var(--muted)">Auto-file Jira / Linear / GitHub issues for unacknowledged anomalies</span></div>
           </div>
         </div>
-        <div class="info-box">Slack and Teams alerts fire automatically when a new anomaly is detected — no polling needed. Configure <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">SLACK_WEBHOOK_URL</code> or <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">TEAMS_WEBHOOK_URL</code> to enable.</div>
+        <div class="info-box">Slack and Teams alerts fire automatically when a new anomaly is detected, no polling needed. Configure <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">SLACK_WEBHOOK_URL</code> or <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">TEAMS_WEBHOOK_URL</code> to enable.</div>
       </div>
 
       <hr class="divider"/>
@@ -1044,7 +1044,7 @@
           Commitment analysis
           <span class="text-xs ml-2 px-2 py-0.5 rounded font-mono font-semibold" style="background:var(--bg-3);color:var(--fg-3);border:1px solid var(--line)">Team</span>
         </h2>
-        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Models Savings Plans and Reserved Instance coverage against your actual usage patterns. Shows your current effective discount rate, coverage gaps, and what you'd save by purchasing additional commitments — with ROI projections by term length.</p>
+        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Models Savings Plans and Reserved Instance coverage against your actual usage patterns. Shows your current effective discount rate, coverage gaps, and what you'd save by purchasing additional commitments, with ROI projections by term length.</p>
 
         <div class="card p-5 mb-4">
           <div class="space-y-2 text-sm">
@@ -1064,7 +1064,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
         All environment variables
       </h2>
-      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Full reference. The wizard sets these for you — use this table if you're deploying in CI/CD or Docker.</p>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Full reference. The wizard sets these for you. Use this table if you're deploying in CI/CD or Docker.</p>
       <div class="card overflow-hidden">
         <table class="w-full text-xs">
           <thead>
@@ -1133,7 +1133,7 @@
         </div>
         <div class="card p-5">
           <p class="font-semibold text-sm mb-2" style="color:var(--text)">MCP server not showing in Claude / Cursor</p>
-          <p class="text-sm" style="color:var(--muted)">Fully quit and reopen the app after editing the config file — most clients only read config at startup. Run <code class="text-xs bg-blue-50 px-1 rounded">finops-mcp</code> manually in terminal to confirm there are no Python errors.</p>
+          <p class="text-sm" style="color:var(--muted)">Fully quit and reopen the app after editing the config file. Most clients only read config at startup. Run <code class="text-xs bg-blue-50 px-1 rounded">finops-mcp</code> manually in terminal to confirm there are no Python errors.</p>
         </div>
         <div class="card p-5">
           <p class="font-semibold text-sm mb-2" style="color:var(--text)">Credentials not persisting after restart</p>

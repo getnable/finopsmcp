@@ -15,7 +15,7 @@
 <meta name="twitter:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 13 more." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <script defer src="/_vercel/insights/script.js"></script>
-<!-- PostHog — product analytics + DAU/MAU -->
+<!-- PostHog - product analytics + DAU/MAU -->
 <script>
   !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
   posthog.init("phc_zcaQqoAXrSghjtbE6VB83p4RjfmcpqezKWV9GdZy4dPv", {
@@ -520,17 +520,17 @@ const FEATURES = [
   {
     n:"01",
     h:"Anomaly detection that tells you who, not just what.",
-    p:"Multi-signal detection: z-score + CUSUM drift + day-of-week seasonal normalisation. When something spikes, nable drills into Cost Explorer by tag and tells you which team, environment, or service drove it — and by how much."
+    p:"Multi-signal detection: z-score + CUSUM drift + day-of-week seasonal normalisation. When something spikes, nable drills into Cost Explorer by tag and tells you which team, environment, or service drove it, and by how much."
   },
   {
     n:"02",
     h:"Kubernetes costs AWS doesn't show you.",
-    p:"EKS charges a single EC2 line for your whole cluster. nable allocates that cost to every pod, deployment, namespace, and team label — proportionally by CPU and memory requests. The breakdown AWS was never going to give you."
+    p:"EKS charges a single EC2 line for your whole cluster. nable allocates that cost to every pod, deployment, namespace, and team label, proportionally by CPU and memory requests. The breakdown AWS was never going to give you."
   },
   {
     n:"03",
     h:"Cost estimates before terraform apply.",
-    p:"Run terraform plan and pipe it to nable. Get a per-resource cost delta — adds, removes, and changes — with savings tips inline. Catch a $2,000/mo mistake before it hits your bill."
+    p:"Run terraform plan and pipe it to nable. Get a per-resource cost delta (adds, removes, and changes) with savings tips inline. Catch a $2,000/mo mistake before it hits your bill."
   },
   {
     n:"04",
@@ -540,12 +540,12 @@ const FEATURES = [
   {
     n:"05",
     h:"Forecasting with tuned Holt-Winters models.",
-    p:"Fits a triple exponential smoothing model to your account's own spend history — no generic formula. Returns 30-day point forecasts with 80% prediction intervals. Model parameters improve as history accumulates."
+    p:"Fits a triple exponential smoothing model to your account's own spend history. No generic formula. Returns 30-day point forecasts with 80% prediction intervals. Model parameters improve as history accumulates."
   },
   {
     n:"06",
     h:"Peer benchmarking. Know where you stand.",
-    p:"Opt-in anonymised pool: see how your EC2%, savings plan coverage, idle resource rate, and LLM spend compare to companies in your vertical and size band. Differential-private — raw numbers never leave your machine."
+    p:"Opt-in anonymised pool: see how your EC2%, savings plan coverage, idle resource rate, and LLM spend compare to companies in your vertical and size band. Differential-private. Raw numbers never leave your machine."
   },
 ];
 
@@ -634,10 +634,10 @@ function Security(){
             Nothing leaves your machine. Queries go direct from your laptop to your cloud APIs.
           </blockquote>
           <p>
-            Credentials are encrypted with Fernet and stored in your OS keyring — macOS Keychain, Windows Credential Manager, or libsecret on Linux. The vault key lives on your hardware. There is no nable server in the middle. There is no cloud sync. Nothing to breach on our end because there is nothing on our end.
+            Credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). The vault key lives on your hardware. There is no nable server in the middle. There is no cloud sync. Nothing to breach on our end because there is nothing on our end.
           </p>
           <p style={{marginTop:16}}>
-            Run <code style={{fontFamily:"var(--mono)",fontSize:13,background:"var(--bg-2)",padding:"2px 7px",borderRadius:4}}>finops setup aws --iam-template</code> to generate a least-privilege IAM policy with exactly the permissions nable needs — nothing more. <code style={{fontFamily:"var(--mono)",fontSize:13,background:"var(--bg-2)",padding:"2px 7px",borderRadius:4}}>finops-doctor</code> verifies your credentials are read-only and your vault is locked down.
+            Run <code style={{fontFamily:"var(--mono)",fontSize:13,background:"var(--bg-2)",padding:"2px 7px",borderRadius:4}}>finops setup aws --iam-template</code> to generate a least-privilege IAM policy with exactly the permissions nable needs, nothing more. <code style={{fontFamily:"var(--mono)",fontSize:13,background:"var(--bg-2)",padding:"2px 7px",borderRadius:4}}>finops-doctor</code> verifies your credentials are read-only and your vault is locked down.
           </p>
           <div className="chips">
             <span className="chip">Fernet encryption</span>
@@ -693,7 +693,7 @@ function Pricing({ onTrial }){
 
         <div className="pricing">
 
-          {/* Free — permanent */}
+          {/* Free - permanent */}
           <div className="price">
             <div className="tier">Free · No card required</div>
             <div>
@@ -723,7 +723,7 @@ function Pricing({ onTrial }){
               </div>
             ) : (
               <div className="free-setup-steps">
-                <div className="fs-confirmed">✓ {freeEmail} — setup below</div>
+                <div className="fs-confirmed">✓ {freeEmail} · setup below</div>
                 <ol>
                   <li>
                     <span className="step-label">1 · Install</span>
@@ -737,7 +737,7 @@ function Pricing({ onTrial }){
                   <li>
                     <span className="step-label">3 · Store credentials securely</span>
                     <code>finops setup aws</code>
-                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Credentials go into your OS keyring — never a .env file.</span>
+                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Credentials go into your OS keyring. Never a .env file.</span>
                   </li>
                   <li>
                     <span className="step-label">4 · Add to Claude Desktop</span>
@@ -760,7 +760,7 @@ function Pricing({ onTrial }){
             )}
           </div>
 
-          {/* Team — featured */}
+          {/* Team - featured */}
           <div className="price feat">
             <div className="tier">Team · 14-day free trial</div>
             <div>
@@ -770,7 +770,7 @@ function Pricing({ onTrial }){
             <ul>
               <li>Everything in Free</li>
               <li>Up to 10 cloud accounts</li>
-              <li>Ticket auto-creation — Jira, Linear, GitHub</li>
+              <li>Ticket auto-creation: Jira, Linear, GitHub</li>
               <li>Scheduled email reports</li>
               <li>Commitment purchase recommendations + ROI</li>
               <li>Org-wide multi-account cost rollup</li>
@@ -941,15 +941,15 @@ function TrialModal({ onClose }){
             <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Cancel before day 14. No charge.</div>
           </div>
           <ul>
-            <li>Everything in the free tier, plus —</li>
-            <li>Ticket auto-creation — Jira, Linear, GitHub Issues</li>
+            <li>Everything in the free tier, plus:</li>
+            <li>Ticket auto-creation: Jira, Linear, GitHub Issues</li>
             <li>Scheduled email reports at any frequency</li>
             <li>Commitment purchase recommendations + ROI</li>
             <li>Org-wide multi-account cost rollup</li>
             <li>OU breakdown &amp; account anomaly detection</li>
           </ul>
           <div style={{marginTop:"auto",paddingTop:16,borderTop:"1px solid var(--line)",fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>
-            Just want the free tier? Skip this — run <span style={{color:"var(--fg)"}}>pip install finops-mcp</span> and you're in.
+            Just want the free tier? Skip this. Run <span style={{color:"var(--fg)"}}>pip install finops-mcp</span> and you're in.
           </div>
         </div>
 
@@ -977,7 +977,7 @@ function TrialModal({ onClose }){
           </form>
 
           <div className="modal-pip">
-            <div className="step-label">Step 1 — after checkout</div>
+            <div className="step-label">Step 1: after checkout</div>
             <div className="install">
               <span className="prompt">$</span>
               <span>pip install finops-mcp</span>
