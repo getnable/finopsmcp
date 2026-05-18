@@ -400,10 +400,10 @@ function Hero({ onTrial }){
   return (
     <header className="hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.7.4 · 17 connectors · free to start</div>
-        <h1>Cloud cost intelligence,<br/>asked, not queried.</h1>
+        <div className="label" style={{marginBottom:18}}>v0.7.5 · 17 connectors · free to start</div>
+        <h1>One conversation.<br/>Every cloud bill.</h1>
         <p className="lede">
-          Connect 13 billing APIs once. Then ask: why did we spike, which team is over budget, what can we cut. nable catches anomalies before the invoice lands, enforces budgets in CI, and opens the Jira ticket when something needs action.
+          Enterprise FinOps tools cost $200k a year and still require a team to run them. Native cloud MCPs only see their own provider. nable connects AWS, Azure, GCP, and 10 SaaS tools in one place, then lets Claude reason across all of it for $39.99 a month.
         </p>
         <div className="hero-cta">
           <a href="#" onClick={onTrial} className="btn btn-primary">Start 14-day trial <span className="arr">→</span></a>
@@ -535,8 +535,8 @@ const FEATURES = [
   },
   {
     n:"04",
-    h:"AI and LLM spend, tracked like everything else.",
-    p:"OpenAI, Anthropic, and AWS Bedrock costs broken down by model. See which teams are spending on GPT-4o when GPT-4o-mini does the job. Unit economics: cost per 1,000 requests, cost per user, benchmark against your projected growth."
+    h:"AI spend consolidated across every provider.",
+    p:"OpenAI projects, Anthropic workspaces, Bedrock, Vertex AI: one unified view. See which teams are spending on GPT-4o when GPT-4o-mini does the job. Unit economics: cost per 1,000 requests, cost per user, cache hit rate, model sprawl score."
   },
   {
     n:"05",
@@ -556,8 +556,8 @@ function Features(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ Capabilities</div>
-          <h2>Not a wrapper around get_cost_and_usage.</h2>
-          <p>Every other tool gives you the data and leaves. nable runs the analysis, catches what matters, and takes action on it.</p>
+          <h2>Not a dashboard. Not a connector. A reasoning layer.</h2>
+          <p>Native cloud MCPs are siloed. Enterprise FinOps tools cost more than most engineers. nable sits in the middle: all providers consolidated, Claude reasoning across all of it, taking action when something needs it.</p>
         </div>
 
         <div className="features">
@@ -600,8 +600,8 @@ function Connectors(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ Connectors</div>
-          <h2>Every cost source, one normalized schema.</h2>
-          <p>Not every provider has a real billing API. We're honest about what each connector returns.</p>
+          <h2>17 providers. One conversation.</h2>
+          <p>AWS Cost Explorer only sees AWS. Azure only sees Azure. nable pulls everything into one normalized schema so Claude can reason across your whole stack. We're honest about what each connector returns.</p>
         </div>
 
         <div className="connectors">
