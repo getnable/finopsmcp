@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.7.5"
-description = "Ask Claude about your cloud costs. AWS, Azure, GCP, Datadog, Snowflake, and 13 more connectors."
+version = "0.7.6"
+description = "Ask Claude about your cloud costs. AWS, Azure, GCP, Datadog, Langfuse, Snowflake, and 14 more connectors."
 readme = "README.md"
 license = { text = "Elastic License 2.0" }
 authors = [{ name = "Chandan Bukkapatnam", email = "chbu0285@colorado.edu" }]

@@ -238,6 +238,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("azure")
     sub.add_parser("gcp")
     sub.add_parser("datadog")
+    sub.add_parser("langfuse")
     sub.add_parser("snowflake")
     sub.add_parser("github")
     sub.add_parser("stripe")
@@ -275,6 +276,11 @@ def main(args: list[str] | None = None) -> None:
             ("DATADOG_API_KEY", "API Key", True),
             ("DATADOG_APP_KEY", "Application Key", True),
             ("DATADOG_SITE", "Site (datadoghq.com or datadoghq.eu)", False),
+        ]),
+        "langfuse": lambda: setup_saas_api_key("Langfuse", [
+            ("LANGFUSE_PUBLIC_KEY", "Public Key (pk-lf-...)", True),
+            ("LANGFUSE_SECRET_KEY", "Secret Key (sk-lf-...)", True),
+            ("LANGFUSE_HOST", "Host URL (leave blank for cloud.langfuse.com)", False),
         ]),
         "snowflake": lambda: setup_saas_api_key("Snowflake", [
             ("SNOWFLAKE_ACCOUNT", "Account identifier (e.g. xy12345.us-east-1)", False),
@@ -384,7 +390,7 @@ def main(args: list[str] | None = None) -> None:
         dispatch[parsed.cmd]()
     else:
         # Interactive full setup
-        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "together", "cohere", "mistral", "slack", "teams"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "together", "cohere", "mistral", "slack", "teams"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")

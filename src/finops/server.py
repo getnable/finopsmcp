@@ -36,6 +36,7 @@ from .connectors.gcp import GCPConnector
 from .connectors.saas.cloudflare import CloudflareConnector
 from .connectors.saas.datadog import DatadogConnector
 from .connectors.saas.github import GitHubConnector
+from .connectors.saas.langfuse import LangfuseConnector
 from .connectors.saas.mongodb_atlas import MongoDBAtlasConnector
 from .connectors.saas.new_relic import NewRelicConnector
 from .connectors.saas.pagerduty import PagerDutyConnector
@@ -50,6 +51,29 @@ from . import telemetry as _telemetry  # noqa: E402
 
 mcp = FastMCP("finops")
 
+# ── telemetry: auto-instrument every tool call ───────────────────────────────
+# Wraps FastMCP's tool() decorator so record_tool_call fires on every invocation
+# without needing to add a line to each tool function.
+_original_mcp_tool = mcp.tool
+
+def _instrumented_tool(*dargs, **dkwargs):
+    """Thin shim around mcp.tool() that injects telemetry into the registered fn."""
+    decorator = _original_mcp_tool(*dargs, **dkwargs)
+
+    def _wrap(fn):
+        import functools
+
+        @functools.wraps(fn)
+        async def _inner(*args, **kwargs):
+            _telemetry.record_tool_call(fn.__name__)
+            return await fn(*args, **kwargs)
+
+        return decorator(_inner)
+
+    return _wrap
+
+mcp.tool = _instrumented_tool  # type: ignore[method-assign]
+
 # ── connector registry ───────────────────────────────────────────────────────
 
 _CLOUD_CONNECTORS: dict[str, Any] = {
@@ -60,6 +84,7 @@ _CLOUD_CONNECTORS: dict[str, Any] = {
 
 _SAAS_CONNECTORS: dict[str, Any] = {
     "datadog": DatadogConnector(),
+    "langfuse": LangfuseConnector(),
     "snowflake": SnowflakeConnector(),
     "github": GitHubConnector(),
     "stripe": StripeConnector(),
@@ -76,7 +101,9 @@ _ALL_CONNECTORS: dict[str, Any] = {**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS}
 # ── startup telemetry (anonymous, opt-out via NABLE_NO_TELEMETRY=1) ──────────
 try:
     _lic = get_status()
-    _plan = _lic.get("plan", "free") if isinstance(_lic, dict) else "free"
+    _plan = _lic.mode if hasattr(_lic, "mode") else (
+        _lic.get("plan", "free") if isinstance(_lic, dict) else "free"
+    )
     _telemetry.ping_startup(provider_count=len(_ALL_CONNECTORS), plan=_plan)
 except Exception:
     pass  # telemetry must never crash the server
@@ -3469,6 +3496,98 @@ async def get_llm_unit_economics(
             )
 
         return out
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_langfuse_model_costs(
+    days: int = 30,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """
+    Break down LLM spend and token usage by model from Langfuse observability data.
+
+    Shows cost and token consumption for every model tracked in Langfuse — useful
+    for understanding which models are driving spend and optimizing model selection.
+
+    Requires:
+        LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY in environment.
+        Optional: LANGFUSE_HOST (defaults to https://cloud.langfuse.com)
+
+    Args:
+        days:       lookback window in days (default 30, ignored if start/end provided)
+        start_date: ISO date string YYYY-MM-DD
+        end_date:   ISO date string YYYY-MM-DD
+
+    Returns cost per model, tokens per model, and cost-per-1k-token efficiency.
+
+    Examples:
+        - "Show me our LLM costs by model in Langfuse"
+        - "Which model is costing us the most in Langfuse?"
+        - "What's our cost per 1k tokens for GPT-4 vs Claude?"
+    """
+    try:
+        connector: LangfuseConnector = _SAAS_CONNECTORS["langfuse"]  # type: ignore
+        if not await connector.is_configured():
+            return {
+                "error": "Langfuse not configured",
+                "help": "Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY in your environment.",
+            }
+
+        if start_date and end_date:
+            sd = date.fromisoformat(start_date)
+            ed = date.fromisoformat(end_date)
+        else:
+            ed = date.today()
+            sd = ed - timedelta(days=days)
+
+        return await connector.get_usage_by_model(start_date=sd, end_date=ed)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_langfuse_trace_volume(
+    days: int = 30,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """
+    Daily trace and observation counts from Langfuse — usage volume over time.
+
+    Use this to identify request spikes, growth trends, or unexpected volume surges
+    that may be driving LLM cost increases.
+
+    Requires LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY.
+
+    Args:
+        days:       lookback window in days (default 30)
+        start_date: ISO date string YYYY-MM-DD
+        end_date:   ISO date string YYYY-MM-DD
+
+    Examples:
+        - "How many LLM traces did we run this month in Langfuse?"
+        - "Show me daily AI request volume for the last 30 days"
+        - "Was there a spike in Langfuse traces last week?"
+    """
+    try:
+        connector: LangfuseConnector = _SAAS_CONNECTORS["langfuse"]  # type: ignore
+        if not await connector.is_configured():
+            return {
+                "error": "Langfuse not configured",
+                "help": "Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY in your environment.",
+            }
+
+        if start_date and end_date:
+            sd = date.fromisoformat(start_date)
+            ed = date.fromisoformat(end_date)
+        else:
+            ed = date.today()
+            sd = ed - timedelta(days=days)
+
+        return await connector.get_trace_volume(start_date=sd, end_date=ed)
     except Exception as e:
         return {"error": str(e)}
 

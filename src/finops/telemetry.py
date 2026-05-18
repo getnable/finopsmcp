@@ -77,11 +77,32 @@ _lock = threading.Lock()
 
 
 def record_tool_call(tool_name: str) -> None:
-    """Call this whenever an MCP tool is invoked. Thread-safe."""
+    """
+    Record a tool invocation. Accumulates in-session and fires a lightweight
+    PostHog event (fire-and-forget, background thread) for per-tool analytics.
+    Thread-safe.
+    """
     if _is_opted_out():
         return
     with _lock:
         _session["tools_used"].add(tool_name)
+        # Track call counts for frequency analysis
+        counts = _session.setdefault("tool_counts", {})
+        counts[tool_name] = counts.get(tool_name, 0) + 1
+
+    # Fire a lightweight per-tool event (does not block caller)
+    install_id = _get_install_id()
+    props = {
+        "tool": tool_name,
+        "plan": _session.get("plan", "free"),
+        "date": date.today().isoformat(),
+    }
+    t = threading.Thread(
+        target=_send_event,
+        args=(install_id, "tool_called", props),
+        daemon=True,
+    )
+    t.start()
 
 
 def set_plan(plan: str) -> None:
@@ -99,10 +120,15 @@ def set_provider_count(count: int) -> None:
 
 def _send(install_id: str, properties: dict) -> None:
     """Fire-and-forget POST to PostHog. Runs in background thread."""
+    _send_event(install_id, "heartbeat", properties)
+
+
+def _send_event(install_id: str, event: str, properties: dict) -> None:
+    """Send a single named event to PostHog."""
     import urllib.request
     payload = json.dumps({
         "api_key": _POSTHOG_KEY,
-        "event": "heartbeat",
+        "event": event,
         "distinct_id": install_id,
         "properties": {
             **properties,
