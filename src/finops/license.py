@@ -48,7 +48,7 @@ else:
         "Pro features will not activate. Set FINOPS_LICENSE_SECRET to enable license validation."
     )
 _UPGRADE_URL = "https://nable.sh/#pricing"
-_TRIAL_DAYS  = 14
+_TRIAL_DAYS  = 30
 _TRIAL_FILE  = Path.home() / ".finops-mcp" / "trial_start"
 
 # Keyring service/username — intentionally generic to avoid being obvious
