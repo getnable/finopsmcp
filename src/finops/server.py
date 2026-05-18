@@ -2660,6 +2660,245 @@ async def get_ou_cost_breakdown(days_back: int = 30) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# CUR ATHENA (Team plan)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+async def get_resource_cost_breakdown_aws(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    service: str | None = None,
+    account_id: str | None = None,
+    min_cost_usd: float = 1.0,
+    limit: int = 100,
+) -> dict:
+    """
+    Return per-resource AWS cost detail from the Cost and Usage Report (CUR)
+    via Athena. Includes unblended cost, on-demand equivalent, and effective
+    savings from Savings Plans or Reserved Instances.
+
+    Requires CUR delivery to S3 and an Athena database. Team plan feature.
+
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date. Defaults to today.
+        service: AWS service code filter (e.g. "Amazon EC2"). None = all services.
+        account_id: 12-digit AWS account ID filter. None = all accounts.
+        min_cost_usd: Exclude resources below this cost threshold (default $1).
+        limit: Maximum resources to return ordered by cost descending (default 100).
+
+    Examples:
+        - "Show me per-resource EC2 costs from CUR"
+        - "Which S3 buckets are costing the most this month?"
+        - "Break down costs by resource for account 123456789012"
+    """
+    if err := require_pro("cur_athena_detail"):
+        return err
+
+    sd, ed = _default_dates()
+    if start_date:
+        sd = date.fromisoformat(start_date)
+    if end_date:
+        ed = date.fromisoformat(end_date)
+
+    try:
+        from .connectors.cur import get_resource_costs
+        return get_resource_costs(
+            start_date=sd,
+            end_date=ed,
+            service=service,
+            account_id=account_id,
+            min_cost_usd=min_cost_usd,
+            limit=limit,
+        )
+    except Exception as exc:
+        log.error("get_resource_cost_breakdown_aws failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def get_ri_waste_detail(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    min_waste_usd: float = 10.0,
+) -> dict:
+    """
+    Identify wasted Reserved Instance spend from CUR RIFee line items.
+
+    Shows which reservations have low utilization and how much money is being
+    wasted on unused reserved capacity. Requires CUR via Athena. Team plan feature.
+
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date. Defaults to today.
+        min_waste_usd: Minimum wasted dollars to include a reservation (default $10).
+
+    Examples:
+        - "Which Reserved Instances are underutilized?"
+        - "How much are we wasting on unused RIs?"
+        - "Show RI waste for this quarter"
+    """
+    if err := require_pro("cur_athena_detail"):
+        return err
+
+    sd, ed = _default_dates()
+    if start_date:
+        sd = date.fromisoformat(start_date)
+    if end_date:
+        ed = date.fromisoformat(end_date)
+
+    try:
+        from .connectors.cur import get_ri_waste
+        return get_ri_waste(start_date=sd, end_date=ed, min_waste_usd=min_waste_usd)
+    except Exception as exc:
+        log.error("get_ri_waste_detail failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def get_tag_cost_breakdown_cur(
+    tag_key: str = "team",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    cost_type: str = "unblended",
+) -> dict:
+    """
+    Break AWS costs down by a resource tag using CUR line-item data via Athena.
+
+    Supports both unblended and amortized cost types. Resources missing the
+    specified tag are grouped under "__untagged__". Team plan feature.
+
+    Args:
+        tag_key: Tag key to group by (e.g. "team", "env", "project").
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date. Defaults to today.
+        cost_type: "unblended" (default) or "amortized" (applies effective
+                   SP/RI rates instead of list price).
+
+    Examples:
+        - "Show me AWS costs broken down by team tag"
+        - "What is each environment costing us in CUR?"
+        - "Break down amortized costs by project tag"
+    """
+    if err := require_pro("cur_athena_detail"):
+        return err
+
+    sd, ed = _default_dates()
+    if start_date:
+        sd = date.fromisoformat(start_date)
+    if end_date:
+        ed = date.fromisoformat(end_date)
+
+    try:
+        from .connectors.cur import get_tag_cost_breakdown
+        return get_tag_cost_breakdown(
+            tag_key=tag_key,
+            start_date=sd,
+            end_date=ed,
+            cost_type=cost_type,
+        )
+    except Exception as exc:
+        log.error("get_tag_cost_breakdown_cur failed: %s", exc)
+        return {"error": str(exc)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AZURE DETAIL (Team plan)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+async def get_resource_cost_breakdown_azure(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    subscription_id: str | None = None,
+    resource_group: str | None = None,
+    min_cost_usd: float = 1.0,
+    limit: int = 200,
+) -> dict:
+    """
+    Return per-resource Azure cost detail via the Cost Management Query API.
+
+    No storage account or export job required -- data is queried live.
+    Supports multi-subscription environments. Team plan feature.
+
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date. Defaults to today.
+        subscription_id: Single Azure subscription ID. None = all configured subs.
+        resource_group: Filter to a specific resource group. None = all groups.
+        min_cost_usd: Exclude resources below this cost threshold (default $1).
+        limit: Maximum resources to return ordered by cost descending (default 200).
+
+    Examples:
+        - "Show me per-resource Azure costs this month"
+        - "Which Azure resources are most expensive in the production resource group?"
+        - "Break down costs by resource across all subscriptions"
+    """
+    if err := require_pro("azure_detail"):
+        return err
+
+    sd, ed = _default_dates()
+    if start_date:
+        sd = date.fromisoformat(start_date)
+    if end_date:
+        ed = date.fromisoformat(end_date)
+
+    try:
+        from .connectors.azure_detail import get_resource_costs
+        return get_resource_costs(
+            start_date=sd,
+            end_date=ed,
+            subscription_id=subscription_id,
+            resource_group=resource_group,
+            min_cost_usd=min_cost_usd,
+            limit=limit,
+        )
+    except Exception as exc:
+        log.error("get_resource_cost_breakdown_azure failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def get_azure_reservation_utilization(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """
+    Fetch Azure reservation utilization summaries from the Capacity API.
+
+    Shows monthly utilization rates, used vs reserved hours, and wasted
+    capacity for all reservations visible to the configured service principal.
+    Team plan feature.
+
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date. Defaults to today.
+
+    Examples:
+        - "How well are we utilizing our Azure reservations?"
+        - "Which Azure reservations are underutilized?"
+        - "Show wasted Azure reserved capacity this quarter"
+    """
+    if err := require_pro("azure_detail"):
+        return err
+
+    sd, ed = _default_dates()
+    if start_date:
+        sd = date.fromisoformat(start_date)
+    if end_date:
+        ed = date.fromisoformat(end_date)
+
+    try:
+        from .connectors.azure_detail import get_reservation_utilization
+        return get_reservation_utilization(start_date=sd, end_date=ed)
+    except Exception as exc:
+        log.error("get_azure_reservation_utilization failed: %s", exc)
+        return {"error": str(exc)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # STORAGE MODE
 # ═══════════════════════════════════════════════════════════════════════════════
 

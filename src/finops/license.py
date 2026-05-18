@@ -71,6 +71,8 @@ PRO_FEATURES: set[str] = {
     "scheduled_email_digests",   # email delivery of scheduled reports (Slack delivery is free)
     "commitment_recommendations", # RI / SP purchase recommendations with $ amounts + ROI
     "org_reports",               # full org-wide cost rollup across all accounts / OUs
+    "cur_athena_detail",         # line-item CUR data via Athena (per-resource, RI waste, tag breakdown)
+    "azure_detail",              # Azure resource-level cost detail and reservation utilization
 }
 
 
