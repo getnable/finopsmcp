@@ -210,6 +210,13 @@
       <a href="#pr-comments"   class="nav-link">PR cost comments</a>
       <a href="#cleanup"       class="nav-link">Idle resource cleanup</a>
 
+      <div class="nav-group">Intelligence</div>
+      <a href="#features"      class="nav-link">What nable does</a>
+      <a href="#audit"         class="nav-link">AWS deep audit</a>
+      <a href="#anomalies"     class="nav-link">Anomaly detection</a>
+      <a href="#rightsizing"   class="nav-link">Rightsizing</a>
+      <a href="#commitments"   class="nav-link">Commitment analysis</a>
+
       <div class="nav-group">Reference</div>
       <a href="#env"           class="nav-link">All env variables</a>
       <a href="#troubleshoot"  class="nav-link">Troubleshooting</a>
@@ -227,7 +234,7 @@
 
       <div class="trial-banner mb-6">
         <span class="trial-badge">14-day free trial</span>
-        <p class="text-sm" style="color:var(--muted)">All Pro features are unlocked from the moment you install. No credit card, no license key — just install and go. Your trial clock starts on first run.</p>
+        <p class="text-sm" style="color:var(--muted)">All Team features are unlocked from the moment you install. No credit card, no license key — just install and go. Your trial clock starts on first run.</p>
       </div>
 
       <div class="card p-6 mb-6">
@@ -824,8 +831,8 @@
       </h2>
       <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">A persistent bot you can talk to directly in Slack — just DM <strong>@nable</strong> or mention it in any channel. It calls the same nable tools under the hood and responds with cost analysis, anomaly summaries, rightsizing recommendations, and more. Different from the webhook alerts above — this is conversational.</p>
 
-      <div class="warn-box mb-4">
-        <strong>Requires the Slack bot extra:</strong> <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[slack]</code>
+      <div class="info-box mb-4">
+        <strong>Comes with Team.</strong> Install the Slack extra: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[slack]</code>
       </div>
 
       <div class="space-y-3 mb-4">
@@ -863,8 +870,8 @@
       </h2>
       <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Automatically posts a cost estimate on GitHub pull requests when infrastructure files change (Terraform, CloudFormation, CDK, Helm). The comment is updated — not duplicated — on each push. Only fires if the estimated impact exceeds your configured threshold.</p>
 
-      <div class="warn-box mb-4">
-        <strong>Requires the pr-comments extra:</strong> <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[pr-comments]</code>
+      <div class="info-box mb-4">
+        <strong>Comes with Team.</strong> Install the PR comments extra: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[pr-comments]</code>
       </div>
 
       <div class="space-y-3 mb-4">
@@ -935,6 +942,116 @@
       </div>
 
       <div class="info-box">Every cleanup action — including dry runs — is appended to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">~/.finops-mcp/cleanup_audit.jsonl</code> for auditing.</div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Intelligence / Features overview -->
+    <div id="features" class="section-anchor">
+      <div class="badge mb-4">Intelligence</div>
+      <h2 class="text-2xl font-black mb-3" style="color:var(--text)">What nable actually does</h2>
+      <p class="text-sm leading-relaxed mb-6" style="color:var(--muted)">nable isn't just a connector that pipes your billing data into Claude. It runs active analysis — anomaly detection, CloudWatch-based rightsizing, waste pattern scanning, and commitment modeling — and surfaces the output as MCP tools your AI client can query, reason about, and act on.</p>
+
+      <hr class="divider"/>
+
+      <!-- AWS Deep Audit -->
+      <div id="audit" class="section-anchor">
+        <h2 class="section-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          AWS deep audit
+        </h2>
+        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Goes well beyond Cost Explorer. Pulls CloudWatch metrics for every running resource and flags waste patterns that never show up on your bill until it's too late.</p>
+
+        <div class="card p-5 mb-4">
+          <p class="text-xs font-semibold mb-3" style="color:var(--muted);letter-spacing:.05em;text-transform:uppercase">Waste patterns detected</p>
+          <div class="space-y-2">
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">gp2 → gp3 migration</span><span style="color:var(--muted)">EBS volumes on gp2 — identical performance at 20% less cost on gp3</span></div>
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">Unattached EBS volumes</span><span style="color:var(--muted)">Volumes not mounted to any instance, paying for provisioned GB</span></div>
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">Orphaned snapshots</span><span style="color:var(--muted)">EBS snapshots &gt;30 days old with no AMI reference</span></div>
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">Unassociated EIPs</span><span style="color:var(--muted)">Elastic IPs not attached to anything — $3.60/mo each, silent</span></div>
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">Idle NAT Gateways</span><span style="color:var(--muted)">&lt;1 GB/day throughput over 7 days — $32/mo base charge you're not using</span></div>
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">ChargedBackup</span><span style="color:var(--muted)">RDS automated backup retention set &gt;7 days — common silent cost</span></div>
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">CloudTrail data events</span><span style="color:var(--muted)">Data events ($2/100k) enabled across all regions when not needed</span></div>
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">Infinite log retention</span><span style="color:var(--muted)">CloudWatch Log Groups with no retention policy — grows forever</span></div>
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">S3 storage class waste</span><span style="color:var(--muted)">Buckets &gt;10 GB in STANDARD with low access — Intelligent-Tiering saves 30%+</span></div>
+            <div class="flex gap-3 text-sm"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">Lambda memory overalloc</span><span style="color:var(--muted)">Configured memory &gt;2× p99 actual usage — direct billing waste</span></div>
+          </div>
+        </div>
+
+        <p class="text-sm font-semibold mb-2" style="color:var(--text)">Usage in Claude / Cursor</p>
+        <div class="code-block p-3 text-xs mb-4">
+          <span style="color:var(--dim)"># Full audit across all regions</span><br/>
+          <span style="color:var(--blue-hi)">audit_aws_waste</span>()<br/><br/>
+          <span style="color:var(--dim)"># Target specific checks and region</span><br/>
+          <span style="color:var(--blue-hi)">audit_aws_waste</span>(regions=["us-east-1"], checks=["ebs","nat","rds_backups"])<br/><br/>
+          <span style="color:var(--dim)"># Deep CloudWatch analysis for a specific instance</span><br/>
+          <span style="color:var(--blue-hi)">get_instance_deep_analysis</span>(instance_id="i-0abc123", lookback_days=14)<br/><br/>
+          <span style="color:var(--dim)"># Scan all log groups for missing retention policies</span><br/>
+          <span style="color:var(--blue-hi)">scan_cloudwatch_waste</span>()
+        </div>
+
+        <div class="info-box">Results are sorted by estimated monthly savings. Each finding includes resource ID, region, waste type, severity, and a detail explanation — ready for Claude to triage and act on.</div>
+      </div>
+
+      <hr class="divider"/>
+
+      <!-- Anomaly detection -->
+      <div id="anomalies" class="section-anchor">
+        <h2 class="section-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Anomaly detection
+        </h2>
+        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Multi-signal detection using z-score, CUSUM drift, and day-of-week seasonal normalisation. When something spikes, nable drills into Cost Explorer by tag and tells you which team, environment, or service drove it — and by how much.</p>
+
+        <div class="card p-5 mb-4">
+          <div class="space-y-2 text-sm">
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">get_anomalies</span><span style="color:var(--muted)">All anomalies across every connected provider, last 7–30 days</span></div>
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">get_account_anomalies</span><span style="color:var(--muted)">Per-account breakdown — useful for multi-account AWS orgs</span></div>
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">acknowledge_anomaly</span><span style="color:var(--muted)">Mark as known / expected so it stops surfacing in digests</span></div>
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:180px">create_anomaly_tickets</span><span style="color:var(--muted)">Auto-file Jira / Linear / GitHub issues for unacknowledged anomalies</span></div>
+          </div>
+        </div>
+        <div class="info-box">Slack and Teams alerts fire automatically when a new anomaly is detected — no polling needed. Configure <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">SLACK_WEBHOOK_URL</code> or <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">TEAMS_WEBHOOK_URL</code> to enable.</div>
+      </div>
+
+      <hr class="divider"/>
+
+      <!-- Rightsizing -->
+      <div id="rightsizing" class="section-anchor">
+        <h2 class="section-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          Rightsizing
+        </h2>
+        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Combines AWS Compute Optimizer recommendations with nable's own CloudWatch analysis. Surfaces instances where actual CPU / memory / connection utilization is consistently below the provisioned level, with a specific recommended type and estimated savings.</p>
+
+        <div class="card p-5 mb-4">
+          <div class="space-y-2 text-sm">
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">get_rightsizing_recommendations</span><span style="color:var(--muted)">EC2, RDS, and Lambda rightsizing in one call</span></div>
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">create_rightsizing_tickets</span><span style="color:var(--muted)">Auto-file tickets for the top N recommendations by savings</span></div>
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:200px">get_instance_deep_analysis</span><span style="color:var(--muted)">Per-instance CloudWatch p95/p99 utilization deep dive</span></div>
+          </div>
+        </div>
+      </div>
+
+      <hr class="divider"/>
+
+      <!-- Commitment analysis -->
+      <div id="commitments" class="section-anchor">
+        <h2 class="section-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+          Commitment analysis
+          <span class="text-xs ml-2 px-2 py-0.5 rounded font-mono font-semibold" style="background:var(--bg-3);color:var(--fg-3);border:1px solid var(--line)">Team</span>
+        </h2>
+        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Models Savings Plans and Reserved Instance coverage against your actual usage patterns. Shows your current effective discount rate, coverage gaps, and what you'd save by purchasing additional commitments — with ROI projections by term length.</p>
+
+        <div class="card p-5 mb-4">
+          <div class="space-y-2 text-sm">
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:220px">get_commitment_analysis</span><span style="color:var(--muted)">Current coverage, gaps, and purchase recommendations</span></div>
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:220px">get_commitment_coverage_by_tag</span><span style="color:var(--muted)">Coverage breakdown per team / environment / service tag</span></div>
+            <div class="flex gap-3"><span style="color:var(--blue-hi);font-family:var(--mono);font-size:12px;min-width:220px">get_effective_rate_profile</span><span style="color:var(--muted)">Your blended and unblended effective rate vs on-demand</span></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <hr class="divider"/>
