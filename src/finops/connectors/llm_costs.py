@@ -160,22 +160,35 @@ def get_all_llm_costs(
 
     from .saas.openai_usage import get_costs as openai_costs, is_configured as openai_configured
     from .saas.anthropic_usage import get_costs as anthropic_costs, is_configured as anthropic_configured
+    from .saas.vertex_costs import get_vertex_costs, is_configured as vertex_configured
 
     results: dict[str, dict] = {}
 
+    # Use asyncio.run() safely — avoid deprecated get_event_loop on Python 3.10+
+    import asyncio
+
+    def _run(coro):  # type: ignore[return]
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already inside an async context (e.g. called from an MCP tool handler)
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    return pool.submit(asyncio.run, coro).result()
+            return loop.run_until_complete(coro)
+        except RuntimeError:
+            return asyncio.run(coro)
+
     # OpenAI
     try:
-        import asyncio
-        configured = asyncio.get_event_loop().run_until_complete(openai_configured())
-        if configured:
+        if _run(openai_configured()):
             results["openai"] = openai_costs(start_date, end_date)
     except Exception as e:
         log.debug("OpenAI cost fetch error: %s", e)
 
     # Anthropic
     try:
-        configured = asyncio.get_event_loop().run_until_complete(anthropic_configured())
-        if configured:
+        if _run(anthropic_configured()):
             results["anthropic"] = anthropic_costs(start_date, end_date)
     except Exception as e:
         log.debug("Anthropic cost fetch error: %s", e)
@@ -187,6 +200,15 @@ def get_all_llm_costs(
         results["bedrock"] = get_bedrock_costs(start_date, end_date)
     except Exception as e:
         log.debug("Bedrock cost fetch skipped: %s", e)
+
+    # Vertex AI
+    try:
+        if _run(vertex_configured()):
+            v = get_vertex_costs(start_date, end_date)
+            if v.get("source") != "none":
+                results["vertex"] = v
+    except Exception as e:
+        log.debug("Vertex AI cost fetch skipped: %s", e)
 
     # Aggregate
     total = 0.0

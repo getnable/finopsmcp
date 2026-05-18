@@ -3403,5 +3403,158 @@ async def estimate_terraform_cost(
         return {"error": str(e)}
 
 
+@mcp.tool()
+async def get_ai_kpis(
+    days: int = 30,
+    infra_total_usd: float | None = None,
+) -> dict:
+    """
+    Full AI cost health dashboard with actionable KPIs.
+
+    Runs all AI cost health metrics in one call:
+      - Prompt cache hit rate and estimated savings (Anthropic)
+      - Context window utilisation per model (are you paying for 200K context but using 2K?)
+      - Model sprawl score (Herfindahl index of model concentration)
+      - Peak usage day-of-week and weekend vs weekday patterns
+      - Prompt efficiency (output/input token ratio — flags verbose or wrong-model usage)
+      - Error spend estimate (tokens wasted on failed requests)
+      - AI vs infrastructure spend ratio (benchmark: healthy SaaS = 5–15%)
+
+    Each finding includes an estimated monthly savings amount and specific
+    remediation advice.
+
+    Args:
+        days:            Lookback window in days (default 30).
+        infra_total_usd: Your total cloud infrastructure spend for the same period.
+                         Pass this to get AI-vs-infra ratio benchmarking.
+
+    Examples:
+        - "Show me our AI cost health dashboard"
+        - "What's our prompt cache hit rate?"
+        - "Are we using the right AI models?"
+        - "How efficient are our AI prompts?"
+        - "What AI cost optimisations should we prioritise?"
+    """
+    try:
+        from datetime import date as _date, timedelta
+        ed = _date.today()
+        sd = ed - timedelta(days=days)
+
+        from .connectors.llm_costs import get_all_llm_costs
+        from .connectors.saas.anthropic_usage import get_costs as anthropic_costs, is_configured as anth_configured
+        from .analytics.ai_kpis import full_kpi_report
+
+        llm_result = get_all_llm_costs(start_date=sd, end_date=ed)
+
+        # Fetch Anthropic data separately for cache analysis
+        anthropic_data = None
+        if await anth_configured():
+            try:
+                anthropic_data = anthropic_costs(sd, ed)
+            except Exception as e:
+                log.debug("Anthropic data fetch for KPI: %s", e)
+
+        return full_kpi_report(
+            llm_costs_result=llm_result,
+            anthropic_data=anthropic_data,
+            infra_total_usd=infra_total_usd,
+        )
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_llm_unit_economics_full(
+    customers: int | None = None,
+    mau: int | None = None,
+    mrr: float | None = None,
+    api_requests: int | None = None,
+    days: int = 30,
+) -> dict:
+    """
+    AI cost unit economics: cost per customer, MAU, API request, and gross margin impact.
+
+    Fetches AI spend across all configured providers and divides by your business
+    metrics to compute:
+      - Cost per paying customer
+      - Cost per monthly active user (MAU)
+      - Cost per API request (in micro-dollars)
+      - AI spend as % of MRR (gross margin risk)
+      - Break-even ARPU (minimum price per customer to keep AI under 20% of revenue)
+
+    Also returns a cross-provider project/workspace breakdown showing which
+    teams or product areas are driving AI spend.
+
+    Args:
+        customers:    Number of paying customers in the period.
+        mau:          Monthly active users.
+        mrr:          Monthly recurring revenue in USD.
+        api_requests: Total API requests handled in the period.
+        days:         Lookback window in days (default 30).
+
+    Examples:
+        - "What's our AI cost per customer? We have 800 paying customers."
+        - "We have $50K MRR and 1200 MAU. What's our AI unit economics?"
+        - "Cost per API request for our AI features — we handled 2 million requests"
+        - "Is our AI spend sustainable at our current scale?"
+    """
+    try:
+        from datetime import date as _date, timedelta
+        ed = _date.today()
+        sd = ed - timedelta(days=days)
+
+        from .connectors.llm_costs import get_all_llm_costs
+        from .connectors.saas.anthropic_usage import get_costs as anthropic_costs, is_configured as anth_configured
+        from .connectors.saas.openai_usage import get_costs as openai_costs, is_configured as openai_configured
+        from .connectors.llm_unit_economics import (
+            compute_unit_economics,
+            get_cost_per_project,
+        )
+
+        llm_result   = get_all_llm_costs(start_date=sd, end_date=ed)
+        total_ai_usd = llm_result.get("total_usd", 0.0)
+
+        # Gather provider-level data for project breakdown
+        openai_data    = None
+        anthropic_data = None
+
+        if await openai_configured():
+            try:
+                openai_data = openai_costs(sd, ed)
+            except Exception:
+                pass
+
+        if await anth_configured():
+            try:
+                anthropic_data = anthropic_costs(sd, ed)
+            except Exception:
+                pass
+
+        metrics = {}
+        if customers:    metrics["customers"]    = customers
+        if mau:          metrics["mau"]          = mau
+        if mrr:          metrics["mrr"]          = mrr
+        if api_requests: metrics["api_requests"] = api_requests
+
+        unit_econ    = compute_unit_economics(total_ai_usd, metrics) if metrics else {}
+        proj_costs   = get_cost_per_project(openai_data, anthropic_data)
+
+        return {
+            "period":         llm_result.get("period"),
+            "total_ai_usd":   total_ai_usd,
+            "by_provider":    llm_result.get("by_provider", {}),
+            "by_project":     proj_costs,
+            "unit_economics": unit_econ if unit_econ else {
+                "note": (
+                    "Pass business metrics (customers, mau, mrr, api_requests) to compute "
+                    "cost-per-unit breakdowns."
+                )
+            },
+            "recommendations": llm_result.get("recommendations", []),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 if __name__ == "__main__":
     main()

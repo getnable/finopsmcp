@@ -53,6 +53,71 @@ def _headers(api_key: str) -> dict[str, str]:
     }
 
 
+def get_workspaces(api_key: str, org_id: str) -> list[dict[str, Any]]:
+    """
+    List all workspaces in an Anthropic organization.
+
+    Calls GET /v1/organizations/{org_id}/workspaces (enterprise only).
+    Returns a list of workspace dicts with at least {"id", "name"}.
+    Returns an empty list gracefully if not on an enterprise plan or
+    if the endpoint is unavailable.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return []
+
+    try:
+        resp = httpx.get(
+            f"{_API_BASE}/v1/organizations/{org_id}/workspaces",
+            headers=_headers(api_key),
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("data", data.get("workspaces", []))
+    except Exception as e:
+        log.debug("Anthropic workspaces endpoint unavailable (enterprise only): %s", e)
+        return []
+
+
+def get_workspace_usage(
+    api_key: str,
+    org_id: str,
+    workspace_id: str,
+    start_date: date,
+    end_date: date,
+) -> dict[str, Any]:
+    """
+    Fetch usage data for a single Anthropic workspace.
+
+    Calls GET /v1/organizations/{org_id}/workspaces/{workspace_id}/usage.
+    Returns the same normalised structure as get_costs().
+    """
+    try:
+        import httpx
+    except ImportError:
+        return _empty("httpx_missing")
+
+    try:
+        resp = httpx.get(
+            f"{_API_BASE}/v1/organizations/{org_id}/workspaces/{workspace_id}/usage",
+            params={
+                "start_date": start_date.isoformat(),
+                "end_date":   end_date.isoformat(),
+            },
+            headers=_headers(api_key),
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        log.debug("Anthropic workspace usage unavailable for %s: %s", workspace_id, e)
+        return _empty("workspace_api_unavailable")
+
+    return _parse_usage(data, source="api")
+
+
 def get_costs(
     start_date: date,
     end_date: date,
@@ -60,6 +125,10 @@ def get_costs(
     """
     Fetch Anthropic usage costs for the given date range.
     Falls back to estimated costs if the org-level API is unavailable.
+
+    When an admin key + org ID are configured and the account has enterprise
+    workspace access, also returns ``by_workspace`` mapping workspace names
+    to their respective costs.
     """
     from ...security.env import get_env
     api_key = get_env("ANTHROPIC_ADMIN_KEY") or get_env("ANTHROPIC_API_KEY")
@@ -72,10 +141,43 @@ def get_costs(
     if org_id:
         result = _fetch_org_usage(api_key, org_id, start_date, end_date)
         if result.get("source") == "api":
+            # Attempt to add workspace breakdown (enterprise only, silent fallback)
+            admin_key = get_env("ANTHROPIC_ADMIN_KEY")
+            if admin_key:
+                by_workspace = _fetch_by_workspace(admin_key, org_id, start_date, end_date)
+                if by_workspace:
+                    result["by_workspace"] = by_workspace
             return result
 
     # Fall back to workspace-level token usage
     return _fetch_workspace_usage(api_key, start_date, end_date)
+
+
+def _fetch_by_workspace(
+    api_key: str,
+    org_id: str,
+    start_date: date,
+    end_date: date,
+) -> dict[str, float]:
+    """
+    Fetch per-workspace cost breakdown.  Returns {} if workspaces unavailable.
+    """
+    workspaces = get_workspaces(api_key, org_id)
+    if not workspaces:
+        return {}
+
+    by_workspace: dict[str, float] = {}
+    for ws in workspaces:
+        ws_id   = ws.get("id") or ws.get("workspace_id", "")
+        ws_name = ws.get("name") or ws_id
+        if not ws_id:
+            continue
+        usage = get_workspace_usage(api_key, org_id, ws_id, start_date, end_date)
+        cost  = usage.get("total_usd", 0.0)
+        if cost > 0.0:
+            by_workspace[ws_name] = round(cost, 4)
+
+    return {k: v for k, v in sorted(by_workspace.items(), key=lambda x: x[1], reverse=True)}
 
 
 def _fetch_org_usage(

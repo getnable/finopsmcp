@@ -61,6 +61,40 @@ def _headers(api_key: str, org_id: str | None = None) -> dict[str, str]:
     return h
 
 
+def get_projects(api_key: str, org_id: str | None = None) -> dict[str, str]:
+    """
+    Fetch the list of OpenAI projects and return an id→name mapping.
+
+    Calls GET /v1/organization/projects (requires Admin API key).
+    Returns an empty dict gracefully on any error.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return {}
+
+    try:
+        resp = httpx.get(
+            "https://api.openai.com/v1/organization/projects",
+            params={"limit": 100},
+            headers=_headers(api_key, org_id),
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        log.debug("OpenAI projects API unavailable: %s", e)
+        return {}
+
+    id_to_name: dict[str, str] = {}
+    for proj in data.get("data", []):
+        pid  = proj.get("id", "")
+        name = proj.get("name") or pid
+        if pid:
+            id_to_name[pid] = name
+    return id_to_name
+
+
 def get_costs(
     start_date: date,
     end_date: date,
@@ -124,14 +158,26 @@ def get_costs(
         log.warning("OpenAI costs API failed: %s — falling back to usage estimate", e)
         return _estimate_from_usage(start_date, end_date, api_key, org_id)
 
-    return _parse_costs_response(data)
+    # Resolve project IDs to names when using an admin key
+    project_names: dict[str, str] = {}
+    admin_key = get_env("OPENAI_ADMIN_KEY")
+    if admin_key:
+        project_names = get_projects(admin_key, org_id)
+
+    return _parse_costs_response(data, project_names=project_names)
 
 
-def _parse_costs_response(data: dict) -> dict[str, Any]:
+def _parse_costs_response(
+    data: dict,
+    project_names: dict[str, str] | None = None,
+) -> dict[str, Any]:
     total = 0.0
     by_model: dict[str, float] = {}
     by_project: dict[str, float] = {}
+    by_project_named: dict[str, float] = {}
     daily: list[dict] = []
+
+    project_names = project_names or {}
 
     for bucket in data.get("data", []):
         bucket_total = 0.0
@@ -141,10 +187,13 @@ def _parse_costs_response(data: dict) -> dict[str, Any]:
             amount = result.get("amount", {}).get("value", 0.0)
             model  = result.get("model_id") or "unknown"
             proj   = result.get("project_id") or "default"
+            proj_name = project_names.get(proj, proj)
+
             bucket_total += amount
             bucket_by_model[model] = bucket_by_model.get(model, 0.0) + amount
             by_model[model]        = by_model.get(model, 0.0) + amount
             by_project[proj]       = by_project.get(proj, 0.0) + amount
+            by_project_named[proj_name] = by_project_named.get(proj_name, 0.0) + amount
 
         total += bucket_total
         ts = bucket.get("start_time", 0)
@@ -153,7 +202,7 @@ def _parse_costs_response(data: dict) -> dict[str, Any]:
         daily.append({"date": day_str, "total_usd": round(bucket_total, 4),
                       "by_model": {k: round(v, 4) for k, v in bucket_by_model.items()}})
 
-    return {
+    result: dict[str, Any] = {
         "total_usd":  round(total, 4),
         "by_model":   {k: round(v, 4) for k, v in
                        sorted(by_model.items(), key=lambda x: x[1], reverse=True)},
@@ -162,6 +211,13 @@ def _parse_costs_response(data: dict) -> dict[str, Any]:
         "daily":      daily,
         "source":     "api",
     }
+    # Only include named breakdown when we actually resolved any names
+    if project_names:
+        result["by_project_named"] = {
+            k: round(v, 4)
+            for k, v in sorted(by_project_named.items(), key=lambda x: x[1], reverse=True)
+        }
+    return result
 
 
 def _estimate_from_usage(
