@@ -4,11 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.7.3"
+version = "0.7.4"
 description = "Ask Claude about your cloud costs. AWS, Azure, GCP, Datadog, Snowflake, and 13 more connectors."
 readme = "README.md"
 license = { text = "Elastic License 2.0" }
-authors = [{ name = "Chandan Bukkapatnam", email = "hello@nable.sh" }]
+authors = [{ name = "Chandan Bukkapatnam", email = "chbu0285@colorado.edu" }]
+maintainers = [{ name = "Chandan Bukkapatnam", email = "chbu0285@colorado.edu" }]
 keywords = ["mcp", "finops", "claude", "aws", "cloud-cost", "ai", "cost-optimization"]
 classifiers = [
     "Development Status :: 4 - Beta",
