@@ -124,7 +124,7 @@ async def connection_status() -> str:
     if not configured_names:
         return (
             "nable is installed but no providers are configured yet.\n\n"
-            "Run 'finops setup' in your terminal to connect AWS, Azure, GCP, Datadog, "
+            "Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, Datadog, "
             "Snowflake, or any other supported provider.\n\n"
             "After setup, restart this AI client and nable will be ready."
         )
@@ -226,7 +226,7 @@ async def list_connected_providers() -> dict:
             result[name] = {
                 "category": category,
                 "configured": configured,
-                "status": "connected" if configured else "not configured — run: finops setup",
+                "status": "connected" if configured else "not configured — run: uvx finops-mcp setup",
             }
     return result
 
@@ -271,7 +271,7 @@ async def get_cost_summary(
 
     targets = await _active(pool)
     if not targets:
-        return {"error": "No providers configured. Run 'finops setup' in your terminal to connect a cloud provider, then restart your AI client."}
+        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect a cloud provider, then restart your AI client."}
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed, granularity)
 
@@ -769,7 +769,7 @@ async def get_costs_by_team(
     Return cloud costs broken down by engineering team, using tag attribution rules.
 
     Requires:
-    - Tag rules configured in ~/.finops/tag_rules.yaml (run 'finops setup' → tags)
+    - Tag rules configured in ~/.finops/tag_rules.yaml (run 'uvx finops-mcp setup' → tags)
     - Cloud providers that support tag-based cost grouping (AWS, Azure, GCP)
 
     Args:
@@ -903,7 +903,7 @@ async def send_digest_now() -> dict:
     sent = await run_digest_now()
     return {
         "sent": sent,
-        "message": "Digest sent." if sent else "No notification channels configured. Run 'finops setup slack' or 'finops setup teams'.",
+        "message": "Digest sent." if sent else "No notification channels configured. Run 'uvx finops-mcp setup slack' or 'uvx finops-mcp setup teams'.",
     }
 
 
@@ -954,7 +954,7 @@ async def list_vault_credentials() -> dict:
         return {
             "count": len(keys),
             "credentials": keys,
-            "note": "Values are never exposed. Use 'finops setup' CLI to add or update credentials.",
+            "note": "Values are never exposed. Run uvx finops-mcp setup to add or update credentials.",
         }
     except Exception as e:
         return {"error": str(e)}
@@ -1009,7 +1009,7 @@ async def get_commitment_analysis() -> dict:
         from .recommendations.commitments import analyze_commitments, commitment_summary
         analysis = analyze_commitments()
         if analysis is None:
-            return {"error": "AWS not configured. Run: finops setup aws"}
+            return {"error": "AWS not configured. Run: uvx finops-mcp setup aws"}
         result = commitment_summary(analysis)
         # Strip purchase recommendations on free tier — coverage/utilization/waste stays free
         if require_pro("commitment_recommendations") is not None:
@@ -1273,7 +1273,7 @@ async def fetch_invoice_emails() -> dict:
             if not host:
                 return {
                     "invoices_stored": 0,
-                    "message": "No IMAP mailbox configured. Run: finops setup invoice",
+                    "message": "No IMAP mailbox configured. Run: uvx finops-mcp setup invoice",
                 }
         return {
             "invoices_stored": len(stored),
