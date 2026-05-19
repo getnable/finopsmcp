@@ -53,11 +53,39 @@ def _err(msg: str) -> None:
 
 # ── Provider wizards ──────────────────────────────────────────────────────────
 
+_VALID_AWS_REGIONS = {
+    "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+    "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1",
+    "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
+    "ap-south-1", "ca-central-1", "sa-east-1", "me-south-1", "af-south-1",
+}
+
+
 def setup_aws() -> None:
     _section("AWS — Cost Explorer")
+
+    print("""  Before entering credentials, make sure your IAM user or role has
+  these permissions. Without them, cost queries will fail.
+
+  Required IAM permissions:
+    ce:GetCostAndUsage
+    ce:GetCostForecast
+    ce:GetDimensionValues
+    sts:GetCallerIdentity
+
+  Quickest way to add them:
+    1. Open https://console.aws.amazon.com/iam
+    2. Go to Users → your user → Add permissions → Attach policies
+    3. Search for "AWSBillingReadOnlyAccess" and attach it
+       (or attach a custom policy with just the ce:* actions above)
+
+  Already done? Press Enter to continue.
+""")
+    input("  → ")
+
     print("  Choose authentication method:")
-    print("  1) IAM Access Key (simple)")
-    print("  2) IAM Identity Center / SSO (recommended)")
+    print("  1) IAM Access Key (simple, works for personal accounts)")
+    print("  2) IAM Identity Center / SSO (recommended for teams)")
     choice = _prompt("  Choice", default="1")
 
     from .security.vault import Vault
@@ -74,9 +102,29 @@ def setup_aws() -> None:
         tokens = poll_for_token(flow)
         store_sso_credentials(tokens, region, account_id, role_name)
     else:
-        access_key = _prompt("  AWS Access Key ID")
+        print("""
+  Create an access key:
+    1. IAM → Users → your user → Security credentials
+    2. Access keys → Create access key → choose "Other" → Create
+    3. Copy both values below (the secret is only shown once)
+""")
+        access_key = _prompt("  AWS Access Key ID (starts with AKIA...)")
+        while not access_key.startswith("AK") or len(access_key) < 16:
+            _warn("That doesn't look like a valid Access Key ID (should start with AKIA and be 20 chars)")
+            access_key = _prompt("  AWS Access Key ID")
+
         secret_key = _prompt("  AWS Secret Access Key", secret=True)
-        region = _prompt("  Default region (press Enter to keep us-east-1)", default="us-east-1")
+        while len(secret_key) < 20:
+            _warn("That doesn't look like a valid Secret Access Key")
+            secret_key = _prompt("  AWS Secret Access Key", secret=True)
+
+        # Region with validation
+        while True:
+            region = _prompt("  AWS region (press Enter for us-east-1)", default="us-east-1")
+            if region in _VALID_AWS_REGIONS:
+                break
+            _warn(f"'{region}' is not a valid AWS region. Examples: us-east-1, us-west-2, eu-west-1")
+
         role_arns = _prompt("  Role ARNs for additional accounts (comma-separated, or blank)")
         vault.store("AWS_ACCESS_KEY_ID", access_key)
         vault.store("AWS_SECRET_ACCESS_KEY", secret_key)
