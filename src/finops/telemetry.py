@@ -34,7 +34,7 @@ from typing import Optional
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
-_POSTHOG_KEY  = os.environ.get("NABLE_POSTHOG_KEY", "")  # set in env; telemetry silently disabled if absent
+_POSTHOG_KEY  = os.environ.get("NABLE_POSTHOG_KEY", "phc_zcaQqoAXrSghjtbE6VB83p4RjfmcpqezKWV9GdZy4dPv")
 _POSTHOG_HOST = "https://us.i.posthog.com"
 _ID_FILE      = Path.home() / ".config" / "finops" / ".install_id"
 _OPT_OUT_ENV  = "NABLE_NO_TELEMETRY"
