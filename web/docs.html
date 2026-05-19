@@ -211,6 +211,7 @@
       <a href="#ticketing"     class="nav-link">Jira / Linear / GitHub</a>
       <a href="#pr-comments"   class="nav-link">PR cost comments</a>
       <a href="#cleanup"       class="nav-link">Idle resource cleanup</a>
+      <a href="#sso"           class="nav-link">Enterprise SSO</a>
 
       <div class="nav-group">Intelligence</div>
       <a href="#features"      class="nav-link">What nable does</a>
@@ -1093,8 +1094,106 @@
             <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:220px">get_commitment_analysis</span><span style="color:var(--muted)">Current coverage, gaps, and purchase recommendations</span></div>
             <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:220px">get_commitment_coverage_by_tag</span><span style="color:var(--muted)">Coverage breakdown per team / environment / service tag</span></div>
             <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:220px">get_effective_rate_profile</span><span style="color:var(--muted)">Your blended and unblended effective rate vs on-demand</span></div>
+            <div class="flex gap-3"><span style="color:var(--text);font-family:var(--mono);font-size:12px;min-width:220px">get_savings_plan_showback</span><span style="color:var(--muted)">SP + RI savings attributed back to each team by tag (CUR required)</span></div>
           </div>
         </div>
+
+        <!-- SP Showback deep-dive -->
+        <div class="section-anchor" id="sp-showback"></div>
+        <h3 style="font-size:15px;font-weight:500;letter-spacing:-.02em;color:var(--fg);margin-bottom:10px;margin-top:28px;">
+          Savings Plan showback by team
+        </h3>
+        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">
+          Savings Plans are purchased at the payer account level. By default there is no way to know which team
+          benefited from a discount — your bill shows one blended rate and tools like CloudHealth, Apptio, and
+          AWS Cost Explorer all approximate the allocation. nable reads two fields from CUR that most tools ignore:
+        </p>
+        <div class="card p-4 mb-4" style="font-family:var(--mono);font-size:12px;line-height:2;color:var(--fg-2);">
+          <div><span style="color:var(--fg)">savingsplan_savings_plan_effective_cost</span> &nbsp;— what the resource actually cost under SP rates</div>
+          <div><span style="color:var(--fg)">pricing_public_on_demand_cost</span> &nbsp;— what it would have cost on-demand</div>
+        </div>
+        <p class="text-sm leading-relaxed mb-3" style="color:var(--muted)">
+          The difference is the real dollar savings that resource captured from the SP. Grouped by a resource tag
+          (e.g. <code style="font-family:var(--mono);font-size:12px;background:var(--bg-3);padding:1px 6px;border-radius:4px;">team</code>),
+          this gives each team their effective discount rate and savings captured — something no tool below the $50K/yr tier offers at line-item granularity.
+        </p>
+
+        <div class="warn-box mb-4" style="border-color:rgba(184,140,58,0.25);background:rgba(184,140,58,0.04);">
+          <div style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#6b5000;margin-bottom:6px;">Approximation notice</div>
+          <p style="font-size:13px;color:var(--fg-2);line-height:1.6;">
+            Like CloudHealth and Apptio, this is an approximation. AWS applies SP discounts using internal logic that is not fully exposed in the CUR.
+            Specifically: <strong>family-based SP allocation order</strong> (AWS picks which resources to cover first) is not deterministic from CUR data alone,
+            and <strong>SP amortization timing</strong> can shift costs across billing periods by a few percent. Results will be within ~2–5% of the true allocation
+            for most workloads, and significantly more accurate than tools that rely solely on Cost Explorer blended rates. Treat showback figures as a strong
+            signal for team accountability, not an accounting-grade ledger entry.
+          </p>
+        </div>
+
+        <div class="card p-5 mb-2">
+          <div style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-4);margin-bottom:12px;">Example output</div>
+          <div style="font-family:var(--mono);font-size:12px;line-height:2;color:var(--fg-2);">
+            <div><span style="color:var(--fg)">payments</span> &nbsp;effective_cost: $8,240 &nbsp;on_demand_equiv: $11,800 &nbsp;<span style="color:var(--hl)">savings: $3,560 (30.2%)</span></div>
+            <div><span style="color:var(--fg)">platform</span> &nbsp;effective_cost: $14,100 &nbsp;on_demand_equiv: $19,300 &nbsp;<span style="color:var(--hl)">savings: $5,200 (26.9%)</span></div>
+            <div><span style="color:var(--fg)">__untagged__</span> &nbsp;effective_cost: $2,100 &nbsp;on_demand_equiv: $2,900 &nbsp;savings: $800 (27.6%)</div>
+          </div>
+        </div>
+        <p style="font-size:12px;font-family:var(--mono);color:var(--fg-4);margin-top:8px;">Requires CUR delivery to S3 + Athena. Set <code style="color:var(--fg-3)">CUR_S3_BUCKET</code>, <code style="color:var(--fg-3)">CUR_ATHENA_DATABASE</code>, <code style="color:var(--fg-3)">CUR_ATHENA_TABLE</code>, <code style="color:var(--fg-3)">CUR_ATHENA_RESULTS_BUCKET</code>.</p>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- SSO -->
+    <div id="sso" class="section-anchor">
+      <h2 class="section-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Enterprise SSO (OIDC)
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Enterprise plan. Lets your whole team sign in with their company credentials via Okta, Azure AD, Google Workspace, Auth0, or any OIDC-compatible IdP. IdP groups automatically map to nable RBAC roles — no manual API key distribution needed.</p>
+
+      <div class="info-box mb-5">
+        <strong>How it works:</strong> User clicks "Sign in with SSO" → browser redirects to your IdP → IdP authenticates and returns an ID token → nable validates the token, reads the groups claim, and maps groups to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">admin</code> / <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">analyst</code> / <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">viewer</code> → user receives a Pro license key automatically.
+      </div>
+
+      <div class="space-y-3 mb-5">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)"><strong>Create an OAuth2 app in your IdP.</strong> Set the redirect URI to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">https://nable.sh/api/sso/oidc-callback</code>. Request scopes: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">openid email profile groups</code>.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1">
+          <p class="text-sm" style="color:var(--text)"><strong>Enable the groups claim in the ID token.</strong> Steps vary by IdP:</p>
+          <ul class="text-xs mt-2 space-y-1" style="color:var(--muted);padding-left:16px;list-style:disc">
+            <li><strong>Okta:</strong> Authorization Server → Claims → Add → set Name=groups, Token type=ID, Filter=Matches regex <code class="text-xs px-0.5" style="background:var(--surface2)">.*</code></li>
+            <li><strong>Azure AD / Entra ID:</strong> App registration → Token configuration → Add groups claim → select "Security groups". Use <code class="text-xs px-0.5" style="background:var(--surface2)">OIDC_GROUPS_CLAIM=roles</code> and add App Roles in the manifest.</li>
+            <li><strong>Google Workspace:</strong> Configure a custom claim via the Admin SDK. Set <code class="text-xs px-0.5" style="background:var(--surface2)">OIDC_GROUPS_CLAIM</code> to match your claim name.</li>
+            <li><strong>Auth0:</strong> Add an Action or Rule to include groups/roles in the ID token.</li>
+          </ul>
+        </div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Run the wizard to configure and store credentials:</p>
+          <div class="code-block p-3 text-xs mt-2"><span class="cmd">finops setup sso</span></div>
+        </div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">4</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Add the env vars to your Vercel project (or wherever nable runs). Test by visiting <a href="/api/sso/oidc-start" class="underline" style="color:var(--blue-hi)">/api/sso/oidc-start</a>.</p></div></div>
+      </div>
+
+      <div class="card p-5 mb-4">
+        <p class="font-semibold text-sm mb-3" style="color:var(--text)">Role mapping example</p>
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">OIDC_ISSUER</span>=<span class="env-val">https://yourcompany.okta.com</span><br/>
+          <span class="env-key">OIDC_CLIENT_ID</span>=<span class="env-val">0oa1abc...</span><br/>
+          <span class="env-key">OIDC_CLIENT_SECRET</span>=<span class="env-val">your-client-secret</span><br/>
+          <span class="env-key">OIDC_GROUPS_CLAIM</span>=<span class="env-val">groups</span><br/>
+          <span class="env-key">OIDC_ROLE_MAP</span>=<span class="env-val">{"finops-admins":"admin","engineering":"analyst","finance":"viewer"}</span><br/>
+          <span class="env-key">OIDC_DEFAULT_ROLE</span>=<span class="env-val">viewer</span> &nbsp;<span style="color:var(--dim)"># fallback for users not in any mapped group</span>
+        </div>
+      </div>
+
+      <div class="card p-5">
+        <p class="font-semibold text-sm mb-2" style="color:var(--text)">RBAC roles</p>
+        <table class="w-full text-xs">
+          <thead><tr style="border-bottom:1px solid var(--border)"><th class="text-left pb-2" style="color:var(--muted)">Role</th><th class="text-left pb-2" style="color:var(--muted)">Can do</th></tr></thead>
+          <tbody>
+            <tr style="border-bottom:1px solid var(--border)"><td class="py-2 font-mono" style="color:var(--blue-hi)">admin</td><td class="py-2" style="color:var(--muted)">All queries, set budgets, manage API keys, create tickets, view all teams</td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="py-2 font-mono" style="color:var(--blue-hi)">analyst</td><td class="py-2" style="color:var(--muted)">All queries and recommendations, cannot manage keys or budgets</td></tr>
+            <tr><td class="py-2 font-mono" style="color:var(--blue-hi)">viewer</td><td class="py-2" style="color:var(--muted)">Read-only: cost summaries, anomalies, rightsizing. Cannot set budgets or create tickets</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
@@ -1154,7 +1253,15 @@
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">FINOPS_PROTECTED_TAGS</td><td class="px-4 py-2.5" style="color:var(--muted)">Cleanup</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--line);background:var(--bg-3)"><td class="px-4 py-2.5 font-mono text-xs font-semibold" colspan="3" style="color:var(--blue)">Rate detection (CUR / Athena)</td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">CUR_ATHENA_DATABASE</td><td class="px-4 py-2.5" style="color:var(--muted)">Rate detection</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
-            <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">CUR_ATHENA_TABLE</td><td class="px-4 py-2.5" style="color:var(--muted)">Rate detection</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">CUR_ATHENA_TABLE</td><td class="px-4 py-2.5" style="color:var(--muted)">Rate detection</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--line);background:var(--bg-3)"><td class="px-4 py-2.5 font-mono text-xs font-semibold" colspan="3" style="color:var(--blue)">Enterprise SSO (OIDC)</td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_ISSUER</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_CLIENT_ID</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_CLIENT_SECRET</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_REDIRECT_URI</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_GROUPS_CLAIM</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_ROLE_MAP</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_DEFAULT_ROLE</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
           </tbody>
         </table>
       </div>

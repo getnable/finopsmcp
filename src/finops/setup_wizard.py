@@ -12,6 +12,7 @@ Usage:
   finops setup gcp                    # configure GCP only
   finops setup slack                  # configure Slack notifications
   finops setup teams                  # configure Teams notifications
+  finops setup sso                    # configure enterprise SSO (OIDC / Okta / Azure AD)
   finops setup vault list             # list stored credential keys
   finops setup vault delete KEY       # delete a stored credential
   finops setup vault rotate           # rotate the master encryption key
@@ -149,6 +150,81 @@ def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]
     _ok(f"{provider_name} credentials stored in vault")
 
 
+def setup_sso() -> None:
+    """Enterprise SSO wizard — configures OIDC for Okta, Azure AD, Google Workspace, etc."""
+    _section("Enterprise SSO — OIDC Configuration")
+    print("""
+  nable supports SSO via OIDC (OpenID Connect).
+  Compatible with: Okta, Azure AD / Entra ID, Google Workspace, Auth0, Ping Identity.
+
+  Before running this wizard:
+    1. Create an OAuth2 app in your IdP
+    2. Set the redirect URI to: https://nable.sh/api/sso/oidc-callback
+    3. Enable the "groups" claim in the ID token (steps vary by IdP — see docs)
+""")
+    from .security.vault import Vault
+    vault = Vault.default()
+
+    issuer = _prompt("  OIDC Issuer URL (e.g. https://company.okta.com, https://login.microsoftonline.com/<tenant-id>/v2.0)")
+    client_id = _prompt("  Client ID")
+    client_secret = _prompt("  Client Secret", secret=True)
+    redirect_uri = _prompt(
+        "  Redirect URI",
+        default="https://nable.sh/api/sso/oidc-callback",
+    )
+    groups_claim = _prompt("  Groups claim name in JWT", default="groups")
+    default_role = _prompt("  Default role for users not in any mapped group (viewer/analyst/admin)", default="viewer")
+
+    print("""
+  Map IdP groups to nable roles. Enter group names exactly as they appear in your IdP.
+  Press Enter to skip a role (those users will get the default role above).
+""")
+    admin_groups = _prompt("  Group names for admin role (comma-separated, or blank)")
+    analyst_groups = _prompt("  Group names for analyst role (comma-separated, or blank)")
+    viewer_groups = _prompt("  Group names for viewer role (comma-separated, or blank)")
+
+    # Build OIDC_ROLE_MAP JSON
+    import json
+    role_map: dict[str, str] = {}
+    for g in [x.strip() for x in admin_groups.split(",") if x.strip()]:
+        role_map[g] = "admin"
+    for g in [x.strip() for x in analyst_groups.split(",") if x.strip()]:
+        role_map[g] = "analyst"
+    for g in [x.strip() for x in viewer_groups.split(",") if x.strip()]:
+        role_map[g] = "viewer"
+
+    if issuer:
+        vault.store("OIDC_ISSUER", issuer)
+    if client_id:
+        vault.store("OIDC_CLIENT_ID", client_id)
+    if client_secret:
+        vault.store("OIDC_CLIENT_SECRET", client_secret)
+    if redirect_uri:
+        vault.store("OIDC_REDIRECT_URI", redirect_uri)
+    if groups_claim:
+        vault.store("OIDC_GROUPS_CLAIM", groups_claim)
+    if default_role:
+        vault.store("OIDC_DEFAULT_ROLE", default_role)
+    if role_map:
+        vault.store("OIDC_ROLE_MAP", json.dumps(role_map))
+    vault.store("OIDC_PLAN", "pro")
+
+    _ok("SSO configuration stored in vault")
+    print(f"""
+  Role map configured: {json.dumps(role_map, indent=4) if role_map else "(none — all SSO users → {default_role})"}
+
+  Next steps:
+    1. Export these env vars to your Vercel project:
+         OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
+         OIDC_REDIRECT_URI, OIDC_GROUPS_CLAIM, OIDC_ROLE_MAP, OIDC_DEFAULT_ROLE
+    2. Test the flow: https://nable.sh/api/sso/oidc-start
+    3. Users in your IdP will automatically receive a Pro license key on first login.
+
+  For Azure AD: set OIDC_GROUPS_CLAIM=roles (not "groups") and assign app roles in the manifest.
+  For Okta: set OIDC_GROUPS_CLAIM=groups and add the Groups claim to your authorization server.
+""")
+
+
 def setup_slack() -> None:
     _section("Slack — Cost Alerts & Daily Digest")
     print("  Choose method:")
@@ -248,6 +324,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("vercel")
     sub.add_parser("slack")
     sub.add_parser("teams")
+    sub.add_parser("sso")
     sub.add_parser("claude")    # configure Claude Desktop MCP entry
 
     vault_p = sub.add_parser("vault")
@@ -272,6 +349,7 @@ def main(args: list[str] | None = None) -> None:
         "gcp": setup_gcp,
         "slack": setup_slack,
         "teams": setup_teams,
+        "sso": setup_sso,
         "datadog": lambda: setup_saas_api_key("Datadog", [
             ("DATADOG_API_KEY", "API Key", True),
             ("DATADOG_APP_KEY", "Application Key", True),

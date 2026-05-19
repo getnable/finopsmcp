@@ -792,7 +792,7 @@ function Pricing({ onTrial }){
               <li>Everything in Team</li>
               <li>Unlimited connectors &amp; history</li>
               <li>Custom connector development</li>
-              <li>SSO / SAML (roadmap)</li>
+              <li>SSO / SAML via OIDC</li>
               <li>Dedicated Slack channel</li>
               <li>On-prem / private VPC deploy</li>
               <li>Custom connector development</li>
@@ -991,32 +991,117 @@ function TrialModal({ onClose }){
 
 function SignInModal({ onClose }){
   const [email, setEmail] = useState("");
-  const handleSubmit = (e) => {
+  const [sent, setSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleEmail = async (e) => {
     e.preventDefault();
-    window.location.href = "/docs";
+    setLoading(true); setError("");
+    try {
+      const r = await fetch("/api/account/send-code", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ email }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Failed to send code");
+      setSent(true);
+    } catch(err) {
+      setError(err.message);
+    } finally { setLoading(false); }
   };
+
+  const handleCode = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError("");
+    try {
+      const r = await fetch("/api/account/verify-code", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ email, code }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Invalid code");
+      // Store session token and redirect to account page
+      sessionStorage.setItem("nable_token", d.token);
+      sessionStorage.setItem("nable_email", d.email);
+      sessionStorage.setItem("nable_plan", d.plan);
+      if (d.license_key) sessionStorage.setItem("nable_license", d.license_key);
+      window.location.href = "/account";
+    } catch(err) {
+      setError(err.message);
+    } finally { setLoading(false); }
+  };
+
+  const handleSso = () => {
+    window.location.href = "/api/sso/oidc-start?return_to=/account";
+  };
+
   return (
     <div className="modal-backdrop" onClick={(e)=>{ if(e.target===e.currentTarget) onClose(); }}>
       <div className="modal" style={{position:"relative",gridTemplateColumns:"1fr",maxWidth:440}}>
         <button className="modal-close" onClick={onClose}>×</button>
         <div className="modal-right" style={{padding:"44px 40px"}}>
           <h4>Sign in to nable</h4>
-          <p style={{fontFamily:"var(--mono)",fontSize:12,color:"var(--fg-3)",marginTop:4}}>Enter your email to continue to the docs.</p>
-          <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16,marginTop:20}}>
-            <div>
-              <label>EMAIL</label>
-              <input
-                type="email"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e)=>setEmail(e.target.value)}
-                required
-                autoFocus
-              />
-            </div>
-            <button className="modal-submit" type="submit">Continue to docs →</button>
-            <div className="modal-note">We'll use this to link your account and send setup tips.</div>
-          </form>
+          <p style={{fontFamily:"var(--mono)",fontSize:12,color:"var(--fg-3)",marginTop:4}}>
+            {sent ? `Check ${email} for a 6-digit code.` : "Enter your email to receive a sign-in code."}
+          </p>
+          {!sent ? (
+            <form onSubmit={handleEmail} style={{display:"flex",flexDirection:"column",gap:16,marginTop:20}}>
+              <div>
+                <label>EMAIL</label>
+                <input
+                  type="email"
+                  placeholder="you@company.com"
+                  value={email}
+                  onChange={(e)=>setEmail(e.target.value)}
+                  required
+                  autoFocus
+                />
+              </div>
+              {error && <div style={{color:"var(--alert)",fontSize:13}}>{error}</div>}
+              <button className="modal-submit" type="submit" disabled={loading}>
+                {loading ? "Sending…" : "Send code →"}
+              </button>
+              <div style={{display:"flex",alignItems:"center",gap:12,margin:"4px 0"}}>
+                <div style={{flex:1,height:1,background:"var(--line)"}}/>
+                <span style={{fontSize:12,color:"var(--fg-3)"}}>or</span>
+                <div style={{flex:1,height:1,background:"var(--line)"}}/>
+              </div>
+              <button type="button" onClick={handleSso}
+                style={{background:"var(--bg-2)",color:"var(--fg)",border:"1px solid var(--line-2)",borderRadius:6,padding:"10px 0",cursor:"pointer",fontFamily:"var(--mono)",fontSize:13,fontWeight:500}}>
+                Sign in with SSO →
+              </button>
+              <div className="modal-note">Enterprise customers: your IT team configures SSO once for the whole org.</div>
+            </form>
+          ) : (
+            <form onSubmit={handleCode} style={{display:"flex",flexDirection:"column",gap:16,marginTop:20}}>
+              <div>
+                <label>6-DIGIT CODE</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="\d{6}"
+                  maxLength={6}
+                  placeholder="123456"
+                  value={code}
+                  onChange={(e)=>setCode(e.target.value.replace(/\D/g,""))}
+                  required
+                  autoFocus
+                />
+              </div>
+              {error && <div style={{color:"var(--alert)",fontSize:13}}>{error}</div>}
+              <button className="modal-submit" type="submit" disabled={loading}>
+                {loading ? "Verifying…" : "Verify & sign in →"}
+              </button>
+              <button type="button" onClick={()=>{setSent(false);setCode("");setError("");}}
+                style={{background:"none",border:"none",color:"var(--fg-3)",cursor:"pointer",fontSize:13,textDecoration:"underline"}}>
+                Use a different email
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </div>
