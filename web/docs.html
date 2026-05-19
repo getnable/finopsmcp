@@ -232,34 +232,12 @@
     <!-- Quick start -->
     <div id="quickstart" class="section-anchor">
       <div class="badge mb-4">Getting started</div>
-      <h1 class="text-3xl font-black mb-3" style="color:var(--text)">Setup guide</h1>
-      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">This guide walks you through connecting every provider. You don't need all 13. Start with the two or three you care about most, and add more later.</p>
+      <h1 class="text-3xl font-black mb-3" style="color:var(--text)">Get up and running in 5 minutes</h1>
+      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">Install nable, connect a provider, then ask Claude about your cloud costs in plain English. You don't need all 13 connectors — start with the one you care about most.</p>
 
-      <div class="trial-banner mb-6">
-        <span class="trial-badge">1-month free trial</span>
-        <p class="text-sm" style="color:var(--muted)">All Team features are unlocked from the moment you install. No credit card, no license key. Just install and go. Your trial clock starts on first run.</p>
-      </div>
-
-      <div class="card p-6 mb-6">
-        <h3 class="font-bold mb-4" style="color:var(--text)">What you'll need before starting</h3>
-        <div class="space-y-3">
-          <div class="perm-row">
-            <span class="check mt-0.5">✓</span>
-            <div><span class="font-medium text-sm" style="color:var(--text)">Python 3.10+</span><span class="text-sm ml-2" style="color:var(--muted)">(check with <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">python3 --version</code>)</span></div>
-          </div>
-          <div class="perm-row">
-            <span class="check mt-0.5">✓</span>
-            <div><span class="font-medium text-sm" style="color:var(--text)">An AI client</span><span class="text-sm ml-2" style="color:var(--muted)">(Claude Desktop, Cursor, Windsurf, or any MCP-compatible app)</span></div>
-          </div>
-          <div class="perm-row">
-            <span class="check mt-0.5">✓</span>
-            <div><span class="font-medium text-sm" style="color:var(--text)">Read-only credentials</span><span class="text-sm ml-2" style="color:var(--muted)">(for each provider you want to connect; details below)</span></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="info-box mb-8">
-        <strong style="color:var(--fg)">Security note:</strong> All credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine.
+      <div class="trial-banner mb-8">
+        <span class="trial-badge">30-day free trial</span>
+        <p class="text-sm" style="color:var(--muted)">All Team features are unlocked from the moment you install. No credit card, no license key. Just install and go.</p>
       </div>
     </div>
 
@@ -268,7 +246,6 @@
     <!-- Installation -->
     <div id="install" class="section-anchor">
       <h2 class="section-title">Installation</h2>
-      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">Install the package and run the setup wizard. The wizard walks you through each provider interactively.</p>
 
       <div class="space-y-4">
         <div class="flex items-start gap-3">
@@ -276,9 +253,10 @@
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install from PyPI</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cm"># includes PDF parsing, Snowflake, and OS keyring support</span><br/><span class="cmd">pip install</span> finops-mcp[pdf,snowflake,keyring]</div>
+              <div class="code-block p-4"><span class="cmd">pip install</span> finops-mcp</div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
+            <p class="text-xs mt-2" style="color:var(--muted)">On Anaconda? Use <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp setup</code> instead — it runs in an isolated env and skips pip entirely.</p>
           </div>
         </div>
         <div class="flex items-start gap-3">
@@ -286,7 +264,7 @@
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Run the setup wizard</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">finops setup</span><br/><span class="cm"># Interactive - walks through each provider, skip any you don't need</span></div>
+              <div class="code-block p-4"><span class="cmd">finops setup</span><br/><span class="cm"># Walks through each provider interactively — skip any you don't need</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
           </div>
@@ -294,13 +272,28 @@
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">3</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Verify everything is configured</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Check your setup</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">finops status</span><br/><span style="color:#34d399">✓ aws</span> &nbsp;&nbsp;&nbsp;configured<br/><span style="color:#34d399">✓ datadog</span> configured<br/><span class="cm">– azure</span> &nbsp;&nbsp;not configured</div>
+              <div class="code-block p-4"><span class="cmd">finops-doctor</span><br/><span style="color:#34d399">✓ aws</span> &nbsp;&nbsp;&nbsp;configured<br/><span style="color:#34d399">✓ datadog</span> configured<br/><span class="cm">– azure</span> &nbsp;&nbsp;not configured</div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
           </div>
         </div>
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">4</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Restart Claude Desktop and ask</p>
+            <div class="card p-4" style="background:var(--surface2)">
+              <p class="text-sm" style="color:var(--muted);font-style:italic">"What did we spend on AWS last month?"</p>
+              <p class="text-sm mt-2" style="color:var(--muted);font-style:italic">"Any anomalies in our Datadog costs this week?"</p>
+              <p class="text-sm mt-2" style="color:var(--muted);font-style:italic">"Show me rightsizing opportunities for EC2."</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="info-box mt-6">
+        <strong style="color:var(--fg)">Security note:</strong> Credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine.
       </div>
     </div>
 
@@ -1294,7 +1287,7 @@
         </div>
         <div class="card p-5">
           <p class="font-semibold text-sm mb-2" style="color:var(--text)">Still stuck?</p>
-          <p class="text-sm mb-3" style="color:var(--muted)">Email us with your <code class="text-xs bg-blue-50 px-1 rounded">finops status</code> output and we'll debug with you.</p>
+          <p class="text-sm mb-3" style="color:var(--muted)">Email us with your <code class="text-xs bg-blue-50 px-1 rounded">finops-doctor</code> output and we'll debug with you.</p>
           <a href="mailto:hello@nable.sh" class="btn-primary">hello@nable.sh</a>
         </div>
       </div>
