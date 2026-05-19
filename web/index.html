@@ -104,16 +104,15 @@
   .client-pill::before{content:"";width:14px;height:14px;border-radius:3px;background:var(--bg-3);border:1px solid var(--line);flex-shrink:0;transition:border-color .15s}
   .client-pill:hover::before,.client-pill:focus-within::before{border-color:var(--line-2)}
   .client-pill:hover,.client-pill:focus-within{color:var(--fg)}
-  .client-pop{position:absolute;top:calc(100% + 10px);left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:14px 16px;width:240px;box-shadow:0 4px 24px rgba(0,0,0,.08);z-index:100;
-    opacity:0;visibility:hidden;transition:opacity .15s,visibility .15s;pointer-events:none}
-  .client-pill:hover .client-pop,.client-pill:focus-within .client-pop{opacity:1;visibility:visible;pointer-events:auto}
+  .client-pop{position:absolute;top:calc(100% + 10px);left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:14px 16px;width:220px;box-shadow:0 4px 24px rgba(0,0,0,.08);z-index:100;
+    opacity:0;visibility:hidden;transition:opacity .12s,visibility .12s;pointer-events:none}
+  .client-pill:hover .client-pop,.client-pill:focus-within .client-pop{opacity:1;visibility:visible}
   .client-pop::before{content:"";position:absolute;top:-5px;left:50%;transform:translateX(-50%) rotate(45deg);width:8px;height:8px;background:var(--bg);border-left:1px solid var(--line-2);border-top:1px solid var(--line-2)}
   .client-pop .cp-name{font-weight:500;font-size:13px;color:var(--fg);margin-bottom:6px}
   .client-pop .cp-status{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;color:var(--hl);margin-bottom:8px}
   .client-pop .cp-status::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--hl);flex-shrink:0}
   .client-pop .cp-path{font-family:var(--mono);font-size:11px;color:var(--fg-3);line-height:1.5;word-break:break-all}
   .client-pop .cp-note{font-size:12px;color:var(--fg-3);margin-top:6px;line-height:1.4}
-  .client-pop a.cp-link{display:inline-block;margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--fg-2);text-decoration:underline;text-underline-offset:2px;cursor:pointer;pointer-events:auto}
 
   /* terminal */
   .terminal{margin-top:56px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg);box-shadow:0 1px 0 rgba(0,0,0,.02),0 16px 40px -22px rgba(0,0,0,.12)}
@@ -446,7 +445,6 @@ function ClientPill({ client }){
         <div className="cp-status">{client.status}</div>
         <div className="cp-path">{client.path}</div>
         {client.note && <div className="cp-note">{client.note}</div>}
-        <a className="cp-link" href="/docs#quickstart">Setup guide →</a>
       </div>
     </span>
   );
