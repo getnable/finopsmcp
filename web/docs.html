@@ -134,9 +134,10 @@
   <aside class="sidebar w-56 flex-shrink-0 hidden lg:block">
     <div class="pr-2">
       <div class="nav-group">Getting started</div>
-      <a href="#quickstart"    class="nav-link active">Quick start</a>
-      <a href="#install"       class="nav-link">Installation</a>
-      <a href="#ai-clients"    class="nav-link">AI client setup</a>
+      <a href="#quickstart"         class="nav-link active">Quick start</a>
+      <a href="#install"            class="nav-link">Installation</a>
+      <a href="#activate-license"   class="nav-link">Activate Pro license</a>
+      <a href="#ai-clients"         class="nav-link">AI client setup</a>
 
       <div class="nav-group">Cloud providers</div>
       <a href="#aws"           class="nav-link">AWS</a>
@@ -252,6 +253,43 @@
 
     <hr class="divider"/>
 
+    <!-- Activate Pro license -->
+    <div id="activate-license" class="section-anchor">
+      <h2 class="section-title">Activate your Pro license</h2>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">After purchasing a Team plan, you receive a license key by email and on your account page at <a href="https://nable.sh/account" style="color:var(--fg);text-decoration:underline">nable.sh/account</a>. Keys start with <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">FINOPS-1-</code>. Here is how to activate it.</p>
+
+      <div class="space-y-4">
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">1</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-1" style="color:var(--text)">Copy your license key from the email or account page.</p>
+            <p class="text-sm" style="color:var(--muted)">It looks like: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">FINOPS-1-your-key-here</code></p>
+          </div>
+        </div>
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">2</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Open your Claude Desktop config file.</p>
+            <p class="text-sm mb-2" style="color:var(--muted)">On Mac: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">~/Library/Application Support/Claude/claude_desktop_config.json</code></p>
+            <p class="text-sm mb-2" style="color:var(--muted)">Add the key to the <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">env</code> block for the finops server:</p>
+            <div class="code-block p-4 text-xs">
+              <span style="color:#c1bdaf">"env"</span>: {<br/>
+              &nbsp;&nbsp;<span style="color:var(--blue-hi)">"FINOPS_LICENSE_KEY"</span>: <span style="color:#c1bdaf">"FINOPS-1-your-key-here"</span><br/>
+              }
+            </div>
+          </div>
+        </div>
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">3</div>
+          <div class="flex-1">
+            <p class="text-sm" style="color:var(--text)">Restart Claude Desktop. Pro features unlock immediately.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
     <!-- AI clients -->
     <div id="ai-clients" class="section-anchor">
       <h2 class="section-title">AI client setup</h2>
@@ -270,6 +308,7 @@
             &nbsp;&nbsp;}<br/>
             }
           </div>
+          <p class="text-xs mt-3" style="color:var(--muted)">Note: if you used <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">finops setup</code>, this was configured automatically with the correct path. If editing manually, use the full path from <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">which finops-mcp</code> instead of the bare command name.</p>
         </div>
 
         <div class="card p-5">
@@ -548,7 +587,7 @@
       </div>
       <div class="card p-5">
         <div class="code-block p-3 text-xs">
-          <span class="env-key">STRIPE_API_KEY</span>=<span class="env-val">rk_live_...</span> &nbsp;<span style="color:var(--dim)"># restricted key, not secret key</span>
+          <span class="env-key">STRIPE_SECRET_KEY</span>=<span class="env-val">sk_live_...</span>
         </div>
       </div>
     </div>
@@ -650,7 +689,7 @@
       <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns seat count and user data. For actual dollar amounts, use the <a href="#invoices" style="color:var(--blue)">Invoice email parser</a>, as PagerDuty doesn't expose billing amounts via API.</p>
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>My Profile → User Settings → Create API User Token</strong>. Read-only access is sufficient.</p></div></div>
-        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup pagerduty</span></div></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Set the env var manually or run <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">finops setup</code> (interactive mode) and select PagerDuty.</p></div></div>
       </div>
       <div class="card p-5">
         <div class="code-block p-3 text-xs">
@@ -670,7 +709,7 @@
       <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Returns data ingest (GB) and full platform user counts. Set your contract ingest price to convert to USD.</p>
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>New Relic → API Keys → Create key</strong>. Type: User key.</p></div></div>
-        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup newrelic</span></div></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Set the env vars manually or run <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">finops setup</code> (interactive mode) and select New Relic.</p></div></div>
       </div>
       <div class="card p-5">
         <div class="code-block p-3 text-xs">
@@ -694,7 +733,7 @@
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Enable IMAP access on your mailbox (Gmail: Settings → See all settings → Forwarding and POP/IMAP).</p></div></div>
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">If using Gmail, create an <strong>App Password</strong> (requires 2FA): Google Account → Security → App passwords.</p></div></div>
-        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup invoice</span></div></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Set the env vars below in your Claude Desktop MCP config or shell environment. Run <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">finops setup</code> to store them securely in the vault.</p></div></div>
       </div>
       <div class="card p-5">
         <div class="code-block p-3 text-xs">
@@ -820,7 +859,7 @@
       <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">A persistent bot you can talk to directly in Slack. Just DM <strong>@nable</strong> or mention it in any channel. It calls the same nable tools under the hood and responds with cost analysis, anomaly summaries, rightsizing recommendations, and more. Different from the webhook alerts above: this is conversational.</p>
 
       <div class="info-box mb-4">
-        <strong>Comes with Team.</strong> Install the Slack extra: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[slack]</code>
+        <strong>Free.</strong> Install the Slack extra: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[slack]</code>
       </div>
 
       <div class="space-y-3 mb-4">
@@ -859,7 +898,7 @@
       <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Automatically posts a cost estimate on GitHub pull requests when infrastructure files change (Terraform, CloudFormation, CDK, Helm). The comment is updated, not duplicated, on each push. Only fires if the estimated impact exceeds your configured threshold.</p>
 
       <div class="info-box mb-4">
-        <strong>Comes with Team.</strong> Install the PR comments extra: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[pr-comments]</code>
+        <strong>Free.</strong> Install the PR comments extra: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">pip install finops-mcp[pr-comments]</code>
       </div>
 
       <div class="space-y-3 mb-4">
@@ -1178,7 +1217,7 @@
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_ACCOUNT</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_CREDIT_PRICE</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GITHUB_TOKEN</td><td class="px-4 py-2.5" style="color:var(--muted)">GitHub</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
-            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">STRIPE_API_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Stripe</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">STRIPE_SECRET_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Stripe</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SLACK_WEBHOOK_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Slack</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">TEAMS_WEBHOOK_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Teams</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">FINOPS_DIGEST_TO</td><td class="px-4 py-2.5" style="color:var(--muted)">Email</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
@@ -1208,6 +1247,8 @@
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_GROUPS_CLAIM</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_ROLE_MAP</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_DEFAULT_ROLE</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-top:1px solid var(--line);background:var(--bg-3)"><td class="px-4 py-2.5 font-mono text-xs font-semibold" colspan="3" style="color:var(--blue)">License</td></tr>
+            <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">FINOPS_LICENSE_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Your Pro license key. Set this in the env block of your Claude Desktop MCP config to unlock Pro features.</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
           </tbody>
         </table>
       </div>

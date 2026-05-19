@@ -463,10 +463,10 @@ function Hero({ onTrial }){
   return (
     <header className="hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.7.9 · 18 connectors · free to start</div>
+        <div className="label" style={{marginBottom:18}}>v0.8.10 · 18 connectors · free to start</div>
         <h1>One conversation.<br/>Every cloud bill.</h1>
         <p className="lede">
-          AWS, Azure, GCP, Datadog, Snowflake, and 13 more, all in one conversation. Ask anything about your cloud spend, get answers in plain English.
+          AWS, Azure, GCP, Datadog, Langfuse, Snowflake, and 12 more, all in one conversation. Ask anything about your cloud spend, get answers in plain English.
         </p>
         <div className="hero-cta">
           <a href="#product" className="btn btn-primary">See how it works <span className="arr">→</span></a>
@@ -546,6 +546,7 @@ function QuickStart(){
   return (
     <section style={{paddingTop:0}}>
       <div className="wrap">
+        <p style={{fontSize:13,color:"var(--fg-3)",marginBottom:24,fontFamily:"var(--mono)"}}>Install and get 30 days free. No credit card required.</p>
         <div className="steps">
           <div className="step">
             <div className="n">01</div>
@@ -737,7 +738,7 @@ function Pricing({ onTrial }){
               <div className="amt-sub">forever · no credit card · no expiry</div>
             </div>
             <ul>
-              <li>All 17 cloud, SaaS &amp; AI connectors</li>
+              <li>All 18 cloud, SaaS &amp; AI connectors</li>
               <li>Cost queries, trends &amp; history</li>
               <li>Anomaly detection</li>
               <li>Rightsizing recommendations</li>
@@ -789,7 +790,7 @@ function Pricing({ onTrial }){
                     <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Confirms credentials are read-only and vault is locked. Set NABLE_NO_TELEMETRY=1 to disable anonymous usage pings.</span>
                   </li>
                 </ol>
-                <a className="fs-docs" href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener">
+                <a className="fs-docs" href="https://nable.sh/docs" target="_blank" rel="noopener">
                   Full docs &amp; connector setup →
                 </a>
               </div>
@@ -829,7 +830,6 @@ function Pricing({ onTrial }){
               <li>SSO / SAML via OIDC</li>
               <li>Dedicated Slack channel</li>
               <li>On-prem / private VPC deploy</li>
-              <li>Custom connector development</li>
             </ul>
             <div className="cta"><a href="mailto:hello@nable.sh">Contact sales →</a></div>
           </div>
@@ -887,7 +887,7 @@ function Footer(){
             <a href="#product">Live demo</a>
             <a href="#connectors">Connectors</a>
             <a href="#pricing">Pricing</a>
-            <a href="#install">Install guide</a>
+            <a href="/docs">Install guide</a>
           </div>
           <div>
             <h5>Resources</h5>
@@ -904,7 +904,7 @@ function Footer(){
         </div>
         <div className="foot-bottom">
           <span>© 2026 nable inc.</span>
-          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.7.9 · 18 connectors</span>
+          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.8.10 · 18 connectors</span>
         </div>
       </div>
     </footer>

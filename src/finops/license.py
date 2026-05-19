@@ -7,7 +7,7 @@ free         Permanent. ~90% of the platform. No key required.
              Cost queries, anomaly detection, rightsizing, PR comments,
              Slack/Teams alerts, all connectors, snapshots, attribution.
 
-trial        14 days of full Pro access from first install. Kicks in
+trial        30 days of full Pro access from first install. Kicks in
              automatically when no key is set. Uses the same dual-store
              (OS keyring + file) so deleting one source can't reset it.
 
@@ -203,7 +203,7 @@ def generate_key(email: str, plan: str = "pro") -> str:
 def validate_key(key: str) -> LicenseStatus:
     """Parse and verify a license key string."""
     if not key:
-        # No key — give a 14-day pro trial, then drop to free forever
+        # No key — give a 30-day pro trial, then drop to free forever
         trial_start   = _get_or_create_trial_start()
         days_used     = (date.today() - trial_start).days
         days_remaining = max(0, _TRIAL_DAYS - days_used)

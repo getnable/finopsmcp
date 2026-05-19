@@ -473,6 +473,9 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("mistral")
     sub.add_parser("claude")    # configure Claude Desktop MCP entry
 
+    iam_p = sub.add_parser("iam-template")
+    iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
+
     vault_p = sub.add_parser("vault")
     vault_p.add_argument("action", choices=["list", "delete", "rotate"])
     vault_p.add_argument("key", nargs="?", default="")
@@ -632,7 +635,7 @@ def main(args: list[str] | None = None) -> None:
     _configure_claude_desktop()
 
     print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'")
-    print("  To add more providers later: uvx finops-mcp setup\n")
+    print("  To add more providers later: finops setup\n")
     _offer_email_signup()
 
     # Fire setup_completed event

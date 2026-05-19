@@ -100,16 +100,24 @@ async function sendLicenseEmail(to, licenseKey) {
   </div>
 
   <!-- Step 2 -->
-  <div style="margin-bottom:36px;">
+  <div style="margin-bottom:20px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 2 — </strong>Install and connect your first provider:
+      <strong style="color:#1a1915;">Step 2 — </strong>Add the key to your Claude Desktop config. Open <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">~/Library/Application Support/Claude/claude_desktop_config.json</code> and add <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">FINOPS_LICENSE_KEY</code> to the <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">env</code> block for the finops server:
     </p>
     <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
-      <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;">
-        pip install finops-mcp<br/>
-        finops setup
+      <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
+        "env": {<br/>
+        &nbsp;&nbsp;"FINOPS_LICENSE_KEY": "${licenseKey}"<br/>
+        }
       </code>
     </div>
+  </div>
+
+  <!-- Step 3 -->
+  <div style="margin-bottom:36px;">
+    <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
+      <strong style="color:#1a1915;">Step 3 — </strong>Restart Claude Desktop. Pro features unlock immediately.
+    </p>
   </div>
 
   <!-- CTA -->
@@ -217,9 +225,14 @@ export default async function handler(req, res) {
     await sendLicenseEmail(email, key);
     console.log(`License key delivered to ${email}`);
   } catch (err) {
-    // Log but return 200 — Stripe retries on non-2xx and we don't want duplicate sends
+    // Return 500 so Stripe retries delivery on transient failures (Resend outage, etc.).
+    // DEDUPLICATION RISK: generateKey() is deterministic for the same email+date, so
+    // retries on the same day will generate the same key and the customer receives a
+    // duplicate email but an identical key — acceptable. If Stripe retries on a different
+    // calendar day, the key will differ; both keys will be valid. Log session.id to
+    // detect and deduplicate at the application level if this becomes a concern.
     console.error(`Delivery failed for ${email}:`, err.message);
-    return res.status(200).json({ received: true, error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 
   return res.status(200).json({ received: true });
