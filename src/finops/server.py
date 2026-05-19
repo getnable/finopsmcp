@@ -3401,7 +3401,18 @@ async def open_terraform_tag_pr(
 
 def main() -> None:
     import logging
+    import sys
+
+    # `uvx finops-mcp setup` — route to the setup wizard instead of starting the server.
+    if len(sys.argv) > 1 and sys.argv[1] == "setup":
+        from .setup_wizard import main as setup_main
+        setup_main(sys.argv[2:])
+        return
+
     logging.basicConfig(level=logging.INFO)
+    # Silence APScheduler's noisy "Adding job tentatively" lines — they fire once per
+    # scheduled job at startup and are meaningless to end users.
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
     # Resolve and cache the calling user's identity at startup.
     # In single-user mode this is a no-op. In shared mode it validates

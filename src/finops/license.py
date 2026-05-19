@@ -43,9 +43,8 @@ if _env_secret:
 else:
     import secrets as _secrets
     _SECRET = _secrets.token_bytes(32)   # random per-session — license keys won't verify
-    logging.getLogger("finops.license").warning(
-        "FINOPS_LICENSE_SECRET is not set. License key verification is disabled. "
-        "Pro features will not activate. Set FINOPS_LICENSE_SECRET to enable license validation."
+    logging.getLogger("finops.license").debug(
+        "FINOPS_LICENSE_SECRET not set — license verification disabled (expected on self-hosted installs)"
     )
 _UPGRADE_URL = "https://nable.sh/#pricing"
 _TRIAL_DAYS  = 30
