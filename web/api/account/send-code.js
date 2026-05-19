@@ -127,16 +127,12 @@ export default async function handler(req) {
     });
   }
 
-  // Generate 6-digit OTP
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-  // Log IP for monitoring (not stored, just visible in Vercel function logs)
+  // Generate deterministic 6-digit OTP from HMAC(secret, email:bucket).
+  // Because it's derived — not random — verify-code.js can recompute it
+  // without any KV store. Valid for a 10-minute bucket window.
   const timeBucket = Math.floor(Date.now() / 600000);
-  const signedPayload = `${email}:${code}:${timeBucket}`;
-  const _hmac = await hmacHex(ACCOUNT_SECRET, signedPayload);
-  // Note: in a stateless design the HMAC is recomputed at verify time;
-  // we do not need to store it, the code itself is included in the email.
-  void _hmac;
+  const mac = await hmacHex(ACCOUNT_SECRET, `otp:${email}:${timeBucket}`);
+  const code = (parseInt(mac.slice(0, 8), 16) % 900000 + 100000).toString();
 
   if (RESEND_KEY) {
     try {

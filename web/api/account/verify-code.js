@@ -57,33 +57,20 @@ function timingSafeEqual(a, b) {
 // ── OTP verification ──────────────────────────────────────────────────────────
 
 async function verifyOtp(secret, email, code) {
+  if (!code || !/^\d{6}$/.test(code)) return false;
   const now = Date.now();
+  // Check current bucket and the previous one to handle boundary edge cases
   const buckets = [
     Math.floor(now / 600000),
-    Math.floor((now - 1) / 600000), // previous bucket for boundary tolerance
+    Math.floor(now / 600000) - 1,
   ];
   for (const bucket of buckets) {
-    const expected = await hmacHex(secret, `${email}:${code}:${bucket}`);
-    const actual = await hmacHex(secret, `${email}:${code}:${bucket}`);
-    // Both are derived from the same inputs; what we really check is whether
-    // the user-supplied code, when combined with email and the current bucket,
-    // produces a valid HMAC. Since we do not store codes, we verify by
-    // recomputing both sides with the same inputs and confirming consistency.
-    // The real security is that only the server knows ACCOUNT_SECRET.
-    if (timingSafeEqual(expected, actual) && code.length === 6 && /^\d{6}$/.test(code)) {
-      // Code format is valid; the bucket check ensures it was issued in the
-      // last 10-20 minutes. A brute-force attempt is rate-limited by IP at
-      // the network edge (Vercel's DDoS protection) and by always returning
-      // the same latency regardless of validity.
-      return true;
-    }
+    const mac = await hmacHex(secret, `otp:${email}:${bucket}`);
+    const expected = (parseInt(mac.slice(0, 8), 16) % 900000 + 100000).toString();
+    if (timingSafeEqual(expected, code)) return true;
   }
   return false;
 }
-
-// NOTE: The above is a lightweight stateless design. For production hardening,
-// store a hashed OTP in Vercel KV with a 10-minute TTL and delete on use.
-// That prevents replay of valid codes within the window.
 
 // ── License key generation (mirrors stripe-webhook.js and license.py) ─────────
 
