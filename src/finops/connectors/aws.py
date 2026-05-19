@@ -143,13 +143,23 @@ class AWSConnector(BaseConnector):
 
             # paginate
             results: list[dict] = []
-            while True:
-                resp = ce.get_cost_and_usage(**kwargs)
-                results.extend(resp.get("ResultsByTime", []))
-                token = resp.get("NextPageToken")
-                if not token:
-                    break
-                kwargs["NextPageToken"] = token
+            try:
+                while True:
+                    resp = ce.get_cost_and_usage(**kwargs)
+                    results.extend(resp.get("ResultsByTime", []))
+                    token = resp.get("NextPageToken")
+                    if not token:
+                        break
+                    kwargs["NextPageToken"] = token
+            except Exception as exc:
+                err_code = getattr(exc, "response", {}).get("Error", {}).get("Code", "") if hasattr(exc, "response") else type(exc).__name__
+                if "DataUnavailableException" in err_code or "DataUnavailableException" in str(exc):
+                    raise RuntimeError(
+                        "AWS Cost Explorer data is not yet available for this account. "
+                        "Cost Explorer needs up to 24 hours to backfill data after it is first enabled. "
+                        "Try again tomorrow, or check the AWS Console > Billing > Cost Explorer."
+                    ) from exc
+                raise
 
             summary = self._build_summary(
                 account_id, start_date, end_date, {"ResultsByTime": results}
