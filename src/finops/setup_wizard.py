@@ -394,6 +394,15 @@ def vault_rotate() -> None:
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
 def main(args: list[str] | None = None) -> None:
+    import sys as _sys
+    if args is None:
+        args = _sys.argv[1:]
+
+    # Allow `finops setup` and `finops setup aws` as aliases —
+    # strip the leading "setup" so both `finops aws` and `finops setup aws` work.
+    if args and args[0] == "setup":
+        args = args[1:]
+
     from .welcome import show_welcome
     show_welcome()
 

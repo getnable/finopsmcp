@@ -24,16 +24,9 @@ finops setup
 
 `finops setup` connects your providers and auto-configures Claude Desktop. Restart Claude Desktop and ask: *"What are my AWS costs this month?"*
 
-**On Anaconda or getting pip errors?** Your pip may be too old. Upgrade it first:
+**On Anaconda?** Anaconda's pip can't install finops-mcp. Use uvx instead — it's isolated and doesn't touch your Anaconda environment:
 ```bash
-pip install --upgrade pip
-pip install finops-mcp
-finops setup
-```
-
-**Prefer an isolated install?**
-```bash
-brew install uv
+brew install uv        # or: curl -LsSf https://astral.sh/uv/install.sh | sh
 uvx finops-mcp setup
 ```
 
