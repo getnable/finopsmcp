@@ -109,6 +109,41 @@ except Exception:
     pass  # telemetry must never crash the server
 
 
+@mcp.resource("finops://status")
+async def connection_status() -> str:
+    """
+    Returns nable's current connection status — which providers are configured,
+    the active plan, and setup instructions if nothing is connected.
+    AI clients should read this resource on first connect to understand what data is available.
+    """
+    active = await _active()
+    all_names = list(_ALL_CONNECTORS.keys())
+    configured_names = list(active.keys())
+    unconfigured = [n for n in all_names if n not in configured_names]
+
+    if not configured_names:
+        return (
+            "nable is installed but no providers are configured yet.\n\n"
+            "Run 'finops setup' in your terminal to connect AWS, Azure, GCP, Datadog, "
+            "Snowflake, or any other supported provider.\n\n"
+            "After setup, restart this AI client and nable will be ready."
+        )
+
+    lines = [
+        f"nable is connected and ready. Plan: {_plan}",
+        "",
+        f"Connected providers ({len(configured_names)}): {', '.join(configured_names)}",
+    ]
+    if unconfigured:
+        lines.append(f"Not configured ({len(unconfigured)}): {', '.join(unconfigured)}")
+    lines += [
+        "",
+        "You can ask about costs, anomalies, rightsizing, forecasts, and more.",
+        "Try: 'What did we spend last month?' or 'Any cost anomalies this week?'",
+    ]
+    return "\n".join(lines)
+
+
 async def _active(subset: dict | None = None) -> dict[str, Any]:
     pool = subset or _ALL_CONNECTORS
     result = {}
@@ -191,7 +226,7 @@ async def list_connected_providers() -> dict:
             result[name] = {
                 "category": category,
                 "configured": configured,
-                "status": "connected" if configured else "not configured — check .env",
+                "status": "connected" if configured else "not configured — run: finops setup",
             }
     return result
 
@@ -236,7 +271,7 @@ async def get_cost_summary(
 
     targets = await _active(pool)
     if not targets:
-        return {"error": "No providers configured. Set credentials in .env"}
+        return {"error": "No providers configured. Run 'finops setup' in your terminal to connect a cloud provider, then restart your AI client."}
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed, granularity)
 

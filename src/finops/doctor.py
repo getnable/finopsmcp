@@ -178,23 +178,28 @@ def _check_database() -> dict:
 
 
 def _check_telemetry() -> dict:
-    """Confirm nable has zero telemetry/phone-home behaviour."""
-    # There is no telemetry — this is a static confirmation.
-    # We verify no SENTRY_DSN, no AMPLITUDE_KEY, no analytics env vars.
+    """Report nable's telemetry posture honestly."""
     analytics_vars = [v for v in os.environ if any(
-        kw in v.upper() for kw in ["SENTRY", "AMPLITUDE", "SEGMENT", "MIXPANEL", "TELEMETRY"]
+        kw in v.upper() for kw in ["SENTRY", "AMPLITUDE", "SEGMENT", "MIXPANEL"]
     )]
+    posthog_key = os.environ.get("NABLE_POSTHOG_KEY", "")
+    warnings = [f"External analytics env var detected: {v}" for v in analytics_vars]
+    if posthog_key:
+        detail = (
+            "Anonymous usage events are sent to PostHog (tool names + plan tier, no cost data). "
+            "Disable by unsetting NABLE_POSTHOG_KEY. "
+            "Queries go directly from your machine to your cloud provider APIs — no cost data leaves your machine."
+        )
+    else:
+        detail = (
+            "No usage telemetry active. "
+            "Queries go directly from your machine to your cloud provider APIs."
+        )
     return {
         "name": "Telemetry",
         "ok": True,
-        "detail": (
-            "No telemetry. nable never phones home. "
-            "Queries go directly from your machine to your cloud provider APIs."
-        ),
-        "warnings": (
-            [f"External analytics env var detected: {v}" for v in analytics_vars]
-            if analytics_vars else []
-        ),
+        "detail": detail,
+        "warnings": warnings,
     }
 
 
