@@ -4,15 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>nable · cost intelligence, reimagined</title>
-<meta name="description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 13 more. No dashboards. No SQL." />
+<meta name="description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 12 more. No dashboards. No SQL." />
 <meta property="og:title" content="nable · cost intelligence, reimagined" />
-<meta property="og:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 13 more. No dashboards. No SQL." />
+<meta property="og:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 12 more. No dashboards. No SQL." />
 <meta property="og:url" content="https://nable.sh" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="nable" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="nable · cost intelligence, reimagined" />
-<meta name="twitter:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Snowflake and 13 more." />
+<meta name="twitter:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 12 more." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <script defer src="/_vercel/insights/script.js"></script>
 <!-- PostHog - product analytics + DAU/MAU -->
@@ -400,10 +400,10 @@ function Hero({ onTrial }){
   return (
     <header className="hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.7.5 · 17 connectors · free to start</div>
+        <div className="label" style={{marginBottom:18}}>v0.7.9 · 18 connectors · free to start</div>
         <h1>One conversation.<br/>Every cloud bill.</h1>
         <p className="lede">
-          17 cloud and SaaS providers, one conversation. Ask anything, get answers, take action. $39.99 per seat per month.
+          18 cloud and SaaS providers, one conversation. Ask anything, get answers, take action. $39.99 per seat per month.
         </p>
         <div className="hero-cta">
           <a href="#" onClick={onTrial} className="btn btn-primary">Start free trial <span className="arr">→</span></a>
@@ -545,8 +545,8 @@ const FEATURES = [
   },
   {
     n:"06",
-    h:"Peer benchmarking. Know where you stand.",
-    p:"Opt-in anonymised pool: see how your EC2%, savings plan coverage, idle resource rate, and LLM spend compare to companies in your vertical and size band. Differential-private. Raw numbers never leave your machine."
+    h:"Industry benchmarking. Know where you stand.",
+    p:"See how your EC2%, savings plan coverage, idle resource rate, and LLM spend compare against industry medians for companies in your vertical. Calculated locally — your numbers never leave your machine."
   },
 ];
 
@@ -582,16 +582,17 @@ const CONNECTORS = [
   ["Anthropic","Usage API","Real",          "ok"],
   ["AWS Bedrock","Cost Explorer","Real",    "ok"],
   ["Datadog","Usage Metering v2","Real",    "ok"],
+  ["Langfuse","Daily Metrics API","Real",   "ok"],
   ["Snowflake","ACCOUNT_USAGE","Credits",   "ok"],
-  ["Stripe","Balance Transactions","Real",  "ok"],
   ["MongoDB Atlas","Invoice API","Real",    "ok"],
   ["Twilio","Usage Records","Real",         "ok"],
   ["Cloudflare","Billing API","Real",       "ok"],
+  ["New Relic","Usage + Ingest API","Real", "ok"],
+  ["PagerDuty","Seat count","Seats",        "ok"],
   ["Kubernetes","Metrics API","Allocated",  "ok"],
   ["GitHub","Actions + Copilot","Minutes",  "partial"],
   ["Vercel","Invoice API","Enterprise",     "warn"],
   ["Together AI","Usage API","Real",        "ok"],
-  ["Cohere","Usage API","Real",             "ok"],
 ];
 
 function Connectors(){
@@ -600,7 +601,7 @@ function Connectors(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ Connectors</div>
-          <h2>17 providers. One conversation.</h2>
+          <h2>18 providers. One conversation.</h2>
           <p>AWS Cost Explorer only sees AWS. Azure only sees Azure. nable pulls everything into one normalized schema so Claude can reason across your whole stack. We're honest about what each connector returns.</p>
         </div>
 
@@ -751,7 +752,7 @@ function Pricing({ onTrial }){
                   <li>
                     <span className="step-label">6 · Verify your setup</span>
                     <code>finops-doctor</code>
-                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Confirms credentials are read-only, vault is locked, no telemetry.</span>
+                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Confirms credentials are read-only and vault is locked. Set NABLE_NO_TELEMETRY=1 to disable anonymous usage pings.</span>
                   </li>
                 </ol>
                 <a className="fs-docs" href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener">
@@ -770,12 +771,12 @@ function Pricing({ onTrial }){
             </div>
             <ul>
               <li>Everything in Free</li>
-              <li>Up to 10 cloud accounts</li>
               <li>Ticket auto-creation: Jira, Linear, GitHub</li>
               <li>Scheduled email reports</li>
               <li>Commitment purchase recommendations + ROI</li>
+              <li>Savings Plan showback by team</li>
               <li>Org-wide multi-account cost rollup</li>
-              <li>Priority support</li>
+              <li>Email support</li>
             </ul>
             <div className="cta"><a href="#" onClick={onTrial}>Start free trial →</a></div>
           </div>
@@ -791,10 +792,10 @@ function Pricing({ onTrial }){
               <li>Everything in Team</li>
               <li>Unlimited connectors &amp; history</li>
               <li>Custom connector development</li>
-              <li>SSO / SAML</li>
+              <li>SSO / SAML (roadmap)</li>
               <li>Dedicated Slack channel</li>
-              <li>SLA &amp; uptime guarantee</li>
               <li>On-prem / private VPC deploy</li>
+              <li>Custom connector development</li>
             </ul>
             <div className="cta"><a href="mailto:hello@nable.sh">Contact sales →</a></div>
           </div>
@@ -856,22 +857,20 @@ function Footer(){
           </div>
           <div>
             <h5>Resources</h5>
-            <a href="#">Docs</a>
-            <a href="#">Changelog</a>
-            <a href="#">MCP overview</a>
-            <a href="#">Status</a>
+            <a href="/docs">Docs</a>
+            <a href="https://github.com/chaandannn/finopsmcp/releases" target="_blank" rel="noopener">Changelog</a>
+            <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP overview</a>
           </div>
           <div>
             <h5>Company</h5>
             <a href="mailto:hello@nable.sh">hello@nable.sh</a>
-            <a href="#">Security</a>
-            <a href="#">Privacy</a>
-            <a href="#">Terms</a>
+            <a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener">GitHub</a>
+            <a href="mailto:hello@nable.sh">Privacy &amp; Terms</a>
           </div>
         </div>
         <div className="foot-bottom">
           <span>© 2026 nable inc.</span>
-          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.7.4 · 17 connectors</span>
+          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.7.9 · 18 connectors</span>
         </div>
       </div>
     </footer>
@@ -932,14 +931,14 @@ function TrialModal({ onClose }){
         <div className="modal-left">
           <div>
             <div className="label" style={{marginBottom:12}}>/ Team · 1-month free trial</div>
-            <h3>Try every Team feature free for two weeks.</h3>
+            <h3>Try every Team feature free for one month.</h3>
           </div>
           <div>
             <div className="price-row">
               <span className="price-big">$0</span>
               <span className="price-after">then $39.99 / seat / mo</span>
             </div>
-            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Cancel before day 14. No charge.</div>
+            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Cancel before day 30. No charge.</div>
           </div>
           <ul>
             <li>Everything in the free tier, plus:</li>
