@@ -587,7 +587,8 @@ def main(args: list[str] | None = None) -> None:
     # Always offer to configure Claude Desktop at the end of setup
     _configure_claude_desktop()
 
-    print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'\n")
+    print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'")
+    print("  To add more providers later: uvx finops-mcp setup\n")
 
 
 # ── Claude Desktop auto-configuration ─────────────────────────────────────────
