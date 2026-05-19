@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.4"
+version = "0.8.5"
 description = "Ask your AI about cloud costs. AWS, Azure, GCP, Datadog, Snowflake, and more. 1-month free trial."
 readme = "README.md"
 license = { text = "Elastic License 2.0" }

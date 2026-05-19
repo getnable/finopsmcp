@@ -598,6 +598,64 @@ def main(args: list[str] | None = None) -> None:
 
     print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'")
     print("  To add more providers later: uvx finops-mcp setup\n")
+    _offer_email_signup()
+
+
+# ── Post-setup email capture ──────────────────────────────────────────────────
+
+def _offer_email_signup() -> None:
+    """
+    Offer a free weekly cost digest and capture email for follow-up.
+    Non-blocking: any error is silently skipped.
+    """
+    # Skip if already captured in this session or previously declined
+    sentinel = Path.home() / ".config" / "finops" / ".email_captured"
+    if sentinel.exists():
+        return
+
+    print("─" * 60)
+    print("  Get a free weekly cost digest in your inbox.")
+    print("  nable emails you every Monday with your top spend drivers,")
+    print("  anomalies, and rightsizing opportunities.")
+    print()
+    try:
+        email = input("  Your email (Enter to skip): ").strip()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return
+
+    if not email or "@" not in email:
+        # User skipped — mark so we don't ask again this install
+        try:
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.write_text("skipped\n")
+        except Exception:
+            pass
+        return
+
+    try:
+        import urllib.request
+        import json as _json
+        req = urllib.request.Request(
+            "https://nable.sh/api/subscribe",
+            data=_json.dumps({"email": email, "source": "setup_wizard"}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5)
+        _ok(f"Subscribed — first digest lands Monday.")
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        sentinel.write_text(f"{email}\n")
+    except Exception:
+        # Don't block setup if the request fails
+        _ok("Got it — we'll be in touch.")
+        try:
+            sentinel.parent.mkdir(parents=True, exist_ok=True)
+            sentinel.write_text(f"{email}\n")
+        except Exception:
+            pass
+
+    print()
 
 
 # ── Claude Desktop auto-configuration ─────────────────────────────────────────

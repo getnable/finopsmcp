@@ -129,8 +129,27 @@ async def connection_status() -> str:
             "After setup, restart this AI client and nable will be ready."
         )
 
+    lic = get_status()
+    if lic.mode == "trial":
+        plan_line = (
+            f"Plan: Pro trial — {lic.days_remaining} day{'s' if lic.days_remaining != 1 else ''} remaining. "
+            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Pro features."
+        )
+    elif lic.mode == "free":
+        plan_line = (
+            f"Plan: Free — cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
+            f"PR comments, budgets, K8s analysis, and all connectors included. "
+            f"Upgrade at {_UPGRADE_URL} for ticket auto-creation, email reports, "
+            f"commitment recommendations, and org rollup ($39.99/mo, first month free)."
+        )
+    elif lic.mode == "pro":
+        plan_line = f"Plan: Pro — {lic.email}"
+    else:
+        plan_line = f"Plan: {lic.mode}"
+
     lines = [
-        f"nable is connected and ready. Plan: {_plan}",
+        "nable is connected and ready.",
+        plan_line,
         "",
         f"Connected providers ({len(configured_names)}): {', '.join(configured_names)}",
     ]
@@ -217,7 +236,7 @@ async def _gather_costs(
 async def list_connected_providers() -> dict:
     """
     List all configured cloud and SaaS providers with their connection status.
-    Shows which connectors are active and which need credentials.
+    Shows which connectors are active, which need credentials, and the active plan.
     """
     result: dict[str, dict] = {}
     for category, pool in [("cloud", _CLOUD_CONNECTORS), ("saas", _SAAS_CONNECTORS)]:
@@ -228,6 +247,31 @@ async def list_connected_providers() -> dict:
                 "configured": configured,
                 "status": "connected" if configured else "not configured — run: uvx finops-mcp setup",
             }
+
+    # Surface plan status so Claude can proactively mention upgrade when relevant
+    status = get_status()
+    if status.mode == "trial":
+        result["_plan"] = {
+            "plan": "trial",
+            "days_remaining": status.days_remaining,
+            "note": (
+                f"Pro trial active — {status.days_remaining} day{'s' if status.days_remaining != 1 else ''} remaining. "
+                f"All features unlocked. Subscribe at {_UPGRADE_URL} before trial ends to keep Pro features."
+            ),
+        }
+    elif status.mode == "free":
+        result["_plan"] = {
+            "plan": "free",
+            "note": (
+                f"Free tier — cost queries, anomaly detection, rightsizing, Slack alerts, "
+                f"and all connectors included. "
+                f"Upgrade at {_UPGRADE_URL} for ticket auto-creation, email reports, "
+                f"commitment recommendations, and org rollup."
+            ),
+        }
+    elif status.mode == "pro":
+        result["_plan"] = {"plan": "pro", "email": status.email}
+
     return result
 
 

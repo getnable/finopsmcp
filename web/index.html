@@ -798,10 +798,10 @@ function Pricing({ onTrial }){
 
           {/* Team - featured */}
           <div className="price feat">
-            <div className="tier">Team · 1-month free trial</div>
+            <div className="tier">Team · Most popular</div>
             <div>
-              <div className="amt">$39<span className="small">.99 / seat / mo</span></div>
-              <div className="amt-sub">1 month free · cancel any time · built for teams</div>
+              <div className="amt">$39<span className="small">.99 / mo</span></div>
+              <div className="amt-sub">first month free · cancel any time · built for teams</div>
             </div>
             <ul>
               <li>Everything in Free</li>
@@ -812,7 +812,7 @@ function Pricing({ onTrial }){
               <li>Org-wide multi-account cost rollup</li>
               <li>Email support</li>
             </ul>
-            <div className="cta"><a href="#" onClick={onTrial}>Start free trial →</a></div>
+            <div className="cta"><a href="#" onClick={onTrial}>Get Team — first month free →</a></div>
           </div>
 
           {/* Enterprise */}
@@ -964,15 +964,15 @@ function TrialModal({ onClose }){
         {/* Left: what's included */}
         <div className="modal-left">
           <div>
-            <div className="label" style={{marginBottom:12}}>/ Team · 1-month free trial</div>
-            <h3>Try every Team feature free for one month.</h3>
+            <div className="label" style={{marginBottom:12}}>/ Team Plan</div>
+            <h3>Unlock tickets, email reports, and org rollup.</h3>
           </div>
           <div>
             <div className="price-row">
-              <span className="price-big">$0</span>
-              <span className="price-after">then $39.99 / seat / mo</span>
+              <span className="price-big">$39.99</span>
+              <span className="price-after">/ mo — first month free</span>
             </div>
-            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Cancel before day 30. No charge.</div>
+            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Enter card now. Not charged for 30 days. Cancel any time.</div>
           </div>
           <ul>
             <li>Everything in the free tier, plus:</li>
@@ -983,13 +983,13 @@ function TrialModal({ onClose }){
             <li>OU breakdown &amp; account anomaly detection</li>
           </ul>
           <div style={{marginTop:"auto",paddingTop:16,borderTop:"1px solid var(--line)",fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>
-            Just want the free tier? Skip this. Run <span style={{color:"var(--fg)"}}>pip install finops-mcp &amp;&amp; finops setup</span> and you're in.
+            Already installed? Your first 30 days are free in-product. This subscribes you so Team features stay unlocked after that.
           </div>
         </div>
 
         {/* Right: email form + pip install */}
         <div className="modal-right">
-          <h4>Start your Team trial</h4>
+          <h4>Get Team — first month free</h4>
           <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
             <div>
               <label>EMAIL</label>
@@ -1005,8 +1005,8 @@ function TrialModal({ onClose }){
               Continue to checkout →
             </button>
             <div className="modal-note">
-              You'll enter your card on the next screen.<br/>
-              Not charged for 30 days. Cancel any time.
+              Card required to hold your spot — not charged for 30 days.<br/>
+              Cancel any time before day 30. No questions asked.
             </div>
           </form>
 
@@ -1016,7 +1016,7 @@ function TrialModal({ onClose }){
               <span className="prompt">$</span>
               <span>pip install finops-mcp &amp;&amp; finops setup</span>
             </div>
-            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Anaconda? Run <code style={{fontSize:"11px"}}>pip install --upgrade pip</code> first. <a href="/docs#install" style={{color:"var(--fg-3)", textDecoration:"underline"}}>Other options →</a></div>
+            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Anaconda? Use <code style={{fontSize:"11px"}}>uvx finops-mcp setup</code> instead — it runs in an isolated env. <a href="/docs#install" style={{color:"var(--fg-3)", textDecoration:"underline"}}>Install guide →</a></div>
           </div>
         </div>
       </div>

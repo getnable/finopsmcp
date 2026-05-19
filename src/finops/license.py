@@ -337,14 +337,34 @@ def require_pro(feature: str) -> dict | None:
 
     # Free tier — explain what they're missing and how to unlock it
     friendly = feature.replace("_", " ")
+
+    # Craft a contextual upgrade message based on whether trial expired recently
+    if s.mode == "free" and s.issued:
+        try:
+            trial_start = date.fromisoformat(s.issued)
+            days_since_expiry = (date.today() - trial_start).days - _TRIAL_DAYS
+            if 0 < days_since_expiry <= 30:
+                urgency = (
+                    f"Your {_TRIAL_DAYS}-day trial ended {days_since_expiry} day{'s' if days_since_expiry != 1 else ''} ago. "
+                )
+            else:
+                urgency = ""
+        except Exception:
+            urgency = ""
+    else:
+        urgency = ""
+
     return {
         "error": "pro_required",
         "feature": feature,
         "message": (
-            f"'{friendly}' is a Pro feature. "
-            f"You're on the free tier — cost queries, anomaly detection, rightsizing, "
-            f"PR comments, Slack alerts, and all connectors are fully available. "
-            f"Upgrade at {_UPGRADE_URL} to unlock {friendly}."
+            f"'{friendly}' requires a Team plan. "
+            f"{urgency}"
+            f"Free tier includes: cost queries, anomaly detection, rightsizing, "
+            f"Slack/Teams alerts, PR cost comments, budgets, K8s analysis, and all connectors. "
+            f"Team plan adds: {friendly}, ticket auto-creation (Jira/Linear/GitHub), "
+            f"scheduled email reports, commitment purchase recommendations, and org rollup. "
+            f"Subscribe at {_UPGRADE_URL} — $39.99/mo, first month free."
         ),
         "upgrade_url": _UPGRADE_URL,
         "free_tier_available": True,
