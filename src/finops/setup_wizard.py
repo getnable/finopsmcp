@@ -325,6 +325,11 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("slack")
     sub.add_parser("teams")
     sub.add_parser("sso")
+    sub.add_parser("openai")
+    sub.add_parser("anthropic")
+    sub.add_parser("together")
+    sub.add_parser("cohere")
+    sub.add_parser("mistral")
     sub.add_parser("claude")    # configure Claude Desktop MCP entry
 
     vault_p = sub.add_parser("vault")
@@ -423,6 +428,7 @@ def main(args: list[str] | None = None) -> None:
                 vault_delete(parsed.key)
         elif parsed.action == "rotate":
             vault_rotate()
+        return
     elif parsed.cmd == "iam-template":
         # Standalone alias: finops setup iam-template
         from .security.iam_setup import print_iam_template
