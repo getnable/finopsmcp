@@ -38,14 +38,10 @@ from pathlib import Path
 log = logging.getLogger("finops.license")
 
 _env_secret = os.environ.get("FINOPS_LICENSE_SECRET", "")
-if _env_secret:
-    _SECRET = _env_secret.encode()
-else:
-    import secrets as _secrets
-    _SECRET = _secrets.token_bytes(32)   # random per-session — license keys won't verify
-    logging.getLogger("finops.license").debug(
-        "FINOPS_LICENSE_SECRET not set — license verification disabled (expected on self-hosted installs)"
-    )
+# Default allows customers to verify purchased license keys without setting the env var.
+# Override via FINOPS_LICENSE_SECRET if you self-host with your own signing secret.
+_DEFAULT_SECRET = "933cb551a15aa14b2a2c3517536da50773c2492a2dce2879578cb60cf34bb81b"
+_SECRET = (_env_secret or _DEFAULT_SECRET).encode()
 _UPGRADE_URL = "https://nable.sh/#pricing"
 _TRIAL_DAYS  = 30
 _TRIAL_FILE  = Path.home() / ".finops-mcp" / "trial_start"

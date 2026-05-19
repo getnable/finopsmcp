@@ -14,9 +14,6 @@ import crypto from "node:crypto";
 // Set FINOPS_LICENSE_SECRET in Vercel project environment variables.
 // Must match the FINOPS_LICENSE_SECRET env var on the MCP server side.
 const LICENSE_SECRET = process.env.FINOPS_LICENSE_SECRET;
-if (!LICENSE_SECRET) {
-  throw new Error("FINOPS_LICENSE_SECRET environment variable is not set.");
-}
 
 // ─── License key generation ──────────────────────────────────────────────────
 // Mirrors generate_key() in license.py exactly so keys are valid in the MCP server.
@@ -109,7 +106,7 @@ async function sendLicenseEmail(to, licenseKey) {
     </p>
     <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
       <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;">
-        pip install finops-mcp[pdf,snowflake,keyring]<br/>
+        pip install finops-mcp<br/>
         finops setup
       </code>
     </div>
@@ -180,9 +177,9 @@ export default async function handler(req, res) {
   const sig = req.headers["stripe-signature"];
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
 
-  if (!secret) {
-    console.error("STRIPE_WEBHOOK_SECRET not set");
-    return res.status(500).json({ error: "webhook secret not configured" });
+  if (!secret || !LICENSE_SECRET) {
+    console.error("Missing env vars:", { STRIPE_WEBHOOK_SECRET: !!secret, FINOPS_LICENSE_SECRET: !!LICENSE_SECRET });
+    return res.status(500).json({ error: "webhook not configured" });
   }
 
   try {
