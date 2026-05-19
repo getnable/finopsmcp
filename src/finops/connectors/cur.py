@@ -535,6 +535,184 @@ ORDER BY cost_usd DESC
     }
 
 
+def get_savings_plan_showback(
+    start_date: date,
+    end_date: date,
+    tag_key: str = "team",
+    include_ri: bool = True,
+) -> dict[str, Any]:
+    """
+    Attribute Savings Plan (and optionally RI) benefits back to teams/services
+    by tag — the showback problem no other tool solves at line-item granularity.
+
+    How it works
+    ────────────
+    AWS Savings Plans apply a blended discount across the payer account. The CUR
+    exposes two fields per covered resource:
+
+      savings_plan_effective_cost  — what you actually paid under SP rates
+      pricing_public_on_demand_cost — what you'd have paid on-demand
+
+    The difference is the real dollar benefit that resource captured from the SP.
+    By grouping these fields by a resource tag (e.g. "team"), each team sees:
+      • how much they consumed under SP coverage (effective cost)
+      • how much they would have paid without it (on-demand equivalent)
+      • how much they saved in real dollars (savings captured)
+      • their effective discount rate
+
+    For Reserved Instances, the same logic applies using reservation_effective_cost
+    vs pricing_public_on_demand_cost on DiscountedUsage lines.
+
+    Args:
+        start_date: Inclusive start of the billing period.
+        end_date:   Inclusive end of the billing period.
+        tag_key:    Resource tag to group by (default "team").
+        include_ri: Also include RI discounts in the showback (default True).
+
+    Returns:
+        {
+            "by_tag": {
+                "payments": {
+                    "effective_cost":     float,   # what they actually paid
+                    "on_demand_equiv":    float,   # what they'd have paid
+                    "savings_captured":   float,   # dollar benefit from SP/RI
+                    "discount_rate_pct":  float,   # effective discount %
+                    "sp_savings":         float,   # savings from SPs specifically
+                    "ri_savings":         float,   # savings from RIs specifically
+                },
+                ...
+                "__untagged__": { ... },           # unattributed resources
+            },
+            "summary": {
+                "total_effective_cost":   float,
+                "total_on_demand_equiv":  float,
+                "total_savings_captured": float,
+                "overall_discount_pct":   float,
+                "sp_coverage_pct":        float,   # % of usage covered by SP
+                "ri_coverage_pct":        float,   # % of usage covered by RI
+            },
+            "tag_key": str,
+            "period":  str,
+            "source":  "cur_athena",
+        }
+    """
+    if not is_configured():
+        return _error("CUR not configured. Set CUR_S3_BUCKET, CUR_ATHENA_DATABASE, "
+                      "CUR_ATHENA_TABLE, CUR_ATHENA_RESULTS_BUCKET.")
+
+    partition = _partition_filter(start_date, end_date)
+    table     = f"{_db()}.{_table()}"
+    safe_key  = tag_key.replace("'", "''").replace("`", "")
+    tag_col   = f"resource_tags_user_{safe_key}"
+
+    # line_item_types to include
+    li_types = "'SavingsPlanCoveredUsage', 'Usage', 'DiscountedUsage'"
+
+    sql = f"""
+SELECT
+    COALESCE(NULLIF({tag_col}, ''), '__untagged__')            AS tag_value,
+
+    -- Savings Plan lines
+    SUM(CASE WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage'
+             THEN savingsplan_savings_plan_effective_cost ELSE 0 END)  AS sp_effective_cost,
+    SUM(CASE WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage'
+             THEN pricing_public_on_demand_cost ELSE 0 END)            AS sp_on_demand_equiv,
+
+    -- Reserved Instance lines
+    SUM(CASE WHEN line_item_line_item_type = 'DiscountedUsage'
+             THEN reservation_effective_cost ELSE 0 END)               AS ri_effective_cost,
+    SUM(CASE WHEN line_item_line_item_type = 'DiscountedUsage'
+             THEN pricing_public_on_demand_cost ELSE 0 END)            AS ri_on_demand_equiv,
+
+    -- Regular on-demand usage (no commitment discount)
+    SUM(CASE WHEN line_item_line_item_type = 'Usage'
+             THEN line_item_unblended_cost ELSE 0 END)                 AS od_cost,
+
+    -- Totals
+    SUM(CASE
+          WHEN line_item_line_item_type = 'SavingsPlanCoveredUsage'
+            THEN savingsplan_savings_plan_effective_cost
+          WHEN line_item_line_item_type = 'DiscountedUsage'
+            THEN reservation_effective_cost
+          ELSE line_item_unblended_cost
+        END)                                                           AS total_effective_cost,
+    SUM(pricing_public_on_demand_cost)                                 AS total_on_demand_equiv
+
+FROM {table}
+WHERE ({partition})
+  AND line_item_line_item_type IN ({li_types})
+GROUP BY COALESCE(NULLIF({tag_col}, ''), '__untagged__')
+ORDER BY total_effective_cost DESC
+""".strip()
+
+    try:
+        rows = _athena_query(sql, timeout_secs=45)
+    except CURQueryError as exc:
+        log.warning("CUR get_savings_plan_showback failed: %s", exc)
+        return {"error": str(exc), "source": "cur_athena"}
+
+    by_tag: dict[str, dict] = {}
+    grand_effective   = 0.0
+    grand_on_demand   = 0.0
+    grand_sp_savings  = 0.0
+    grand_ri_savings  = 0.0
+    grand_sp_od       = 0.0
+    grand_ri_od       = 0.0
+
+    for row in rows:
+        tag_val       = row.get("tag_value") or "__untagged__"
+        sp_eff        = _float(row.get("sp_effective_cost", "0"))
+        sp_od         = _float(row.get("sp_on_demand_equiv", "0"))
+        ri_eff        = _float(row.get("ri_effective_cost", "0"))
+        ri_od         = _float(row.get("ri_on_demand_equiv", "0"))
+        od_cost       = _float(row.get("od_cost", "0"))
+        total_eff     = _float(row.get("total_effective_cost", "0"))
+        total_od      = _float(row.get("total_on_demand_equiv", "0"))
+
+        sp_savings    = max(0.0, sp_od - sp_eff)
+        ri_savings    = max(0.0, ri_od - ri_eff) if include_ri else 0.0
+        total_savings = sp_savings + ri_savings
+
+        discount_pct  = (total_savings / total_od * 100) if total_od > 0 else 0.0
+
+        by_tag[tag_val] = {
+            "effective_cost":    round(total_eff, 4),
+            "on_demand_equiv":   round(total_od, 4),
+            "savings_captured":  round(total_savings, 4),
+            "discount_rate_pct": round(discount_pct, 2),
+            "sp_savings":        round(sp_savings, 4),
+            "ri_savings":        round(ri_savings, 4) if include_ri else 0.0,
+            "on_demand_cost":    round(od_cost, 4),   # usage not covered by any commitment
+        }
+
+        grand_effective  += total_eff
+        grand_on_demand  += total_od
+        grand_sp_savings += sp_savings
+        grand_ri_savings += ri_savings if include_ri else 0.0
+        grand_sp_od      += sp_od
+        grand_ri_od      += ri_od
+
+    grand_savings     = grand_sp_savings + grand_ri_savings
+    overall_discount  = (grand_savings / grand_on_demand * 100) if grand_on_demand > 0 else 0.0
+    sp_coverage_pct   = (grand_sp_od / grand_on_demand * 100) if grand_on_demand > 0 else 0.0
+    ri_coverage_pct   = (grand_ri_od / grand_on_demand * 100) if grand_on_demand > 0 else 0.0
+
+    return {
+        "by_tag": by_tag,
+        "summary": {
+            "total_effective_cost":   round(grand_effective, 4),
+            "total_on_demand_equiv":  round(grand_on_demand, 4),
+            "total_savings_captured": round(grand_savings, 4),
+            "overall_discount_pct":   round(overall_discount, 2),
+            "sp_coverage_pct":        round(sp_coverage_pct, 2),
+            "ri_coverage_pct":        round(ri_coverage_pct, 2),
+        },
+        "tag_key": tag_key,
+        "period":  f"{start_date} to {end_date}",
+        "source":  "cur_athena",
+    }
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _float(value: Any) -> float:

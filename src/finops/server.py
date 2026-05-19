@@ -2830,6 +2830,64 @@ async def get_tag_cost_breakdown_cur(
         return {"error": str(exc)}
 
 
+@mcp.tool()
+async def get_savings_plan_showback(
+    tag_key: str = "team",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    include_ri: bool = True,
+) -> dict:
+    """
+    Show exactly how much each team saved from Savings Plans and Reserved Instances.
+
+    This is the showback problem no other tool solves at line-item granularity.
+    Instead of blending SP/RI discounts across the account, nable attributes the
+    real dollar benefit back to the team or service that consumed the covered usage —
+    using CUR fields that Cost Explorer doesn't expose.
+
+    For each team (or tag value):
+      • effective_cost     — what they actually paid under SP/RI rates
+      • on_demand_equiv    — what they would have paid without commitments
+      • savings_captured   — real dollar benefit from Savings Plans + RIs
+      • discount_rate_pct  — their effective discount rate
+      • sp_savings / ri_savings — broken out by commitment type
+
+    Requires CUR delivery to S3 and Athena. Team plan feature.
+
+    Args:
+        tag_key:    Resource tag to group by — "team", "project", "env" (default "team")
+        start_date: ISO date YYYY-MM-DD (default: start of current month)
+        end_date:   ISO date YYYY-MM-DD (default: today)
+        include_ri: Include Reserved Instance savings alongside SP savings (default True)
+
+    Examples:
+        - "Show me savings plan showback by team this month"
+        - "How much did the payments team save from our savings plans?"
+        - "What's the effective discount rate per team from our commitments?"
+        - "Which team is getting the most benefit from our reserved instances?"
+    """
+    if err := require_pro("cur_athena_detail"):
+        return err
+
+    sd, ed = _default_dates()
+    if start_date:
+        sd = date.fromisoformat(start_date)
+    if end_date:
+        ed = date.fromisoformat(end_date)
+
+    try:
+        from .connectors.cur import get_savings_plan_showback as _showback
+        return _showback(
+            start_date=sd,
+            end_date=ed,
+            tag_key=tag_key,
+            include_ri=include_ri,
+        )
+    except Exception as exc:
+        log.error("get_savings_plan_showback failed: %s", exc)
+        return {"error": str(exc)}
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # AZURE DETAIL (Team plan)
 # ═══════════════════════════════════════════════════════════════════════════════
