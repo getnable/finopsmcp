@@ -346,7 +346,7 @@ def main(args: list[str] | None = None) -> None:
     if not hasattr(parsed, "key"):
         parsed.key = ""
 
-    print("\n  nable setup  —  credentials encrypted in ~/.finops/vault.db\n")
+    print("\n  nable setup  —  all credentials stay on your machine\n")
 
     dispatch = {
         "aws": setup_aws,

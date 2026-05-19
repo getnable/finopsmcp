@@ -128,4 +128,5 @@ def show_welcome() -> None:
 
     # ── Next step ────────────────────────────────────────────────────────────
     _line(bold("Getting started:") + "  connect your first provider below.")
+    _line(dim("   Credentials stay on your machine — never sent anywhere."))
     print()
