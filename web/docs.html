@@ -106,53 +106,6 @@
 </head>
 <body class="antialiased">
 
-<!-- Docs access gate -->
-<div id="docs-gate" style="position:fixed;inset:0;z-index:9999;background:#fbfaf7;display:flex;align-items:center;justify-content:center;padding:20px;">
-  <div style="background:#f4f2ec;border:1px solid #e6e2d6;border-radius:14px;padding:40px 36px;max-width:380px;width:100%;text-align:center;">
-    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin:0 auto 20px;display:block;">
-      <rect width="32" height="32" rx="7" fill="#1a1915"/>
-      <path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#fbfaf7"/>
-    </svg>
-    <h2 style="font-size:1.15rem;font-weight:500;color:#1a1915;margin:0 0 8px;letter-spacing:-0.025em;">nable documentation</h2>
-    <p style="font-size:13px;color:#54524a;margin:0 0 24px;line-height:1.65;">Enter your license key to access the full setup guide, or start a free trial to get one.</p>
-    <div id="gate-error" style="display:none;background:rgba(184,83,58,0.07);border:1px solid rgba(184,83,58,0.2);color:#b8533a;border-radius:7px;padding:8px 12px;font-size:12px;margin-bottom:12px;text-align:left;font-family:'JetBrains Mono',monospace;"></div>
-    <input id="gate-key" type="text" placeholder="sk-nable-..."
-      style="width:100%;border:1px solid #e6e2d6;background:#fbfaf7;color:#1a1915;border-radius:7px;padding:11px 14px;font-size:13px;margin-bottom:10px;outline:none;font-family:'JetBrains Mono',monospace;box-sizing:border-box;letter-spacing:0.02em;"
-      onkeydown="if(event.key==='Enter')unlockDocs()"/>
-    <button onclick="unlockDocs()"
-      style="width:100%;background:#1a1915;color:#fbfaf7;font-weight:500;border-radius:7px;padding:12px;font-size:13px;border:none;cursor:pointer;margin-bottom:20px;font-family:'Geist',sans-serif;letter-spacing:-0.005em;">
-      Unlock →
-    </button>
-    <div style="border-top:1px solid #e6e2d6;padding-top:18px;">
-      <p style="font-size:12px;color:#8b8879;margin:0 0 10px;">Don't have a license key?</p>
-      <a href="https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01"
-        style="display:inline-block;border:1px solid #e6e2d6;color:#1a1915;font-weight:500;border-radius:7px;padding:8px 18px;font-size:12px;text-decoration:none;font-family:'Geist',sans-serif;letter-spacing:-0.005em;">
-        Start 1-month free trial →
-      </a>
-    </div>
-  </div>
-</div>
-<script>
-(function(){
-  var KEY='nable_docs_v1',TEAM='nable2025';
-  var p=new URLSearchParams(window.location.search);
-  if(p.get('team')===TEAM){localStorage.setItem(KEY,'team');history.replaceState({},'',window.location.pathname);}
-  if(localStorage.getItem(KEY)){document.getElementById('docs-gate').style.display='none';return;}
-  document.body.style.overflow='hidden';
-  window.unlockDocs=function(){
-    var k=document.getElementById('gate-key').value.trim();
-    var e=document.getElementById('gate-error');
-    if(k.length>=16){
-      localStorage.setItem(KEY,'key:'+k);
-      document.getElementById('docs-gate').style.display='none';
-      document.body.style.overflow='';
-    } else {
-      e.textContent='Please enter a valid license key (16+ characters).';
-      e.style.display='block';
-    }
-  };
-})();
-</script>
 
 <!-- Nav -->
 <nav class="sticky top-0 z-50">
