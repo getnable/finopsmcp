@@ -98,10 +98,19 @@
   .install .prompt{color:var(--fg-3)}
   .install button{margin-left:4px;border:1px solid var(--line);border-radius:5px;background:transparent;color:var(--fg-3);padding:2px 8px;font-family:var(--mono);font-size:11px;cursor:pointer}
   .install button:hover{color:var(--fg);border-color:var(--line-2)}
-  .clients{margin-top:64px;display:flex;align-items:center;gap:28px;flex-wrap:wrap;color:var(--fg-3);font-size:13px}
+  .clients{margin-top:64px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;color:var(--fg-3);font-size:13px}
   .clients .l{font-family:var(--mono);font-size:11.5px;color:var(--fg-4);letter-spacing:.04em}
-  .clients .c{display:inline-flex;align-items:center;gap:8px;color:var(--fg-2)}
-  .clients .c::before{content:"";width:14px;height:14px;border-radius:3px;background:var(--bg-3);border:1px solid var(--line)}
+  .client-pill{position:relative;display:inline-flex;align-items:center;gap:8px;color:var(--fg-2);cursor:pointer;user-select:none}
+  .client-pill::before{content:"";width:14px;height:14px;border-radius:3px;background:var(--bg-3);border:1px solid var(--line);flex-shrink:0;transition:border-color .15s}
+  .client-pill:hover::before,.client-pill.open::before{border-color:var(--line-2)}
+  .client-pill:hover{color:var(--fg)}
+  .client-pop{position:absolute;top:calc(100% + 10px);left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:14px 16px;width:240px;box-shadow:0 4px 24px rgba(0,0,0,.07);z-index:100;pointer-events:none}
+  .client-pop::before{content:"";position:absolute;top:-5px;left:50%;transform:translateX(-50%) rotate(45deg);width:8px;height:8px;background:var(--bg);border-left:1px solid var(--line-2);border-top:1px solid var(--line-2)}
+  .client-pop .cp-name{font-weight:500;font-size:13px;color:var(--fg);margin-bottom:6px}
+  .client-pop .cp-status{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;color:var(--hl);margin-bottom:8px}
+  .client-pop .cp-status::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--hl);flex-shrink:0}
+  .client-pop .cp-path{font-family:var(--mono);font-size:11px;color:var(--fg-3);line-height:1.5;word-break:break-all}
+  .client-pop .cp-note{font-size:12px;color:var(--fg-3);margin-top:6px;line-height:1.4}
 
   /* terminal */
   .terminal{margin-top:56px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg);box-shadow:0 1px 0 rgba(0,0,0,.02),0 16px 40px -22px rgba(0,0,0,.12)}
@@ -392,6 +401,74 @@ function Nav({ dark, onToggle, onTrial, onSignIn }){
   );
 }
 
+const CLIENT_INFO = [
+  {
+    name: "Claude Desktop",
+    status: "Full MCP support",
+    path: "~/Library/Application Support/Claude/claude_desktop_config.json",
+    note: "Official MCP client from Anthropic. All tools available.",
+  },
+  {
+    name: "Cursor",
+    status: "Full MCP support",
+    path: ".cursor/mcp.json  (project)  or  ~/.cursor/mcp.json  (global)",
+    note: "Works in Agent mode. Use global config to enable across all projects.",
+  },
+  {
+    name: "Windsurf",
+    status: "Full MCP support",
+    path: "~/.codeium/windsurf/mcp_config.json",
+    note: "Codeium's editor. Same MCP protocol, same tools.",
+  },
+  {
+    name: "Cline",
+    status: "Full MCP support",
+    path: "VS Code settings → Cline → MCP Servers",
+    note: "Configure via the Cline extension settings panel in VS Code.",
+  },
+  {
+    name: "Zed",
+    status: "Full MCP support",
+    path: "~/.config/zed/settings.json  →  context_servers",
+    note: "Zed's context servers use the MCP protocol natively.",
+  },
+];
+
+function ClientPill({ client }){
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handle(e){ if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
+  return (
+    <span ref={ref} className={"client-pill" + (open ? " open" : "")} onClick={() => setOpen(o => !o)}>
+      {client.name}
+      {open && (
+        <div className="client-pop">
+          <div className="cp-name">{client.name}</div>
+          <div className="cp-status">{client.status}</div>
+          <div className="cp-path">{client.path}</div>
+          {client.note && <div className="cp-note">{client.note}</div>}
+        </div>
+      )}
+    </span>
+  );
+}
+
+function Clients(){
+  return (
+    <div className="clients">
+      <span className="l">Works with</span>
+      {CLIENT_INFO.map(c => <ClientPill key={c.name} client={c} />)}
+    </div>
+  );
+}
+
 function Hero({ onTrial }){
   return (
     <header className="hero">
@@ -406,14 +483,7 @@ function Hero({ onTrial }){
           <a href="/docs" className="btn btn-ghost">Read the docs</a>
         </div>
 
-        <div className="clients">
-          <span className="l">Works with</span>
-          <span className="c">Claude Desktop</span>
-          <span className="c">Cursor</span>
-          <span className="c">Windsurf</span>
-          <span className="c">Cline</span>
-          <span className="c">Zed</span>
-        </div>
+        <Clients />
 
         <Terminal />
       </div>
