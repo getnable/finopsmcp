@@ -1,8 +1,8 @@
-# nable: Cloud Cost Intelligence for Claude
+# nable — Ask your AI about cloud costs
 
-**Ask Claude about your cloud costs in plain English.**
+**Connect Claude (or any MCP client) to your real AWS, Azure, GCP, and SaaS billing data.**
 
-nable is an MCP server that connects Claude Desktop, Cursor, Windsurf, and any MCP-compatible AI client to your real billing data across AWS, Azure, GCP, and 10+ SaaS tools.
+nable is an MCP server. Install it once and ask Claude about your cloud spend in plain English — no dashboards, no SQL, no BI tool.
 
 ```
 "What drove our AWS costs up 40% this month?"
