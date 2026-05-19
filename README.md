@@ -17,25 +17,25 @@ No dashboards. No SQL. Just ask.
 
 ## Quick start
 
-**Option A — uvx (recommended):**
-```bash
-brew install uv         # macOS/Linux — or: curl -LsSf https://astral.sh/uv/install.sh | sh
-uvx finops-mcp setup    # installs in an isolated env, no PATH or Python version issues
-```
-
-> **Use this if you're on Anaconda, Conda, Python 3.8/3.9, or a corporate machine.**
-> uvx brings its own Python 3.12 — your system Python doesn't matter.
->
-> Already have uv? Just run `uvx finops-mcp setup` directly.
-> **Don't use `pip install uv`** — on Anaconda, pip itself may crash before uv installs.
-
-**Option B — pip (requires Python 3.10+):**
 ```bash
 pip install finops-mcp
-finops setup            # connects your providers and auto-configures Claude Desktop
+finops setup
 ```
 
-> If `pip install finops-mcp` fails with version errors, your pip or Python is too old. Use Option A.
+`finops setup` connects your providers and auto-configures Claude Desktop. Restart Claude Desktop and ask: *"What are my AWS costs this month?"*
+
+**On Anaconda or getting pip errors?** Your pip may be too old. Upgrade it first:
+```bash
+pip install --upgrade pip
+pip install finops-mcp
+finops setup
+```
+
+**Prefer an isolated install?**
+```bash
+brew install uv
+uvx finops-mcp setup
+```
 
 `finops setup` detects Claude Desktop and writes `claude_desktop_config.json` automatically. It picks `uvx` if available, otherwise uses the absolute binary path. Restart Claude Desktop and ask: *"What are my AWS costs this month?"*
 
