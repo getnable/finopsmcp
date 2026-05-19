@@ -168,13 +168,11 @@
   .feature h3{font-size:22px;font-weight:500;letter-spacing:-.02em;line-height:1.2;color:var(--fg)}
   .feature p{font-size:14.5px;line-height:1.6;max-width:46ch}
 
-  /* connectors */
-  .connectors{border-top:1px solid var(--line)}
-  .conn-row{display:grid;grid-template-columns:200px 1fr 110px 110px;padding:18px 0;border-bottom:1px solid var(--line);align-items:center;font-size:14px;transition:background .15s}
-  .conn-row:hover{background:var(--bg-2)}
-  .conn-row .name{color:var(--fg);letter-spacing:-.01em;font-weight:500}
-  .conn-row .meta{font-family:var(--mono);font-size:13px;color:var(--fg-2)}
-  .conn-row .ret{font-family:var(--mono);font-size:12px;color:var(--fg-3)}
+  /* connectors pill grid */
+  .conn-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:40px}
+  .conn-pill{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border:1px solid var(--line);border-radius:999px;font-size:13.5px;color:var(--fg-2);background:var(--bg);letter-spacing:-.01em;transition:border-color .15s,color .15s}
+  .conn-pill:hover{border-color:var(--line-2);color:var(--fg)}
+  .conn-group-label{width:100%;font-family:var(--mono);font-size:11px;color:var(--fg-4);letter-spacing:.06em;text-transform:uppercase;margin-top:20px;margin-bottom:2px}
   .badge{font-family:var(--mono);font-size:11.5px;letter-spacing:.02em}
   .badge.ok::before, .badge.warn::before, .badge.partial::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;vertical-align:1px}
   .badge.ok{color:var(--fg)}
@@ -298,8 +296,6 @@
     .price{padding:32px 0!important;border-right:0;border-bottom:1px solid var(--line)}
     .price.feat{margin:0;padding:32px 0!important;border-left:0}
     .price:last-child{border-bottom:0}
-    .conn-row{grid-template-columns:1fr 110px;}
-    .conn-row .meta,.conn-row .ret{display:none}
     .nav ul{display:none}
     .cta .row{grid-template-columns:1fr;gap:48px}
     .foot{grid-template-columns:1fr 1fr}
@@ -403,11 +399,11 @@ function Hero({ onTrial }){
         <div className="label" style={{marginBottom:18}}>v0.7.9 · 18 connectors · free to start</div>
         <h1>One conversation.<br/>Every cloud bill.</h1>
         <p className="lede">
-          18 cloud and SaaS providers, one conversation. Ask anything, get answers, take action. $39.99 per seat per month.
+          AWS, Azure, GCP, Datadog, Snowflake, and 13 more — all in one conversation with Claude. Ask anything about your cloud spend, get answers in plain English.
         </p>
         <div className="hero-cta">
-          <a href="#" onClick={onTrial} className="btn btn-primary">Start free trial <span className="arr">→</span></a>
-          <a href="#product" className="btn btn-ghost">See how it works</a>
+          <a href="#product" className="btn btn-primary">See how it works <span className="arr">→</span></a>
+          <a href="/docs" className="btn btn-ghost">Read the docs</a>
         </div>
 
         <div className="clients">
@@ -574,26 +570,9 @@ function Features(){
   );
 }
 
-const CONNECTORS = [
-  ["AWS","Cost Explorer","Real",            "ok"],
-  ["Azure","Cost Management","Real",        "ok"],
-  ["GCP","Billing + BigQuery","Real",       "ok"],
-  ["OpenAI","Usage + Costs API","Real",     "ok"],
-  ["Anthropic","Usage API","Real",          "ok"],
-  ["AWS Bedrock","Cost Explorer","Real",    "ok"],
-  ["Datadog","Usage Metering v2","Real",    "ok"],
-  ["Langfuse","Daily Metrics API","Real",   "ok"],
-  ["Snowflake","ACCOUNT_USAGE","Credits",   "ok"],
-  ["MongoDB Atlas","Invoice API","Real",    "ok"],
-  ["Twilio","Usage Records","Real",         "ok"],
-  ["Cloudflare","Billing API","Real",       "ok"],
-  ["New Relic","Usage + Ingest API","Real", "ok"],
-  ["PagerDuty","Seat count","Seats",        "ok"],
-  ["Kubernetes","Metrics API","Allocated",  "ok"],
-  ["GitHub","Actions + Copilot","Minutes",  "partial"],
-  ["Vercel","Invoice API","Enterprise",     "warn"],
-  ["Together AI","Usage API","Real",        "ok"],
-];
+const CONN_CLOUD   = ["AWS","Azure","GCP","Kubernetes"];
+const CONN_AI      = ["OpenAI","Anthropic","AWS Bedrock","Langfuse","Together AI"];
+const CONN_SAAS    = ["Datadog","Snowflake","MongoDB Atlas","Twilio","Cloudflare","New Relic","PagerDuty","GitHub","Vercel"];
 
 function Connectors(){
   return (
@@ -601,23 +580,17 @@ function Connectors(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ Connectors</div>
-          <h2>18 providers. One conversation.</h2>
-          <p>AWS Cost Explorer only sees AWS. Azure only sees Azure. nable pulls everything into one normalized schema so Claude can reason across your whole stack. We're honest about what each connector returns.</p>
+          <h2>Every bill in one place.</h2>
+          <p>nable normalises spend across cloud, AI, and SaaS into a single schema so Claude can reason across your whole stack — without you writing a line of SQL.</p>
         </div>
 
-        <div className="connectors">
-          {CONNECTORS.map(([n,cov,ret,st],i)=>(
-            <div className="conn-row" key={i}>
-              <div className="name">{n}</div>
-              <div className="meta">{cov}</div>
-              <div className="ret">{ret}</div>
-              <div>
-                <span className={"badge " + (st==="ok"?"ok":st==="warn"?"warn":"partial")}>
-                  {st==="ok"?"Full":st==="warn"?"Gated":"Partial"}
-                </span>
-              </div>
-            </div>
-          ))}
+        <div className="conn-grid">
+          <div className="conn-group-label">Cloud &amp; Infra</div>
+          {CONN_CLOUD.map(n => <span className="conn-pill" key={n}>{n}</span>)}
+          <div className="conn-group-label">AI &amp; LLMs</div>
+          {CONN_AI.map(n => <span className="conn-pill" key={n}>{n}</span>)}
+          <div className="conn-group-label">SaaS</div>
+          {CONN_SAAS.map(n => <span className="conn-pill" key={n}>{n}</span>)}
         </div>
       </div>
     </section>
