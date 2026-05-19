@@ -85,13 +85,54 @@ def setup_aws() -> None:
             vault.store("AWS_ROLE_ARNS", role_arns)
         _ok("AWS credentials stored in vault")
 
-    # Test connection
+    # Test connection + Cost Explorer permissions
     try:
         import boto3
+        from datetime import date, timedelta
         vault.load_to_env()
-        sts = boto3.client("sts", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+        region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+
+        sts = boto3.client("sts", region_name=region)
         identity = sts.get_caller_identity()
         _ok(f"Connection verified — account {identity['Account']}")
+
+        # Check Cost Explorer access specifically — this is the core permission
+        try:
+            ce = boto3.client("ce", region_name="us-east-1")
+            end = date.today()
+            start = end - timedelta(days=1)
+            ce.get_cost_and_usage(
+                TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+                Granularity="DAILY",
+                Metrics=["UnblendedCost"],
+            )
+            _ok("Cost Explorer access confirmed")
+        except Exception as ce_err:
+            err = str(ce_err)
+            if "AccessDenied" in err or "AuthFailure" in err:
+                print()
+                _warn("This key is missing ce:GetCostAndUsage — cost queries will fail.")
+                print("""
+  Add this inline policy to your IAM user or role:
+
+  {
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": [
+        "ce:GetCostAndUsage",
+        "ce:GetCostForecast",
+        "ce:GetDimensionValues"
+      ],
+      "Resource": "*"
+    }]
+  }
+
+  Or run: finops setup aws --iam-template
+  to generate a full least-privilege CloudFormation template.
+""")
+            elif "DataUnavailableException" in err:
+                _warn("Cost Explorer enabled but data not ready yet — AWS takes up to 24h to backfill. Try again tomorrow.")
     except Exception as e:
         _warn(f"Connection test failed: {e}")
 
