@@ -265,9 +265,23 @@
             </div>
           </div>
           <div class="inline-error" id="rotate-error" style="margin-top:10px"></div>
+          <div style="margin-top:20px;padding:16px;background:var(--bg-2);border-radius:8px;border:1px solid var(--line)">
+            <p style="font-size:12.5px;font-weight:600;color:var(--fg);margin:0 0 10px;">How to activate</p>
+            <ol style="margin:0;padding-left:18px;font-size:12.5px;color:var(--fg-2);line-height:1.8">
+              <li>Copy your key above.</li>
+              <li>Open <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
+              <li>Add <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">FINOPS_LICENSE_KEY</code> to the <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">env</code> block for the finops server:</li>
+            </ol>
+            <div style="background:var(--fg);border-radius:6px;padding:10px 14px;margin-top:10px">
+              <code style="font-family:var(--mono);font-size:11.5px;color:var(--accent-ink);line-height:1.7;display:block;white-space:pre">"env": {
+  "FINOPS_LICENSE_KEY": "FINOPS-1-..."
+}</code>
+            </div>
+            <p style="font-size:12.5px;color:var(--fg-2);margin:10px 0 0">Restart Claude Desktop after saving. Pro features unlock immediately. <a href="/docs#activate-license" style="color:var(--fg)">Full instructions</a></p>
+          </div>
         </div>
         <div id="key-free-view" style="display:none">
-          <p class="free-plan-note">You are on the free plan. <a href="/#pricing">Upgrade to Pro</a> to get a license key.</p>
+          <p class="free-plan-note">You are on the free plan. <a href="/#pricing">Upgrade to Team</a> to get a license key.</p>
         </div>
       </div>
 
