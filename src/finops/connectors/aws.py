@@ -161,6 +161,15 @@ class AWSConnector(BaseConnector):
                     ) from exc
                 raise
 
+            # If CE returned rows but all costs are zero, this is a free/new account
+            # with no actual spend. Flag it so callers can give a clear message
+            # instead of misdiagnosing it as a config error.
+            if results and all(
+                float(r.get("Total", {}).get("UnblendedCost", {}).get("Amount", 0)) == 0.0
+                for r in results
+            ):
+                merged._zero_spend_account = True
+
             summary = self._build_summary(
                 account_id, start_date, end_date, {"ResultsByTime": results}
             )

@@ -199,7 +199,7 @@ def _fmt_usd(amount: float) -> str:
 
 
 def _summary_to_dict(summary: CostSummary) -> dict:
-    return {
+    d: dict = {
         "provider": summary.provider,
         "period": {"start": summary.start_date.isoformat(), "end": summary.end_date.isoformat()},
         "total_usd": round(summary.total_usd, 4),
@@ -212,6 +212,13 @@ def _summary_to_dict(summary: CostSummary) -> dict:
             k: round(v, 4) for k, v in sorted(summary.by_region.items(), key=lambda x: -x[1])
         },
     }
+    if getattr(summary, "_zero_spend_account", False):
+        d["note"] = (
+            "Cost Explorer is connected and returning data, but this account has $0.00 in "
+            "spend for the requested period. This is expected for free-tier or new AWS accounts "
+            "with no billable usage. There is no configuration error."
+        )
+    return d
 
 
 async def _gather_costs(
