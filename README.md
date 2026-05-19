@@ -17,17 +17,22 @@ No dashboards. No SQL. Just ask.
 
 ## Quick start
 
-**Option A — uvx (recommended, works everywhere including corporate machines):**
+**Option A — uvx (recommended):**
 ```bash
 pip install uv          # or: brew install uv
-uvx finops-mcp setup    # installs in isolated venv, no PATH issues
+uvx finops-mcp setup    # installs in an isolated env, no PATH or Python version issues
 ```
 
-**Option B — pip:**
+> **Use this if you're on Anaconda, Conda, Python 3.8/3.9, or a corporate machine.**
+> uvx brings its own Python 3.12 — your system Python doesn't matter.
+
+**Option B — pip (requires Python 3.10+):**
 ```bash
 pip install finops-mcp
 finops setup            # connects your providers and auto-configures Claude Desktop
 ```
+
+> If `pip install finops-mcp` fails with version errors, your pip or Python is too old. Use Option A.
 
 `finops setup` detects Claude Desktop and writes `claude_desktop_config.json` automatically. It picks `uvx` if available, otherwise uses the absolute binary path. Restart Claude Desktop and ask: *"What are my AWS costs this month?"*
 
