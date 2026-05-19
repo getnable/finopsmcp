@@ -55,6 +55,11 @@ mcp = FastMCP("finops")
 # Wraps FastMCP's tool() decorator so record_tool_call fires on every invocation
 # without needing to add a line to each tool function.
 _original_mcp_tool = mcp.tool
+_COST_QUERY_TOOLS = {
+    "get_cost_summary", "get_costs_by_service", "get_cost_trends",
+    "get_cost_history", "get_top_cost_drivers", "get_total_spend_all_sources",
+}
+_first_cost_query_fired = False
 
 def _instrumented_tool(*dargs, **dkwargs):
     """Thin shim around mcp.tool() that injects telemetry into the registered fn."""
@@ -65,8 +70,19 @@ def _instrumented_tool(*dargs, **dkwargs):
 
         @functools.wraps(fn)
         async def _inner(*args, **kwargs):
+            global _first_cost_query_fired
             _telemetry.record_tool_call(fn.__name__)
-            return await fn(*args, **kwargs)
+            result = await fn(*args, **kwargs)
+            # Fire first_cost_query event once per session — signals real value delivery
+            if fn.__name__ in _COST_QUERY_TOOLS and not _first_cost_query_fired:
+                if isinstance(result, dict) and "error" not in result:
+                    _first_cost_query_fired = True
+                    _telemetry._send_event(
+                        _telemetry._get_install_id(),
+                        "first_cost_query_success",
+                        {"tool": fn.__name__, "plan": _telemetry._session.get("plan", "free")},
+                    )
+            return result
 
         return decorator(_inner)
 

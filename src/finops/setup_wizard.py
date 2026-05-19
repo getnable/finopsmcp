@@ -145,6 +145,7 @@ def setup_aws() -> None:
         _ok(f"Connection verified — account {identity['Account']}")
 
         # Check Cost Explorer access specifically — this is the core permission
+        ce_ok = False
         try:
             ce = boto3.client("ce", region_name="us-east-1")
             end = date.today()
@@ -155,6 +156,7 @@ def setup_aws() -> None:
                 Metrics=["UnblendedCost"],
             )
             _ok("Cost Explorer access confirmed")
+            ce_ok = True
         except Exception as ce_err:
             err = str(ce_err)
             if "AccessDenied" in err or "AuthFailure" in err:
@@ -181,8 +183,28 @@ def setup_aws() -> None:
 """)
             elif "DataUnavailableException" in err:
                 _warn("Cost Explorer enabled but data not ready yet — AWS takes up to 24h to backfill. Try again tomorrow.")
+                ce_ok = True  # credentials work, data just not ready yet
+
+        try:
+            from . import telemetry as _tel
+            _tel._send_event(_tel._get_install_id(), "provider_connected", {
+                "provider": "aws",
+                "ce_access": ce_ok,
+                "auth_method": "sso" if choice == "2" else "access_key",
+            })
+        except Exception:
+            pass
+
     except Exception as e:
         _warn(f"Connection test failed: {e}")
+        try:
+            from . import telemetry as _tel
+            _tel._send_event(_tel._get_install_id(), "provider_connect_failed", {
+                "provider": "aws",
+                "error_type": type(e).__name__,
+            })
+        except Exception:
+            pass
 
 
 def setup_azure() -> None:
@@ -406,6 +428,15 @@ def main(args: list[str] | None = None) -> None:
     from .welcome import show_welcome
     show_welcome()
 
+    # Track setup wizard start
+    try:
+        from . import telemetry as _tel
+        _tel._send_event(_tel._get_install_id(), "setup_wizard_started", {
+            "subcommand": args[0] if args else "interactive",
+        })
+    except Exception:
+        pass
+
     import argparse
     import logging
     # Silence noisy third-party loggers during interactive setup
@@ -599,6 +630,15 @@ def main(args: list[str] | None = None) -> None:
     print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'")
     print("  To add more providers later: uvx finops-mcp setup\n")
     _offer_email_signup()
+
+    # Fire setup_completed event
+    try:
+        from . import telemetry as _tel
+        _tel._send_event(_tel._get_install_id(), "setup_completed", {
+            "subcommand": args[0] if args else "interactive",
+        })
+    except Exception:
+        pass
 
 
 # ── Post-setup email capture ──────────────────────────────────────────────────
