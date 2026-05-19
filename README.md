@@ -19,12 +19,15 @@ No dashboards. No SQL. Just ask.
 
 **Option A — uvx (recommended):**
 ```bash
-pip install uv          # or: brew install uv
+brew install uv         # macOS/Linux — or: curl -LsSf https://astral.sh/uv/install.sh | sh
 uvx finops-mcp setup    # installs in an isolated env, no PATH or Python version issues
 ```
 
 > **Use this if you're on Anaconda, Conda, Python 3.8/3.9, or a corporate machine.**
 > uvx brings its own Python 3.12 — your system Python doesn't matter.
+>
+> Already have uv? Just run `uvx finops-mcp setup` directly.
+> **Don't use `pip install uv`** — on Anaconda, pip itself may crash before uv installs.
 
 **Option B — pip (requires Python 3.10+):**
 ```bash

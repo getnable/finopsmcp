@@ -550,8 +550,8 @@ function QuickStart(){
           <div className="step">
             <div className="n">01</div>
             <h3>Install</h3>
-            <div className="cmd"><span className="c">$</span> pip install uv <span style={{opacity:0.4}}>&amp;&amp; uvx finops-mcp setup</span></div>
-            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Works on any Python, including Anaconda. <a href="/docs#install" style={{color:"var(--fg-3)"}}>pip install instead →</a></div>
+            <div className="cmd"><span className="c">$</span> brew install uv <span style={{opacity:0.4}}>&amp;&amp; uvx finops-mcp setup</span></div>
+            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Works on any Python, including Anaconda. <a href="/docs#install" style={{color:"var(--fg-3)"}}>Other install options →</a></div>
           </div>
           <div className="step">
             <div className="n">02</div>
@@ -763,7 +763,7 @@ function Pricing({ onTrial }){
                 <ol>
                   <li>
                     <span className="step-label">1 · Install</span>
-                    <code>pip install uv &amp;&amp; uvx finops-mcp setup</code>
+                    <code>brew install uv &amp;&amp; uvx finops-mcp setup</code>
                   </li>
                   <li>
                     <span className="step-label">2 · Generate a least-privilege IAM policy</span>
@@ -983,7 +983,7 @@ function TrialModal({ onClose }){
             <li>OU breakdown &amp; account anomaly detection</li>
           </ul>
           <div style={{marginTop:"auto",paddingTop:16,borderTop:"1px solid var(--line)",fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>
-            Just want the free tier? Skip this. Run <span style={{color:"var(--fg)"}}>uvx finops-mcp setup</span> and you're in.
+            Just want the free tier? Skip this. Run <span style={{color:"var(--fg)"}}>brew install uv &amp;&amp; uvx finops-mcp setup</span> and you're in.
           </div>
         </div>
 
@@ -1014,9 +1014,9 @@ function TrialModal({ onClose }){
             <div className="step-label">Step 1: after checkout</div>
             <div className="install">
               <span className="prompt">$</span>
-              <span>pip install uv &amp;&amp; uvx finops-mcp setup</span>
+              <span>brew install uv &amp;&amp; uvx finops-mcp setup</span>
             </div>
-            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Works on any Python. <a href="/docs#install" style={{color:"var(--fg-3)", textDecoration:"underline"}}>pip install instead →</a></div>
+            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Works on any Python. <a href="/docs#install" style={{color:"var(--fg-3)", textDecoration:"underline"}}>Other install options →</a></div>
           </div>
         </div>
       </div>
