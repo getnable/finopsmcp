@@ -74,7 +74,7 @@ async function sendLicenseEmail(to, licenseKey) {
   </div>
 
   <h1 style="font-size:22px;font-weight:500;letter-spacing:-0.025em;color:#1a1915;margin:0 0 10px;">
-    Your nable Pro license key
+    Your nable Team license key
   </h1>
   <p style="font-size:15px;color:#54524a;line-height:1.65;margin:0 0 32px;">
     Thanks for subscribing. Here's your license key — keep it somewhere safe.
@@ -116,7 +116,7 @@ async function sendLicenseEmail(to, licenseKey) {
   <!-- Step 3 -->
   <div style="margin-bottom:36px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 3 — </strong>Restart Claude Desktop. Pro features unlock immediately.
+      <strong style="color:#1a1915;">Step 3 — </strong>Restart Claude Desktop. Team features unlock immediately.
     </p>
   </div>
 
@@ -146,7 +146,7 @@ async function sendLicenseEmail(to, licenseKey) {
     body: JSON.stringify({
       from: "nable <noreply@nable.sh>",
       to: [to],
-      subject: "Your nable Pro license key",
+      subject: "Your nable Team license key",
       html,
     }),
   });

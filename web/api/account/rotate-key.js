@@ -38,10 +38,10 @@ async function hmacHex(secret, message) {
 }
 
 function b64url(str) {
-  return btoa(str)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  bytes.forEach(b => binary += String.fromCharCode(b));
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function b64urlDecode(str) {
@@ -124,10 +124,28 @@ async function sendRotationEmail(to, licenseKey, resendKey) {
     </p>
   </div>
 
-  <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;margin-bottom:24px;">
-    <p style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;margin:0;">
-      FINOPS_LICENSE_KEY=${licenseKey}
+  <div style="margin-bottom:16px;">
+    <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
+      <strong style="color:#1a1915;">Step 1 — </strong>Set it in your environment:
     </p>
+    <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
+      <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
+        FINOPS_LICENSE_KEY=${licenseKey}
+      </code>
+    </div>
+  </div>
+
+  <div style="margin-bottom:24px;">
+    <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
+      <strong style="color:#1a1915;">Step 2 — </strong>Update the key in your Claude Desktop config (<code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">~/Library/Application Support/Claude/claude_desktop_config.json</code>):
+    </p>
+    <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
+      <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
+        "env": {<br/>
+        &nbsp;&nbsp;"FINOPS_LICENSE_KEY": "${licenseKey}"<br/>
+        }
+      </code>
+    </div>
   </div>
 
   <p style="font-size:13px;color:#8b8879;line-height:1.6;margin:0;">
@@ -224,7 +242,7 @@ export default async function handler(req) {
 
   if (plan !== "pro" && plan !== "trial") {
     return new Response(
-      JSON.stringify({ error: "Key rotation requires a Pro subscription." }),
+      JSON.stringify({ error: "Key rotation requires a Team subscription." }),
       {
         status: 403,
         headers: { "Content-Type": "application/json", ...CORS_HEADERS },

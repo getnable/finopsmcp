@@ -202,7 +202,7 @@
     <div id="state-email" class="auth-card">
       <div class="card-head">
         <h1>Access your account</h1>
-        <p>Enter your email to receive a sign-in link.</p>
+        <p>Enter your email to receive a sign-in code.</p>
       </div>
       <form id="email-form" novalidate>
         <div class="field-group">
@@ -211,7 +211,7 @@
         </div>
         <div class="inline-error" id="email-error"></div>
         <div class="form-action">
-          <button type="submit" class="btn btn-primary btn-full" id="email-submit-btn">Send link</button>
+          <button type="submit" class="btn btn-primary btn-full" id="email-submit-btn">Send code</button>
         </div>
       </form>
     </div>
@@ -269,7 +269,7 @@
             <p style="font-size:12.5px;font-weight:600;color:var(--fg);margin:0 0 10px;">How to activate</p>
             <ol style="margin:0;padding-left:18px;font-size:12.5px;color:var(--fg-2);line-height:1.8">
               <li>Copy your key above.</li>
-              <li>Open <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">~/Library/Application Support/Claude/claude_desktop_config.json</code></li>
+              <li>Open <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">~/Library/Application Support/Claude/claude_desktop_config.json</code><br/>On Windows: <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">%APPDATA%\Claude\claude_desktop_config.json</code></li>
               <li>Add <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">FINOPS_LICENSE_KEY</code> to the <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">env</code> block for the finops server:</li>
             </ol>
             <div style="background:var(--fg);border-radius:6px;padding:10px 14px;margin-top:10px">
@@ -277,7 +277,7 @@
   "FINOPS_LICENSE_KEY": "FINOPS-1-..."
 }</code>
             </div>
-            <p style="font-size:12.5px;color:var(--fg-2);margin:10px 0 0">Restart Claude Desktop after saving. Pro features unlock immediately. <a href="/docs#activate-license" style="color:var(--fg)">Full instructions</a></p>
+            <p style="font-size:12.5px;color:var(--fg-2);margin:10px 0 0">Restart Claude Desktop after saving. Team features unlock immediately. <a href="/docs#activate-license" style="color:var(--fg)">Full instructions</a></p>
           </div>
         </div>
         <div id="key-free-view" style="display:none">
@@ -450,7 +450,7 @@
     }
 
     // Plan display
-    const planLabel = isPro ? 'Pro' : isTrial ? 'Trial' : 'Free';
+    const planLabel = isPro ? 'Team' : isTrial ? 'Trial' : 'Free';
     document.getElementById('plan-name-display').textContent = planLabel;
     const statusEl = document.getElementById('plan-status-display');
     if (isPro) {
@@ -487,7 +487,7 @@
   const emailForm = document.getElementById('email-form');
   const emailInput = document.getElementById('email-input');
   const emailSubmitBtn = document.getElementById('email-submit-btn');
-  emailSubmitBtn.dataset.label = 'Send link';
+  emailSubmitBtn.dataset.label = 'Send code';
 
   emailForm.addEventListener('submit', async function (e) {
     e.preventDefault();

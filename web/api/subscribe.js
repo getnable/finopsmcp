@@ -87,7 +87,7 @@ export default async function handler(req) {
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   }
 
@@ -98,7 +98,7 @@ export default async function handler(req) {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return new Response(JSON.stringify({ error: "Invalid email" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   }
 

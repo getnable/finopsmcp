@@ -39,10 +39,10 @@ async function hmacHex(secret, message) {
 }
 
 function b64url(str) {
-  return btoa(str)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  bytes.forEach(b => binary += String.fromCharCode(b));
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function timingSafeEqual(a, b) {
