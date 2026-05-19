@@ -202,7 +202,6 @@
   /* pricing */
   .pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
   .price{padding:36px 32px 36px 0;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:22px;transition:background .18s}
-  .price:not(.feat):hover{background:var(--bg-2)}
   .price:not(:first-child){padding-left:32px}
   .price:last-child{border-right:0;padding-right:0}
   .price .tier{font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--fg-3);text-transform:uppercase}
@@ -217,7 +216,8 @@
   .price .cta{margin-top:auto;padding-top:8px}
   .price .cta a{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--fg);border-bottom:1px solid var(--line)}
   .price .cta a:hover{border-bottom-color:var(--fg)}
-  .price.feat{background:var(--bg-2);margin:0 -1px;border-left:1px solid var(--line);padding-left:32px;padding-right:32px}
+  .price.feat{margin:0 -1px;border-left:1px solid var(--line);padding-left:32px;padding-right:32px}
+  .price:hover{background:var(--bg-2)}
   .price.feat .cta a{color:var(--fg);font-weight:500}
   .price .free-badge{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);border:1px solid var(--line);border-radius:4px;padding:2px 7px;margin-bottom:4px}
   .free-setup-form{padding-top:4px}
