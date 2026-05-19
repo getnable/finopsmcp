@@ -305,6 +305,9 @@ def vault_rotate() -> None:
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
 def main(args: list[str] | None = None) -> None:
+    from .welcome import show_welcome
+    show_welcome()
+
     import argparse
 
     parser = argparse.ArgumentParser(prog="finops setup", description="FinOps MCP provider configuration wizard")
@@ -343,10 +346,7 @@ def main(args: list[str] | None = None) -> None:
     if not hasattr(parsed, "key"):
         parsed.key = ""
 
-    print("\n  ╔═══════════════════════════════════╗")
-    print("  ║   FinOps MCP — Setup Wizard       ║")
-    print("  ╚═══════════════════════════════════╝")
-    print("  All credentials are encrypted in ~/.finops/vault.db\n")
+    print("\n  nable setup  —  credentials encrypted in ~/.finops/vault.db\n")
 
     dispatch = {
         "aws": setup_aws,
