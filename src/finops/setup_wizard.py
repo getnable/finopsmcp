@@ -76,7 +76,7 @@ def setup_aws() -> None:
     else:
         access_key = _prompt("  AWS Access Key ID")
         secret_key = _prompt("  AWS Secret Access Key", secret=True)
-        region = _prompt("  Default region", default="us-east-1")
+        region = _prompt("  Default region (press Enter to keep us-east-1)", default="us-east-1")
         role_arns = _prompt("  Role ARNs for additional accounts (comma-separated, or blank)")
         vault.store("AWS_ACCESS_KEY_ID", access_key)
         vault.store("AWS_SECRET_ACCESS_KEY", secret_key)
@@ -309,6 +309,11 @@ def main(args: list[str] | None = None) -> None:
     show_welcome()
 
     import argparse
+    import logging
+    # Silence noisy third-party loggers during interactive setup
+    logging.getLogger("botocore").setLevel(logging.WARNING)
+    logging.getLogger("boto3").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
     parser = argparse.ArgumentParser(prog="finops setup", description="FinOps MCP provider configuration wizard")
     sub = parser.add_subparsers(dest="cmd")

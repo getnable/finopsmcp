@@ -174,7 +174,7 @@ class Vault:
                 count += 1
             except Exception:
                 log.warning("Vault: could not decrypt %s, skipping", key_name)
-        log.info("Vault: loaded %d credentials into environment", count)
+        log.debug("Vault: loaded %d credentials into environment", count)
         return count
 
     def rotate_key(self, new_key: bytes) -> None:
