@@ -26,7 +26,6 @@ def demo_cost_summary() -> dict:
         "period": {"start": start.isoformat(), "end": end.isoformat()},
         "grand_total_usd": 8421.63,
         "grand_total_formatted": "$8,421.63",
-        "note": "Demo mode: sample data for a typical Series A SaaS startup.",
         "by_provider": {
             "aws": {
                 "total_usd": 7284.17,
@@ -92,7 +91,6 @@ def demo_cost_trends() -> dict:
         months.append(d.strftime("%Y-%m"))
 
     return {
-        "note": "Demo mode: sample data for a typical Series A SaaS startup.",
         "trend": [
             {"month": m, "total_usd": t, "formatted": f"${t:,.2f}"}
             for m, t in zip(months, totals)
@@ -109,7 +107,6 @@ def demo_cost_trends() -> dict:
 
 def demo_anomalies() -> dict:
     return {
-        "note": "Demo mode: sample anomaly data.",
         "anomalies": [
             {
                 "provider": "aws",
@@ -178,13 +175,11 @@ def demo_kubernetes_costs() -> dict:
             {"node": "ip-10-0-2-87.ec2.internal", "instance_type": "m5.2xlarge", "zone": "us-east-1b", "is_spot": True, "monthly_cost": 98.11, "cpu_requested_pct": 44.8, "mem_requested_pct": 38.4, "cpu_allocatable_cores": 8.0, "mem_allocatable_gib": 30.5},
         ],
         "summary": "Cluster: prod-eks-us-east-1 (AWS, 12 nodes) | Total cost: $4,822/month | Estimated waste: $963/month (20% of cluster cost) | Efficiency: 34% CPU, 42% memory | Top namespaces: production: $2,840, data-platform: $1,102, monitoring: $384",
-        "note": "Demo mode: sample data for a typical Series A SaaS EKS cluster.",
     }
 
 
 def demo_rightsizing() -> dict:
     return {
-        "note": "Demo mode: sample rightsizing recommendations.",
         "recommendations": [
             {
                 "provider": "aws",
