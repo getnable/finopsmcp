@@ -361,14 +361,17 @@ def run_doctor(as_json: bool = False) -> int:
 
     if has_failure:
         print("  Status: issues found — see recommendations above")
+        print(f"  Docs:   https://nable.sh/docs")
         print()
         return 1
     elif has_warning:
         print("  Status: warnings only — review above")
+        print(f"  Docs:   https://nable.sh/docs")
         print()
         return 0
     else:
         print("  Status: all checks passed")
+        print(f"  Docs:   https://nable.sh/docs")
         print()
         return 0
 

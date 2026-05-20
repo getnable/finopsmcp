@@ -142,7 +142,7 @@ def setup_aws() -> None:
 
         sts = boto3.client("sts", region_name=region)
         identity = sts.get_caller_identity()
-        _ok(f"Connection verified — account {identity['Account']}")
+        _ok(f"Connection verified: account {identity['Account']}")
 
         # Check Cost Explorer access specifically — this is the core permission
         ce_ok = False
@@ -161,7 +161,7 @@ def setup_aws() -> None:
             err = str(ce_err)
             if "AccessDenied" in err or "AuthFailure" in err:
                 print()
-                _warn("This key is missing ce:GetCostAndUsage — cost queries will fail.")
+                _warn("This key is missing ce:GetCostAndUsage. Cost queries will fail.")
                 print("""
   Add this inline policy to your IAM user or role:
 
@@ -182,7 +182,7 @@ def setup_aws() -> None:
   to generate a full least-privilege CloudFormation template.
 """)
             elif "DataUnavailableException" in err:
-                _warn("Cost Explorer enabled but data not ready yet — AWS takes up to 24h to backfill. Try again tomorrow.")
+                _warn("Cost Explorer enabled but data not ready yet. AWS takes up to 24h to backfill. Try again tomorrow.")
                 ce_ok = True  # credentials work, data just not ready yet
 
         try:
@@ -326,7 +326,7 @@ def setup_sso() -> None:
 
     _ok("SSO configuration stored in vault")
     print(f"""
-  Role map configured: {json.dumps(role_map, indent=4) if role_map else "(none — all SSO users → {default_role})"}
+  Role map configured: {json.dumps(role_map, indent=4) if role_map else "(none: all SSO users → {default_role})"}
 
   Next steps:
     1. Export these env vars to your Vercel project:
@@ -471,6 +471,8 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("together")
     sub.add_parser("cohere")
     sub.add_parser("mistral")
+    sub.add_parser("newrelic")
+    sub.add_parser("pagerduty")
     sub.add_parser("claude")    # configure Claude Desktop MCP entry
 
     iam_p = sub.add_parser("iam-template")
@@ -487,7 +489,7 @@ def main(args: list[str] | None = None) -> None:
     if not hasattr(parsed, "key"):
         parsed.key = ""
 
-    print("\n  nable setup  —  all credentials stay on your machine\n")
+    print("\n  nable setup: all credentials stay on your machine\n")
 
     dispatch = {
         "aws": setup_aws,
@@ -510,6 +512,7 @@ def main(args: list[str] | None = None) -> None:
             ("SNOWFLAKE_ACCOUNT", "Account identifier (e.g. xy12345.us-east-1)", False),
             ("SNOWFLAKE_USER", "Username", False),
             ("SNOWFLAKE_PASSWORD", "Password", True),
+            ("SNOWFLAKE_WAREHOUSE", "Warehouse name (e.g. COMPUTE_WH)", False),
             ("SNOWFLAKE_ROLE", "Role (default: ACCOUNTADMIN)", False),
             ("SNOWFLAKE_CREDIT_PRICE", "Credit price USD (your contract rate, optional)", False),
         ]),
@@ -557,6 +560,13 @@ def main(args: list[str] | None = None) -> None:
         "mistral": lambda: setup_saas_api_key("Mistral AI", [
             ("MISTRAL_API_KEY", "API Key", True),
         ]),
+        "newrelic": lambda: setup_saas_api_key("New Relic", [
+            ("NEW_RELIC_API_KEY", "API Key (NRAK-...)", True),
+            ("NEW_RELIC_ACCOUNT_ID", "Account ID", False),
+        ]),
+        "pagerduty": lambda: setup_saas_api_key("PagerDuty", [
+            ("PAGERDUTY_API_KEY", "API Key", True),
+        ]),
     }
 
     if parsed.cmd == "vault":
@@ -599,7 +609,7 @@ def main(args: list[str] | None = None) -> None:
             for a in result["required_denied"]:
                 print(f"    ✗ {a}")
         if result.get("dangerous_allowed"):
-            print(f"\n  ⚠ Over-provisioned — write permissions detected:")
+            print(f"\n  ⚠ Over-provisioned: write permissions detected:")
             for a in result["dangerous_allowed"]:
                 print(f"    ⚠ {a}")
             print()
@@ -615,7 +625,7 @@ def main(args: list[str] | None = None) -> None:
         dispatch[parsed.cmd]()
     else:
         # Interactive full setup
-        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "together", "cohere", "mistral", "slack", "teams"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "together", "cohere", "mistral", "newrelic", "pagerduty", "slack", "teams"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")
@@ -635,7 +645,8 @@ def main(args: list[str] | None = None) -> None:
     _configure_claude_desktop()
 
     print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'")
-    print("  To add more providers later: finops setup\n")
+    print("  To add more providers later: finops setup")
+    print("  Full docs: https://nable.sh/docs\n")
     _offer_email_signup()
 
     # Fire setup_completed event
@@ -690,12 +701,12 @@ def _offer_email_signup() -> None:
             method="POST",
         )
         urllib.request.urlopen(req, timeout=5)
-        _ok(f"Subscribed — first digest lands Monday.")
+        _ok(f"Subscribed. First digest lands Monday.")
         sentinel.parent.mkdir(parents=True, exist_ok=True)
         sentinel.write_text(f"{email}\n")
     except Exception:
         # Don't block setup if the request fails
-        _ok("Got it — we'll be in touch.")
+        _ok("Got it. We'll be in touch.")
         try:
             sentinel.parent.mkdir(parents=True, exist_ok=True)
             sentinel.write_text(f"{email}\n")

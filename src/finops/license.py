@@ -214,9 +214,9 @@ def validate_key(key: str) -> LicenseStatus:
                 email="",
                 issued=trial_start.isoformat(),
                 message=(
-                    f"Pro trial — {days_remaining} day{'s' if days_remaining != 1 else ''} remaining. "
+                    f"Team trial: {days_remaining} day{'s' if days_remaining != 1 else ''} remaining. "
                     f"All features unlocked. "
-                    f"Upgrade at {_UPGRADE_URL} to keep Pro features after your trial."
+                    f"Upgrade at {_UPGRADE_URL} to keep Team features after your trial."
                 ),
                 days_remaining=days_remaining,
             )
@@ -227,7 +227,7 @@ def validate_key(key: str) -> LicenseStatus:
                 email="",
                 issued=trial_start.isoformat(),
                 message=(
-                    f"Free tier — cost queries, anomaly detection, Slack/Teams alerts, "
+                    f"Free tier: cost queries, anomaly detection, Slack/Teams alerts, "
                     f"rightsizing, PR cost comments, budget enforcement, K8s cost analysis, "
                     f"Helm visibility, efficiency scorecard, scheduled Slack reports, "
                     f"Postgres shared mode, all cloud + SaaS connectors, and more are fully available. "
@@ -280,7 +280,7 @@ def validate_key(key: str) -> LicenseStatus:
         mode=plan,
         email=email,
         issued=issued_str,
-        message=f"Pro license active — {email}, issued {issued_str}.",
+        message=f"Team license active: {email}, issued {issued_str}.",
     )
 
 
@@ -360,7 +360,7 @@ def require_pro(feature: str) -> dict | None:
             f"Slack/Teams alerts, PR cost comments, budgets, K8s analysis, and all connectors. "
             f"Team plan adds: {friendly}, ticket auto-creation (Jira/Linear/GitHub), "
             f"scheduled email reports, commitment purchase recommendations, and org rollup. "
-            f"Subscribe at {_UPGRADE_URL} — $39.99/mo, first month free."
+            f"Subscribe at {_UPGRADE_URL} ($39.99/mo, first month free)."
         ),
         "upgrade_url": _UPGRADE_URL,
         "free_tier_available": True,

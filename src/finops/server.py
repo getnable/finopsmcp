@@ -148,18 +148,18 @@ async def connection_status() -> str:
     lic = get_status()
     if lic.mode == "trial":
         plan_line = (
-            f"Plan: Pro trial — {lic.days_remaining} day{'s' if lic.days_remaining != 1 else ''} remaining. "
-            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Pro features."
+            f"Plan: Team trial: {lic.days_remaining} day{'s' if lic.days_remaining != 1 else ''} remaining. "
+            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Team features."
         )
     elif lic.mode == "free":
         plan_line = (
-            f"Plan: Free — cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
+            f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
             f"PR comments, budgets, K8s analysis, and all connectors included. "
             f"Upgrade at {_UPGRADE_URL} for ticket auto-creation, email reports, "
             f"commitment recommendations, and org rollup ($39.99/mo, first month free)."
         )
     elif lic.mode == "pro":
-        plan_line = f"Plan: Pro — {lic.email}"
+        plan_line = f"Plan: Team: {lic.email}"
     else:
         plan_line = f"Plan: {lic.mode}"
 
@@ -268,7 +268,7 @@ async def list_connected_providers() -> dict:
             result[name] = {
                 "category": category,
                 "configured": configured,
-                "status": "connected" if configured else "not configured — run: uvx finops-mcp setup",
+                "status": "connected" if configured else "not configured: run uvx finops-mcp setup",
             }
 
     # Surface plan status so Claude can proactively mention upgrade when relevant
@@ -278,15 +278,15 @@ async def list_connected_providers() -> dict:
             "plan": "trial",
             "days_remaining": status.days_remaining,
             "note": (
-                f"Pro trial active — {status.days_remaining} day{'s' if status.days_remaining != 1 else ''} remaining. "
-                f"All features unlocked. Subscribe at {_UPGRADE_URL} before trial ends to keep Pro features."
+                f"Team trial active: {status.days_remaining} day{'s' if status.days_remaining != 1 else ''} remaining. "
+                f"All features unlocked. Subscribe at {_UPGRADE_URL} before trial ends to keep Team features."
             ),
         }
     elif status.mode == "free":
         result["_plan"] = {
             "plan": "free",
             "note": (
-                f"Free tier — cost queries, anomaly detection, rightsizing, Slack alerts, "
+                f"Free tier: cost queries, anomaly detection, rightsizing, Slack alerts, "
                 f"and all connectors included. "
                 f"Upgrade at {_UPGRADE_URL} for ticket auto-creation, email reports, "
                 f"commitment recommendations, and org rollup."
@@ -712,7 +712,7 @@ async def get_anomalies(
     if not rows:
         return {
             "anomalies": [],
-            "message": "No active anomalies." if rows is not None else "No snapshot history yet — run daily snapshots first.",
+            "message": "No active anomalies." if rows is not None else "No snapshot history yet. Run daily snapshots first.",
         }
 
     formatted = []
@@ -1340,7 +1340,7 @@ async def fetch_invoice_emails() -> dict:
             if not host:
                 return {
                     "invoices_stored": 0,
-                    "message": "No IMAP mailbox configured. Run: uvx finops-mcp setup invoice",
+                    "message": "No IMAP mailbox configured. Set FINOPS_INVOICE_IMAP_HOST (and FINOPS_INVOICE_IMAP_USER, FINOPS_INVOICE_IMAP_PASSWORD) in your environment, then restart.",
                 }
         return {
             "invoices_stored": len(stored),
@@ -2057,9 +2057,9 @@ async def get_commitment_coverage_by_tag(
         )
 
         if coverage < 30:
-            assessment = f"Low coverage — ${result.tagged_spend_usd:,.0f}/month largely at on-demand rates"
+            assessment = f"Low coverage: ${result.tagged_spend_usd:,.0f}/month largely at on-demand rates"
         elif coverage < 60:
-            assessment = "Moderate coverage — meaningful SP/RI opportunity remains"
+            assessment = "Moderate coverage: meaningful SP/RI opportunity remains"
         else:
             assessment = "Good coverage"
 
@@ -3204,7 +3204,7 @@ def whoami() -> dict:
             "mode": "permissive",
             "role": "admin",
             "note": (
-                "Running in single-user mode — no authentication required. "
+                "Running in single-user mode. No authentication required. "
                 "Set FINOPS_REQUIRE_AUTH=1 and issue API keys to enforce RBAC."
             ),
             "storage": mode,
@@ -3476,6 +3476,26 @@ def main() -> None:
         setup_main(sys.argv[2:])
         return
 
+    # When run directly from a terminal (not piped by Claude Desktop), stdin is a TTY.
+    # The MCP server communicates over stdio — running it interactively makes no sense
+    # and just hangs. Show a helpful message and redirect to the setup wizard instead.
+    if sys.stdin.isatty():
+        print()
+        print("  nable MCP server  —  https://nable.sh")
+        print()
+        print("  This command is called automatically by Claude Desktop.")
+        print("  To configure providers and connect Claude Desktop, run:")
+        print()
+        print("    finops setup")
+        print()
+        print("  Or with uvx:")
+        print()
+        print("    uvx finops-mcp setup")
+        print()
+        print("  Setup guide: https://nable.sh/docs")
+        print()
+        sys.exit(0)
+
     logging.basicConfig(level=logging.INFO)
     # Silence APScheduler's noisy "Adding job tentatively" lines — they fire once per
     # scheduled job at startup and are meaningless to end users.
@@ -3491,17 +3511,17 @@ def main() -> None:
     border = "=" * 56
     if status.mode == "pro":
         print(f"\n{border}")
-        print(f"  nable  ✦  Pro  —  {status.email}")
+        print(f"  nable Team  ({status.email})")
         print(f"{border}\n")
     elif status.mode == "trial":
         print(f"\n{border}")
-        print(f"  nable  —  Free trial  ({status.days_remaining} days remaining)")
-        print("  All Pro features unlocked.")
-        print(f"  Subscribe → {_UPGRADE_URL}")
+        print(f"  nable Team trial  ({status.days_remaining} days remaining)")
+        print("  All Team features unlocked.")
+        print(f"  Subscribe at {_UPGRADE_URL}")
         print(f"{border}\n")
     else:
         print(f"\n{border}")
-        print("  nable  —  Trial expired")
+        print("  nable  Trial expired")
         print(f"  Subscribe to restore full access → {_UPGRADE_URL}")
         print(f"{border}\n")
 
@@ -3653,13 +3673,13 @@ async def get_llm_unit_economics(
             cpm = round(total / metric_count * 1000, 4)
             out["cost_per_1000"] = cpm
             if cpm < 0.10:
-                out["benchmark"] = "Excellent — under $0.10 per 1,000 units"
+                out["benchmark"] = "Excellent: under $0.10 per 1,000 units"
             elif cpm < 0.50:
-                out["benchmark"] = "Good — under $0.50 per 1,000 units"
+                out["benchmark"] = "Good: under $0.50 per 1,000 units"
             elif cpm < 2.00:
-                out["benchmark"] = "Moderate — consider model optimisation"
+                out["benchmark"] = "Moderate: consider model optimisation"
             else:
-                out["benchmark"] = "High — review model selection and prompt efficiency"
+                out["benchmark"] = "High: review model selection and prompt efficiency"
         else:
             out["next_step"] = (
                 f"Provide metric_count (how many {metric_name}s in this period) "

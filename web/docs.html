@@ -205,26 +205,17 @@
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">1</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install from PyPI</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install and run the setup wizard</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">pip install</span> finops-mcp</div>
+              <div class="code-block p-4"><span class="cmd">pip install</span> finops-mcp<br/><span class="cmd">finops setup</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">On Anaconda? Use <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp setup</code> instead — it runs in an isolated env and skips pip entirely.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">Note the hyphen: <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops-mcp</code>, not <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops mcp</code>. The setup wizard connects your providers and writes the Claude Desktop config automatically.</p>
+            <p class="text-xs mt-1" style="color:var(--muted)">On Anaconda? Skip pip and run: <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp setup</code></p>
           </div>
         </div>
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">2</div>
-          <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Run the setup wizard</p>
-            <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">finops setup</span><br/><span class="cm"># Walks through each provider interactively — skip any you don't need</span></div>
-              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-            </div>
-          </div>
-        </div>
-        <div class="flex items-start gap-3">
-          <div class="step-num mt-0.5">3</div>
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Check your setup</p>
             <div class="code-wrap">
@@ -234,7 +225,7 @@
           </div>
         </div>
         <div class="flex items-start gap-3">
-          <div class="step-num mt-0.5">4</div>
+          <div class="step-num mt-0.5">3</div>
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Restart Claude Desktop and ask</p>
             <div class="card p-4" style="background:var(--surface2)">
@@ -271,6 +262,7 @@
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Open your Claude Desktop config file.</p>
             <p class="text-sm mb-2" style="color:var(--muted)">On Mac: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">~/Library/Application Support/Claude/claude_desktop_config.json</code></p>
+            <p class="text-sm mb-2" style="color:var(--muted)">On Windows: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">%APPDATA%\Claude\claude_desktop_config.json</code></p>
             <p class="text-sm mb-2" style="color:var(--muted)">Add the key to the <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">env</code> block for the finops server:</p>
             <div class="code-block p-4 text-xs">
               <span style="color:#c1bdaf">"env"</span>: {<br/>
@@ -515,8 +507,8 @@
       <div class="card p-5">
         <div class="code-block p-3 text-xs">
           <span class="env-key">DATADOG_API_KEY</span>=<span class="env-val">your-api-key</span><br/>
-          <span class="env-key">DD_APP_KEY</span>=<span class="env-val">your-app-key</span><br/>
-          <span class="env-key">DD_SITE</span>=<span class="env-val">datadoghq.com</span> &nbsp;<span style="color:var(--dim)"># or datadoghq.eu</span>
+          <span class="env-key">DATADOG_APP_KEY</span>=<span class="env-val">your-app-key</span><br/>
+          <span class="env-key">DATADOG_SITE</span>=<span class="env-val">datadoghq.com</span> &nbsp;<span style="color:var(--dim)"># or datadoghq.eu</span>
         </div>
       </div>
     </div>
@@ -1214,9 +1206,12 @@
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GCP_PROJECT_ID</td><td class="px-4 py-2.5" style="color:var(--muted)">GCP</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GCP_BIGQUERY_DATASET</td><td class="px-4 py-2.5" style="color:var(--muted)">GCP</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DATADOG_API_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Datadog</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
-            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DD_APP_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Datadog</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
-            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DD_SITE</td><td class="px-4 py-2.5" style="color:var(--muted)">Datadog</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DATADOG_APP_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Datadog</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DATADOG_SITE</td><td class="px-4 py-2.5" style="color:var(--muted)">Datadog</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_ACCOUNT</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_USER</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_PASSWORD</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_WAREHOUSE</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_CREDIT_PRICE</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GITHUB_TOKEN</td><td class="px-4 py-2.5" style="color:var(--muted)">GitHub</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">STRIPE_SECRET_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Stripe</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>

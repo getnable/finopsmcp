@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.11"
+version = "0.8.12"
 description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
 readme = "README.md"
 license = { text = "Elastic License 2.0" }
@@ -87,6 +87,11 @@ finops-slack      = "finops.slack_bot.app:main"
 finops-pr-webhook = "finops.pr_comments.webhook:main"
 finops-doctor     = "finops.doctor:main"
 finops-estimate   = "finops.connectors.terraform_estimate:main"
+
+[project.urls]
+Homepage      = "https://nable.sh"
+Documentation = "https://nable.sh/docs"
+"Bug Tracker" = "https://github.com/chaandannn/finopsmcp/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/finops"]
