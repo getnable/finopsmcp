@@ -321,10 +321,6 @@ async def get_cost_summary(
         - "What did we spend on SaaS tools this quarter?"
         - "Give me an AWS cost summary for January"
     """
-    from .demo import is_demo, demo_cost_summary
-    if is_demo():
-        return demo_cost_summary()
-
     sd, ed = _default_dates()
     if start_date:
         sd = date.fromisoformat(start_date)
@@ -342,6 +338,9 @@ async def get_cost_summary(
 
     targets = await _active(pool)
     if not targets:
+        from .demo import is_demo, demo_cost_summary
+        if is_demo():
+            return demo_cost_summary()
         return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect a cloud provider, then restart your AI client."}
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed, granularity)
@@ -382,31 +381,6 @@ async def get_costs_by_service(
         - "How much are we paying for GitHub Actions?"
         - "Show me all Datadog product costs"
     """
-    from .demo import is_demo, demo_cost_summary
-    if is_demo():
-        ds = demo_cost_summary()
-        ranked = sorted(
-            [
-                {
-                    "service": svc,
-                    "total_usd": round(amt, 4),
-                    "total_formatted": _fmt_usd(amt),
-                    "by_provider": {"demo": round(amt, 4)},
-                }
-                for svc, amt in ds["grand_by_service"].items()
-            ],
-            key=lambda x: -x["total_usd"],
-        )
-        if service_filter:
-            ranked = [s for s in ranked if service_filter.lower() in s["service"].lower()]
-        return {
-            "period": ds["period"],
-            "filter": service_filter,
-            "services": ranked,
-            "total_usd": round(sum(s["total_usd"] for s in ranked), 4),
-            "note": ds["note"],
-        }
-
     sd, ed = _default_dates()
     if start_date:
         sd = date.fromisoformat(start_date)
@@ -424,6 +398,30 @@ async def get_costs_by_service(
 
     targets = await _active(pool)
     if not targets:
+        from .demo import is_demo, demo_cost_summary
+        if is_demo():
+            ds = demo_cost_summary()
+            ranked = sorted(
+                [
+                    {
+                        "service": svc,
+                        "total_usd": round(amt, 4),
+                        "total_formatted": _fmt_usd(amt),
+                        "by_provider": {"demo": round(amt, 4)},
+                    }
+                    for svc, amt in ds["grand_by_service"].items()
+                ],
+                key=lambda x: -x["total_usd"],
+            )
+            if service_filter:
+                ranked = [s for s in ranked if service_filter.lower() in s["service"].lower()]
+            return {
+                "period": ds["period"],
+                "filter": service_filter,
+                "services": ranked,
+                "total_usd": round(sum(s["total_usd"] for s in ranked), 4),
+                "note": ds["note"],
+            }
         return {"error": "No providers configured."}
 
     combined: dict[str, dict[str, float]] = {}
@@ -596,10 +594,6 @@ async def get_cost_trends(
         - "Show daily cloud costs for the last 2 weeks"
         - "What did we spend each month this quarter?"
     """
-    from .demo import is_demo, demo_cost_trends
-    if is_demo():
-        return demo_cost_trends()
-
     end = date.today()
     start = end - timedelta(days=days)
 
@@ -609,6 +603,9 @@ async def get_cost_trends(
 
     targets = await _active(pool)
     if not targets:
+        from .demo import is_demo, demo_cost_trends
+        if is_demo():
+            return demo_cost_trends()
         return {"error": "No providers configured."}
 
     grand_total, by_provider, _ = await _gather_costs(targets, start, end, granularity)
