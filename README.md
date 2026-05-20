@@ -2,7 +2,7 @@
 
 **Connect Claude to your real AWS, Azure, GCP, and SaaS billing data. Ask questions in plain English. Get answers in seconds.**
 
-<!-- TODO: add animated GIF of Claude answering a cost question here for higher PyPI conversion -->
+![nable in Claude Desktop](docs/claude-cost-answer.png)
 
 ```
 User: Just downloaded nable: What's our cloud spend this month?
@@ -27,7 +27,6 @@ Top AWS services:
 Most spend is concentrated in us-east-1 ($5,841 of the $7,284 AWS total).
 ```
 
-<!-- screenshot: docs/claude-cost-answer.png -->
 
 ---
 
