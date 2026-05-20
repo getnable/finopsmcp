@@ -91,6 +91,28 @@ def _node_monthly_cost(instance_type: str, provider: str = "aws") -> float:
     return _EC2_MONTHLY.get(instance_type, 0.0)
 
 
+def _fargate_pod_monthly_cost(cpu_cores: float, mem_gib: float) -> float:
+    """
+    Compute the monthly cost of an AWS Fargate pod from its resource requests.
+
+    AWS Fargate pricing (us-east-1):
+      $0.04048 per vCPU per hour
+      $0.004445 per GB per hour
+    Monthly = (cpu * 0.04048 + mem_gib * 0.004445) * 730
+    """
+    hourly = cpu_cores * 0.04048 + mem_gib * 0.004445
+    return round(hourly * 730, 4)
+
+
+def _is_fargate_pod(pod_labels: dict[str, str], node_name: str) -> bool:
+    """Return True if this pod runs on AWS Fargate (no regular node)."""
+    if pod_labels.get("eks.amazonaws.com/compute-type") == "fargate":
+        return True
+    if node_name.startswith("fargate-"):
+        return True
+    return False
+
+
 def _parse_cpu(cpu_str: str) -> float:
     """Parse k8s CPU string → float cores. '500m' → 0.5, '2' → 2.0"""
     if not cpu_str:
@@ -330,10 +352,15 @@ class KubernetesConnector:
                     mem_req += _parse_mem_gib(req.get("memory", "0"))
                     mem_lim += _parse_mem_gib(lim.get("memory", "0"))
 
+            pod_labels = dict(meta.labels or {})
+            node_name = spec.node_name or ""
+            # Fargate pods may have a node name like "fargate-ip-..." or the
+            # compute-type label set; preserve the node_name so callers can
+            # distinguish Fargate pods from unscheduled (Pending) pods.
             pods.append(PodInfo(
                 name=meta.name,
                 namespace=meta.namespace,
-                node_name=spec.node_name or "",
+                node_name=node_name,
                 phase=phase,
                 owner_kind=owner_kind,
                 owner_name=owner_name,
@@ -341,7 +368,7 @@ class KubernetesConnector:
                 cpu_limit=cpu_lim,
                 mem_request=mem_req,
                 mem_limit=mem_lim,
-                labels=dict(meta.labels or {}),
+                labels=pod_labels,
                 containers=container_count,
             ))
         return pods
@@ -405,6 +432,15 @@ class KubernetesConnector:
         for pod in pods:
             if pod.phase not in ("Running", "Pending"):
                 continue
+
+            # Fargate pods: priced directly per vCPU/GB — no node allocation needed
+            if _is_fargate_pod(pod.labels, pod.node_name):
+                if pod.cpu_request > 0 or pod.mem_request > 0:
+                    pod_costs[pod.name] = _fargate_pod_monthly_cost(
+                        pod.cpu_request, pod.mem_request
+                    )
+                continue
+
             node = node_map.get(pod.node_name)
             if not node or node.monthly_cost == 0:
                 continue

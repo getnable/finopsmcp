@@ -141,6 +141,47 @@ def demo_anomalies() -> dict:
     }
 
 
+def demo_kubernetes_costs() -> dict:
+    return {
+        "cluster": "prod-eks-us-east-1",
+        "provider": "aws",
+        "node_count": 12,
+        "pod_count": 87,
+        "total_monthly_cost_usd": 4821.60,
+        "pvc_storage_cost_usd": 96.00,
+        "wasted_monthly_cost_usd": 963.20,
+        "waste_pct": 20.0,
+        "cpu_efficiency_pct": 34.2,
+        "mem_efficiency_pct": 41.8,
+        "cost_by_namespace": {
+            "production": 2840.10,
+            "data-platform": 1102.40,
+            "monitoring": 384.20,
+            "staging": 310.50,
+            "kube-system": 184.40,
+        },
+        "top_workloads": [
+            {"namespace": "production", "workload": "Deployment/api-server", "pods": 6, "monthly_cost_usd": 842.40, "wasted_usd": 124.80, "cpu_efficiency_pct": 38.2, "mem_efficiency_pct": 52.1, "labels": {"team": "platform", "env": "prod"}},
+            {"namespace": "production", "workload": "Deployment/worker-pool", "pods": 8, "monthly_cost_usd": 724.80, "wasted_usd": 210.40, "cpu_efficiency_pct": 28.4, "mem_efficiency_pct": 35.6, "labels": {"team": "payments", "env": "prod"}},
+            {"namespace": "data-platform", "workload": "StatefulSet/kafka", "pods": 3, "monthly_cost_usd": 561.60, "wasted_usd": 0, "cpu_efficiency_pct": 78.4, "mem_efficiency_pct": 82.1, "labels": {"team": "data", "env": "prod"}},
+            {"namespace": "production", "workload": "Deployment/auth-service", "pods": 3, "monthly_cost_usd": 421.20, "wasted_usd": 186.40, "cpu_efficiency_pct": 18.2, "mem_efficiency_pct": 22.4, "labels": {"team": "platform", "env": "prod"}},
+            {"namespace": "data-platform", "workload": "Deployment/spark-driver", "pods": 2, "monthly_cost_usd": 384.00, "wasted_usd": 84.20, "cpu_efficiency_pct": 61.2, "mem_efficiency_pct": 54.8, "labels": {"team": "data", "env": "prod"}},
+        ],
+        "rightsizing_opportunities": [
+            {"workload": "production/auth-service", "kind": "Deployment", "monthly_cost": 421.20, "potential_savings_usd": 130.48, "issues": ["CPU requests 2.00 cores but only using 0.36 (18%) -- consider reducing requests to 0.47 cores", "Memory requests 4.0 GiB but only using 0.9 GiB (22%) -- consider reducing to 1.2 GiB"], "labels": {"team": "platform"}},
+            {"workload": "production/worker-pool", "kind": "Deployment", "monthly_cost": 724.80, "potential_savings_usd": 147.28, "issues": ["CPU requests 4.00 cores but only using 1.14 (28%) -- consider reducing requests to 1.48 cores"], "labels": {"team": "payments"}},
+            {"workload": "staging/frontend", "kind": "Deployment", "monthly_cost": 186.40, "potential_savings_usd": 84.24, "issues": ["CPU requests 2.00 cores but only using 0.21 (11%) -- consider reducing requests to 0.27 cores", "Memory requests 2.0 GiB but only using 0.3 GiB (14%) -- consider reducing to 0.4 GiB"], "labels": {"team": "frontend"}},
+        ],
+        "total_recoverable_usd": 361.76,
+        "node_utilization": [
+            {"node": "ip-10-0-1-142.ec2.internal", "instance_type": "m5.2xlarge", "zone": "us-east-1a", "is_spot": False, "monthly_cost": 280.32, "cpu_requested_pct": 62.4, "mem_requested_pct": 71.2, "cpu_allocatable_cores": 8.0, "mem_allocatable_gib": 30.5},
+            {"node": "ip-10-0-2-87.ec2.internal", "instance_type": "m5.2xlarge", "zone": "us-east-1b", "is_spot": True, "monthly_cost": 98.11, "cpu_requested_pct": 44.8, "mem_requested_pct": 38.4, "cpu_allocatable_cores": 8.0, "mem_allocatable_gib": 30.5},
+        ],
+        "summary": "Cluster: prod-eks-us-east-1 (AWS, 12 nodes) | Total cost: $4,822/month | Estimated waste: $963/month (20% of cluster cost) | Efficiency: 34% CPU, 42% memory | Top namespaces: production: $2,840, data-platform: $1,102, monitoring: $384",
+        "note": "Demo mode: sample data for a typical Series A SaaS EKS cluster.",
+    }
+
+
 def demo_rightsizing() -> dict:
     return {
         "note": "Demo mode: sample rightsizing recommendations.",

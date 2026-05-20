@@ -1117,7 +1117,55 @@ async def get_commitment_analysis() -> dict:
         if analysis is None:
             return {"error": "AWS not configured. Run: uvx finops-mcp setup aws"}
         result = commitment_summary(analysis)
-        # Strip purchase recommendations on free tier — coverage/utilization/waste stays free
+
+        # Add actionable coverage gap analysis
+        sp_cov = analysis.savings_plan_coverage_pct
+        ri_cov = analysis.ri_coverage_pct
+        combined_coverage = (sp_cov + ri_cov) / 2 if (sp_cov + ri_cov) > 0 else max(sp_cov, ri_cov)
+        coverage_target = 80.0
+        coverage_gap_pct = max(0.0, coverage_target - combined_coverage)
+
+        # Monthly uncovered on-demand (3-month average)
+        monthly_uncovered = analysis.uncovered_on_demand_usd / 3 if analysis.uncovered_on_demand_usd > 0 else 0.0
+
+        actionable = {
+            "combined_coverage_pct": round(combined_coverage, 1),
+            "coverage_target_pct": coverage_target,
+            "coverage_gap_pct": round(coverage_gap_pct, 1),
+            "monthly_uncovered_on_demand_usd": round(monthly_uncovered, 2),
+        }
+
+        # "If you bought $X more in commitments" projection
+        if monthly_uncovered > 100:
+            # Compute SP covers eligible spend at ~34% discount (1yr no-upfront)
+            _COMPUTE_SP_DISCOUNT_RATE = 0.34
+            # Covering the full gap would require this hourly commitment
+            additional_commitment = monthly_uncovered * 0.5  # cover 50% of gap as a sensible step
+            projected_savings = additional_commitment * _COMPUTE_SP_DISCOUNT_RATE
+            actionable["if_you_bought_more"] = {
+                "description": (
+                    f"Buying a 1-year no-upfront Compute Savings Plan at "
+                    f"${additional_commitment:,.0f}/mo hourly commitment would cover "
+                    f"~50% of your uncovered on-demand spend and save "
+                    f"~${projected_savings:,.0f}/mo (${projected_savings * 12:,.0f}/yr)."
+                ),
+                "additional_monthly_commitment_usd": round(additional_commitment, 2),
+                "projected_monthly_savings_usd": round(projected_savings, 2),
+                "projected_annual_savings_usd": round(projected_savings * 12, 2),
+            }
+
+        # RI conversion opportunities (under-utilized RIs in wrong family)
+        if analysis.ri_utilization_pct < 75 and analysis.ri_unused_usd > 50:
+            actionable["ri_conversion_opportunity"] = (
+                f"Your RIs are {analysis.ri_utilization_pct:.0f}% utilized, wasting "
+                f"${analysis.ri_unused_usd:,.0f}/mo. Convert unused RI capacity to a "
+                f"different instance size within the same family (e.g. 2x m5.large -> 1x m5.xlarge) "
+                f"via the AWS console, or list on the RI Marketplace."
+            )
+
+        result["actionable_analysis"] = actionable
+
+        # Strip purchase recommendations on free tier -- coverage/utilization/waste stays free
         if require_pro("commitment_recommendations") is not None:
             result["recommendations"] = [
                 r for r in result.get("recommendations", []) if r.get("type") == "warning"
@@ -1570,18 +1618,23 @@ async def cleanup_idle_resources(
     dry_run: bool = True,
 ) -> dict:
     """
-    Delete or release idle AWS resources. ALWAYS confirm with the user before
-    setting dry_run=False. Protected resources are never touched.
+    Delete or release idle AWS resources. This is a REAL ACTION that terminates
+    EC2 instances, releases EBS volumes, and frees Elastic IPs. Always runs in
+    dry_run=True mode first so you can review what will be deleted. Requires
+    explicit confirmation before setting dry_run=False.
 
-    Requires FINOPS_CLEANUP_ENABLED=true in the environment (opt-in).
-    Every action is written to ~/.finops-mcp/cleanup_audit.jsonl.
+    Requires FINOPS_CLEANUP_ENABLED=true in the environment (opt-in safety gate).
+    Every action is written to ~/.finops-mcp/cleanup_audit.jsonl for audit.
 
     dry_run=True (default): shows what WOULD be deleted, nothing is changed.
     dry_run=False: actually deletes. Only set this after explicit user confirmation.
 
     Examples:
+        - "Clean up idle EC2 instances and unattached EBS volumes"
+        - "Show me what I can safely delete to save money"
+        - "Terminate the stopped instances that have been idle for 2 weeks"
         - "Show me what would happen if I cleaned up unattached EBS volumes"
-        - "Delete the EBS volumes we just listed" (then confirm → dry_run=False)
+        - "Delete the EBS volumes we just listed" (then confirm: dry_run=False)
         - "Clean up all unused Elastic IPs in us-east-1"
     """
     if err := require_role("admin"):
@@ -1643,12 +1696,42 @@ async def get_effective_rate_profile() -> dict:
 
 
 @mcp.tool()
+async def list_kubernetes_contexts() -> dict:
+    """
+    List all Kubernetes contexts available in the local kubeconfig, and show
+    which one is currently active. Use this to discover what to pass as the
+    'context' argument to get_kubernetes_costs.
+
+    Examples:
+        - "What Kubernetes clusters do I have?"
+        - "List my kubeconfig contexts"
+        - "Which K8s context is currently active?"
+    """
+    try:
+        from kubernetes import config as k8s_config  # type: ignore
+    except ImportError:
+        return {"error": "kubernetes package not installed. Run: pip install finops-mcp[kubernetes]"}
+
+    try:
+        current_ctx, all_contexts = k8s_config.list_kube_config_contexts()
+        names = [c["name"] for c in (all_contexts or [])]
+        current_name = (current_ctx or {}).get("name", "")
+        return {
+            "current_context": current_name,
+            "available_contexts": names,
+            "count": len(names),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def get_kubernetes_costs(
     context: str | None = None,
     namespace: str | None = None,
 ) -> dict:
     """
-    Full Kubernetes cost breakdown — node costs attributed to namespaces,
+    Full Kubernetes cost breakdown -- node costs attributed to namespaces,
     workloads, and labels. Detects wasted spend and rightsizing opportunities.
 
     Requires: pip install finops-mcp[kubernetes]
@@ -1665,6 +1748,10 @@ async def get_kubernetes_costs(
         from .connectors.kubernetes import KubernetesConnector
     except ImportError:
         return {"error": "kubernetes package not installed. Run: pip install finops-mcp[kubernetes]"}
+
+    from .demo import is_demo, demo_kubernetes_costs
+    if is_demo():
+        return demo_kubernetes_costs()
 
     try:
         connector = KubernetesConnector()
