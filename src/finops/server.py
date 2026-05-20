@@ -1064,7 +1064,7 @@ async def get_commitment_analysis() -> dict:
     """
     Analyze Reserved Instance and Savings Plan coverage, utilization, and waste.
     Coverage %, utilization, and waste figures are free.
-    Purchase recommendations with $ amounts require Pro (commitment_recommendations).
+    Purchase recommendations with $ amounts require a Team plan (commitment_recommendations).
 
     Examples:
         - "How well are we using our Reserved Instances?"
@@ -1084,7 +1084,7 @@ async def get_commitment_analysis() -> dict:
                 r for r in result.get("recommendations", []) if r.get("type") == "warning"
             ]
             result["recommendations_note"] = (
-                "Purchase recommendations ($ amounts, ROI) require Pro. "
+                "Purchase recommendations ($ amounts, ROI) require a Team plan. "
                 f"Upgrade at {_UPGRADE_URL}"
             )
         return result
@@ -2066,8 +2066,8 @@ async def get_commitment_coverage_by_tag(
         out["summary"] = (
             f"{tag_key}={tag_value}: ~{coverage:.0f}% commitment coverage "
             f"({result.confidence} confidence). {assessment}. "
-            + (f"Tagging is {tag_coverage_pct:.0f}% complete — "
-               f"improving to 90%+ will give a high-confidence number."
+            + (f"Tagging is {tag_coverage_pct:.0f}% complete. "
+               f"Improving to 90%+ will give a high-confidence number."
                if tag_coverage_pct < 90 else "")
         )
 
@@ -2172,7 +2172,7 @@ async def get_helm_release_costs(
                 for r in orphaned
             ]
 
-        lines = [f"{len(releases)} Helm releases — ${result['total_managed_cost_usd']:,.0f}/month managed"]
+        lines = [f"{len(releases)} Helm releases: ${result['total_managed_cost_usd']:,.0f}/month managed"]
         if unmanaged_cost > 10:
             lines.append(f"${unmanaged_cost:,.0f}/month in workloads not managed by Helm")
         if orphaned:
@@ -2293,7 +2293,7 @@ async def compare_kubernetes_clusters() -> dict:
             "total_monthly_cost_usd": round(total, 2),
             "total_wasted_usd": round(total_waste, 2),
             "summary": (
-                f"{len(reports)} cluster(s) — ${total:,.0f}/month total, "
+                f"{len(reports)} cluster(s): ${total:,.0f}/month total, "
                 f"${total_waste:,.0f}/month estimated waste"
             ),
         }
@@ -2358,7 +2358,7 @@ async def subscribe_to_report(
         email_note = None
         if email_addresses and require_pro("scheduled_email_digests") is not None:
             email_note = (
-                f"Email delivery requires Pro. The subscription will be created with Slack "
+                f"Email delivery requires a Team plan. The subscription will be created with Slack "
                 f"delivery only. Upgrade at {_UPGRADE_URL} to enable email delivery."
             )
             email_addresses = []  # clear emails on free tier
@@ -2652,7 +2652,7 @@ async def list_org_accounts() -> dict:
     """
     List all AWS Organization member accounts, discovering them via the
     AWS Organizations API. Syncs account metadata to local DB for future queries.
-    Account listing is free — detailed cost rollup across accounts requires Pro.
+    Account listing is free. Detailed cost rollup across accounts requires a Team plan.
 
     Requires: AWS credentials with organizations:ListAccounts permission
     (management account or delegated admin).
@@ -2684,9 +2684,9 @@ async def list_org_accounts() -> dict:
 @mcp.tool()
 async def get_org_cost_summary(days_back: int = 30) -> dict:
     """
-    Get a cost rollup across all AWS Organization accounts — total spend,
+    Get a cost rollup across all AWS Organization accounts: total spend,
     per-account breakdown sorted by spend, and top services per account.
-    Requires Pro (org_reports).
+    Requires a Team plan (org_reports).
 
     Args:
         days_back: Look-back period in days (default 30)
@@ -2710,7 +2710,7 @@ async def get_org_cost_summary(days_back: int = 30) -> dict:
 async def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dict:
     """
     Show the highest-spending AWS accounts in the organization.
-    Requires Pro (org_reports).
+    Requires a Team plan (org_reports).
 
     Args:
         limit: Number of top accounts to return (default 10)
@@ -2734,9 +2734,9 @@ async def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dic
 @mcp.tool()
 async def get_account_anomalies(days_back: int = 30) -> dict:
     """
-    Detect accounts with unusual spend changes versus their prior period —
-    accounts that significantly spiked or dropped in cost.
-    Requires Pro (org_reports).
+    Detect accounts with unusual spend changes versus their prior period.
+    Returns accounts that significantly spiked or dropped in cost.
+    Requires a Team plan (org_reports).
 
     Args:
         days_back: Look-back period to compare (default 30 vs prior 30)
@@ -2768,7 +2768,7 @@ async def get_ou_cost_breakdown(days_back: int = 30) -> dict:
     """
     Break costs down by AWS Organizational Unit (OU). When OUs map to
     departments or teams, this gives you a clean chargeback report.
-    Requires Pro (org_reports).
+    Requires a Team plan (org_reports).
 
     Args:
         days_back: Look-back period in days (default 30)
@@ -3390,8 +3390,8 @@ async def open_terraform_tag_pr(
     if not modified_files:
         return {
             "message": (
-                "No .tf files were modified. Violations may not be locatable in source — "
-                "ensure tf_dir contains .tf files with matching resource declarations."
+                "No .tf files were modified. Violations may not be locatable in source. "
+                "Ensure tf_dir contains .tf files with matching resource declarations."
             ),
             "pr_url": None,
         }
@@ -3421,7 +3421,7 @@ async def open_terraform_tag_pr(
 
     # 3. Open GitHub PR
     violation_lines = "\n".join(
-        f"- `{v['address']}` — missing: {', '.join(v['missing_tags'])}"
+        f"- `{v['address']}` - missing: {', '.join(v['missing_tags'])}"
         for v in violations[:30]
     )
     if len(violations) > 30:
@@ -3481,7 +3481,7 @@ def main() -> None:
     # and just hangs. Show a helpful message and redirect to the setup wizard instead.
     if sys.stdin.isatty():
         print()
-        print("  nable MCP server  —  https://nable.sh")
+        print("  nable MCP server  |  https://nable.sh")
         print()
         print("  This command is called automatically by Claude Desktop.")
         print("  To configure providers and connect Claude Desktop, run:")
@@ -3521,8 +3521,9 @@ def main() -> None:
         print(f"{border}\n")
     else:
         print(f"\n{border}")
-        print("  nable  Trial expired")
-        print(f"  Subscribe to restore full access → {_UPGRADE_URL}")
+        print("  nable  (free tier)")
+        print("  Cost queries, anomaly detection, Slack alerts, and all connectors are free.")
+        print(f"  Upgrade for ticket auto-creation and scheduled digests: {_UPGRADE_URL}")
         print(f"{border}\n")
 
     # Warn if running in Postgres mode without auth enforcement

@@ -333,7 +333,7 @@ def setup_sso() -> None:
          OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
          OIDC_REDIRECT_URI, OIDC_GROUPS_CLAIM, OIDC_ROLE_MAP, OIDC_DEFAULT_ROLE
     2. Test the flow: https://nable.sh/api/sso/oidc-start
-    3. Users in your IdP will automatically receive a Pro license key on first login.
+    3. Users in your IdP will automatically receive a Team license key on first login.
 
   For Azure AD: set OIDC_GROUPS_CLAIM=roles (not "groups") and assign app roles in the manifest.
   For Okta: set OIDC_GROUPS_CLAIM=groups and add the Groups claim to your authorization server.

@@ -155,6 +155,7 @@
       <a href="#vercel"        class="nav-link">Vercel</a>
       <a href="#pagerduty"     class="nav-link">PagerDuty</a>
       <a href="#newrelic"      class="nav-link">New Relic</a>
+      <a href="#langfuse"      class="nav-link">Langfuse</a>
       <a href="#invoices"      class="nav-link">Invoice emails</a>
 
       <div class="nav-group">Alerts & automation</div>
@@ -187,7 +188,7 @@
     <div id="quickstart" class="section-anchor">
       <div class="badge mb-4">Getting started</div>
       <h1 class="text-3xl font-black mb-3" style="color:var(--text)">Get up and running in 5 minutes</h1>
-      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">Install nable, connect a provider, then ask Claude about your cloud costs in plain English. You don't need all 18 connectors — start with the one you care about most.</p>
+      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">Install nable, connect a provider, then ask Claude about your cloud costs in plain English. You don't need all 18 connectors. Start with the one you care about most.</p>
 
       <div class="trial-banner mb-8">
         <span class="trial-badge">30-day free trial</span>
@@ -538,7 +539,8 @@
           <span class="env-key">SNOWFLAKE_USER</span>=<span class="env-val">finops_user</span><br/>
           <span class="env-key">SNOWFLAKE_PASSWORD</span>=<span class="env-val">your-password</span><br/>
           <span class="env-key">SNOWFLAKE_WAREHOUSE</span>=<span class="env-val">COMPUTE_WH</span><br/>
-          <span class="env-key">SNOWFLAKE_CREDIT_PRICE</span>=<span class="env-val">3.00</span> &nbsp;<span style="color:var(--dim)"># your contract rate per credit</span>
+          <span class="env-key">SNOWFLAKE_CREDIT_PRICE</span>=<span class="env-val">3.00</span> &nbsp;<span style="color:var(--dim)"># your contract rate per credit</span><br/>
+          <span class="env-key">SNOWFLAKE_ROLE</span>=<span class="env-val">ACCOUNTADMIN</span> &nbsp;<span style="color:var(--dim)"># optional, defaults to ACCOUNTADMIN</span>
         </div>
       </div>
     </div>
@@ -657,7 +659,7 @@
         Vercel
       </h2>
       <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Invoice API, requires a Vercel Enterprise plan. Returns invoices with line items. Returns a descriptive message if no invoice data is available.</p>
-      <div class="warn-box mb-4">Invoice data is only available on <strong>Enterprise plans</strong>. Pro/Hobby plans won't return billing data via the API.</div>
+      <div class="warn-box mb-4">Invoice data is only available on <strong>Enterprise plans</strong>. Vercel Pro or Hobby plans won't return billing data via the API.</div>
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Vercel Dashboard → Settings → Tokens → Create</strong>. Scope: Full Account.</p></div></div>
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup vercel</span></div></div></div>
@@ -708,6 +710,28 @@
           <span class="env-key">NEW_RELIC_API_KEY</span>=<span class="env-val">NRAK-...</span><br/>
           <span class="env-key">NEW_RELIC_ACCOUNT_ID</span>=<span class="env-val">1234567</span><br/>
           <span class="env-key">NEW_RELIC_INGEST_PRICE_PER_GB</span>=<span class="env-val">0.35</span> &nbsp;<span style="color:var(--dim)"># your contract rate</span>
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- Langfuse -->
+    <div id="langfuse" class="section-anchor">
+      <h2 class="section-title">
+        <span class="pbadge">lf</span>
+        Langfuse
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Tracks LLM observability costs via the Langfuse Daily Metrics API. Returns model cost, token usage, and trace volume so you can see how much each model and project is actually costing you.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Go to <strong>Langfuse → Settings → API Keys</strong> and create a new key pair. Copy the public and secret keys.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup langfuse</span></div></div></div>
+      </div>
+      <div class="card p-5">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">LANGFUSE_PUBLIC_KEY</span>=<span class="env-val">pk-lf-...</span><br/>
+          <span class="env-key">LANGFUSE_SECRET_KEY</span>=<span class="env-val">sk-lf-...</span><br/>
+          <span class="env-key">LANGFUSE_HOST</span>=<span class="env-val">https://cloud.langfuse.com</span> &nbsp;<span style="color:var(--dim)"># optional, defaults to cloud.langfuse.com</span>
         </div>
       </div>
     </div>
@@ -1084,17 +1108,17 @@
         </h3>
         <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">
           Savings Plans are purchased at the payer account level. By default there is no way to know which team
-          benefited from a discount — your bill shows one blended rate and tools like CloudHealth, Apptio, and
+          benefited from a discount. Your bill shows one blended rate and tools like CloudHealth, Apptio, and
           AWS Cost Explorer all approximate the allocation. nable reads two fields from CUR that most tools ignore:
         </p>
         <div class="card p-4 mb-4" style="font-family:var(--mono);font-size:12px;line-height:2;color:var(--fg-2);">
-          <div><span style="color:var(--fg)">savingsplan_savings_plan_effective_cost</span> &nbsp;— what the resource actually cost under SP rates</div>
-          <div><span style="color:var(--fg)">pricing_public_on_demand_cost</span> &nbsp;— what it would have cost on-demand</div>
+          <div><span style="color:var(--fg)">savingsplan_savings_plan_effective_cost</span> &nbsp;- what the resource actually cost under SP rates</div>
+          <div><span style="color:var(--fg)">pricing_public_on_demand_cost</span> &nbsp;- what it would have cost on-demand</div>
         </div>
         <p class="text-sm leading-relaxed mb-3" style="color:var(--muted)">
           The difference is the real dollar savings that resource captured from the SP. Grouped by a resource tag
           (e.g. <code style="font-family:var(--mono);font-size:12px;background:var(--bg-3);padding:1px 6px;border-radius:4px;">team</code>),
-          this gives each team their effective discount rate and savings captured — something no tool below the $50K/yr tier offers at line-item granularity.
+          this gives each team their effective discount rate and savings captured. No tool below the $50K/yr tier offers this at line-item granularity.
         </p>
 
         <div class="warn-box mb-4" style="border-color:rgba(184,140,58,0.25);background:rgba(184,140,58,0.04);">
@@ -1128,7 +1152,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--fg-3)"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         Enterprise SSO (OIDC)
       </h2>
-      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Enterprise plan. Lets your whole team sign in with their company credentials via Okta, Azure AD, Google Workspace, Auth0, or any OIDC-compatible IdP. IdP groups automatically map to nable RBAC roles — no manual API key distribution needed.</p>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">Enterprise plan. Lets your whole team sign in with their company credentials via Okta, Azure AD, Google Workspace, Auth0, or any OIDC-compatible IdP. IdP groups automatically map to nable RBAC roles, with no manual API key distribution needed.</p>
 
       <div class="info-box mb-5">
         <strong>How it works:</strong> User clicks "Sign in with SSO" → browser redirects to your IdP → IdP authenticates and returns an ID token → nable validates the token, reads the groups claim, and maps groups to <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">admin</code> / <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">analyst</code> / <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">viewer</code> → user receives a Team license key automatically.
@@ -1213,7 +1237,11 @@
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_PASSWORD</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_WAREHOUSE</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_CREDIT_PRICE</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SNOWFLAKE_ROLE</td><td class="px-4 py-2.5" style="color:var(--muted)">Snowflake</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">GITHUB_TOKEN</td><td class="px-4 py-2.5" style="color:var(--muted)">GitHub</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">LANGFUSE_PUBLIC_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Langfuse</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">LANGFUSE_SECRET_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Langfuse</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">LANGFUSE_HOST</td><td class="px-4 py-2.5" style="color:var(--muted)">Langfuse</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">STRIPE_SECRET_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Stripe</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SLACK_WEBHOOK_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Slack</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">TEAMS_WEBHOOK_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Teams</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>

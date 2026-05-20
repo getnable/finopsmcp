@@ -1,8 +1,8 @@
-# nable — Ask your AI about cloud costs
+# nable: Ask your AI about cloud costs
 
 **Connect Claude (or any MCP client) to your real AWS, Azure, GCP, and SaaS billing data.**
 
-nable is an MCP server. Install it once and ask Claude about your cloud spend in plain English — no dashboards, no SQL, no BI tool.
+nable is an MCP server. Install it once and ask Claude about your cloud spend in plain English. No dashboards, no SQL, no BI tool.
 
 ```
 "What drove our AWS costs up 40% this month?"
@@ -24,7 +24,7 @@ finops setup
 
 `finops setup` connects your providers and auto-configures Claude Desktop. Restart Claude Desktop and ask: *"What are my AWS costs this month?"*
 
-**On Anaconda?** Anaconda's pip can't install finops-mcp. Use uvx instead — it's isolated and doesn't touch your Anaconda environment:
+**On Anaconda?** Anaconda's pip can't install finops-mcp. Use uvx instead. It's isolated and doesn't touch your Anaconda environment:
 ```bash
 brew install uv        # or: curl -LsSf https://astral.sh/uv/install.sh | sh
 uvx finops-mcp setup
@@ -88,11 +88,11 @@ finops setup claude    # re-run Claude Desktop configuration only
 | Python 3.8/3.9 errors | nable requires Python 3.10+: `python3.10 -m pip install finops-mcp` |
 | Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
 | Permission denied | Install to user: `pip install --user finops-mcp` or use `uvx` |
-| Works at home, not at work | Use `uvx` — corporate IT often strips custom PATH entries |
+| Works at home, not at work | Use `uvx` (corporate IT often strips custom PATH entries) |
 
 ---
 
-## Connectors
+## Connectors (18)
 
 | Provider | What it pulls |
 |---|---|
