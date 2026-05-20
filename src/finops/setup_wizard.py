@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-finops setup — interactive CLI wizard for configuring providers securely.
+finops setup: interactive CLI wizard for configuring providers securely.
 
 Usage:
   finops setup                        # walk through all providers
@@ -62,7 +62,7 @@ _VALID_AWS_REGIONS = {
 
 
 def setup_aws() -> None:
-    _section("AWS — Cost Explorer")
+    _section("AWS: Cost Explorer")
 
     print("""  Before entering credentials, make sure your IAM user or role has
   these permissions. Without them, cost queries will fail.
@@ -212,7 +212,7 @@ def setup_aws() -> None:
 
 
 def setup_azure() -> None:
-    _section("Azure — Cost Management")
+    _section("Azure: Cost Management")
     print("  Choose authentication method:")
     print("  1) Service Principal (recommended for production)")
     print("  2) Device code flow (browser required)")
@@ -239,7 +239,7 @@ def setup_azure() -> None:
 
 
 def setup_gcp() -> None:
-    _section("GCP — Cloud Billing")
+    _section("GCP: Cloud Billing")
     key_path = _prompt("  Path to service account JSON key file")
     billing_ids_raw = _prompt("  Billing account IDs (comma-separated, format: XXXXXX-XXXXXX-XXXXXX)")
     billing_ids = [b.strip() for b in billing_ids_raw.split(",") if b.strip()]
@@ -267,7 +267,7 @@ def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]
 
 def setup_sso() -> None:
     """Enterprise SSO wizard — configures OIDC for Okta, Azure AD, Google Workspace, etc."""
-    _section("Enterprise SSO — OIDC Configuration")
+    _section("Enterprise SSO: OIDC Configuration")
     print("""
   nable supports SSO via OIDC (OpenID Connect).
   Compatible with: Okta, Azure AD / Entra ID, Google Workspace, Auth0, Ping Identity.
@@ -275,7 +275,7 @@ def setup_sso() -> None:
   Before running this wizard:
     1. Create an OAuth2 app in your IdP
     2. Set the redirect URI to: https://getnable.com/api/sso/oidc-callback
-    3. Enable the "groups" claim in the ID token (steps vary by IdP — see docs)
+    3. Enable the "groups" claim in the ID token (steps vary by IdP, see docs)
 """)
     from .security.vault import Vault
     vault = Vault.default()
@@ -341,7 +341,7 @@ def setup_sso() -> None:
 
 
 def setup_slack() -> None:
-    _section("Slack — Cost Alerts & Daily Digest")
+    _section("Slack: Cost Alerts and Daily Digest")
     print("  Choose method:")
     print("  1) Incoming Webhook (simpler)")
     print("  2) Bot Token (richer, supports buttons)")
@@ -362,7 +362,7 @@ def setup_slack() -> None:
 
 
 def setup_teams() -> None:
-    _section("Microsoft Teams — Cost Alerts & Daily Digest")
+    _section("Microsoft Teams: Cost Alerts and Daily Digest")
     from .security.vault import Vault
     vault = Vault.default()
     url = _prompt("  Incoming Webhook URL (from Teams channel → Connectors)", secret=True)
@@ -719,7 +719,7 @@ def _configure_claude_desktop() -> None:
     Auto-detect claude_desktop_config.json and inject the nable MCP server
     with the correct absolute path to finops-mcp.
 
-    This is the #1 reason nable doesn't work on company computers — Claude
+    This is the #1 reason nable doesn't work on company computers. Claude
     Desktop is a GUI app that doesn't inherit the user's shell PATH, so
     'finops-mcp' as a bare command fails unless it's in /usr/bin or /bin.
 
