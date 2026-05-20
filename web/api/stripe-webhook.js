@@ -121,7 +121,7 @@ async function sendLicenseEmail(to, licenseKey) {
   </div>
 
   <!-- CTA -->
-  <a href="https://nable.sh/docs" style="display:inline-block;background:#1a1915;color:#fbfaf7;font-size:13px;font-weight:500;text-decoration:none;padding:11px 20px;border-radius:7px;letter-spacing:-0.005em;">
+  <a href="https://getnable.com/docs" style="display:inline-block;background:#1a1915;color:#fbfaf7;font-size:13px;font-weight:500;text-decoration:none;padding:11px 20px;border-radius:7px;letter-spacing:-0.005em;">
     Open setup guide →
   </a>
 
@@ -129,7 +129,7 @@ async function sendLicenseEmail(to, licenseKey) {
   <hr style="border:none;border-top:1px solid #e6e2d6;margin:36px 0 20px;"/>
   <p style="font-size:12px;color:#8b8879;margin:0;line-height:1.6;">
     Questions? Reply here or email
-    <a href="mailto:hello@nable.sh" style="color:#1a1915;">hello@nable.sh</a>.
+    <a href="mailto:hello@getnable.com" style="color:#1a1915;">hello@getnable.com</a>.
     You can manage your subscription at any time via
     <a href="https://billing.stripe.com/p/login/eVq3cY8qQ" style="color:#1a1915;">the billing portal</a>.
   </p>
@@ -144,7 +144,7 @@ async function sendLicenseEmail(to, licenseKey) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: "nable <noreply@nable.sh>",
+      from: "nable <noreply@getnable.com>",
       to: [to],
       subject: "Your nable Team license key",
       html,

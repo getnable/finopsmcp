@@ -14,7 +14,7 @@ export const config = { runtime: "edge" };
 const RESEND_API = "https://api.resend.com";
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "https://nable.sh",
+  "Access-Control-Allow-Origin": "https://getnable.com",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
@@ -71,8 +71,8 @@ function signInEmailHtml(code) {
 
   <hr style="border:none;border-top:1px solid #e6e2d6;margin:28px 0 20px;"/>
   <p style="font-size:12px;color:#8b8879;margin:0;line-height:1.6;">
-    <a href="https://nable.sh" style="color:#1a1915;">nable.sh</a> &middot;
-    <a href="mailto:hello@nable.sh" style="color:#8b8879;">hello@nable.sh</a>
+    <a href="https://getnable.com" style="color:#1a1915;">getnable.com</a> &middot;
+    <a href="mailto:hello@getnable.com" style="color:#8b8879;">hello@getnable.com</a>
   </p>
 </div>
 </body>
@@ -143,7 +143,7 @@ export default async function handler(req) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: "nable <hello@nable.sh>",
+          from: "nable <hello@getnable.com>",
           to: [email],
           subject: "Your nable sign-in code",
           html: signInEmailHtml(code),

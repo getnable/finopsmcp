@@ -89,8 +89,8 @@ finops-doctor     = "finops.doctor:main"
 finops-estimate   = "finops.connectors.terraform_estimate:main"
 
 [project.urls]
-Homepage      = "https://nable.sh"
-Documentation = "https://nable.sh/docs"
+Homepage      = "https://getnable.com"
+Documentation = "https://getnable.com/docs"
 "Bug Tracker" = "https://github.com/chaandannn/finopsmcp/issues"
 
 [tool.hatch.build.targets.wheel]

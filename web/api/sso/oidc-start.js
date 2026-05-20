@@ -7,7 +7,7 @@
  * Required env vars (set per-tenant via Vercel env or a tenant config store):
  *   OIDC_ISSUER          -- e.g. https://company.okta.com
  *   OIDC_CLIENT_ID       -- OAuth2 client ID registered in the IdP
- *   OIDC_REDIRECT_URI    -- must match what's registered (e.g. https://nable.sh/api/sso/oidc-callback)
+ *   OIDC_REDIRECT_URI    -- must match what's registered (e.g. https://getnable.com/api/sso/oidc-callback)
  *
  * Optional env vars:
  *   OIDC_SCOPE           -- defaults to "openid email profile groups"
@@ -17,7 +17,7 @@
 export const config = { runtime: "edge" };
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "https://nable.sh",
+  "Access-Control-Allow-Origin": "https://getnable.com",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
@@ -49,7 +49,7 @@ export default async function handler(req) {
   // Load OIDC config from env (single-tenant for now; extend to per-tenant KV later)
   const ISSUER = process.env.OIDC_ISSUER;
   const CLIENT_ID = process.env.OIDC_CLIENT_ID;
-  const REDIRECT_URI = process.env.OIDC_REDIRECT_URI || "https://nable.sh/api/sso/oidc-callback";
+  const REDIRECT_URI = process.env.OIDC_REDIRECT_URI || "https://getnable.com/api/sso/oidc-callback";
   const SCOPE = process.env.OIDC_SCOPE || "openid email profile groups";
   const SECRET = process.env.ACCOUNT_SECRET;
 

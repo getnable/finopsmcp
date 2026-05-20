@@ -14,7 +14,7 @@
 export const config = { runtime: "edge" };
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "https://nable.sh",
+  "Access-Control-Allow-Origin": "https://getnable.com",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };

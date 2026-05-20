@@ -1,7 +1,7 @@
 /**
  * POST /api/subscribe
  *
- * Captures an email address from any form on nable.sh, then:
+ * Captures an email address from any form on getnable.com, then:
  *   1. Adds the contact to Loops.so (triggers the onboarding drip sequence)
  *   2. Sends an immediate welcome email via Resend
  *   3. Identifies the user in PostHog server-side (optional, enriches DAU data)
@@ -45,10 +45,10 @@ function welcomeHtml(email) {
   <div class="code">pip install finops-mcp<br>finops setup</div>
   <p><strong>Step 2 — restart Claude Desktop, then ask:</strong></p>
   <div class="code">"What drove our AWS costs up this month?"<br>"Which team is over budget?"<br>"Show me rightsizing opportunities."</div>
-  <a href="https://nable.sh/docs" class="btn">Read the setup guide →</a>
+  <a href="https://getnable.com/docs" class="btn">Read the setup guide →</a>
   <div class="footer">
-    You're receiving this because you signed up at nable.sh.<br>
-    <a href="https://nable.sh" style="color:#9a9a95">nable.sh</a> · <a href="mailto:hello@nable.sh" style="color:#9a9a95">hello@nable.sh</a>
+    You're receiving this because you signed up at getnable.com.<br>
+    <a href="https://getnable.com" style="color:#9a9a95">getnable.com</a> · <a href="mailto:hello@getnable.com" style="color:#9a9a95">hello@getnable.com</a>
   </div>
 </div>
 </body>
@@ -58,7 +58,7 @@ function welcomeHtml(email) {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "https://nable.sh",
+  "Access-Control-Allow-Origin": "https://getnable.com",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
@@ -129,7 +129,7 @@ export default async function handler(req) {
       method: "POST",
       headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: "nable <hello@nable.sh>",
+        from: "nable <hello@getnable.com>",
         to: [email],
         subject: "Get started with nable",
         html: welcomeHtml(email),

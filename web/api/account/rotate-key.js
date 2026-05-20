@@ -13,7 +13,7 @@
 export const config = { runtime: "edge" };
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "https://nable.sh",
+  "Access-Control-Allow-Origin": "https://getnable.com",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
@@ -150,12 +150,12 @@ async function sendRotationEmail(to, licenseKey, resendKey) {
 
   <p style="font-size:13px;color:#8b8879;line-height:1.6;margin:0;">
     If you did not request this rotation, contact
-    <a href="mailto:hello@nable.sh" style="color:#1a1915;">hello@nable.sh</a> immediately.
+    <a href="mailto:hello@getnable.com" style="color:#1a1915;">hello@getnable.com</a> immediately.
   </p>
 
   <hr style="border:none;border-top:1px solid #e6e2d6;margin:28px 0 20px;"/>
   <p style="font-size:12px;color:#8b8879;margin:0;line-height:1.6;">
-    <a href="https://nable.sh" style="color:#1a1915;">nable.sh</a> &middot;
+    <a href="https://getnable.com" style="color:#1a1915;">getnable.com</a> &middot;
     <a href="https://billing.stripe.com/p/login/eVq3cY8qQ" style="color:#8b8879;">Manage billing</a>
   </p>
 </div>
@@ -169,7 +169,7 @@ async function sendRotationEmail(to, licenseKey, resendKey) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: "nable <hello@nable.sh>",
+      from: "nable <hello@getnable.com>",
       to: [to],
       subject: "Your nable license key has been rotated",
       html,

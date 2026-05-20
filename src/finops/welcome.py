@@ -121,7 +121,7 @@ def show_welcome() -> None:
     print()
 
     # ── Docs ─────────────────────────────────────────────────────────────────
-    _line(f"  Docs  →  {cyan('https://nable.sh/docs')}")
+    _line(f"  Docs  →  {cyan('https://getnable.com/docs')}")
     print()
     _line(_rule())
     print()

@@ -136,7 +136,7 @@ nable is not just a connector that pipes billing data into Claude. It runs activ
 - Org-wide multi-account cost rollup
 - Invoice email parsing via IMAP for vendors without APIs
 
-$39.99/mo, 1-month free trial. Subscribe at [nable.sh](https://nable.sh).
+$39.99/mo, 1-month free trial. Subscribe at [getnable.com](https://getnable.com).
 
 ---
 
@@ -150,4 +150,4 @@ Run `finops setup aws --iam-template` to generate a least-privilege IAM policy w
 
 ## Docs
 
-Full setup guide: [nable.sh/docs](https://nable.sh/docs)
+Full setup guide: [getnable.com/docs](https://getnable.com/docs)

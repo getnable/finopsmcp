@@ -27,7 +27,7 @@
 export const config = { runtime: "edge" };
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "https://nable.sh",
+  "Access-Control-Allow-Origin": "https://getnable.com",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
@@ -240,7 +240,7 @@ export default async function handler(req) {
   if (error) {
     const desc = url.searchParams.get("error_description") || error;
     return Response.redirect(
-      `https://nable.sh/?sso_error=${encodeURIComponent(desc)}`,
+      `https://getnable.com/?sso_error=${encodeURIComponent(desc)}`,
       302
     );
   }
@@ -255,7 +255,7 @@ export default async function handler(req) {
   const ISSUER = process.env.OIDC_ISSUER;
   const CLIENT_ID = process.env.OIDC_CLIENT_ID;
   const CLIENT_SECRET = process.env.OIDC_CLIENT_SECRET;
-  const REDIRECT_URI = process.env.OIDC_REDIRECT_URI || "https://nable.sh/api/sso/oidc-callback";
+  const REDIRECT_URI = process.env.OIDC_REDIRECT_URI || "https://getnable.com/api/sso/oidc-callback";
   const ACCOUNT_SECRET = process.env.ACCOUNT_SECRET;
   const LICENSE_SECRET = process.env.FINOPS_LICENSE_SECRET;
   const GROUPS_CLAIM = process.env.OIDC_GROUPS_CLAIM || "groups";
@@ -274,7 +274,7 @@ export default async function handler(req) {
   if (state && ACCOUNT_SECRET) {
     const valid = await verifyState(ACCOUNT_SECRET, state);
     if (!valid) {
-      return Response.redirect("https://nable.sh/?sso_error=invalid_state", 302);
+      return Response.redirect("https://getnable.com/?sso_error=invalid_state", 302);
     }
   }
 
@@ -302,7 +302,7 @@ export default async function handler(req) {
     if (!tokenRes.ok) {
       const err = await tokenRes.text();
       console.error("Token exchange failed:", err);
-      return Response.redirect("https://nable.sh/?sso_error=token_exchange_failed", 302);
+      return Response.redirect("https://getnable.com/?sso_error=token_exchange_failed", 302);
     }
 
     const tokens = await tokenRes.json();
@@ -310,7 +310,7 @@ export default async function handler(req) {
     accessToken = tokens.access_token;
   } catch (err) {
     console.error("Token exchange error:", err.message);
-    return Response.redirect("https://nable.sh/?sso_error=idp_unreachable", 302);
+    return Response.redirect("https://getnable.com/?sso_error=idp_unreachable", 302);
   }
 
   // Validate the ID token JWT
@@ -320,13 +320,13 @@ export default async function handler(req) {
     claims = await verifyJwt(idToken, jwks);
   } catch (err) {
     console.error("JWT validation error:", err.message);
-    return Response.redirect("https://nable.sh/?sso_error=jwt_invalid", 302);
+    return Response.redirect("https://getnable.com/?sso_error=jwt_invalid", 302);
   }
 
   // Extract identity
   const email = claims.email || claims.preferred_username || claims.upn;
   if (!email) {
-    return Response.redirect("https://nable.sh/?sso_error=no_email_claim", 302);
+    return Response.redirect("https://getnable.com/?sso_error=no_email_claim", 302);
   }
 
   // Map IdP groups → nable RBAC role
@@ -372,5 +372,5 @@ export default async function handler(req) {
     sso: "1",
   }).toString();
 
-  return Response.redirect(`https://nable.sh${returnTo}#${fragment}`, 302);
+  return Response.redirect(`https://getnable.com${returnTo}#${fragment}`, 302);
 }

@@ -258,6 +258,6 @@ def format_pr_comment(estimates: list[CostEstimate], threshold_usd: float = 10.0
             lines.append(f"- {note}")
 
     lines.append("")
-    lines.append("*⁽ᵉˢᵗ⁾ estimated · [nable](https://nable.sh)*")
+    lines.append("*⁽ᵉˢᵗ⁾ estimated · [nable](https://getnable.com)*")
 
     return "\n".join(lines)

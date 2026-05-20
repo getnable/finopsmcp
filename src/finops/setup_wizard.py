@@ -274,7 +274,7 @@ def setup_sso() -> None:
 
   Before running this wizard:
     1. Create an OAuth2 app in your IdP
-    2. Set the redirect URI to: https://nable.sh/api/sso/oidc-callback
+    2. Set the redirect URI to: https://getnable.com/api/sso/oidc-callback
     3. Enable the "groups" claim in the ID token (steps vary by IdP — see docs)
 """)
     from .security.vault import Vault
@@ -285,7 +285,7 @@ def setup_sso() -> None:
     client_secret = _prompt("  Client Secret", secret=True)
     redirect_uri = _prompt(
         "  Redirect URI",
-        default="https://nable.sh/api/sso/oidc-callback",
+        default="https://getnable.com/api/sso/oidc-callback",
     )
     groups_claim = _prompt("  Groups claim name in JWT", default="groups")
     default_role = _prompt("  Default role for users not in any mapped group (viewer/analyst/admin)", default="viewer")
@@ -332,7 +332,7 @@ def setup_sso() -> None:
     1. Export these env vars to your Vercel project:
          OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
          OIDC_REDIRECT_URI, OIDC_GROUPS_CLAIM, OIDC_ROLE_MAP, OIDC_DEFAULT_ROLE
-    2. Test the flow: https://nable.sh/api/sso/oidc-start
+    2. Test the flow: https://getnable.com/api/sso/oidc-start
     3. Users in your IdP will automatically receive a Team license key on first login.
 
   For Azure AD: set OIDC_GROUPS_CLAIM=roles (not "groups") and assign app roles in the manifest.
@@ -642,7 +642,7 @@ def main(args: list[str] | None = None) -> None:
 
     print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'")
     print("  To add more providers later: finops setup")
-    print("  Full docs: https://nable.sh/docs\n")
+    print("  Full docs: https://getnable.com/docs\n")
     _offer_email_signup()
 
     # Fire setup_completed event
@@ -691,7 +691,7 @@ def _offer_email_signup() -> None:
         import urllib.request
         import json as _json
         req = urllib.request.Request(
-            "https://nable.sh/api/subscribe",
+            "https://getnable.com/api/subscribe",
             data=_json.dumps({"email": email, "source": "setup_wizard"}).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",

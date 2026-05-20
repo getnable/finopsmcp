@@ -527,5 +527,5 @@ def format_helm_diff_comment(diff: HelmCostDiff, threshold_usd: float = 10.0) ->
         f"| | **{sign}${abs(diff.delta_monthly_usd):,.0f}/month{conf_note}** |"
     )
     lines.append("")
-    lines.append("*[nable](https://nable.sh)*")
+    lines.append("*[nable](https://getnable.com)*")
     return "\n".join(lines)

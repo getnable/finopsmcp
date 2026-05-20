@@ -3481,7 +3481,7 @@ def main() -> None:
     # and just hangs. Show a helpful message and redirect to the setup wizard instead.
     if sys.stdin.isatty():
         print()
-        print("  nable MCP server  |  https://nable.sh")
+        print("  nable MCP server  |  https://getnable.com")
         print()
         print("  This command is called automatically by Claude Desktop.")
         print("  To configure providers and connect Claude Desktop, run:")
@@ -3492,7 +3492,7 @@ def main() -> None:
         print()
         print("    uvx finops-mcp setup")
         print()
-        print("  Setup guide: https://nable.sh/docs")
+        print("  Setup guide: https://getnable.com/docs")
         print()
         sys.exit(0)
 
