@@ -92,7 +92,7 @@ finops setup claude    # re-run Claude Desktop configuration only
 
 ---
 
-## Connectors (18)
+## Connectors (17)
 
 | Provider | What it pulls |
 |---|---|

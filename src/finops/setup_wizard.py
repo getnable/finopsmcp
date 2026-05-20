@@ -468,7 +468,6 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("sso")
     sub.add_parser("openai")
     sub.add_parser("anthropic")
-    sub.add_parser("together")
     sub.add_parser("cohere")
     sub.add_parser("mistral")
     sub.add_parser("newrelic")
@@ -551,9 +550,6 @@ def main(args: list[str] | None = None) -> None:
             ("ANTHROPIC_ADMIN_KEY", "Admin Key for org usage data (optional)", True),
             ("ANTHROPIC_ORGANIZATION_ID", "Organization ID (optional)", False),
         ]),
-        "together": lambda: setup_saas_api_key("Together AI", [
-            ("TOGETHER_API_KEY", "API Key", True),
-        ]),
         "cohere": lambda: setup_saas_api_key("Cohere", [
             ("COHERE_API_KEY", "API Key", True),
         ]),
@@ -625,7 +621,7 @@ def main(args: list[str] | None = None) -> None:
         dispatch[parsed.cmd]()
     else:
         # Interactive full setup
-        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "together", "cohere", "mistral", "newrelic", "pagerduty", "slack", "teams"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "slack", "teams"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")

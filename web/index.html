@@ -4,15 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>nable · cost intelligence, reimagined</title>
-<meta name="description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 12 more. No dashboards. No SQL." />
+<meta name="description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 11 more. No dashboards. No SQL." />
 <meta property="og:title" content="nable · cost intelligence, reimagined" />
-<meta property="og:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 12 more. No dashboards. No SQL." />
+<meta property="og:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 11 more. No dashboards. No SQL." />
 <meta property="og:url" content="https://nable.sh" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="nable" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="nable · cost intelligence, reimagined" />
-<meta name="twitter:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 12 more." />
+<meta name="twitter:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 11 more." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <script defer src="/_vercel/insights/script.js"></script>
 <!-- PostHog - product analytics + DAU/MAU -->
@@ -396,7 +396,7 @@ function Nav({ dark, onToggle, onTrial, onSignIn }){
         </ul>
         <div className="right">
           <ThemeToggle dark={dark} onToggle={onToggle} />
-          <a href="#" onClick={onTrial} className="btn btn-primary">Try Team free <span className="arr">→</span></a>
+          <a href="#" onClick={onTrial} className="btn btn-primary">Get Team <span className="arr">→</span></a>
         </div>
       </div>
     </nav>
@@ -463,10 +463,10 @@ function Hero({ onTrial }){
   return (
     <header className="hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.8.12 · 18 connectors · free to start</div>
+        <div className="label" style={{marginBottom:18}}>v0.8.12 · 17 connectors · free to start</div>
         <h1>One conversation.<br/>Every cloud bill.</h1>
         <p className="lede">
-          AWS, Azure, GCP, Datadog, Langfuse, Snowflake, and 12 more, all in one conversation. Ask anything about your cloud spend, get answers in plain English.
+          AWS, Azure, GCP, Datadog, Langfuse, Snowflake, and 11 more, all in one conversation. Ask anything about your cloud spend, get answers in plain English.
         </p>
         <div className="hero-cta">
           <a href="#product" className="btn btn-primary">See how it works <span className="arr">→</span></a>
@@ -546,7 +546,7 @@ function QuickStart(){
   return (
     <section style={{paddingTop:0}}>
       <div className="wrap">
-        <p style={{fontSize:13,color:"var(--fg-3)",marginBottom:24,fontFamily:"var(--mono)"}}>Install and get 30 days free. No credit card required.</p>
+        <p style={{fontSize:13,color:"var(--fg-3)",marginBottom:24,fontFamily:"var(--mono)"}}>Install and get 30 days free. No credit card required. All Team features unlocked.</p>
         <div className="steps">
           <div className="step">
             <div className="n">01</div>
@@ -594,7 +594,7 @@ const FEATURES = [
   {
     n:"04",
     h:"All your AI spend in one place.",
-    p:"OpenAI, Anthropic, Bedrock, Langfuse, Together AI: one view. See which teams are paying for expensive models when cheaper ones do the job. Cost per 1,000 requests, cost per user, cache hit rate. The unit economics your AI budget actually needs."
+    p:"OpenAI, Anthropic, Bedrock, Langfuse: one view. See which teams are paying for expensive models when cheaper ones do the job. Cost per 1,000 requests, cost per user, cache hit rate. The unit economics your AI budget actually needs."
   },
   {
     n:"05",
@@ -633,7 +633,7 @@ function Features(){
 }
 
 const CONN_CLOUD   = ["AWS","Azure","GCP","Kubernetes"];
-const CONN_AI      = ["OpenAI","Anthropic","AWS Bedrock","Langfuse","Together AI"];
+const CONN_AI      = ["OpenAI","Anthropic","AWS Bedrock","Langfuse"];
 const CONN_SAAS    = ["Datadog","Snowflake","MongoDB Atlas","Twilio","Cloudflare","New Relic","PagerDuty","GitHub","Vercel"];
 
 function Connectors(){
@@ -725,7 +725,7 @@ function Pricing({ onTrial }){
         <div className="section-head">
           <div className="label">/ Pricing</div>
           <h2>Simple, transparent pricing.</h2>
-          <p>Start free. Upgrade when you see the savings.</p>
+          <p>Install free, 30 days of Team features included. Subscribe when you're ready.</p>
         </div>
 
         <div className="pricing">
@@ -738,7 +738,7 @@ function Pricing({ onTrial }){
               <div className="amt-sub">forever · no credit card · no expiry</div>
             </div>
             <ul>
-              <li>All 18 cloud, SaaS &amp; AI connectors</li>
+              <li>All 17 cloud, SaaS &amp; AI connectors</li>
               <li>Cost queries, trends &amp; history</li>
               <li>Anomaly detection</li>
               <li>Rightsizing recommendations</li>
@@ -802,7 +802,7 @@ function Pricing({ onTrial }){
             <div className="tier">Team · Most popular</div>
             <div>
               <div className="amt">$39<span className="small">.99 / mo</span></div>
-              <div className="amt-sub">first month free · cancel any time · built for teams</div>
+              <div className="amt-sub">first month free when you subscribe · cancel any time</div>
             </div>
             <ul>
               <li>Everything in Free</li>
@@ -813,7 +813,7 @@ function Pricing({ onTrial }){
               <li>Org-wide multi-account cost rollup</li>
               <li>Email support</li>
             </ul>
-            <div className="cta"><a href="#" onClick={onTrial}>Get Team: first month free</a></div>
+            <div className="cta"><a href="#" onClick={onTrial}>Subscribe: first month free →</a></div>
           </div>
 
           {/* Enterprise */}
@@ -904,7 +904,7 @@ function Footer(){
         </div>
         <div className="foot-bottom">
           <span>© 2026 nable inc.</span>
-          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.8.12 · 18 connectors</span>
+          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.8.12 · 17 connectors</span>
         </div>
       </div>
     </footer>
@@ -983,13 +983,13 @@ function TrialModal({ onClose }){
             <li>OU breakdown &amp; account anomaly detection</li>
           </ul>
           <div style={{marginTop:"auto",paddingTop:16,borderTop:"1px solid var(--line)",fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>
-            Already installed? Your first 30 days are free in-product. This subscribes you so Team features stay unlocked after that.
+            Already installed? You get 30 days free in-product with no card. This subscription keeps Team features unlocked after that trial ends. First month is free when you subscribe.
           </div>
         </div>
 
         {/* Right: email form + pip install */}
         <div className="modal-right">
-          <h4>Get Team: first month free</h4>
+          <h4>Subscribe to Team: first month free</h4>
           <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
             <div>
               <label>EMAIL</label>
