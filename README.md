@@ -1,38 +1,84 @@
-# nable: Ask your AI about cloud costs
+# nable: The FinOps copilot that runs on your machine
 
-**Connect Claude (or any MCP client) to your real AWS, Azure, GCP, and SaaS billing data.**
+**Connect Claude to your real AWS, Azure, GCP, and SaaS billing data. Ask questions in plain English. Get answers in seconds.**
 
-nable is an MCP server. Install it once and ask Claude about your cloud spend in plain English. No dashboards, no SQL, no BI tool.
+<!-- TODO: add animated GIF of Claude answering a cost question here for higher PyPI conversion -->
 
 ```
-"What drove our AWS costs up 40% this month?"
-"Which team is spending the most on Datadog?"
-"Show me rightsizing opportunities for EC2."
-"Create a Jira ticket for any anomalies over $500."
+User: Just downloaded nable: What's our cloud spend this month?
+
+Claude: Here's your spend breakdown:
+
+Total: $8,421.63 / month
+
+Provider    | Spend
+------------|----------
+AWS         | $7,284.17
+Datadog     | $847.20
+Snowflake   | $290.26
+
+Top AWS services:
+- EC2: $3,184.52
+- EKS: $1,821.34
+- RDS: $1,243.80
+- ElastiCache: $612.40
+- S3: $184.22
+
+Most spend is concentrated in us-east-1 ($5,841 of the $7,284 AWS total).
 ```
 
-No dashboards. No SQL. Just ask.
+<!-- screenshot: docs/claude-cost-answer.png -->
 
 ---
 
 ## Quick start
 
+**Step 1: Install**
 ```bash
 pip install finops-mcp
-finops setup
 ```
 
-`finops setup` connects your providers and auto-configures Claude Desktop. Restart Claude Desktop and ask: *"What are my AWS costs this month?"*
-
-**On Anaconda?** Anaconda's pip can't install finops-mcp. Use uvx instead. It's isolated and doesn't touch your Anaconda environment:
+**On Anaconda?** Use uvx instead (it's isolated and won't touch your Anaconda environment):
 ```bash
 brew install uv        # or: curl -LsSf https://astral.sh/uv/install.sh | sh
 uvx finops-mcp setup
 ```
 
-`finops setup` detects Claude Desktop and writes `claude_desktop_config.json` automatically. It picks `uvx` if available, otherwise uses the absolute binary path. Restart Claude Desktop and ask: *"What are my AWS costs this month?"*
+**Step 2: Connect your providers**
+```bash
+finops setup
+```
+
+`finops setup` walks you through connecting AWS, Azure, GCP, Datadog, Snowflake, and more. It auto-configures Claude Desktop at the end.
+
+**Step 3: Ask Claude**
+
+Restart Claude Desktop, then ask: *"What are my AWS costs this month?"*
 
 **1-month free trial, all features unlocked. No credit card required.**
+
+---
+
+## What you can ask
+
+- "What drove our AWS bill up 40% last month?"
+- "Which Kubernetes namespace is over-provisioned?"
+- "Are there any unusual cost spikes this week?"
+- "Which EC2 instances should we downsize?"
+- "Compare our cloud spend vs SaaS spend"
+- "Create a Jira ticket for any EC2 waste over $200/mo"
+- "Which team is spending the most on Datadog?"
+- "What will our AWS bill look like next month?"
+- "Show me RDS instances with low CPU that we could right-size"
+- "What's our effective discount rate from Savings Plans?"
+
+---
+
+## How it works
+
+nable runs entirely on your machine. Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). Nothing leaves your machine except the API calls to your cloud providers.
+
+nable is read-only by default. It never writes to your AWS account unless you explicitly enable cleanup mode. Run `finops setup aws --iam-template` to generate a least-privilege IAM policy with exactly the permissions nable needs.
 
 ---
 
@@ -74,24 +120,6 @@ Config file locations:
 
 ---
 
-## Troubleshooting
-
-```bash
-finops-doctor          # checks credentials, DB, network, audit log
-finops setup claude    # re-run Claude Desktop configuration only
-```
-
-| Symptom | Fix |
-|---|---|
-| Tools don't appear in Claude | Switch to uvx config or use absolute path |
-| `command not found: finops-mcp` | Re-install with `pip install finops-mcp` or use `uvx` |
-| Python 3.8/3.9 errors | nable requires Python 3.10+: `python3.10 -m pip install finops-mcp` |
-| Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
-| Permission denied | Install to user: `pip install --user finops-mcp` or use `uvx` |
-| Works at home, not at work | Use `uvx` (corporate IT often strips custom PATH entries) |
-
----
-
 ## Connectors (17)
 
 | Provider | What it pulls |
@@ -126,7 +154,7 @@ nable is not just a connector that pipes billing data into Claude. It runs activ
 
 ---
 
-## Team plan features
+## Team plan
 
 - Anomaly alerts via Slack or Teams
 - Cost attribution by team, service, or tag
@@ -136,15 +164,25 @@ nable is not just a connector that pipes billing data into Claude. It runs activ
 - Org-wide multi-account cost rollup
 - Invoice email parsing via IMAP for vendors without APIs
 
-$39.99/mo, 1-month free trial. Subscribe at [getnable.com](https://getnable.com).
+**$39.99/mo. First month free, no credit card required.** Subscribe at [getnable.com](https://getnable.com).
 
 ---
 
-## Security
+## Troubleshooting
 
-Credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine. nable never writes to your AWS account unless you explicitly enable cleanup mode.
+```bash
+finops-doctor          # checks credentials, DB, network, audit log
+finops setup claude    # re-run Claude Desktop configuration only
+```
 
-Run `finops setup aws --iam-template` to generate a least-privilege IAM policy with exactly the permissions nable needs.
+| Symptom | Fix |
+|---|---|
+| Tools don't appear in Claude | Switch to uvx config or use absolute path |
+| `command not found: finops-mcp` | Re-install with `pip install finops-mcp` or use `uvx` |
+| Python 3.8/3.9 errors | nable requires Python 3.10+: `python3.10 -m pip install finops-mcp` |
+| Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
+| Permission denied | Install to user: `pip install --user finops-mcp` or use `uvx` |
+| Works at home, not at work | Use `uvx` (corporate IT often strips custom PATH entries) |
 
 ---
 
