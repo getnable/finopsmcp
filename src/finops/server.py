@@ -338,6 +338,9 @@ async def get_cost_summary(
 
     targets = await _active(pool)
     if not targets:
+        from .demo import is_demo, demo_cost_summary
+        if is_demo():
+            return demo_cost_summary()
         return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect a cloud provider, then restart your AI client."}
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed, granularity)
@@ -395,6 +398,31 @@ async def get_costs_by_service(
 
     targets = await _active(pool)
     if not targets:
+        from .demo import is_demo, demo_cost_summary
+        if is_demo():
+            # Build a services response from demo data
+            ds = demo_cost_summary()
+            ranked = sorted(
+                [
+                    {
+                        "service": svc,
+                        "total_usd": round(amt, 4),
+                        "total_formatted": _fmt_usd(amt),
+                        "by_provider": {"demo": round(amt, 4)},
+                    }
+                    for svc, amt in ds["grand_by_service"].items()
+                ],
+                key=lambda x: -x["total_usd"],
+            )
+            if service_filter:
+                ranked = [s for s in ranked if service_filter.lower() in s["service"].lower()]
+            return {
+                "period": ds["period"],
+                "filter": service_filter,
+                "services": ranked,
+                "total_usd": round(sum(s["total_usd"] for s in ranked), 4),
+                "note": ds["note"],
+            }
         return {"error": "No providers configured."}
 
     combined: dict[str, dict[str, float]] = {}
@@ -576,6 +604,9 @@ async def get_cost_trends(
 
     targets = await _active(pool)
     if not targets:
+        from .demo import is_demo, demo_cost_trends
+        if is_demo():
+            return demo_cost_trends()
         return {"error": "No providers configured."}
 
     grand_total, by_provider, _ = await _gather_costs(targets, start, end, granularity)
@@ -705,6 +736,10 @@ async def get_anomalies(
     Note: Anomalies require at least 7 days of snapshot history.
           Run 'finops snapshot' or wait for the daily job to accumulate data.
     """
+
+    from .demo import is_demo, demo_anomalies
+    if is_demo():
+        return demo_anomalies()
 
     from .anomaly.detector import get_active_anomalies
 
@@ -1047,6 +1082,10 @@ async def get_rightsizing_recommendations(
         - "How much could we save by rightsizing?"
         - "Find underutilized instances we should downsize"
     """
+
+    from .demo import is_demo, demo_rightsizing
+    if is_demo():
+        return demo_rightsizing()
 
     try:
         from .recommendations.rightsizing import analyze_rightsizing, rightsizing_summary
