@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>nable · cost intelligence, reimagined</title>
-<meta name="description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 11 more. No dashboards. No SQL." />
-<meta property="og:title" content="nable · cost intelligence, reimagined" />
-<meta property="og:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 11 more. No dashboards. No SQL." />
+<title>nable · AI-native FinOps copilot</title>
+<meta name="description" content="AI-native FinOps copilot with secure local execution. Reads cloud billing, inspects Kubernetes, correlates deployments, and recommends remediations. AWS, Azure, GCP, and 14 more." />
+<meta property="og:title" content="nable · AI-native FinOps copilot" />
+<meta property="og:description" content="AI-native FinOps copilot with secure local execution. Reads cloud billing, inspects Kubernetes, correlates deployments, and recommends remediations. AWS, Azure, GCP, and 14 more." />
 <meta property="og:url" content="https://getnable.com" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="nable" />
 <meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="nable · cost intelligence, reimagined" />
-<meta name="twitter:description" content="Connect your AI to real cloud and SaaS billing data. AWS, Azure, GCP, Datadog, Langfuse, Snowflake and 11 more." />
+<meta name="twitter:title" content="nable · AI-native FinOps copilot" />
+<meta name="twitter:description" content="AI-native FinOps copilot with secure local execution. Reads cloud billing, inspects Kubernetes, correlates deployments, and recommends remediations." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <script defer src="/_vercel/insights/script.js"></script>
 <!-- PostHog - product analytics + DAU/MAU -->
@@ -463,10 +463,10 @@ function Hero({ onTrial }){
   return (
     <header className="hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.8.12 · 17 connectors · free to start</div>
-        <h1>One conversation.<br/>Every cloud bill.</h1>
+        <div className="label" style={{marginBottom:18}}>v0.8.14 · 17 connectors · free to start</div>
+        <h1>The FinOps copilot<br/>that runs on your machine.</h1>
         <p className="lede">
-          AWS, Azure, GCP, Datadog, Langfuse, Snowflake, and 11 more, all in one conversation. Ask anything about your cloud spend, get answers in plain English.
+          nable reads your cloud billing, inspects Kubernetes clusters, correlates deployments, and recommends remediations. Sensitive infra context stays inside your environment. No dashboards. No SaaS middleman. No data leaving your machine.
         </p>
         <div className="hero-cta">
           <a href="#product" className="btn btn-primary">See how it works <span className="arr">→</span></a>
@@ -584,7 +584,7 @@ const FEATURES = [
   {
     n:"02",
     h:"Kubernetes costs, broken down to every team.",
-    p:"EKS charges you one EC2 line for the whole cluster. nable breaks that down to every pod, deployment, namespace, and team, weighted by what each workload actually requested. The per-team breakdown your cloud bill doesn't include."
+    p:"EKS charges you one EC2 line for the whole cluster. nable breaks that down to every pod, deployment, namespace, and team, including Fargate pods, weighted by what each workload actually requested. The per-team breakdown your cloud bill doesn't include."
   },
   {
     n:"03",
@@ -598,13 +598,18 @@ const FEATURES = [
   },
   {
     n:"05",
-    h:"Savings Plan benefit, broken down by team.",
-    p:"Savings Plan discounts show up as a single line item in your bill. nable attributes that discount to the teams who actually consumed the reserved capacity, so you can show each team what they're saving, not just that savings exist."
+    h:"Savings Plan and RI optimization that actually saves money.",
+    p:"nable analyzes your actual usage patterns and tells you exactly how much more commitment to buy, which instance families to target, and what your coverage gap costs you per day. Specific dollar amounts, not just coverage percentages."
   },
   {
     n:"06",
     h:"Cost impact in every pull request.",
     p:"nable comments on PRs that touch infrastructure with a per-resource cost breakdown. Engineers see the monthly impact before they merge, not after the bill arrives. Works with GitHub via webhook, no pipeline changes needed."
+  },
+  {
+    n:"07",
+    h:"Find waste. Clean it up. Track the savings.",
+    p:"nable identifies idle EC2 instances, unattached EBS volumes, oversized RDS instances, and ghost Kubernetes workloads, then cleans them up on your instruction. Not a list of recommendations you ignore. Actual remediation, with an audit trail."
   },
 ];
 
@@ -614,8 +619,8 @@ function Features(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ Capabilities</div>
-          <h2>Not a dashboard. Not a connector. A reasoning layer.</h2>
-          <p>Native cloud MCPs are siloed. Enterprise FinOps tools cost more than most engineers. nable sits in the middle: all providers consolidated, your AI reasoning across all of it, taking action when something needs it.</p>
+          <h2>Not a dashboard. Not a connector. An agent.</h2>
+          <p>Native cloud MCPs only read. Enterprise FinOps tools only report. nable understands, recommends, and executes. All providers consolidated, your AI reasoning across billing, Kubernetes, observability, and deployments, taking action when something needs it.</p>
         </div>
 
         <div className="features">
@@ -642,8 +647,8 @@ function Connectors(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ Connectors</div>
-          <h2>Every bill in one place.</h2>
-          <p>nable normalises spend across cloud, AI, and SaaS into a single schema so your AI can reason across your whole stack, without you writing a line of SQL.</p>
+          <h2>Every signal. One agent.</h2>
+          <p>nable normalizes spend across cloud, AI, and SaaS into a single schema. Your AI reasons across billing, Kubernetes, observability, and deployments together, the cross-stack context that makes recommendations actually actionable.</p>
         </div>
 
         <div className="conn-grid">
