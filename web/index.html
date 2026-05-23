@@ -143,9 +143,9 @@
 
   /* trust strip */
   .trust-strip{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-top:36px}
-  .trust-item{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--fg-3)}
+  .trust-item{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--fg-2)}
   .trust-item strong{color:var(--fg);font-weight:600}
-  .trust-sep{width:1px;height:14px;background:var(--line-2);flex-shrink:0}
+  .trust-sep{width:1px;height:14px;background:var(--line-2);flex-shrink:0;opacity:0.6}
   @media(max-width:640px){.trust-sep{display:none}.trust-strip{gap:12px}}
 
   /* card shadows for depth */
@@ -372,7 +372,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const PALETTES = {
   linen:    { bg:"#fbfaf7", bg2:"#f4f2ec", bg3:"#ebe8e0", fg:"#1a1915", fg2:"#54524a", fg3:"#8b8879", fg4:"#c1bdaf", line:"#e6e2d6", line2:"#d9d4c4" },
   paper:    { bg:"#ffffff", bg2:"#f7f7f5", bg3:"#eeeeea", fg:"#161616", fg2:"#525252", fg3:"#8a8a85", fg4:"#c4c4be", line:"#ebebe6", line2:"#dedeD8" },
-  graphite: { bg:"#15140f", bg2:"#1c1a14", bg3:"#23211a", fg:"#f3efe6", fg2:"#bbb6a4", fg3:"#7e7a6c", fg4:"#4a4639", line:"#262318", line2:"#33301f" },
+  graphite: { bg:"#15140f", bg2:"#1c1a14", bg3:"#23211a", fg:"#f3efe6", fg2:"#bbb6a4", fg3:"#7e7a6c", fg4:"#4a4639", line:"#2e2b20", line2:"#3d3929" },
 };
 const ACCENTS = {
   neutral: { hl:"#3b6e3a", alert:"#b8533a" },
@@ -426,10 +426,10 @@ function ThemeToggle({ dark, onToggle }){
 
 function PromoBanner({ onTrial }){
   return (
-    <div style={{background:"#18181b",borderBottom:"1px solid #27272a",textAlign:"center",padding:"10px 16px",fontSize:13.5,color:"#a1a1aa",position:"relative",zIndex:100}}>
+    <div style={{background:"var(--bg-3)",borderBottom:"1px solid var(--line-2)",textAlign:"center",padding:"10px 16px",fontSize:13.5,color:"var(--fg-2)",position:"relative",zIndex:100}}>
       <span style={{color:"#22C55E",fontWeight:600,marginRight:6}}>LAUNCH50</span>
       50% off your first month of Team. Expires June 22.&nbsp;
-      <a href="#" onClick={onTrial} style={{color:"#fff",textDecoration:"underline",textUnderlineOffset:3}}>Claim now →</a>
+      <a href="#" onClick={onTrial} style={{color:"var(--fg)",textDecoration:"underline",textUnderlineOffset:3}}>Claim now →</a>
     </div>
   );
 }
