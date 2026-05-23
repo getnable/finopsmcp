@@ -141,6 +141,19 @@
   .anomaly{display:inline-flex;align-items:center;gap:6px;color:var(--alert);font-family:var(--mono);font-size:11.5px;letter-spacing:.04em}
   .anomaly::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--alert)}
 
+  /* stats bar */
+  .stats-bar{display:flex;align-items:center;justify-content:center;gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg-2)}
+  .stat-item{flex:1;text-align:center;padding:20px 16px;border-right:1px solid var(--line)}
+  .stat-item:last-child{border-right:0}
+  .stat-num{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-size:28px;font-weight:600;letter-spacing:-.03em;color:var(--fg)}
+  .stat-label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase;margin-top:4px}
+  @media(max-width:640px){.stats-bar{flex-wrap:wrap}.stat-item{flex:0 0 50%;border-bottom:1px solid var(--line)}.stat-item:nth-child(2){border-right:0}.stat-item:nth-child(3){border-bottom:0}.stat-item:nth-child(4){border-right:0;border-bottom:0}}
+
+  /* card shadows for depth */
+  .terminal{box-shadow:0 1px 0 rgba(0,0,0,.02),0 8px 32px -8px rgba(0,0,0,.10),0 24px 48px -16px rgba(0,0,0,.06)}
+  .codecard{box-shadow:0 1px 0 rgba(0,0,0,.02),0 4px 16px -4px rgba(0,0,0,.08)}
+  .price.feat{box-shadow:0 0 0 1.5px #22C55E,0 8px 32px -8px rgba(34,197,94,.12)}
+
   /* sections */
   section{padding:96px 0;border-top:1px solid var(--line)}
   .section-head{margin-bottom:48px;max-width:760px}
@@ -502,8 +515,8 @@ function Hero({ onTrial }){
   return (
     <header className="hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.8.14 · 17 connectors · free to start</div>
-        <h1>The FinOps copilot<br/>that runs on your machine.</h1>
+        <div className="label" style={{marginBottom:18}}>v0.8.19 · 17 connectors · free to start</div>
+        <h1 style={{background:"linear-gradient(135deg,var(--fg) 0%,var(--fg-2) 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>The FinOps copilot<br/>that runs on your machine.</h1>
         <p className="lede">
           nable reads your cloud billing, inspects Kubernetes clusters, correlates deployments, and recommends remediations. Sensitive infra context stays inside your environment. No dashboards. No SaaS middleman. No data leaving your machine.
         </p>
@@ -517,6 +530,29 @@ function Hero({ onTrial }){
         <Terminal />
       </div>
     </header>
+  );
+}
+
+function StatsBar(){
+  return (
+    <div className="stats-bar">
+      <div className="stat-item">
+        <div className="stat-num">3k+</div>
+        <div className="stat-label">Downloads / week</div>
+      </div>
+      <div className="stat-item">
+        <div className="stat-num">17</div>
+        <div className="stat-label">Providers</div>
+      </div>
+      <div className="stat-item">
+        <div className="stat-num">$0</div>
+        <div className="stat-label">To get started</div>
+      </div>
+      <div className="stat-item">
+        <div className="stat-num">100%</div>
+        <div className="stat-label">Local execution</div>
+      </div>
+    </div>
   );
 }
 
@@ -994,7 +1030,7 @@ function FAQ(){
                 style={{width:"100%",textAlign:"left",background:"none",border:"none",padding:"18px 0",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:16}}
               >
                 <span style={{fontSize:15,fontWeight:500,color:"var(--fg)",fontFamily:"'Space Grotesk',ui-sans-serif,system-ui,sans-serif"}}>{f.q}</span>
-                <span style={{color:"var(--fg-3)",fontSize:18,lineHeight:1,flexShrink:0,transform:open===i?"rotate(45deg)":"none",transition:"transform .2s"}}>&plus;</span>
+                <span style={{color:"var(--fg-3)",fontSize:20,lineHeight:1,flexShrink:0,transform:open===i?"rotate(45deg)":"none",transition:"transform .2s",fontWeight:300}}>+</span>
               </button>
               {open===i && (
                 <p style={{paddingBottom:18,fontSize:14,lineHeight:1.7,color:"var(--fg-2)",marginTop:-6}}>{f.a}</p>
@@ -1339,6 +1375,7 @@ function App(){
       <Nav dark={dark} onToggle={toggle} onTrial={openModal} onSignIn={openSignIn} />
       <PromoBanner onTrial={openModal} />
       <Hero onTrial={openModal} />
+      <StatsBar />
       <QuickStart />
       <Features />
       <Connectors />
