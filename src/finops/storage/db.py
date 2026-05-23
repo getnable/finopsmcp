@@ -111,6 +111,24 @@ audit_log = Table(
     Column("detail", Text, nullable=True),
 )
 
+# ── Business metrics — time-series store for unit economics ──────────────────
+
+business_metrics = Table(
+    "business_metrics", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("metric_date", String(10), nullable=False),          # YYYY-MM-DD
+    Column("arr_usd", Float, nullable=True),                    # Annual Recurring Revenue
+    Column("mrr_usd", Float, nullable=True),                    # Monthly Recurring Revenue
+    Column("mau", Integer, nullable=True),                      # Monthly Active Users
+    Column("dau", Integer, nullable=True),                      # Daily Active Users
+    Column("paying_customers", Integer, nullable=True),         # paying customer count
+    Column("api_calls_monthly", Integer, nullable=True),        # API calls per month
+    Column("employees", Integer, nullable=True),                # headcount
+    Column("custom_metrics", Text, nullable=True),              # JSON: {"metric": value}
+    Column("notes", Text, nullable=True),                       # optional free-text context
+    Column("captured_at", DateTime, nullable=False),
+)
+
 # ── Moat tables — data that accumulates value over time ───────────────────────
 
 effective_rates = Table(

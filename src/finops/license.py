@@ -68,6 +68,7 @@ PRO_FEATURES: set[str] = {
     "org_reports",               # full org-wide cost rollup across all accounts / OUs
     "cur_athena_detail",         # line-item CUR data via Athena (per-resource, RI waste, tag breakdown)
     "azure_detail",              # Azure resource-level cost detail and reservation utilization
+    "business_metrics",          # unit economics: hosting % of MRR, cost per customer, "so what?" analysis
     # anomaly_detection and rightsizing are intentionally FREE:
     # users discover value → want Slack alerts + ticket auto-creation → upgrade to Team
 }

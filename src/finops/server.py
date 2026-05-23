@@ -4188,6 +4188,245 @@ async def get_llm_unit_economics_full(
         return {"error": str(e)}
 
 
+# ── Business metrics + unit economics ────────────────────────────────────────
+
+@mcp.tool()
+async def set_business_metrics(
+    arr_usd: float | None = None,
+    mrr_usd: float | None = None,
+    mau: int | None = None,
+    dau: int | None = None,
+    paying_customers: int | None = None,
+    api_calls_monthly: int | None = None,
+    employees: int | None = None,
+    custom_metrics: dict | None = None,
+    notes: str | None = None,
+    metric_date: str | None = None,
+) -> dict:
+    """
+    Store your business metrics so nable can connect cloud costs to business outcomes.
+
+    Call this once a month (or whenever metrics change) and nable will track trends
+    over time and answer "so what?" when your cloud spend changes.
+
+    Args:
+        arr_usd:            Annual Recurring Revenue in USD (e.g. 1_200_000 for $1.2M ARR)
+        mrr_usd:            Monthly Recurring Revenue in USD. Use this OR arr_usd, not both.
+        mau:                Monthly Active Users
+        dau:                Daily Active Users
+        paying_customers:   Number of paying customers / accounts
+        api_calls_monthly:  Your product's API calls per month (not cloud API calls)
+        employees:          Total headcount
+        custom_metrics:     Any other metric as a dict, e.g. {"free_signups": 4200, "nps": 42}
+        notes:              Free-text context, e.g. "Post Series A, hired 8 engineers"
+        metric_date:        Date these metrics apply to (YYYY-MM-DD). Defaults to today.
+
+    Examples:
+        - "Set our MRR to $45,000 and MAU to 1,200"
+        - "Update business metrics: ARR $2.4M, 340 paying customers, 8,200 MAU"
+        - "Record this month's metrics: MRR 38000, MAU 950, API calls 2400000"
+    """
+    if err := require_pro("business_metrics"):
+        return err
+
+    from .connectors.business_metrics import save_metrics
+
+    date_str = metric_date or date.today().isoformat()
+    result = save_metrics(
+        metric_date=date_str,
+        arr_usd=arr_usd,
+        mrr_usd=mrr_usd,
+        mau=mau,
+        dau=dau,
+        paying_customers=paying_customers,
+        api_calls_monthly=api_calls_monthly,
+        employees=employees,
+        custom_metrics=custom_metrics,
+        notes=notes,
+    )
+
+    stored = {k: v for k, v in {
+        "arr_usd": arr_usd, "mrr_usd": mrr_usd, "mau": mau, "dau": dau,
+        "paying_customers": paying_customers, "api_calls_monthly": api_calls_monthly,
+        "employees": employees, "custom_metrics": custom_metrics,
+    }.items() if v is not None}
+
+    return {
+        **result,
+        "stored": stored,
+        "tip": (
+            "Call get_unit_economics() to see hosting cost as % of MRR, cost per user, "
+            "cost per customer, and more. Call explain_cost_change() to understand what "
+            "recent cost movements mean for the business."
+        ),
+    }
+
+
+@mcp.tool()
+async def get_business_metrics(history_days: int = 90) -> dict:
+    """
+    Return stored business metrics and trend over time.
+
+    Args:
+        history_days: How many days of history to return (default 90).
+
+    Examples:
+        - "Show our business metrics"
+        - "What business metrics do we have on file?"
+        - "Show MRR and MAU history for the last 6 months"
+    """
+    if err := require_pro("business_metrics"):
+        return err
+
+    from .connectors.business_metrics import get_latest_metrics, get_metrics_history
+
+    latest = get_latest_metrics(n=1)
+    history = get_metrics_history(days=history_days)
+
+    if not latest:
+        return {
+            "metrics": None,
+            "message": (
+                "No business metrics stored yet. "
+                "Use set_business_metrics() to record MRR, MAU, paying customers, etc. "
+                "Once set, nable connects your cloud costs to business outcomes automatically."
+            ),
+        }
+
+    return {
+        "latest": latest[0],
+        "history": history,
+        "history_days": history_days,
+        "tip": "Call get_unit_economics() to see cost per customer, hosting as % of MRR, and more.",
+    }
+
+
+@mcp.tool()
+async def get_unit_economics(period_days: int = 30) -> dict:
+    """
+    Connect your total cloud and SaaS spend to business metrics.
+
+    Shows hosting cost as % of MRR/ARR, cost per customer, cost per MAU,
+    cost per API call, and other ratios your finance team and investors care about.
+
+    Requires business metrics to be set with set_business_metrics() first.
+
+    Args:
+        period_days: Cost window to use for the calculation (default 30 days).
+
+    Examples:
+        - "What are our unit economics?"
+        - "What's our hosting cost as a percentage of MRR?"
+        - "How much does it cost us per customer per month?"
+        - "What's our cost per API call?"
+        - "Show me our infrastructure unit economics"
+    """
+    if err := require_pro("business_metrics"):
+        return err
+
+    from .connectors.business_metrics import get_latest_metrics, compute_unit_economics
+
+    latest = get_latest_metrics(n=1)
+    if not latest:
+        return {
+            "error": "No business metrics on file.",
+            "fix": (
+                "Run set_business_metrics(mrr_usd=..., mau=..., paying_customers=...) "
+                "to store your business metrics. nable will then connect cost to business outcomes."
+            ),
+        }
+
+    metrics = latest[0]
+    start = date.today() - timedelta(days=period_days)
+    end = date.today()
+
+    active = await _active()
+    total_cost, by_provider, by_service = await _gather_costs(active, start, end)
+
+    econ = compute_unit_economics(total_cost, metrics)
+
+    top_services = sorted(by_service.items(), key=lambda x: -x[1])[:5]
+
+    return {
+        "period": f"{start} to {end} ({period_days} days)",
+        "total_infrastructure_cost": _fmt_usd(total_cost),
+        "unit_economics": econ,
+        "by_provider": {k: _fmt_usd(v.get("total_usd", 0)) for k, v in by_provider.items()},
+        "top_cost_drivers": [{"service": s, "cost": _fmt_usd(a)} for s, a in top_services],
+        "metrics_as_of": metrics.get("metric_date"),
+        "tip": (
+            "Call explain_cost_change() to understand what recent cost movements "
+            "mean for the business in plain English."
+        ),
+    }
+
+
+@mcp.tool()
+async def explain_cost_change(
+    compare_days: int = 30,
+) -> dict:
+    """
+    Explain what recent cost changes actually mean for the business.
+
+    Compares this period to the previous period across all providers, then
+    connects the change to your business metrics to answer: is this spend
+    increase growth-driven and healthy, or is it pure cost inflation?
+
+    Requires business metrics set with set_business_metrics().
+
+    Args:
+        compare_days: Length of each comparison window in days (default 30).
+                      Uses this period vs the same-length period immediately before.
+
+    Examples:
+        - "Explain our cost changes this month"
+        - "Is our infrastructure spend healthy given our growth?"
+        - "Why did our bill go up and does it matter?"
+        - "What do the cost changes mean for our gross margin?"
+        - "Are we scaling efficiently?"
+    """
+    if err := require_pro("business_metrics"):
+        return err
+
+    from .connectors.business_metrics import (
+        get_latest_metrics, get_metrics_history,
+        compute_unit_economics, explain_cost_change as _explain,
+    )
+
+    history = get_metrics_history(days=compare_days * 3)
+    latest = get_latest_metrics(n=1)
+
+    if not latest:
+        return {
+            "error": "No business metrics on file.",
+            "fix": "Use set_business_metrics() to record MRR, MAU, paying customers, etc.",
+        }
+
+    today = date.today()
+    period_end = today
+    period_start = today - timedelta(days=compare_days)
+    prev_end = period_start - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=compare_days)
+
+    active = await _active()
+    cost_now, _, _ = await _gather_costs(active, period_start, period_end)
+    cost_before, _, _ = await _gather_costs(active, prev_start, prev_end)
+
+    # Use latest metrics for "now" and the oldest available for "before"
+    metrics_now = latest[0]
+    metrics_before = history[0] if len(history) > 1 else latest[0]
+
+    explanation = _explain(
+        cost_now=cost_now,
+        cost_before=cost_before,
+        metrics_now=metrics_now,
+        metrics_before=metrics_before,
+        period_label=f"{period_start} to {period_end} vs {prev_start} to {prev_end}",
+    )
+
+    return explanation
+
+
 # ── Shared views ─────────────────────────────────────────────────────────────
 # Pre-built cost views your whole team can run by name.
 # Add to a Claude Project instruction: "Use get_view() for standard cost reports."

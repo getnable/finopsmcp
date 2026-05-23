@@ -515,7 +515,7 @@ function Hero({ onTrial }){
   return (
     <header className="hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.8.22 · 17 connectors · free to start</div>
+        <div className="label" style={{marginBottom:18}}>v0.8.23 · 17 connectors · free to start</div>
         <h1 style={{background:"linear-gradient(135deg,var(--fg) 0%,var(--fg-2) 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>The FinOps copilot<br/>that runs on your machine.</h1>
         <p className="lede">
           nable reads your cloud billing, inspects Kubernetes clusters, correlates deployments, and recommends remediations. Sensitive infra context stays inside your environment. No dashboards. No SaaS middleman. No data leaving your machine.
@@ -682,9 +682,9 @@ const FEATURES = [
     p:"OpenAI, Anthropic, Bedrock, Langfuse: one view. See which teams are using expensive models when cheaper ones would do. Cost per thousand requests, cost per user, cache hit rate. The numbers your AI budget actually needs to make good decisions."
   },
   {
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,
-    h:"Savings Plans and Reserved Instances that are actually worth buying.",
-    p:"nable looks at your real usage patterns and tells you exactly how much more commitment to buy, which instance families to target, and what your coverage gap is costing you each day. Specific dollar amounts. Not just a coverage percentage and a shrug."
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
+    h:"Connect your cloud bill to your business. Answer the so-what question.",
+    p:"Tell nable your MRR, MAU, and paying customer count. When your AWS bill goes up, it tells you whether that is growth-driven and healthy or pure cost inflation with no business justification. Hosting as a percent of MRR, cost per customer, cost per API call, and how each is trending over time."
   },
   {
     icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>,
@@ -904,6 +904,7 @@ function Pricing({ onTrial }){
             </div>
             <ul>
               <li>Everything in Free</li>
+              <li><strong>Business metrics and unit economics</strong></li>
               <li><strong>Slack / Teams anomaly alerts</strong></li>
               <li>Ticket auto-creation: Jira, Linear, GitHub</li>
               <li>Scheduled email reports</li>
@@ -950,6 +951,7 @@ function CompareTable(){
     { feature: "Kubernetes cost analysis", free: true, team: true },
     { feature: "PR cost comments & CI gate", free: true, team: true },
     { feature: "AWS Cost Explorer", free: true, team: true },
+    { feature: "Business metrics and unit economics", free: false, team: true },
     { feature: "Anomaly alerts via Slack or Teams", free: false, team: true },
     { feature: "AWS CUR (line-item granularity)", free: false, team: true },
     { feature: "Ticket auto-creation: Jira, Linear, GitHub", free: false, team: true },
@@ -1122,7 +1124,7 @@ function Footer(){
         </div>
         <div className="foot-bottom">
           <span>© 2026 nable inc.</span>
-          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.8.22 · 17 connectors</span>
+          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.8.23 · 17 connectors</span>
         </div>
       </div>
     </footer>
