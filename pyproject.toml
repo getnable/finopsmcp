@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.19"
+version = "0.8.22"
 description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
 readme = "README.md"
-license = { text = "Elastic License 2.0" }
+license = { text = "Elastic-2.0" }
 authors = [{ name = "Chandan Bukkapatnam", email = "chbu0285@colorado.edu" }]
 maintainers = [{ name = "Chandan Bukkapatnam", email = "chbu0285@colorado.edu" }]
 keywords = ["mcp", "finops", "claude", "aws", "cloud-cost", "ai", "cost-optimization"]

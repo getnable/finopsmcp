@@ -68,6 +68,8 @@ PRO_FEATURES: set[str] = {
     "org_reports",               # full org-wide cost rollup across all accounts / OUs
     "cur_athena_detail",         # line-item CUR data via Athena (per-resource, RI waste, tag breakdown)
     "azure_detail",              # Azure resource-level cost detail and reservation utilization
+    # anomaly_detection and rightsizing are intentionally FREE:
+    # users discover value → want Slack alerts + ticket auto-creation → upgrade to Team
 }
 
 
@@ -227,13 +229,12 @@ def validate_key(key: str) -> LicenseStatus:
                 email="",
                 issued=trial_start.isoformat(),
                 message=(
-                    f"Free tier: cost queries, anomaly detection, Slack/Teams alerts, "
-                    f"rightsizing, PR cost comments, budget enforcement, K8s cost analysis, "
-                    f"Helm visibility, efficiency scorecard, scheduled Slack reports, "
-                    f"Postgres shared mode, all cloud + SaaS connectors, and more are fully available. "
-                    f"Upgrade at {_UPGRADE_URL} to unlock: ticket auto-creation (Jira/Linear/GitHub), "
-                    f"scheduled email reports, commitment purchase recommendations, "
-                    f"and org-wide multi-account rollup."
+                    f"Free tier: cost queries, anomaly detection, rightsizing recommendations, "
+                    f"Slack/Teams alerts, PR cost comments, budget enforcement, K8s cost analysis, "
+                    f"Helm visibility, efficiency scorecard, all cloud + SaaS connectors. "
+                    f"Upgrade at {_UPGRADE_URL} to unlock: Slack anomaly alerts, "
+                    f"ticket auto-creation (Jira/Linear/GitHub), scheduled email reports, "
+                    f"commitment purchase recommendations, and org-wide multi-account rollup."
                 ),
                 days_remaining=0,
             )

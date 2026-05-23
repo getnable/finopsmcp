@@ -231,11 +231,30 @@ def setup_azure() -> None:
             store_service_principal(tenant_id, client_id, client_secret, sub_ids)
         except Exception as e:
             _err(f"Failed: {e}")
+            try:
+                from . import telemetry as _tel
+                _tel._send_event(_tel._get_install_id(), "provider_connect_failed", {
+                    "provider": "azure",
+                    "error_type": type(e).__name__,
+                })
+            except Exception:
+                pass
             return
     else:
         state = start_device_flow(tenant_id)
         result = poll_for_token(state)
         store_credentials(result, tenant_id, sub_ids)
+
+    _ok("Azure credentials stored")
+    try:
+        from . import telemetry as _tel
+        _tel._send_event(_tel._get_install_id(), "provider_connected", {
+            "provider": "azure",
+            "auth_method": "service_principal" if choice == "1" else "device_flow",
+            "subscription_count": len(sub_ids),
+        })
+    except Exception:
+        pass
 
 
 def setup_gcp() -> None:
@@ -249,8 +268,26 @@ def setup_gcp() -> None:
     try:
         import_service_account_key(key_path)
         store_billing_accounts(billing_ids, bq_table or None)
+        _ok("GCP credentials stored")
+        try:
+            from . import telemetry as _tel
+            _tel._send_event(_tel._get_install_id(), "provider_connected", {
+                "provider": "gcp",
+                "billing_account_count": len(billing_ids),
+                "has_bq_export": bool(bq_table),
+            })
+        except Exception:
+            pass
     except Exception as e:
         _err(f"Failed: {e}")
+        try:
+            from . import telemetry as _tel
+            _tel._send_event(_tel._get_install_id(), "provider_connect_failed", {
+                "provider": "gcp",
+                "error_type": type(e).__name__,
+            })
+        except Exception:
+            pass
 
 
 def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]) -> None:
@@ -258,11 +295,21 @@ def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]
     _section(f"{provider_name}")
     from .security.vault import Vault
     vault = Vault.default()
+    stored_any = False
     for env_key, label, is_secret in env_vars:
         val = _prompt(f"  {label}", secret=is_secret)
         if val:
             vault.store(env_key, val)
+            stored_any = True
     _ok(f"{provider_name} credentials stored in vault")
+    if stored_any:
+        try:
+            from . import telemetry as _tel
+            _tel._send_event(_tel._get_install_id(), "provider_connected", {
+                "provider": provider_name.lower().replace(" ", "_"),
+            })
+        except Exception:
+            pass
 
 
 def setup_sso() -> None:
@@ -725,6 +772,17 @@ def _configure_claude_desktop() -> None:
 
     We resolve the absolute path at setup time and write it to the config.
     """
+    try:
+        _configure_claude_desktop_inner()
+    except (KeyboardInterrupt, EOFError):
+        print("\n  Claude Desktop configuration skipped.")
+    except Exception as e:
+        _warn(f"Claude Desktop auto-config failed: {e}")
+        print("  Run 'finops setup claude' to try again, or configure manually.")
+
+
+def _configure_claude_desktop_inner() -> None:
+    """Inner implementation -- called by _configure_claude_desktop with error handling."""
     import json
     import shutil
 
@@ -792,7 +850,13 @@ def _configure_claude_desktop() -> None:
         print(f"  (replaces existing: {existing.get('command', '?')})")
     print(f"  ──────────────────────────────────────────────────")
 
-    ans = _prompt("  Write config? [Y/n]", default="y").lower()
+    try:
+        ans = _prompt("  Write config? [Y/n]", default="y").lower()
+    except (KeyboardInterrupt, EOFError):
+        print("\n  Skipped. Add manually:")
+        _print_manual_config(mcp_entry)
+        return
+
     if ans not in ("y", "yes", ""):
         print("  Skipped. Add manually:")
         _print_manual_config(mcp_entry)

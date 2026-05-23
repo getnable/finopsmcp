@@ -145,9 +145,9 @@ nable is not just a connector that pipes billing data into Claude. It runs activ
 
 **AWS deep audit** goes well beyond Cost Explorer. It pulls CloudWatch metrics for every running resource and flags waste that never shows up on your bill until it's too late: gp2 volumes that should be gp3 (20% cheaper, same performance), unattached EBS volumes, idle NAT Gateways costing $32/mo in base charges, RDS backup retention set way too high, CloudWatch Log Groups with no retention policy growing forever, and Lambda functions allocated 2x the memory they actually use. Think of it as Compute Optimizer plus the layer underneath it.
 
-**Anomaly detection** uses z-score, CUSUM drift, and day-of-week seasonal normalization. When something spikes, it drills into Cost Explorer by tag and tells you which team, environment, or service drove it.
+**Anomaly detection** uses z-score, CUSUM drift, and day-of-week seasonal normalization. When something spikes, it drills into Cost Explorer by tag and tells you which team, environment, or service drove it. Free tier shows findings in Claude; Team adds Slack/Teams alerts and auto-ticketing.
 
-**Rightsizing** combines AWS Compute Optimizer with nable's own CloudWatch analysis. It gives you specific recommended instance types with estimated savings, not just a list of underutilized resources.
+**Rightsizing** combines AWS Compute Optimizer with nable's own CloudWatch analysis. It gives you specific recommended instance types with estimated savings, not just a list of underutilized resources. Free tier shows recommendations in Claude; Team adds ticket auto-creation.
 
 **Commitment analysis** (Team plan) models Savings Plans and Reserved Instance coverage against your actual usage. It shows your current effective discount rate, coverage gaps, and what you would save by purchasing additional commitments.
 
@@ -155,9 +155,9 @@ nable is not just a connector that pipes billing data into Claude. It runs activ
 
 ## Team plan
 
-- Anomaly alerts via Slack or Teams
+- **Slack / Teams anomaly alerts** — get notified the moment spend spikes, not the next morning
+- **Ticket auto-creation** — Jira, Linear, or GitHub issues for anomalies, rightsizing, and waste
 - Cost attribution by team, service, or tag
-- Auto-ticketing: creates Jira, Linear, or GitHub issues for anomalies and waste findings
 - Scheduled email reports
 - Commitment purchase recommendations with ROI projections
 - Org-wide multi-account cost rollup

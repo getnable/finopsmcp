@@ -155,8 +155,9 @@ async def connection_status() -> str:
         plan_line = (
             f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
             f"PR comments, budgets, K8s analysis, and all connectors included. "
-            f"Team features (ticket auto-creation, email reports, commitment recommendations, org rollup) "
-            f"are $39.99/mo. Upgrade at {_UPGRADE_URL}."
+            f"Team plan ($39.99/mo) adds: Slack anomaly alerts, ticket auto-creation, "
+            f"email digests, commitment recommendations, and org rollup. "
+            f"Upgrade at {_UPGRADE_URL}."
         )
     elif lic.mode == "pro":
         plan_line = f"Plan: Team: {lic.email}"
@@ -286,10 +287,11 @@ async def list_connected_providers() -> dict:
         result["_plan"] = {
             "plan": "free",
             "note": (
-                f"Free tier: cost queries, anomaly detection, rightsizing, Slack alerts, "
-                f"and all connectors included. "
-                f"Team features (ticket auto-creation, email reports, commitment recommendations, org rollup) "
-                f"are $39.99/mo. Upgrade at {_UPGRADE_URL}."
+                f"Free tier: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
+                f"PR comments, budgets, K8s analysis, Helm visibility, and all connectors included. "
+                f"Team plan ($39.99/mo) adds: Slack anomaly alerts, ticket auto-creation "
+                f"(Jira/Linear/GitHub), email reports, commitment recommendations, "
+                f"and org rollup. Upgrade at {_UPGRADE_URL}."
             ),
         }
     elif status.mode == "pro":
@@ -705,7 +707,6 @@ async def get_anomalies(
     Note: Anomalies require at least 7 days of snapshot history.
           Run 'finops snapshot' or wait for the daily job to accumulate data.
     """
-
     from .anomaly.detector import get_active_anomalies
 
     rows = get_active_anomalies(provider=provider, severity=severity, limit=limit)
@@ -1047,7 +1048,6 @@ async def get_rightsizing_recommendations(
         - "How much could we save by rightsizing?"
         - "Find underutilized instances we should downsize"
     """
-
     try:
         from .recommendations.rightsizing import analyze_rightsizing, rightsizing_summary
         recs = analyze_rightsizing(
@@ -4186,6 +4186,369 @@ async def get_llm_unit_economics_full(
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+# ── Shared views ─────────────────────────────────────────────────────────────
+# Pre-built cost views your whole team can run by name.
+# Add to a Claude Project instruction: "Use get_view() for standard cost reports."
+
+_VIEWS: dict[str, dict] = {
+    "mom": {
+        "name": "Month over month",
+        "description": "Compare total spend across all providers for the last two full months.",
+    },
+    "wow": {
+        "name": "Week over week",
+        "description": "Compare last week vs the week before, broken down by provider.",
+    },
+    "dod": {
+        "name": "Day over day (last 14 days)",
+        "description": "Daily spend for the past 14 days so you can spot trends at a glance.",
+    },
+    "by_service": {
+        "name": "Top services this month",
+        "description": "Ranked list of every AWS/Azure/GCP service by spend this month vs last month.",
+    },
+    "by_tag": {
+        "name": "Cost by tag",
+        "description": "Spend broken down by a tag key (e.g. team, env, cost-center). Pass tag_key.",
+    },
+    "by_team": {
+        "name": "Cost by team",
+        "description": "Spend attributed to each team via tag rules. Requires team tagging to be configured.",
+    },
+    "top_spenders": {
+        "name": "Top 10 cost drivers",
+        "description": "The ten biggest line items across all providers this month.",
+    },
+    "daily_trend": {
+        "name": "Daily trend (30 days)",
+        "description": "Your daily spend for the last 30 days plotted as a simple table.",
+    },
+    "anomalies": {
+        "name": "Active anomalies",
+        "description": "All unacknowledged cost spikes and drops detected from historical baselines.",
+    },
+    "rightsizing": {
+        "name": "Rightsizing opportunities",
+        "description": "EC2 instances with low CPU that could be downsized with estimated monthly savings.",
+    },
+    "waste": {
+        "name": "Idle and wasted resources",
+        "description": "Unattached EBS volumes, stopped instances, idle NAT gateways, and over-retained RDS backups.",
+    },
+    "saas": {
+        "name": "SaaS spend summary",
+        "description": "All SaaS provider spend (Datadog, Snowflake, GitHub, etc.) in one place.",
+    },
+}
+
+
+@mcp.tool()
+async def list_views() -> dict:
+    """
+    List all pre-built cost views available to your team.
+
+    These are ready-to-run reports anyone on the team can call by name using get_view().
+    Useful to paste into a Claude Project system prompt so teammates know what is available.
+
+    Examples:
+        - "What views are available?"
+        - "Show me the list of shared cost reports"
+    """
+    return {
+        "views": [
+            {"id": k, "name": v["name"], "description": v["description"]}
+            for k, v in _VIEWS.items()
+        ],
+        "usage": (
+            "Call get_view(view='<id>') to run any view. "
+            "Some views accept extra args: by_tag needs tag_key, "
+            "dod/daily_trend accept a days parameter."
+        ),
+        "tip": (
+            "Add 'Use list_views() to show available cost reports' to your Claude Project "
+            "instructions so every teammate knows what to ask for."
+        ),
+    }
+
+
+@mcp.tool()
+async def get_view(
+    view: str,
+    tag_key: str | None = None,
+    tag_value: str | None = None,
+    provider: str | None = None,
+    days: int | None = None,
+) -> dict:
+    """
+    Run a pre-built cost view by name. These are standard reports your whole team can share.
+
+    Args:
+        view:      View ID from list_views(). Required.
+        tag_key:   Tag key to group by (required for 'by_tag' view, e.g. 'team', 'env').
+        tag_value: Optional filter to a single tag value within by_tag.
+        provider:  Optional provider filter (aws, azure, gcp, datadog, etc.).
+        days:      Override the default lookback window for time-series views.
+
+    Examples:
+        - "Show me the month over month view"
+        - "Run the by_tag view for the team tag"
+        - "Get the anomalies view for AWS"
+        - "What does the top_spenders view show?"
+        - "Run daily_trend for the last 7 days"
+
+    Tip: Share these view names in your team's Slack or Claude Project so everyone
+         runs the same report instead of writing queries from scratch each time.
+    """
+    if view not in _VIEWS:
+        return {
+            "error": f"Unknown view '{view}'.",
+            "available_views": list(_VIEWS.keys()),
+            "tip": "Call list_views() to see all available views with descriptions.",
+        }
+
+    meta = _VIEWS[view]
+    today = date.today()
+
+    # ── mom ──────────────────────────────────────────────────────────────────
+    if view == "mom":
+        first_this = today.replace(day=1)
+        first_last = (first_this - timedelta(days=1)).replace(day=1)
+        last_last   = first_this - timedelta(days=1)
+
+        active = await _active()
+        if provider:
+            active = {k: v for k, v in active.items() if k == provider}
+
+        this_total, this_by, _  = await _gather_costs(active, first_this, today)
+        last_total, last_by, _  = await _gather_costs(active, first_last, last_last)
+
+        rows = []
+        all_providers = sorted(set(list(this_by.keys()) + list(last_by.keys())))
+        for p in all_providers:
+            t = this_by.get(p, {}).get("total_usd", 0.0)
+            l = last_by.get(p, {}).get("total_usd", 0.0)
+            pct = ((t - l) / l * 100) if l else None
+            rows.append({
+                "provider": p,
+                "this_month": _fmt_usd(t),
+                "last_month": _fmt_usd(l),
+                "change_pct": f"{pct:+.1f}%" if pct is not None else "n/a",
+            })
+
+        total_pct = ((this_total - last_total) / last_total * 100) if last_total else None
+        return {
+            "view": meta["name"],
+            "this_month": {"period": f"{first_this} to {today}", "total": _fmt_usd(this_total)},
+            "last_month": {"period": f"{first_last} to {last_last}", "total": _fmt_usd(last_total)},
+            "total_change": f"{total_pct:+.1f}%" if total_pct is not None else "n/a",
+            "by_provider": rows,
+        }
+
+    # ── wow ──────────────────────────────────────────────────────────────────
+    if view == "wow":
+        this_start = today - timedelta(days=7)
+        last_start = today - timedelta(days=14)
+        last_end   = today - timedelta(days=8)
+
+        active = await _active()
+        if provider:
+            active = {k: v for k, v in active.items() if k == provider}
+
+        this_total, this_by, _  = await _gather_costs(active, this_start, today, granularity="DAILY")
+        last_total, last_by, _  = await _gather_costs(active, last_start, last_end, granularity="DAILY")
+
+        pct = ((this_total - last_total) / last_total * 100) if last_total else None
+        return {
+            "view": meta["name"],
+            "this_week": {"period": f"{this_start} to {today}", "total": _fmt_usd(this_total)},
+            "last_week": {"period": f"{last_start} to {last_end}", "total": _fmt_usd(last_total)},
+            "change_pct": f"{pct:+.1f}%" if pct is not None else "n/a",
+            "by_provider": [
+                {
+                    "provider": p,
+                    "this_week": _fmt_usd(this_by.get(p, {}).get("total_usd", 0)),
+                    "last_week": _fmt_usd(last_by.get(p, {}).get("total_usd", 0)),
+                }
+                for p in sorted(set(list(this_by.keys()) + list(last_by.keys())))
+            ],
+        }
+
+    # ── dod / daily_trend ────────────────────────────────────────────────────
+    if view in ("dod", "daily_trend"):
+        n = days or (14 if view == "dod" else 30)
+        start = today - timedelta(days=n)
+
+        active = await _active()
+        if provider:
+            active = {k: v for k, v in active.items() if k == provider}
+
+        _, _, grand_by_service = await _gather_costs(active, start, today, granularity="DAILY")
+
+        # Aggregate per-connector daily data directly
+        daily: dict[str, float] = {}
+        for name, connector in active.items():
+            try:
+                summary = await connector.get_costs(start, today, granularity="DAILY")
+                # daily_breakdown is a dict[str, float] keyed by date string if available
+                breakdown = getattr(summary, "daily_breakdown", None) or {}
+                for day_str, amt in breakdown.items():
+                    daily[day_str] = daily.get(day_str, 0.0) + amt
+            except Exception:
+                pass
+
+        rows = [{"date": d, "spend": _fmt_usd(v)} for d, v in sorted(daily.items())]
+        return {
+            "view": meta["name"],
+            "period": f"{start} to {today}",
+            "daily_spend": rows if rows else {"note": "Daily granularity not available for configured connectors."},
+        }
+
+    # ── by_service ───────────────────────────────────────────────────────────
+    if view == "by_service":
+        first_this = today.replace(day=1)
+        first_last = (first_this - timedelta(days=1)).replace(day=1)
+
+        active = await _active()
+        if provider:
+            active = {k: v for k, v in active.items() if k == provider}
+
+        _, _, this_svc = await _gather_costs(active, first_this, today)
+        _, _, last_svc = await _gather_costs(active, first_last, first_this - timedelta(days=1))
+
+        rows = []
+        for svc, amt in sorted(this_svc.items(), key=lambda x: -x[1])[:20]:
+            last_amt = last_svc.get(svc, 0.0)
+            pct = ((amt - last_amt) / last_amt * 100) if last_amt else None
+            rows.append({
+                "service": svc,
+                "this_month": _fmt_usd(amt),
+                "last_month": _fmt_usd(last_amt),
+                "change": f"{pct:+.1f}%" if pct is not None else "new",
+            })
+
+        return {"view": meta["name"], "period": f"{first_this} to {today}", "services": rows}
+
+    # ── by_tag ───────────────────────────────────────────────────────────────
+    if view == "by_tag":
+        if not tag_key:
+            return {
+                "error": "tag_key is required for the by_tag view.",
+                "example": "get_view(view='by_tag', tag_key='team')",
+            }
+        start, end = _default_dates()
+        active = await _active()
+        if provider:
+            active = {k: v for k, v in active.items() if k == provider}
+
+        tag_totals: dict[str, float] = {}
+        for name, connector in active.items():
+            try:
+                if hasattr(connector, "get_costs_by_tag"):
+                    result = await connector.get_costs_by_tag(start, end, tag_key=tag_key)
+                    for tag_val, amt in result.items():
+                        if tag_value and tag_val != tag_value:
+                            continue
+                        tag_totals[tag_val] = tag_totals.get(tag_val, 0.0) + amt
+            except Exception:
+                pass
+
+        if not tag_totals:
+            return {
+                "view": meta["name"],
+                "tag_key": tag_key,
+                "note": (
+                    f"No cost data found for tag '{tag_key}'. "
+                    "Make sure resources are tagged and Cost Explorer tag activation is enabled."
+                ),
+            }
+
+        rows = [
+            {"tag_value": k, "spend": _fmt_usd(v)}
+            for k, v in sorted(tag_totals.items(), key=lambda x: -x[1])
+        ]
+        return {
+            "view": meta["name"],
+            "tag_key": tag_key,
+            "period": f"{start} to {end}",
+            "by_tag": rows,
+            "total": _fmt_usd(sum(tag_totals.values())),
+        }
+
+    # ── by_team ──────────────────────────────────────────────────────────────
+    if view == "by_team":
+        start, end = _default_dates()
+        try:
+            from .attribution.engine import AttributionEngine
+            engine = AttributionEngine()
+            result = await engine.attribute(start, end)
+            rows = [
+                {"team": t, "spend": _fmt_usd(v)}
+                for t, v in sorted(result.items(), key=lambda x: -x[1])
+            ]
+            return {
+                "view": meta["name"],
+                "period": f"{start} to {end}",
+                "by_team": rows,
+                "total": _fmt_usd(sum(result.values())),
+            }
+        except Exception as e:
+            return {"view": meta["name"], "error": str(e)}
+
+    # ── top_spenders ─────────────────────────────────────────────────────────
+    if view == "top_spenders":
+        start, end = _default_dates()
+        active = await _active()
+        if provider:
+            active = {k: v for k, v in active.items() if k == provider}
+
+        _, _, grand_svc = await _gather_costs(active, start, end)
+        rows = [
+            {"service": svc, "spend": _fmt_usd(amt)}
+            for svc, amt in sorted(grand_svc.items(), key=lambda x: -x[1])[:10]
+        ]
+        return {
+            "view": meta["name"],
+            "period": f"{start} to {end}",
+            "top_10": rows,
+        }
+
+    # ── anomalies ────────────────────────────────────────────────────────────
+    if view == "anomalies":
+        return await get_anomalies(provider=provider)
+
+    # ── rightsizing ──────────────────────────────────────────────────────────
+    if view == "rightsizing":
+        return await get_rightsizing_recommendations()
+
+    # ── waste ────────────────────────────────────────────────────────────────
+    if view == "waste":
+        try:
+            from .analyzers.waste import scan_waste
+            result = scan_waste()
+            return {"view": meta["name"], **result}
+        except Exception as e:
+            return {"view": meta["name"], "error": str(e)}
+
+    # ── saas ─────────────────────────────────────────────────────────────────
+    if view == "saas":
+        start, end = _default_dates()
+        active = await _active(subset=_SAAS_CONNECTORS)
+        if provider:
+            active = {k: v for k, v in active.items() if k == provider}
+
+        grand_total, by_provider, _ = await _gather_costs(active, start, end)
+        return {
+            "view": meta["name"],
+            "period": f"{start} to {end}",
+            "total": _fmt_usd(grand_total),
+            "by_provider": {
+                k: _fmt_usd(v.get("total_usd", 0)) for k, v in by_provider.items()
+            },
+        }
+
+    return {"error": f"View '{view}' is defined but not yet implemented."}
 
 
 if __name__ == "__main__":
