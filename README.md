@@ -123,7 +123,7 @@ Config file locations:
 
 | Provider | What it pulls |
 |---|---|
-| AWS | Cost Explorer: real spend, savings plans, reservations |
+| AWS | Cost Explorer (free tier) · CUR via S3 (Team: line-item granularity, savings plans, reservations) |
 | Azure | Cost Management API |
 | GCP | Cloud Billing API + BigQuery export |
 | Datadog | Usage Metering API v2: real dollar amounts |
