@@ -141,13 +141,12 @@
   .anomaly{display:inline-flex;align-items:center;gap:6px;color:var(--alert);font-family:var(--mono);font-size:11.5px;letter-spacing:.04em}
   .anomaly::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--alert)}
 
-  /* stats bar */
-  .stats-bar{display:flex;align-items:center;justify-content:center;gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg-2)}
-  .stat-item{flex:1;text-align:center;padding:20px 16px;border-right:1px solid var(--line)}
-  .stat-item:last-child{border-right:0}
-  .stat-num{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-size:28px;font-weight:600;letter-spacing:-.03em;color:var(--fg)}
-  .stat-label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase;margin-top:4px}
-  @media(max-width:640px){.stats-bar{flex-wrap:wrap}.stat-item{flex:0 0 50%;border-bottom:1px solid var(--line)}.stat-item:nth-child(2){border-right:0}.stat-item:nth-child(3){border-bottom:0}.stat-item:nth-child(4){border-right:0;border-bottom:0}}
+  /* trust strip */
+  .trust-strip{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-top:36px}
+  .trust-item{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--fg-3)}
+  .trust-item strong{color:var(--fg);font-weight:600}
+  .trust-sep{width:1px;height:14px;background:var(--line-2);flex-shrink:0}
+  @media(max-width:640px){.trust-sep{display:none}.trust-strip{gap:12px}}
 
   /* card shadows for depth */
   .terminal{box-shadow:0 1px 0 rgba(0,0,0,.02),0 8px 32px -8px rgba(0,0,0,.10),0 24px 48px -16px rgba(0,0,0,.06)}
@@ -189,6 +188,7 @@
   .feature:hover{background:var(--bg-2)}
   .feature:nth-child(2n){border-right:0;padding-right:0;padding-left:36px}
   .feature:nth-last-child(-n+2){border-bottom:0}
+  .feature .feat-icon{width:36px;height:36px;border-radius:8px;background:var(--bg-3);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--fg-2);flex-shrink:0}
   .feature .num{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.04em}
   .feature h3{font-size:22px;font-weight:500;letter-spacing:-.02em;line-height:1.2;color:var(--fg)}
   .feature p{font-size:14.5px;line-height:1.6;max-width:46ch}
@@ -525,6 +525,8 @@ function Hero({ onTrial }){
           <a href="/docs" className="btn btn-ghost">Read the docs</a>
         </div>
 
+        <TrustStrip />
+
         <Clients />
 
         <Terminal />
@@ -533,24 +535,27 @@ function Hero({ onTrial }){
   );
 }
 
-function StatsBar(){
+function TrustStrip(){
   return (
-    <div className="stats-bar">
-      <div className="stat-item">
-        <div className="stat-num">3k+</div>
-        <div className="stat-label">Downloads / week</div>
+    <div className="trust-strip">
+      <div className="trust-item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span><strong>3k+</strong> installs / week</span>
       </div>
-      <div className="stat-item">
-        <div className="stat-num">17</div>
-        <div className="stat-label">Providers</div>
+      <div className="trust-sep"/>
+      <div className="trust-item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span><strong>17</strong> cloud &amp; SaaS providers</span>
       </div>
-      <div className="stat-item">
-        <div className="stat-num">$0</div>
-        <div className="stat-label">To get started</div>
+      <div className="trust-sep"/>
+      <div className="trust-item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span><strong>100%</strong> local — nothing leaves your machine</span>
       </div>
-      <div className="stat-item">
-        <div className="stat-num">100%</div>
-        <div className="stat-label">Local execution</div>
+      <div className="trust-sep"/>
+      <div className="trust-item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>Free to start — no card required</span>
       </div>
     </div>
   );
@@ -652,37 +657,37 @@ function QuickStart(){
 
 const FEATURES = [
   {
-    n:"01",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
     h:"Anomaly detection that tells you who, not just what.",
     p:"Most tools tell you spend jumped 40%. nable tells you the payments team's new node group in us-east-1 drove $1,840 of it. Alerts fire only when something is genuinely unusual, not every time a tagged resource crosses an arbitrary threshold."
   },
   {
-    n:"02",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>,
     h:"Kubernetes costs, broken down to every team.",
     p:"EKS charges you one EC2 line for the whole cluster. nable breaks that down to every pod, deployment, namespace, and team, including Fargate pods, weighted by what each workload actually requested. The per-team breakdown your cloud bill doesn't include."
   },
   {
-    n:"03",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
     h:"Catch expensive infrastructure before it deploys.",
     p:"Pipe terraform plan to nable and get a per-resource cost delta before you apply: additions, removals, and changes, with rightsizing suggestions inline. Know the cost impact before you commit, not after."
   },
   {
-    n:"04",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>,
     h:"All your AI spend in one place.",
     p:"OpenAI, Anthropic, Bedrock, Langfuse: one view. See which teams are paying for expensive models when cheaper ones do the job. Cost per 1,000 requests, cost per user, cache hit rate. The unit economics your AI budget actually needs."
   },
   {
-    n:"05",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,
     h:"Savings Plan and RI optimization that actually saves money.",
     p:"nable analyzes your actual usage patterns and tells you exactly how much more commitment to buy, which instance families to target, and what your coverage gap costs you per day. Specific dollar amounts, not just coverage percentages."
   },
   {
-    n:"06",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>,
     h:"Cost impact in every pull request.",
     p:"nable comments on PRs that touch infrastructure with a per-resource cost breakdown. Engineers see the monthly impact before they merge, not after the bill arrives. Works with GitHub via webhook, no pipeline changes needed."
   },
   {
-    n:"07",
+    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>,
     h:"Find waste. Clean it up. Track the savings.",
     p:"nable identifies idle EC2 instances, unattached EBS volumes, oversized RDS instances, and ghost Kubernetes workloads, then cleans them up on your instruction. Not a list of recommendations you ignore. Actual remediation, with an audit trail."
   },
@@ -701,7 +706,7 @@ function Features(){
         <div className="features">
           {FEATURES.map((f,i)=>(
             <article className="feature" key={i}>
-              <div className="num">/ {f.n}</div>
+              <div className="feat-icon">{f.icon}</div>
               <h3>{f.h}</h3>
               <p>{f.p}</p>
             </article>
@@ -1375,7 +1380,6 @@ function App(){
       <Nav dark={dark} onToggle={toggle} onTrial={openModal} onSignIn={openSignIn} />
       <PromoBanner onTrial={openModal} />
       <Hero onTrial={openModal} />
-      <StatsBar />
       <QuickStart />
       <Features />
       <Connectors />
