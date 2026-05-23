@@ -224,7 +224,7 @@
   .free-setup-form{padding-top:4px}
   .free-setup-form .fs-label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.03em;margin-bottom:10px}
   .free-setup-form .fs-field{display:flex;gap:0;border-bottom:1px solid var(--fg);padding-bottom:8px}
-  .free-setup-form input[type=email]{flex:1;background:transparent;border:0;color:var(--fg);padding:6px 0;font-family:'Geist',sans-serif;font-size:14px;outline:none}
+  .free-setup-form input[type=email]{flex:1;background:transparent;border:0;color:var(--fg);padding:6px 0;font-family:'DM Sans',sans-serif;font-size:14px;outline:none;min-height:44px}
   .free-setup-form input[type=email]::placeholder{color:var(--fg-3)}
   .free-setup-form .fs-btn{background:transparent;border:0;color:var(--fg);font-size:13px;cursor:pointer;padding:0 2px;white-space:nowrap}
   .free-setup-steps{padding-top:4px}
@@ -256,7 +256,7 @@
   .cta .row{display:grid;grid-template-columns:1.4fr 1fr;gap:80px;align-items:end}
   .cta-form .lab{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em;margin-bottom:12px}
   .cta-form .field{display:flex;gap:8px;border-bottom:1px solid var(--fg);padding-bottom:8px}
-  .cta-form input{flex:1;background:transparent;border:0;color:var(--fg);padding:6px 0;font-family:'Geist',sans-serif;font-size:16px;outline:none}
+  .cta-form input{flex:1;background:transparent;border:0;color:var(--fg);padding:6px 0;font-family:'DM Sans',sans-serif;font-size:16px;outline:none}
   .cta-form input::placeholder{color:var(--fg-3)}
   .cta-form .submit{background:transparent;border:0;color:var(--fg);font-size:14px;cursor:pointer;padding:0 4px;display:inline-flex;align-items:center;gap:6px}
   .cta-form .helper{margin-top:14px;font-size:12.5px;color:var(--fg-3)}
@@ -274,9 +274,9 @@
   .modal-right{padding:44px 40px;display:flex;flex-direction:column;gap:20px}
   .modal-right h4{font-size:15px;font-weight:500;letter-spacing:-.01em}
   .modal-right label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.04em;display:block;margin-bottom:6px}
-  .modal-right input[type=email]{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:'Geist',sans-serif;font-size:14px;color:var(--fg);outline:none}
+  .modal-right input[type=email]{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--fg);outline:none}
   .modal-right input[type=email]:focus{border-color:var(--fg-2)}
-  .modal-right .modal-submit{width:100%;background:var(--fg);color:var(--bg);border:0;border-radius:6px;padding:11px;font-family:'Geist',sans-serif;font-size:14px;font-weight:500;cursor:pointer;margin-top:4px}
+  .modal-right .modal-submit{width:100%;background:var(--fg);color:var(--bg);border:0;border-radius:6px;padding:11px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;cursor:pointer;margin-top:4px}
   .modal-right .modal-submit:hover{background:#000}
   .modal-right .modal-note{font-size:11.5px;color:var(--fg-3);line-height:1.5;font-family:var(--mono)}
   .modal-pip{margin-top:auto;padding-top:20px;border-top:1px solid var(--line)}
@@ -311,6 +311,34 @@
     .nav ul{display:none}
     .cta .row{grid-template-columns:1fr;gap:48px}
     .foot{grid-template-columns:1fr 1fr}
+  }
+
+  /* 375px mobile */
+  @media (max-width:375px){
+    .wrap{padding:0 16px}
+    h1{font-size:36px}
+    .hero{padding:56px 0 48px}
+    .hero .lede{font-size:15px}
+    .foot{grid-template-columns:1fr}
+  }
+
+  /* Focus rings — keyboard nav */
+  :focus-visible{outline:2px solid var(--fg);outline-offset:2px;border-radius:3px}
+  input:focus-visible,textarea:focus-visible{outline:2px solid var(--fg-2);outline-offset:0}
+  .client-pill:focus-visible{outline:2px solid var(--fg);outline-offset:3px}
+
+  /* Touch targets — 44x44px minimum */
+  .btn{min-height:36px;min-width:36px}
+  .theme-tog{min-width:44px;min-height:44px}
+  .modal-close{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center}
+  .install button{min-height:28px;min-width:36px;padding:4px 10px}
+  .fs-btn{min-height:44px;padding:0 8px}
+  .cta-form .submit{min-height:44px;padding:0 8px}
+
+  /* prefers-reduced-motion */
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+    .theme-tog-knob{transition:none}
   }
 </style>
 <script defer src="/_vercel/speed-insights/script.js"></script>
@@ -1099,7 +1127,7 @@ function TrialModal({ onClose }){
   return (
     <div className="modal-backdrop" onClick={(e)=>{ if(e.target===e.currentTarget) onClose(); }}>
       <div className="modal" style={{position:"relative"}}>
-        <button className="modal-close" onClick={onClose}>×</button>
+        <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
 
         {/* Left: what's included */}
         <div className="modal-left">
@@ -1132,8 +1160,9 @@ function TrialModal({ onClose }){
           <h4>Subscribe to Team: first month free</h4>
           <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
             <div>
-              <label>EMAIL</label>
+              <label htmlFor="trial-email">EMAIL</label>
               <input
+                id="trial-email"
                 type="email"
                 placeholder="you@company.com"
                 value={email}
@@ -1217,7 +1246,7 @@ function SignInModal({ onClose }){
   return (
     <div className="modal-backdrop" onClick={(e)=>{ if(e.target===e.currentTarget) onClose(); }}>
       <div className="modal" style={{position:"relative",gridTemplateColumns:"1fr",maxWidth:440}}>
-        <button className="modal-close" onClick={onClose}>×</button>
+        <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
         <div className="modal-right" style={{padding:"44px 40px"}}>
           <h4>Sign in to nable</h4>
           <p style={{fontFamily:"var(--mono)",fontSize:12,color:"var(--fg-3)",marginTop:4}}>
@@ -1226,8 +1255,9 @@ function SignInModal({ onClose }){
           {!sent ? (
             <form onSubmit={handleEmail} style={{display:"flex",flexDirection:"column",gap:16,marginTop:20}}>
               <div>
-                <label>EMAIL</label>
+                <label htmlFor="signin-email">EMAIL</label>
                 <input
+                  id="signin-email"
                   type="email"
                   placeholder="you@company.com"
                   value={email}
@@ -1254,8 +1284,9 @@ function SignInModal({ onClose }){
           ) : (
             <form onSubmit={handleCode} style={{display:"flex",flexDirection:"column",gap:16,marginTop:20}}>
               <div>
-                <label>6-DIGIT CODE</label>
+                <label htmlFor="signin-code">6-DIGIT CODE</label>
                 <input
+                  id="signin-code"
                   type="text"
                   inputMode="numeric"
                   pattern="\d{6}"
