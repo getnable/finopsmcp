@@ -816,8 +816,14 @@ function Pricing({ onTrial }){
           <div className="price feat">
             <div className="tier">Team · Most popular</div>
             <div>
-              <div className="amt">$39<span className="small">.99 / mo</span></div>
-              <div className="amt-sub">first month free when you subscribe · cancel any time</div>
+              <div className="amt">
+                <span style={{textDecoration:"line-through",opacity:0.4,fontSize:"0.7em",verticalAlign:"middle",marginRight:6}}>$39.99</span>
+                $19<span className="small">.99 / mo</span>
+              </div>
+              <div className="amt-sub" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span style={{background:"#a3e635",color:"#1a1a1a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:4,letterSpacing:"0.04em"}}>LAUNCH50</span>
+                <span>50% off first month · cancel any time · expires Jun 22</span>
+              </div>
             </div>
             <ul>
               <li>Everything in Free</li>
