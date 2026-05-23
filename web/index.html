@@ -27,13 +27,14 @@
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" />
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  html,body{background:var(--bg);color:var(--fg);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-feature-settings:"ss01","cv11";-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px;letter-spacing:-0.005em}
+  html,body{background:var(--bg);color:var(--fg);font-family:'DM Sans',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px;letter-spacing:-0.005em}
+  h1,h2,h3,h4,.logo{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif}
   :root{
     --bg:#fbfaf7;
     --bg-2:#f4f2ec;
@@ -83,7 +84,7 @@
   .btn:hover .arr{transform:translateX(2px)}
 
   /* type */
-  h1,h2,h3,h4{font-weight:500;letter-spacing:-.025em;color:var(--fg)}
+  h1,h2,h3,h4{font-weight:500;letter-spacing:-.025em;color:var(--fg);font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif}
   h1{font-size:clamp(40px,5.6vw,68px);line-height:1.04;letter-spacing:-.035em;font-weight:400}
   h2{font-size:clamp(30px,3.6vw,44px);line-height:1.08;letter-spacing:-.03em;font-weight:400}
   h3{font-size:18px}
@@ -385,7 +386,7 @@ function ThemeToggle({ dark, onToggle }){
 function PromoBanner({ onTrial }){
   return (
     <div style={{background:"#18181b",borderBottom:"1px solid #27272a",textAlign:"center",padding:"10px 16px",fontSize:13.5,color:"#a1a1aa",position:"relative",zIndex:100}}>
-      <span style={{color:"#a3e635",fontWeight:600,marginRight:6}}>LAUNCH50</span>
+      <span style={{color:"#22C55E",fontWeight:600,marginRight:6}}>LAUNCH50</span>
       50% off your first month of Team &mdash; expires June 22.&nbsp;
       <a href="#" onClick={onTrial} style={{color:"#fff",textDecoration:"underline",textUnderlineOffset:3}}>Claim now →</a>
     </div>
@@ -821,7 +822,7 @@ function Pricing({ onTrial }){
                 $19<span className="small">.99 / mo</span>
               </div>
               <div className="amt-sub" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                <span style={{background:"#a3e635",color:"#1a1a1a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:4,letterSpacing:"0.04em"}}>LAUNCH50</span>
+                <span style={{background:"#22C55E",color:"#1a1a1a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:4,letterSpacing:"0.04em"}}>LAUNCH50</span>
                 <span>50% off first month · cancel any time · expires Jun 22</span>
               </div>
             </div>
@@ -861,6 +862,122 @@ function Pricing({ onTrial }){
   );
 }
 
+
+function CompareTable(){
+  const rows = [
+    { feature: "Cloud + SaaS connectors (17)", free: true, team: true },
+    { feature: "Cost queries, trends, history", free: true, team: true },
+    { feature: "Anomaly detection", free: true, team: true },
+    { feature: "Rightsizing recommendations", free: true, team: true },
+    { feature: "AWS Cost Explorer", free: true, team: true },
+    { feature: "AWS CUR (line-item granularity)", free: false, team: true },
+    { feature: "Ticket auto-creation: Jira, Linear, GitHub", free: false, team: true },
+    { feature: "Scheduled email reports", free: false, team: true },
+    { feature: "Savings Plan showback by team", free: false, team: true },
+    { feature: "Commitment purchase recommendations + ROI", free: false, team: true },
+    { feature: "Org-wide multi-account cost rollup", free: false, team: true },
+    { feature: "Anomaly alerts via Slack or Teams", free: false, team: true },
+    { feature: "Email support", free: false, team: true },
+  ];
+  const Check = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{display:"inline-block",verticalAlign:"middle"}}>
+      <circle cx="8" cy="8" r="8" fill="#22C55E" fillOpacity="0.15"/>
+      <path d="M5 8l2 2 4-4" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+  const Dash = () => (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{display:"inline-block",verticalAlign:"middle"}}>
+      <path d="M5 8h6" stroke="var(--fg-4)" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  );
+  return (
+    <section style={{paddingBottom:0}}>
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ Compare</div>
+          <h2>Free vs Team</h2>
+        </div>
+        <div style={{overflowX:"auto",marginTop:32}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
+            <thead>
+              <tr>
+                <th style={{textAlign:"left",padding:"10px 16px",color:"var(--fg-3)",fontWeight:500,fontSize:12,letterSpacing:".05em",textTransform:"uppercase",borderBottom:"1px solid var(--line)",width:"60%"}}>Feature</th>
+                <th style={{textAlign:"center",padding:"10px 16px",color:"var(--fg-3)",fontWeight:500,fontSize:12,letterSpacing:".05em",textTransform:"uppercase",borderBottom:"1px solid var(--line)"}}>Free</th>
+                <th style={{textAlign:"center",padding:"10px 16px",fontWeight:600,fontSize:12,letterSpacing:".05em",textTransform:"uppercase",borderBottom:"2px solid #22C55E",color:"#22C55E"}}>Team</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r,i) => (
+                <tr key={i} style={{background: i%2===0 ? "transparent" : "var(--bg-2)"}}>
+                  <td style={{padding:"11px 16px",color:"var(--fg-2)",borderBottom:"1px solid var(--line)"}}>{r.feature}</td>
+                  <td style={{textAlign:"center",padding:"11px 16px",borderBottom:"1px solid var(--line)"}}>{r.free ? <Check/> : <Dash/>}</td>
+                  <td style={{textAlign:"center",padding:"11px 16px",borderBottom:"1px solid var(--line)"}}>{r.team ? <Check/> : <Dash/>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const FAQS = [
+  {
+    q: "Does it work with my existing AWS setup?",
+    a: "Yes. nable uses read-only IAM credentials via Cost Explorer (free) or CUR via S3 (Team). Run finops setup aws --iam-template to generate a least-privilege policy. No changes to your AWS account required."
+  },
+  {
+    q: "What data does nable actually read?",
+    a: "Billing and cost data only. It reads Cost Explorer, CUR reports, and CloudWatch metrics for rightsizing. It never writes to your cloud account unless you explicitly enable cleanup mode. Everything goes direct from your machine to your cloud APIs."
+  },
+  {
+    q: "What happens when I cancel?",
+    a: "You drop back to the free tier instantly. Your credentials and local config stay intact. There is nothing to delete on our end since everything runs on your machine."
+  },
+  {
+    q: "Does it support SSO or SAML?",
+    a: "SSO and SAML are available on the Enterprise plan. Team uses email-based auth. If your org needs SSO, reach out to hello@getnable.com."
+  },
+  {
+    q: "Can multiple team members use it?",
+    a: "Each person installs nable locally on their own machine. Credentials stay on each machine. The Team plan adds shared features like scheduled digests, Slack alerts, and org-wide rollup that the whole team benefits from."
+  },
+  {
+    q: "Is there a self-hosted option?",
+    a: "nable already runs entirely on your machine by design. There is no nable cloud to opt out of. Enterprise adds private VPC deploy for teams that need centralized credential management."
+  },
+];
+
+function FAQ(){
+  const [open, setOpen] = React.useState(null);
+  return (
+    <section style={{paddingTop:80,paddingBottom:80}}>
+      <div className="wrap" style={{maxWidth:760}}>
+        <div className="section-head">
+          <div className="label">/ FAQ</div>
+          <h2>Common questions</h2>
+        </div>
+        <div style={{marginTop:40,display:"flex",flexDirection:"column",gap:2}}>
+          {FAQS.map((f,i) => (
+            <div key={i} style={{borderBottom:"1px solid var(--line)"}}>
+              <button
+                onClick={()=>setOpen(open===i ? null : i)}
+                style={{width:"100%",textAlign:"left",background:"none",border:"none",padding:"18px 0",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:16}}
+              >
+                <span style={{fontSize:15,fontWeight:500,color:"var(--fg)",fontFamily:"'Space Grotesk',ui-sans-serif,system-ui,sans-serif"}}>{f.q}</span>
+                <span style={{color:"var(--fg-3)",fontSize:18,lineHeight:1,flexShrink:0,transform:open===i?"rotate(45deg)":"none",transition:"transform .2s"}}>&plus;</span>
+              </button>
+              {open===i && (
+                <p style={{paddingBottom:18,fontSize:14,lineHeight:1.7,color:"var(--fg-2)",marginTop:-6}}>{f.a}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function Footer(){
   const [footEmail, setFootEmail] = React.useState('');
@@ -1196,6 +1313,8 @@ function App(){
       <Connectors />
       <Security />
       <Pricing onTrial={openModal} />
+      <CompareTable />
+      <FAQ />
       <Footer />
       <Tweaks open={tweaksOpen} t={t} setTweak={setTweak} />
       {modalOpen && <TrialModal onClose={()=>setModalOpen(false)} />}
