@@ -382,6 +382,16 @@ function ThemeToggle({ dark, onToggle }){
   );
 }
 
+function PromoBanner({ onTrial }){
+  return (
+    <div style={{background:"#18181b",borderBottom:"1px solid #27272a",textAlign:"center",padding:"10px 16px",fontSize:13.5,color:"#a1a1aa",position:"relative",zIndex:100}}>
+      <span style={{color:"#a3e635",fontWeight:600,marginRight:6}}>LAUNCH50</span>
+      50% off your first month of Team &mdash; expires June 22.&nbsp;
+      <a href="#" onClick={onTrial} style={{color:"#fff",textDecoration:"underline",textUnderlineOffset:3}}>Claim now →</a>
+    </div>
+  );
+}
+
 function Nav({ dark, onToggle, onTrial, onSignIn }){
   return (
     <nav className="nav">
@@ -958,7 +968,9 @@ function TrialModal({ onClose }){
       posthog?.capture('trial_started', { email });
     } catch(err) { /* non-blocking */ }
     const base = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01";
-    const url = email ? `${base}?prefilled_email=${encodeURIComponent(email)}` : base;
+    const url = email
+      ? `${base}?prefilled_email=${encodeURIComponent(email)}&prefilled_promo_code=LAUNCH50`
+      : `${base}?prefilled_promo_code=LAUNCH50`;
     window.location.href = url;
   };
   return (
@@ -1171,6 +1183,7 @@ function App(){
   return (
     <>
       <Nav dark={dark} onToggle={toggle} onTrial={openModal} onSignIn={openSignIn} />
+      <PromoBanner onTrial={openModal} />
       <Hero onTrial={openModal} />
       <QuickStart />
       <Features />
