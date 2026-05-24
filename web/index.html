@@ -941,6 +941,65 @@ function Pricing({ onTrial }){
 }
 
 
+function Testimonials(){
+  const quotes = [
+    {
+      text: "Wow Chanda, this is awesome tool. I checked my AWS bill — I am saving $404 a year just from what it found in the first hour.",
+      name: "Bukkapatnam",
+      title: "Engineer · Early user",
+      savings: "$404 saved in year 1",
+    },
+  ];
+  return (
+    <section style={{padding:"80px 0 0"}}>
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">/ What users say</div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:24,marginTop:8}}>
+          {quotes.map((q,i) => (
+            <div key={i} style={{
+              background:"var(--bg-2)",
+              border:"1px solid var(--line)",
+              borderRadius:10,
+              padding:"28px 28px 22px",
+              display:"flex",
+              flexDirection:"column",
+              gap:18,
+            }}>
+              <p style={{
+                fontSize:15,
+                lineHeight:1.6,
+                color:"var(--fg)",
+                margin:0,
+                flex:1,
+              }}>&ldquo;{q.text}&rdquo;</p>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+                <div>
+                  <div style={{fontWeight:500,fontSize:13.5,color:"var(--fg)"}}>{q.name}</div>
+                  <div style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--fg-3)",marginTop:2}}>{q.title}</div>
+                </div>
+                {q.savings && (
+                  <div style={{
+                    fontFamily:"var(--mono)",
+                    fontSize:11,
+                    color:"#22C55E",
+                    background:"rgba(34,197,94,.08)",
+                    border:"1px solid rgba(34,197,94,.2)",
+                    borderRadius:5,
+                    padding:"3px 9px",
+                    whiteSpace:"nowrap",
+                  }}>{q.savings}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function CompareTable(){
   const rows = [
     { feature: "Cloud + SaaS connectors (17)", free: true, team: true },
@@ -1398,6 +1457,7 @@ function App(){
       <Connectors />
       <Security />
       <Pricing onTrial={openModal} />
+      <Testimonials />
       <CompareTable />
       <FAQ />
       <Footer />

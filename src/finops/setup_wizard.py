@@ -785,15 +785,15 @@ def _run_license_setup(key: str = "") -> None:
     Called by: finops setup license FINOPS-1-xxx
                 finops setup license   (interactive, prompts for key)
     """
-    from .license import validate_key, _UPGRADE_URL
+    from .license import validate_key, _UPGRADE_URL, _CHECKOUT_URL
     from .security.vault import Vault
 
     print("\n  nable Team license activation\n")
 
     # If key not passed as arg, prompt
     if not key:
-        print(f"  Get your license key at: {_UPGRADE_URL}")
-        print("  After purchase your key is shown on the confirmation page")
+        print(f"  Subscribe at: {_CHECKOUT_URL}")
+        print("  After checkout your license key is shown on the confirmation page")
         print("  and emailed to you. It starts with FINOPS-1-\n")
         key = _prompt("  Paste your license key").strip()
 
@@ -806,7 +806,7 @@ def _run_license_setup(key: str = "") -> None:
 
     if status.mode == "invalid":
         _err(f"Invalid key: {status.message}")
-        print(f"\n  Get a valid key at: {_UPGRADE_URL}\n")
+        print(f"\n  Subscribe at: {_CHECKOUT_URL}\n")
         return
 
     if status.mode not in ("pro", "trial"):
