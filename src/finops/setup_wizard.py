@@ -521,6 +521,9 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("pagerduty")
     sub.add_parser("claude")    # configure Claude Desktop MCP entry
     sub.add_parser("aws-cur")   # deploy CUR CloudFormation stack
+    lic_p = sub.add_parser("license")  # activate a Team license key
+    lic_p.add_argument("key", nargs="?", default="", help="License key (FINOPS-1-...)")
+    sub.add_parser("license-status")   # check current license without restarting
     infra_p = sub.add_parser("infra")  # overview of all connector setup packages
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
 
@@ -670,6 +673,12 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "aws-cur":
         _run_aws_cur_setup()
         return
+    elif parsed.cmd == "license":
+        _run_license_setup(getattr(parsed, "key", ""))
+        return
+    elif parsed.cmd == "license-status":
+        _run_license_status()
+        return
     elif parsed.cmd == "infra":
         _run_infra_overview(getattr(parsed, "provider", ""))
         return
@@ -769,6 +778,147 @@ def _offer_email_signup() -> None:
 
 
 # ── Claude Desktop auto-configuration ─────────────────────────────────────────
+
+def _run_license_setup(key: str = "") -> None:
+    """
+    Activate a Team license key.
+    Called by: finops setup license FINOPS-1-xxx
+                finops setup license   (interactive, prompts for key)
+    """
+    from .license import validate_key, _UPGRADE_URL
+    from .security.vault import Vault
+
+    print("\n  nable Team license activation\n")
+
+    # If key not passed as arg, prompt
+    if not key:
+        print(f"  Get your license key at: {_UPGRADE_URL}")
+        print("  After purchase your key is shown on the confirmation page")
+        print("  and emailed to you. It starts with FINOPS-1-\n")
+        key = _prompt("  Paste your license key").strip()
+
+    if not key:
+        _warn("No key entered. Run 'finops setup license FINOPS-1-...' to activate.")
+        return
+
+    # Validate before storing
+    status = validate_key(key)
+
+    if status.mode == "invalid":
+        _err(f"Invalid key: {status.message}")
+        print(f"\n  Get a valid key at: {_UPGRADE_URL}\n")
+        return
+
+    if status.mode not in ("pro", "trial"):
+        _warn(f"Key validated but returned unexpected plan: {status.mode}")
+
+    # Store in vault AND write to env file for Claude Desktop
+    vault = Vault.default()
+    vault.store("FINOPS_LICENSE_KEY", key)
+
+    # Also try to write directly into the Claude Desktop config
+    _inject_license_into_claude_config(key)
+
+    print(f"\n  ✓  Team plan active — {status.email or 'license validated'}")
+    print(f"  ✓  Key stored in vault.")
+    print(f"  ✓  Plan: {status.mode.upper()}")
+    if status.issued:
+        print(f"  ✓  Issued: {status.issued}")
+    print()
+    print("  Restart Claude Desktop to activate Team features:")
+    print("    • Ticket auto-creation (Jira, Linear, GitHub Issues)")
+    print("    • Scheduled email reports")
+    print("    • Commitment purchase recommendations")
+    print("    • Org-wide multi-account rollup")
+    print("    • Business metrics and unit economics")
+    print()
+
+    try:
+        from . import telemetry as _tel
+        _tel._send_event(_tel._get_install_id(), "license_activated", {
+            "plan": status.mode,
+            "has_email": bool(status.email),
+        })
+    except Exception:
+        pass
+
+
+def _run_license_status() -> None:
+    """
+    Print current license status without restarting anything.
+    Called by: finops setup license-status
+               finops license-status
+    """
+    from .license import check_license, _UPGRADE_URL
+
+    status = check_license()
+
+    print("\n  nable license status\n")
+
+    mode_display = {
+        "pro":     "\033[32mTeam (Pro)\033[0m",
+        "trial":   "\033[33mTrial\033[0m",
+        "free":    "\033[90mFree\033[0m",
+        "invalid": "\033[31mInvalid\033[0m",
+    }.get(status.mode, status.mode)
+
+    print(f"  Plan:    {mode_display}")
+    if status.email:
+        print(f"  Email:   {status.email}")
+    if status.issued:
+        print(f"  Issued:  {status.issued}")
+    if status.days_remaining >= 0:
+        print(f"  Trial:   {status.days_remaining} day(s) remaining")
+    print(f"  Message: {status.message}")
+
+    if status.mode == "free":
+        print(f"\n  Upgrade at: {_UPGRADE_URL}")
+        print("  Then run:   finops setup license FINOPS-1-...\n")
+    elif status.mode == "trial":
+        print(f"\n  Upgrade before trial ends: {_UPGRADE_URL}\n")
+    else:
+        print()
+
+
+def _inject_license_into_claude_config(key: str) -> None:
+    """
+    Try to write FINOPS_LICENSE_KEY directly into claude_desktop_config.json
+    so the user doesn't have to manually edit it.
+    """
+    import json
+    import platform
+
+    if platform.system() == "Darwin":
+        config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    elif platform.system() == "Windows":
+        config_path = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
+    else:
+        config_path = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+
+    try:
+        if not config_path.exists():
+            return
+
+        config = json.loads(config_path.read_text())
+        servers = config.get("mcpServers", {})
+
+        updated = False
+        for server_name, server_cfg in servers.items():
+            if "finops" in server_name.lower() or "nable" in server_name.lower():
+                env = server_cfg.setdefault("env", {})
+                env["FINOPS_LICENSE_KEY"] = key
+                updated = True
+
+        if updated:
+            config_path.write_text(json.dumps(config, indent=2))
+            print("  ✓  Written to Claude Desktop config automatically.")
+        else:
+            print("  →  Add to your Claude Desktop config manually:")
+            print(f'       "FINOPS_LICENSE_KEY": "{key}"')
+    except Exception:
+        print("  →  Add to your Claude Desktop config manually:")
+        print(f'       "FINOPS_LICENSE_KEY": "{key}"')
+
 
 def _run_aws_cur_setup() -> None:
     """

@@ -42,7 +42,9 @@ _env_secret = os.environ.get("FINOPS_LICENSE_SECRET", "")
 # Override via FINOPS_LICENSE_SECRET if you self-host with your own signing secret.
 _DEFAULT_SECRET = "933cb551a15aa14b2a2c3517536da50773c2492a2dce2879578cb60cf34bb81b"
 _SECRET = (_env_secret or _DEFAULT_SECRET).encode()
-_UPGRADE_URL = "https://getnable.com/#pricing"
+_UPGRADE_URL    = "https://getnable.com/#pricing"
+_CHECKOUT_URL   = "https://getnable.com/checkout"   # direct Stripe checkout
+_ACTIVATE_CMD   = "finops setup license"             # shown after purchase
 _TRIAL_DAYS  = 30
 _TRIAL_FILE  = Path.home() / ".finops-mcp" / "trial_start"
 
@@ -362,9 +364,11 @@ def require_pro(feature: str) -> dict | None:
             f"Slack/Teams alerts, PR cost comments, budgets, K8s analysis, and all connectors. "
             f"Team plan adds: {friendly}, ticket auto-creation (Jira/Linear/GitHub), "
             f"scheduled email reports, commitment purchase recommendations, and org rollup. "
-            f"Subscribe at {_UPGRADE_URL} ($39.99/mo, first month free)."
+            f"Upgrade at {_CHECKOUT_URL} ($39.99/mo, cancel anytime). "
+            f"After checkout, run: {_ACTIVATE_CMD} <your-key>"
         ),
-        "upgrade_url": _UPGRADE_URL,
+        "upgrade_url": _CHECKOUT_URL,
+        "activate_command": _ACTIVATE_CMD,
         "free_tier_available": True,
     }
 
