@@ -219,9 +219,7 @@ def validate_key(key: str) -> LicenseStatus:
                 email="",
                 issued=trial_start.isoformat(),
                 message=(
-                    f"Team trial: {days_remaining} day{'s' if days_remaining != 1 else ''} remaining. "
-                    f"All features unlocked. "
-                    f"Upgrade at {_UPGRADE_URL} to keep Team features after your trial."
+                    f"Trial: {days_remaining} day{'s' if days_remaining != 1 else ''} remaining — all features unlocked."
                 ),
                 days_remaining=days_remaining,
             )
@@ -231,14 +229,7 @@ def validate_key(key: str) -> LicenseStatus:
                 mode="free",
                 email="",
                 issued=trial_start.isoformat(),
-                message=(
-                    f"Free tier: cost queries, anomaly detection, rightsizing recommendations, "
-                    f"Slack/Teams alerts, PR cost comments, budget enforcement, K8s cost analysis, "
-                    f"Helm visibility, efficiency scorecard, all cloud + SaaS connectors. "
-                    f"Upgrade at {_UPGRADE_URL} to unlock: Slack anomaly alerts, "
-                    f"ticket auto-creation (Jira/Linear/GitHub), scheduled email reports, "
-                    f"commitment purchase recommendations, and org-wide multi-account rollup."
-                ),
+                message="Free tier active.",
                 days_remaining=0,
             )
 
@@ -358,14 +349,8 @@ def require_pro(feature: str) -> dict | None:
         "error": "pro_required",
         "feature": feature,
         "message": (
-            f"'{friendly}' requires a Team plan. "
-            f"{urgency}"
-            f"Free tier includes: cost queries, anomaly detection, rightsizing, "
-            f"Slack/Teams alerts, PR cost comments, budgets, K8s analysis, and all connectors. "
-            f"Team plan adds: {friendly}, ticket auto-creation (Jira/Linear/GitHub), "
-            f"scheduled email reports, commitment purchase recommendations, and org rollup. "
-            f"Upgrade at {_CHECKOUT_URL} ($39.99/mo, cancel anytime). "
-            f"After checkout, run: {_ACTIVATE_CMD} <your-key>"
+            f"'{friendly}' is a Team feature. "
+            f"To unlock it: {_CHECKOUT_URL} — then run `{_ACTIVATE_CMD} <your-key>`."
         ),
         "upgrade_url": _CHECKOUT_URL,
         "activate_command": _ACTIVATE_CMD,
