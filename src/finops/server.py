@@ -1331,6 +1331,56 @@ async def run_attribution_now(
 
 
 @mcp.tool()
+async def send_onboarding_email(
+    to_email: str,
+    variant: str = "welcome",
+    days_left: int = 3,
+) -> dict:
+    """
+    Send an onboarding email to a specific address.
+
+    Variants:
+      welcome    → "Here's how easy setup is" — sent on email capture
+      day7       → Nudge for users who haven't connected a provider yet
+      trial_end  → Trial expiring in N days, soft upgrade prompt
+
+    Args:
+        to_email: Recipient email address
+        variant: "welcome", "day7", or "trial_end"
+        days_left: For trial_end variant — days until trial expires
+
+    Examples:
+        - "Send the welcome email to john@example.com"
+        - "Send a day 7 nudge to user@company.com"
+        - "Send the trial ending email to someone@corp.com with 3 days left"
+    """
+    if err := require_role("admin"):
+        return err
+    try:
+        from .notifications.onboarding_email import send_welcome, send_day7_nudge, send_trial_ending
+        if variant == "welcome":
+            ok = send_welcome(to_email)
+            subject = "Ask Claude about your cloud bill — here's how (10 min setup)"
+        elif variant == "day7":
+            ok = send_day7_nudge(to_email)
+            subject = "Quick check-in — did nable setup go okay?"
+        elif variant == "trial_end":
+            ok = send_trial_ending(to_email, days_left)
+            subject = f"nable trial ends in {days_left} day{'s' if days_left != 1 else ''}"
+        else:
+            return {"error": f"Unknown variant '{variant}'. Use: welcome, day7, trial_end"}
+
+        if ok:
+            return {"sent": True, "to": to_email, "variant": variant, "subject": subject}
+        return {
+            "sent": False,
+            "error": "SMTP not configured. Set FINOPS_SMTP_HOST, FINOPS_SMTP_USER, FINOPS_SMTP_PASSWORD.",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def send_digest_now() -> dict:
     """
     Manually trigger a cost digest to Slack and/or Teams right now.
