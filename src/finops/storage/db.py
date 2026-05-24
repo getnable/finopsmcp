@@ -331,6 +331,38 @@ pattern_findings = Table(
     Column("dedup_key", String(64), nullable=False),   # SHA256 of account+pattern
 )
 
+# ── Savings tracking — lifecycle from recommendation → verified savings ───────
+
+savings_recommendations = Table(
+    "savings_recommendations", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    # Source
+    Column("source", String(32), nullable=False),           # rightsizing|idle|commitment|kubernetes|waste
+    Column("provider", String(64), nullable=False),
+    Column("account_id", String(128), nullable=False, default=""),
+    Column("region", String(64), nullable=False, default=""),
+    # Resource identity
+    Column("resource_id", String(512), nullable=False, default=""),
+    Column("resource_type", String(256), nullable=False, default=""),  # e.g. "ec2", "rds", "k8s_workload"
+    Column("resource_name", String(512), nullable=False, default=""),
+    # What to change
+    Column("current_config", Text, nullable=False, default="{}"),      # JSON: current state
+    Column("recommended_config", Text, nullable=False, default="{}"),  # JSON: what to change to
+    Column("description", Text, nullable=False, default=""),           # human-readable summary
+    # Economics
+    Column("estimated_monthly_savings_usd", Float, nullable=False, default=0.0),
+    Column("verified_monthly_savings_usd", Float, nullable=True),      # actual measured after change
+    # Lifecycle
+    Column("status", String(16), nullable=False, default="open"),  # open|acted_on|verified|dismissed|expired
+    Column("generated_at", DateTime, nullable=False),
+    Column("acted_on_at", DateTime, nullable=True),
+    Column("verified_at", DateTime, nullable=True),
+    Column("dismissed_at", DateTime, nullable=True),
+    Column("dismiss_reason", Text, nullable=True),
+    # Dedup
+    Column("dedup_key", String(64), nullable=False),   # SHA256 of source+resource_id+recommended_config
+)
+
 # ── Indexes — keep hot query paths O(log n) instead of O(n) ──────────────────
 # cost_snapshots: every budget check and spend query filters by date + provider/service
 Index("ix_cs_date_provider",  cost_snapshots.c.snapshot_date, cost_snapshots.c.provider)
@@ -371,6 +403,12 @@ Index("ix_tfa_status",   terraform_tag_audits.c.status)
 Index("ix_pf_account",  pattern_findings.c.account_id)
 Index("ix_pf_status",   pattern_findings.c.status)
 Index("ix_pf_dedup",    pattern_findings.c.dedup_key, unique=True)
+
+# savings_recommendations: status checks and dedup
+Index("ix_srec_status",   savings_recommendations.c.status)
+Index("ix_srec_source",   savings_recommendations.c.source)
+Index("ix_srec_provider", savings_recommendations.c.provider)
+Index("ix_srec_dedup",    savings_recommendations.c.dedup_key, unique=True)
 
 # ── Engine factory ────────────────────────────────────────────────────────────
 

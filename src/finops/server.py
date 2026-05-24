@@ -1108,6 +1108,34 @@ async def get_rightsizing_recommendations(
         )
         result = rightsizing_summary(recs)
 
+        # Persist recommendations for savings tracking (fire-and-forget)
+        try:
+            from .recommendations.savings_tracker import record_recommendation
+            for rec in recs:
+                if rec.monthly_savings > 0:
+                    record_recommendation(
+                        source="rightsizing",
+                        provider="aws",
+                        resource_id=rec.instance_id,
+                        resource_type=rec.resource_type,
+                        resource_name=rec.name,
+                        account_id=rec.account_id,
+                        region=rec.region,
+                        current_config={
+                            "instance_type": rec.instance_type,
+                            "monthly_cost_usd": rec.current_monthly_cost,
+                        },
+                        recommended_config={
+                            "instance_type": rec.recommended_type,
+                            "monthly_cost_usd": rec.recommended_monthly_cost,
+                            "from_instance_type": rec.instance_type,
+                        },
+                        description=rec.title,
+                        estimated_monthly_savings_usd=rec.monthly_savings,
+                    )
+        except Exception:
+            pass  # never block the main response
+
         # Nudge free users toward ticket creation when there are real savings on the table
         if isinstance(result, dict) and result.get("total_monthly_savings_usd", 0) > 0:
             savings = result["total_monthly_savings_usd"]
@@ -1123,6 +1151,186 @@ async def get_rightsizing_recommendations(
         return result
     except Exception as e:
         return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_savings_summary() -> dict:
+    """
+    Show the realized-savings dashboard: how much nable has recommended, how much
+    has been acted on, and how much has been verified as actually saved.
+
+    Tracks the full lifecycle of every recommendation:
+      open → acted on → verified (change confirmed in AWS/Azure/GCP)
+      open → dismissed (won't fix)
+
+    Examples:
+        - "How much have we saved from recommendations so far?"
+        - "Show me our realized savings"
+        - "Which recommendations have we actually acted on?"
+        - "What's our total potential savings sitting open?"
+    """
+    from .recommendations.savings_tracker import get_summary, expire_stale
+    expire_stale()  # mark 45-day-old open recs as expired
+    summary = get_summary()
+
+    potential = summary["potential_monthly_usd"]
+    acted = summary["acted_on_monthly_usd"]
+    verified = summary["verified_monthly_usd"]
+    total = summary["total_recommendations"]
+
+    lines = []
+    if total == 0:
+        lines.append("No recommendations tracked yet. Run get_rightsizing_recommendations() or scan_waste_patterns() to start building history.")
+    else:
+        lines.append(f"Tracking {total} recommendation{'s' if total != 1 else ''}.")
+        if potential > 0:
+            lines.append(f"  Open potential: ${potential:,.0f}/mo still available.")
+        if acted > 0:
+            lines.append(f"  Acted on: ${acted:,.0f}/mo estimated savings (pending verification).")
+        if verified > 0:
+            lines.append(f"  Verified savings: ${verified:,.0f}/mo (${summary['verified_annual_usd']:,.0f}/yr confirmed).")
+
+    summary["summary"] = " ".join(lines)
+    summary["tip"] = (
+        "Use mark_recommendation_acted_on(id) when you implement a recommendation. "
+        "Use verify_savings() to auto-check if EC2/RDS changes were made. "
+        "Use dismiss_recommendation(id) for recommendations you've decided not to action."
+    )
+    return summary
+
+
+@mcp.tool()
+async def list_savings_recommendations(
+    status: str | None = None,
+    source: str | None = None,
+    limit: int = 30,
+) -> dict:
+    """
+    List tracked recommendations with their current status.
+
+    Args:
+        status: Filter by status: "open", "acted_on", "verified", "dismissed", "expired". None = all.
+        source: Filter by source: "rightsizing", "idle", "kubernetes", "waste", "commitment". None = all.
+        limit: Max results (default 30).
+
+    Examples:
+        - "Show all open recommendations"
+        - "Which recommendations have we acted on?"
+        - "List verified savings"
+        - "Show dismissed recommendations"
+    """
+    from .recommendations.savings_tracker import list_recommendations
+    recs = list_recommendations(status=status, source=source, limit=limit)
+
+    if not recs:
+        msg = f"No {status or ''} recommendations found.".strip()
+        return {"recommendations": [], "message": msg}
+
+    total_potential = sum(r["estimated_monthly_savings_usd"] for r in recs if r["status"] == "open")
+    total_verified = sum(r["verified_monthly_savings_usd"] or 0 for r in recs if r["status"] == "verified")
+
+    return {
+        "count": len(recs),
+        "recommendations": recs,
+        "open_potential_usd": round(total_potential, 2),
+        "verified_savings_usd": round(total_verified, 2),
+    }
+
+
+@mcp.tool()
+async def mark_recommendation_acted_on(recommendation_id: int) -> dict:
+    """
+    Mark a savings recommendation as acted on (you've implemented the change).
+    nable will then attempt to verify the change next time verify_savings() runs.
+
+    Args:
+        recommendation_id: The ID from list_savings_recommendations() or get_savings_summary().
+
+    Examples:
+        - "I resized that EC2 instance, mark recommendation 42 as done"
+        - "We shut down the idle RDS, mark it acted on"
+        - "Mark recommendation 7 as complete"
+    """
+    from .recommendations.savings_tracker import mark_acted_on
+    ok = mark_acted_on(recommendation_id)
+    if ok:
+        return {
+            "status": "acted_on",
+            "message": f"Recommendation {recommendation_id} marked as acted on. Run verify_savings() in a few days to confirm the change and lock in the realized savings.",
+        }
+    return {
+        "error": f"Recommendation {recommendation_id} not found or not in 'open' status.",
+        "tip": "Use list_savings_recommendations() to see current IDs and statuses.",
+    }
+
+
+@mcp.tool()
+async def dismiss_recommendation(recommendation_id: int, reason: str = "") -> dict:
+    """
+    Dismiss a recommendation you've decided not to act on (won't fix, accepted risk, etc.).
+    Dismissed recommendations won't appear in open potential savings.
+
+    Args:
+        recommendation_id: The ID from list_savings_recommendations().
+        reason: Optional note on why you're dismissing it (e.g. "reserved for burst traffic").
+
+    Examples:
+        - "Dismiss recommendation 15 — we need that instance for peak load"
+        - "Mark recommendation 8 as won't fix"
+    """
+    from .recommendations.savings_tracker import mark_dismissed
+    ok = mark_dismissed(recommendation_id, reason)
+    if ok:
+        return {
+            "status": "dismissed",
+            "message": f"Recommendation {recommendation_id} dismissed." + (f" Reason: {reason}" if reason else ""),
+        }
+    return {
+        "error": f"Recommendation {recommendation_id} not found or already in a terminal state.",
+    }
+
+
+@mcp.tool()
+async def verify_savings() -> dict:
+    """
+    Auto-verify acted-on recommendations by checking if changes were actually
+    implemented in AWS (EC2 instance type changes, etc.).
+
+    Moves verified recommendations from 'acted_on' to 'verified' status and
+    records the actual measured savings.
+
+    Examples:
+        - "Verify our savings — check if the rightsizing changes were made"
+        - "Confirm which recommendations actually happened"
+        - "Check if our EC2 downsizes are done"
+    """
+    from .recommendations.savings_tracker import auto_verify_acted_on, get_summary
+    newly_verified = auto_verify_acted_on()
+    summary = get_summary()
+
+    if not newly_verified:
+        acted_count = summary["by_status"].get("acted_on", 0)
+        if acted_count == 0:
+            return {
+                "message": "No acted-on recommendations to verify. Mark recommendations as acted on first with mark_recommendation_acted_on().",
+                "verified_count": 0,
+            }
+        return {
+            "message": f"{acted_count} recommendation{'s' if acted_count != 1 else ''} marked as acted on but changes not yet confirmed in AWS. Check back after the instance restarts or give it a few minutes.",
+            "verified_count": 0,
+            "tip": "For EC2 rightsizing, the instance needs to be stopped/started before the new type shows up.",
+        }
+
+    total_verified = sum(r["verified_monthly_savings_usd"] for r in newly_verified)
+    return {
+        "verified_count": len(newly_verified),
+        "newly_verified": newly_verified,
+        "total_new_monthly_savings_usd": round(total_verified, 2),
+        "total_new_annual_savings_usd": round(total_verified * 12, 2),
+        "message": f"Verified {len(newly_verified)} change{'s' if len(newly_verified) != 1 else ''}: ${total_verified:,.0f}/mo (${total_verified * 12:,.0f}/yr) in confirmed savings.",
+        "cumulative_verified_monthly_usd": summary["verified_monthly_usd"],
+        "cumulative_verified_annual_usd": summary["verified_annual_usd"],
+    }
 
 
 @mcp.tool()
@@ -1642,6 +1850,28 @@ async def list_idle_resources(
             regions=regions,
             min_idle_days=min_idle_days,
         )
+
+        # Persist for savings tracking
+        try:
+            from .recommendations.savings_tracker import record_recommendation
+            for r in resources:
+                if r.monthly_cost_usd > 0:
+                    record_recommendation(
+                        source="idle",
+                        provider="aws",
+                        resource_id=r.resource_id,
+                        resource_type=r.resource_type,
+                        resource_name=r.name,
+                        account_id=r.account_id,
+                        region=r.region,
+                        current_config={"resource_type": r.resource_type, "idle_days": r.idle_days},
+                        recommended_config={"action": "delete_or_release"},
+                        description=r.reason,
+                        estimated_monthly_savings_usd=r.monthly_cost_usd,
+                    )
+        except Exception:
+            pass
+
         return idle_resources_summary(resources)
     except Exception as e:
         return {"error": str(e)}
