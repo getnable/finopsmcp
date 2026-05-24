@@ -1200,6 +1200,141 @@ async def get_savings_summary() -> dict:
 
 
 @mcp.tool()
+async def export_cost_report(
+    title: str | None = None,
+    sections: list[str] | None = None,
+    formats: list[str] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    open_file: bool = True,
+) -> dict:
+    """
+    Export a cost report as an HTML file (printable to PDF) and/or CSV files.
+
+    Generates a clean, shareable report that anyone can open — no Claude Desktop
+    or nable required. Finance teams get CSVs; stakeholders get HTML with a
+    'Print / Save PDF' button.
+
+    Files are saved to: ~/.finops/exports/
+
+    Args:
+        title: Report title (default: "Cloud Cost Report — <period>")
+        sections: Which sections to include. Options:
+                  "cost_summary", "services", "anomalies", "rightsizing",
+                  "savings", "budgets". Default: all available.
+        formats: ["html", "csv"] — default: both. "html" = single file with
+                 print-to-PDF button. "csv" = zip of CSVs + individual files.
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date. Defaults to today.
+        open_file: Open the HTML report in the default browser (default True).
+
+    Examples:
+        - "Export a cost report for this month"
+        - "Give me a CSV export of our anomalies and rightsizing recs"
+        - "Generate a PDF report I can send to finance"
+        - "Export just the rightsizing and savings sections as CSV"
+        - "Make a weekly cost report for the team"
+    """
+    from datetime import date as _date, timedelta
+    sd = _date.fromisoformat(start_date) if start_date else _date.today() - timedelta(days=30)
+    ed = _date.fromisoformat(end_date) if end_date else _date.today()
+    period_start = sd.isoformat()
+    period_end = ed.isoformat()
+
+    if title is None:
+        title = f"Cloud Cost Report — {period_start} to {period_end}"
+
+    all_sections = ["cost_summary", "services", "anomalies", "rightsizing", "savings", "budgets"]
+    wanted = set(sections or all_sections)
+    fmt_list = formats or ["html", "csv"]
+
+    collected: dict = {}
+
+    # Gather data for each requested section (errors are non-fatal)
+    if "cost_summary" in wanted:
+        try:
+            collected["cost_summary"] = await get_cost_summary(
+                start_date=period_start, end_date=period_end
+            )
+        except Exception:
+            pass
+
+    if "services" in wanted:
+        try:
+            collected["services"] = await get_costs_by_service(
+                start_date=period_start, end_date=period_end
+            )
+        except Exception:
+            pass
+
+    if "anomalies" in wanted:
+        try:
+            collected["anomalies"] = await get_anomalies(limit=50)
+        except Exception:
+            pass
+
+    if "rightsizing" in wanted:
+        try:
+            collected["rightsizing"] = await get_rightsizing_recommendations()
+        except Exception:
+            pass
+
+    if "savings" in wanted:
+        try:
+            from .recommendations.savings_tracker import get_summary, list_recommendations
+            summary = get_summary()
+            summary["recommendations"] = list_recommendations(limit=100)
+            collected["savings"] = summary
+        except Exception:
+            pass
+
+    if "budgets" in wanted:
+        try:
+            collected["budgets"] = await list_budgets()
+        except Exception:
+            pass
+
+    if not collected:
+        return {
+            "error": "No data available to export. Make sure at least one provider is configured.",
+        }
+
+    # Write files
+    from .reporting.exporter import write_report
+    output = write_report(
+        title=title,
+        period_start=period_start,
+        period_end=period_end,
+        sections=collected,
+        formats=fmt_list,
+    )
+
+    # Open HTML in browser if requested
+    if open_file and "html" in output:
+        try:
+            import subprocess
+            subprocess.Popen(["open", output["html"]])
+        except Exception:
+            pass
+
+    result = {
+        "title": title,
+        "period": f"{period_start} to {period_end}",
+        "sections_included": list(collected.keys()),
+        "files": output,
+        "message": (
+            f"Report generated with {len(collected)} section(s). "
+            + (f"HTML: {output.get('html', '')}. " if "html" in output else "")
+            + (f"CSVs: {output.get('csv_dir', '')}." if "csv_dir" in output else "")
+        ),
+    }
+    if "html" in output:
+        result["tip"] = "Open the HTML file in your browser, then use File → Print → Save as PDF to create a PDF."
+
+    return result
+
+
+@mcp.tool()
 async def list_savings_recommendations(
     status: str | None = None,
     source: str | None = None,
