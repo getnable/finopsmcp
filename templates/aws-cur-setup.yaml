@@ -1,0 +1,366 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  nable finops-mcp: Cost and Usage Report (CUR) pipeline.
+  Creates an S3 bucket, daily CUR v2 delivery, Glue crawler,
+  Athena workgroup, and a read-only IAM role for nable.
+  Deploy in us-east-1 (CUR reports only deliver to us-east-1).
+
+# ── Parameters ────────────────────────────────────────────────────────────────
+
+Parameters:
+  ReportName:
+    Type: String
+    Default: nable-cur
+    Description: Name of the CUR report and Glue/Athena table.
+    AllowedPattern: "[a-z0-9-]+"
+
+  BucketSuffix:
+    Type: String
+    Default: ""
+    Description: >
+      Optional suffix for the S3 bucket name (leave blank to use account ID).
+      Bucket will be named: nable-cur-{AccountId}-{Suffix}
+    AllowedPattern: "[a-z0-9-]*"
+
+  EnableSplitCost:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Include split cost allocation data (EKS pod-level costs).
+      Requires the feature to be enabled in your AWS account.
+
+  CrawlerSchedule:
+    Type: String
+    Default: "cron(0 6 * * ? *)"
+    Description: >
+      Glue crawler schedule (default: 6 AM UTC daily, after AWS delivers CUR).
+
+Conditions:
+  HasBucketSuffix: !Not [!Equals [!Ref BucketSuffix, ""]]
+  SplitCostEnabled: !Equals [!Ref EnableSplitCost, "true"]
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+
+Resources:
+
+  # ── S3 Bucket ────────────────────────────────────────────────────────────────
+
+  CURBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If
+        - HasBucketSuffix
+        - !Sub "nable-cur-${AWS::AccountId}-${BucketSuffix}"
+        - !Sub "nable-cur-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Suspended
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldCUR
+            Status: Enabled
+            ExpirationInDays: 400      # ~13 months of history
+          - Id: ExpireAthenaResults
+            Status: Enabled
+            Prefix: athena-results/
+            ExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CURBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CURBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Allow AWS billing service to validate + write CUR files
+          - Sid: AllowBillingServiceAcl
+            Effect: Allow
+            Principal:
+              Service: billingreports.amazonaws.com
+            Action:
+              - s3:GetBucketAcl
+              - s3:GetBucketPolicy
+            Resource: !GetAtt CURBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+          - Sid: AllowBillingServicePut
+            Effect: Allow
+            Principal:
+              Service: billingreports.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "${CURBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+          # Allow Glue + Athena to read CUR files
+          - Sid: AllowGlueRead
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt GlueCrawlerRole.Arn
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt CURBucket.Arn
+              - !Sub "${CURBucket.Arn}/*"
+
+          # Allow the nable read role
+          - Sid: AllowNableRead
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt NableCostReadRole.Arn
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:PutObject     # Athena result writes
+            Resource:
+              - !GetAtt CURBucket.Arn
+              - !Sub "${CURBucket.Arn}/*"
+
+  # ── CUR Report Definition ─────────────────────────────────────────────────────
+
+  CURReport:
+    Type: AWS::CUR::ReportDefinition
+    DependsOn: CURBucketPolicy
+    Properties:
+      ReportName: !Ref ReportName
+      TimeUnit: DAILY
+      Format: Parquet
+      Compression: Parquet
+      AdditionalSchemaElements:
+        - RESOURCES
+        - !If [SplitCostEnabled, SPLIT_COST_ALLOCATION_DATA, !Ref AWS::NoValue]
+      S3Bucket: !Ref CURBucket
+      S3Prefix: cur
+      S3Region: !Ref AWS::Region
+      RefreshClosedReports: true
+      ReportVersioning: OVERWRITE_REPORT
+
+  # ── Glue ─────────────────────────────────────────────────────────────────────
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: nable_cur
+        Description: "nable Cost and Usage Report database"
+
+  GlueCrawlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "nable-cur-crawler-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: CURBucketReadAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt CURBucket.Arn
+                  - !Sub "${CURBucket.Arn}/*"
+
+  GlueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Sub "nable-cur-crawler"
+      Description: "Crawls CUR Parquet files to keep Athena schema in sync"
+      Role: !GetAtt GlueCrawlerRole.Arn
+      DatabaseName: !Ref GlueDatabase
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${CURBucket}/cur/${ReportName}/${ReportName}/"
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: LOG
+      RecrawlPolicy:
+        RecrawlBehavior: CRAWL_NEW_FOLDERS_ONLY
+      Schedule:
+        ScheduleExpression: !Ref CrawlerSchedule
+      Configuration: |
+        {
+          "Version": 1.0,
+          "Grouping": { "TableGroupingPolicy": "CombineCompatibleSchemas" }
+        }
+
+  # ── Athena ───────────────────────────────────────────────────────────────────
+
+  AthenaWorkgroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: nable-cur
+      Description: "nable finops-mcp Athena workgroup"
+      WorkGroupConfiguration:
+        ResultConfiguration:
+          OutputLocation: !Sub "s3://${CURBucket}/athena-results/"
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: false
+        RequesterPaysEnabled: false
+        BytesScannedCutoffPerQuery: 10737418240  # 10 GB safety limit per query
+
+  # ── IAM: read-only role for nable ─────────────────────────────────────────────
+
+  NableCostReadRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: nable-cost-reader
+      Description: "Read-only role for nable finops-mcp (Cost Explorer + CUR + rightsizing)"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Allow the current account's principals to assume this role
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: NableCostReadOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Cost Explorer — aggregated billing
+              - Sid: CostExplorer
+                Effect: Allow
+                Action:
+                  - ce:GetCostAndUsage
+                  - ce:GetCostAndUsageWithResources
+                  - ce:GetCostForecast
+                  - ce:GetReservationUtilization
+                  - ce:GetReservationCoverage
+                  - ce:GetSavingsPlansCoverage
+                  - ce:GetSavingsPlansUtilization
+                  - ce:GetRightsizingRecommendation
+                  - ce:ListCostAllocationTags
+                  - ce:GetTags
+                Resource: "*"
+
+              # Organizations — multi-account listing
+              - Sid: Organizations
+                Effect: Allow
+                Action:
+                  - organizations:ListAccounts
+                  - organizations:DescribeOrganization
+                  - organizations:ListOrganizationalUnitsForParent
+                  - organizations:DescribeOrganizationalUnit
+                Resource: "*"
+
+              # EC2 / RDS / EKS metadata for rightsizing context
+              - Sid: ComputeDescribe
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeReservedInstances
+                  - ec2:DescribeReservedInstancesModifications
+                  - rds:DescribeDBInstances
+                  - rds:DescribeReservedDBInstances
+                  - eks:ListClusters
+                  - eks:DescribeCluster
+                  - elasticache:DescribeReservedCacheNodes
+                Resource: "*"
+
+              # S3 — read CUR files and write Athena results
+              - Sid: CURS3Access
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:PutObject
+                  - s3:GetBucketLocation
+                Resource:
+                  - !GetAtt CURBucket.Arn
+                  - !Sub "${CURBucket.Arn}/*"
+
+              # Athena — run queries against CUR
+              - Sid: AthenaAccess
+                Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - athena:StopQueryExecution
+                  - athena:GetWorkGroup
+                  - athena:ListWorkGroups
+                Resource: "*"
+
+              # Glue — read table schema
+              - Sid: GlueReadSchema
+                Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                Resource: "*"
+
+              # CloudWatch — read spend metrics (used by anomaly detection)
+              - Sid: CloudWatchRead
+                Effect: Allow
+                Action:
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:ListMetrics
+                Resource: "*"
+
+# ── Outputs ───────────────────────────────────────────────────────────────────
+
+Outputs:
+  CURBucketName:
+    Value: !Ref CURBucket
+    Description: "S3 bucket receiving CUR files"
+    Export:
+      Name: !Sub "${AWS::StackName}-cur-bucket"
+
+  GlueDatabase:
+    Value: !Ref GlueDatabase
+    Description: "Athena/Glue database name"
+
+  AthenaTable:
+    Value: !Sub "nable_cur.${ReportName}"
+    Description: "Full Athena table reference (database.table)"
+
+  AthenaWorkgroup:
+    Value: !Ref AthenaWorkgroup
+    Description: "Athena workgroup for nable queries"
+
+  NableRoleArn:
+    Value: !GetAtt NableCostReadRole.Arn
+    Description: "IAM role ARN that nable uses (assume this role for scoped access)"
+
+  ConfigSnippet:
+    Value: !Sub |
+      CUR_S3_BUCKET=${CURBucket}
+      CUR_ATHENA_DATABASE=nable_cur
+      CUR_ATHENA_TABLE=${ReportName}
+      CUR_ATHENA_RESULTS_BUCKET=${CURBucket}
+      CUR_ATHENA_WORKGROUP=nable-cur
+    Description: "Paste these env vars into your .env or Claude Desktop config"
+
+  FirstDataNote:
+    Value: "CUR files are delivered within 24 hours. The Glue crawler runs at 6 AM UTC to refresh the Athena table. First query results appear the day after deployment."
+    Description: "When to expect data"

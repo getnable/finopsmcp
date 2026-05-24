@@ -520,6 +520,9 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("newrelic")
     sub.add_parser("pagerduty")
     sub.add_parser("claude")    # configure Claude Desktop MCP entry
+    sub.add_parser("aws-cur")   # deploy CUR CloudFormation stack
+    infra_p = sub.add_parser("infra")  # overview of all connector setup packages
+    infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
 
     iam_p = sub.add_parser("iam-template")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
@@ -664,6 +667,12 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "claude":
         _configure_claude_desktop()
         return
+    elif parsed.cmd == "aws-cur":
+        _run_aws_cur_setup()
+        return
+    elif parsed.cmd == "infra":
+        _run_infra_overview(getattr(parsed, "provider", ""))
+        return
     elif parsed.cmd in dispatch:
         dispatch[parsed.cmd]()
     else:
@@ -760,6 +769,86 @@ def _offer_email_signup() -> None:
 
 
 # ── Claude Desktop auto-configuration ─────────────────────────────────────────
+
+def _run_aws_cur_setup() -> None:
+    """
+    Interactive AWS CUR CloudFormation deployment.
+    Called by: finops setup aws-cur
+    """
+    from .setup.cloud_infra import setup_aws_cur
+    from .security.vault import Vault
+
+    env_vars = setup_aws_cur()
+    if not env_vars:
+        return
+
+    # Offer to store the outputs in the nable vault
+    store = _prompt(
+        "\n  Store these in the nable credential vault? [Y/n]", default="y"
+    ).lower()
+    if store in ("y", "yes", ""):
+        vault = Vault.default()
+        for key, val in env_vars.items():
+            if val:
+                vault.store(key, val)
+        print("\n  ✓  Stored in vault. CUR line-item queries are now available.")
+        print("  ✓  Restart Claude Desktop to pick up the new env vars.\n")
+
+        try:
+            from . import telemetry as _tel
+            _tel._send_event(_tel._get_install_id(), "provider_connected", {
+                "provider": "aws_cur",
+                "via": "cloudformation",
+            })
+        except Exception:
+            pass
+    else:
+        print("\n  Add the env vars above to your Claude Desktop config or .env manually.\n")
+
+
+def _run_infra_overview(provider: str = "") -> None:
+    """
+    Show the connector registry overview or a specific provider's setup guide.
+    Called by: finops setup infra [provider]
+    """
+    from .setup.cloud_infra import (
+        print_connector_overview,
+        print_saas_setup,
+        AzureSetupPackage,
+        GCPSetupPackage,
+        SnowflakeSetupPackage,
+    )
+
+    if not provider:
+        print_connector_overview()
+        print(
+            "  Run 'finops setup infra <provider>' for detailed setup steps.\n"
+            "  Run 'finops setup aws-cur' to deploy the CUR pipeline interactively.\n"
+        )
+        return
+
+    p = provider.lower()
+    if p == "aws" or p == "aws-cur":
+        print(
+            "\n  AWS uses your existing credential chain (IAM role, ~/.aws/credentials, env vars).\n"
+            "  For line-item CUR detail, run: finops setup aws-cur\n"
+        )
+    elif p == "azure":
+        sub_id = _prompt("  Azure Subscription ID (leave blank to skip validation)")
+        AzureSetupPackage().print_setup_commands(sub_id or "<your-subscription-id>")
+    elif p == "gcp":
+        project = _prompt("  GCP Project ID")
+        billing = _prompt("  Billing Account ID (format: XXXXXX-XXXXXX-XXXXXX)")
+        GCPSetupPackage().print_setup_commands(
+            project or "<project-id>",
+            billing or "<billing-account-id>",
+        )
+    elif p == "snowflake":
+        account = _prompt("  Snowflake account identifier (e.g. xy12345.us-east-1)")
+        SnowflakeSetupPackage().print_setup_sql(account or "<account>")
+    else:
+        print_saas_setup(p)
+
 
 def _configure_claude_desktop() -> None:
     """

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.24"
+version = "0.8.25"
 description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
 readme = "README.md"
 license = { text = "Elastic-2.0" }
@@ -87,6 +87,7 @@ finops-slack      = "finops.slack_bot.app:main"
 finops-pr-webhook = "finops.pr_comments.webhook:main"
 finops-doctor     = "finops.doctor:main"
 finops-estimate   = "finops.connectors.terraform_estimate:main"
+finops-infra      = "finops.setup_wizard:main"
 
 [project.urls]
 Homepage      = "https://getnable.com"
@@ -95,6 +96,10 @@ Documentation = "https://getnable.com/docs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/finops"]
+artifacts = ["templates/*.yaml", "templates/*.json"]
+
+[tool.hatch.build]
+include = ["src/finops/**", "templates/**"]
 
 [tool.ruff]
 line-length = 100
