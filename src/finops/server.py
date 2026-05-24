@@ -315,6 +315,128 @@ async def list_connected_providers() -> dict:
 
 
 @mcp.tool()
+async def check_connector_health() -> dict:
+    """
+    Actively test every configured connector with a real API call and report
+    health status, last successful data time, and specific fix instructions
+    for any failures.
+
+    Unlike list_connected_providers (which only checks if credentials exist),
+    this actually calls each API and measures response time.
+
+    Examples:
+        - "Are all my connectors healthy?"
+        - "Which connectors are broken or stale?"
+        - "Check if AWS is still working"
+        - "Why am I not getting data from Datadog?"
+        - "Show connector health dashboard"
+    """
+    import asyncio
+    import time
+    from datetime import datetime, timezone
+    from sqlalchemy import select, func, text as sql_text
+    from .storage.db import get_engine, cost_snapshots
+
+    # Get last-seen data per provider from DB
+    last_seen: dict[str, str] = {}
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    cost_snapshots.c.provider,
+                    func.max(cost_snapshots.c.captured_at).label("last_at"),
+                ).group_by(cost_snapshots.c.provider)
+            ).fetchall()
+            for r in rows:
+                last_seen[r.provider] = r.last_at.isoformat() if r.last_at else None
+    except Exception:
+        pass
+
+    def _age_label(ts: str | None) -> str:
+        if not ts:
+            return "never"
+        try:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - dt
+            h = delta.total_seconds() / 3600
+            if h < 2:
+                return f"{int(delta.total_seconds() / 60)}m ago"
+            if h < 48:
+                return f"{int(h)}h ago"
+            return f"{int(h / 24)}d ago"
+        except Exception:
+            return "unknown"
+
+    async def _probe(name: str, connector) -> dict:
+        t0 = time.monotonic()
+        result: dict = {"name": name, "configured": False, "healthy": False,
+                        "last_data": _age_label(last_seen.get(name)),
+                        "response_ms": None, "error": None, "fix": None}
+        try:
+            result["configured"] = await connector.is_configured()
+            if not result["configured"]:
+                result["fix"] = f"Run: finops setup {name}"
+                return result
+
+            # Minimal live probe — list_accounts is the lightest call on every connector
+            await asyncio.wait_for(connector.list_accounts(), timeout=10.0)
+            result["healthy"] = True
+            result["response_ms"] = int((time.monotonic() - t0) * 1000)
+        except asyncio.TimeoutError:
+            result["error"] = "Timeout (>10s) — credentials may be valid but API is slow"
+            result["fix"] = "Check network connectivity or API endpoint status"
+        except Exception as e:
+            msg = str(e)
+            result["error"] = msg[:200]
+            # Map common errors to actionable fixes
+            if any(k in msg.lower() for k in ("expired", "token", "refresh")):
+                result["fix"] = f"Credentials expired. Run: finops setup {name}"
+            elif any(k in msg.lower() for k in ("access denied", "unauthorized", "403", "401")):
+                result["fix"] = f"Permission denied. Re-authorize: finops setup {name}"
+            elif any(k in msg.lower() for k in ("not found", "404")):
+                result["fix"] = f"Resource not found. Re-configure: finops setup {name}"
+            elif any(k in msg.lower() for k in ("rate limit", "throttl", "429")):
+                result["fix"] = "Rate limited — nable will auto-retry. No action needed."
+            else:
+                result["fix"] = f"Re-run setup: finops setup {name}"
+        return result
+
+    # Run all probes in parallel (don't await serially — would take minutes)
+    tasks = [_probe(name, conn) for name, conn in _ALL_CONNECTORS.items()]
+    probes = await asyncio.gather(*tasks, return_exceptions=False)
+
+    healthy = [p for p in probes if p["healthy"]]
+    broken = [p for p in probes if p["configured"] and not p["healthy"]]
+    unconfigured = [p for p in probes if not p["configured"]]
+    stale = [p for p in probes if p["healthy"] and p["last_data"] not in ("never",) and
+             any(x in p["last_data"] for x in ("d ago",)) and
+             int(p["last_data"].split("d")[0]) > 2]
+
+    summary_parts = []
+    if healthy:
+        summary_parts.append(f"{len(healthy)} healthy")
+    if broken:
+        summary_parts.append(f"{len(broken)} broken")
+    if unconfigured:
+        summary_parts.append(f"{len(unconfigured)} not configured")
+    if stale:
+        summary_parts.append(f"{len(stale)} stale (>2 days since last data)")
+
+    return {
+        "summary": ", ".join(summary_parts) or "No connectors found",
+        "healthy_count": len(healthy),
+        "broken_count": len(broken),
+        "unconfigured_count": len(unconfigured),
+        "connectors": sorted(probes, key=lambda p: (p["healthy"], not p["configured"])),
+        "broken": [{"name": p["name"], "error": p["error"], "fix": p["fix"]} for p in broken],
+        "tip": "Run 'finops-doctor' for a full credential and permission audit." if broken else None,
+    }
+
+
+@mcp.tool()
 async def get_cost_summary(
     provider: str | None = None,
     category: str | None = None,
@@ -712,6 +834,204 @@ async def get_total_spend_all_sources(
     }
 
 
+# ── Alert policy helpers ───────────────────────────────────────────────────────
+
+def _load_alert_policies() -> list[dict]:
+    """Load all alert policies from DB. Returns [] on any error."""
+    try:
+        from .storage.db import get_engine, alert_policies as _ap_table
+        from sqlalchemy import select
+        with get_engine().connect() as conn:
+            rows = conn.execute(select(_ap_table)).fetchall()
+            return [dict(r._mapping) for r in rows]
+    except Exception:
+        return []
+
+
+def _apply_alert_policies(anomalies_list: list[dict], policies: list[dict]) -> list[dict]:
+    """Filter anomaly list through alert policies."""
+    if not policies:
+        return anomalies_list
+    import fnmatch
+    result = []
+    for a in anomalies_list:
+        filtered = False
+        for p in policies:
+            # Provider match: "*" matches all
+            prov_match = p["provider"] in ("*", a.get("provider", ""))
+            # Service match: supports glob patterns ("DataTransfer*", "*Transfer*")
+            svc_match = fnmatch.fnmatch(
+                a.get("service", "").lower(),
+                p["service_pattern"].lower(),
+            )
+            if not (prov_match and svc_match):
+                continue
+            if p["muted"]:
+                filtered = True
+                break
+            # Check custom thresholds
+            pct = abs(float(str(a.get("change", "0%")).replace("%", "").replace("+", "").replace("-", "")))
+            today_str = str(a.get("today", "$0")).replace("$", "").replace(",", "")
+            baseline_str = str(a.get("baseline_avg", "$0")).replace("$", "").replace(",", "")
+            try:
+                usd_delta = abs(float(today_str) - float(baseline_str))
+            except Exception:
+                usd_delta = 0.0
+            if p.get("min_pct_change") is not None and pct < p["min_pct_change"]:
+                filtered = True
+                break
+            if p.get("min_usd_change") is not None and usd_delta < p["min_usd_change"]:
+                filtered = True
+                break
+        if not filtered:
+            result.append(a)
+    return result
+
+
+# ── Alert policy tools ─────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def set_alert_policy(
+    provider: str = "*",
+    service_pattern: str = "*",
+    muted: bool = False,
+    min_pct_change: float | None = None,
+    min_usd_change: float | None = None,
+    note: str = "",
+) -> dict:
+    """
+    Set a custom alert policy for anomaly detection on a specific provider or service.
+
+    Use this to:
+    - Mute noisy services you don't care about (e.g. DataTransfer, Tax)
+    - Raise the threshold for services that are naturally volatile
+    - Set a minimum $ delta to ignore tiny fluctuations
+
+    Supports glob patterns: "DataTransfer*", "*Transfer*", "EC2*"
+
+    Args:
+        provider: "aws", "azure", "gcp", or "*" for all providers
+        service_pattern: Exact service name or glob pattern (e.g. "DataTransfer*", "*")
+        muted: If True, all anomalies matching this rule are silenced
+        min_pct_change: Only alert if change exceeds this % (overrides default 20%)
+        min_usd_change: Only alert if absolute change exceeds this $ amount
+        note: Why this policy exists (shown in list_alert_policies)
+
+    Examples:
+        - "Mute DataTransfer anomalies, they're always noisy"
+        - "Only alert on EC2 if it changes by more than 40%"
+        - "Ignore AWS Tax service anomalies"
+        - "Only alert on changes over $500, ignore tiny fluctuations"
+        - "Set a 50% threshold for Support charges"
+    """
+    if err := require_role("analyst"):
+        return err
+    try:
+        from .storage.db import get_engine, alert_policies as _ap_table
+        from sqlalchemy import select, delete
+        from datetime import datetime
+        engine = get_engine()
+        with engine.begin() as conn:
+            # Delete existing policy for same provider+service
+            conn.execute(
+                _ap_table.delete().where(
+                    _ap_table.c.provider == provider,
+                    _ap_table.c.service_pattern == service_pattern,
+                )
+            )
+            conn.execute(
+                _ap_table.insert().values(
+                    provider=provider,
+                    service_pattern=service_pattern,
+                    muted=muted,
+                    min_pct_change=min_pct_change,
+                    min_usd_change=min_usd_change,
+                    note=note or None,
+                    created_at=datetime.utcnow(),
+                )
+            )
+        action = "muted" if muted else f"threshold set to {min_pct_change or 20}%"
+        return {
+            "created": True,
+            "provider": provider,
+            "service_pattern": service_pattern,
+            "action": action,
+            "message": f"Alert policy saved: {provider}/{service_pattern} → {action}",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def list_alert_policies() -> dict:
+    """
+    List all custom alert policies for anomaly detection.
+
+    Shows which services are muted, which have custom thresholds, and why.
+
+    Examples:
+        - "What alert policies do I have?"
+        - "Which services are muted from anomaly detection?"
+        - "Show my alert thresholds"
+    """
+    policies = _load_alert_policies()
+    if not policies:
+        return {
+            "policies": [],
+            "message": "No custom alert policies set. All services use the default 20% / z=2.0 threshold.",
+        }
+    formatted = []
+    for p in policies:
+        desc_parts = []
+        if p["muted"]:
+            desc_parts.append("MUTED")
+        if p.get("min_pct_change"):
+            desc_parts.append(f"min {p['min_pct_change']:.0f}% change to alert")
+        if p.get("min_usd_change"):
+            desc_parts.append(f"min ${p['min_usd_change']:,.0f} delta to alert")
+        formatted.append({
+            "id": p["id"],
+            "provider": p["provider"],
+            "service_pattern": p["service_pattern"],
+            "description": " · ".join(desc_parts) or "no filter",
+            "note": p.get("note"),
+            "created_at": p["created_at"].isoformat() if p.get("created_at") else None,
+        })
+    return {
+        "count": len(formatted),
+        "policies": formatted,
+        "tip": "Use set_alert_policy() to add or update a policy. Use delete_alert_policy(id) to remove one.",
+    }
+
+
+@mcp.tool()
+async def delete_alert_policy(policy_id: int) -> dict:
+    """
+    Remove a custom alert policy. The service will revert to the default threshold.
+
+    Args:
+        policy_id: The ID from list_alert_policies()
+
+    Examples:
+        - "Delete alert policy 3"
+        - "Remove the mute on DataTransfer"
+    """
+    if err := require_role("analyst"):
+        return err
+    try:
+        from .storage.db import get_engine, alert_policies as _ap_table
+        engine = get_engine()
+        with engine.begin() as conn:
+            r = conn.execute(
+                _ap_table.delete().where(_ap_table.c.id == policy_id)
+            )
+        if r.rowcount == 0:
+            return {"error": f"Policy {policy_id} not found. Use list_alert_policies() to see IDs."}
+        return {"deleted": True, "policy_id": policy_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Anomaly tools ────────────────────────────────────────────────────────────
 
 
@@ -769,11 +1089,19 @@ async def get_anomalies(
             "snapshot_date": r["snapshot_date"],
         })
 
+    # Apply custom alert policies (mutes, custom thresholds)
+    policies = _load_alert_policies()
+    before_count = len(formatted)
+    formatted = _apply_alert_policies(formatted, policies)
+    muted_count = before_count - len(formatted)
+
     result: dict = {
         "count": len(formatted),
         "anomalies": formatted,
-        "tip": "Use acknowledge_anomaly(id) to dismiss resolved anomalies.",
+        "tip": "Use acknowledge_anomaly(id) to dismiss resolved anomalies. Use set_alert_policy() to mute noisy services.",
     }
+    if muted_count > 0:
+        result["muted_by_policy"] = muted_count
 
     # Nudge free users toward Slack alerts -- most useful next step after seeing anomalies
     high_count = sum(1 for a in formatted if a.get("severity") == "high")
@@ -1804,6 +2132,156 @@ async def fetch_invoice_emails() -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@mcp.tool()
+async def push_weekly_insight() -> dict:
+    """
+    Push a rich weekly cost intelligence summary to Slack right now.
+
+    Covers: week-over-week spend change, top cost movers, open savings pipeline,
+    active anomalies, budget alerts, and a single recommended action.
+
+    This is the proactive format — an analyst briefing, not a metric dump.
+    Runs automatically every Monday morning when scheduled. Use this to
+    trigger it on demand.
+
+    Examples:
+        - "Send a weekly cost summary to Slack"
+        - "Push the weekly insight to the team channel"
+        - "Send this week's cost intelligence to Slack now"
+    """
+    from datetime import date, timedelta
+    from .notifications import slack
+
+    if not slack.is_configured():
+        return {
+            "error": "Slack not configured. Run: finops setup slack",
+            "tip": "Supports both webhook URL (SLACK_WEBHOOK_URL) and bot token (SLACK_BOT_TOKEN + SLACK_CHANNEL).",
+        }
+
+    today = date.today()
+    this_week_start = today - timedelta(days=7)
+    last_week_start = today - timedelta(days=14)
+    last_week_end = today - timedelta(days=8)
+
+    # Gather this-week and last-week totals from snapshots
+    try:
+        from .storage.db import get_engine, cost_snapshots
+        from sqlalchemy import select, func
+        engine = get_engine()
+
+        def _week_total(start: date, end: date) -> dict[str, dict]:
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    select(
+                        cost_snapshots.c.provider,
+                        cost_snapshots.c.service,
+                        func.sum(cost_snapshots.c.amount_usd).label("total"),
+                    )
+                    .where(
+                        cost_snapshots.c.snapshot_date >= start.isoformat(),
+                        cost_snapshots.c.snapshot_date <= end.isoformat(),
+                    )
+                    .group_by(cost_snapshots.c.provider, cost_snapshots.c.service)
+                ).fetchall()
+            result: dict[str, dict] = {}
+            for r in rows:
+                key = f"{r.provider}::{r.service}"
+                result[key] = {"provider": r.provider, "service": r.service, "total": r.total or 0.0}
+            return result
+
+        this_week = _week_total(this_week_start, today)
+        last_week = _week_total(last_week_start, last_week_end)
+
+        grand_total = sum(v["total"] for v in this_week.values())
+        prev_total = sum(v["total"] for v in last_week.values())
+
+        # Top movers: biggest absolute changes week-over-week
+        movers = []
+        all_keys = set(this_week) | set(last_week)
+        for key in all_keys:
+            tw = this_week.get(key, {}).get("total", 0.0)
+            lw = last_week.get(key, {}).get("total", 0.0)
+            prov = (this_week.get(key) or last_week.get(key) or {}).get("provider", "")
+            svc = (this_week.get(key) or last_week.get(key) or {}).get("service", "")
+            if tw < 5 and lw < 5:
+                continue  # skip noise
+            pct = ((tw - lw) / lw * 100) if lw else 100.0
+            movers.append({"provider": prov, "service": svc,
+                           "this_week": tw, "last_week": lw, "pct_change": pct})
+        movers.sort(key=lambda m: -abs(m["pct_change"]))
+    except Exception as e:
+        grand_total = 0.0
+        prev_total = 0.0
+        movers = []
+
+    # Savings pipeline
+    try:
+        from .recommendations.savings_tracker import get_summary
+        savings_summary = get_summary()
+        open_savings = savings_summary.get("potential_monthly_usd", 0)
+        verified_savings = savings_summary.get("verified_monthly_usd", 0)
+    except Exception:
+        open_savings = verified_savings = 0.0
+
+    # Active anomalies
+    try:
+        from .anomaly.detector import get_active_anomalies
+        active_anomaly_count = len(get_active_anomalies(limit=100) or [])
+    except Exception:
+        active_anomaly_count = 0
+
+    # Budget alerts
+    budget_alert_list = []
+    try:
+        from .budget.enforcer import list_budgets as _list_budgets_fn
+        budgets_data = _list_budgets_fn()
+        for b in budgets_data:
+            pct = b.get("pct_used", 0) or 0
+            if pct >= 75:
+                budget_alert_list.append({"name": b.get("name", ""), "pct_used": pct})
+        budget_alert_list.sort(key=lambda x: -x["pct_used"])
+    except Exception:
+        pass
+
+    # Top action heuristic
+    top_action = ""
+    if active_anomaly_count >= 1:
+        top_action = f'Review {active_anomaly_count} anomaly{"s" if active_anomaly_count > 1 else ""}: _"show me the cost anomalies"_'
+    elif open_savings > 500:
+        top_action = f'${open_savings:,.0f}/mo in open savings: _"show rightsizing recommendations"_'
+    elif budget_alert_list:
+        top_action = f'Budget alert: {budget_alert_list[0]["name"]} at {budget_alert_list[0]["pct_used"]:.0f}%'
+
+    period_label = f"{this_week_start.strftime('%b %d')} – {today.strftime('%b %d')}"
+    sent = await slack.send_weekly_insight(
+        period_label=period_label,
+        grand_total=grand_total,
+        prev_total=prev_total,
+        top_movers=movers[:5],
+        open_savings_usd=open_savings,
+        verified_savings_usd=verified_savings,
+        active_anomalies=active_anomaly_count,
+        budget_alerts=budget_alert_list,
+        top_action=top_action,
+    )
+
+    if sent:
+        return {
+            "sent": True,
+            "period": period_label,
+            "grand_total_usd": round(grand_total, 2),
+            "prev_total_usd": round(prev_total, 2),
+            "top_movers_count": len(movers),
+            "active_anomalies": active_anomaly_count,
+            "open_savings_usd": round(open_savings, 2),
+            "message": f"Weekly insight sent to Slack for {period_label}.",
+        }
+    return {
+        "sent": False,
+        "error": "Slack send failed — check SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN.",
+    }
 
 
 @mcp.tool()

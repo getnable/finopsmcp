@@ -256,6 +256,15 @@ def job_invoice_fetch() -> None:
         log.exception("Invoice fetch job failed")
 
 
+def job_weekly_slack_insight() -> None:
+    """Send the weekly Slack insight (top movers, savings, anomalies, budget alerts)."""
+    try:
+        _run(run_weekly_insight_now())
+        log.info("Weekly Slack insight sent")
+    except Exception:
+        log.exception("Weekly Slack insight failed")
+
+
 def job_weekly_email_digest() -> None:
     """Send the standalone weekly email digest (no AI client required)."""
     try:
@@ -360,6 +369,10 @@ def start_scheduler() -> BackgroundScheduler:
     weekly_cron = os.environ.get("FINOPS_WEEKLY_CRON", "0 9 * * 1")
     _scheduler.add_job(job_weekly_email_digest, CronTrigger.from_crontab(weekly_cron), id="weekly_digest", replace_existing=True)
 
+    # Weekly Slack insight every Monday at 09:30 UTC (30 min after email)
+    weekly_slack_cron = os.environ.get("FINOPS_WEEKLY_SLACK_CRON", "30 9 * * 1")
+    _scheduler.add_job(job_weekly_slack_insight, CronTrigger.from_crontab(weekly_slack_cron), id="weekly_slack_insight", replace_existing=True)
+
     _scheduler.start()
     log.info("Scheduler started (snapshot=%s, anomaly=%s, digest=%s)", snapshot_cron, anomaly_cron, digest_cron)
     return _scheduler
@@ -384,3 +397,83 @@ async def run_anomaly_check_now() -> list[dict]:
 
 async def run_digest_now() -> bool:
     return await _send_daily_digest()
+
+
+async def run_weekly_insight_now() -> bool:
+    """Trigger the weekly Slack insight immediately (used by push_weekly_insight tool)."""
+    from ..notifications import slack
+    if not slack.is_configured():
+        return False
+    from datetime import date, timedelta
+    from ..storage.db import get_engine, cost_snapshots
+    from sqlalchemy import select, func
+
+    today = date.today()
+    this_start = today - timedelta(days=7)
+    last_start = today - timedelta(days=14)
+    last_end = today - timedelta(days=8)
+
+    def _week(start: date, end: date) -> tuple[float, dict]:
+        engine = get_engine()
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    cost_snapshots.c.provider,
+                    cost_snapshots.c.service,
+                    func.sum(cost_snapshots.c.amount_usd).label("t"),
+                )
+                .where(
+                    cost_snapshots.c.snapshot_date >= start.isoformat(),
+                    cost_snapshots.c.snapshot_date <= end.isoformat(),
+                )
+                .group_by(cost_snapshots.c.provider, cost_snapshots.c.service)
+            ).fetchall()
+        by_key = {}
+        total = 0.0
+        for r in rows:
+            by_key[f"{r.provider}::{r.service}"] = {"provider": r.provider, "service": r.service, "total": r.t or 0}
+            total += r.t or 0
+        return total, by_key
+
+    try:
+        grand_total, this_week = _week(this_start, today)
+        prev_total, last_week = _week(last_start, last_end)
+    except Exception:
+        grand_total, prev_total, this_week, last_week = 0.0, 0.0, {}, {}
+
+    movers = []
+    for key in set(this_week) | set(last_week):
+        tw = this_week.get(key, {}).get("total", 0.0)
+        lw = last_week.get(key, {}).get("total", 0.0)
+        if tw < 5 and lw < 5:
+            continue
+        rec = (this_week.get(key) or last_week.get(key) or {})
+        pct = ((tw - lw) / lw * 100) if lw else 100.0
+        movers.append({"provider": rec.get("provider", ""), "service": rec.get("service", ""),
+                       "this_week": tw, "last_week": lw, "pct_change": pct})
+    movers.sort(key=lambda m: -abs(m["pct_change"]))
+
+    try:
+        from ..recommendations.savings_tracker import get_summary
+        s = get_summary()
+        open_savings = s.get("potential_monthly_usd", 0)
+        verified_savings = s.get("verified_monthly_usd", 0)
+    except Exception:
+        open_savings = verified_savings = 0.0
+
+    try:
+        from ..anomaly.detector import get_active_anomalies
+        active = len(get_active_anomalies(limit=100) or [])
+    except Exception:
+        active = 0
+
+    period_label = f"{this_start.strftime('%b %d')} – {today.strftime('%b %d')}"
+    return await slack.send_weekly_insight(
+        period_label=period_label,
+        grand_total=grand_total,
+        prev_total=prev_total,
+        top_movers=movers[:5],
+        open_savings_usd=open_savings,
+        verified_savings_usd=verified_savings,
+        active_anomalies=active,
+    )

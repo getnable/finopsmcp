@@ -331,6 +331,22 @@ pattern_findings = Table(
     Column("dedup_key", String(64), nullable=False),   # SHA256 of account+pattern
 )
 
+# ── Alert policies — per-service anomaly thresholds and mute rules ────────────
+
+alert_policies = Table(
+    "alert_policies", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("provider", String(64), nullable=False, default="*"),        # "aws" | "azure" | "*"
+    Column("service_pattern", String(256), nullable=False, default="*"), # exact or "*" wildcard
+    Column("muted", Boolean, nullable=False, default=False),            # silence all alerts for this service
+    Column("min_pct_change", Float, nullable=True),                     # override global 20% threshold
+    Column("min_usd_change", Float, nullable=True),                     # ignore if delta < $X
+    Column("min_z_score", Float, nullable=True),                        # override global z=2.0
+    Column("note", Text, nullable=True),                                # why this policy exists
+    Column("created_at", DateTime, nullable=False),
+    Column("created_by", String(256), nullable=False, default=""),
+)
+
 # ── Savings tracking — lifecycle from recommendation → verified savings ───────
 
 savings_recommendations = Table(
@@ -403,6 +419,9 @@ Index("ix_tfa_status",   terraform_tag_audits.c.status)
 Index("ix_pf_account",  pattern_findings.c.account_id)
 Index("ix_pf_status",   pattern_findings.c.status)
 Index("ix_pf_dedup",    pattern_findings.c.dedup_key, unique=True)
+
+# alert_policies: fast lookup by provider + service
+Index("ix_ap_provider_svc", alert_policies.c.provider, alert_policies.c.service_pattern)
 
 # savings_recommendations: status checks and dedup
 Index("ix_srec_status",   savings_recommendations.c.status)

@@ -122,6 +122,120 @@ def daily_digest_blocks(
     return blocks
 
 
+def weekly_insight_blocks(
+    period_label: str,
+    grand_total: float,
+    prev_total: float,
+    top_movers: list[dict],       # [{service, provider, this_week, last_week, pct_change}]
+    open_savings_usd: float,
+    verified_savings_usd: float,
+    active_anomalies: int,
+    budget_alerts: list[dict],    # [{name, pct_used, status}]
+    top_action: str = "",
+) -> list[dict]:
+    """
+    Rich weekly insight push — reads like an analyst briefing, not a metric dump.
+    Covers: week-over-week spend, top movers, open savings, budget status, next action.
+    """
+    delta = grand_total - prev_total
+    delta_pct = (delta / prev_total * 100) if prev_total else 0
+    trend = "📈" if delta > 0 else "📉" if delta < 0 else "➡️"
+    sign = "+" if delta >= 0 else ""
+
+    blocks: list[dict] = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"💡 Weekly Cost Intelligence — {period_label}"},
+        },
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*This week*\n${grand_total:,.0f}"},
+                {"type": "mrkdwn", "text": f"*vs last week*\n{trend} {sign}{delta_pct:.1f}% (${delta:+,.0f})"},
+            ],
+        },
+    ]
+
+    # Top movers
+    if top_movers:
+        mover_lines = []
+        for m in top_movers[:5]:
+            pct = m.get("pct_change", 0)
+            arrow = "↑" if pct > 0 else "↓"
+            mover_lines.append(
+                f"• *{m['service']}* ({m.get('provider','').upper()}): "
+                f"{arrow}{abs(pct):.0f}% · ${m.get('this_week', 0):,.0f} this week"
+            )
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "*Top movers*\n" + "\n".join(mover_lines)},
+        })
+
+    # Savings row
+    savings_parts = []
+    if open_savings_usd > 0:
+        savings_parts.append(f"*${open_savings_usd:,.0f}/mo* open")
+    if verified_savings_usd > 0:
+        savings_parts.append(f"*${verified_savings_usd:,.0f}/mo* verified ✓")
+    if savings_parts:
+        blocks.append({
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*Savings pipeline*\n{' · '.join(savings_parts)}"},
+                {"type": "mrkdwn", "text": f"*Anomalies*\n{'⚠️ ' + str(active_anomalies) + ' active' if active_anomalies else '✅ None'}"},
+            ],
+        })
+
+    # Budget alerts
+    if budget_alerts:
+        alert_lines = []
+        for b in budget_alerts[:3]:
+            pct = b.get("pct_used", 0)
+            emoji = "🔴" if pct >= 100 else "🟡"
+            alert_lines.append(f"{emoji} *{b['name']}*: {pct:.0f}% of budget used")
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "*Budget alerts*\n" + "\n".join(alert_lines)},
+        })
+
+    # Top action
+    action_text = top_action or "Ask Claude: _\"what should I focus on this week?\"_"
+    blocks.append({
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": f"💬 {action_text}"}],
+    })
+    blocks.append({"type": "divider"})
+    return blocks
+
+
+async def send_weekly_insight(
+    period_label: str,
+    grand_total: float,
+    prev_total: float,
+    top_movers: list[dict],
+    open_savings_usd: float = 0.0,
+    verified_savings_usd: float = 0.0,
+    active_anomalies: int = 0,
+    budget_alerts: list[dict] | None = None,
+    top_action: str = "",
+) -> bool:
+    blocks = weekly_insight_blocks(
+        period_label=period_label,
+        grand_total=grand_total,
+        prev_total=prev_total,
+        top_movers=top_movers,
+        open_savings_usd=open_savings_usd,
+        verified_savings_usd=verified_savings_usd,
+        active_anomalies=active_anomalies,
+        budget_alerts=budget_alerts or [],
+        top_action=top_action,
+    )
+    delta_pct = ((grand_total - prev_total) / prev_total * 100) if prev_total else 0
+    sign = "+" if delta_pct >= 0 else ""
+    text = f"Weekly cost: ${grand_total:,.0f} ({sign}{delta_pct:.1f}% vs last week)"
+    return await send(blocks, text)
+
+
 async def send_anomaly_alert(anomaly: dict[str, Any]) -> bool:
     blocks = anomaly_blocks(anomaly)
     pct = abs(anomaly["pct_change"])
