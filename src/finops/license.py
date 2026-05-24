@@ -43,7 +43,7 @@ _env_secret = os.environ.get("FINOPS_LICENSE_SECRET", "")
 _DEFAULT_SECRET = "933cb551a15aa14b2a2c3517536da50773c2492a2dce2879578cb60cf34bb81b"
 _SECRET = (_env_secret or _DEFAULT_SECRET).encode()
 _UPGRADE_URL    = "https://getnable.com/#pricing"
-_CHECKOUT_URL   = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01?prefilled_promo_code=LAUNCH50"   # direct Stripe checkout
+_CHECKOUT_URL   = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01"   # direct Stripe checkout
 _ACTIVATE_CMD   = "finops setup license"             # shown after purchase
 _TRIAL_DAYS  = 30
 _TRIAL_FILE  = Path.home() / ".finops-mcp" / "trial_start"
@@ -345,13 +345,29 @@ def require_pro(feature: str) -> dict | None:
     else:
         urgency = ""
 
+    # Build a concise FOMO block showing everything Team unlocks
+    _TEAM_FEATURES = [
+        ("ticket_creation",            "🎫 Auto-create Jira / Linear / GitHub Issues from anomalies & rightsizing"),
+        ("scheduled_email_digests",    "📧 Scheduled email reports — weekly, monthly, or custom cadence"),
+        ("commitment_recommendations", "💰 RI / Savings Plan recommendations with exact $ ROI"),
+        ("org_reports",                "🏢 Org-wide cost rollup across all accounts & OUs"),
+        ("cur_athena_detail",          "🔍 Line-item CUR data — per-resource costs, RI waste, tag breakdown"),
+        ("azure_detail",               "☁️  Azure resource-level cost detail & reservation utilization"),
+        ("business_metrics",           "📈 Unit economics — cost per customer, hosting % of MRR"),
+    ]
+
+    lines = [f"⬡  nable Team — everything in free, plus:\n"]
+    for key, desc in _TEAM_FEATURES:
+        marker = "▶" if key == feature else " "
+        lines.append(f"  {marker} {desc}")
+    lines.append(f"\n  You hit this because '{friendly}' requires Team.")
+    lines.append(f"\n  → First month free: {_CHECKOUT_URL}")
+    lines.append(f"  → Then activate:    {_ACTIVATE_CMD} <your-key>")
+
     return {
         "error": "pro_required",
         "feature": feature,
-        "message": (
-            f"'{friendly}' is a Team feature. "
-            f"To unlock it: {_CHECKOUT_URL} — then run `{_ACTIVATE_CMD} <your-key>`."
-        ),
+        "message": "\n".join(lines),
         "upgrade_url": _CHECKOUT_URL,
         "activate_command": _ACTIVATE_CMD,
         "free_tier_available": True,

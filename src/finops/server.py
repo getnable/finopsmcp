@@ -149,13 +149,13 @@ async def connection_status() -> str:
     if lic.mode == "trial":
         plan_line = (
             f"Plan: Team trial: {lic.days_remaining} day{'s' if lic.days_remaining != 1 else ''} remaining. "
-            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Team features ($39.99/mo)."
+            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Team features ($19.99/mo)."
         )
     elif lic.mode == "free":
         plan_line = (
             f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
             f"PR comments, budgets, K8s analysis, and all connectors included. "
-            f"Team plan ($39.99/mo) adds: Slack anomaly alerts, ticket auto-creation, "
+            f"Team plan ($19.99/mo) adds: Slack anomaly alerts, ticket auto-creation, "
             f"email digests, commitment recommendations, and org rollup. "
             f"Upgrade at {_UPGRADE_URL}."
         )
@@ -303,7 +303,7 @@ async def list_connected_providers() -> dict:
             "note": (
                 f"Free tier: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
                 f"PR comments, budgets, K8s analysis, Helm visibility, and all connectors included. "
-                f"Team plan ($39.99/mo) adds: Slack anomaly alerts, ticket auto-creation "
+                f"Team plan ($19.99/mo) adds: Slack anomaly alerts, ticket auto-creation "
                 f"(Jira/Linear/GitHub), email reports, commitment recommendations, "
                 f"and org rollup. Upgrade at {_UPGRADE_URL}."
             ),
@@ -1919,7 +1919,7 @@ async def get_commitment_analysis() -> dict:
                 r for r in result.get("recommendations", []) if r.get("type") == "warning"
             ]
             result["recommendations_note"] = (
-                f"This is a Team feature ($39.99/mo). Upgrade at {_UPGRADE_URL} to unlock purchase recommendations with ROI projections."
+                f"This is a Team feature ($19.99/mo). Upgrade at {_UPGRADE_URL} to unlock purchase recommendations with ROI projections."
             )
         return result
     except Exception as e:
@@ -3776,7 +3776,7 @@ async def subscribe_to_report(
         email_note = None
         if email_addresses and require_pro("scheduled_email_digests") is not None:
             email_note = (
-                f"This is a Team feature ($39.99/mo). Upgrade at {_UPGRADE_URL} to unlock email delivery. "
+                f"This is a Team feature ($19.99/mo). Upgrade at {_UPGRADE_URL} to unlock email delivery. "
                 f"The subscription will be created with Slack delivery only."
             )
             email_addresses = []  # clear emails on free tier
@@ -4926,23 +4926,65 @@ def main() -> None:
     set_current_identity(ident)
 
     status = get_status()
-    border = "=" * 56
+    W = 62
+    border = "─" * W
+
+    _FREE = [
+        "✓  Cost queries across AWS, Azure, GCP & 10+ SaaS connectors",
+        "✓  Anomaly detection with Slack / Teams alerts",
+        "✓  Rightsizing recommendations",
+        "✓  Budgets, forecasts & spend alerts",
+        "✓  Kubernetes cost analysis",
+        "✓  PR cost comments",
+        "✓  Connector health & savings tracking",
+    ]
+    _TEAM = [
+        "   🎫  Ticket auto-creation  (Jira · Linear · GitHub Issues)",
+        "   📧  Scheduled email reports at any cadence",
+        "   💰  RI / Savings Plan recommendations with $ ROI",
+        "   🏢  Org-wide multi-account rollup & OU breakdown",
+        "   🔍  Line-item CUR data — per-resource & RI waste",
+        "   📈  Unit economics — cost per customer, % of MRR",
+    ]
+
     if status.mode == "pro":
-        print(f"\n{border}")
-        print(f"  nable Team  ({status.email})")
-        print(f"{border}\n")
+        print(f"\n  {border}")
+        print(f"  nable Team  ·  {status.email}")
+        print(f"  {border}")
+        for f in _FREE:
+            print(f"  {f}")
+        print(f"  {'─' * (W - 0)}")
+        for t in _TEAM:
+            print(f"  {t.replace('   ', '', 1)}")
+        print(f"  {border}\n")
+
     elif status.mode == "trial":
-        print(f"\n{border}")
-        print(f"  nable Team trial  ({status.days_remaining} days remaining)")
-        print("  All Team features unlocked.")
-        print(f"  Subscribe at {_UPGRADE_URL}")
-        print(f"{border}\n")
+        days = status.days_remaining
+        print(f"\n  {border}")
+        print(f"  nable Team trial  ·  {days} day{'s' if days != 1 else ''} remaining  ·  all features unlocked")
+        print(f"  {border}")
+        for f in _FREE:
+            print(f"  {f}")
+        for t in _TEAM:
+            print(f"  {t.replace('   ', '', 1)}")
+        print(f"  {'─' * W}")
+        print(f"  Subscribe before day {30 - (30 - days) + 1} to keep Team features:")
+        print(f"  {_UPGRADE_URL}")
+        print(f"  {border}\n")
+
     else:
-        print(f"\n{border}")
-        print("  nable  (free)")
-        print("  Queries, anomaly detection, rightsizing, and all connectors are free.")
-        print(f"  Team plan ($39.99/mo): tickets, digests, commitments: {_UPGRADE_URL}")
-        print(f"{border}\n")
+        print(f"\n  {border}")
+        print(f"  nable  ·  free tier")
+        print(f"  {border}")
+        for f in _FREE:
+            print(f"  {f}")
+        print(f"  {'─' * W}")
+        print(f"  Locked on free tier  ↓")
+        for t in _TEAM:
+            print(f"  {t}")
+        print(f"  {'─' * W}")
+        print(f"  First month free → {_UPGRADE_URL}")
+        print(f"  {border}\n")
 
     # Warn if running in Postgres mode without auth enforcement
     if os.getenv("DATABASE_URL") and os.getenv("FINOPS_REQUIRE_AUTH") != "1":
