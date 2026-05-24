@@ -199,6 +199,20 @@ def _fmt_usd(amount: float) -> str:
     return f"${amount:,.2f}"
 
 
+def _team_nudge(message: str) -> str | None:
+    """
+    Return a contextual upgrade nudge for free-tier users only.
+    Returns None for trial and pro users so the message never appears for paying customers.
+    Phrased as a helpful next step, not an ad.
+    """
+    try:
+        if get_status().mode == "free":
+            return f"{message} {_UPGRADE_URL}"
+    except Exception:
+        pass
+    return None
+
+
 def _summary_to_dict(summary: CostSummary) -> dict:
     d: dict = {
         "provider": summary.provider,
@@ -344,7 +358,7 @@ async def get_cost_summary(
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed, granularity)
 
-    return {
+    result = {
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _fmt_usd(grand_total),
@@ -354,6 +368,18 @@ async def get_cost_summary(
             for k, v in sorted(grand_by_service.items(), key=lambda x: -x[1])
         },
     }
+
+    # Subtle nudge after the first real cost query -- mention anomaly alerts + ticket creation
+    # Only fires for free users with real spend data (not $0 accounts)
+    if grand_total > 10:
+        nudge = _team_nudge(
+            "To get automatic Slack alerts when spend spikes and auto-create tickets "
+            "for waste findings, upgrade to Team:"
+        )
+        if nudge:
+            result["_tip"] = nudge
+
+    return result
 
 
 @mcp.tool()
@@ -735,11 +761,25 @@ async def get_anomalies(
             "snapshot_date": r["snapshot_date"],
         })
 
-    return {
+    result: dict = {
         "count": len(formatted),
         "anomalies": formatted,
         "tip": "Use acknowledge_anomaly(id) to dismiss resolved anomalies.",
     }
+
+    # Nudge free users toward Slack alerts -- most useful next step after seeing anomalies
+    high_count = sum(1 for a in formatted if a.get("severity") == "high")
+    nudge_msg = (
+        f"You have {len(formatted)} anomal{'ies' if len(formatted) != 1 else 'y'}"
+        + (f" ({high_count} high-severity)" if high_count else "")
+        + ". To get Slack or Teams alerts the moment these fire so you catch spikes live,"
+        + " upgrade to Team:"
+    )
+    nudge = _team_nudge(nudge_msg)
+    if nudge:
+        result["_upgrade"] = nudge
+
+    return result
 
 
 @mcp.tool()
@@ -1054,7 +1094,21 @@ async def get_rightsizing_recommendations(
             avg_cpu_threshold=avg_cpu_threshold,
             max_cpu_threshold=max_cpu_threshold,
         )
-        return rightsizing_summary(recs)
+        result = rightsizing_summary(recs)
+
+        # Nudge free users toward ticket creation when there are real savings on the table
+        if isinstance(result, dict) and result.get("total_monthly_savings_usd", 0) > 0:
+            savings = result["total_monthly_savings_usd"]
+            count = result.get("count", len(recs))
+            nudge = _team_nudge(
+                f"You have {count} rightsizing opportunit{'ies' if count != 1 else 'y'} "
+                f"worth ${savings:,.0f}/mo. To auto-create Jira, Linear, or GitHub tickets "
+                f"so these actually get fixed, upgrade to Team:"
+            )
+            if nudge:
+                result["_upgrade"] = nudge
+
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -1462,12 +1516,24 @@ async def audit_aws_waste(
             checks=checks,
         )
         # Add a human-readable summary at the top
+        monthly = report.get("total_estimated_monthly_savings", 0)
+        findings = report.get("total_findings", 0)
         report["summary"] = (
-            f"Found {report.get('total_findings', 0)} waste findings across "
+            f"Found {findings} waste findings across "
             f"{len(report.get('regions_scanned', []))} region(s). "
-            f"Estimated savings: ${report.get('total_estimated_monthly_savings', 0):,.2f}/mo "
+            f"Estimated savings: ${monthly:,.2f}/mo "
             f"(${report.get('total_estimated_annual_savings', 0):,.2f}/yr)."
         )
+
+        # Nudge free users toward ticket creation when there is real waste on the table
+        if monthly > 0 and findings > 0:
+            nudge = _team_nudge(
+                f"To auto-create Jira, Linear, or GitHub tickets for these {findings} "
+                f"findings so your team actually acts on them, upgrade to Team:"
+            )
+            if nudge:
+                report["_upgrade"] = nudge
+
         return report
     except Exception as e:
         log.error("audit_aws_waste failed: %s", e, exc_info=True)
