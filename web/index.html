@@ -427,9 +427,9 @@ function ThemeToggle({ dark, onToggle }){
 function PromoBanner({ onTrial }){
   return (
     <div style={{background:"var(--bg-3)",borderBottom:"1px solid var(--line-2)",textAlign:"center",padding:"10px 16px",fontSize:13.5,color:"var(--fg-2)",position:"relative",zIndex:100}}>
-      <span style={{color:"#22C55E",fontWeight:600,marginRight:6}}>LAUNCH50</span>
-      50% off your first month of Team. Expires June 22.&nbsp;
-      <a href="#" onClick={onTrial} style={{color:"var(--fg)",textDecoration:"underline",textUnderlineOffset:3}}>Claim now →</a>
+      <span style={{color:"#22C55E",fontWeight:600,marginRight:6}}>FREE TRIAL</span>
+      First month free — no charge until day 31, cancel any time.&nbsp;
+      <a href="#" onClick={onTrial} style={{color:"var(--fg)",textDecoration:"underline",textUnderlineOffset:3}}>Start free →</a>
     </div>
   );
 }
@@ -894,12 +894,11 @@ function Pricing({ onTrial }){
             <div className="tier">Team · Most popular</div>
             <div>
               <div className="amt">
-                <span style={{textDecoration:"line-through",opacity:0.4,fontSize:"0.7em",verticalAlign:"middle",marginRight:6}}>$39.99</span>
                 $19<span className="small">.99 / mo</span>
               </div>
               <div className="amt-sub" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                <span style={{background:"#22C55E",color:"#1a1a1a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:4,letterSpacing:"0.04em"}}>LAUNCH50</span>
-                <span>50% off first month · cancel any time · expires Jun 22</span>
+                <span style={{background:"#22C55E",color:"#1a1a1a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:4,letterSpacing:"0.04em"}}>FREE TRIAL</span>
+                <span>First month free · cancel any time</span>
               </div>
             </div>
             <ul>
@@ -1233,8 +1232,8 @@ function TrialModal({ onClose }){
     } catch(err) { /* non-blocking */ }
     const base = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01";
     const url = email
-      ? `${base}?prefilled_email=${encodeURIComponent(email)}&prefilled_promo_code=LAUNCH50`
-      : `${base}?prefilled_promo_code=LAUNCH50`;
+      ? `${base}?prefilled_email=${encodeURIComponent(email)}`
+      : base;
     window.location.href = url;
   };
   return (
@@ -1251,9 +1250,9 @@ function TrialModal({ onClose }){
           <div>
             <div className="price-row">
               <span className="price-big">$19.99</span>
-              <span className="price-after">/ mo, first month free</span>
+              <span className="price-after">/ mo</span>
             </div>
-            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>Enter card now. Not charged for 30 days. Cancel any time.</div>
+            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>First month free. Not charged until day 31. Cancel any time.</div>
           </div>
           <ul>
             <li>Everything in the free tier, plus:</li>
@@ -1264,13 +1263,13 @@ function TrialModal({ onClose }){
             <li>OU breakdown &amp; account anomaly detection</li>
           </ul>
           <div style={{marginTop:"auto",paddingTop:16,borderTop:"1px solid var(--line)",fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>
-            Already installed? You get 30 days free in-product with no card. This subscription keeps Team features unlocked after that trial ends. First month is free when you subscribe.
+            Already installed? Your in-product trial counts — subscribe to keep Team features after it ends. Either way, first month is free.
           </div>
         </div>
 
         {/* Right: email form + pip install */}
         <div className="modal-right">
-          <h4>Subscribe to Team: first month free</h4>
+          <h4>Start free — $19.99/mo after day 31</h4>
           <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
             <div>
               <label htmlFor="trial-email">EMAIL</label>
@@ -1287,8 +1286,8 @@ function TrialModal({ onClose }){
               Continue to checkout →
             </button>
             <div className="modal-note">
-              Card required to hold your spot. Not charged for 30 days.<br/>
-              Cancel any time before day 30. No questions asked.
+              Card required. Not charged until day 31.<br/>
+              Cancel any time. No questions asked.
             </div>
           </form>
 
