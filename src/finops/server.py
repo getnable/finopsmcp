@@ -2392,6 +2392,363 @@ async def estimate_helm_diff_cost(
 
 
 @mcp.tool()
+async def get_cluster_efficiency(context: str | None = None) -> dict:
+    """
+    Kubernetes cluster efficiency score (0-100) with letter grade, per-namespace
+    breakdown, and prioritised recommendations ranked by dollar impact.
+
+    Scores across 4 dimensions:
+      - CPU efficiency    (30 pts) — actual usage vs requests (needs metrics-server)
+      - Memory efficiency (30 pts) — actual usage vs requests (needs metrics-server)
+      - Idle node penalty (20 pts) — penalised for nodes under 10% utilisation
+      - Waste ratio       (20 pts) — penalised for % of cost that's unrecoverable
+
+    Works without metrics-server — uses request fill-ratio against node capacity.
+
+    Examples:
+        - "What's our Kubernetes efficiency score?"
+        - "Grade our cluster"
+        - "Which namespaces are dragging down our efficiency score?"
+        - "Where should we focus to improve cluster efficiency?"
+        - "Are we wasting money in Kubernetes?"
+    """
+    try:
+        from .connectors.kubernetes import KubernetesConnector
+    except ImportError:
+        return {"error": "kubernetes package not installed. Run: pip install finops-mcp[kubernetes]"}
+
+    try:
+        connector = KubernetesConnector()
+        if not await connector.is_configured():
+            return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
+
+        report = connector.analyze_cluster(context)
+        result = connector.compute_efficiency_score(report)
+
+        # Human-readable headline
+        grade = result["grade"]
+        score = result["score"]
+        waste = result["wasted_monthly_cost_usd"]
+        total = result["total_monthly_cost_usd"]
+        grade_msg = {
+            "A": "Great shape. Keep rightsizing to hold the grade.",
+            "B": "Good, but there's room to claw back $100-500/mo with targeted fixes.",
+            "C": "Moderate waste. Tackle idle nodes and top rightsizing candidates first.",
+            "D": "Significant over-provisioning. Start with idle nodes and CPU-wasted workloads.",
+            "F": "High waste. A dedicated sprint on cluster efficiency will pay for itself in weeks.",
+        }.get(grade, "")
+        result["headline"] = (
+            f"Cluster '{report.cluster}' scores {score:.0f}/100 (Grade {grade}) — "
+            f"${total:,.0f}/mo total, ${waste:,.0f}/mo estimated waste. {grade_msg}"
+        )
+
+        return result
+    except Exception as e:
+        log.exception("Cluster efficiency failed")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_label_costs(
+    label_key: str = "team",
+    context: str | None = None,
+) -> dict:
+    """
+    Aggregate Kubernetes costs by any pod label across all namespaces.
+    Great for chargeback: see spend by team, environment, app, or any label.
+
+    Workloads without the label are grouped under '__untagged__'. If tagging
+    coverage is low, the response includes a warning with the tagged %.
+
+    Common label_key values: team, env, environment, app, component, tier,
+    app.kubernetes.io/name, app.kubernetes.io/part-of
+
+    Examples:
+        - "Show me Kubernetes costs by team"
+        - "Which team is spending the most on Kubernetes?"
+        - "Break down K8s costs by environment"
+        - "How much is the payments team spending in the cluster?"
+        - "Show K8s cost by app label"
+        - "What percentage of our cluster is untagged?"
+    """
+    try:
+        from .connectors.kubernetes import KubernetesConnector
+    except ImportError:
+        return {"error": "kubernetes package not installed. Run: pip install finops-mcp[kubernetes]"}
+
+    try:
+        connector = KubernetesConnector()
+        if not await connector.is_configured():
+            return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
+
+        report = connector.analyze_cluster(context)
+        result = connector.get_label_costs(report, label_key=label_key)
+
+        # Human-readable summary
+        rows = result.get("by_label", [])
+        top3 = rows[:3]
+        top_str = ", ".join(f"{r['label_value']}: ${r['monthly_cost_usd']:,.0f}" for r in top3)
+        tagged_pct = result.get("tagged_workload_pct", 0)
+        result["summary"] = (
+            f"Cluster '{report.cluster}' by {label_key}: {top_str}. "
+            f"{tagged_pct}% of cost tagged."
+        )
+
+        return result
+    except Exception as e:
+        log.exception("Label cost breakdown failed")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_workload_costs(
+    namespace: str | None = None,
+    kind: str | None = None,
+    sort_by: str = "cost",
+    context: str | None = None,
+    limit: int = 50,
+) -> dict:
+    """
+    Detailed Kubernetes workload cost breakdown with efficiency grades.
+    Supports filtering by namespace and workload kind, sorting by cost or waste.
+
+    Args:
+        namespace: Filter to a specific namespace (e.g. "production")
+        kind:      Filter by workload type: Deployment, StatefulSet, DaemonSet, Job
+        sort_by:   "cost" (default) | "waste" | "efficiency" (worst first)
+        context:   Kubeconfig context (default: current context)
+        limit:     Max workloads returned (default 50)
+
+    Each workload includes: cost, waste, CPU/memory requests vs actual usage,
+    efficiency grade (A-F), and pod labels for attribution.
+
+    Examples:
+        - "Show me all workload costs in the production namespace"
+        - "Which Deployments are wasting the most money?"
+        - "Show me StatefulSet costs sorted by waste"
+        - "What are the least efficient workloads in the cluster?"
+        - "List all DaemonSet costs"
+        - "Show me every workload cost sorted by efficiency"
+    """
+    try:
+        from .connectors.kubernetes import KubernetesConnector
+    except ImportError:
+        return {"error": "kubernetes package not installed. Run: pip install finops-mcp[kubernetes]"}
+
+    if sort_by not in ("cost", "waste", "efficiency"):
+        return {"error": "sort_by must be 'cost', 'waste', or 'efficiency'"}
+
+    try:
+        connector = KubernetesConnector()
+        if not await connector.is_configured():
+            return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
+
+        report = connector.analyze_cluster(context)
+        result = connector.get_workload_breakdown(
+            report,
+            namespace=namespace,
+            kind=kind,
+            sort_by=sort_by,
+            limit=limit,
+        )
+
+        total_waste = sum(w.get("wasted_usd", 0) for w in result.get("workloads", []))
+        result["summary"] = (
+            f"{result['filtered_workloads']} workload(s) in cluster '{report.cluster}' "
+            f"(filtered from {result['total_workloads']} total), "
+            f"sorted by {sort_by}. "
+            f"Estimated waste in view: ${total_waste:,.0f}/mo."
+        )
+
+        return result
+    except Exception as e:
+        log.exception("Workload cost breakdown failed")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_kubernetes_cost_trends(
+    days: int = 30,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    granularity: str = "daily",
+) -> dict:
+    """
+    Kubernetes cost trend over time from stored daily snapshots.
+    Shows whether cluster spend is growing, shrinking, or stable.
+
+    Snapshots are stored automatically each time get_kubernetes_costs is called.
+    The first snapshot date is the start of your trend history.
+
+    Args:
+        days:        Lookback window in days (default 30)
+        cluster:     Filter to a specific cluster name
+        namespace:   Filter to a specific namespace
+        granularity: "daily" or "weekly"
+
+    Examples:
+        - "Is our Kubernetes spend growing?"
+        - "Show me the K8s cost trend for the last 30 days"
+        - "How has the production namespace spend changed?"
+        - "Is the cluster getting more or less expensive?"
+        - "Show weekly Kubernetes cost trends"
+    """
+    try:
+        from .storage.db import get_engine, kubernetes_costs
+        from sqlalchemy import select, func
+        from datetime import date, timedelta
+    except ImportError:
+        return {"error": "Storage not available"}
+
+    try:
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        engine = get_engine()
+
+        with engine.connect() as conn:
+            q = select(
+                kubernetes_costs.c.snapshot_date,
+                kubernetes_costs.c.cluster,
+                kubernetes_costs.c.namespace,
+                func.sum(kubernetes_costs.c.monthly_cost_usd).label("monthly_cost"),
+                func.sum(kubernetes_costs.c.wasted_usd).label("wasted"),
+                func.avg(kubernetes_costs.c.cpu_efficiency_pct).label("avg_cpu_eff"),
+                func.avg(kubernetes_costs.c.mem_efficiency_pct).label("avg_mem_eff"),
+                func.count().label("workload_count"),
+            ).where(
+                kubernetes_costs.c.snapshot_date >= cutoff,
+            )
+            if cluster:
+                q = q.where(kubernetes_costs.c.cluster == cluster)
+            if namespace:
+                q = q.where(kubernetes_costs.c.namespace == namespace)
+
+            q = q.group_by(
+                kubernetes_costs.c.snapshot_date,
+                kubernetes_costs.c.cluster,
+                kubernetes_costs.c.namespace,
+            ).order_by(kubernetes_costs.c.snapshot_date)
+
+            rows = conn.execute(q).fetchall()
+
+        if not rows:
+            return {
+                "message": (
+                    "No Kubernetes cost history found. "
+                    "Run 'get_kubernetes_costs' first to start recording snapshots."
+                ),
+                "days_requested": days,
+                "cluster": cluster,
+                "namespace": namespace,
+            }
+
+        # Roll up to daily totals across clusters/namespaces
+        from collections import defaultdict
+        daily: dict[str, dict] = defaultdict(lambda: {
+            "date": "",
+            "monthly_cost_usd": 0.0,
+            "wasted_usd": 0.0,
+            "cpu_effs": [],
+            "mem_effs": [],
+            "workload_count": 0,
+        })
+
+        clusters_seen: set[str] = set()
+        namespaces_seen: set[str] = set()
+        ns_totals: dict[str, float] = {}
+
+        for row in rows:
+            d = row.snapshot_date
+            daily[d]["date"] = d
+            daily[d]["monthly_cost_usd"] += row.monthly_cost or 0
+            daily[d]["wasted_usd"] += row.wasted or 0
+            daily[d]["workload_count"] += row.workload_count or 0
+            if row.avg_cpu_eff is not None:
+                daily[d]["cpu_effs"].append(row.avg_cpu_eff)
+            if row.avg_mem_eff is not None:
+                daily[d]["mem_effs"].append(row.avg_mem_eff)
+            clusters_seen.add(row.cluster)
+            namespaces_seen.add(row.namespace)
+            ns_totals[row.namespace] = ns_totals.get(row.namespace, 0) + (row.monthly_cost or 0)
+
+        # Aggregate to weekly if requested
+        trend_points: list[dict] = []
+        if granularity == "weekly":
+            from itertools import groupby as _gby
+            sorted_days = sorted(daily.values(), key=lambda x: x["date"])
+            # Group into ISO weeks
+            def _week(pt: dict) -> str:
+                from datetime import date as _d
+                d = _d.fromisoformat(pt["date"])
+                return f"{d.isocalendar().year}-W{d.isocalendar().week:02d}"
+            for week_key, week_pts in _gby(sorted_days, key=_week):
+                pts = list(week_pts)
+                all_cpu = [e for p in pts for e in p["cpu_effs"]]
+                all_mem = [e for p in pts for e in p["mem_effs"]]
+                trend_points.append({
+                    "period": week_key,
+                    "monthly_cost_usd": round(sum(p["monthly_cost_usd"] for p in pts) / len(pts), 2),
+                    "wasted_usd": round(sum(p["wasted_usd"] for p in pts) / len(pts), 2),
+                    "avg_cpu_efficiency_pct": round(sum(all_cpu) / len(all_cpu), 1) if all_cpu else None,
+                    "avg_mem_efficiency_pct": round(sum(all_mem) / len(all_mem), 1) if all_mem else None,
+                    "workload_count": round(sum(p["workload_count"] for p in pts) / len(pts)),
+                    "data_points": len(pts),
+                })
+        else:
+            for pt in sorted(daily.values(), key=lambda x: x["date"]):
+                cpu_effs = pt.pop("cpu_effs")
+                mem_effs = pt.pop("mem_effs")
+                trend_points.append({
+                    "date": pt["date"],
+                    "monthly_cost_usd": round(pt["monthly_cost_usd"], 2),
+                    "wasted_usd": round(pt["wasted_usd"], 2),
+                    "avg_cpu_efficiency_pct": round(sum(cpu_effs) / len(cpu_effs), 1) if cpu_effs else None,
+                    "avg_mem_efficiency_pct": round(sum(mem_effs) / len(mem_effs), 1) if mem_effs else None,
+                    "workload_count": pt["workload_count"],
+                })
+
+        # Trend direction
+        if len(trend_points) >= 2:
+            first_cost = trend_points[0]["monthly_cost_usd"]
+            last_cost  = trend_points[-1]["monthly_cost_usd"]
+            delta_pct  = (last_cost - first_cost) / max(first_cost, 1) * 100
+            trend_dir = (
+                "growing" if delta_pct > 5 else
+                "shrinking" if delta_pct < -5 else "stable"
+            )
+        else:
+            delta_pct = 0.0
+            trend_dir = "stable"
+
+        top_ns = sorted(ns_totals.items(), key=lambda x: x[1], reverse=True)[:5]
+
+        return {
+            "clusters": sorted(clusters_seen),
+            "namespaces_in_view": sorted(namespaces_seen) if namespace else None,
+            "lookback_days": days,
+            "granularity": granularity,
+            "data_points": len(trend_points),
+            "trend_direction": trend_dir,
+            "cost_change_pct": round(delta_pct, 1),
+            "trend": trend_points,
+            "top_namespaces_by_spend": [
+                {"namespace": ns, "total_monthly_cost_usd": round(cost, 2)}
+                for ns, cost in top_ns
+            ],
+            "summary": (
+                f"K8s cost trend ({days}d): {trend_dir} "
+                f"({'up' if delta_pct >= 0 else 'down'} {abs(delta_pct):.1f}% "
+                f"from {trend_points[0].get('date') or trend_points[0].get('period', '')} "
+                f"to {trend_points[-1].get('date') or trend_points[-1].get('period', '')})"
+                if len(trend_points) >= 2 else "Not enough data points for trend yet."
+            ),
+        }
+
+    except Exception as e:
+        log.exception("K8s cost trend failed")
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def compare_kubernetes_clusters() -> dict:
     """
     Compare costs and efficiency across all configured Kubernetes clusters.

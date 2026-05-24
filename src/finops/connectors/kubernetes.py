@@ -674,6 +674,341 @@ class KubernetesConnector:
                 log.warning("Failed to analyze cluster %s: %s", ctx, e)
         return reports
 
+    # ── Efficiency score ──────────────────────────────────────────────────────
+
+    def compute_efficiency_score(self, report: ClusterReport) -> dict[str, Any]:
+        """
+        Composite cluster efficiency score (0-100) with letter grade.
+
+        Dimensions (max points):
+          CPU efficiency     30 pts  — actual vs requested (requires metrics-server)
+          Memory efficiency  30 pts  — actual vs requested (requires metrics-server)
+          Idle node penalty  20 pts  — penalised for nodes <10% utilised
+          Waste ratio        20 pts  — penalised for % of cost that's wasted
+
+        Without metrics-server (no actuals): CPU + mem scored via request ratio
+        relative to node capacity (request utilisation, not actual).
+        """
+        score = 100.0
+        details: dict[str, Any] = {}
+
+        has_metrics = report.overall_cpu_efficiency is not None
+
+        # ── CPU efficiency (30 pts) ──────────────────────────────────────────
+        if has_metrics:
+            cpu_eff = report.overall_cpu_efficiency or 0.0
+            cpu_pts = min(30.0, cpu_eff * 30 / 100)
+            details["cpu_efficiency_pct"] = cpu_eff
+        else:
+            # Estimate from request fill-ratio (how much of node capacity is requested)
+            total_node_cpu = sum(
+                n["cpu_allocatable_cores"] for n in report.node_utilization
+            )
+            total_req_pct = sum(
+                n["cpu_requested_pct"] * n["cpu_allocatable_cores"]
+                for n in report.node_utilization
+            ) / max(total_node_cpu, 0.001)
+            req_fill = min(total_req_pct / 100, 1.0)
+            # Good fill: 60-80% of capacity requested = efficient
+            # <30% = wasteful nodes, >90% = too tight (scheduling risk)
+            if req_fill < 0.30:
+                cpu_pts = req_fill * 30 / 0.30 * 0.5  # steep penalty for under-request
+            elif req_fill <= 0.80:
+                cpu_pts = 15 + (req_fill - 0.30) / 0.50 * 15  # linear 15→30
+            else:
+                cpu_pts = 30 - (req_fill - 0.80) / 0.20 * 5  # slight penalty over-request
+            details["cpu_request_fill_pct"] = round(req_fill * 100, 1)
+        score -= 30 - cpu_pts
+        details["cpu_score"] = round(cpu_pts, 1)
+
+        # ── Memory efficiency (30 pts) ───────────────────────────────────────
+        if has_metrics:
+            mem_eff = report.overall_mem_efficiency or 0.0
+            mem_pts = min(30.0, mem_eff * 30 / 100)
+            details["mem_efficiency_pct"] = mem_eff
+        else:
+            total_node_mem = sum(
+                n["mem_allocatable_gib"] for n in report.node_utilization
+            )
+            total_mem_req_pct = sum(
+                n["mem_requested_pct"] * n["mem_allocatable_gib"]
+                for n in report.node_utilization
+            ) / max(total_node_mem, 0.001)
+            mem_fill = min(total_mem_req_pct / 100, 1.0)
+            if mem_fill < 0.30:
+                mem_pts = mem_fill * 30 / 0.30 * 0.5
+            elif mem_fill <= 0.80:
+                mem_pts = 15 + (mem_fill - 0.30) / 0.50 * 15
+            else:
+                mem_pts = 30 - (mem_fill - 0.80) / 0.20 * 5
+            details["mem_request_fill_pct"] = round(mem_fill * 100, 1)
+        score -= 30 - mem_pts
+        details["mem_score"] = round(mem_pts, 1)
+
+        # ── Idle node penalty (20 pts) ───────────────────────────────────────
+        idle_pct = len(report.idle_nodes) / max(report.node_count, 1) * 100
+        idle_pts = max(0.0, 20.0 - idle_pct * 2)  # -2 pts per % idle
+        score -= 20 - idle_pts
+        details["idle_node_pct"] = round(idle_pct, 1)
+        details["idle_node_score"] = round(idle_pts, 1)
+
+        # ── Waste ratio penalty (20 pts) ─────────────────────────────────────
+        waste_pct = (
+            report.wasted_monthly_cost / report.total_monthly_cost * 100
+            if report.total_monthly_cost > 0 else 0
+        )
+        waste_pts = max(0.0, 20.0 - waste_pct * 1.5)  # -1.5 pts per % waste
+        score -= 20 - waste_pts
+        details["waste_pct"] = round(waste_pct, 1)
+        details["waste_score"] = round(waste_pts, 1)
+
+        final = max(0.0, min(100.0, score))
+        grade = (
+            "A" if final >= 80 else
+            "B" if final >= 65 else
+            "C" if final >= 50 else
+            "D" if final >= 35 else "F"
+        )
+
+        # Per-namespace efficiency
+        ns_scores: list[dict[str, Any]] = []
+        ns_costs: dict[str, float] = {}
+        ns_waste: dict[str, float] = {}
+        ns_cpu_eff: dict[str, list[float]] = {}
+        ns_mem_eff: dict[str, list[float]] = {}
+        for w in report.workloads:
+            ns = w.namespace
+            ns_costs[ns] = ns_costs.get(ns, 0) + w.monthly_cost
+            ns_waste[ns] = ns_waste.get(ns, 0) + w.wasted_usd
+            if w.cpu_efficiency_pct is not None:
+                ns_cpu_eff.setdefault(ns, []).append(w.cpu_efficiency_pct)
+            if w.mem_efficiency_pct is not None:
+                ns_mem_eff.setdefault(ns, []).append(w.mem_efficiency_pct)
+
+        for ns, cost in sorted(ns_costs.items(), key=lambda x: x[1], reverse=True):
+            waste = ns_waste.get(ns, 0)
+            ns_waste_pct = waste / cost * 100 if cost > 0 else 0
+            cpu_effs = ns_cpu_eff.get(ns)
+            mem_effs = ns_mem_eff.get(ns)
+            ns_scores.append({
+                "namespace": ns,
+                "monthly_cost_usd": round(cost, 2),
+                "wasted_usd": round(waste, 2),
+                "waste_pct": round(ns_waste_pct, 1),
+                "avg_cpu_efficiency_pct": round(sum(cpu_effs) / len(cpu_effs), 1) if cpu_effs else None,
+                "avg_mem_efficiency_pct": round(sum(mem_effs) / len(mem_effs), 1) if mem_effs else None,
+            })
+
+        # Recommendations by impact
+        recommendations: list[dict[str, Any]] = []
+        if idle_pct > 20:
+            idle_cost = sum(
+                n["monthly_cost"] for n in report.node_utilization
+                if n["node"] in report.idle_nodes
+            )
+            recommendations.append({
+                "priority": "high",
+                "category": "idle_nodes",
+                "action": f"Drain or remove {len(report.idle_nodes)} idle node(s) — "
+                          f"saving ~${idle_cost:,.0f}/mo. "
+                          "Enable Cluster Autoscaler or Karpenter to automate this.",
+                "potential_savings_usd": round(idle_cost * 0.9, 0),
+            })
+        for r in (report.rightsizing_opportunities or [])[:5]:
+            recommendations.append({
+                "priority": "medium",
+                "category": "rightsizing",
+                "action": f"Rightsize {r['workload']}: {'; '.join(r['issues'])}",
+                "potential_savings_usd": r["potential_savings_usd"],
+            })
+        recommendations.sort(key=lambda x: x.get("potential_savings_usd", 0), reverse=True)
+
+        return {
+            "cluster": report.cluster,
+            "provider": report.provider,
+            "score": round(final, 1),
+            "grade": grade,
+            "total_monthly_cost_usd": report.total_monthly_cost,
+            "wasted_monthly_cost_usd": report.wasted_monthly_cost,
+            "has_metrics_server": has_metrics,
+            "dimensions": details,
+            "namespace_efficiency": ns_scores,
+            "top_recommendations": recommendations[:10],
+            "generated_at": report.generated_at,
+        }
+
+    # ── Label-based cost breakdown ────────────────────────────────────────────
+
+    def get_label_costs(
+        self,
+        report: ClusterReport,
+        label_key: str = "team",
+    ) -> dict[str, Any]:
+        """
+        Aggregate workload costs by any pod label (team, env, app, component, tier, etc.).
+        Workloads without the label are grouped under '__untagged__'.
+
+        Returns cost by label value, sorted descending, with efficiency metrics.
+        """
+        by_label: dict[str, dict[str, Any]] = {}
+
+        for w in report.workloads:
+            label_val = w.labels.get(label_key)
+            # Also check common aliased forms of the label
+            if label_val is None:
+                for alias in (f"app.kubernetes.io/{label_key}", label_key.replace("-", "_")):
+                    label_val = w.labels.get(alias)
+                    if label_val:
+                        break
+            key = label_val or "__untagged__"
+
+            if key not in by_label:
+                by_label[key] = {
+                    "label_value": key,
+                    "monthly_cost_usd": 0.0,
+                    "wasted_usd": 0.0,
+                    "pod_count": 0,
+                    "workload_count": 0,
+                    "namespaces": set(),
+                    "cpu_effs": [],
+                    "mem_effs": [],
+                }
+            entry = by_label[key]
+            entry["monthly_cost_usd"] += w.monthly_cost
+            entry["wasted_usd"] += w.wasted_usd
+            entry["pod_count"] += w.pod_count
+            entry["workload_count"] += 1
+            entry["namespaces"].add(w.namespace)
+            if w.cpu_efficiency_pct is not None:
+                entry["cpu_effs"].append(w.cpu_efficiency_pct)
+            if w.mem_efficiency_pct is not None:
+                entry["mem_effs"].append(w.mem_efficiency_pct)
+
+        total_cost = report.total_monthly_cost or 1.0
+        rows = []
+        for entry in sorted(by_label.values(), key=lambda x: x["monthly_cost_usd"], reverse=True):
+            cpu_effs = entry.pop("cpu_effs")
+            mem_effs = entry.pop("mem_effs")
+            nss = entry.pop("namespaces")
+            rows.append({
+                "label_value": entry["label_value"],
+                "monthly_cost_usd": round(entry["monthly_cost_usd"], 2),
+                "cost_pct": round(entry["monthly_cost_usd"] / total_cost * 100, 1),
+                "wasted_usd": round(entry["wasted_usd"], 2),
+                "pod_count": entry["pod_count"],
+                "workload_count": entry["workload_count"],
+                "namespaces": sorted(nss),
+                "avg_cpu_efficiency_pct": round(sum(cpu_effs) / len(cpu_effs), 1) if cpu_effs else None,
+                "avg_mem_efficiency_pct": round(sum(mem_effs) / len(mem_effs), 1) if mem_effs else None,
+            })
+
+        untagged_cost = next(
+            (r["monthly_cost_usd"] for r in rows if r["label_value"] == "__untagged__"), 0.0
+        )
+        tagged_pct = round((1 - untagged_cost / total_cost) * 100, 1) if total_cost else 0
+
+        return {
+            "cluster": report.cluster,
+            "label_key": label_key,
+            "total_monthly_cost_usd": report.total_monthly_cost,
+            "tagged_workload_pct": tagged_pct,
+            "by_label": rows,
+            "note": None if tagged_pct >= 90 else (
+                f"Only {tagged_pct}% of cluster cost has the '{label_key}' label. "
+                f"Add '{label_key}' labels to workloads for accurate attribution."
+            ),
+        }
+
+    # ── Workload breakdown with filters ──────────────────────────────────────
+
+    def get_workload_breakdown(
+        self,
+        report: ClusterReport,
+        namespace: str | None = None,
+        kind: str | None = None,
+        sort_by: str = "cost",
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """
+        Filtered workload cost breakdown with efficiency grades.
+
+        Args:
+            namespace: filter to specific namespace
+            kind:      filter to workload kind (Deployment/StatefulSet/DaemonSet/Job)
+            sort_by:   "cost" | "waste" | "efficiency"
+            limit:     max workloads returned (default 50)
+        """
+        workloads = report.workloads
+
+        if namespace:
+            workloads = [w for w in workloads if w.namespace == namespace]
+        if kind:
+            kind_lower = kind.lower()
+            workloads = [w for w in workloads if w.workload_kind.lower() == kind_lower]
+
+        if sort_by == "waste":
+            workloads = sorted(workloads, key=lambda w: w.wasted_usd, reverse=True)
+        elif sort_by == "efficiency":
+            # Lowest efficiency first (most opportunity)
+            workloads = sorted(
+                workloads,
+                key=lambda w: (w.cpu_efficiency_pct or 100) + (w.mem_efficiency_pct or 100),
+            )
+        else:
+            workloads = sorted(workloads, key=lambda w: w.monthly_cost, reverse=True)
+
+        # Cost by kind summary
+        by_kind: dict[str, float] = {}
+        for w in report.workloads:
+            by_kind[w.workload_kind] = by_kind.get(w.workload_kind, 0) + w.monthly_cost
+
+        rows = []
+        for w in workloads[:limit]:
+            # Efficiency grade for this workload
+            if w.cpu_efficiency_pct is not None and w.mem_efficiency_pct is not None:
+                avg_eff = (w.cpu_efficiency_pct + w.mem_efficiency_pct) / 2
+                wl_grade = (
+                    "A" if avg_eff >= 70 else
+                    "B" if avg_eff >= 50 else
+                    "C" if avg_eff >= 30 else
+                    "D" if avg_eff >= 15 else "F"
+                )
+            else:
+                wl_grade = None
+
+            rows.append({
+                "namespace": w.namespace,
+                "kind": w.workload_kind,
+                "name": w.workload_name,
+                "pods": w.pod_count,
+                "monthly_cost_usd": w.monthly_cost,
+                "wasted_usd": w.wasted_usd,
+                "cpu_requested_cores": w.cpu_requested,
+                "cpu_used_cores": w.cpu_used,
+                "cpu_efficiency_pct": w.cpu_efficiency_pct,
+                "mem_requested_gib": w.mem_requested,
+                "mem_used_gib": w.mem_used,
+                "mem_efficiency_pct": w.mem_efficiency_pct,
+                "efficiency_grade": wl_grade,
+                "labels": w.labels,
+            })
+
+        return {
+            "cluster": report.cluster,
+            "filters": {
+                "namespace": namespace,
+                "kind": kind,
+                "sort_by": sort_by,
+            },
+            "total_workloads": len(report.workloads),
+            "filtered_workloads": len(workloads),
+            "cost_by_kind": {
+                k: round(v, 2)
+                for k, v in sorted(by_kind.items(), key=lambda x: x[1], reverse=True)
+            },
+            "workloads": rows,
+        }
+
     def persist_to_db(self, report: ClusterReport) -> None:
         """Store cluster cost data in the local SQLite DB for trend analysis."""
         from ..storage.db import get_engine, kubernetes_costs
