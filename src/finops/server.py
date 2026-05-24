@@ -337,6 +337,10 @@ async def get_cost_summary(
         - "What did we spend on SaaS tools this quarter?"
         - "Give me an AWS cost summary for January"
     """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_cost_summary") or {}
+
     sd, ed = _default_dates()
     if start_date:
         sd = date.fromisoformat(start_date)
@@ -733,6 +737,10 @@ async def get_anomalies(
     Note: Anomalies require at least 7 days of snapshot history.
           Run 'finops snapshot' or wait for the daily job to accumulate data.
     """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_anomalies") or {}
+
     from .anomaly.detector import get_active_anomalies
 
     rows = get_active_anomalies(provider=provider, severity=severity, limit=limit)
@@ -1088,6 +1096,10 @@ async def get_rightsizing_recommendations(
         - "How much could we save by rightsizing?"
         - "Find underutilized instances we should downsize"
     """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_rightsizing_recommendations") or {}
+
     try:
         from .recommendations.rightsizing import analyze_rightsizing, rightsizing_summary
         recs = analyze_rightsizing(
@@ -1775,6 +1787,10 @@ async def get_kubernetes_costs(
     except ImportError:
         return {"error": "kubernetes package not installed. Run: pip install finops-mcp[kubernetes]"}
 
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_kubernetes_costs") or {}
+
     try:
         connector = KubernetesConnector()
         if not await connector.is_configured():
@@ -2412,6 +2428,10 @@ async def get_cluster_efficiency(context: str | None = None) -> dict:
         - "Where should we focus to improve cluster efficiency?"
         - "Are we wasting money in Kubernetes?"
     """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_cluster_efficiency") or {}
+
     try:
         from .connectors.kubernetes import KubernetesConnector
     except ImportError:
