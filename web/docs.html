@@ -204,53 +204,76 @@
       <h2 class="section-title">Installation</h2>
 
       <div class="space-y-4">
+
+        <!-- Step 1 -->
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">1</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install and run the setup wizard</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install the package</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">pip install</span> finops-mcp<br/><span class="cmd">finops setup</span></div>
+              <div class="code-block p-4"><span class="cmd">pip install</span> finops-mcp</div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">Note the hyphen: <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops-mcp</code>, not <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops mcp</code>. The setup wizard connects your providers and writes the Claude Desktop config automatically.</p>
-            <p class="text-xs mt-1" style="color:var(--muted)">On Anaconda? Skip pip and run: <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp setup</code></p>
+            <p class="text-xs mt-2" style="color:var(--muted)">Note the hyphen: <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops-mcp</code>, not <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops mcp</code>. On Anaconda? Use: <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp</code></p>
           </div>
         </div>
+
+        <!-- Step 2 -->
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">2</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Check your setup</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Connect your first cloud provider</p>
+            <div class="code-wrap">
+              <div class="code-block p-4"><span class="cm"># Pick whichever you care about most:</span><br/><span class="cmd">finops setup aws</span><br/><span class="cmd">finops setup azure</span><br/><span class="cmd">finops setup gcp</span></div>
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+            <p class="text-xs mt-2" style="color:var(--muted)">The wizard creates a <strong style="color:var(--fg)">read-only IAM policy</strong>, walks through the API key, and stores credentials in your OS keyring. You don't need all 17 connectors — one is enough to start.</p>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">3</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Add nable to your AI editor's MCP config</p>
+            <div class="code-wrap">
+              <div class="code-block p-4"><span class="cm">// Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json</span><br/><span class="cm">// Cursor: ~/.cursor/mcp.json</span><br/>{<br/>&nbsp;&nbsp;<span class="str">"mcpServers"</span>: {<br/>&nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"finops"</span>: { <span class="str">"command"</span>: <span class="str">"finops-mcp"</span> }<br/>&nbsp;&nbsp;}<br/>}</div>
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+            <p class="text-xs mt-2" style="color:var(--muted)">Run <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops setup</code> to have this written automatically, or paste it manually. Then <strong style="color:var(--fg)">fully quit and reopen</strong> your editor — most clients only read config at startup.</p>
+          </div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">4</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Verify everything is connected</p>
             <div class="code-wrap">
               <div class="code-block p-4"><span class="cmd">finops-doctor</span><br/><span style="color:#34d399">✓ aws</span> &nbsp;&nbsp;&nbsp;configured<br/><span style="color:#34d399">✓ datadog</span> configured<br/><span class="cm">– azure</span> &nbsp;&nbsp;not configured</div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
+            <p class="text-xs mt-2" style="color:var(--muted)">If a provider shows red, re-run <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops setup &lt;provider&gt;</code> or check the <a href="#troubleshoot" class="underline">troubleshooting section</a>.</p>
           </div>
         </div>
+
+        <!-- Step 5 -->
         <div class="flex items-start gap-3">
-          <div class="step-num mt-0.5">3</div>
+          <div class="step-num mt-0.5">5</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Restart your AI editor and ask</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Ask your first question</p>
             <div class="card p-4" style="background:var(--surface2)">
-              <p class="text-sm" style="color:var(--muted);font-style:italic">"Why did our AWS bill jump so much this month?"</p>
-              <p class="text-sm mt-2" style="color:var(--muted);font-style:italic">"Is there anything obviously wasteful in us-east-1?"</p>
-              <p class="text-sm mt-2" style="color:var(--muted);font-style:italic">"Which team is burning the most on EC2 right now?"</p>
+              <p class="text-xs mb-2" style="color:var(--fg-3);font-family:var(--mono);letter-spacing:0.04em">In Claude Desktop or Cursor, type:</p>
+              <p class="text-sm font-medium" style="color:var(--fg)">"What are my top 5 AWS cost drivers this month, and did anything spike unexpectedly?"</p>
             </div>
+            <p class="text-xs mt-2" style="color:var(--muted)">nable will break down your spend by service, flag anomalies, and explain what changed — in plain English. No SQL, no dashboards.</p>
           </div>
         </div>
+
       </div>
 
       <div class="info-box mt-6">
         <strong style="color:var(--fg)">Security note:</strong> Credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine.
-      </div>
-
-      <!-- First query moment -->
-      <div class="mt-6 rounded-lg p-5" style="background:var(--fg);border:1px solid var(--fg)">
-        <p class="text-xs font-semibold mb-3" style="color:var(--fg-3);font-family:var(--mono);letter-spacing:0.08em;text-transform:uppercase">Start here — your first query</p>
-        <p class="text-sm mb-4" style="color:var(--bg);opacity:0.85">Once setup is done, open Claude Desktop (or Cursor) and type exactly this:</p>
-        <div style="background:rgba(251,250,247,0.06);border:1px solid rgba(251,250,247,0.12);border-radius:7px;padding:14px 16px;font-family:var(--mono);font-size:13px;color:var(--bg);margin-bottom:16px;line-height:1.6">
-          What are my top 5 AWS cost drivers this month, and did anything spike unexpectedly?
-        </div>
-        <p class="text-xs" style="color:var(--fg-3)">nable will break down your spend by service, flag anomalies, and explain what changed — in plain English. No SQL, no dashboards.</p>
       </div>
     </div>
 
