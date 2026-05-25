@@ -242,6 +242,16 @@
       <div class="info-box mt-6">
         <strong style="color:var(--fg)">Security note:</strong> Credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine.
       </div>
+
+      <!-- First query moment -->
+      <div class="mt-6 rounded-lg p-5" style="background:var(--fg);border:1px solid var(--fg)">
+        <p class="text-xs font-semibold mb-3" style="color:var(--fg-3);font-family:var(--mono);letter-spacing:0.08em;text-transform:uppercase">Start here — your first query</p>
+        <p class="text-sm mb-4" style="color:var(--bg);opacity:0.85">Once setup is done, open Claude Desktop (or Cursor) and type exactly this:</p>
+        <div style="background:rgba(251,250,247,0.06);border:1px solid rgba(251,250,247,0.12);border-radius:7px;padding:14px 16px;font-family:var(--mono);font-size:13px;color:var(--bg);margin-bottom:16px;line-height:1.6">
+          What are my top 5 AWS cost drivers this month, and did anything spike unexpectedly?
+        </div>
+        <p class="text-xs" style="color:var(--fg-3)">nable will break down your spend by service, flag anomalies, and explain what changed — in plain English. No SQL, no dashboards.</p>
+      </div>
     </div>
 
     <hr class="divider"/>
@@ -1346,6 +1356,34 @@
         <div class="card p-5">
           <p class="font-semibold text-sm mb-2" style="color:var(--text)">Snowflake: "Object does not exist"</p>
           <p class="text-sm" style="color:var(--muted)">The user needs <code>IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE</code> granted to their role. Run as ACCOUNTADMIN: <code class="text-xs bg-blue-50 px-1 rounded">GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE your_role;</code></p>
+        </div>
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)"><code class="text-xs bg-blue-50 px-1 rounded">command not found: finops</code> after pip install</p>
+          <p class="text-sm mb-3" style="color:var(--muted)">pip installed the package but the executable isn't in your PATH. This is common on macOS when using the system Python or Homebrew.</p>
+          <p class="text-sm font-medium mb-1" style="color:var(--text)">Fix — find and add the pip bin directory:</p>
+          <div class="code-wrap mt-2">
+            <div class="code-block p-4"><span class="cm"># Find where pip puts executables</span><br/><span class="cmd">python3 -m site --user-base</span><br/><span class="cm"># Add /bin to that path, e.g.:</span><br/><span class="cmd">export PATH="$HOME/Library/Python/3.11/bin:$PATH"</span><br/><span class="cm"># Add that export line to ~/.zshrc to make it permanent</span></div>
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+          </div>
+          <p class="text-xs mt-2" style="color:var(--muted)">Or use pipx: <code class="text-xs bg-blue-50 px-1 rounded">pipx install finops-mcp</code> — it handles PATH automatically.</p>
+        </div>
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)"><code class="text-xs bg-blue-50 px-1 rounded">python3: command not found</code> / pip not available</p>
+          <p class="text-sm mb-2" style="color:var(--muted)">Python 3.9+ is required. Check your version first:</p>
+          <div class="code-wrap">
+            <div class="code-block p-4"><span class="cmd">python3 --version</span></div>
+            <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+          </div>
+          <p class="text-sm mt-3" style="color:var(--muted)">If that fails, install Python from <a href="https://python.org" class="underline">python.org</a> or via Homebrew: <code class="text-xs bg-blue-50 px-1 rounded">brew install python</code>. On Windows, install from the Microsoft Store or python.org — make sure to check "Add Python to PATH" during setup.</p>
+        </div>
+        <div class="card p-5">
+          <p class="font-semibold text-sm mb-2" style="color:var(--text)">AWS connected but showing no data / zero costs</p>
+          <p class="text-sm mb-2" style="color:var(--muted)">Three common causes:</p>
+          <ul class="text-sm space-y-2" style="color:var(--muted)">
+            <li><strong style="color:var(--fg)">1. Cost Explorer not enabled.</strong> Go to AWS Console → Billing → Cost Explorer → Enable. Takes up to 24 hours to populate historical data.</li>
+            <li><strong style="color:var(--fg)">2. Wrong AWS profile.</strong> Run <code class="text-xs bg-blue-50 px-1 rounded">aws sts get-caller-identity</code> to confirm which account nable is reading from. If it's wrong, re-run <code class="text-xs bg-blue-50 px-1 rounded">finops setup aws</code> and select the correct profile.</li>
+            <li><strong style="color:var(--fg)">3. IAM missing ce:GetCostAndUsage.</strong> The IAM user or role needs Cost Explorer read permissions. See the <a href="#aws" class="underline">AWS setup section</a> for the exact policy.</li>
+          </ul>
         </div>
         <div class="card p-5">
           <p class="font-semibold text-sm mb-2" style="color:var(--text)">Still stuck?</p>
