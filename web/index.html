@@ -535,7 +535,7 @@ function HeroEmailCapture(){
         body: JSON.stringify({ email, source: 'hero' }),
       });
       if(window.posthog){ posthog.identify(email, { email, plan: 'free' }); posthog.capture('hero_cta', { email }); }
-      if(window.rdt) rdt('track', 'SignUp');
+      if(window.rdt) rdt('track', 'SignUp', {}, {email: email});
     } catch(err){ /* non-blocking */ }
     const url = `https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02?prefilled_email=${encodeURIComponent(email)}`;
     window.location.href = url;
@@ -597,7 +597,7 @@ function BottomCta(){
         body: JSON.stringify({ email, source: 'bottom_cta' }),
       });
       if(window.posthog){ posthog.identify(email, { email, plan: 'free' }); posthog.capture('bottom_cta', { email }); }
-      if(window.rdt) rdt('track', 'SignUp');
+      if(window.rdt) rdt('track', 'SignUp', {}, {email: email});
     } catch(err){ /* non-blocking */ }
     const url = `https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02?prefilled_email=${encodeURIComponent(email)}`;
     window.location.href = url;
@@ -923,7 +923,7 @@ function Pricing({ onTrial }){
         body: JSON.stringify({ email: freeEmail, source: 'free_tier' }),
       });
       if (window.posthog) posthog.identify(freeEmail, { email: freeEmail, plan: 'free' });
-      if (window.rdt) rdt('track', 'SignUp');
+      if (window.rdt) rdt('track', 'SignUp', {}, {email: freeEmail});
     } catch(err) { console.warn('subscribe failed', err); }
   }
 
@@ -1276,7 +1276,7 @@ function Footer(){
         body: JSON.stringify({ email: footEmail, source: 'footer' }),
       });
       if (window.posthog) posthog.identify(footEmail, { email: footEmail, plan: 'free' });
-      if (window.rdt) rdt('track', 'SignUp');
+      if (window.rdt) rdt('track', 'SignUp', {}, {email: footEmail});
     } catch(err) { console.warn('subscribe failed', err); }
   }
 
