@@ -532,7 +532,7 @@ function HeroEmailCapture(){
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{marginTop:28,display:"flex",alignItems:"center",gap:0,maxWidth:420,border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
+    <form onSubmit={handleSubmit} method="post" action="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02" style={{marginTop:28,display:"flex",alignItems:"center",gap:0,maxWidth:420,border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
       <input
         type="email"
         placeholder="you@company.com"

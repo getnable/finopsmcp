@@ -40,10 +40,10 @@ function welcomeHtml(email) {
 <div class="card">
   <div class="logo"><div class="glyph">n</div><strong style="font-size:16px;color:#1a1915">nable</strong></div>
   <h1>You're in. Here's how to get started.</h1>
-  <p>nable connects Claude to your real AWS, GCP, Azure, and SaaS billing data — so you can ask questions in plain English instead of writing SQL or clicking through dashboards.</p>
+  <p>nable connects your AWS, GCP, Azure, and SaaS billing to your AI editor so you can ask questions in plain English instead of writing SQL or clicking through dashboards.</p>
   <p><strong>Step 1 — install:</strong></p>
   <div class="code">pip install finops-mcp<br>finops setup</div>
-  <p><strong>Step 2 — restart Claude Desktop, then ask:</strong></p>
+  <p><strong>Step 2 — add to your editor and ask:</strong></p>
   <div class="code">"What drove our AWS costs up this month?"<br>"Which team is over budget?"<br>"Show me rightsizing opportunities."</div>
   <a href="https://getnable.com/docs" class="btn">Read the setup guide →</a>
   <div class="footer">

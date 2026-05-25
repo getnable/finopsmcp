@@ -54,9 +54,11 @@ export default async function handler(req) {
   const SECRET = process.env.ACCOUNT_SECRET;
 
   if (!ISSUER || !CLIENT_ID) {
-    return new Response(
-      JSON.stringify({ error: "SSO not configured for this tenant." }),
-      { status: 503, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+    // SSO not configured — send the user back with a readable message
+    // instead of a raw JSON 503 blob in their browser
+    return Response.redirect(
+      "https://getnable.com/account?error=sso_not_configured",
+      302
     );
   }
 
