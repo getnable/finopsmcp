@@ -39,13 +39,18 @@ function welcomeHtml(email) {
 <body>
 <div class="card">
   <div class="logo"><div class="glyph">n</div><strong style="font-size:16px;color:#1a1915">nable</strong></div>
-  <h1>You're in. Here's how to get started.</h1>
-  <p>nable connects your AWS, GCP, Azure, and SaaS billing to your AI editor so you can ask questions in plain English instead of writing SQL or clicking through dashboards.</p>
+  <h1>Two minutes to your first cost answer.</h1>
+  <p>Here's the fastest path from zero to asking questions about your cloud bill.</p>
   <p><strong>Step 1 — install:</strong></p>
-  <div class="code">pip install finops-mcp<br>finops setup</div>
-  <p><strong>Step 2 — add to your editor and ask:</strong></p>
+  <div class="code">pip install finops-mcp &amp;&amp; finops setup</div>
+  <p><strong>Step 2 — connect AWS</strong> (or whichever provider you care about most):</p>
+  <div class="code">finops setup aws</div>
+  <p style="margin:0 0 4px;font-size:13px;color:#9a9a95">This generates a read-only IAM policy and stores your credentials in your OS keyring. Nothing leaves your machine.</p>
+  <p style="margin:16px 0 4px"><strong>Step 3 — add to your editor's MCP config:</strong></p>
+  <div class="code">{"mcpServers":{"finops":{"command":"finops-mcp"}}}</div>
+  <p><strong>Step 4 — ask anything:</strong></p>
   <div class="code">"What drove our AWS costs up this month?"<br>"Which team is over budget?"<br>"Show me rightsizing opportunities."</div>
-  <a href="https://getnable.com/docs" class="btn">Read the setup guide →</a>
+  <a href="https://getnable.com/docs" class="btn">Full setup guide →</a>
   <div class="footer">
     You're receiving this because you signed up at getnable.com.<br>
     <a href="https://getnable.com" style="color:#9a9a95">getnable.com</a> · <a href="mailto:hello@getnable.com" style="color:#9a9a95">hello@getnable.com</a>
@@ -130,7 +135,7 @@ export default async function handler(req) {
       body: JSON.stringify({
         from: "nable <hello@getnable.com>",
         to: [email],
-        subject: "Get started with nable",
+        subject: "Your finops-mcp setup (2 min)",
         html: welcomeHtml(email),
       }),
     }),
