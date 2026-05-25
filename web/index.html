@@ -77,8 +77,8 @@
   .nav ul a:hover{color:var(--fg)}
   .nav .right{display:flex;gap:10px;align-items:center}
   .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:6px;font-size:13.5px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:.15s;letter-spacing:-.005em}
-  .btn-primary{background:var(--fg);color:var(--bg)}
-  .btn-primary:hover{background:#000}
+  .btn-primary{background:#22c55e;color:#fff}
+  .btn-primary:hover{background:#16a34a}
   .btn-ghost{color:var(--fg-2);border-color:var(--line)}
   .btn-ghost:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
   /* theme toggle */
@@ -146,8 +146,8 @@
   .bubble .table .r .delta.down{color:var(--hl)}
   .bubble .table .r.total{padding-top:12px;border-bottom:0}
   .bubble .table .r.total b{color:var(--fg)}
-  .anomaly{display:inline-flex;align-items:center;gap:6px;color:var(--alert);font-family:var(--mono);font-size:11.5px;letter-spacing:.04em}
-  .anomaly::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--alert)}
+  .anomaly{color:var(--alert)}
+  .anomaly::before{content:"● ";font-size:10px;vertical-align:middle;margin-right:2px}
 
   /* trust strip */
   .trust-strip{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-top:36px}
@@ -253,7 +253,7 @@
   .free-setup-steps ol{padding-left:0;list-style:none;display:flex;flex-direction:column;gap:10px}
   .free-setup-steps ol li{display:flex;flex-direction:column;gap:3px}
   .free-setup-steps ol li .step-label{font-size:11.5px;color:var(--fg-3);font-family:var(--mono)}
-  .free-setup-steps ol li code{font-family:var(--mono);font-size:12.5px;background:var(--bg-3,#f0efec);color:var(--fg);padding:4px 7px;border-radius:4px;display:inline-block;margin-top:2px;word-break:break-all}
+  .free-setup-steps ol li code{font-family:var(--mono);font-size:12.5px;background:var(--bg-3,#f0efec);color:var(--fg);padding:4px 7px;border-radius:4px;display:inline-block;margin-top:2px;word-break:break-word}
   .free-setup-steps .fs-docs{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--fg);border-bottom:1px solid var(--line);margin-top:12px}
   .free-setup-steps .fs-docs:hover{border-bottom-color:var(--fg)}
 
@@ -297,8 +297,8 @@
   .modal-right label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.04em;display:block;margin-bottom:6px}
   .modal-right input[type=email]{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--fg);outline:none}
   .modal-right input[type=email]:focus{border-color:var(--fg-2)}
-  .modal-right .modal-submit{width:100%;background:var(--fg);color:var(--bg);border:0;border-radius:6px;padding:11px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;cursor:pointer;margin-top:4px}
-  .modal-right .modal-submit:hover{background:#000}
+  .modal-right .modal-submit{width:100%;background:#22c55e;color:#fff;border:0;border-radius:6px;padding:11px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;cursor:pointer;margin-top:4px}
+  .modal-right .modal-submit:hover{background:#16a34a}
   .modal-right .modal-note{font-size:11.5px;color:var(--fg-3);line-height:1.5;font-family:var(--mono)}
   .modal-pip{margin-top:auto;padding-top:20px;border-top:1px solid var(--line)}
   .modal-pip .step-label{font-family:var(--mono);font-size:10.5px;color:var(--fg-4);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
@@ -521,13 +521,13 @@ function Clients(){
 
 function HeroEmailCapture(){
   const [email, setEmail] = React.useState('');
-  const [sent, setSent] = React.useState(false);
+  const [status, setStatus] = React.useState('idle'); // idle | loading | sent
   const [copied, setCopied] = React.useState(false);
 
   async function handleSubmit(e){
     e.preventDefault();
-    if(sent) return;
-    setSent(true);
+    if(status !== 'idle') return;
+    setStatus('loading');
     try {
       await fetch('/api/subscribe', {
         method: 'POST',
@@ -537,6 +537,7 @@ function HeroEmailCapture(){
       if(window.posthog){ posthog.identify(email, { email, plan: 'free' }); posthog.capture('hero_cta', { email }); }
       if(window.rdt) rdt('track', 'SignUp', {}, {email: email});
     } catch(err){ /* non-blocking */ }
+    setStatus('sent');
     const url = `https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02?prefilled_email=${encodeURIComponent(email)}`;
     window.location.href = url;
   }
@@ -549,36 +550,39 @@ function HeroEmailCapture(){
   }
 
   return (
-    <>
-      <div style={{marginTop:28,maxWidth:460}}>
-        <div style={{display:"flex",alignItems:"center",gap:0,background:"var(--bg-2)",border:"1px solid var(--line)",borderRadius:8,overflow:"hidden",fontFamily:"var(--mono)",fontSize:13}}>
-          <span style={{padding:"13px 14px",color:"var(--fg-3)",userSelect:"none",flexShrink:0}}>$</span>
-          <span style={{flex:1,padding:"13px 0",color:"var(--fg)",letterSpacing:"-.01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>pip install finops-mcp &amp;&amp; finops setup</span>
-          <button onClick={handleCopy} style={{background:"none",border:"none",borderLeft:"1px solid var(--line)",padding:"13px 16px",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:500,color:copied?"#22c55e":"var(--fg-2)",cursor:"pointer",whiteSpace:"nowrap",transition:"color .15s",flexShrink:0}}>
-            {copied ? "Copied!" : "Copy"}
-          </button>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:10,margin:"14px 0",color:"var(--fg-4)"}}>
-          <div style={{flex:1,height:"1px",background:"var(--line)"}}/>
-          <span style={{fontSize:11,letterSpacing:".04em",textTransform:"uppercase"}}>or get the quickstart guide</span>
-          <div style={{flex:1,height:"1px",background:"var(--line)"}}/>
-        </div>
-        <form onSubmit={handleSubmit} style={{display:"flex",alignItems:"center",gap:0,border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
-          <input
-            type="email"
-            placeholder="your@company.com"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            required
-            style={{flex:1,background:"transparent",border:"none",padding:"11px 16px",fontFamily:"'DM Sans',sans-serif",fontSize:14,color:"var(--fg)",outline:"none",minHeight:44}}
-          />
-          <button type="submit" style={{background:"var(--fg)",color:"var(--bg)",border:"none",padding:"11px 20px",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",minHeight:44,letterSpacing:"-.01em"}}>
-            {sent ? "Sent!" : "Send guide →"}
-          </button>
-        </form>
-        <p style={{marginTop:8,fontSize:12,color:"var(--fg-3)"}}>Free &middot; No credit card &middot; 2-minute setup</p>
+    <div style={{marginTop:28,maxWidth:460}}>
+      <form onSubmit={handleSubmit} style={{display:"flex",alignItems:"center",gap:0,border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 2px 8px rgba(0,0,0,.12)"}}>
+        <input
+          type="email"
+          placeholder="your@company.com"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          required
+          aria-label="Work email"
+          style={{flex:1,background:"transparent",border:"none",padding:"12px 16px",fontFamily:"'DM Sans',sans-serif",fontSize:14,color:"var(--fg)",outline:"none",minHeight:44}}
+        />
+        <button
+          type="submit"
+          disabled={status !== 'idle'}
+          style={{background:"#22c55e",color:"#fff",border:"none",padding:"12px 22px",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:status !== 'idle' ? "default" : "pointer",whiteSpace:"nowrap",minHeight:44,letterSpacing:"-.01em",transition:"opacity .15s",opacity:status !== 'idle' ? 0.7 : 1,flexShrink:0}}>
+          {status === 'loading' ? "Starting..." : status === 'sent' ? "Done" : "Start free"}
+        </button>
+      </form>
+      <p style={{marginTop:8,fontSize:12,color:"var(--fg-3)"}}>No credit card &middot; 1-month free trial &middot; 2-minute setup</p>
+
+      <div style={{display:"flex",alignItems:"center",gap:10,margin:"16px 0 10px",color:"var(--fg-4)"}}>
+        <div style={{flex:1,height:"1px",background:"var(--line)"}}/>
+        <span style={{fontSize:11,letterSpacing:".04em",textTransform:"uppercase"}}>or install directly</span>
+        <div style={{flex:1,height:"1px",background:"var(--line)"}}/>
       </div>
-    </>
+      <div style={{display:"flex",alignItems:"center",gap:0,background:"var(--bg-2)",border:"1px solid var(--line)",borderRadius:8,overflow:"hidden",fontFamily:"var(--mono)",fontSize:13}}>
+        <span style={{padding:"11px 14px",color:"var(--fg-3)",userSelect:"none",flexShrink:0}}>$</span>
+        <span style={{flex:1,padding:"11px 0",color:"var(--fg)",letterSpacing:"-.01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>pip install finops-mcp &amp;&amp; finops setup</span>
+        <button onClick={handleCopy} style={{background:"none",border:"none",borderLeft:"1px solid var(--line)",padding:"11px 16px",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:500,color:copied?"#22c55e":"var(--fg-2)",cursor:"pointer",whiteSpace:"nowrap",transition:"color .15s",flexShrink:0}}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -617,7 +621,7 @@ function BottomCta(){
           <div key={s.n} style={{background:"var(--bg)",padding:"20px 18px"}}>
             <p style={{fontSize:11,color:"var(--fg-4)",fontFamily:"var(--mono)",marginBottom:6}}>{s.n}</p>
             <p style={{fontSize:13,fontWeight:600,color:"var(--fg)",marginBottom:8}}>{s.title}</p>
-            <p style={{fontSize:11,fontFamily:"var(--mono)",color:"var(--fg-3)",background:"var(--bg-2)",borderRadius:4,padding:"4px 8px",wordBreak:"break-all"}}>{s.code}</p>
+            <p style={{fontSize:11,fontFamily:"var(--mono)",color:"var(--fg-3)",background:"var(--bg-2)",borderRadius:4,padding:"4px 8px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.code}</p>
           </div>
         ))}
       </div>
@@ -632,7 +636,7 @@ function BottomCta(){
             required
             style={{flex:1,background:"transparent",border:"none",padding:"11px 14px",fontSize:14,color:"var(--fg)",outline:"none",minHeight:44}}
           />
-          <button type="submit" style={{background:"var(--fg)",color:"var(--bg)",border:"none",padding:"11px 18px",fontSize:13,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",minHeight:44,letterSpacing:"-.01em"}}>
+          <button type="submit" style={{background:"#22c55e",color:"#fff",border:"none",padding:"11px 18px",fontSize:13,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",minHeight:44,letterSpacing:"-.01em"}}>
             {sent ? "Sent ✓" : "Send guide →"}
           </button>
         </form>
@@ -646,10 +650,10 @@ function Hero({ onTrial }){
   return (
     <header className="hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.8.33 · 17 connectors · free to start</div>
-        <h1 style={{background:"linear-gradient(135deg,var(--fg) 0%,var(--fg-2) 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Find out why<br/>your cloud bill went up.</h1>
+        <div className="label" style={{marginBottom:18}}>v0.8.36 · 17 connectors · free to start</div>
+        <h1 style={{background:"linear-gradient(135deg,var(--fg) 0%,var(--fg-2) 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Your cloud bill<br/>has answers.</h1>
         <p className="lede">
-          Type a question. Get the real answer. nable connects your AWS, Azure, GCP, and SaaS billing to your AI editor so you can ask what happened, see exactly which team or resource caused it, and actually do something about it. No dashboards. No SQL. Your data never leaves your machine — runs locally via MCP, so your billing data never touches our servers.
+          nable connects your billing data directly to your AI editor. Ask what spiked, which team caused it, and what to do. No dashboards. No tickets.
         </p>
         <HeroEmailCapture />
         <div className="hero-cta" style={{marginTop:12}}>
@@ -738,8 +742,8 @@ function Terminal(){
           <div className="av">ai</div>
           <div className="bubble">
             <p>
-              <span className="anomaly">High · z = 3.8</span>{" "}
-              Datadog usage is up <span style={{color:"var(--alert)"}}>+127%</span> versus your same-weekday baseline. $4,100 today vs $1,810 average.
+              <span className="anomaly">Unusual spike detected</span>{" "}
+              Datadog usage is up <span style={{color:"var(--alert)"}}>+127%</span> vs your same-weekday baseline. $4,100 today vs $1,810 average.
             </p>
             <div className="table" style={{marginTop:12}}>
               <div className="r hd"><span>Tag driver</span><span>Delta</span><span>% of spike</span></div>
@@ -1308,7 +1312,7 @@ function Footer(){
           {!done ? (
             <form style={{display:"flex",gap:8}} onSubmit={handleFooterSubmit}>
               <input type="email" placeholder="you@company.com" required value={footEmail} onChange={(e)=>setFootEmail(e.target.value)} style={{flex:1,background:"var(--bg-2)",border:"1px solid var(--line)",borderRadius:6,padding:"8px 12px",fontFamily:"var(--sans, inherit)",fontSize:13.5,color:"var(--fg)",outline:"none"}} />
-              <button type="submit" style={{background:"var(--fg)",color:"var(--bg)",border:0,borderRadius:6,padding:"8px 16px",fontSize:13.5,cursor:"pointer",whiteSpace:"nowrap"}}>Subscribe →</button>
+              <button type="submit" style={{background:"#22c55e",color:"#fff",border:0,borderRadius:6,padding:"8px 16px",fontSize:13.5,cursor:"pointer",whiteSpace:"nowrap"}}>Subscribe →</button>
             </form>
           ) : (
             <div style={{fontFamily:"var(--mono)",fontSize:13,color:"var(--hl)"}}>● subscribed. see you Monday.</div>
