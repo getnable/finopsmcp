@@ -70,7 +70,7 @@
     .badge-green { background: rgba(59,110,58,0.08); border-color: rgba(59,110,58,0.22); color: var(--hl); }
     .badge-yellow { background: rgba(140,100,40,0.07); border-color: rgba(140,100,40,0.2); color: #6b5000; }
     .badge-red { background: rgba(184,83,58,0.08); border-color: rgba(184,83,58,0.22); color: var(--alert); }
-    .step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--fg); color: var(--bg); font-family: var(--mono); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .step-num { width: 24px; height: 24px; border-radius: 50%; background: #22c55e; color: #fff; font-family: var(--mono); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .perm-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
     .perm-row:last-child { border-bottom: none; }
     .connector-logo { width: 20px; height: 20px; object-fit: contain; filter: grayscale(1); opacity: 0.65; }
@@ -83,9 +83,9 @@
     .warn-box { background: rgba(184,140,58,0.05); border: 1px solid rgba(184,140,58,0.18); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--fg-2); }
     .info-box { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--fg-2); }
     .trial-banner { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; display: flex; align-items: center; gap: 14px; }
-    .trial-badge { background: var(--fg); color: var(--bg); border-radius: 5px; font-size: 11px; font-weight: 600; padding: 3px 10px; white-space: nowrap; font-family: var(--mono); letter-spacing: 0.02em; }
-    .btn-primary { background: var(--fg); color: var(--bg); font-weight: 500; border-radius: 7px; padding: 8px 16px; font-size: 13px; display: inline-block; text-decoration: none; letter-spacing: -0.005em; }
-    .btn-primary:hover { background: #000; }
+    .trial-badge { background: #22c55e; color: #fff; border-radius: 5px; font-size: 11px; font-weight: 600; padding: 3px 10px; white-space: nowrap; font-family: var(--mono); letter-spacing: 0.02em; }
+    .btn-primary { background: #22c55e; color: #fff; font-weight: 500; border-radius: 7px; padding: 8px 16px; font-size: 13px; display: inline-block; text-decoration: none; letter-spacing: -0.005em; }
+    .btn-primary:hover { background: #16a34a; }
     /* code syntax on dark bg */
     .cmd { color: #fbfaf7; }
     .str { color: var(--fg-4); }
@@ -95,7 +95,7 @@
     /* section category divider labels */
     p.cat-label { font-family: var(--mono); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-4); margin-bottom: 24px; }
     /* provider lettermark badges - same language as the N logo */
-    .pbadge { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:5px; background:var(--fg); color:var(--bg); font-family:var(--mono); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; flex-shrink:0; }
+    .pbadge { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:5px; background:#22c55e; color:#fff; font-family:var(--mono); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; flex-shrink:0; }
   </style>
 <!-- PostHog -->
 <script>
@@ -110,20 +110,24 @@
 <!-- Nav -->
 <nav class="sticky top-0 z-50">
   <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <a href="index.html" class="flex items-center gap-3">
+    <div class="flex items-center gap-6">
+      <a href="/" class="flex items-center gap-3">
         <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
           <rect width="32" height="32" rx="7" fill="#1a1915"/>
           <path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#fbfaf7"/>
         </svg>
         <span class="font-medium text-base tracking-tight" style="color:var(--fg);letter-spacing:-0.02em">nable</span>
       </a>
-      <span class="text-xs px-2 py-0.5 rounded font-mono font-semibold ml-1" style="background:var(--bg-3);color:var(--fg-3);border:1px solid var(--line);letter-spacing:0.04em">docs</span>
+      <ul class="hidden md:flex items-center gap-6 list-none m-0 p-0" style="font-size:14px;color:var(--fg-2)">
+        <li><a href="/#product" style="color:var(--fg-2);text-decoration:none" onmouseover="this.style.color='var(--fg)'" onmouseout="this.style.color='var(--fg-2)'">Product</a></li>
+        <li><a href="/#connectors" style="color:var(--fg-2);text-decoration:none" onmouseover="this.style.color='var(--fg)'" onmouseout="this.style.color='var(--fg-2)'">Connectors</a></li>
+        <li><a href="/#pricing" style="color:var(--fg-2);text-decoration:none" onmouseover="this.style.color='var(--fg)'" onmouseout="this.style.color='var(--fg-2)'">Pricing</a></li>
+        <li><a href="/docs" style="color:var(--fg);text-decoration:none;font-weight:500">Docs</a></li>
+      </ul>
     </div>
     <div class="flex items-center gap-4">
-      <a href="/" class="text-sm" style="color:var(--fg-3);letter-spacing:-0.005em">← Back</a>
-      <a href="/account" class="text-sm" style="color:var(--fg-3);letter-spacing:-0.005em">Account</a>
-      <a href="mailto:hello@getnable.com" class="btn-primary">Get help</a>
+      <a href="/account" class="text-sm" style="color:var(--fg-3);letter-spacing:-0.005em;text-decoration:none">Account</a>
+      <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02" class="btn-primary">Start free →</a>
     </div>
   </div>
 </nav>
