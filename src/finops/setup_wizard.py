@@ -519,6 +519,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("mistral")
     sub.add_parser("newrelic")
     sub.add_parser("pagerduty")
+    sub.add_parser("databricks")
     sub.add_parser("claude")    # configure Claude Desktop MCP entry
     sub.add_parser("aws-cur")   # deploy CUR CloudFormation stack
     lic_p = sub.add_parser("license")  # activate a Team license key
@@ -616,6 +617,13 @@ def main(args: list[str] | None = None) -> None:
         "pagerduty": lambda: setup_saas_api_key("PagerDuty", [
             ("PAGERDUTY_API_KEY", "API Key", True),
         ]),
+        "databricks": lambda: setup_saas_api_key("Databricks", [
+            ("DATABRICKS_HOST", "Workspace URL (e.g. https://adb-1234567890.1.azuredatabricks.net)", False),
+            ("DATABRICKS_TOKEN", "Personal Access Token or Service Principal token", True),
+            ("DATABRICKS_ACCOUNT_ID", "Account ID for billing API (optional, leave blank for single-workspace)", False),
+            ("DATABRICKS_ACCOUNT_TOKEN", "Account-level token (optional, defaults to DATABRICKS_TOKEN)", True),
+            ("DATABRICKS_DBU_PRICE", "DBU price in USD (optional, default 0.40 — use your contract rate)", False),
+        ]),
     }
 
     if parsed.cmd == "vault":
@@ -686,7 +694,7 @@ def main(args: list[str] | None = None) -> None:
         dispatch[parsed.cmd]()
     else:
         # Interactive full setup
-        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "slack", "teams"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")
@@ -733,9 +741,7 @@ def _offer_email_signup() -> None:
         return
 
     print("─" * 60)
-    print("  Get a free weekly cost digest in your inbox.")
-    print("  nable emails you every Monday with your top spend drivers,")
-    print("  anomalies, and rightsizing opportunities.")
+    print("  Want the quickstart guide sent to your inbox?")
     print()
     try:
         email = input("  Your email (Enter to skip): ").strip()
@@ -762,7 +768,7 @@ def _offer_email_signup() -> None:
             method="POST",
         )
         urllib.request.urlopen(req, timeout=5)
-        _ok(f"Subscribed. First digest lands Monday.")
+        _ok(f"Guide sent. Check your inbox.")
         sentinel.parent.mkdir(parents=True, exist_ok=True)
         sentinel.write_text(f"{email}\n")
     except Exception:

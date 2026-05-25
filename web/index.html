@@ -603,24 +603,41 @@ function BottomCta(){
     window.location.href = url;
   }
 
+  const steps = [
+    { n:"01", title:"Install", code:"pip install finops-mcp" },
+    { n:"02", title:"Connect AWS", code:"finops setup aws" },
+    { n:"03", title:"Add to your editor", code:'{"mcpServers":{"finops":{"command":"finops-mcp"}}}' },
+    { n:"04", title:"Ask anything", code:'"Why did our bill spike last week?"' },
+  ];
   return (
-    <div style={{marginTop:48,paddingTop:40,borderTop:"1px solid var(--line)",textAlign:"center"}}>
-      <p style={{fontSize:17,fontWeight:600,color:"var(--fg)",margin:"0 0 6px"}}>Ready to run this on your own data?</p>
-      <p style={{fontSize:14,color:"var(--fg-3)",margin:"0 0 20px"}}>Set up in 2 minutes. Free tier, no credit card.</p>
-      <form onSubmit={handleSubmit} style={{display:"flex",alignItems:"center",gap:0,maxWidth:420,margin:"0 auto",border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
-        <input
-          type="email"
-          placeholder="your@company.com"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          required
-          style={{flex:1,background:"transparent",border:"none",padding:"12px 16px",fontFamily:"'DM Sans',sans-serif",fontSize:15,color:"var(--fg)",outline:"none",minHeight:48}}
-        />
-        <button type="submit" style={{background:"var(--fg)",color:"var(--bg)",border:"none",padding:"12px 20px",fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",minHeight:48,letterSpacing:"-.01em"}}>
-          {sent ? "Redirecting…" : "Start free →"}
-        </button>
-      </form>
-      <p style={{marginTop:8,fontSize:12,color:"var(--fg-3)"}}>Free &middot; No credit card &middot; 2-minute setup</p>
+    <div style={{marginTop:48,paddingTop:40,borderTop:"1px solid var(--line)"}}>
+      <p style={{fontSize:11,fontWeight:600,color:"var(--fg-4)",fontFamily:"var(--mono)",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:24}}>/ Get started in 4 steps</p>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:1,background:"var(--line)",border:"1px solid var(--line)",borderRadius:8,overflow:"hidden",marginBottom:36}}>
+        {steps.map(s => (
+          <div key={s.n} style={{background:"var(--bg)",padding:"20px 18px"}}>
+            <p style={{fontSize:11,color:"var(--fg-4)",fontFamily:"var(--mono)",marginBottom:6}}>{s.n}</p>
+            <p style={{fontSize:13,fontWeight:600,color:"var(--fg)",marginBottom:8}}>{s.title}</p>
+            <p style={{fontSize:11,fontFamily:"var(--mono)",color:"var(--fg-3)",background:"var(--bg-2)",borderRadius:4,padding:"4px 8px",wordBreak:"break-all"}}>{s.code}</p>
+          </div>
+        ))}
+      </div>
+      <div style={{textAlign:"center"}}>
+        <p style={{fontSize:14,color:"var(--fg-3)",margin:"0 0 14px"}}>Want the setup guide sent to you?</p>
+        <form onSubmit={handleSubmit} style={{display:"flex",alignItems:"center",gap:0,maxWidth:380,margin:"0 auto",border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
+          <input
+            type="email"
+            placeholder="your@company.com"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            required
+            style={{flex:1,background:"transparent",border:"none",padding:"11px 14px",fontSize:14,color:"var(--fg)",outline:"none",minHeight:44}}
+          />
+          <button type="submit" style={{background:"var(--fg)",color:"var(--bg)",border:"none",padding:"11px 18px",fontSize:13,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",minHeight:44,letterSpacing:"-.01em"}}>
+            {sent ? "Sent ✓" : "Send guide →"}
+          </button>
+        </form>
+        <p style={{marginTop:8,fontSize:12,color:"var(--fg-4)"}}>Free &middot; No credit card &middot; Unsubscribe anytime</p>
+      </div>
     </div>
   );
 }
