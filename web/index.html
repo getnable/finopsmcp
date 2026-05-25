@@ -743,47 +743,24 @@ function QuickStart(){
   );
 }
 
+const FiSignal    = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
+const FiGrid      = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>;
+const FiK8s       = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>;
+const FiAlert     = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+const FiServer    = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>;
+const FiBar       = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>;
+const FiPR        = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>;
+const FiTrash     = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>;
+
 const FEATURES = [
-  {
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
-    h:"It tells you who caused the spike, not just that one happened.",
-    p:"Most tools say your bill went up 40%. nable says the payments team's new node group in us-east-1 drove $1,840 of it. Anomaly detection fires only when something is genuinely unusual, so you stop ignoring alerts and start acting on them."
-  },
-  {
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
-    h:"Shared cost views your whole team can run in seconds.",
-    p:"Month over month, day over day, cost by tag, cost by team, top spenders, rightsizing opportunities. Pre-built views that anyone on the team can pull up just by asking. No SQL, no dashboard logins, no waiting for the FinOps team to run a report."
-  },
-  {
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>,
-    h:"Kubernetes costs by cluster, namespace, team, and workload.",
-    p:"Any cluster, not just EKS. nable splits node costs down to every pod, deployment, and namespace, groups spend by any label like team or env for chargeback, scores cluster efficiency 0-100 with a letter grade, flags idle nodes and over-provisioned workloads, and tracks how costs trend over time. The breakdown your cloud bill was never going to give you."
-  },
-  {
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
-    h:"See what a Terraform change will cost before you apply it.",
-    p:"Run terraform plan and nable gives you a line-by-line cost delta: what is being added, changed, and removed, with the monthly dollar impact for each resource. You find out the expensive part before it ships, not when the bill arrives."
-  },
-  {
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>,
-    h:"All your AI spend in one place, with unit economics.",
-    p:"OpenAI, Anthropic, Bedrock, Langfuse: one view. See which teams are using expensive models when cheaper ones would do. Cost per thousand requests, cost per user, cache hit rate. The numbers your AI budget actually needs to make good decisions."
-  },
-  {
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
-    h:"Connect your cloud bill to your business. Answer the so-what question.",
-    p:"Tell nable your MRR, MAU, and paying customer count. When your AWS bill goes up, it tells you whether that is growth-driven and healthy or pure cost inflation with no business justification. Hosting as a percent of MRR, cost per customer, cost per API call, and how each is trending over time."
-  },
-  {
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>,
-    h:"Engineers see the cost impact before the PR merges.",
-    p:"nable comments on every pull request that touches infrastructure with a per-resource cost breakdown. No pipeline changes, no dashboards to check. The number is right there in the review where the decision actually gets made."
-  },
-  {
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>,
-    h:"Find waste and actually clean it up.",
-    p:"Idle EC2 instances, unattached EBS volumes, oversized RDS instances, ghost Kubernetes workloads. nable finds them, tells you what they cost, and removes them on your say-so. Not another list you will get to eventually. Actual remediation with an audit trail."
-  },
+  { icon: FiSignal, h:"It tells you who caused the spike, not just that one happened.", p:"Most tools say your bill went up 40%. nable says the payments team's new node group in us-east-1 drove $1,840 of it. Anomaly detection fires only when something is genuinely unusual, so you stop ignoring alerts and start acting on them." },
+  { icon: FiGrid,   h:"Shared cost views your whole team can run in seconds.", p:"Month over month, day over day, cost by tag, cost by team, top spenders, rightsizing opportunities. Pre-built views that anyone on the team can pull up just by asking. No SQL, no dashboard logins, no waiting for the FinOps team to run a report." },
+  { icon: FiK8s,    h:"Kubernetes costs by cluster, namespace, team, and workload.", p:"Any cluster, not just EKS. nable splits node costs down to every pod, deployment, and namespace, groups spend by any label like team or env for chargeback, scores cluster efficiency 0-100 with a letter grade, flags idle nodes and over-provisioned workloads, and tracks how costs trend over time. The breakdown your cloud bill was never going to give you." },
+  { icon: FiAlert,  h:"See what a Terraform change will cost before you apply it.", p:"Run terraform plan and nable gives you a line-by-line cost delta: what is being added, changed, and removed, with the monthly dollar impact for each resource. You find out the expensive part before it ships, not when the bill arrives." },
+  { icon: FiServer, h:"All your AI spend in one place, with unit economics.", p:"OpenAI, Anthropic, Bedrock, Langfuse: one view. See which teams are using expensive models when cheaper ones would do. Cost per thousand requests, cost per user, cache hit rate. The numbers your AI budget actually needs to make good decisions." },
+  { icon: FiBar,    h:"Connect your cloud bill to your business. Answer the so-what question.", p:"Tell nable your MRR, MAU, and paying customer count. When your AWS bill goes up, it tells you whether that is growth-driven and healthy or pure cost inflation with no business justification. Hosting as a percent of MRR, cost per customer, cost per API call, and how each is trending over time." },
+  { icon: FiPR,     h:"Engineers see the cost impact before the PR merges.", p:"nable comments on every pull request that touches infrastructure with a per-resource cost breakdown. No pipeline changes, no dashboards to check. The number is right there in the review where the decision actually gets made." },
+  { icon: FiTrash,  h:"Find waste and actually clean it up.", p:"Idle EC2 instances, unattached EBS volumes, oversized RDS instances, ghost Kubernetes workloads. nable finds them, tells you what they cost, and removes them on your say-so. Not another list you will get to eventually. Actual remediation with an audit trail." },
 ];
 
 function Features(){
@@ -799,7 +776,7 @@ function Features(){
         <div className="features">
           {FEATURES.map((f,i)=>(
             <article className="feature" key={i}>
-              <div className="feat-icon">{f.icon}</div>
+              <div className="feat-icon"><f.icon /></div>
               <h3>{f.h}</h3>
               <p>{f.p}</p>
             </article>
