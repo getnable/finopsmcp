@@ -832,6 +832,23 @@ function Connectors(){
           <div className="conn-group-label">SaaS</div>
           {CONN_SAAS.map(n => <span className="conn-pill" key={n}>{n}</span>)}
         </div>
+
+        <div style={{marginTop:48,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16}}>
+          {[
+            {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, title:"Read-only by default", body:"Every connector requests the minimum IAM/OAuth scope needed. nable never writes to your cloud."},
+            {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>, title:"Credentials in OS keyring", body:"Fernet-encrypted and stored in macOS Keychain, Windows Credential Manager, or libsecret. Never written to disk in plain text."},
+            {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>, title:"Direct to your cloud APIs", body:"Queries go laptop → cloud API. There is no nable proxy, no data warehouse, no third-party hop."},
+            {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>, title:"Role-based access control", body:"Viewer · Analyst · Admin roles scoped per team member. Admins control which connectors each role can query."},
+          ].map(({icon,title,body}) => (
+            <div key={title} style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,color:"var(--fg-2)"}}>
+                {icon}
+                <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>{title}</span>
+              </div>
+              <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>{body}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -1166,27 +1183,31 @@ function CompareTable(){
 const FAQS = [
   {
     q: "Does it work with my existing AWS setup?",
-    a: "Yes. nable uses read-only IAM credentials via Cost Explorer (free) or CUR via S3 (Team). Run finops setup aws --iam-template to generate a least-privilege policy. No changes to your AWS account required."
+    a: "Yes. nable uses read-only IAM credentials via Cost Explorer (free tier) or CUR via S3 (Team). Run finops setup aws --iam-template to generate an exact least-privilege IAM policy — only the permissions nable needs, nothing more. finops-doctor validates that your credentials are read-only before saving them. No changes to your AWS account structure required."
   },
   {
     q: "What data does nable actually read?",
-    a: "Billing and cost data only. It reads Cost Explorer, CUR reports, and CloudWatch metrics for rightsizing. It never writes to your cloud account unless you explicitly enable cleanup mode. Everything goes direct from your machine to your cloud APIs."
+    a: "Billing and cost data only. Specifically: Cost Explorer API, CUR (Cost and Usage Reports) in S3, CloudWatch metrics for rightsizing signals, and equivalent APIs for other connected providers. It never writes to your cloud account. Everything travels direct from your machine to your cloud APIs — no nable server is in the path."
   },
   {
-    q: "What happens when I cancel?",
-    a: "You drop back to the free tier instantly. Your credentials and local config stay intact. There is nothing to delete on our end since everything runs on your machine."
+    q: "How does it work across a team?",
+    a: "Each engineer installs nable locally — credentials stay on their own machine. The Team plan adds a shared Postgres store so org-wide cost history, budgets, and anomaly state are consistent across machines. RBAC gives admins control over who can query what: Viewer (read dashboards), Analyst (run queries, export reports), Admin (configure connectors, manage budgets, create API keys). One subscription covers the whole org."
+  },
+  {
+    q: "What IAM permissions does nable actually need?",
+    a: "For AWS: ce:GetCostAndUsage, ce:GetRightsizingRecommendation, s3:GetObject on your CUR bucket, and cloudwatch:GetMetricData for rightsizing. That's it. Run finops setup aws --iam-template to get the exact policy JSON to paste into your AWS console. For Azure and GCP, nable uses equivalent read-only built-in roles (Cost Management Reader, BigQuery Data Viewer)."
   },
   {
     q: "Does it support SSO or SAML?",
-    a: "SSO and SAML are available on the Enterprise plan. Team uses email-based auth. If your org needs SSO, reach out to hello@getnable.com."
+    a: "The Team plan uses API key auth — each team member gets a scoped key tied to their role. Enterprise adds OIDC/SAML SSO so login goes through your existing identity provider (Okta, Azure AD, Google Workspace, etc.). If your security policy requires SSO before you can evaluate, email hello@getnable.com and we'll set up an Enterprise trial."
   },
   {
-    q: "Can multiple team members use it?",
-    a: "Each person installs nable locally on their own machine. Credentials stay on each machine. The Team plan adds shared features like scheduled digests, Slack alerts, and org-wide rollup that the whole team benefits from."
+    q: "Is there a self-hosted or on-prem option?",
+    a: "nable is local-first by design — the MCP server runs on each engineer's machine, so there is no nable cloud to opt out of. Your billing data never touches our infrastructure. For teams that want a centralized shared database instead of per-machine installs, the Team plan supports a self-managed Postgres instance inside your own VPC. Enterprise adds a private VPC deployment with centralized credential management and audit logging piped to your SIEM."
   },
   {
-    q: "Is there a self-hosted option?",
-    a: "nable already runs entirely on your machine by design. There is no nable cloud to opt out of. Enterprise adds private VPC deploy for teams that need centralized credential management."
+    q: "What happens when I cancel?",
+    a: "You drop back to the free tier instantly. Your credentials, local config, and cost history stay intact on your machine. There is nothing stored on our end to delete."
   },
 ];
 
