@@ -1050,14 +1050,12 @@ function Pricing({ onTrial }){
             </div>
             <ul>
               <li>Everything in Free</li>
-              <li>Business metrics and unit economics</li>
-              <li>Slack / Teams anomaly alerts</li>
-              <li>Ticket auto-creation: Jira, Linear, GitHub</li>
-              <li>Scheduled email reports</li>
-              <li>Commitment purchase recommendations + ROI</li>
-              <li>Savings Plan showback by team</li>
-              <li>Org-wide multi-account cost rollup</li>
-              <li>Email support</li>
+              <li>Savings Plan &amp; RI coverage analysis — gaps, effective discount rate, ROI on new commitments</li>
+              <li>Commitment purchase recommendations with projected savings</li>
+              <li>PR cost comments — infra cost delta on every pull request, before it merges</li>
+              <li>Anomaly-to-ticket pipeline — spike detected, issue created and assigned automatically</li>
+              <li>Unit economics — cost per customer, per API call, per feature</li>
+              <li>Org-wide rollup across all accounts and cloud providers</li>
             </ul>
             <div className="cta"><a href="#" onClick={onTrial}>Subscribe: first month free →</a></div>
           </div>
@@ -1169,15 +1167,14 @@ function CompareTable(){
     { feature: "Kubernetes cost analysis, efficiency scoring, label chargeback", free: true, team: true },
     { feature: "PR cost comments & CI gate", free: true, team: true },
     { feature: "AWS Cost Explorer", free: true, team: true },
-    { feature: "Business metrics and unit economics", free: false, team: true },
+    { feature: "Unit economics (cost per customer, per API call, per feature)", free: false, team: true },
     { feature: "Anomaly alerts via Slack or Teams", free: false, team: true },
     { feature: "AWS CUR (line-item granularity)", free: false, team: true },
-    { feature: "Ticket auto-creation: Jira, Linear, GitHub", free: false, team: true },
-    { feature: "Scheduled email reports", free: false, team: true },
-    { feature: "Savings Plan showback by team", free: false, team: true },
-    { feature: "Commitment purchase recommendations + ROI", free: false, team: true },
-    { feature: "Org-wide multi-account cost rollup", free: false, team: true },
-    { feature: "Email support", free: false, team: true },
+    { feature: "Savings Plan & RI coverage analysis with ROI projections", free: false, team: true },
+    { feature: "Commitment purchase recommendations with projected savings", free: false, team: true },
+    { feature: "PR cost comments — infra delta on every pull request", free: false, team: true },
+    { feature: "Anomaly-to-ticket pipeline (Jira, Linear, GitHub)", free: false, team: true },
+    { feature: "Org-wide rollup across all accounts and cloud providers", free: false, team: true },
   ];
   const Check = () => (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{display:"inline-block",verticalAlign:"middle"}}>
