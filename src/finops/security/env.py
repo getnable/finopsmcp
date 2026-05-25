@@ -4,8 +4,10 @@ Connectors import get_env() instead of os.getenv() — no other changes needed.
 """
 from __future__ import annotations
 
+import logging
 import os
-from typing import Optional
+
+log = logging.getLogger("finops.security.env")
 
 _vault = None
 _loaded = False
@@ -17,7 +19,8 @@ def _get_vault():
         try:
             from .vault import Vault
             _vault = Vault.default()
-        except Exception:
+        except Exception as e:
+            log.warning("Vault unavailable: %s. Credentials will be read from environment only.", e)
             _vault = None
     return _vault
 
@@ -30,8 +33,8 @@ def get_env(key: str, default: str = "") -> str:
             val = v.get(key)
             if val is not None:
                 return val
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Vault read failed for %s: %s", key, e)
     return os.environ.get(key, default)
 
 
@@ -46,7 +49,16 @@ def load_vault_to_env() -> int:
         return 0
     v = _get_vault()
     if v is None:
+        # Vault is unavailable; server will rely on env vars only
+        log.info("No vault available at startup. Using environment variables only.")
+        _loaded = True
         return 0
-    count = v.load_to_env()
+    try:
+        count = v.load_to_env()
+    except Exception as e:
+        log.warning("Failed to load vault credentials into environment: %s", e)
+        _loaded = True
+        return 0
     _loaded = True
+    log.debug("Loaded %d credentials from vault into environment", count)
     return count

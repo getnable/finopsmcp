@@ -38,10 +38,18 @@ from pathlib import Path
 log = logging.getLogger("finops.license")
 
 _env_secret = os.environ.get("FINOPS_LICENSE_SECRET", "")
-# Default allows customers to verify purchased license keys without setting the env var.
-# Override via FINOPS_LICENSE_SECRET if you self-host with your own signing secret.
+# The signing secret must be set via FINOPS_LICENSE_SECRET.
+# Keeping a default here is intentional for the hosted SaaS build so customers
+# can verify purchased keys without setting an env var themselves.
+# Self-hosters MUST override via FINOPS_LICENSE_SECRET with their own secret.
+# WARNING: If this source is public, rotate FINOPS_LICENSE_SECRET immediately.
 _DEFAULT_SECRET = "933cb551a15aa14b2a2c3517536da50773c2492a2dce2879578cb60cf34bb81b"
 _SECRET = (_env_secret or _DEFAULT_SECRET).encode()
+if not _env_secret:
+    log.debug(
+        "FINOPS_LICENSE_SECRET not set; using built-in default. "
+        "Self-hosters should set this env var to a secret of their own."
+    )
 _UPGRADE_URL    = "https://getnable.com/#pricing"
 _CHECKOUT_URL   = "https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"   # direct Stripe checkout
 _ACTIVATE_CMD   = "finops setup license"             # shown after purchase
@@ -130,9 +138,9 @@ def _kr_get() -> date | None:
         val = keyring.get_password(_KR_SERVICE, _KR_USERNAME)
         if val:
             iso, _, sig = val.partition(":")
-            if sig == _sign_date(iso):
+            if sig and hmac.compare_digest(sig, _sign_date(iso)):
                 return date.fromisoformat(iso)
-            log.debug("Keyring entry signature mismatch — ignoring")
+            log.debug("Keyring entry signature mismatch - ignoring")
     except Exception:
         pass
     return None
@@ -157,9 +165,11 @@ def _file_get() -> date | None:
                 return None
             iso = lines[0].strip()
             sig = lines[1].strip() if len(lines) > 1 else ""
-            if sig == _sign_date(iso) or not sig:
-                return date.fromisoformat(iso)
-            log.debug("Trial file signature mismatch — ignoring")
+            # Require a valid signature; an empty or missing sig is rejected
+            if not sig or not hmac.compare_digest(sig, _sign_date(iso)):
+                log.debug("Trial file signature missing or invalid, ignoring")
+                return None
+            return date.fromisoformat(iso)
     except Exception:
         pass
     return None

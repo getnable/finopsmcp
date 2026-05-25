@@ -136,11 +136,18 @@ def setup_aws() -> None:
 """)
         access_key = _prompt("  AWS Access Key ID (starts with AKIA...)")
         while not access_key.startswith("AK") or len(access_key) < 16:
+            if not access_key:
+                # User hit Enter/Ctrl-C with no input; abort rather than loop forever
+                _warn("No Access Key ID entered. Run 'finops setup aws' to try again.")
+                return
             _warn("That doesn't look like a valid Access Key ID (should start with AKIA and be 20 chars)")
             access_key = _prompt("  AWS Access Key ID")
 
         secret_key = _prompt("  AWS Secret Access Key", secret=True)
         while len(secret_key) < 20:
+            if not secret_key:
+                _warn("No Secret Access Key entered. Run 'finops setup aws' to try again.")
+                return
             _warn("That doesn't look like a valid Secret Access Key")
             secret_key = _prompt("  AWS Secret Access Key", secret=True)
 
@@ -351,7 +358,10 @@ def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]
         if val:
             vault.store(env_key, val)
             stored_any = True
-    _ok(f"{provider_name} credentials stored in vault")
+    if stored_any:
+        _ok(f"{provider_name} credentials stored in vault")
+    else:
+        _warn(f"No {provider_name} credentials entered. Nothing stored.")
     if stored_any:
         try:
             from . import telemetry as _tel
@@ -514,12 +524,17 @@ def vault_rotate() -> None:
     from .security.vault import Vault
     new_key = Fernet.generate_key()
     vault = Vault.default()
-    vault.rotate_key(new_key)
-    # Save new key
-    if not vault._save_keyring(new_key):
+    try:
+        vault.rotate_key(new_key)
+    except Exception as e:
+        _err(f"Key rotation failed: {e}")
+        _warn("Credentials have NOT been re-encrypted. The old key is still active.")
+        return
+    # Save new key only after rotation succeeded
+    if not Vault._save_keyring(new_key):
+        import stat
         key_path = Path(os.environ.get("FINOPS_DATA_DIR", Path.home() / ".finops")) / "vault.key"
         key_path.write_bytes(new_key)
-        import stat
         key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
     _ok("Key rotation complete")
 

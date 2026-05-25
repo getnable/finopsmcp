@@ -161,10 +161,14 @@ def _check_database() -> dict:
             "detail": "Not created yet — will be created on first query",
         }
 
-    mode = oct(stat.S_IMODE(db_path.stat().st_mode))
-    correct_perms = db_path.stat().st_mode & 0o177 == 0  # only owner bits set
+    file_stat = db_path.stat()
+    mode = oct(stat.S_IMODE(file_stat.st_mode))
+    # Good permissions: owner has read+write, no group or world bits set
+    owner_rw = bool(file_stat.st_mode & stat.S_IRUSR) and bool(file_stat.st_mode & stat.S_IWUSR)
+    no_others = file_stat.st_mode & 0o177 == 0
+    correct_perms = owner_rw and no_others
 
-    size_kb = db_path.stat().st_size // 1024
+    size_kb = file_stat.st_size // 1024
 
     return {
         "name": "Local database",

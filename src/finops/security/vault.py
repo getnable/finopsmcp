@@ -69,26 +69,28 @@ class Vault:
     def _init_db(self) -> None:
         import sqlite3
         con = sqlite3.connect(str(self._db_path))
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS credentials (
-                key_name TEXT PRIMARY KEY,
-                encrypted_value BLOB NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-        """)
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts TEXT NOT NULL,
-                operation TEXT NOT NULL,
-                key_name TEXT NOT NULL,
-                client_pid INTEGER,
-                client_user TEXT
-            )
-        """)
-        con.commit()
-        con.close()
+        try:
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS credentials (
+                    key_name TEXT PRIMARY KEY,
+                    encrypted_value BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    key_name TEXT NOT NULL,
+                    client_pid INTEGER,
+                    client_user TEXT
+                )
+            """)
+            con.commit()
+        finally:
+            con.close()
 
     @staticmethod
     def _secure_file(path: Path) -> None:
@@ -99,12 +101,14 @@ class Vault:
         import sqlite3
         try:
             con = sqlite3.connect(str(self._db_path))
-            con.execute(
-                "INSERT INTO audit_log (ts, operation, key_name, client_pid, client_user) VALUES (?,?,?,?,?)",
-                (datetime.now(timezone.utc).isoformat(), operation, key_name, os.getpid(), getpass.getuser()),
-            )
-            con.commit()
-            con.close()
+            try:
+                con.execute(
+                    "INSERT INTO audit_log (ts, operation, key_name, client_pid, client_user) VALUES (?,?,?,?,?)",
+                    (datetime.now(timezone.utc).isoformat(), operation, key_name, os.getpid(), getpass.getuser()),
+                )
+                con.commit()
+            finally:
+                con.close()
         except Exception:
             pass  # audit failure must never block operations
 
@@ -117,23 +121,27 @@ class Vault:
         now = datetime.now(timezone.utc).isoformat()
         import sqlite3
         con = sqlite3.connect(str(self._db_path))
-        con.execute(
-            "INSERT INTO credentials (key_name, encrypted_value, created_at, updated_at) "
-            "VALUES (?,?,?,?) ON CONFLICT(key_name) DO UPDATE SET encrypted_value=excluded.encrypted_value, updated_at=excluded.updated_at",
-            (key_name, encrypted, now, now),
-        )
-        con.commit()
-        con.close()
+        try:
+            con.execute(
+                "INSERT INTO credentials (key_name, encrypted_value, created_at, updated_at) "
+                "VALUES (?,?,?,?) ON CONFLICT(key_name) DO UPDATE SET encrypted_value=excluded.encrypted_value, updated_at=excluded.updated_at",
+                (key_name, encrypted, now, now),
+            )
+            con.commit()
+        finally:
+            con.close()
         self._audit("WRITE", key_name)
         log.debug("Vault: stored %s", key_name)
 
     def get(self, key_name: str) -> str | None:
         import sqlite3
         con = sqlite3.connect(str(self._db_path))
-        row = con.execute(
-            "SELECT encrypted_value FROM credentials WHERE key_name = ?", (key_name,)
-        ).fetchone()
-        con.close()
+        try:
+            row = con.execute(
+                "SELECT encrypted_value FROM credentials WHERE key_name = ?", (key_name,)
+            ).fetchone()
+        finally:
+            con.close()
         if row is None:
             return None
         self._audit("READ", key_name)
@@ -145,9 +153,11 @@ class Vault:
     def delete(self, key_name: str) -> bool:
         import sqlite3
         con = sqlite3.connect(str(self._db_path))
-        cur = con.execute("DELETE FROM credentials WHERE key_name = ?", (key_name,))
-        con.commit()
-        con.close()
+        try:
+            cur = con.execute("DELETE FROM credentials WHERE key_name = ?", (key_name,))
+            con.commit()
+        finally:
+            con.close()
         deleted = cur.rowcount > 0
         if deleted:
             self._audit("DELETE", key_name)
@@ -156,16 +166,20 @@ class Vault:
     def list_keys(self) -> list[str]:
         import sqlite3
         con = sqlite3.connect(str(self._db_path))
-        rows = con.execute("SELECT key_name FROM credentials ORDER BY key_name").fetchall()
-        con.close()
+        try:
+            rows = con.execute("SELECT key_name FROM credentials ORDER BY key_name").fetchall()
+        finally:
+            con.close()
         return [r[0] for r in rows]
 
     def load_to_env(self) -> int:
         """Decrypt all credentials and set them in os.environ. Returns count loaded."""
         import sqlite3
         con = sqlite3.connect(str(self._db_path))
-        rows = con.execute("SELECT key_name, encrypted_value FROM credentials").fetchall()
-        con.close()
+        try:
+            rows = con.execute("SELECT key_name, encrypted_value FROM credentials").fetchall()
+        finally:
+            con.close()
         count = 0
         for key_name, encrypted_value in rows:
             try:
@@ -178,24 +192,37 @@ class Vault:
         return count
 
     def rotate_key(self, new_key: bytes) -> None:
-        """Re-encrypt all credentials with a new key."""
+        """
+        Re-encrypt all credentials with a new key.
+        Uses a single transaction: either all rows are rotated or none are.
+        Skips corrupt entries with a warning rather than aborting the whole rotation.
+        """
         import sqlite3
         new_fernet = self._make_fernet(new_key)
         con = sqlite3.connect(str(self._db_path))
-        rows = con.execute("SELECT key_name, encrypted_value FROM credentials").fetchall()
-        now = datetime.now(timezone.utc).isoformat()
-        for key_name, enc_val in rows:
-            plaintext = self._fernet.decrypt(enc_val)
-            re_encrypted = new_fernet.encrypt(plaintext)
-            con.execute(
-                "UPDATE credentials SET encrypted_value=?, updated_at=? WHERE key_name=?",
-                (re_encrypted, now, key_name),
-            )
-        con.commit()
-        con.close()
+        try:
+            rows = con.execute("SELECT key_name, encrypted_value FROM credentials").fetchall()
+            now = datetime.now(timezone.utc).isoformat()
+            skipped = 0
+            for key_name, enc_val in rows:
+                try:
+                    plaintext = self._fernet.decrypt(enc_val)
+                except Exception:
+                    log.warning("Vault: could not decrypt %s during rotation, skipping", key_name)
+                    skipped += 1
+                    continue
+                re_encrypted = new_fernet.encrypt(plaintext)
+                con.execute(
+                    "UPDATE credentials SET encrypted_value=?, updated_at=? WHERE key_name=?",
+                    (re_encrypted, now, key_name),
+                )
+            con.commit()
+        finally:
+            con.close()
         self._key = new_key
         self._fernet = new_fernet
-        log.info("Vault: key rotation complete (%d credentials re-encrypted)", len(rows))
+        rotated = len(rows) - skipped
+        log.info("Vault: key rotation complete (%d rotated, %d skipped)", rotated, skipped)
 
     # ── Factory methods ───────────────────────────────────────────────────────
 
