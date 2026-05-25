@@ -834,20 +834,34 @@ function Connectors(){
         </div>
 
         <div style={{marginTop:48,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16}}>
-          {[
-            {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, title:"Read-only by default", body:"Every connector requests the minimum IAM/OAuth scope needed. nable never writes to your cloud."},
-            {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>, title:"Credentials in OS keyring", body:"Fernet-encrypted and stored in macOS Keychain, Windows Credential Manager, or libsecret. Never written to disk in plain text."},
-            {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>, title:"Direct to your cloud APIs", body:"Queries go laptop → cloud API. There is no nable proxy, no data warehouse, no third-party hop."},
-            {icon:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>, title:"Role-based access control", body:"Viewer · Analyst · Admin roles scoped per team member. Admins control which connectors each role can query."},
-          ].map(({icon,title,body}) => (
-            <div key={title} style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,color:"var(--fg-2)"}}>
-                {icon}
-                <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>{title}</span>
-              </div>
-              <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>{body}</p>
+          <div style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>Read-only by default</span>
             </div>
-          ))}
+            <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>Every connector requests the minimum IAM/OAuth scope needed. nable never writes to your cloud.</p>
+          </div>
+          <div style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>Credentials in OS keyring</span>
+            </div>
+            <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>Fernet-encrypted and stored in macOS Keychain, Windows Credential Manager, or libsecret. Never written to disk in plain text.</p>
+          </div>
+          <div style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>Direct to your cloud APIs</span>
+            </div>
+            <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>Queries go laptop to cloud API. There is no nable proxy, no data warehouse, no third-party hop.</p>
+          </div>
+          <div style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>Role-based access control</span>
+            </div>
+            <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>Viewer, Analyst, and Admin roles scoped per team member. Admins control which connectors each role can query.</p>
+          </div>
         </div>
       </div>
     </section>
