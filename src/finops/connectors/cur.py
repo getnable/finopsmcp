@@ -17,6 +17,7 @@ Optional:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import date
 from typing import Any
@@ -60,6 +61,29 @@ def _workgroup() -> str:
 
 
 # ── SQL helpers ───────────────────────────────────────────────────────────────
+
+# Athena CUR tag column names are derived from user-supplied tag keys.
+# Only allow characters that are valid in AWS tag keys and safe as SQL identifiers.
+# This prevents SQL injection via tag_key interpolated into column names.
+_TAG_KEY_RE = re.compile(r"^[a-zA-Z0-9_:@./\-]{1,128}$")
+
+
+def _safe_tag_column(tag_key: str) -> str:
+    """
+    Convert a tag key to the Athena CUR column name.
+
+    Raises ValueError if the tag key contains characters that could be used
+    for SQL injection. Valid AWS tag keys are alphanumeric plus _:@./-
+    CUR normalises them to lowercase with spaces replaced by underscores.
+    """
+    if not _TAG_KEY_RE.match(tag_key):
+        raise ValueError(
+            f"Invalid tag key {tag_key!r}: must match [a-zA-Z0-9_:@./\\-]{{1,128}}"
+        )
+    # CUR normalises tag key to lowercase, replaces spaces/hyphens with underscores
+    normalised = tag_key.lower().replace("-", "_").replace(" ", "_").replace(".", "_")
+    return f"resource_tags_user_{normalised}"
+
 
 def _partition_filter(start_date: date, end_date: date) -> str:
     """
@@ -412,8 +436,10 @@ def get_tag_cost_breakdown(
 
     partition = _partition_filter(start_date, end_date)
     table = f"{_db()}.{_table()}"
-    safe_key = tag_key.replace("'", "''").replace("`", "")
-    tag_col = f"resource_tags_user_{safe_key}"
+    try:
+        tag_col = _safe_tag_column(tag_key)
+    except ValueError as exc:
+        return {"error": str(exc), "source": "cur_athena"}
 
     if cost_type == "amortized":
         cost_expr = (
@@ -489,8 +515,10 @@ def get_untagged_resource_cost(
 
     partition = _partition_filter(start_date, end_date)
     table = f"{_db()}.{_table()}"
-    safe_key = tag_key.replace("'", "''").replace("`", "")
-    tag_col = f"resource_tags_user_{safe_key}"
+    try:
+        tag_col = _safe_tag_column(tag_key)
+    except ValueError as exc:
+        return {"error": str(exc), "source": "cur_athena"}
 
     sql = f"""
 SELECT
@@ -602,8 +630,10 @@ def get_savings_plan_showback(
 
     partition = _partition_filter(start_date, end_date)
     table     = f"{_db()}.{_table()}"
-    safe_key  = tag_key.replace("'", "''").replace("`", "")
-    tag_col   = f"resource_tags_user_{safe_key}"
+    try:
+        tag_col = _safe_tag_column(tag_key)
+    except ValueError as exc:
+        return {"error": str(exc), "source": "cur_athena"}
 
     # line_item_types to include
     li_types = "'SavingsPlanCoveredUsage', 'Usage', 'DiscountedUsage'"

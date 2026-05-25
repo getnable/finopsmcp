@@ -148,7 +148,10 @@ class Vault:
         try:
             return self._fernet.decrypt(row[0]).decode()
         except Exception as e:
-            raise VaultError(f"Failed to decrypt {key_name}: {e}") from e
+            # Do not include key_name or the underlying exception in the public
+            # message to avoid leaking internal credential names or crypto details.
+            log.debug("Vault decrypt failed for key %r: %s", key_name, e)
+            raise VaultError("Failed to decrypt credential - check vault key") from e
 
     def delete(self, key_name: str) -> bool:
         import sqlite3

@@ -170,7 +170,8 @@ def cmd_cost(account_id: str, service: str | None, days: int = 30) -> list[dict]
 
     except Exception as e:
         log.exception("cmd_cost failed")
-        return [_section(f"❌ Error fetching costs: `{e}`")]
+        log.debug("cmd_cost exception detail: %s", e)
+        return [_section("Error fetching costs. Check server logs for details.")]
 
 
 def cmd_anomalies(account_id: str, limit: int = 5) -> list[dict]:
@@ -213,7 +214,8 @@ def cmd_anomalies(account_id: str, limit: int = 5) -> list[dict]:
 
     except Exception as e:
         log.exception("cmd_anomalies failed")
-        return [_section(f"❌ Error: `{e}`")]
+        log.debug("cmd_anomalies exception detail: %s", e)
+        return [_section("Error fetching anomalies. Check server logs for details.")]
 
 
 def cmd_forecast(account_id: str, service: str | None = None, horizon: int = 30) -> list[dict]:
@@ -249,7 +251,8 @@ def cmd_forecast(account_id: str, service: str | None = None, horizon: int = 30)
 
     except Exception as e:
         log.exception("cmd_forecast failed")
-        return [_section(f"❌ Forecast error: `{e}`")]
+        log.debug("cmd_forecast exception detail: %s", e)
+        return [_section("Error generating forecast. Check server logs for details.")]
 
 
 def cmd_rightsizing(account_id: str) -> list[dict]:
@@ -288,7 +291,8 @@ def cmd_rightsizing(account_id: str) -> list[dict]:
 
     except Exception as e:
         log.exception("cmd_rightsizing failed")
-        return [_section(f"❌ Error: `{e}`")]
+        log.debug("cmd_rightsizing exception detail: %s", e)
+        return [_section("Error fetching rightsizing data. Check server logs for details.")]
 
 
 def cmd_budget(account_id: str) -> list[dict]:
@@ -333,7 +337,8 @@ def cmd_budget(account_id: str) -> list[dict]:
 
     except Exception as e:
         log.exception("cmd_budget failed")
-        return [_section(f"❌ Error: `{e}`")]
+        log.debug("cmd_budget exception detail: %s", e)
+        return [_section("Error fetching budget data. Check server logs for details.")]
 
 
 def cmd_help() -> list[dict]:
@@ -386,7 +391,8 @@ def handle_interaction(payload: dict) -> list[dict]:
 
     except Exception as e:
         log.exception("interaction handler failed")
-        return [_section(f"❌ Error: `{e}`")]
+        log.debug("interaction handler exception detail: %s", e)
+        return [_section("An error occurred handling this action. Check server logs for details.")]
 
 
 # ── Request verification ───────────────────────────────────────────────────────

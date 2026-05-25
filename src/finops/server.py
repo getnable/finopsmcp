@@ -44,6 +44,7 @@ from .connectors.saas.snowflake import SnowflakeConnector
 from .connectors.saas.stripe import StripeConnector
 from .connectors.saas.twilio import TwilioConnector
 from .connectors.saas.vercel import VercelConnector
+from .connectors.databricks import DatabricksConnector
 
 load_dotenv()
 
@@ -110,6 +111,7 @@ _SAAS_CONNECTORS: dict[str, Any] = {
     "pagerduty": PagerDutyConnector(),
     "twilio": TwilioConnector(),
     "new_relic": NewRelicConnector(),
+    "databricks": DatabricksConnector(),
 }
 
 _ALL_CONNECTORS: dict[str, Any] = {**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS}
@@ -193,6 +195,26 @@ def _default_dates() -> tuple[date, date]:
     lookback = int(os.getenv("DEFAULT_LOOKBACK_DAYS", "30"))
     end = date.today()
     return end - timedelta(days=lookback), end
+
+
+def _resolve_safe_path(raw: str, must_exist: bool = False) -> "str | dict":
+    """
+    Resolve and validate a caller-supplied filesystem path.
+
+    Returns the resolved absolute path string, or an error dict if the path
+    is invalid. Guards against path traversal (/../) and empty inputs.
+    Optionally checks that the path exists.
+    """
+    import pathlib
+    if not raw or not raw.strip():
+        return {"error": "Path must not be empty"}
+    try:
+        p = pathlib.Path(raw).expanduser().resolve()
+    except Exception:
+        return {"error": "Invalid path"}
+    if must_exist and not p.exists():
+        return {"error": f"Path does not exist: {p}"}
+    return str(p)
 
 
 def _fmt_usd(amount: float) -> str:
@@ -4658,6 +4680,17 @@ async def audit_terraform_tags(
     if err := require_role("analyst"):
         return err
 
+    safe_dir = _resolve_safe_path(tf_dir, must_exist=True)
+    if isinstance(safe_dir, dict):
+        return safe_dir
+    tf_dir = safe_dir
+
+    if state_path is not None:
+        safe_state = _resolve_safe_path(state_path, must_exist=True)
+        if isinstance(safe_state, dict):
+            return safe_state
+        state_path = safe_state
+
     from .connectors.terraform import audit_tags, persist_violations, _required_tags
 
     try:
@@ -4694,6 +4727,11 @@ async def generate_terraform_tag_fixes(
     """
     if err := require_role("analyst"):
         return err
+
+    safe_dir = _resolve_safe_path(tf_dir, must_exist=True)
+    if isinstance(safe_dir, dict):
+        return safe_dir
+    tf_dir = safe_dir
 
     import json as _json
     from sqlalchemy import select
@@ -4764,6 +4802,11 @@ async def open_terraform_tag_pr(
     """
     if err := require_role("analyst"):
         return err
+
+    safe_dir = _resolve_safe_path(tf_dir, must_exist=True)
+    if isinstance(safe_dir, dict):
+        return safe_dir
+    tf_dir = safe_dir
 
     import json as _json
     import subprocess as _sp
@@ -5395,9 +5438,15 @@ async def estimate_terraform_cost(
             data = _json.loads(plan_json)
             result = estimate_plan(data)
         elif plan_file:
-            result = estimate_from_file(plan_file)
+            safe_file = _resolve_safe_path(plan_file, must_exist=True)
+            if isinstance(safe_file, dict):
+                return safe_file
+            result = estimate_from_file(safe_file)
         elif tf_dir:
-            result = estimate_from_dir(tf_dir)
+            safe_dir = _resolve_safe_path(tf_dir, must_exist=True)
+            if isinstance(safe_dir, dict):
+                return safe_dir
+            result = estimate_from_dir(safe_dir)
         else:
             return {
                 "error": "Provide plan_json, plan_file, or tf_dir.",
@@ -6166,6 +6215,252 @@ async def get_view(
         }
 
     return {"error": f"View '{view}' is defined but not yet implemented."}
+
+
+# ── Databricks tools ──────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def get_databricks_costs(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """
+    Return Databricks workspace cost breakdown for the given date range.
+
+    Reports total estimated spend, cost by service type (All-Purpose Compute,
+    Jobs, SQL Warehouses, Delta Live Tables) and per-cluster cost.
+
+    Uses the Databricks Billable Usage Download API when DATABRICKS_ACCOUNT_ID
+    is set; otherwise estimates from cluster uptime + job run history.
+
+    Args:
+        start_date: ISO date string (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date:   ISO date string (YYYY-MM-DD). Defaults to today.
+    """
+    from .connectors.databricks import DatabricksConnector
+
+    conn: DatabricksConnector = _SAAS_CONNECTORS.get("databricks")  # type: ignore
+    if not conn or not await conn.is_configured():
+        return {
+            "error": "Databricks not configured. Set DATABRICKS_HOST and DATABRICKS_TOKEN.",
+            "help": "Run: finops setup databricks",
+        }
+
+    if start_date and end_date:
+        sd = date.fromisoformat(start_date)
+        ed = date.fromisoformat(end_date)
+    else:
+        ed = date.today()
+        sd = ed - timedelta(days=30)
+
+    try:
+        summary = await conn.get_costs(sd, ed)
+    except Exception as e:
+        return {"error": str(e)}
+
+    return {
+        "provider": "databricks",
+        "period": f"{sd} to {ed}",
+        "total_usd": _fmt_usd(summary.total_usd),
+        "by_service": {k: _fmt_usd(v) for k, v in sorted(summary.by_service.items(), key=lambda x: -x[1])},
+        "by_workspace": {k: _fmt_usd(v) for k, v in summary.by_account.items()},
+        "note": "Costs are estimates based on DBU rates. Set DATABRICKS_ACCOUNT_ID for exact billing data.",
+    }
+
+
+@mcp.tool()
+async def get_databricks_dbu_breakdown(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """
+    Show DBU (Databricks Unit) consumption by cluster, job, and cluster type.
+
+    Identifies the top DBU consumers in the workspace, helping you understand
+    which clusters and jobs are driving spend. Surfaces all-purpose clusters
+    that should be converted to job clusters for cheaper execution.
+
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date:   ISO date (YYYY-MM-DD). Defaults to today.
+    """
+    from .connectors.databricks import DatabricksConnector
+
+    conn: DatabricksConnector = _SAAS_CONNECTORS.get("databricks")  # type: ignore
+    if not conn or not await conn.is_configured():
+        return {
+            "error": "Databricks not configured. Set DATABRICKS_HOST and DATABRICKS_TOKEN.",
+            "help": "Run: finops setup databricks",
+        }
+
+    if start_date and end_date:
+        sd = date.fromisoformat(start_date)
+        ed = date.fromisoformat(end_date)
+    else:
+        ed = date.today()
+        sd = ed - timedelta(days=30)
+
+    try:
+        ws = await conn.get_workspace_summary(sd, ed)
+    except Exception as e:
+        return {"error": str(e)}
+
+    # Build top consumers table
+    top_clusters = [
+        {"name": name, "cost": _fmt_usd(cost)}
+        for name, cost in list(ws.by_cluster.items())[:10]
+    ]
+    top_jobs = [
+        {"name": name, "cost": _fmt_usd(cost)}
+        for name, cost in list(ws.by_job.items())[:10]
+    ]
+
+    savings_tip = None
+    if ws.by_cluster_type.get("ALL_PURPOSE", 0) > ws.by_cluster_type.get("JOB", 0):
+        all_purpose_cost = ws.by_cluster_type.get("ALL_PURPOSE", 0)
+        potential = all_purpose_cost * 0.60  # job clusters are ~60% cheaper
+        savings_tip = (
+            f"All-purpose clusters cost {_fmt_usd(all_purpose_cost)} this period. "
+            f"Moving batch workloads to job clusters could save ~{_fmt_usd(potential)}."
+        )
+
+    return {
+        "provider": "databricks",
+        "workspace": ws.workspace_name,
+        "period": f"{sd} to {ed}",
+        "total_dbu": ws.total_dbu,
+        "estimated_total_cost": _fmt_usd(ws.estimated_cost_usd),
+        "by_cluster_type": {k: _fmt_usd(v) for k, v in ws.by_cluster_type.items()},
+        "top_clusters_by_cost": top_clusters,
+        "top_jobs_by_cost": top_jobs,
+        **({"savings_tip": savings_tip} if savings_tip else {}),
+    }
+
+
+@mcp.tool()
+async def get_databricks_cluster_efficiency() -> dict:
+    """
+    Audit all Databricks clusters for efficiency issues and cost waste.
+
+    Checks every cluster for:
+    - Missing auto-termination (clusters that run forever)
+    - Idle clusters (running but no recent activity)
+    - Fixed-size clusters that should use autoscaling
+    - All-purpose clusters doing batch work (cheaper as job clusters)
+    - Clusters with no cost-attribution tags
+
+    Returns a prioritized list of issues and estimated wasted spend.
+    """
+    from .connectors.databricks import DatabricksConnector
+
+    conn: DatabricksConnector = _SAAS_CONNECTORS.get("databricks")  # type: ignore
+    if not conn or not await conn.is_configured():
+        return {
+            "error": "Databricks not configured. Set DATABRICKS_HOST and DATABRICKS_TOKEN.",
+            "help": "Run: finops setup databricks",
+        }
+
+    try:
+        efficiencies = await conn.get_cluster_efficiency()
+    except Exception as e:
+        return {"error": str(e)}
+
+    problem_clusters = [e for e in efficiencies if e.issues]
+    clean_clusters = [e for e in efficiencies if not e.issues]
+
+    wasted_estimate = sum(
+        e.estimated_cost_usd for e in problem_clusters
+        if any("idle" in i.lower() or "indefinitely" in i.lower() for i in e.issues)
+    )
+
+    issues_out = []
+    for e in problem_clusters:
+        issues_out.append({
+            "cluster": e.cluster_name,
+            "state": e.state,
+            "type": e.cluster_type,
+            "creator": e.creator,
+            "estimated_cost": _fmt_usd(e.estimated_cost_usd),
+            "uptime_hours": e.uptime_hours,
+            "auto_termination_min": e.autotermination_minutes,
+            "issues": e.issues,
+        })
+
+    return {
+        "provider": "databricks",
+        "total_clusters": len(efficiencies),
+        "clusters_with_issues": len(problem_clusters),
+        "clusters_healthy": len(clean_clusters),
+        "estimated_waste_usd": _fmt_usd(wasted_estimate),
+        "issues": issues_out,
+        "healthy_clusters": [
+            {"name": e.cluster_name, "type": e.cluster_type, "state": e.state}
+            for e in clean_clusters
+        ],
+    }
+
+
+@mcp.tool()
+async def get_databricks_job_costs(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    top_n: int = 20,
+) -> dict:
+    """
+    Show cost and DBU breakdown by Databricks job run.
+
+    Returns the most expensive job runs in the period, with duration,
+    DBU consumed, and estimated cost per run. Useful for finding jobs
+    that can be optimised (right-sized clusters, fewer retries, etc.)
+
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date:   ISO date (YYYY-MM-DD). Defaults to today.
+        top_n:      Number of top job runs to return (default 20).
+    """
+    from .connectors.databricks import DatabricksConnector
+
+    conn: DatabricksConnector = _SAAS_CONNECTORS.get("databricks")  # type: ignore
+    if not conn or not await conn.is_configured():
+        return {
+            "error": "Databricks not configured. Set DATABRICKS_HOST and DATABRICKS_TOKEN.",
+            "help": "Run: finops setup databricks",
+        }
+
+    if start_date and end_date:
+        sd = date.fromisoformat(start_date)
+        ed = date.fromisoformat(end_date)
+    else:
+        ed = date.today()
+        sd = ed - timedelta(days=30)
+
+    try:
+        job_costs = await conn.get_job_costs(sd, ed)
+    except Exception as e:
+        return {"error": str(e)}
+
+    top = job_costs[:top_n]
+    total = sum(j.estimated_cost_usd for j in job_costs)
+
+    rows = []
+    for j in top:
+        rows.append({
+            "job_name": j.job_name,
+            "run_id": j.run_id,
+            "state": j.state,
+            "start_time": j.start_time,
+            "duration_min": round(j.duration_seconds / 60, 1),
+            "dbu": j.dbu_consumed,
+            "estimated_cost": _fmt_usd(j.estimated_cost_usd),
+        })
+
+    return {
+        "provider": "databricks",
+        "period": f"{sd} to {ed}",
+        "total_runs_analyzed": len(job_costs),
+        "total_estimated_cost": _fmt_usd(total),
+        "top_runs": rows,
+    }
 
 
 if __name__ == "__main__":

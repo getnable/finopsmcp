@@ -120,7 +120,13 @@ def _auth_required() -> bool:
     """True when shared mode + FINOPS_REQUIRE_AUTH=1."""
     db_url = os.environ.get("DATABASE_URL", "")
     shared = db_url.startswith(("postgresql://", "postgres://", "postgresql+", "postgres+"))
-    return shared and os.environ.get("FINOPS_REQUIRE_AUTH", "0") == "1"
+    want_auth = os.environ.get("FINOPS_REQUIRE_AUTH", "0") == "1"
+    if want_auth and not shared:
+        log.warning(
+            "FINOPS_REQUIRE_AUTH=1 is set but DATABASE_URL is not a Postgres URL. "
+            "Auth enforcement requires shared Postgres mode. Running in permissive mode."
+        )
+    return shared and want_auth
 
 
 def require_role(min_role: str, ident: Identity | None = None) -> dict | None:
