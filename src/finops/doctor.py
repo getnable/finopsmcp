@@ -67,6 +67,7 @@ def _check_aws_scope() -> dict:
     """Check if AWS credentials are scoped correctly (read-only)."""
     try:
         import boto3
+        from botocore.config import Config as BotocoreConfig
     except ImportError:
         return {
             "name": "AWS credential scope",
@@ -74,8 +75,11 @@ def _check_aws_scope() -> dict:
             "detail": "boto3 not installed — AWS checks skipped",
         }
 
+    # Use a short connect+read timeout so a broken network doesn't hang doctor
+    _boto_cfg = BotocoreConfig(connect_timeout=5, read_timeout=10, retries={"max_attempts": 1})
+
     try:
-        sts = boto3.client("sts")
+        sts = boto3.client("sts", config=_boto_cfg)
         identity = sts.get_caller_identity()
         account_id = identity["Account"]
         identity_arn = identity["Arn"]
@@ -89,7 +93,7 @@ def _check_aws_scope() -> dict:
     # Quick write-permission probe via DryRun
     warnings: list[str] = []
     try:
-        ec2 = boto3.client("ec2", region_name="us-east-1")
+        ec2 = boto3.client("ec2", region_name="us-east-1", config=_boto_cfg)
         try:
             ec2.terminate_instances(
                 InstanceIds=["i-00000000000000000"],
@@ -111,7 +115,7 @@ def _check_aws_scope() -> dict:
     ce_ok = False
     try:
         from datetime import date, timedelta
-        ce = boto3.client("ce", region_name="us-east-1")
+        ce = boto3.client("ce", region_name="us-east-1", config=_boto_cfg)
         end = date.today()
         start = end - timedelta(days=1)
         ce.get_cost_and_usage(
@@ -307,12 +311,45 @@ def print_audit_log(hours: int = 24, limit: int = 50, as_json: bool = False) -> 
 
 # ── Doctor report ─────────────────────────────────────────────────────────────
 
+def _check_path_and_install() -> dict:
+    """Check that the finops and finops-mcp commands are in PATH."""
+    import shutil
+    import sys
+    from pathlib import Path
+
+    issues: list[str] = []
+    recommendations: list[str] = []
+
+    finops_in_path = shutil.which("finops") is not None
+    mcp_in_path = shutil.which("finops-mcp") is not None
+
+    scripts_dir = Path(sys.executable).parent
+
+    if not finops_in_path:
+        issues.append(f"'finops' not in PATH — shell cannot find the setup command")
+        recommendations.append(f"Add to PATH: export PATH=\"{scripts_dir}:$PATH\"  (then add to ~/.zshrc)")
+    if not mcp_in_path:
+        issues.append(f"'finops-mcp' not in PATH — Claude Desktop may fail to start the MCP server")
+        recommendations.append(
+            f"Add to PATH: export PATH=\"{scripts_dir}:$PATH\"  or use uvx: run 'finops setup claude'"
+        )
+
+    return {
+        "name": "PATH / install",
+        "ok": len(issues) == 0,
+        "detail": "Both 'finops' and 'finops-mcp' found in PATH" if not issues else issues[0],
+        "warnings": issues[1:],
+        "recommendation": recommendations[0] if recommendations else None,
+    }
+
+
 def run_doctor(as_json: bool = False) -> int:
     """
     Run all health checks and print a report.
     Returns exit code: 0 = all ok, 1 = warnings/failures.
     """
     checks = [
+        _check_path_and_install(),
         _check_keyring_storage(),
         _check_aws_scope(),
         _check_database(),

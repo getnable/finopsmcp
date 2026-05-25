@@ -29,7 +29,11 @@ def _prompt(msg: str, secret: bool = False, default: str = "") -> str:
     if default:
         msg = f"{msg} [{default}]"
     msg += ": "
-    val = getpass.getpass(msg) if secret else input(msg)
+    try:
+        val = getpass.getpass(msg) if secret else input(msg)
+    except (KeyboardInterrupt, EOFError):
+        print()
+        return default
     return val.strip() or default
 
 
@@ -81,7 +85,10 @@ def setup_aws() -> None:
 
   Already done? Press Enter to continue.
 """)
-    input("  → ")
+    try:
+        input("  → ")
+    except (KeyboardInterrupt, EOFError):
+        print()
 
     print("  Choose authentication method:")
     print("  1) IAM Access Key (simple, works for personal accounts)")
@@ -98,9 +105,28 @@ def setup_aws() -> None:
         role_name = _prompt("  IAM role name (e.g. ReadOnlyAccess)")
         from .security.oauth.aws import start_device_flow, poll_for_token, store_sso_credentials
         print("\n  Starting device authorization flow...")
-        flow = start_device_flow(start_url, region)
-        tokens = poll_for_token(flow)
-        store_sso_credentials(tokens, region, account_id, role_name)
+        try:
+            flow = start_device_flow(start_url, region)
+        except Exception as e:
+            _err(f"Failed to start SSO device flow: {e}")
+            _warn("Check that your SSO Start URL and region are correct.")
+            return
+        try:
+            tokens = poll_for_token(flow)
+        except KeyboardInterrupt:
+            print("\n  SSO authorization cancelled.")
+            return
+        except TimeoutError:
+            _err("SSO authorization timed out (5 minutes). Run 'finops setup aws' to try again.")
+            return
+        except Exception as e:
+            _err(f"SSO token exchange failed: {e}")
+            return
+        try:
+            store_sso_credentials(tokens, region, account_id, role_name)
+        except Exception as e:
+            _err(f"Failed to store SSO credentials: {e}")
+            return
     else:
         print("""
   Create an access key:
@@ -241,9 +267,28 @@ def setup_azure() -> None:
                 pass
             return
     else:
-        state = start_device_flow(tenant_id)
-        result = poll_for_token(state)
-        store_credentials(result, tenant_id, sub_ids)
+        try:
+            state = start_device_flow(tenant_id)
+        except Exception as e:
+            _err(f"Failed to start Azure device flow: {e}")
+            _warn("Check that your Tenant ID is correct.")
+            return
+        try:
+            result = poll_for_token(state)
+        except KeyboardInterrupt:
+            print("\n  Azure authorization cancelled.")
+            return
+        except TimeoutError:
+            _err("Azure authorization timed out. Run 'finops setup azure' to try again.")
+            return
+        except Exception as e:
+            _err(f"Azure token exchange failed: {e}")
+            return
+        try:
+            store_credentials(result, tenant_id, sub_ids)
+        except Exception as e:
+            _err(f"Failed to store Azure credentials: {e}")
+            return
 
     _ok("Azure credentials stored")
     try:
@@ -260,6 +305,11 @@ def setup_azure() -> None:
 def setup_gcp() -> None:
     _section("GCP: Cloud Billing")
     key_path = _prompt("  Path to service account JSON key file")
+    # Validate file exists before proceeding
+    if key_path and not Path(key_path).expanduser().exists():
+        _err(f"File not found: {key_path}")
+        _warn("Create a service account key in GCP Console → IAM → Service Accounts → Keys → Add Key")
+        return
     billing_ids_raw = _prompt("  Billing account IDs (comma-separated, format: XXXXXX-XXXXXX-XXXXXX)")
     billing_ids = [b.strip() for b in billing_ids_raw.split(",") if b.strip()]
     bq_table = _prompt("  BigQuery billing export table (optional, e.g. project.dataset.table)", default="")
@@ -404,7 +454,12 @@ def setup_slack() -> None:
         vault.store("SLACK_BOT_TOKEN", token)
         vault.store("SLACK_CHANNEL", channel)
     digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-    vault.store("FINOPS_DIGEST_CRON", f"{digest_time.split(':')[1]} {digest_time.split(':')[0]} * * *")
+    try:
+        parts = digest_time.split(":")
+        hour, minute = parts[0].strip(), parts[1].strip() if len(parts) > 1 else "0"
+    except Exception:
+        hour, minute = "9", "0"
+    vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
     _ok("Slack configured")
 
 
@@ -415,7 +470,12 @@ def setup_teams() -> None:
     url = _prompt("  Incoming Webhook URL (from Teams channel → Connectors)", secret=True)
     vault.store("TEAMS_WEBHOOK_URL", url)
     digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-    vault.store("FINOPS_DIGEST_CRON", f"{digest_time.split(':')[1]} {digest_time.split(':')[0]} * * *")
+    try:
+        parts = digest_time.split(":")
+        hour, minute = parts[0].strip(), parts[1].strip() if len(parts) > 1 else "0"
+    except Exception:
+        hour, minute = "9", "0"
+    vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
     _ok("Teams configured")
 
 
@@ -466,6 +526,24 @@ def vault_rotate() -> None:
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
+def _check_path_warning() -> None:
+    """
+    Warn the user if the directory containing the `finops` executable is not in PATH.
+    This is the #1 silent failure after `pip install finops-mcp` in a user install.
+    """
+    import shutil
+    if shutil.which("finops") is None:
+        # The command is running (we got here), so find our own location
+        finops_bin_dir = Path(sys.executable).parent
+        _warn(
+            f"The 'finops' command may not be in your PATH after install.\n"
+            f"  Your scripts directory: {finops_bin_dir}\n"
+            f"  Add it to PATH with:\n"
+            f"    export PATH=\"{finops_bin_dir}:$PATH\"\n"
+            f"  Or add that line to your ~/.zshrc / ~/.bashrc"
+        )
+
+
 def main(args: list[str] | None = None) -> None:
     import sys as _sys
     if args is None:
@@ -478,6 +556,9 @@ def main(args: list[str] | None = None) -> None:
 
     from .welcome import show_welcome
     show_welcome()
+
+    # Check PATH early so users know if the command won't be available in new shells
+    _check_path_warning()
 
     # Track setup wizard start
     try:
@@ -1058,7 +1139,15 @@ def _configure_claude_desktop_inner() -> None:
     uvx_bin = shutil.which("uvx")
     finops_bin = shutil.which("finops-mcp")
     if not finops_bin:
-        finops_bin = str(Path(sys.executable).parent / "finops-mcp")
+        # Fall back to the scripts directory next to the current Python interpreter
+        candidate = Path(sys.executable).parent / "finops-mcp"
+        finops_bin = str(candidate)
+        if not candidate.exists():
+            _warn(
+                f"finops-mcp binary not found at {finops_bin}.\n"
+                f"  Make sure `pip install finops-mcp` completed successfully, then run\n"
+                f"  'finops setup claude' again."
+            )
 
     if uvx_bin:
         mcp_entry = {"command": uvx_bin, "args": ["finops-mcp"]}
