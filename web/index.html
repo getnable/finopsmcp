@@ -1230,7 +1230,7 @@ function TrialModal({ onClose }){
       if (window.posthog) posthog.identify(email, { email, plan: 'trial' });
       posthog?.capture('trial_started', { email });
     } catch(err) { /* non-blocking */ }
-    const base = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01";
+    const base = "https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02";
     const url = email
       ? `${base}?prefilled_email=${encodeURIComponent(email)}`
       : base;
