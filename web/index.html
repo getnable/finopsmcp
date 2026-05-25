@@ -235,7 +235,7 @@
   .price ul li::before{content:"·";color:var(--fg-3);width:8px;text-align:center}
   .price ul li.locked{color:var(--fg-4)}
   .price ul li.locked::before{content:"·"}
-  .price .cta{margin-top:auto;padding-top:8px}
+  .price .cta{margin-top:auto;padding-top:8px;padding-bottom:0;border-top:none}
   .price .cta a{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--fg);border-bottom:1px solid var(--line)}
   .price .cta a:hover{border-bottom-color:var(--fg)}
   .price.feat{margin:0 -1px;border-left:1px solid var(--line);padding-left:32px;padding-right:32px}
@@ -325,10 +325,11 @@
     .step{padding:24px!important;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
     .step:nth-child(2n){border-right:0}
     .step:nth-last-child(-n+2){border-bottom:0}
-    .pricing{grid-template-columns:1fr}
-    .price{padding:32px 0!important;border-right:0;border-bottom:1px solid var(--line)}
-    .price.feat{margin:0;padding:32px 0!important;border-left:0}
+    .pricing{grid-template-columns:1fr;grid-auto-rows:auto}
+    .price{padding:32px 0!important;border-right:0;border-bottom:1px solid var(--line);align-self:start}
+    .price.feat{margin:0;padding:32px 0!important;border-left:0;align-self:start}
     .price:last-child{border-bottom:0}
+    .price .cta{margin-top:16px}
     .nav ul{display:none}
     .cta .row{grid-template-columns:1fr;gap:48px}
     .foot{grid-template-columns:1fr 1fr}
