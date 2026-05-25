@@ -246,10 +246,10 @@ export default async function handler(req) {
   }
 
   if (!code) {
-    return new Response(JSON.stringify({ error: "Missing authorization code" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-    });
+    return Response.redirect(
+      "https://getnable.com/account?error=sso_not_configured",
+      302
+    );
   }
 
   const ISSUER = process.env.OIDC_ISSUER;
@@ -264,10 +264,10 @@ export default async function handler(req) {
   const PLAN = process.env.OIDC_PLAN || "pro"; // Enterprise SSO users are always pro
 
   if (!ISSUER || !CLIENT_ID || !CLIENT_SECRET) {
-    return new Response(JSON.stringify({ error: "SSO not configured" }), {
-      status: 503,
-      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-    });
+    return Response.redirect(
+      "https://getnable.com/account?error=sso_not_configured",
+      302
+    );
   }
 
   // Verify CSRF state
