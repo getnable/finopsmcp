@@ -540,7 +540,7 @@ function HeroEmailCapture(){
     <form onSubmit={handleSubmit} method="post" action="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02" style={{marginTop:28,display:"flex",alignItems:"center",gap:0,maxWidth:420,border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
       <input
         type="email"
-        placeholder="you@company.com"
+        placeholder="your@company.com — get the quickstart"
         value={email}
         onChange={e => setEmail(e.target.value)}
         required
@@ -550,6 +550,49 @@ function HeroEmailCapture(){
         {sent ? "Redirecting…" : "Start free →"}
       </button>
     </form>
+    <p style={{marginTop:8,fontSize:12,color:"var(--fg-3)",letterSpacing:"-.005em"}}>Free &middot; No credit card &middot; 2-minute setup</p>
+  );
+}
+
+function BottomCta(){
+  const [email, setEmail] = React.useState('');
+  const [sent, setSent] = React.useState(false);
+
+  async function handleSubmit(e){
+    e.preventDefault();
+    if(sent) return;
+    setSent(true);
+    try {
+      await fetch('/api/subscribe', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email, source: 'bottom_cta' }),
+      });
+      if(window.posthog){ posthog.identify(email, { email, plan: 'free' }); posthog.capture('bottom_cta', { email }); }
+    } catch(err){ /* non-blocking */ }
+    const url = `https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02?prefilled_email=${encodeURIComponent(email)}`;
+    window.location.href = url;
+  }
+
+  return (
+    <div style={{marginTop:48,paddingTop:40,borderTop:"1px solid var(--line)",textAlign:"center"}}>
+      <p style={{fontSize:17,fontWeight:600,color:"var(--fg)",margin:"0 0 6px"}}>Ready to run this on your own data?</p>
+      <p style={{fontSize:14,color:"var(--fg-3)",margin:"0 0 20px"}}>Set up in 2 minutes. Free tier, no credit card.</p>
+      <form onSubmit={handleSubmit} style={{display:"flex",alignItems:"center",gap:0,maxWidth:420,margin:"0 auto",border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
+        <input
+          type="email"
+          placeholder="your@company.com"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          required
+          style={{flex:1,background:"transparent",border:"none",padding:"12px 16px",fontFamily:"'DM Sans',sans-serif",fontSize:15,color:"var(--fg)",outline:"none",minHeight:48}}
+        />
+        <button type="submit" style={{background:"var(--fg)",color:"var(--bg)",border:"none",padding:"12px 20px",fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",minHeight:48,letterSpacing:"-.01em"}}>
+          {sent ? "Redirecting…" : "Start free →"}
+        </button>
+      </form>
+      <p style={{marginTop:8,fontSize:12,color:"var(--fg-3)"}}>Free &middot; No credit card &middot; 2-minute setup</p>
+    </div>
   );
 }
 
@@ -560,7 +603,7 @@ function Hero({ onTrial }){
         <div className="label" style={{marginBottom:18}}>v0.8.33 · 17 connectors · free to start</div>
         <h1 style={{background:"linear-gradient(135deg,var(--fg) 0%,var(--fg-2) 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Find out why<br/>your cloud bill went up.</h1>
         <p className="lede">
-          Type a question. Get the real answer. nable connects your AWS, Azure, GCP, and SaaS billing to your AI editor so you can ask what happened, see exactly which team or resource caused it, and actually do something about it. No dashboards. No SQL. Your data never leaves your machine.
+          Type a question. Get the real answer. nable connects your AWS, Azure, GCP, and SaaS billing to your AI editor so you can ask what happened, see exactly which team or resource caused it, and actually do something about it. No dashboards. No SQL. Your data never leaves your machine — runs locally via MCP, so your billing data never touches our servers.
         </p>
         <HeroEmailCapture />
         <div className="hero-cta" style={{marginTop:12}}>
@@ -573,6 +616,7 @@ function Hero({ onTrial }){
         <Clients />
 
         <Terminal />
+        <BottomCta />
       </div>
     </header>
   );
