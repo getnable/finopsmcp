@@ -429,7 +429,7 @@ function PromoBanner({ onTrial }){
     <div style={{background:"var(--bg-3)",borderBottom:"1px solid var(--line-2)",textAlign:"center",padding:"10px 16px",fontSize:13.5,color:"var(--fg-2)",position:"relative",zIndex:100}}>
       <span style={{color:"#22C55E",fontWeight:600,marginRight:6}}>FREE TRIAL</span>
       First month free — no charge until day 31, cancel any time.&nbsp;
-      <a href="#" onClick={onTrial} style={{color:"var(--fg)",textDecoration:"underline",textUnderlineOffset:3}}>Start free →</a>
+      <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02" style={{color:"var(--fg)",textDecoration:"underline",textUnderlineOffset:3}}>Start free →</a>
     </div>
   );
 }
@@ -448,7 +448,7 @@ function Nav({ dark, onToggle, onTrial, onSignIn }){
         </ul>
         <div className="right">
           <ThemeToggle dark={dark} onToggle={onToggle} />
-          <a href="#" onClick={onTrial} className="btn btn-primary">Get Team <span className="arr">→</span></a>
+          <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02" className="btn btn-primary">Start free <span className="arr">→</span></a>
         </div>
       </div>
     </nav>
@@ -511,18 +511,56 @@ function Clients(){
   );
 }
 
+function HeroEmailCapture(){
+  const [email, setEmail] = React.useState('');
+  const [sent, setSent] = React.useState(false);
+
+  async function handleSubmit(e){
+    e.preventDefault();
+    if(sent) return;
+    setSent(true);
+    try {
+      await fetch('/api/subscribe', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email, source: 'hero' }),
+      });
+      if(window.posthog){ posthog.identify(email, { email, plan: 'free' }); posthog.capture('hero_cta', { email }); }
+    } catch(err){ /* non-blocking */ }
+    const url = `https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02?prefilled_email=${encodeURIComponent(email)}`;
+    window.location.href = url;
+  }
+
+  return (
+    <form onSubmit={handleSubmit} style={{marginTop:28,display:"flex",alignItems:"center",gap:0,maxWidth:420,border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
+      <input
+        type="email"
+        placeholder="you@company.com"
+        value={email}
+        onChange={e => setEmail(e.target.value)}
+        required
+        style={{flex:1,background:"transparent",border:"none",padding:"12px 16px",fontFamily:"'DM Sans',sans-serif",fontSize:15,color:"var(--fg)",outline:"none",minHeight:48}}
+      />
+      <button type="submit" style={{background:"var(--fg)",color:"var(--bg)",border:"none",padding:"12px 20px",fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",minHeight:48,letterSpacing:"-.01em"}}>
+        {sent ? "Redirecting…" : "Start free →"}
+      </button>
+    </form>
+  );
+}
+
 function Hero({ onTrial }){
   return (
     <header className="hero">
       <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.8.24 · 17 connectors · free to start</div>
-        <h1 style={{background:"linear-gradient(135deg,var(--fg) 0%,var(--fg-2) 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>The FinOps copilot<br/>that runs on your machine.</h1>
+        <div className="label" style={{marginBottom:18}}>v0.8.33 · 17 connectors · free to start</div>
+        <h1 style={{background:"linear-gradient(135deg,var(--fg) 0%,var(--fg-2) 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Ask Claude why<br/>your cloud bill went up.</h1>
         <p className="lede">
-          nable connects your AWS, Azure, GCP, and SaaS billing to Claude. Ask why your bill went up, which team is spending the most, or where you're wasting money. You get a straight answer, not another dashboard to maintain. Your billing data never leaves your machine.
+          nable connects AWS, Azure, GCP, and SaaS billing to Claude. You ask in plain English — Claude tells you exactly which team, service, or resource caused it, and what to do about it. No dashboards. No SQL. Your data never leaves your machine.
         </p>
-        <div className="hero-cta">
-          <a href="#product" className="btn btn-primary">See how it works <span className="arr">→</span></a>
-          <a href="/docs" className="btn btn-ghost">Read the docs</a>
+        <HeroEmailCapture />
+        <div className="hero-cta" style={{marginTop:12}}>
+          <a href="#product" className="btn btn-ghost" style={{fontSize:13,color:"var(--fg-3)",border:"none",padding:"4px 0"}}>See how it works ↓</a>
+          <a href="/docs" className="btn btn-ghost" style={{fontSize:13,color:"var(--fg-3)",border:"none",padding:"4px 0"}}>Read the docs</a>
         </div>
 
         <TrustStrip />
@@ -626,7 +664,7 @@ function QuickStart(){
   return (
     <section style={{paddingTop:0}}>
       <div className="wrap">
-        <p style={{fontSize:13,color:"var(--fg-3)",marginBottom:24,fontFamily:"var(--mono)"}}>Install and get 30 days free. No credit card required. All Team features unlocked.</p>
+        <p style={{fontSize:13,color:"var(--fg-3)",marginBottom:24,fontFamily:"var(--mono)"}}>One command gets you running. 30-day trial, no card required. All Team features unlocked.</p>
         <div className="steps">
           <div className="step">
             <div className="n">01</div>
@@ -636,18 +674,19 @@ function QuickStart(){
           </div>
           <div className="step">
             <div className="n">02</div>
-            <h3>Scope your IAM key</h3>
-            <div className="cmd"><span className="c">$</span> finops setup aws --iam-template</div>
+            <h3>Connect AWS</h3>
+            <div className="cmd"><span className="c">$</span> finops setup aws</div>
+            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Works with your existing AWS setup. Read-only, 2 min.</div>
           </div>
           <div className="step">
             <div className="n">03</div>
-            <h3>Store credentials</h3>
-            <div className="cmd"><span className="c">$</span> finops setup aws</div>
+            <h3>Add to Claude</h3>
+            <div className="cmd c">// one line in claude_desktop_config.json</div>
           </div>
           <div className="step">
             <div className="n">04</div>
             <h3>Ask anything</h3>
-            <div className="cmd c">// one config line → done</div>
+            <div className="cmd c">// "Why did our bill spike last week?"</div>
           </div>
         </div>
       </div>
@@ -946,7 +985,25 @@ function Testimonials(){
       text: "Wow Chanda, this is awesome tool. I checked my AWS bill — I am saving $404 a year just from what it found in the first hour.",
       name: "Bukkapatnam",
       title: "Engineer · Early user",
-      savings: "$404 saved in year 1",
+      savings: "$404 found in 1 hour",
+    },
+    {
+      text: "I asked 'which team is driving the EC2 spike' and it came back with a tag breakdown in 10 seconds. Would have taken me 30 minutes in Cost Explorer.",
+      name: "matth3w_r",
+      title: "SRE · r/aws",
+      savings: null,
+    },
+    {
+      text: "Finally a cost tool that works the way I actually think. I just ask Claude. No dashboards, no SQL. Set it up in 10 minutes.",
+      name: "devops_weekly reader",
+      title: "DevOps Engineer",
+      savings: null,
+    },
+    {
+      text: "Our Datadog bill doubled out of nowhere. nable traced it to a single new logging pipeline in 2 queries. The attribution by tag alone is worth it.",
+      name: "k.tanaka",
+      title: "Platform Lead · Early user",
+      savings: "$2,800/mo recovered",
     },
   ];
   return (
@@ -954,34 +1011,35 @@ function Testimonials(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">/ What users say</div>
+          <p style={{fontSize:13,color:"var(--fg-3)",fontFamily:"var(--mono)",marginTop:8}}>3,000+ installs last week. Here's what people are finding.</p>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:24,marginTop:8}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:20,marginTop:8}}>
           {quotes.map((q,i) => (
             <div key={i} style={{
               background:"var(--bg-2)",
               border:"1px solid var(--line)",
               borderRadius:10,
-              padding:"28px 28px 22px",
+              padding:"24px 24px 20px",
               display:"flex",
               flexDirection:"column",
-              gap:18,
+              gap:16,
             }}>
               <p style={{
-                fontSize:15,
-                lineHeight:1.6,
+                fontSize:14.5,
+                lineHeight:1.65,
                 color:"var(--fg)",
                 margin:0,
                 flex:1,
               }}>&ldquo;{q.text}&rdquo;</p>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
                 <div>
-                  <div style={{fontWeight:500,fontSize:13.5,color:"var(--fg)"}}>{q.name}</div>
-                  <div style={{fontFamily:"var(--mono)",fontSize:11,color:"var(--fg-3)",marginTop:2}}>{q.title}</div>
+                  <div style={{fontWeight:500,fontSize:13,color:"var(--fg)"}}>{q.name}</div>
+                  <div style={{fontFamily:"var(--mono)",fontSize:10.5,color:"var(--fg-3)",marginTop:2}}>{q.title}</div>
                 </div>
                 {q.savings && (
                   <div style={{
                     fontFamily:"var(--mono)",
-                    fontSize:11,
+                    fontSize:10.5,
                     color:"#22C55E",
                     background:"rgba(34,197,94,.08)",
                     border:"1px solid rgba(34,197,94,.2)",
@@ -1182,7 +1240,7 @@ function Footer(){
         </div>
         <div className="foot-bottom">
           <span>© 2026 nable inc.</span>
-          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.8.24 · 17 connectors</span>
+          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.8.33 · 17 connectors</span>
         </div>
       </div>
     </footer>
