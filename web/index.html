@@ -1632,6 +1632,14 @@ function App(){
 }
 
 ReactDOM.createRoot(document.getElementById("app")).render(<App />);
+
+// Scroll to hash after React renders (handles navigation from other pages)
+if (window.location.hash) {
+  setTimeout(() => {
+    const el = document.querySelector(window.location.hash);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 120);
+}
 </script>
 
 </body>
