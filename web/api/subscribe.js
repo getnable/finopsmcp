@@ -14,7 +14,7 @@
  *   POSTHOG_API_KEY     — server-side identification for product analytics
  */
 
-export const config = { runtime: "edge" };
+export const config = { maxDuration: 10 };
 
 const RESEND_API   = "https://api.resend.com";
 const LOOPS_API    = "https://app.loops.so/api/v1";
@@ -70,10 +70,9 @@ export default async function handler(req) {
   }
 
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-    });
+    // Bots and scanners probe this endpoint with GET — redirect browsers cleanly
+    // rather than serving a raw JSON error page.
+    return Response.redirect("https://getnable.com", 302);
   }
 
   // Basic rate limiting via IP — edge runtime provides cf headers or x-forwarded-for

@@ -23,6 +23,11 @@
     person_profiles: "identified_only",
     capture_pageview: true,
     capture_pageleave: true,
+    session_recording: {
+      maskAllInputs: true,         // masks email fields so PII stays out of recordings
+      maskTextSelector: "[data-ph-mask]", // opt-in masking for sensitive copy
+    },
+    disable_session_recording: false,
   });
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -516,7 +521,7 @@ function HeroEmailCapture(){
   const [sent, setSent] = React.useState(false);
 
   async function handleSubmit(e){
-    e.preventDefault();
+    e.preventDefault(); // always first — prevents native form action firing on any code path
     if(sent) return;
     setSent(true);
     try {

@@ -156,6 +156,7 @@
       <a href="#pagerduty"     class="nav-link">PagerDuty</a>
       <a href="#newrelic"      class="nav-link">New Relic</a>
       <a href="#langfuse"      class="nav-link">Langfuse</a>
+      <a href="#databricks"    class="nav-link">Databricks</a>
       <a href="#invoices"      class="nav-link">Invoice emails</a>
 
       <div class="nav-group">Alerts & automation</div>
@@ -188,7 +189,7 @@
     <div id="quickstart" class="section-anchor">
       <div class="badge mb-4">Getting started</div>
       <h1 class="text-3xl font-black mb-3" style="color:var(--text)">Get up and running in 5 minutes</h1>
-      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">Install nable, connect a provider, then ask Claude about your cloud costs in plain English. You don't need all 17 connectors. Start with the one you care about most.</p>
+      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">Install nable, connect a provider, then ask your AI editor about your cloud costs in plain English. You don't need all 17 connectors. Start with the one you care about most.</p>
 
       <div class="trial-banner mb-8">
         <span class="trial-badge">30-day free trial</span>
@@ -228,11 +229,11 @@
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">3</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Restart Claude Desktop and ask</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Restart your AI editor and ask</p>
             <div class="card p-4" style="background:var(--surface2)">
-              <p class="text-sm" style="color:var(--muted);font-style:italic">"What did we spend on AWS last month?"</p>
-              <p class="text-sm mt-2" style="color:var(--muted);font-style:italic">"Any anomalies in our Datadog costs this week?"</p>
-              <p class="text-sm mt-2" style="color:var(--muted);font-style:italic">"Show me rightsizing opportunities for EC2."</p>
+              <p class="text-sm" style="color:var(--muted);font-style:italic">"Why did our AWS bill jump so much this month?"</p>
+              <p class="text-sm mt-2" style="color:var(--muted);font-style:italic">"Is there anything obviously wasteful in us-east-1?"</p>
+              <p class="text-sm mt-2" style="color:var(--muted);font-style:italic">"Which team is burning the most on EC2 right now?"</p>
             </div>
           </div>
         </div>
@@ -738,6 +739,44 @@
 
     <hr class="divider"/>
 
+    <!-- Databricks -->
+    <div id="databricks" class="section-anchor">
+      <h2 class="section-title">
+        <span class="pbadge">db</span>
+        Databricks
+      </h2>
+      <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">DBU consumption and cost data from the Databricks REST API. Surfaces cluster-level spend, job costs, workspace totals, idle clusters, missing auto-termination, and autoscale efficiency. Uses the Billable Usage Download API when an account ID is set; otherwise estimates from cluster uptime and job run history.</p>
+      <div class="space-y-3 mb-4">
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">In your Databricks workspace, go to <strong>Settings → Developer → Access Tokens → Generate new token</strong>. For service principals, use the OAuth M2M flow instead.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><div class="code-block p-3 text-xs"><span style="color:var(--blue-hi)">finops setup databricks</span></div></div></div>
+      </div>
+      <div class="card p-5 mb-4">
+        <div class="code-block p-3 text-xs">
+          <span class="env-key">DATABRICKS_HOST</span>=<span class="env-val">https://adb-1234567890.1.azuredatabricks.net</span><br/>
+          <span class="env-key">DATABRICKS_TOKEN</span>=<span class="env-val">dapi...</span><br/>
+          <span class="env-key">DATABRICKS_ACCOUNT_ID</span>=<span class="env-val">your-account-id</span> &nbsp;<span style="color:var(--dim)"># optional — enables exact billing via the Usage Download API</span><br/>
+          <span class="env-key">DATABRICKS_DBU_PRICE</span>=<span class="env-val">0.40</span> &nbsp;<span style="color:var(--dim)"># optional — override with your contract rate (default $0.40/DBU)</span>
+        </div>
+      </div>
+      <div class="card p-4" style="border-left: 3px solid var(--yellow, #f59e0b);">
+        <p class="text-xs font-semibold mb-1" style="color:var(--text)">Cost estimation note</p>
+        <p class="text-xs" style="color:var(--muted)">Without <code class="text-xs px-1 rounded" style="background:var(--surface2)">DATABRICKS_ACCOUNT_ID</code>, costs are estimated from cluster uptime and job run duration using list DBU rates. Set your account ID and an account-level token for exact figures from the Billable Usage API. Override <code class="text-xs px-1 rounded" style="background:var(--surface2)">DATABRICKS_DBU_PRICE</code> with your negotiated rate for accurate dollar amounts.</p>
+      </div>
+      <p class="text-xs mt-4 mb-2 font-semibold" style="color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase;">Available tools</p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <tbody>
+            <tr class="border-b" style="border-color:var(--line)"><td class="py-2 pr-4 font-mono" style="color:var(--blue-hi)">get_databricks_costs</td><td class="py-2" style="color:var(--muted)">Total spend by service type for a date range</td></tr>
+            <tr class="border-b" style="border-color:var(--line)"><td class="py-2 pr-4 font-mono" style="color:var(--blue-hi)">get_databricks_dbu_breakdown</td><td class="py-2" style="color:var(--muted)">DBU by cluster type, top 10 clusters and jobs, savings tip if all-purpose clusters dominate</td></tr>
+            <tr class="border-b" style="border-color:var(--line)"><td class="py-2 pr-4 font-mono" style="color:var(--blue-hi)">get_databricks_cluster_efficiency</td><td class="py-2" style="color:var(--muted)">Audit every cluster for missing auto-termination, idle time, fixed vs autoscale, and missing tags</td></tr>
+            <tr><td class="py-2 pr-4 font-mono" style="color:var(--blue-hi)">get_databricks_job_costs</td><td class="py-2" style="color:var(--muted)">Top N most expensive job runs with DBU, duration, and estimated cost</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
     <!-- Invoice emails -->
     <div id="invoices" class="section-anchor">
       <h2 class="section-title">
@@ -749,7 +788,7 @@
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Enable IMAP access on your mailbox (Gmail: Settings → See all settings → Forwarding and POP/IMAP).</p></div></div>
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">2</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">If using Gmail, create an <strong>App Password</strong> (requires 2FA): Google Account → Security → App passwords.</p></div></div>
-        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Set the env vars below in your Claude Desktop MCP config or shell environment. Run <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">finops setup</code> to store them securely in the vault.</p></div></div>
+        <div class="flex items-start gap-3"><div class="step-num mt-0.5">3</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Set the env vars below in your MCP config or shell environment. Run <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">finops setup</code> to store them securely in the vault.</p></div></div>
       </div>
       <div class="card p-5">
         <div class="code-block p-3 text-xs">
@@ -995,7 +1034,7 @@
     <div id="features" class="section-anchor">
       <div class="badge mb-4">Intelligence</div>
       <h2 class="text-2xl font-black mb-3" style="color:var(--text)">What nable actually does</h2>
-      <p class="text-sm leading-relaxed mb-6" style="color:var(--muted)">nable isn't just a connector that pipes your billing data into Claude. It runs active analysis (anomaly detection, CloudWatch-based rightsizing, waste pattern scanning, and commitment modeling) and surfaces the output as MCP tools your AI client can query, reason about, and act on.</p>
+      <p class="text-sm leading-relaxed mb-6" style="color:var(--muted)">nable isn't just a connector that pipes your billing data into an AI. It runs active analysis (anomaly detection, CloudWatch-based rightsizing, waste pattern scanning, and commitment modeling) and surfaces the output as MCP tools your AI editor can query, reason about, and act on.</p>
 
       <hr class="divider"/>
 
@@ -1006,7 +1045,7 @@
           AWS deep audit
         </h2>
         <p class="text-sm leading-relaxed mb-3" style="color:var(--muted)">The intent here is to give you two tools side by side: AWS Compute Optimizer for standard rightsizing, and nable's audit for the deeper layer underneath it. Optimizer will tell you to downsize an instance. nable will also tell you the EBS volume attached to it is gp2, the snapshot from 6 months ago is still accruing charges, and the CloudTrail trail recording data events in every region is costing you $400/mo nobody noticed.</p>
-        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">The patterns below are just what ships out of the box. The audit engine is built to be extended, and the tools are designed to be composed: ask Claude to "find every dollar of waste in us-east-1" and it will pull Compute Optimizer, run the deep audit, and cross-reference both.</p>
+        <p class="text-sm leading-relaxed mb-4" style="color:var(--muted)">The patterns below are just what ships out of the box. The audit engine is built to be extended, and the tools are designed to be composed: ask your AI editor to "find every dollar of waste in us-east-1" and it will pull Compute Optimizer, run the deep audit, and cross-reference both.</p>
 
         <div class="mb-4" style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
           <div style="display:grid;grid-template-columns:200px 1fr;font-size:12px;font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);padding:8px 16px;background:var(--surface2);border-bottom:1px solid var(--border)">
@@ -1038,7 +1077,7 @@
           <span style="color:var(--blue-hi)">scan_cloudwatch_waste</span>()
         </div>
 
-        <div class="info-box">Results are sorted by estimated monthly savings. Each finding includes resource ID, region, waste type, severity, and a detail explanation, ready for Claude to triage and act on.</div>
+        <div class="info-box">Results are sorted by estimated monthly savings. Each finding includes resource ID, region, waste type, severity, and a plain-English explanation you can act on immediately.</div>
       </div>
 
       <hr class="divider"/>
@@ -1242,6 +1281,10 @@
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">LANGFUSE_PUBLIC_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Langfuse</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">LANGFUSE_SECRET_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Langfuse</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">LANGFUSE_HOST</td><td class="px-4 py-2.5" style="color:var(--muted)">Langfuse</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DATABRICKS_HOST</td><td class="px-4 py-2.5" style="color:var(--muted)">Databricks</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DATABRICKS_TOKEN</td><td class="px-4 py-2.5" style="color:var(--muted)">Databricks</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DATABRICKS_ACCOUNT_ID</td><td class="px-4 py-2.5" style="color:var(--muted)">Databricks</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">DATABRICKS_DBU_PRICE</td><td class="px-4 py-2.5" style="color:var(--muted)">Databricks</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">STRIPE_SECRET_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Stripe</td><td class="px-4 py-2.5"><span class="badge badge-red">Required</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">SLACK_WEBHOOK_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Slack</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">TEAMS_WEBHOOK_URL</td><td class="px-4 py-2.5" style="color:var(--muted)">Teams</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
@@ -1273,7 +1316,7 @@
             <tr style="border-bottom:1px solid var(--border)"><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_ROLE_MAP</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">OIDC_DEFAULT_ROLE</td><td class="px-4 py-2.5" style="color:var(--muted)">SSO</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
             <tr style="border-top:1px solid var(--line);background:var(--bg-3)"><td class="px-4 py-2.5 font-mono text-xs font-semibold" colspan="3" style="color:var(--blue)">License</td></tr>
-            <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">FINOPS_LICENSE_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Your Team license key. Set this in the env block of your Claude Desktop MCP config to unlock Team features.</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
+            <tr><td class="px-4 py-2.5 font-mono" style="color:var(--blue-hi)">FINOPS_LICENSE_KEY</td><td class="px-4 py-2.5" style="color:var(--muted)">Your Team license key. Set this in the env block of your MCP config to unlock Team features.</td><td class="px-4 py-2.5"><span class="badge badge-yellow">Optional</span></td></tr>
           </tbody>
         </table>
       </div>
