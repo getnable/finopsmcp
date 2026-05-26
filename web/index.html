@@ -531,15 +531,16 @@ function HeroEmailCapture(){
     if(status !== 'idle') return;
     setStatus('loading');
     try {
-      await fetch('/api/subscribe', {
+      const res = await fetch('/api/subscribe', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ email, source: 'hero' }),
       });
+      if(!res.ok) throw new Error('subscribe failed');
       if(window.posthog){ posthog.identify(email, { email, plan: 'free' }); posthog.capture('hero_cta', { email }); }
       if(window.rdt) rdt('track', 'SignUp', {}, {email: email});
-    } catch(err){ /* non-blocking */ }
-    setStatus('sent');
+      setStatus('sent');
+    } catch(err){ setStatus('idle'); console.warn('subscribe failed', err); }
   }
 
   function handleCopy(){

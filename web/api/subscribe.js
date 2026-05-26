@@ -14,7 +14,7 @@
  *   POSTHOG_API_KEY     — server-side identification for product analytics
  */
 
-export const config = { maxDuration: 10 };
+export const config = { runtime: 'edge', maxDuration: 10 };
 
 const RESEND_API   = "https://api.resend.com";
 const LOOPS_API    = "https://app.loops.so/api/v1";
