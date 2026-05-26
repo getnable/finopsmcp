@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from .base import BaseConnector, CostEntry, CostSummary
@@ -137,6 +137,37 @@ class AzureConnector(BaseConnector):
             merged.entries.extend(summary.entries)
 
         return merged
+
+    async def get_costs_as_focus(
+        self,
+        start_date: date,
+        end_date: date,
+        granularity: str = "MONTHLY",
+    ) -> list:
+        """Return cost data as a list of FocusRecord objects."""
+        from ..focus import normalize
+
+        summary = await self.get_costs(start_date, end_date, granularity=granularity)
+        period_start = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
+        period_end = datetime(end_date.year, end_date.month, end_date.day, tzinfo=timezone.utc)
+
+        records = []
+        for entry in summary.entries:
+            raw: dict[str, Any] = {
+                "BilledCost": entry.amount,
+                "EffectiveCost": entry.amount,
+                "ServiceName": entry.service,
+                "ResourceLocation": entry.region,
+                "SubscriptionId": entry.account_id,
+                "SubscriptionName": entry.account_name,
+                "ChargeType": "Usage",
+                "BillingPeriodStartDate": period_start.isoformat(),
+                "BillingPeriodEndDate": period_end.isoformat(),
+                "UsageDate": period_start.isoformat(),
+                "Tags": entry.tags,
+            }
+            records.append(normalize("azure", raw))
+        return records
 
     async def list_accounts(self) -> list[dict[str, str]]:
         return [{"id": s, "name": s} for s in self._subscription_ids]

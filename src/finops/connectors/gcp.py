@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from .base import BaseConnector, CostEntry, CostSummary
@@ -160,6 +160,33 @@ class GCPConnector(BaseConnector):
             merged.entries.extend(summary.entries)
 
         return merged
+
+    async def get_costs_as_focus(
+        self,
+        start_date: date,
+        end_date: date,
+        granularity: str = "MONTHLY",
+    ) -> list:
+        """Return cost data as a list of FocusRecord objects."""
+        from ..focus import normalize
+
+        summary = await self.get_costs(start_date, end_date, granularity=granularity)
+
+        # Derive invoice_month from start_date for BillingPeriod derivation
+        invoice_month = f"{start_date.year}{start_date.month:02d}"
+
+        records = []
+        for entry in summary.entries:
+            raw: dict[str, Any] = {
+                "cost": entry.amount,
+                "service": {"description": entry.service},
+                "location": {"region": entry.region},
+                "project": {"id": entry.account_id, "name": entry.account_name},
+                "invoice_month": invoice_month,
+                "labels": entry.tags,
+            }
+            records.append(normalize("gcp", raw))
+        return records
 
     async def list_accounts(self) -> list[dict[str, str]]:
         return [{"id": b, "name": b} for b in self._billing_account_ids]

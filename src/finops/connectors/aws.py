@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from .base import BaseConnector, CostEntry, CostSummary
@@ -184,6 +184,39 @@ class AWSConnector(BaseConnector):
             merged.entries.extend(summary.entries)
 
         return merged
+
+    async def get_costs_as_focus(
+        self,
+        start_date: date,
+        end_date: date,
+        granularity: str = "MONTHLY",
+    ) -> list:
+        """Return cost data as a list of FocusRecord objects."""
+        from ..focus import normalize
+
+        summary = await self.get_costs(start_date, end_date, granularity=granularity)
+        period_start = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
+        period_end = datetime(end_date.year, end_date.month, end_date.day, tzinfo=timezone.utc)
+
+        records = []
+        for entry in summary.entries:
+            raw: dict[str, Any] = {
+                "line_item_unblended_cost": entry.amount,
+                "line_item_blended_cost": entry.amount,
+                "pricing_public_on_demand_cost": entry.amount,
+                "product_servicename": entry.service,
+                "line_item_product_code": entry.service,
+                "product_region": entry.region,
+                "line_item_usage_account_id": entry.account_id,
+                "line_item_line_item_type": "Usage",
+                "bill_billing_period_start_date": period_start.isoformat(),
+                "bill_billing_period_end_date": period_end.isoformat(),
+                "line_item_usage_start_date": period_start.isoformat(),
+                "line_item_usage_end_date": period_end.isoformat(),
+                "resource_tags": entry.tags,
+            }
+            records.append(normalize("aws", raw))
+        return records
 
     async def list_accounts(self) -> list[dict[str, str]]:
         if self._role_arns:

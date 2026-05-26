@@ -6463,5 +6463,136 @@ async def get_databricks_job_costs(
     }
 
 
+@mcp.tool()
+async def get_focus_costs(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    provider: str | None = None,
+    group_by: str | None = None,
+) -> dict:
+    """
+    Return unified cost data in FOCUS 2.0 format across all connected cloud providers.
+
+    FOCUS (FinOps Open Cost and Usage Specification) is an open standard for
+    normalizing cloud cost data across AWS, Azure, and GCP into a vendor-neutral schema.
+
+    Args:
+        start_date: ISO date string (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date:   ISO date string (YYYY-MM-DD). Defaults to today.
+        provider:   Optional filter. One of "aws", "azure", "gcp". Omit for all providers.
+        group_by:   Optional grouping. One of "ServiceName", "ServiceCategory",
+                    "RegionId", "SubAccountId". Returns aggregated totals when set.
+
+    Returns:
+        FOCUS 2.0 normalized cost records with fields: BilledCost, EffectiveCost,
+        ServiceName, ServiceCategory, ProviderName, RegionId, SubAccountId, Tags, etc.
+    """
+    require_role("viewer")
+
+    from .focus import normalize as _focus_normalize
+    from dataclasses import asdict
+
+    sd, ed = _default_dates()
+    if start_date:
+        try:
+            sd = date.fromisoformat(start_date)
+        except ValueError:
+            return {"error": f"Invalid start_date: {start_date!r}. Use YYYY-MM-DD."}
+    if end_date:
+        try:
+            ed = date.fromisoformat(end_date)
+        except ValueError:
+            return {"error": f"Invalid end_date: {end_date!r}. Use YYYY-MM-DD."}
+
+    # Resolve which cloud connectors to query
+    active_cloud = await _active(subset=_CLOUD_CONNECTORS)
+    if provider:
+        p = provider.lower()
+        if p not in _CLOUD_CONNECTORS:
+            return {"error": f"Unknown provider {provider!r}. Supported: aws, azure, gcp."}
+        if p not in active_cloud:
+            return {"error": f"Provider {provider!r} is not configured. Run 'finops-mcp setup' to connect it."}
+        active_cloud = {p: active_cloud[p]}
+
+    if not active_cloud:
+        return {"error": "No cloud providers are configured. Run 'finops-mcp setup' to connect AWS, Azure, or GCP."}
+
+    all_records = []
+    errors: dict[str, str] = {}
+
+    for name, connector in active_cloud.items():
+        try:
+            records = await connector.get_costs_as_focus(sd, ed)
+            all_records.extend(records)
+        except Exception as exc:
+            log.error("FOCUS fetch failed: provider=%s error=%s", name, exc)
+            errors[name] = str(exc)
+
+    if not all_records and errors:
+        return {"error": "All providers failed", "details": errors}
+
+    # Serialize records to dicts, converting datetime fields to ISO strings
+    def _serialize(rec) -> dict:
+        d = asdict(rec)
+        for key in ("BillingPeriodStart", "BillingPeriodEnd", "ChargePeriodStart", "ChargePeriodEnd"):
+            if d.get(key):
+                d[key] = d[key].isoformat()
+        return d
+
+    serialized = [_serialize(r) for r in all_records]
+
+    # Apply grouping if requested
+    valid_group_by = {"ServiceName", "ServiceCategory", "RegionId", "SubAccountId"}
+    if group_by and group_by in valid_group_by:
+        grouped: dict[str, dict] = {}
+        for rec in all_records:
+            key_val = getattr(rec, group_by, None) or "__none__"
+            if key_val not in grouped:
+                grouped[key_val] = {
+                    "key": key_val,
+                    "group_by": group_by,
+                    "BilledCost": 0.0,
+                    "EffectiveCost": 0.0,
+                    "ListCost": 0.0,
+                    "record_count": 0,
+                    "providers": set(),
+                }
+            g = grouped[key_val]
+            g["BilledCost"] = round(g["BilledCost"] + rec.BilledCost, 4)
+            g["EffectiveCost"] = round(g["EffectiveCost"] + rec.EffectiveCost, 4)
+            g["ListCost"] = round(g["ListCost"] + rec.ListCost, 4)
+            g["record_count"] += 1
+            g["providers"].add(rec.ProviderName)
+
+        # Convert sets to sorted lists for JSON serialization
+        grouped_list = []
+        for g in sorted(grouped.values(), key=lambda x: -x["BilledCost"]):
+            g["providers"] = sorted(g["providers"])
+            grouped_list.append(g)
+
+        return {
+            "focus_version": "2.0",
+            "period": {"start": sd.isoformat(), "end": ed.isoformat()},
+            "providers_queried": sorted(active_cloud.keys()),
+            "group_by": group_by,
+            "total_billed_cost": round(sum(r.BilledCost for r in all_records), 4),
+            "total_effective_cost": round(sum(r.EffectiveCost for r in all_records), 4),
+            "record_count": len(all_records),
+            "grouped": grouped_list,
+            **({"errors": errors} if errors else {}),
+        }
+
+    return {
+        "focus_version": "2.0",
+        "period": {"start": sd.isoformat(), "end": ed.isoformat()},
+        "providers_queried": sorted(active_cloud.keys()),
+        "total_billed_cost": round(sum(r.BilledCost for r in all_records), 4),
+        "total_effective_cost": round(sum(r.EffectiveCost for r in all_records), 4),
+        "record_count": len(serialized),
+        "records": serialized,
+        **({"errors": errors} if errors else {}),
+    }
+
+
 if __name__ == "__main__":
     main()
