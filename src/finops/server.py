@@ -6782,5 +6782,109 @@ async def get_focus_costs(
     }
 
 
+# ── AWS service-specific analyzers ───────────────────────────────────────────
+
+@mcp.tool()
+async def get_bedrock_costs(days: int = 30, account: str = "") -> str:
+    """
+    Break down Amazon Bedrock costs by model and token type.
+
+    Shows spend per model (Claude, Titan, Llama, etc.), input vs output token
+    split, cost per 1k tokens, and trend vs the prior period.
+
+    Args:
+        days:    Number of days to analyze (default 30).
+        account: Reserved for future multi-account support.
+    """
+    try:
+        from .connectors.aws_services.bedrock import BedrockAnalyzer
+        analyzer = BedrockAnalyzer(region="us-east-1")
+        return analyzer.get_costs(days=days)
+    except Exception as e:
+        return f"Bedrock cost analysis unavailable: {e}"
+
+
+@mcp.tool()
+async def get_documentdb_costs(days: int = 30, account: str = "") -> str:
+    """
+    Analyze Amazon DocumentDB costs by cluster, with rightsizing recommendations.
+
+    Pulls Cost Explorer spend, breaks down compute vs storage, and checks
+    CloudWatch CPU utilization to flag clusters that can be downsized.
+
+    Args:
+        days:    Number of days to analyze (default 30).
+        account: Reserved for future multi-account support.
+    """
+    try:
+        from .connectors.aws_services.documentdb import DocumentDBAnalyzer
+        region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+        analyzer = DocumentDBAnalyzer(region=region)
+        return analyzer.get_costs(days=days)
+    except Exception as e:
+        return f"DocumentDB cost analysis unavailable: {e}"
+
+
+@mcp.tool()
+async def get_kendra_costs(account: str = "") -> str:
+    """
+    Analyze Amazon Kendra costs by index, with edition and usage flags.
+
+    Lists all Kendra indexes, their edition (DEVELOPER vs ENTERPRISE),
+    monthly cost, query volume, and cost per query. Flags indexes that are
+    oversized for their query volume or appear unused.
+
+    Args:
+        account: Reserved for future multi-account support.
+    """
+    try:
+        from .connectors.aws_services.kendra import KendraAnalyzer
+        region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+        analyzer = KendraAnalyzer(region=region)
+        return analyzer.get_costs()
+    except Exception as e:
+        return f"Kendra cost analysis unavailable: {e}"
+
+
+@mcp.tool()
+async def get_textract_costs(days: int = 30, account: str = "") -> str:
+    """
+    Analyze AWS Textract costs by API type (sync vs async).
+
+    Breaks down Textract spend by usage type and flags high-cost sync API
+    usage where async alternatives would reduce cost by up to 96%.
+
+    Args:
+        days:    Number of days to analyze (default 30).
+        account: Reserved for future multi-account support.
+    """
+    try:
+        from .connectors.aws_services.textract import TextractAnalyzer
+        analyzer = TextractAnalyzer()
+        return analyzer.get_costs(days=days)
+    except Exception as e:
+        return f"Textract cost analysis unavailable: {e}"
+
+
+@mcp.tool()
+async def get_marketplace_costs(days: int = 30, account: str = "") -> str:
+    """
+    Break down AWS Marketplace costs by product and vendor.
+
+    Surfaces per-product spend, month-over-month trends, and flags
+    products with more than $1,000 in spend for review.
+
+    Args:
+        days:    Number of days to analyze (default 30).
+        account: Reserved for future multi-account support.
+    """
+    try:
+        from .connectors.aws_services.marketplace import MarketplaceAnalyzer
+        analyzer = MarketplaceAnalyzer()
+        return analyzer.get_costs(days=days)
+    except Exception as e:
+        return f"Marketplace cost analysis unavailable: {e}"
+
+
 if __name__ == "__main__":
     main()
