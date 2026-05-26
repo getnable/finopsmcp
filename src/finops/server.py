@@ -49,8 +49,19 @@ from .connectors.databricks import DatabricksConnector
 load_dotenv()
 
 from . import telemetry as _telemetry  # noqa: E402
+from .persona import get_persona, get_persona_mcp_context
 
-mcp = FastMCP("finops")
+_persona = get_persona()
+_persona_ctx = get_persona_mcp_context()
+
+mcp = FastMCP("finops", description=f"""nable: cloud cost intelligence MCP server.
+
+Connects to AWS, Azure, GCP, and 10+ SaaS providers to answer cost questions,
+detect anomalies, recommend rightsizing, and attribute spend to teams and services.
+
+USER PERSONA: {_persona}
+RESPONSE FORMAT INSTRUCTION: {_persona_ctx}
+""")
 
 # ── telemetry: auto-instrument every tool call ───────────────────────────────
 # Wraps FastMCP's tool() decorator so record_tool_call fires on every invocation
@@ -4636,6 +4647,10 @@ def whoami() -> dict:
         - "What's my role?"
         - "Do I have analyst access?"
     """
+    from .persona import get_persona, PERSONAS
+    current_persona = get_persona()
+    persona_label = PERSONAS[current_persona]["label"]
+
     ident = current_identity()
     if ident is None:
         from .storage.db import storage_mode
@@ -4648,10 +4663,14 @@ def whoami() -> dict:
                 "Set FINOPS_REQUIRE_AUTH=1 and issue API keys to enforce RBAC."
             ),
             "storage": mode,
+            "persona": current_persona,
+            "persona_label": persona_label,
         }
     return {
         "mode": "authenticated",
         **ident.as_dict(),
+        "persona": current_persona,
+        "persona_label": persona_label,
     }
 
 

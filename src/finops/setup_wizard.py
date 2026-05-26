@@ -244,6 +244,146 @@ def setup_aws() -> None:
             pass
 
 
+def setup_aws_account() -> None:
+    """
+    Add a named AWS account to ~/.finops-mcp/accounts.yaml.
+    Called by: finops setup aws (new multi-account flow)
+    """
+    from .accounts import AccountConfig, add_account, list_accounts, set_default_account
+
+    _section("AWS: Add Account")
+
+    existing = list_accounts()
+    if existing:
+        print(f"  Currently configured accounts: {', '.join(a.name for a in existing)}\n")
+
+    name = _prompt("  Account name (e.g. production, anway, staging)")
+    if not name:
+        _warn("No name entered. Run 'finops setup aws' to try again.")
+        return
+
+    region = _prompt("  AWS region", default="us-east-1")
+
+    use_role = _prompt("  Use a cross-account IAM role? (y/N)", default="n").lower()
+    role_arn = ""
+    if use_role in ("y", "yes"):
+        role_arn = _prompt("  Role ARN (arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME)")
+
+    use_profile = _prompt("  Use an AWS CLI profile? (y/N)", default="n").lower()
+    profile = ""
+    if use_profile in ("y", "yes"):
+        profile = _prompt("  AWS CLI profile name (from ~/.aws/config)")
+
+    account_cfg = AccountConfig(
+        name=name,
+        region=region,
+        role_arn=role_arn,
+        profile=profile,
+    )
+
+    # Try to resolve account ID
+    try:
+        from .accounts import get_boto3_session
+        session = get_boto3_session(account_cfg)
+        sts = session.client("sts")
+        identity = sts.get_caller_identity()
+        account_cfg.account_id = identity["Account"]
+        _ok(f"Connected: account {account_cfg.account_id}")
+    except Exception as e:
+        _warn(f"Could not verify credentials: {e}")
+        account_id_input = _prompt("  AWS Account ID (12 digits, or leave blank)")
+        account_cfg.account_id = account_id_input.strip()
+
+    add_account(account_cfg)
+    _ok(f"Account '{name}' saved to ~/.finops-mcp/accounts.yaml")
+
+    existing_after = list_accounts()
+    if len(existing_after) == 1:
+        set_default_account(name)
+        _ok(f"'{name}' set as default account")
+    else:
+        make_default = _prompt(f"  Set '{name}' as the default account? (y/N)", default="n").lower()
+        if make_default in ("y", "yes"):
+            set_default_account(name)
+            _ok(f"'{name}' set as default account")
+
+    try:
+        from . import telemetry as _tel
+        _tel._send_event(_tel._get_install_id(), "provider_connected", {
+            "provider": "aws",
+            "auth_method": "role_arn" if role_arn else "profile" if profile else "default",
+            "multi_account": True,
+        })
+    except Exception:
+        pass
+
+
+def setup_aws_org() -> None:
+    """
+    Auto-discover accounts from AWS Organizations and add them to the registry.
+    Called by: finops setup aws --org
+    """
+    from .accounts import discover_org_accounts, add_account, AccountConfig
+
+    _section("AWS Organizations: Auto-discover Accounts")
+
+    print("  Calling AWS Organizations API with your current credentials...")
+
+    try:
+        accounts = discover_org_accounts(add_all=False)
+    except Exception as e:
+        _err(f"Could not list org accounts: {e}")
+        _warn("Make sure your credentials have organizations:ListAccounts permission.")
+        return
+
+    if not accounts:
+        _warn("No active accounts found in your organization.")
+        return
+
+    print(f"\n  Found {len(accounts)} active account(s):\n")
+    for i, acct in enumerate(accounts, 1):
+        print(f"    {i:3d}) {acct['account_id']}  {acct['account_name']}")
+
+    print()
+    role_name = _prompt("  IAM role name to assume in each account", default="FinOpsReadOnly")
+    add_all = _prompt("  Add all accounts to the registry? (y/N)", default="n").lower()
+
+    added = []
+    if add_all in ("y", "yes"):
+        for acct in accounts:
+            cfg = AccountConfig(
+                name=acct["account_name"].lower().replace(" ", "-"),
+                account_id=acct["account_id"],
+                region="us-east-1",
+                role_arn=f"arn:aws:iam::{acct['account_id']}:role/{role_name}",
+            )
+            add_account(cfg)
+            added.append(cfg.name)
+        _ok(f"Added {len(added)} account(s): {', '.join(added)}")
+    else:
+        raw = _prompt("  Enter account numbers to add (comma-separated, or blank to skip)")
+        indices = [int(x.strip()) - 1 for x in raw.split(",") if x.strip().isdigit()]
+        for i in indices:
+            if 0 <= i < len(accounts):
+                acct = accounts[i]
+                cfg = AccountConfig(
+                    name=acct["account_name"].lower().replace(" ", "-"),
+                    account_id=acct["account_id"],
+                    region="us-east-1",
+                    role_arn=f"arn:aws:iam::{acct['account_id']}:role/{role_name}",
+                )
+                add_account(cfg)
+                added.append(cfg.name)
+        if added:
+            _ok(f"Added {len(added)} account(s): {', '.join(added)}")
+        else:
+            _warn("No accounts added.")
+
+    if added:
+        print(f"\n  Accounts are stored in ~/.finops-mcp/accounts.yaml")
+        print("  Use list_aws_accounts() in Claude to see them, or get_cost_summary(account=...) to query one.")
+
+
 def setup_azure() -> None:
     _section("Azure: Cost Management")
     print("  Choose authentication method:")
@@ -559,6 +699,67 @@ def _check_path_warning() -> None:
         )
 
 
+def _wizard_select_persona() -> None:
+    """Interactive persona selection shown during the full setup wizard."""
+    from .persona import PERSONAS, set_persona, get_persona
+
+    _section("Your role")
+    print("  What best describes your role?\n")
+
+    persona_keys = list(PERSONAS.keys())
+    for i, key in enumerate(persona_keys, 1):
+        p = PERSONAS[key]
+        label = p["label"].ljust(28)
+        print(f"  [{i}] {label}{p['description']}")
+
+    current = get_persona()
+    print(f"\n  (You can change this later with: finops config --persona <role>)")
+
+    raw = _prompt("\n  Choice", default="1")
+    try:
+        idx = int(raw.strip()) - 1
+        if 0 <= idx < len(persona_keys):
+            chosen = persona_keys[idx]
+        else:
+            chosen = current
+    except (ValueError, IndexError):
+        chosen = current
+
+    try:
+        set_persona(chosen)
+        _ok(f"Persona set to: {PERSONAS[chosen]['label']}")
+    except Exception as e:
+        _warn(f"Could not save persona: {e}")
+
+
+def _handle_config_cmd(parsed: object) -> None:
+    """Handle: finops config --persona <role>"""
+    from .persona import PERSONAS, set_persona, get_persona
+
+    persona_val = getattr(parsed, "persona", "")
+
+    if persona_val:
+        if persona_val not in PERSONAS:
+            valid = ", ".join(PERSONAS.keys())
+            _err(f"Unknown persona '{persona_val}'. Valid options: {valid}")
+            return
+        try:
+            set_persona(persona_val)
+            _ok(f"Persona set to: {PERSONAS[persona_val]['label']}")
+            print(f"\n  Responses will now be formatted for: {PERSONAS[persona_val]['description']}")
+            print("  Restart your MCP client to apply the change.\n")
+        except Exception as e:
+            _err(f"Could not save persona: {e}")
+    else:
+        current = get_persona()
+        print(f"\n  Current persona: {PERSONAS[current]['label']} ({current})")
+        print("\n  Available personas:")
+        for key, p in PERSONAS.items():
+            marker = "*" if key == current else " "
+            print(f"    {marker} {key:<12} {p['label']}")
+        print("\n  Change with: finops config --persona <role>\n")
+
+
 def main(args: list[str] | None = None) -> None:
     import sys as _sys
     if args is None:
@@ -594,7 +795,8 @@ def main(args: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="finops setup", description="FinOps MCP provider configuration wizard")
     sub = parser.add_subparsers(dest="cmd")
 
-    sub.add_parser("aws")
+    aws_p = sub.add_parser("aws")
+    aws_p.add_argument("--org", action="store_true", help="Auto-discover accounts from AWS Organizations")
     sub.add_parser("azure")
     sub.add_parser("gcp")
     sub.add_parser("datadog")
@@ -618,6 +820,10 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("databricks")
     sub.add_parser("claude")    # configure Claude Desktop MCP entry
     sub.add_parser("aws-cur")   # deploy CUR CloudFormation stack
+    config_p = sub.add_parser("config")  # configure user preferences
+    config_p.add_argument("--persona", metavar="ROLE", default="",
+                          help="Set response persona: engineer, finops, finance, platform")
+
     lic_p = sub.add_parser("license")  # activate a Team license key
     lic_p.add_argument("key", nargs="?", default="", help="License key (FINOPS-1-...)")
     sub.add_parser("license-status")   # check current license without restarting
@@ -722,6 +928,10 @@ def main(args: list[str] | None = None) -> None:
         ]),
     }
 
+    if parsed.cmd == "config":
+        _handle_config_cmd(parsed)
+        return
+
     if parsed.cmd == "vault":
         if parsed.action == "list":
             vault_list()
@@ -790,6 +1000,8 @@ def main(args: list[str] | None = None) -> None:
         dispatch[parsed.cmd]()
     else:
         # Interactive full setup
+        _wizard_select_persona()
+
         providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
