@@ -181,6 +181,7 @@ export default async function handler(req) {
       headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from: "nable <hello@getnable.com>",
+        reply_to: "chandanirving@gmail.com",
         to: [email],
         subject: "Your finops-mcp setup (2 min)",
         html: welcomeHtml(email),

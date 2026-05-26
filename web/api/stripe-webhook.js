@@ -140,6 +140,7 @@ async function sendLicenseEmail(to, licenseKey) {
     },
     body: JSON.stringify({
       from: "nable <hello@getnable.com>",
+      reply_to: "chandanirving@gmail.com",
       to: [to],
       subject: "Your nable Team license key",
       html,
