@@ -54,7 +54,7 @@ from .persona import get_persona, get_persona_mcp_context
 _persona = get_persona()
 _persona_ctx = get_persona_mcp_context()
 
-mcp = FastMCP("finops", description=f"""nable: cloud cost intelligence MCP server.
+mcp = FastMCP("finops", instructions=f"""nable: cloud cost intelligence MCP server.
 
 Connects to AWS, Azure, GCP, and 10+ SaaS providers to answer cost questions,
 detect anomalies, recommend rightsizing, and attribute spend to teams and services.
