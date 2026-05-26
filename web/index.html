@@ -452,7 +452,7 @@ function Nav({ dark, onToggle, onTrial, onSignIn }){
           <li><a href="#product">Product</a></li>
           <li><a href="#connectors">Connectors</a></li>
           <li><a href="#pricing">Pricing</a></li>
-          <li><a href="/docs">Docs</a></li>
+          <li><a href="/docs" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked', { location: 'nav' }); }}>Docs</a></li>
           <li><a href="/account">Account</a></li>
         </ul>
         <div className="right">
@@ -641,7 +641,7 @@ function Hero({ onTrial }){
         <HeroEmailCapture />
         <div className="hero-cta" style={{marginTop:12}}>
           <a href="#product" className="btn btn-ghost" style={{fontSize:13,color:"var(--fg-3)",border:"none",padding:"4px 0"}}>See how it works ↓</a>
-          <a href="/docs" className="btn btn-ghost" style={{fontSize:13,color:"var(--fg-3)",border:"none",padding:"4px 0"}}>Read the docs</a>
+          <a href="/docs" className="btn btn-ghost" style={{fontSize:13,color:"var(--fg-3)",border:"none",padding:"4px 0"}} onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked', { location: 'hero' }); }}>Read the docs</a>
         </div>
 
         <TrustStrip />
@@ -1040,7 +1040,7 @@ function Pricing({ onTrial }){
               <li>Unit economics per customer, API call, and feature</li>
               <li>Org-wide cost rollup across all accounts</li>
             </ul>
-            <div className="cta"><a href="#" onClick={onTrial}>Subscribe: first month free →</a></div>
+            <div className="cta"><a href="#" onClick={(e)=>{ if(window.posthog) posthog.capture('team_subscribe_clicked'); onTrial(e); }}>Subscribe: first month free →</a></div>
           </div>
 
           {/* Enterprise */}
@@ -1310,11 +1310,11 @@ function Footer(){
             <a href="#product">Live demo</a>
             <a href="#connectors">Connectors</a>
             <a href="#pricing">Pricing</a>
-            <a href="/docs">Install guide</a>
+            <a href="/docs" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked', { location: 'footer_product' }); }}>Install guide</a>
           </div>
           <div>
             <h5>Resources</h5>
-            <a href="/docs">Docs</a>
+            <a href="/docs" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked', { location: 'footer_resources' }); }}>Docs</a>
             <a href="https://github.com/chaandannn/finopsmcp/releases" target="_blank" rel="noopener">Changelog</a>
             <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP overview</a>
           </div>
@@ -1612,6 +1612,51 @@ function App(){
 }
 
 ReactDOM.createRoot(document.getElementById("app")).render(<App />);
+
+// Scroll depth milestones: fires once per session at 25/50/75/90%
+(function() {
+  const milestones = [25, 50, 75, 90];
+  const fired = new Set();
+  window.addEventListener('scroll', function() {
+    const scrollable = document.body.scrollHeight - window.innerHeight;
+    if (scrollable <= 0) return;
+    const pct = Math.round((window.scrollY / scrollable) * 100);
+    milestones.forEach(function(m) {
+      if (pct >= m && !fired.has(m)) {
+        fired.add(m);
+        if (window.posthog) posthog.capture('scroll_depth', { pct: m });
+      }
+    });
+  }, { passive: true });
+})();
+
+// Terminal demo viewed: fires once when terminal section enters viewport
+(function() {
+  const termEl = document.querySelector('.terminal');
+  if (termEl && window.IntersectionObserver) {
+    const observer = new IntersectionObserver(function(entries) {
+      if (entries[0].isIntersecting) {
+        if (window.posthog) posthog.capture('terminal_demo_viewed');
+        observer.disconnect();
+      }
+    }, { threshold: 0.5 });
+    observer.observe(termEl);
+  }
+})();
+
+// Pricing section viewed: fires once when #pricing enters viewport
+(function() {
+  const pricingEl = document.getElementById('pricing');
+  if (pricingEl && window.IntersectionObserver) {
+    const observer = new IntersectionObserver(function(entries) {
+      if (entries[0].isIntersecting) {
+        if (window.posthog) posthog.capture('pricing_viewed');
+        observer.disconnect();
+      }
+    }, { threshold: 0.3 });
+    observer.observe(pricingEl);
+  }
+})();
 
 // Scroll to hash after React renders (handles navigation from other pages)
 if (window.location.hash) {
