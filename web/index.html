@@ -1614,6 +1614,7 @@ function App(){
 ReactDOM.createRoot(document.getElementById("app")).render(<App />);
 
 // Scroll depth milestones: fires once per session at 25/50/75/90%
+// posthog stub is synchronously available so no guard needed here
 (function() {
   const milestones = [25, 50, 75, 90];
   const fired = new Set();
@@ -1624,39 +1625,38 @@ ReactDOM.createRoot(document.getElementById("app")).render(<App />);
     milestones.forEach(function(m) {
       if (pct >= m && !fired.has(m)) {
         fired.add(m);
-        if (window.posthog) posthog.capture('scroll_depth', { pct: m });
+        posthog.capture('scroll_depth', { pct: m });
       }
     });
   }, { passive: true });
 })();
 
-// Terminal demo viewed: fires once when terminal section enters viewport
-(function() {
-  const termEl = document.querySelector('.terminal');
+// IntersectionObserver setup deferred so React has time to render the DOM
+setTimeout(function() {
+  // Terminal demo viewed: fires once when terminal section enters viewport
+  var termEl = document.querySelector('.terminal');
   if (termEl && window.IntersectionObserver) {
-    const observer = new IntersectionObserver(function(entries) {
+    var termObs = new IntersectionObserver(function(entries) {
       if (entries[0].isIntersecting) {
-        if (window.posthog) posthog.capture('terminal_demo_viewed');
-        observer.disconnect();
+        posthog.capture('terminal_demo_viewed');
+        termObs.disconnect();
       }
     }, { threshold: 0.5 });
-    observer.observe(termEl);
+    termObs.observe(termEl);
   }
-})();
 
-// Pricing section viewed: fires once when #pricing enters viewport
-(function() {
-  const pricingEl = document.getElementById('pricing');
+  // Pricing section viewed: fires once when #pricing enters viewport
+  var pricingEl = document.getElementById('pricing');
   if (pricingEl && window.IntersectionObserver) {
-    const observer = new IntersectionObserver(function(entries) {
+    var pricingObs = new IntersectionObserver(function(entries) {
       if (entries[0].isIntersecting) {
-        if (window.posthog) posthog.capture('pricing_viewed');
-        observer.disconnect();
+        posthog.capture('pricing_viewed');
+        pricingObs.disconnect();
       }
     }, { threshold: 0.3 });
-    observer.observe(pricingEl);
+    pricingObs.observe(pricingEl);
   }
-})();
+}, 600);
 
 // Scroll to hash after React renders (handles navigation from other pages)
 if (window.location.hash) {
