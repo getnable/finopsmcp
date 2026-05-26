@@ -476,6 +476,7 @@ async def get_cost_summary(
     start_date: str | None = None,
     end_date: str | None = None,
     granularity: str = "MONTHLY",
+    account: str | None = None,
 ) -> dict:
     """
     Get total spend summarized by service, account, and region.
@@ -486,11 +487,14 @@ async def get_cost_summary(
         start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
         end_date: ISO date. Defaults to today.
         granularity: "DAILY" or "MONTHLY".
+        account: Named AWS account from accounts.yaml (e.g. "anway", "easystreet").
+                 Uses the default account when omitted.
 
     Examples:
         - "How much did we spend total last month?"
         - "What did we spend on SaaS tools this quarter?"
         - "Give me an AWS cost summary for January"
+        - "What did the anway account spend this month?"
     """
     from .demo_data import is_demo, get_demo_response
     if is_demo():
@@ -502,16 +506,31 @@ async def get_cost_summary(
     if end_date:
         ed = date.fromisoformat(end_date)
 
-    if provider:
+    # Multi-account: swap in an account-specific AWS connector when requested
+    if account:
+        from .accounts import get_account, get_default_account, get_boto3_session
+        from .connectors.aws import AWSConnector as _AWSConnector
+        acct_cfg = get_account(account) or get_default_account()
+        if not acct_cfg:
+            return {"error": f"Account '{account}' not found. Run list_aws_accounts() to see configured accounts."}
+        session = get_boto3_session(acct_cfg)
+        acct_connector = _AWSConnector(session=session)
+        pool = {"aws": acct_connector}
+        targets = {"aws": acct_connector} if await acct_connector.is_configured() else {}
+        if not targets:
+            return {"error": f"Could not connect to account '{acct_cfg.name}'. Check credentials."}
+    elif provider:
         pool = {provider: _ALL_CONNECTORS[provider]} if provider in _ALL_CONNECTORS else {}
+        targets = await _active(pool)
     elif category == "cloud":
         pool = _CLOUD_CONNECTORS
+        targets = await _active(pool)
     elif category == "saas":
         pool = _SAAS_CONNECTORS
+        targets = await _active(pool)
     else:
         pool = _ALL_CONNECTORS
-
-    targets = await _active(pool)
+        targets = await _active(pool)
     if not targets:
         return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect a cloud provider, then restart your AI client."}
 
@@ -548,6 +567,7 @@ async def get_costs_by_service(
     category: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    account: str | None = None,
 ) -> dict:
     """
     Cost breakdown by service, optionally filtered to a keyword.
@@ -558,12 +578,14 @@ async def get_costs_by_service(
         category: "cloud" or "saas". None = all.
         start_date: ISO date. Defaults to 30 days ago.
         end_date: ISO date. Defaults to today.
+        account: Named AWS account from accounts.yaml (e.g. "anway", "easystreet").
 
     Examples:
         - "How much did compute cost us across all clouds?"
         - "What did we spend on storage?"
         - "How much are we paying for GitHub Actions?"
         - "Show me all Datadog product costs"
+        - "What did the easystreet account spend on EC2?"
     """
     sd, ed = _default_dates()
     if start_date:
@@ -571,16 +593,24 @@ async def get_costs_by_service(
     if end_date:
         ed = date.fromisoformat(end_date)
 
-    if provider:
+    if account:
+        from .accounts import get_account, get_default_account, get_boto3_session
+        from .connectors.aws import AWSConnector as _AWSConnector
+        acct_cfg = get_account(account) or get_default_account()
+        if not acct_cfg:
+            return {"error": f"Account '{account}' not found. Run list_aws_accounts() to see configured accounts."}
+        session = get_boto3_session(acct_cfg)
+        acct_connector = _AWSConnector(session=session)
+        targets = {"aws": acct_connector} if await acct_connector.is_configured() else {}
+    elif provider:
         pool = {provider: _ALL_CONNECTORS[provider]} if provider in _ALL_CONNECTORS else {}
+        targets = await _active(pool)
     elif category == "cloud":
-        pool = _CLOUD_CONNECTORS
+        targets = await _active(_CLOUD_CONNECTORS)
     elif category == "saas":
-        pool = _SAAS_CONNECTORS
+        targets = await _active(_SAAS_CONNECTORS)
     else:
-        pool = _ALL_CONNECTORS
-
-    targets = await _active(pool)
+        targets = await _active(_ALL_CONNECTORS)
     if not targets:
         return {"error": "No providers configured."}
 
@@ -630,6 +660,7 @@ async def get_top_cost_drivers(
     category: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    account: str | None = None,
 ) -> dict:
     """
     Return the top N most expensive services across all configured providers.
@@ -640,11 +671,13 @@ async def get_top_cost_drivers(
         category: "cloud" or "saas". None = all.
         start_date: ISO date. Defaults to 30 days ago.
         end_date: ISO date. Defaults to today.
+        account: Named AWS account from accounts.yaml (e.g. "anway", "easystreet").
 
     Examples:
         - "What are our biggest cost drivers this month?"
         - "Top 5 most expensive things in AWS"
         - "What SaaS tools are costing us the most?"
+        - "Top cost drivers in the easystreet account"
     """
     result = await get_costs_by_service(
         service_filter=None,
@@ -652,6 +685,7 @@ async def get_top_cost_drivers(
         category=category,
         start_date=start_date,
         end_date=end_date,
+        account=account,
     )
     if "error" in result:
         return result
@@ -793,6 +827,128 @@ async def list_accounts(provider: str | None = None) -> dict:
         except Exception as exc:
             result[name] = [{"error": str(exc)}]
     return result
+
+
+@mcp.tool()
+async def list_aws_accounts() -> dict:
+    """
+    List all AWS accounts configured in ~/.finops-mcp/accounts.yaml.
+
+    Shows each account's name, account ID, region, and auth method.
+    Use account names as the 'account' parameter in cost tools like get_cost_summary.
+
+    Examples:
+        - "What AWS accounts do I have configured?"
+        - "List all my AWS accounts"
+        - "Which account is the default?"
+    """
+    try:
+        from .accounts import list_accounts as _list, get_default_account
+        accounts = _list()
+        default = get_default_account()
+        default_name = default.name if default else ""
+
+        if not accounts:
+            return {
+                "accounts": [],
+                "message": (
+                    "No accounts configured. Run 'finops setup aws' to add one, "
+                    "or 'finops setup aws --org' to auto-discover from AWS Organizations."
+                ),
+            }
+
+        return {
+            "default_account": default_name,
+            "count": len(accounts),
+            "accounts": [
+                {
+                    "name": a.name,
+                    "account_id": a.account_id,
+                    "region": a.region,
+                    "auth": "role_arn" if a.role_arn else "profile" if a.profile else "default_credentials",
+                    "is_default": a.name == default_name,
+                    "tags": a.tags,
+                }
+                for a in accounts
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_cost_summary_all_accounts(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    granularity: str = "MONTHLY",
+) -> dict:
+    """
+    Fan out cost queries across ALL configured AWS accounts and return a combined
+    view sorted by total spend. Shows each account's total and top services.
+
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date. Defaults to today.
+        granularity: "DAILY" or "MONTHLY".
+
+    Examples:
+        - "Show costs across all my AWS accounts"
+        - "What is each client account spending this month?"
+        - "Compare spend across anway and easystreet accounts"
+    """
+    from datetime import date, timedelta
+    from .accounts import list_accounts as _list_accounts, get_boto3_session
+    from .connectors.aws import AWSConnector
+
+    sd = date.fromisoformat(start_date) if start_date else date.today() - timedelta(days=30)
+    ed = date.fromisoformat(end_date) if end_date else date.today()
+
+    accounts = _list_accounts()
+    if not accounts:
+        return {
+            "error": (
+                "No accounts configured. Run 'finops setup aws' to add one, "
+                "or 'finops setup aws --org' to auto-discover from AWS Organizations."
+            )
+        }
+
+    results = []
+    grand_total = 0.0
+    errors: dict[str, str] = {}
+
+    for acct in accounts:
+        try:
+            session = get_boto3_session(acct)
+            connector = AWSConnector(session=session)
+            summary = await connector.get_costs(sd, ed, granularity=granularity)
+            top_services = sorted(summary.by_service.items(), key=lambda x: -x[1])[:5]
+            results.append({
+                "account": acct.name,
+                "account_id": acct.account_id or summary.by_account and list(summary.by_account.keys())[0] or "",
+                "total_usd": round(summary.total_usd, 4),
+                "total_formatted": _fmt_usd(summary.total_usd),
+                "top_services": [
+                    {"service": s, "amount_usd": round(a, 4)} for s, a in top_services
+                ],
+            })
+            grand_total += summary.total_usd
+        except Exception as exc:
+            errors[acct.name] = str(exc)
+
+    results.sort(key=lambda x: -x["total_usd"])
+    for r in results:
+        r["pct_of_total"] = round(r["total_usd"] / grand_total * 100, 1) if grand_total else 0
+
+    out: dict = {
+        "period": {"start": sd.isoformat(), "end": ed.isoformat()},
+        "grand_total_usd": round(grand_total, 4),
+        "grand_total_formatted": _fmt_usd(grand_total),
+        "account_count": len(results),
+        "accounts": results,
+    }
+    if errors:
+        out["errors"] = errors
+    return out
 
 
 @mcp.tool()
@@ -1073,6 +1229,7 @@ async def get_anomalies(
     provider: str | None = None,
     severity: str | None = None,
     limit: int = 20,
+    account: str | None = None,
 ) -> dict:
     """
     Return active (unacknowledged) cost anomalies detected from historical baselines.
@@ -1081,11 +1238,13 @@ async def get_anomalies(
         provider: Filter to a specific provider. None = all.
         severity: "high", "medium", or "low". None = all severities.
         limit: Max anomalies to return (default 20).
+        account: Named AWS account from accounts.yaml to filter results.
 
     Examples:
         - "Are there any cost anomalies I should know about?"
         - "Show me high-severity cost spikes"
         - "What spiked in AWS this week?"
+        - "Any anomalies in the anway account?"
 
     Note: Anomalies require at least 7 days of snapshot history.
           Run 'finops snapshot' or wait for the daily job to accumulate data.
@@ -1096,7 +1255,17 @@ async def get_anomalies(
 
     from .anomaly.detector import get_active_anomalies
 
+    # Resolve account_id filter when a named account is requested
+    account_id_filter: str | None = None
+    if account:
+        from .accounts import get_account, get_default_account
+        acct_cfg = get_account(account) or get_default_account()
+        if acct_cfg and acct_cfg.account_id:
+            account_id_filter = acct_cfg.account_id
+
     rows = get_active_anomalies(provider=provider, severity=severity, limit=limit)
+    if account_id_filter and rows:
+        rows = [r for r in rows if r.get("account_id") == account_id_filter]
     if not rows:
         return {
             "anomalies": [],

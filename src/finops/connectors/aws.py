@@ -10,7 +10,12 @@ from .base import BaseConnector, CostEntry, CostSummary
 class AWSConnector(BaseConnector):
     provider = "aws"
 
-    def __init__(self) -> None:
+    def __init__(self, session=None) -> None:
+        """
+        session: optional boto3.Session to use for all calls.
+        If not provided, falls back to environment-based role ARNs or default credentials.
+        """
+        self._session = session  # set when created for a specific account
         self._role_arns: list[str] = [
             arn.strip()
             for arn in os.getenv("AWS_ROLE_ARNS", "").split(",")
@@ -20,6 +25,11 @@ class AWSConnector(BaseConnector):
     async def is_configured(self) -> bool:
         try:
             import boto3  # noqa: F401
+
+            if self._session:
+                # Validate that the injected session has working credentials
+                creds = self._session.get_credentials()
+                return creds is not None
 
             # Either explicit creds or a role/instance profile must be resolvable
             import botocore.session
@@ -34,6 +44,10 @@ class AWSConnector(BaseConnector):
 
     def _make_client(self, role_arn: str | None = None):
         import boto3
+
+        # If a session was injected (via account registry), use it directly
+        if self._session and not role_arn:
+            return self._session.client("ce", region_name="us-east-1")
 
         if role_arn:
             sts = boto3.client("sts")
@@ -53,7 +67,10 @@ class AWSConnector(BaseConnector):
 
         if role_arn:
             return role_arn.split(":")[4]
-        sts = boto3.client("sts")
+        if self._session:
+            sts = self._session.client("sts")
+        else:
+            sts = boto3.client("sts")
         return sts.get_caller_identity()["Account"]
 
     def _build_summary(

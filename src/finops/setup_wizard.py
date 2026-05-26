@@ -847,7 +847,7 @@ def main(args: list[str] | None = None) -> None:
     print("\n  nable setup: all credentials stay on your machine\n")
 
     dispatch = {
-        "aws": setup_aws,
+        "aws": setup_aws_account,
         "azure": setup_azure,
         "gcp": setup_gcp,
         "slack": setup_slack,
@@ -995,6 +995,13 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "infra":
         _run_infra_overview(getattr(parsed, "provider", ""))
+        return
+    elif parsed.cmd == "aws":
+        # Route: --org flag triggers org discovery, otherwise account registration
+        if getattr(parsed, "org", False):
+            setup_aws_org()
+        else:
+            setup_aws_account()
         return
     elif parsed.cmd in dispatch:
         dispatch[parsed.cmd]()
