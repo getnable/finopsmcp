@@ -90,19 +90,14 @@ async function sendLicenseEmail(to, licenseKey) {
   <!-- Step 1 -->
   <div style="margin-bottom:20px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 1 — </strong>Set it in your environment:
+      <strong style="color:#1a1915;">Step 1 — </strong>Open your MCP config file. In Claude Desktop, go to <strong style="color:#1a1915;">Settings &rsaquo; Developer &rsaquo; Edit Config</strong>. In Cursor or Windsurf, open <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">.cursor/mcp.json</code> or <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">.windsurf/mcp.json</code> in your project root.
     </p>
-    <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
-      <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
-        FINOPS_LICENSE_KEY=${licenseKey}
-      </code>
-    </div>
   </div>
 
   <!-- Step 2 -->
   <div style="margin-bottom:20px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 2 — </strong>Add the key to your Claude Desktop config. Open <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">~/Library/Application Support/Claude/claude_desktop_config.json</code> and add <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">FINOPS_LICENSE_KEY</code> to the <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">env</code> block for the finops server:
+      <strong style="color:#1a1915;">Step 2 — </strong>Add your license key to the <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">env</code> block for the finops server:
     </p>
     <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
       <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
@@ -116,7 +111,7 @@ async function sendLicenseEmail(to, licenseKey) {
   <!-- Step 3 -->
   <div style="margin-bottom:36px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 3 — </strong>Restart Claude Desktop. Team features unlock immediately.
+      <strong style="color:#1a1915;">Step 3 — </strong>Save the file and restart your editor. Team features unlock immediately.
     </p>
   </div>
 
@@ -144,7 +139,7 @@ async function sendLicenseEmail(to, licenseKey) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: "nable <noreply@getnable.com>",
+      from: "nable <hello@getnable.com>",
       to: [to],
       subject: "Your nable Team license key",
       html,
