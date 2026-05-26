@@ -246,10 +246,12 @@ def setup_aws() -> None:
 
 def setup_aws_account() -> None:
     """
-    Add a named AWS account to ~/.finops-mcp/accounts.yaml.
-    Called by: finops setup aws (new multi-account flow)
+    Add a named AWS account to ~/.finops-mcp/accounts.yaml and store
+    credentials so the user never has to run aws configure or edit JSON.
+    Called by: finops setup aws
     """
     from .accounts import AccountConfig, add_account, list_accounts, set_default_account
+    from .security.vault import Vault
 
     _section("AWS: Add Account")
 
@@ -257,22 +259,70 @@ def setup_aws_account() -> None:
     if existing:
         print(f"  Currently configured accounts: {', '.join(a.name for a in existing)}\n")
 
-    name = _prompt("  Account name (e.g. production, anway, staging)")
+    name = _prompt("  Account name (e.g. production, staging, easystreet)")
     if not name:
         _warn("No name entered. Run 'finops setup aws' to try again.")
         return
 
     region = _prompt("  AWS region", default="us-east-1")
+    while region not in _VALID_AWS_REGIONS:
+        _warn(f"'{region}' is not a valid AWS region. Examples: us-east-1, us-west-2, eu-west-1")
+        region = _prompt("  AWS region", default="us-east-1")
 
-    use_role = _prompt("  Use a cross-account IAM role? (y/N)", default="n").lower()
+    print("\n  How should nable authenticate with this account?")
+    print("  1) IAM access key  (most common)")
+    print("  2) Cross-account IAM role ARN")
+    print("  3) AWS CLI profile  (~/.aws/config)")
+    cred_choice = _prompt("  Choice", default="1")
+
+    access_key = ""
+    secret_key = ""
     role_arn = ""
-    if use_role in ("y", "yes"):
-        role_arn = _prompt("  Role ARN (arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME)")
-
-    use_profile = _prompt("  Use an AWS CLI profile? (y/N)", default="n").lower()
     profile = ""
-    if use_profile in ("y", "yes"):
+    auth_method = "access_key"
+
+    if cred_choice == "2":
+        role_arn = _prompt("  Role ARN (arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME)")
+        auth_method = "role_arn"
+
+    elif cred_choice == "3":
         profile = _prompt("  AWS CLI profile name (from ~/.aws/config)")
+        auth_method = "profile"
+
+    else:
+        # IAM access key — collect and store here so the user never has to
+        # run aws configure or manually edit claude_desktop_config.json.
+        print("""
+  Create an access key in the AWS Console:
+    1. IAM → Users → your user → Security credentials
+    2. Access keys → Create access key → choose "Other" → Create
+    3. Copy both values below (the secret is only shown once)
+""")
+        access_key = _prompt("  AWS Access Key ID (starts with AKIA...)")
+        while not access_key.startswith("AK") or len(access_key) < 16:
+            if not access_key:
+                _warn("No Access Key ID entered. Run 'finops setup aws' to try again.")
+                return
+            _warn("That doesn't look like a valid Access Key ID (should start with AKIA, 20 chars)")
+            access_key = _prompt("  AWS Access Key ID")
+
+        secret_key = _prompt("  AWS Secret Access Key", secret=True)
+        while len(secret_key) < 20:
+            if not secret_key:
+                _warn("No Secret Access Key entered. Run 'finops setup aws' to try again.")
+                return
+            _warn("That doesn't look like a valid Secret Access Key")
+            secret_key = _prompt("  AWS Secret Access Key", secret=True)
+
+        # Store in vault and expose to current process so the connection test works
+        vault = Vault.default()
+        vault.store("AWS_ACCESS_KEY_ID", access_key)
+        vault.store("AWS_SECRET_ACCESS_KEY", secret_key)
+        vault.store("AWS_DEFAULT_REGION", region)
+        os.environ["AWS_ACCESS_KEY_ID"] = access_key
+        os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
+        os.environ["AWS_DEFAULT_REGION"] = region
+        _ok("AWS credentials stored in vault")
 
     account_cfg = AccountConfig(
         name=name,
@@ -281,7 +331,7 @@ def setup_aws_account() -> None:
         profile=profile,
     )
 
-    # Try to resolve account ID
+    # Verify connectivity and resolve account ID
     try:
         from .accounts import get_boto3_session
         session = get_boto3_session(account_cfg)
@@ -289,6 +339,25 @@ def setup_aws_account() -> None:
         identity = sts.get_caller_identity()
         account_cfg.account_id = identity["Account"]
         _ok(f"Connected: account {account_cfg.account_id}")
+
+        # Check Cost Explorer while we have valid creds
+        try:
+            from datetime import date, timedelta
+            ce = session.client("ce", region_name="us-east-1")
+            end = date.today()
+            ce.get_cost_and_usage(
+                TimePeriod={"Start": (end - timedelta(days=1)).isoformat(), "End": end.isoformat()},
+                Granularity="DAILY",
+                Metrics=["UnblendedCost"],
+            )
+            _ok("Cost Explorer access confirmed")
+        except Exception as ce_err:
+            err_str = str(ce_err)
+            if "AccessDenied" in err_str or "AuthFailure" in err_str:
+                _warn("Missing ce:GetCostAndUsage. Run 'finops setup aws --iam-template' for the policy.")
+            elif "DataUnavailableException" in err_str:
+                _warn("Cost Explorer enabled but AWS hasn't backfilled data yet (up to 24 h). Try again tomorrow.")
+
     except Exception as e:
         _warn(f"Could not verify credentials: {e}")
         account_id_input = _prompt("  AWS Account ID (12 digits, or leave blank)")
@@ -307,11 +376,16 @@ def setup_aws_account() -> None:
             set_default_account(name)
             _ok(f"'{name}' set as default account")
 
+    # Write credentials directly into Claude Desktop config so the user
+    # never has to touch the JSON manually.
+    if access_key:
+        _inject_aws_into_claude_config(access_key, secret_key, region)
+
     try:
         from . import telemetry as _tel
         _tel._send_event(_tel._get_install_id(), "provider_connected", {
             "provider": "aws",
-            "auth_method": "role_arn" if role_arn else "profile" if profile else "default",
+            "auth_method": auth_method,
             "multi_account": True,
         })
     except Exception:
@@ -1241,6 +1315,57 @@ def _inject_license_into_claude_config(key: str) -> None:
         print(f'       "FINOPS_LICENSE_KEY": "{key}"')
 
 
+def _inject_aws_into_claude_config(access_key: str, secret_key: str, region: str) -> None:
+    """
+    Write AWS credentials into the finops MCP server's env block in
+    claude_desktop_config.json so the server subprocess inherits them.
+    Safe to call multiple times; existing keys are overwritten, others left alone.
+    """
+    import json
+    import platform
+
+    if platform.system() == "Darwin":
+        config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    elif platform.system() == "Windows":
+        config_path = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
+    else:
+        config_path = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+
+    if not config_path.exists():
+        # Claude Desktop not yet configured. The credentials are in the vault;
+        # _configure_claude_desktop_inner will inject them when it runs.
+        print("\n  (Claude Desktop config not found yet. Run 'finops setup claude' to register")
+        print("   nable and the credentials will be included automatically.)")
+        return
+
+    try:
+        try:
+            config = json.loads(config_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            config = {}
+
+        servers = config.get("mcpServers", {})
+        updated_server = None
+        for server_name, server_cfg in servers.items():
+            if "finops" in server_name.lower() or "nable" in server_name.lower():
+                env = server_cfg.setdefault("env", {})
+                env["AWS_ACCESS_KEY_ID"] = access_key
+                env["AWS_SECRET_ACCESS_KEY"] = secret_key
+                env["AWS_DEFAULT_REGION"] = region
+                updated_server = server_name
+
+        if updated_server:
+            config_path.write_text(json.dumps(config, indent=2) + "\n")
+            _ok(f"AWS credentials written to Claude Desktop config ({updated_server}).")
+            print("  Restart Claude Desktop to apply.")
+        else:
+            print("\n  nable is not yet in Claude Desktop config.")
+            print("  Run 'finops setup claude' to register it. AWS credentials will be included.")
+    except Exception as e:
+        _warn(f"Could not update Claude Desktop config: {e}")
+        print("  Credentials are saved in the vault and will load at MCP server startup.")
+
+
 def _run_aws_cur_setup() -> None:
     """
     Interactive AWS CUR CloudFormation deployment.
@@ -1402,9 +1527,27 @@ def _configure_claude_desktop_inner() -> None:
 
     config.setdefault("mcpServers", {})
 
+    # Pull any credentials already stored in the vault so they land in the
+    # env block automatically. The user then never has to edit the JSON.
+    vault_env: dict[str, str] = {}
+    try:
+        from .security.vault import Vault
+        _v = Vault.default()
+        for _k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "FINOPS_LICENSE_KEY"):
+            _val = _v.get(_k)
+            if _val:
+                vault_env[_k] = _val
+    except Exception:
+        pass
+
+    if vault_env:
+        mcp_entry["env"] = {**vault_env, **mcp_entry.get("env", {})}
+
     existing = config["mcpServers"].get("finops", {})
-    # Already up-to-date?
-    if existing == mcp_entry:
+    # Already up-to-date? (compare command/args only, env may differ)
+    existing_base = {k: v for k, v in existing.items() if k != "env"}
+    new_base = {k: v for k, v in mcp_entry.items() if k != "env"}
+    if existing_base == new_base and not vault_env:
         _ok(f"Claude Desktop already configured: {display_cmd}")
         return
 
@@ -1414,8 +1557,10 @@ def _configure_claude_desktop_inner() -> None:
     print(f"  Command:     {display_cmd}")
     if uvx_bin:
         print(f"  (uvx mode: works on corporate machines without PATH changes)")
+    if vault_env:
+        print(f"  (including {len(vault_env)} credential(s) from vault)")
     if existing:
-        print(f"  (replaces existing: {existing.get('command', '?')})")
+        print(f"  (updates existing entry)")
     print(f"  ──────────────────────────────────────────────────")
 
     try:
@@ -1429,6 +1574,12 @@ def _configure_claude_desktop_inner() -> None:
         print("  Skipped. Add manually:")
         _print_manual_config(mcp_entry)
         return
+
+    # Preserve any env keys already in the existing entry that we're not overwriting
+    if existing.get("env"):
+        merged_env = {**existing["env"], **mcp_entry.get("env", {})}
+        if merged_env:
+            mcp_entry["env"] = merged_env
 
     config["mcpServers"]["finops"] = mcp_entry
 

@@ -72,16 +72,16 @@ function welcomeHtml(email) {
       <div class="step-body">
         <p class="step-label">Connect your cloud provider</p>
         <div class="code">finops setup aws</div>
-        <p class="step-note">Generates a read-only IAM policy. Credentials stay in your OS keyring. Nothing leaves your machine.</p>
+        <p class="step-note">The wizard asks for your access key and writes everything to your editor config automatically. Nothing leaves your machine.</p>
       </div>
     </div>
 
     <div class="step">
       <span class="step-num">3</span>
       <div class="step-body">
-        <p class="step-label">Add to your editor's MCP config</p>
-        <div class="code">{"mcpServers":{"finops":{"command":"finops-mcp"}}}</div>
-        <p class="step-note">Works with Cursor, Claude, Windsurf, and VS Code.</p>
+        <p class="step-label">Restart your editor and ask</p>
+        <div class="code">What are my AWS costs this month?</div>
+        <p class="step-note">Works with Claude Desktop, Cursor, Windsurf, and VS Code.</p>
       </div>
     </div>
 

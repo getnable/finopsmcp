@@ -90,28 +90,22 @@ async function sendLicenseEmail(to, licenseKey) {
   <!-- Step 1 -->
   <div style="margin-bottom:20px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 1 — </strong>Open your MCP config file. In Claude Desktop, go to <strong style="color:#1a1915;">Settings &rsaquo; Developer &rsaquo; Edit Config</strong>. In Cursor or Windsurf, open <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">.cursor/mcp.json</code> or <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">.windsurf/mcp.json</code> in your project root.
-    </p>
-  </div>
-
-  <!-- Step 2 -->
-  <div style="margin-bottom:20px;">
-    <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 2 — </strong>Add your license key to the <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">env</code> block for the finops server:
+      <strong style="color:#1a1915;">Step 1 — </strong>Run this command in your terminal. It activates your key and writes it to your editor config automatically.
     </p>
     <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
       <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
-        "env": {<br/>
-        &nbsp;&nbsp;"FINOPS_LICENSE_KEY": "${licenseKey}"<br/>
-        }
+        finops setup license ${licenseKey}
       </code>
     </div>
   </div>
 
-  <!-- Step 3 -->
+  <!-- Step 2 -->
   <div style="margin-bottom:36px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 3 — </strong>Save the file and restart your editor. Team features unlock immediately.
+      <strong style="color:#1a1915;">Step 2 — </strong>Restart your editor. Team features unlock immediately.
+    </p>
+    <p style="font-size:12px;color:#8b8879;margin:6px 0 0;">
+      If you haven't installed nable yet, run <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;">pip install finops-mcp &amp;&amp; finops setup</code> first.
     </p>
   </div>
 

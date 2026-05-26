@@ -54,7 +54,14 @@ uvx finops-mcp setup
 finops setup
 ```
 
-`finops setup` walks you through connecting AWS, Azure, GCP, Datadog, Snowflake, and more. It auto-configures Claude Desktop at the end.
+`finops setup` walks you through connecting AWS, Azure, GCP, Datadog, Snowflake, and more. For AWS, it collects your access key directly and writes it to your editor config automatically. No `aws configure`, no manual JSON editing. It auto-configures Claude Desktop at the end.
+
+To connect a single provider later:
+```bash
+finops setup aws      # add an AWS account
+finops setup azure    # add Azure
+finops setup slack    # configure alerts
+```
 
 **Step 3: Ask Claude**
 
@@ -184,6 +191,7 @@ finops setup claude    # re-run Claude Desktop configuration only
 |---|---|
 | Tools don't appear in Claude | Switch to uvx config or use absolute path |
 | `command not found: finops-mcp` | Re-install with `pip install finops-mcp` or use `uvx` |
+| AWS returns no data | Run `finops setup aws` — the wizard writes credentials to your editor config automatically |
 | Python 3.8/3.9 errors | nable requires Python 3.10+: `python3.10 -m pip install finops-mcp` |
 | Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
 | Permission denied | Install to user: `pip install --user finops-mcp` or use `uvx` |
