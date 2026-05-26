@@ -540,8 +540,6 @@ function HeroEmailCapture(){
       if(window.rdt) rdt('track', 'SignUp', {}, {email: email});
     } catch(err){ /* non-blocking */ }
     setStatus('sent');
-    const url = `https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02?prefilled_email=${encodeURIComponent(email)}`;
-    window.location.href = url;
   }
 
   function handleCopy(){
@@ -567,10 +565,10 @@ function HeroEmailCapture(){
           type="submit"
           disabled={status !== 'idle'}
           style={{background:"#22c55e",color:"#fff",border:"none",padding:"12px 22px",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:status !== 'idle' ? "default" : "pointer",whiteSpace:"nowrap",minHeight:44,letterSpacing:"-.01em",transition:"opacity .15s",opacity:status !== 'idle' ? 0.7 : 1,flexShrink:0}}>
-          {status === 'loading' ? "Starting..." : status === 'sent' ? "Done" : "Start free"}
+          {status === 'loading' ? "Sending..." : status === 'sent' ? "Check your email ✓" : "Get setup guide"}
         </button>
       </form>
-      <p style={{marginTop:8,fontSize:12,color:"var(--fg-3)"}}>No credit card &middot; 1-month free trial &middot; 2-minute setup</p>
+      <p style={{marginTop:8,fontSize:12,color:"var(--fg-3)"}}>Free &middot; No credit card &middot; Setup guide sent instantly</p>
 
       <div style={{display:"flex",alignItems:"center",gap:10,margin:"16px 0 10px",color:"var(--fg-4)"}}>
         <div style={{flex:1,height:"1px",background:"var(--line)"}}/>
