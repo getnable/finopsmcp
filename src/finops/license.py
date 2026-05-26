@@ -32,24 +32,24 @@ import logging
 import os
 import platform
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 log = logging.getLogger("finops.license")
 
 _env_secret = os.environ.get("FINOPS_LICENSE_SECRET", "")
-# The signing secret must be set via FINOPS_LICENSE_SECRET.
-# Keeping a default here is intentional for the hosted SaaS build so customers
-# can verify purchased keys without setting an env var themselves.
-# Self-hosters MUST override via FINOPS_LICENSE_SECRET with their own secret.
-# WARNING: If this source is public, rotate FINOPS_LICENSE_SECRET immediately.
-_DEFAULT_SECRET = "933cb551a15aa14b2a2c3517536da50773c2492a2dce2879578cb60cf34bb81b"
-_SECRET = (_env_secret or _DEFAULT_SECRET).encode()
+# FINOPS_LICENSE_SECRET must be set in the environment. No default is kept in
+# source — a committed default allows anyone with repo access to forge valid keys.
+# If the env var is missing, pro key validation is disabled and all keys are
+# treated as invalid so users fall through to the free/trial tier safely.
+_SECRET = _env_secret.encode() if _env_secret else b""
 if not _env_secret:
-    log.debug(
-        "FINOPS_LICENSE_SECRET not set; using built-in default. "
-        "Self-hosters should set this env var to a secret of their own."
+    log.warning(
+        "FINOPS_LICENSE_SECRET is not set. Pro license key validation is disabled. "
+        "Set this env var to the secret used when keys were issued."
     )
+_KEY_TTL_DAYS   = 366          # pro keys expire 1 year after issue date
+_VALID_PLANS    = {"pro", "trial", "enterprise"}
 _UPGRADE_URL    = "https://getnable.com/#pricing"
 _CHECKOUT_URL   = "https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"   # direct Stripe checkout
 _ACTIVATE_CMD   = "finops setup license"             # shown after purchase
@@ -243,6 +243,12 @@ def validate_key(key: str) -> LicenseStatus:
                 days_remaining=0,
             )
 
+    # If the signing secret is not configured, we cannot verify any key.
+    # Treat as free/trial rather than silently accepting forged keys.
+    if not _SECRET:
+        log.warning("Pro key presented but FINOPS_LICENSE_SECRET is not set; treating as unkeyed.")
+        return validate_key("")
+
     parts = key.strip().split("-", 3)
     if len(parts) != 4 or parts[0] != "FINOPS" or parts[1] != "1":
         return LicenseStatus(
@@ -275,11 +281,37 @@ def validate_key(key: str) -> LicenseStatus:
     issued_raw = payload.get("d", "")
     plan       = payload.get("p", "pro")
 
+    # Validate plan field against allowlist
+    if plan not in _VALID_PLANS:
+        log.warning("License key contains unrecognised plan %r; treating as invalid.", plan)
+        return LicenseStatus(
+            mode="invalid",
+            email=email,
+            issued="",
+            message=f"License key contains an unrecognised plan. Contact support.",
+        )
+
     try:
         issued     = date(int(issued_raw[:4]), int(issued_raw[4:6]), int(issued_raw[6:8]))
         issued_str = issued.isoformat()
     except Exception:
         issued_str = issued_raw
+        issued     = None
+
+    # Expiry check: keys are valid for _KEY_TTL_DAYS from issue date.
+    if issued is not None:
+        expiry = issued + timedelta(days=_KEY_TTL_DAYS)
+        today  = date.today()
+        if today > expiry:
+            return LicenseStatus(
+                mode="invalid",
+                email=email,
+                issued=issued_str,
+                message=(
+                    f"License key expired on {expiry.isoformat()}. "
+                    f"Renew your subscription at {_UPGRADE_URL}"
+                ),
+            )
 
     return LicenseStatus(
         mode=plan,
