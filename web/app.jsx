@@ -106,13 +106,22 @@ function EmailCapture({ source = "hero", placeholder = "work email", btnLabel = 
   );
 }
 
+function LogoMark(){
+  return (
+    <svg width="26" height="26" viewBox="0 0 32 32" className="mark-img" aria-hidden="true">
+      <rect width="32" height="32" rx="7" fill="var(--bg-2)" stroke="var(--line-2)" strokeWidth="1"/>
+      <path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="var(--accent)"/>
+    </svg>
+  );
+}
+
 /* Nav */
 function Nav(){
   return (
     <nav className="nav">
       <div className="nav-inner">
         <a href="#top" className="logo">
-          <img src="favicon.svg" alt="" width="26" height="26" className="mark-img" />
+          <LogoMark />
           <span>nable</span>
         </a>
         <ul>
@@ -686,7 +695,7 @@ function Footer(){
         <div className="foot">
           <div>
             <a href="#top" className="logo" style={{marginBottom:18}}>
-              <img src="favicon.svg" alt="" width="26" height="26" className="mark-img" />
+              <LogoMark />
               <span>nable</span>
             </a>
             <p style={{color:"var(--fg-3)",fontSize:13,maxWidth:"34ch",lineHeight:1.55,marginTop:10}}>The FinOps runtime for the AI-native engineering team. Made in Austin, TX.</p>
