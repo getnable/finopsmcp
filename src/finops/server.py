@@ -6886,5 +6886,97 @@ async def get_marketplace_costs(days: int = 30, account: str = "") -> str:
         return f"Marketplace cost analysis unavailable: {e}"
 
 
+@mcp.tool()
+async def list_active_services(
+    provider: str = "",
+    start_date: str = "",
+    end_date: str = "",
+) -> dict:
+    """
+    List every cloud service that has spend in the period, across AWS, Azure, and GCP.
+
+    Use this to discover what services are running before querying a specific one.
+    Returns services sorted by cost so you can see the top drivers at a glance.
+
+    Works for any service — EC2, RDS, ElastiCache, AppSync, Kendra, IoT Core,
+    WorkSpaces, Pinpoint, or anything else in your account.
+
+    Args:
+        provider:   "aws", "azure", "gcp", or blank for all connected providers.
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date:   ISO date. Defaults to today.
+
+    Examples:
+        - "What services are we running on AWS?"
+        - "Show me all GCP services with spend this month"
+        - "What cloud services do we use?"
+    """
+    from .connectors.universal import list_all_services
+    from datetime import date, timedelta
+
+    end = date.fromisoformat(end_date) if end_date else date.today()
+    start = date.fromisoformat(start_date) if start_date else end - timedelta(days=30)
+
+    return list_all_services(
+        provider=provider.lower() if provider else None,
+        start_date=start,
+        end_date=end,
+    )
+
+
+@mcp.tool()
+async def get_service_cost(
+    service_name: str,
+    provider: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    granularity: str = "DAILY",
+) -> dict:
+    """
+    Get cost breakdown for any named cloud service on AWS, Azure, or GCP.
+
+    Handles any service — common ones like EC2 and RDS, or less common ones
+    like AppSync, Kendra, MSK, WorkSpaces, IoT Core, Pinpoint, Forecast,
+    MemoryDB, Clean Rooms, Lake Formation, and 200+ others.
+
+    Short names and abbreviations are resolved automatically:
+      "ElastiCache" → "Amazon ElastiCache"
+      "MSK" or "Kafka" → "Amazon Managed Streaming for Apache Kafka"
+      "Step Functions" → "AWS Step Functions"
+
+    If the service name is ambiguous, returns a list of close matches.
+
+    Args:
+        service_name: Name of the service (short name or full name both work).
+        provider:     "aws", "azure", "gcp", or blank to auto-detect.
+        start_date:   ISO date. Defaults to 30 days ago.
+        end_date:     ISO date. Defaults to today.
+        granularity:  "DAILY" or "MONTHLY".
+
+    Examples:
+        - "How much did we spend on ElastiCache this month?"
+        - "Show me AppSync costs for the last 7 days"
+        - "What's our MSK spend?"
+        - "How much are we spending on Azure Cognitive Services?"
+        - "Show me GCP BigQuery costs"
+    """
+    from .connectors.universal import get_any_service_cost
+    from datetime import date, timedelta
+
+    if not service_name:
+        return {"error": "service_name is required."}
+
+    end = date.fromisoformat(end_date) if end_date else date.today()
+    start = date.fromisoformat(start_date) if start_date else end - timedelta(days=30)
+
+    return get_any_service_cost(
+        service_name=service_name,
+        provider=provider.lower() if provider else None,
+        start_date=start,
+        end_date=end,
+        granularity=granularity,
+    )
+
+
 if __name__ == "__main__":
     main()

@@ -10,16 +10,28 @@ readme = "README.md"
 license = { text = "Elastic-2.0" }
 authors = [{ name = "Chandan Bukkapatnam", email = "chbu0285@colorado.edu" }]
 maintainers = [{ name = "Chandan Bukkapatnam", email = "chbu0285@colorado.edu" }]
-keywords = ["mcp", "finops", "claude", "aws", "cloud-cost", "ai", "cost-optimization"]
+keywords = [
+    "mcp", "finops", "claude", "aws", "azure", "gcp", "cloud-cost",
+    "cost-optimization", "ai", "llm", "claude-desktop", "cursor",
+    "model-context-protocol", "cost-management", "cloud-billing",
+    "anomaly-detection", "rightsizing", "kubernetes-cost",
+    "aws-cost-explorer", "cloud-finops", "devops", "platform-engineering",
+    "cost-intelligence", "saas-spend", "cloud-spend", "savings-plans",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
+    "Intended Audience :: Financial and Insurance Industry",
     "Topic :: Office/Business :: Financial",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Internet",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "License :: Other/Proprietary License",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
 ]
 requires-python = ">=3.10"
 dependencies = [
