@@ -600,7 +600,7 @@ function Pricing(){
           </div>
           <div className="tier feat">
             <span className="name">Team</span>
-            <span className="amt mono">$39.99<span className="sm">/ user / mo</span></span>
+            <span className="amt mono">$19.99<span className="sm">/ user / mo</span></span>
             <p className="desc">For finance + platform teams who need alerts, attribution, and a paper trail.</p>
             <ul>
               <li>Everything in Solo</li>
@@ -797,7 +797,6 @@ function App(){
       <QMarquee />
       <Thesis />
       <Architecture />
-      <Telemetry />
       <Connectors />
       <Pricing />
       <FootCta />
