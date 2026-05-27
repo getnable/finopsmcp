@@ -1035,3 +1035,734 @@ def check_idle_ec2(
                 })
 
     return findings
+
+
+# ── RDS rightsizing ───────────────────────────────────────────────────────────
+
+# Approximate on-demand hourly prices per instance class (us-east-1, single-AZ).
+# Used only when Cost Explorer data is unavailable.
+_RDS_HOURLY: dict[str, float] = {
+    "db.t3.micro": 0.017, "db.t3.small": 0.034, "db.t3.medium": 0.068,
+    "db.t3.large": 0.136, "db.t3.xlarge": 0.272, "db.t3.2xlarge": 0.544,
+    "db.m5.large": 0.171, "db.m5.xlarge": 0.342, "db.m5.2xlarge": 0.684,
+    "db.m5.4xlarge": 1.368,
+    "db.m6g.large": 0.162, "db.m6g.xlarge": 0.325, "db.m6g.2xlarge": 0.650,
+    "db.r5.large": 0.240, "db.r5.xlarge": 0.480, "db.r5.2xlarge": 0.960,
+    "db.r6g.large": 0.228, "db.r6g.xlarge": 0.456,
+}
+
+_RDS_DOWNSIZE: dict[str, str] = {
+    "db.t3.medium": "db.t3.small",    "db.t3.large": "db.t3.medium",
+    "db.t3.xlarge": "db.t3.large",    "db.t3.2xlarge": "db.t3.xlarge",
+    "db.m5.xlarge": "db.m5.large",    "db.m5.2xlarge": "db.m5.xlarge",
+    "db.m5.4xlarge": "db.m5.2xlarge",
+    "db.m6g.xlarge": "db.m6g.large",  "db.m6g.2xlarge": "db.m6g.xlarge",
+    "db.r5.xlarge": "db.r5.large",    "db.r5.2xlarge": "db.r5.xlarge",
+    "db.r6g.xlarge": "db.r6g.large",
+}
+
+
+def check_rds_rightsizing(
+    rds_client: Any,
+    cw_client: Any,
+    region: str = "unknown",
+    cpu_threshold_pct: float = 20.0,
+    lookback_days: int = 14,
+) -> list[dict]:
+    """
+    Detect RDS instances with consistently low CPU utilization.
+
+    RDS Compute Optimizer integration is limited, so we use CloudWatch
+    CPUUtilization as the primary signal. Instances with average CPU below
+    cpu_threshold_pct over lookback_days are candidates for downsizing.
+
+    Excludes Aurora Serverless (scales automatically) and read replicas.
+    """
+    findings: list[dict] = []
+
+    try:
+        paginator = rds_client.get_paginator("describe_db_instances")
+        pages = paginator.paginate()
+    except Exception as exc:
+        log.warning("describe_db_instances failed (region=%s): %s", region, exc)
+        return findings
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=lookback_days)
+
+    for page in pages:
+        for db in page.get("DBInstances", []):
+            db_id = db["DBInstanceIdentifier"]
+            db_class = db.get("DBInstanceClass", "")
+            engine = db.get("Engine", "")
+            status = db.get("DBInstanceStatus", "")
+            multi_az = db.get("MultiAZ", False)
+
+            if status != "available":
+                continue
+            if "aurora-serverless" in engine:
+                continue
+            if db.get("ReadReplicaSourceDBInstanceIdentifier"):
+                continue
+
+            try:
+                resp = cw_client.get_metric_statistics(
+                    Namespace="AWS/RDS",
+                    MetricName="CPUUtilization",
+                    Dimensions=[{"Name": "DBInstanceIdentifier", "Value": db_id}],
+                    StartTime=start,
+                    EndTime=now,
+                    Period=3600,
+                    Statistics=["Average"],
+                )
+                datapoints = resp.get("Datapoints", [])
+            except Exception as exc:
+                log.debug("CW CPU metrics failed for RDS %s: %s", db_id, exc)
+                continue
+
+            if not datapoints or len(datapoints) < 24:
+                continue
+
+            avg_cpu = sum(dp.get("Average", 0) for dp in datapoints) / len(datapoints)
+            max_cpu = max(dp.get("Average", 0) for dp in datapoints)
+
+            if avg_cpu >= cpu_threshold_pct:
+                continue
+
+            recommended_class = _RDS_DOWNSIZE.get(db_class)
+            if not recommended_class:
+                continue
+
+            current_hourly = _RDS_HOURLY.get(db_class, 0.0)
+            recommended_hourly = _RDS_HOURLY.get(recommended_class, 0.0)
+            factor = 2.0 if multi_az else 1.0
+            monthly_savings = (current_hourly - recommended_hourly) * 730 * factor
+
+            if monthly_savings <= 0:
+                continue
+
+            findings.append({
+                "resource_id": db_id,
+                "resource_type": "RDS Instance",
+                "waste_type": "rds_overprovisioned",
+                "estimated_monthly_savings": round(monthly_savings, 2),
+                "detail": (
+                    f"RDS instance '{db_id}' ({db_class}, {engine}) averaged "
+                    f"{avg_cpu:.1f}% CPU (peak: {max_cpu:.1f}%) over {lookback_days} days. "
+                    f"Recommend downsizing to {recommended_class}. "
+                    f"{'Multi-AZ: savings doubled. ' if multi_az else ''}"
+                    f"Verify FreeStorageSpace and DatabaseConnections before resizing."
+                ),
+                "severity": _severity_from_savings(monthly_savings),
+                "region": region,
+                "account_id": None,
+                "current_class": db_class,
+                "recommended_class": recommended_class,
+                "engine": engine,
+                "multi_az": multi_az,
+                "avg_cpu_pct": round(avg_cpu, 2),
+                "max_cpu_pct": round(max_cpu, 2),
+            })
+
+    return findings
+
+
+def check_rds_idle(
+    rds_client: Any,
+    cw_client: Any,
+    region: str = "unknown",
+    connection_threshold: float = 1.0,
+    lookback_days: int = 14,
+) -> list[dict]:
+    """
+    Detect RDS instances with near-zero database connections over the lookback
+    period. Zero-connection instances are likely unused and can be stopped or deleted.
+    """
+    findings: list[dict] = []
+
+    try:
+        paginator = rds_client.get_paginator("describe_db_instances")
+        pages = paginator.paginate()
+    except Exception as exc:
+        log.warning("describe_db_instances failed (region=%s): %s", region, exc)
+        return findings
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=lookback_days)
+
+    for page in pages:
+        for db in page.get("DBInstances", []):
+            db_id = db["DBInstanceIdentifier"]
+            db_class = db.get("DBInstanceClass", "")
+            engine = db.get("Engine", "")
+            status = db.get("DBInstanceStatus", "")
+
+            if status != "available":
+                continue
+
+            try:
+                resp = cw_client.get_metric_statistics(
+                    Namespace="AWS/RDS",
+                    MetricName="DatabaseConnections",
+                    Dimensions=[{"Name": "DBInstanceIdentifier", "Value": db_id}],
+                    StartTime=start,
+                    EndTime=now,
+                    Period=86400,
+                    Statistics=["Maximum"],
+                )
+                datapoints = resp.get("Datapoints", [])
+            except Exception as exc:
+                log.debug("CW connections failed for RDS %s: %s", db_id, exc)
+                continue
+
+            if not datapoints or len(datapoints) < 7:
+                continue
+
+            max_connections = max(dp.get("Maximum", 0) for dp in datapoints)
+
+            if max_connections >= connection_threshold:
+                continue
+
+            current_hourly = _RDS_HOURLY.get(db_class, 0.10)
+            monthly_cost = current_hourly * 730
+            multi_az = db.get("MultiAZ", False)
+            if multi_az:
+                monthly_cost *= 2
+
+            findings.append({
+                "resource_id": db_id,
+                "resource_type": "RDS Instance",
+                "waste_type": "rds_idle_no_connections",
+                "estimated_monthly_savings": round(monthly_cost, 2),
+                "detail": (
+                    f"RDS instance '{db_id}' ({db_class}, {engine}) had "
+                    f"max {max_connections:.0f} connections over the past {lookback_days} days. "
+                    f"Running cost: ~${monthly_cost:.0f}/mo. "
+                    f"Consider stopping (preserves data) or deleting with a final snapshot."
+                ),
+                "severity": _severity_from_savings(monthly_cost),
+                "region": region,
+                "account_id": None,
+                "current_class": db_class,
+                "engine": engine,
+                "max_connections_14d": max_connections,
+                "estimated_monthly_cost": round(monthly_cost, 2),
+            })
+
+    return findings
+
+
+# ── Load balancer waste ───────────────────────────────────────────────────────
+
+_ALB_HOURLY = 0.008
+_NLB_HOURLY = 0.008
+_CLB_HOURLY = 0.025
+
+
+def check_idle_load_balancers(
+    elbv2_client: Any,
+    elb_client: Any,
+    cw_client: Any,
+    region: str = "unknown",
+    lookback_days: int = 14,
+    request_threshold: float = 100.0,
+) -> list[dict]:
+    """
+    Detect ALBs and NLBs with no or near-zero request traffic.
+
+    Load balancers with fewer than request_threshold total requests over
+    lookback_days are flagged as idle. They still incur the hourly LCU base cost.
+    """
+    findings: list[dict] = []
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=lookback_days)
+
+    # ALB and NLB via ELBv2
+    try:
+        paginator = elbv2_client.get_paginator("describe_load_balancers")
+        for page in paginator.paginate():
+            for lb in page.get("LoadBalancers", []):
+                lb_name = lb.get("LoadBalancerName", "")
+                lb_arn = lb.get("LoadBalancerArn", "")
+                lb_type = lb.get("Type", "application")
+                state = lb.get("State", {}).get("Code", "")
+
+                if state != "active":
+                    continue
+
+                metric = "RequestCount" if lb_type == "application" else "ActiveFlowCount"
+                namespace = "AWS/ApplicationELB" if lb_type == "application" else "AWS/NetworkELB"
+                lb_dim_value = lb_arn.split("loadbalancer/")[-1] if "loadbalancer/" in lb_arn else lb_arn
+
+                try:
+                    resp = cw_client.get_metric_statistics(
+                        Namespace=namespace,
+                        MetricName=metric,
+                        Dimensions=[{"Name": "LoadBalancer", "Value": lb_dim_value}],
+                        StartTime=start,
+                        EndTime=now,
+                        Period=86400,
+                        Statistics=["Sum"] if lb_type == "application" else ["Average"],
+                    )
+                    datapoints = resp.get("Datapoints", [])
+                except Exception as exc:
+                    log.debug("CW metrics failed for LB %s: %s", lb_name, exc)
+                    continue
+
+                if not datapoints:
+                    total_requests = 0.0
+                else:
+                    total_requests = sum(dp.get("Sum", dp.get("Average", 0)) for dp in datapoints)
+
+                if total_requests >= request_threshold:
+                    continue
+
+                hourly = _ALB_HOURLY if lb_type == "application" else _NLB_HOURLY
+                monthly_cost = hourly * 730
+
+                findings.append({
+                    "resource_id": lb_arn,
+                    "resource_type": "ALB" if lb_type == "application" else "NLB",
+                    "waste_type": "idle_load_balancer",
+                    "estimated_monthly_savings": round(monthly_cost, 2),
+                    "detail": (
+                        f"Load balancer '{lb_name}' ({lb_type}) had {total_requests:.0f} "
+                        f"total requests over {lookback_days} days. "
+                        f"Running cost: ~${monthly_cost:.0f}/mo. "
+                        f"Check target groups before deleting."
+                    ),
+                    "severity": _severity_from_savings(monthly_cost),
+                    "region": region,
+                    "account_id": None,
+                    "lb_name": lb_name,
+                    "lb_type": lb_type,
+                    "total_requests_14d": total_requests,
+                })
+    except Exception as exc:
+        log.warning("ELBv2 describe failed (region=%s): %s", region, exc)
+
+    # Classic ELBs
+    try:
+        paginator = elb_client.get_paginator("describe_load_balancers")
+        for page in paginator.paginate():
+            for lb in page.get("LoadBalancerDescriptions", []):
+                lb_name = lb.get("LoadBalancerName", "")
+
+                try:
+                    resp = cw_client.get_metric_statistics(
+                        Namespace="AWS/ELB",
+                        MetricName="RequestCount",
+                        Dimensions=[{"Name": "LoadBalancerName", "Value": lb_name}],
+                        StartTime=start,
+                        EndTime=now,
+                        Period=86400,
+                        Statistics=["Sum"],
+                    )
+                    datapoints = resp.get("Datapoints", [])
+                except Exception:
+                    continue
+
+                total_requests = sum(dp.get("Sum", 0) for dp in datapoints)
+
+                if total_requests >= request_threshold:
+                    continue
+
+                monthly_cost = _CLB_HOURLY * 730
+
+                findings.append({
+                    "resource_id": lb_name,
+                    "resource_type": "Classic Load Balancer",
+                    "waste_type": "idle_load_balancer",
+                    "estimated_monthly_savings": round(monthly_cost, 2),
+                    "detail": (
+                        f"Classic ELB '{lb_name}' had {total_requests:.0f} requests over "
+                        f"{lookback_days} days. Running cost: ~${monthly_cost:.0f}/mo. "
+                        f"Migrate to ALB/NLB or delete if unused."
+                    ),
+                    "severity": _severity_from_savings(monthly_cost),
+                    "region": region,
+                    "account_id": None,
+                    "lb_name": lb_name,
+                    "lb_type": "classic",
+                    "total_requests_14d": total_requests,
+                })
+    except Exception as exc:
+        log.warning("Classic ELB describe failed (region=%s): %s", region, exc)
+
+    return findings
+
+
+# ── S3 incomplete multipart uploads ──────────────────────────────────────────
+
+def check_s3_incomplete_multipart(
+    s3_client: Any,
+    region: str = "unknown",
+    older_than_days: int = 7,
+) -> list[dict]:
+    """
+    Detect S3 buckets with incomplete multipart uploads older than older_than_days.
+
+    Incomplete multipart uploads accumulate silently and are billed at STANDARD
+    storage rates. A lifecycle rule is the fix.
+    """
+    findings: list[dict] = []
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+
+    try:
+        buckets_resp = s3_client.list_buckets()
+        buckets = buckets_resp.get("Buckets", [])
+    except Exception as exc:
+        log.warning("list_buckets failed: %s", exc)
+        return findings
+
+    for bucket in buckets:
+        bucket_name = bucket["Name"]
+        total_size_bytes = 0
+        old_upload_count = 0
+
+        try:
+            paginator = s3_client.get_paginator("list_multipart_uploads")
+            for page in paginator.paginate(Bucket=bucket_name):
+                for upload in page.get("Uploads", []):
+                    initiated = upload.get("Initiated")
+                    if initiated and initiated < cutoff:
+                        upload_id = upload.get("UploadId", "")
+                        try:
+                            parts_resp = s3_client.list_parts(
+                                Bucket=bucket_name,
+                                Key=upload.get("Key", ""),
+                                UploadId=upload_id,
+                            )
+                            for part in parts_resp.get("Parts", []):
+                                total_size_bytes += part.get("Size", 0)
+                        except Exception:
+                            pass
+                        old_upload_count += 1
+        except Exception as exc:
+            log.debug("list_multipart_uploads failed for %s: %s", bucket_name, exc)
+            continue
+
+        if old_upload_count == 0:
+            continue
+
+        size_gb = total_size_bytes / (1024 ** 3)
+        monthly_cost = size_gb * _S3_STANDARD_PER_GB_MONTH
+
+        findings.append({
+            "resource_id": f"s3://{bucket_name}",
+            "resource_type": "S3 Bucket",
+            "waste_type": "s3_incomplete_multipart_uploads",
+            "estimated_monthly_savings": round(monthly_cost, 2),
+            "detail": (
+                f"Bucket '{bucket_name}' has {old_upload_count} incomplete multipart "
+                f"upload(s) older than {older_than_days} days, consuming {size_gb:.2f} GB "
+                f"(~${monthly_cost:.2f}/mo). Add a lifecycle rule: "
+                f"AbortIncompleteMultipartUpload with DaysAfterInitiation=7."
+            ),
+            "severity": _severity_from_savings(monthly_cost) if monthly_cost > 1 else "low",
+            "region": region,
+            "account_id": None,
+            "bucket": bucket_name,
+            "incomplete_upload_count": old_upload_count,
+            "wasted_gb": round(size_gb, 3),
+        })
+
+    return findings
+
+
+# ── ECR image cleanup ─────────────────────────────────────────────────────────
+
+_ECR_STORAGE_PER_GB_MONTH = 0.10  # $0.10/GB-month after first 500MB free
+
+
+def check_ecr_old_images(
+    ecr_client: Any,
+    region: str = "unknown",
+    older_than_days: int = 90,
+    keep_tagged: bool = True,
+) -> list[dict]:
+    """
+    Detect old untagged ECR images incurring storage charges.
+
+    ECR charges $0.10/GB-month. Lifecycle policies that expire untagged
+    images after 14 days are the standard fix.
+    """
+    findings: list[dict] = []
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+
+    try:
+        paginator = ecr_client.get_paginator("describe_repositories")
+        repos = []
+        for page in paginator.paginate():
+            repos.extend(page.get("repositories", []))
+    except Exception as exc:
+        log.warning("ECR describe_repositories failed (region=%s): %s", region, exc)
+        return findings
+
+    for repo in repos:
+        repo_name = repo["repositoryName"]
+        repo_uri = repo.get("repositoryUri", repo_name)
+        old_image_count = 0
+        total_size_bytes = 0
+
+        try:
+            img_paginator = ecr_client.get_paginator("describe_images")
+            filters: dict[str, Any] = {}
+            if keep_tagged:
+                filters = {"filter": {"tagStatus": "UNTAGGED"}}
+            for page in img_paginator.paginate(repositoryName=repo_name, **filters):
+                for img in page.get("imageDetails", []):
+                    pushed_at = img.get("imagePushedAt")
+                    if pushed_at:
+                        if pushed_at.tzinfo is None:
+                            pushed_at = pushed_at.replace(tzinfo=timezone.utc)
+                        if pushed_at >= cutoff:
+                            continue
+                    old_image_count += 1
+                    total_size_bytes += img.get("imageSizeInBytes", 0)
+        except Exception as exc:
+            log.debug("ECR describe_images failed for %s: %s", repo_name, exc)
+            continue
+
+        if old_image_count == 0:
+            continue
+
+        size_gb = total_size_bytes / (1024 ** 3)
+        monthly_cost = max(0, size_gb - 0.5) * _ECR_STORAGE_PER_GB_MONTH
+
+        if monthly_cost < 1.0 and old_image_count < 10:
+            continue
+
+        findings.append({
+            "resource_id": repo_uri,
+            "resource_type": "ECR Repository",
+            "waste_type": "ecr_old_untagged_images",
+            "estimated_monthly_savings": round(monthly_cost, 2),
+            "detail": (
+                f"ECR repository '{repo_name}' has {old_image_count} "
+                f"{'untagged ' if keep_tagged else ''}image(s) older than {older_than_days} days, "
+                f"consuming {size_gb:.2f} GB (~${monthly_cost:.2f}/mo). "
+                f"Add an ECR lifecycle policy to expire untagged images after 14 days."
+            ),
+            "severity": _severity_from_savings(monthly_cost),
+            "region": region,
+            "account_id": None,
+            "repository": repo_name,
+            "old_image_count": old_image_count,
+            "size_gb": round(size_gb, 3),
+        })
+
+    return findings
+
+
+# ── Data transfer analysis ────────────────────────────────────────────────────
+
+def check_data_transfer_costs(
+    ce_client: Any,
+    start: str,
+    end: str,
+    threshold_usd: float = 50.0,
+) -> list[dict]:
+    """
+    Identify expensive data transfer line items from Cost Explorer.
+
+    Surfaces cross-AZ transfer, internet egress, inter-region transfer,
+    and NAT Gateway data charges. Each finding includes a targeted
+    remediation recommendation.
+    """
+    findings: list[dict] = []
+
+    data_transfer_keywords = [
+        "DataTransfer", "Transfer", "data transfer",
+        "inter-region", "NAT",
+    ]
+
+    try:
+        resp = ce_client.get_cost_and_usage(
+            TimePeriod={"Start": start, "End": end},
+            Granularity="MONTHLY",
+            GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
+            Metrics=["UnblendedCost"],
+        )
+    except Exception as exc:
+        log.warning("Data transfer CE query failed: %s", exc)
+        return findings
+
+    for period in resp.get("ResultsByTime", []):
+        for group in period.get("Groups", []):
+            usage_type = group.get("Keys", [""])[0]
+            amount = float(group.get("Metrics", {}).get("UnblendedCost", {}).get("Amount", 0))
+
+            if amount < threshold_usd:
+                continue
+
+            is_transfer = any(kw.lower() in usage_type.lower() for kw in data_transfer_keywords)
+            if not is_transfer:
+                continue
+
+            if "NAT" in usage_type:
+                rec = (
+                    "Replace NAT Gateway with VPC endpoints for S3 and DynamoDB traffic "
+                    "(free for gateway endpoints). Use Interface endpoints for other services."
+                )
+            elif "inter-region" in usage_type.lower() or "Region to Region" in usage_type:
+                rec = (
+                    "Consolidate workloads to a single region where possible. "
+                    "Use S3 replication only for DR, not hot data access."
+                )
+            elif "Internet" in usage_type:
+                rec = (
+                    "Use CloudFront to cache and reduce egress costs. "
+                    "Ensure API clients are in the same region as your endpoints."
+                )
+            else:
+                rec = "Review usage type. Consider VPC endpoints, CloudFront, or regional consolidation."
+
+            findings.append({
+                "resource_id": usage_type,
+                "resource_type": "Data Transfer",
+                "waste_type": "data_transfer_cost",
+                "estimated_monthly_savings": round(amount * 0.3, 2),
+                "detail": (
+                    f"Usage type '{usage_type}' cost ${amount:,.2f} in the period. "
+                    f"Recommendation: {rec}"
+                ),
+                "severity": "high" if amount >= 200 else "medium",
+                "region": "global",
+                "account_id": None,
+                "usage_type": usage_type,
+                "monthly_cost": round(amount, 2),
+            })
+
+    return findings
+
+
+# ── ECS Fargate rightsizing ───────────────────────────────────────────────────
+
+def check_ecs_task_rightsizing(
+    ecs_client: Any,
+    cw_client: Any,
+    region: str = "unknown",
+    cpu_threshold_pct: float = 20.0,
+    lookback_days: int = 14,
+) -> list[dict]:
+    """
+    Detect ECS Fargate services with over-provisioned CPU allocations.
+
+    Uses Container Insights CpuUtilized metric. Only clusters with
+    Container Insights enabled produce usable data.
+
+    Fargate billing: $0.04048/vCPU-hr, $0.004445/GB-hr.
+    """
+    findings: list[dict] = []
+
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=lookback_days)
+
+    _FARGATE_VCPU_HOURLY = 0.04048
+
+    try:
+        cluster_paginator = ecs_client.get_paginator("list_clusters")
+        clusters = []
+        for page in cluster_paginator.paginate():
+            clusters.extend(page.get("clusterArns", []))
+    except Exception as exc:
+        log.warning("ECS list_clusters failed (region=%s): %s", region, exc)
+        return findings
+
+    for cluster_arn in clusters:
+        cluster_name = cluster_arn.split("/")[-1]
+
+        try:
+            service_paginator = ecs_client.get_paginator("list_services")
+            service_arns = []
+            for page in service_paginator.paginate(cluster=cluster_arn):
+                service_arns.extend(page.get("serviceArns", []))
+        except Exception:
+            continue
+
+        for i in range(0, len(service_arns), 10):
+            batch = service_arns[i:i+10]
+            try:
+                resp = ecs_client.describe_services(cluster=cluster_arn, services=batch)
+            except Exception:
+                continue
+
+            for svc in resp.get("services", []):
+                svc_name = svc.get("serviceName", "")
+                task_def_arn = svc.get("taskDefinition", "")
+                launch_type = svc.get("launchType", "")
+
+                if launch_type != "FARGATE":
+                    continue
+
+                try:
+                    td_resp = ecs_client.describe_task_definition(taskDefinition=task_def_arn)
+                    td = td_resp.get("taskDefinition", {})
+                    allocated_cpu = int(td.get("cpu", 256))
+                    allocated_memory_mb = int(td.get("memory", 512))
+                except Exception:
+                    continue
+
+                try:
+                    cpu_resp = cw_client.get_metric_statistics(
+                        Namespace="ECS/ContainerInsights",
+                        MetricName="CpuUtilized",
+                        Dimensions=[
+                            {"Name": "ClusterName", "Value": cluster_name},
+                            {"Name": "ServiceName", "Value": svc_name},
+                        ],
+                        StartTime=start,
+                        EndTime=now,
+                        Period=3600,
+                        Statistics=["Average"],
+                    )
+                    cpu_datapoints = cpu_resp.get("Datapoints", [])
+                except Exception:
+                    continue
+
+                if not cpu_datapoints or len(cpu_datapoints) < 24:
+                    continue
+
+                avg_cpu_units = sum(dp.get("Average", 0) for dp in cpu_datapoints) / len(cpu_datapoints)
+                avg_cpu_pct = (avg_cpu_units / allocated_cpu) * 100 if allocated_cpu > 0 else 0
+
+                if avg_cpu_pct >= cpu_threshold_pct:
+                    continue
+
+                recommended_cpu = max(256, allocated_cpu // 2)
+                cpu_vcpu_saved = (allocated_cpu - recommended_cpu) / 1024
+                desired_count = svc.get("desiredCount", 1)
+                monthly_cpu_savings = cpu_vcpu_saved * _FARGATE_VCPU_HOURLY * 730 * desired_count
+
+                if monthly_cpu_savings < 5:
+                    continue
+
+                findings.append({
+                    "resource_id": svc.get("serviceArn", svc_name),
+                    "resource_type": "ECS Fargate Service",
+                    "waste_type": "ecs_overprovisioned_cpu",
+                    "estimated_monthly_savings": round(monthly_cpu_savings, 2),
+                    "detail": (
+                        f"ECS Fargate service '{svc_name}' (cluster: {cluster_name}) "
+                        f"uses {avg_cpu_pct:.1f}% of its {allocated_cpu} CPU units on average. "
+                        f"Desired count: {desired_count}. "
+                        f"Recommend reducing CPU to {recommended_cpu} units. "
+                        f"Requires Container Insights enabled."
+                    ),
+                    "severity": _severity_from_savings(monthly_cpu_savings),
+                    "region": region,
+                    "account_id": None,
+                    "cluster": cluster_name,
+                    "service": svc_name,
+                    "allocated_cpu_units": allocated_cpu,
+                    "recommended_cpu_units": recommended_cpu,
+                    "allocated_memory_mb": allocated_memory_mb,
+                    "avg_cpu_pct": round(avg_cpu_pct, 2),
+                    "desired_count": desired_count,
+                })
+
+    return findings

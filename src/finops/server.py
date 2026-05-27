@@ -2688,6 +2688,415 @@ async def scan_cloudwatch_waste(
 
 
 @mcp.tool()
+async def get_rds_rightsizing_recommendations(
+    cpu_threshold: float = 20.0,
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Detect over-provisioned RDS instances with low CPU utilization.
+
+    Uses CloudWatch CPUUtilization over 14 days. Excludes Aurora Serverless
+    and read replicas. Returns downsizing recommendations with estimated savings.
+
+    Args:
+        cpu_threshold: Flag instances with average CPU below this % (default 20%).
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+
+    Examples:
+        - "Which RDS instances are over-provisioned?"
+        - "Find oversized databases we can downsize"
+        - "How much could we save by rightsizing RDS?"
+    """
+    try:
+        import boto3
+        from .analyzers.waste import check_rds_rightsizing
+
+        if regions is None:
+            try:
+                ec2g = boto3.client("ec2", region_name="us-east-1")
+                resp = ec2g.describe_regions(
+                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                )
+                regions = [r["RegionName"] for r in resp.get("Regions", [])]
+            except Exception:
+                regions = ["us-east-1", "us-west-2", "eu-west-1"]
+
+        all_findings: list[dict] = []
+        for region in regions:
+            try:
+                rds = boto3.client("rds", region_name=region)
+                cw = boto3.client("cloudwatch", region_name=region)
+                findings = check_rds_rightsizing(rds, cw, region, cpu_threshold_pct=cpu_threshold)
+                all_findings.extend(findings)
+            except Exception as exc:
+                log.warning("RDS rightsizing scan failed for region %s: %s", region, exc)
+
+        all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
+        total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
+
+        return {
+            "count": len(all_findings),
+            "total_monthly_savings": round(total_savings, 2),
+            "total_annual_savings": round(total_savings * 12, 2),
+            "regions_scanned": regions,
+            "findings": all_findings,
+            "tip": (
+                "Verify FreeStorageSpace and DatabaseConnections before resizing. "
+                "Take a snapshot before any instance class change."
+            ),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_idle_rds_instances(
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Find RDS instances with near-zero database connections over the past 14 days.
+
+    Zero-connection instances are likely decommissioned and can be stopped
+    (free, preserves data) or deleted (saves full cost after final snapshot).
+
+    Args:
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+
+    Examples:
+        - "Which RDS databases have no active connections?"
+        - "Find idle databases we can stop to save money"
+        - "Are there any unused RDS instances running?"
+    """
+    try:
+        import boto3
+        from .analyzers.waste import check_rds_idle
+
+        if regions is None:
+            try:
+                ec2g = boto3.client("ec2", region_name="us-east-1")
+                resp = ec2g.describe_regions(
+                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                )
+                regions = [r["RegionName"] for r in resp.get("Regions", [])]
+            except Exception:
+                regions = ["us-east-1", "us-west-2", "eu-west-1"]
+
+        all_findings: list[dict] = []
+        for region in regions:
+            try:
+                rds = boto3.client("rds", region_name=region)
+                cw = boto3.client("cloudwatch", region_name=region)
+                findings = check_rds_idle(rds, cw, region)
+                all_findings.extend(findings)
+            except Exception as exc:
+                log.warning("RDS idle scan failed for region %s: %s", region, exc)
+
+        all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
+        total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
+
+        return {
+            "count": len(all_findings),
+            "total_monthly_savings": round(total_savings, 2),
+            "total_annual_savings": round(total_savings * 12, 2),
+            "findings": all_findings,
+            "tip": (
+                "Stopping an RDS instance pauses billing for compute (storage still billed). "
+                "AWS auto-starts stopped instances after 7 days unless stopped again."
+            ),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_idle_load_balancers(
+    regions: list[str] | None = None,
+    request_threshold: float = 100.0,
+) -> dict:
+    """
+    Detect ALBs, NLBs, and Classic ELBs with near-zero traffic over the past 14 days.
+
+    Idle load balancers still incur hourly LCU base charges. ALB/NLB cost ~$5.84/mo
+    minimum; Classic ELBs cost ~$18.25/mo minimum.
+
+    Args:
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+        request_threshold: Max requests in 14 days to flag as idle (default 100).
+
+    Examples:
+        - "Find idle load balancers we can delete"
+        - "Which ALBs have no traffic?"
+        - "Are there any unused load balancers costing us money?"
+    """
+    try:
+        import boto3
+        from .analyzers.waste import check_idle_load_balancers
+
+        if regions is None:
+            try:
+                ec2g = boto3.client("ec2", region_name="us-east-1")
+                resp = ec2g.describe_regions(
+                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                )
+                regions = [r["RegionName"] for r in resp.get("Regions", [])]
+            except Exception:
+                regions = ["us-east-1", "us-west-2", "eu-west-1"]
+
+        all_findings: list[dict] = []
+        for region in regions:
+            try:
+                elbv2 = boto3.client("elbv2", region_name=region)
+                elb = boto3.client("elb", region_name=region)
+                cw = boto3.client("cloudwatch", region_name=region)
+                findings = check_idle_load_balancers(
+                    elbv2, elb, cw, region, request_threshold=request_threshold
+                )
+                all_findings.extend(findings)
+            except Exception as exc:
+                log.warning("Load balancer idle scan failed for region %s: %s", region, exc)
+
+        all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
+        total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
+
+        return {
+            "count": len(all_findings),
+            "total_monthly_savings": round(total_savings, 2),
+            "total_annual_savings": round(total_savings * 12, 2),
+            "regions_scanned": regions,
+            "findings": all_findings,
+            "tip": "Verify target groups and DNS before deleting a load balancer.",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_s3_incomplete_multipart_uploads(
+    older_than_days: int = 7,
+) -> dict:
+    """
+    Find S3 buckets with incomplete multipart uploads older than the threshold.
+
+    Incomplete uploads accumulate silently at STANDARD storage rates ($0.023/GB-month).
+    The fix is a single S3 lifecycle rule per bucket. This tool shows which buckets
+    need it and how much wasted storage they hold.
+
+    Args:
+        older_than_days: Flag uploads older than this many days (default 7).
+
+    Examples:
+        - "Which S3 buckets have incomplete multipart uploads?"
+        - "Find wasted S3 storage from incomplete uploads"
+        - "How much are we paying for failed S3 uploads?"
+    """
+    try:
+        import boto3
+        from .analyzers.waste import check_s3_incomplete_multipart
+
+        s3 = boto3.client("s3", region_name="us-east-1")
+        findings = check_s3_incomplete_multipart(s3, older_than_days=older_than_days)
+        findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
+        total_savings = sum(f.get("estimated_monthly_savings", 0) for f in findings)
+
+        return {
+            "count": len(findings),
+            "total_monthly_savings": round(total_savings, 2),
+            "total_annual_savings": round(total_savings * 12, 2),
+            "findings": findings,
+            "tip": (
+                "Fix: add an S3 lifecycle rule with "
+                "AbortIncompleteMultipartUpload DaysAfterInitiation=7 to each flagged bucket."
+            ),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_ecr_cleanup_recommendations(
+    older_than_days: int = 90,
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Find ECR repositories with old untagged container images consuming storage.
+
+    ECR charges $0.10/GB-month for images beyond the free 500MB per repo.
+    Untagged images from old CI builds accumulate quickly. The fix is an ECR
+    lifecycle policy that auto-expires untagged images.
+
+    Args:
+        older_than_days: Flag untagged images older than this many days (default 90).
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+
+    Examples:
+        - "Which ECR repos have old images wasting storage?"
+        - "Find container image cleanup opportunities"
+        - "How much are old ECR images costing us?"
+    """
+    try:
+        import boto3
+        from .analyzers.waste import check_ecr_old_images
+
+        if regions is None:
+            try:
+                ec2g = boto3.client("ec2", region_name="us-east-1")
+                resp = ec2g.describe_regions(
+                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                )
+                regions = [r["RegionName"] for r in resp.get("Regions", [])]
+            except Exception:
+                regions = ["us-east-1", "us-west-2", "eu-west-1"]
+
+        all_findings: list[dict] = []
+        for region in regions:
+            try:
+                ecr = boto3.client("ecr", region_name=region)
+                findings = check_ecr_old_images(ecr, region, older_than_days=older_than_days)
+                all_findings.extend(findings)
+            except Exception as exc:
+                log.warning("ECR scan failed for region %s: %s", region, exc)
+
+        all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
+        total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
+
+        return {
+            "count": len(all_findings),
+            "total_monthly_savings": round(total_savings, 2),
+            "total_annual_savings": round(total_savings * 12, 2),
+            "regions_scanned": regions,
+            "findings": all_findings,
+            "tip": (
+                "Fix: add an ECR lifecycle policy with rule "
+                "tagStatus=untagged, countType=sinceImagePushed, countNumber=14 to each repo."
+            ),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_ecs_rightsizing_recommendations(
+    cpu_threshold: float = 20.0,
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Find ECS Fargate services with over-provisioned CPU allocations.
+
+    Uses Container Insights CpuUtilized metric. Services using less than
+    cpu_threshold% of their allocated vCPUs are candidates for downsizing.
+    Fargate billing is per vCPU-hour, so reducing allocation directly cuts cost.
+
+    Requires Container Insights to be enabled on the ECS cluster.
+
+    Args:
+        cpu_threshold: Flag services with average CPU below this % (default 20%).
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+
+    Examples:
+        - "Which ECS Fargate services are over-provisioned?"
+        - "Find oversized ECS tasks we can right-size"
+        - "How much could we save by reducing Fargate CPU allocations?"
+    """
+    try:
+        import boto3
+        from .analyzers.waste import check_ecs_task_rightsizing
+
+        if regions is None:
+            try:
+                ec2g = boto3.client("ec2", region_name="us-east-1")
+                resp = ec2g.describe_regions(
+                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                )
+                regions = [r["RegionName"] for r in resp.get("Regions", [])]
+            except Exception:
+                regions = ["us-east-1", "us-west-2", "eu-west-1"]
+
+        all_findings: list[dict] = []
+        for region in regions:
+            try:
+                ecs = boto3.client("ecs", region_name=region)
+                cw = boto3.client("cloudwatch", region_name=region)
+                findings = check_ecs_task_rightsizing(ecs, cw, region, cpu_threshold_pct=cpu_threshold)
+                all_findings.extend(findings)
+            except Exception as exc:
+                log.warning("ECS rightsizing scan failed for region %s: %s", region, exc)
+
+        all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
+        total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
+
+        return {
+            "count": len(all_findings),
+            "total_monthly_savings": round(total_savings, 2),
+            "total_annual_savings": round(total_savings * 12, 2),
+            "regions_scanned": regions,
+            "findings": all_findings,
+            "tip": (
+                "Enable Container Insights on your ECS clusters for CPU data: "
+                "aws ecs update-cluster-settings --cluster <name> "
+                "--settings name=containerInsights,value=enabled"
+            ),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_data_transfer_costs(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    threshold_usd: float = 50.0,
+) -> dict:
+    """
+    Identify significant data transfer cost line items from AWS Cost Explorer.
+
+    Surfaces internet egress, cross-AZ transfer, inter-region transfer, and
+    NAT Gateway data charges. Each finding includes a specific cost-reduction
+    recommendation (VPC endpoints, CloudFront, regional consolidation).
+
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date. Defaults to today.
+        threshold_usd: Only return usage types costing more than this (default $50).
+
+    Examples:
+        - "What are our data transfer costs?"
+        - "How much are we paying for inter-region traffic?"
+        - "Which data transfer charges are most expensive?"
+        - "Are we overpaying for NAT Gateway data transfer?"
+    """
+    try:
+        import boto3
+        from .analyzers.waste import check_data_transfer_costs
+
+        sd, ed = _default_dates()
+        if start_date:
+            sd = date.fromisoformat(start_date)
+        if end_date:
+            ed = date.fromisoformat(end_date)
+
+        ce = boto3.client("ce", region_name="us-east-1")
+        findings = check_data_transfer_costs(
+            ce,
+            start=sd.isoformat(),
+            end=ed.isoformat(),
+            threshold_usd=threshold_usd,
+        )
+        findings.sort(key=lambda x: x.get("monthly_cost", 0), reverse=True)
+        total_cost = sum(f.get("monthly_cost", 0) for f in findings)
+        total_potential_savings = sum(f.get("estimated_monthly_savings", 0) for f in findings)
+
+        return {
+            "period": {"start": sd.isoformat(), "end": ed.isoformat()},
+            "total_transfer_cost": round(total_cost, 2),
+            "estimated_reducible_savings": round(total_potential_savings, 2),
+            "count": len(findings),
+            "findings": findings,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def list_idle_resources(
     resource_types: list[str] | None = None,
     regions: list[str] | None = None,

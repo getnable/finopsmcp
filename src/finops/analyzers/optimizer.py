@@ -26,16 +26,22 @@ log = logging.getLogger(__name__)
 # ── All known check keys ──────────────────────────────────────────────────────
 
 _ALL_CHECKS = frozenset([
-    "ebs",           # unattached volumes + gp2→gp3
+    "ebs",           # unattached volumes + gp2 to gp3
     "snapshots",     # old EBS snapshots
     "eips",          # unassociated Elastic IPs
     "nat",           # idle NAT Gateways
     "rds",           # excessive RDS backup retention
+    "rds_rightsizing",  # oversized RDS instances (low CPU)
+    "rds_idle",      # RDS with zero connections
     "cloudtrail",    # CloudTrail waste (data events, duplicate trails)
     "cloudwatch",    # CloudWatch Log Groups without retention
     "s3",            # S3 suboptimal storage class
+    "s3_multipart",  # incomplete S3 multipart uploads
     "lambda",        # Lambda memory over-provisioning
     "ec2",           # idle EC2 instances
+    "load_balancer", # idle ALBs, NLBs, Classic ELBs
+    "ecr",           # old untagged ECR images
+    "ecs",           # ECS Fargate over-provisioned CPU
 ])
 
 _DEFAULT_REGIONS = ["us-east-1"]
@@ -92,11 +98,17 @@ def _audit_region(
         check_elastic_ips,
         check_nat_gateways,
         check_rds_backups,
+        check_rds_rightsizing,
+        check_rds_idle,
         check_cloudtrail_waste,
         check_cloudwatch_logs,
         check_s3_storage_class,
+        check_s3_incomplete_multipart,
         check_lambda_memory,
         check_idle_ec2,
+        check_idle_load_balancers,
+        check_ecr_old_images,
+        check_ecs_task_rightsizing,
     )
 
     findings: list[dict] = []
@@ -106,12 +118,19 @@ def _audit_region(
         return session.client(service, region_name=region)
 
     ec2_client = _client("ec2") if checks & {"ebs", "snapshots", "eips", "nat", "ec2"} else None
-    cw_client = _client("cloudwatch") if checks & {"nat", "s3", "lambda", "ec2", "cloudwatch"} else None
-    rds_client = _client("rds") if "rds" in checks else None
+    cw_client = _client("cloudwatch") if checks & {
+        "nat", "s3", "lambda", "ec2", "cloudwatch",
+        "rds_rightsizing", "rds_idle", "load_balancer", "ecs",
+    } else None
+    rds_client = _client("rds") if checks & {"rds", "rds_rightsizing", "rds_idle"} else None
     lambda_client = _client("lambda") if "lambda" in checks else None
     logs_client = _client("logs") if "cloudwatch" in checks else None
-    s3_client = _client("s3") if "s3" in checks else None
+    s3_client = _client("s3") if checks & {"s3", "s3_multipart"} else None
     ct_client = _client("cloudtrail") if "cloudtrail" in checks else None
+    elbv2_client = _client("elbv2") if "load_balancer" in checks else None
+    elb_client = _client("elb") if "load_balancer" in checks else None
+    ecr_client = _client("ecr") if "ecr" in checks else None
+    ecs_client = _client("ecs") if "ecs" in checks else None
 
     def _run(name: str, fn, *args):
         try:
@@ -137,6 +156,12 @@ def _audit_region(
     if "rds" in checks and rds_client:
         _run("rds", check_rds_backups, rds_client, region)
 
+    if "rds_rightsizing" in checks and rds_client and cw_client:
+        _run("rds_rightsizing", check_rds_rightsizing, rds_client, cw_client, region)
+
+    if "rds_idle" in checks and rds_client and cw_client:
+        _run("rds_idle", check_rds_idle, rds_client, cw_client, region)
+
     if "cloudtrail" in checks and ct_client:
         _run("cloudtrail", check_cloudtrail_waste, ct_client, region)
 
@@ -147,6 +172,19 @@ def _audit_region(
         # S3 is global — only run from us-east-1 to avoid duplicate findings
         if region == "us-east-1":
             _run("s3", check_s3_storage_class, s3_client, cw_client, region)
+
+    if "s3_multipart" in checks and s3_client:
+        if region == "us-east-1":
+            _run("s3_multipart", check_s3_incomplete_multipart, s3_client, region)
+
+    if "load_balancer" in checks and elbv2_client and elb_client and cw_client:
+        _run("load_balancer", check_idle_load_balancers, elbv2_client, elb_client, cw_client, region)
+
+    if "ecr" in checks and ecr_client:
+        _run("ecr", check_ecr_old_images, ecr_client, region)
+
+    if "ecs" in checks and ecs_client and cw_client:
+        _run("ecs", check_ecs_task_rightsizing, ecs_client, cw_client, region)
 
     if "lambda" in checks and lambda_client and cw_client:
         _run("lambda", check_lambda_memory, lambda_client, cw_client, region)
