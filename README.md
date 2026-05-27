@@ -38,36 +38,46 @@ Most spend is concentrated in us-east-1 ($5,841 of the $7,284 AWS total).
 
 ## Quick start
 
-**Step 1: Install**
+**Step 1: Install and run the setup wizard**
 ```bash
-pip install finops-mcp
+pip install finops-mcp && finops setup
 ```
 
-**On Anaconda?** Use uvx instead (it's isolated and won't touch your Anaconda environment):
+The wizard walks through connecting your providers and auto-configures Claude Desktop at the end. No config file editing, no manual env vars.
+
+**On Anaconda?** Use uvx (isolated, won't touch your Anaconda environment):
 ```bash
-brew install uv        # or: curl -LsSf https://astral.sh/uv/install.sh | sh
-uvx finops-mcp setup
+brew install uv && uvx finops-mcp setup
 ```
 
-**Step 2: Connect your providers**
-```bash
-finops setup
+**Step 2: Create an AWS access key (takes ~90 seconds)**
+
+When the wizard asks for your key:
+1. Open: [console.aws.amazon.com/iam/home#/users](https://console.aws.amazon.com/iam/home#/users)
+2. Click your username → Security credentials → Access keys → Create access key → "Other" → Create
+3. Paste both values into the wizard. It stores them and writes them to your editor config automatically.
+
+Need a read-only IAM policy first? Run `finops setup aws --iam-template` and it generates one.
+
+**Step 3: Restart Claude Desktop and ask**
+
+```
+What are my AWS costs this month?
 ```
 
-`finops setup` walks you through connecting AWS, Azure, GCP, Datadog, Snowflake, and more. For AWS, it collects your access key directly and writes it to your editor config automatically. No `aws configure`, no manual JSON editing. It auto-configures Claude Desktop at the end.
-
-To connect a single provider later:
-```bash
-finops setup aws      # add an AWS account
-finops setup azure    # add Azure
-finops setup slack    # configure alerts
-```
-
-**Step 3: Ask Claude**
-
-Restart Claude Desktop, then ask: *"What are my AWS costs this month?"*
+Once you see a real cost breakdown, you're live. Also works with Cursor, Windsurf, and VS Code.
 
 **1-month free trial, all features unlocked. No credit card required.**
+
+---
+
+To add more providers later:
+```bash
+finops setup aws      # add another AWS account
+finops setup azure    # add Azure
+finops setup slack    # configure alerts
+finops setup license  # activate a Team plan key
+```
 
 ---
 

@@ -27,79 +27,92 @@ function welcomeHtml(email) {
 <html>
 <head><meta charset="utf-8"><style>
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f3ef;margin:0;padding:40px 0}
-  .card{max-width:540px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #e8e8e4}
-  .header{background:#1a1915;padding:28px 40px;display:flex;align-items:center;gap:10px}
-  .glyph{width:30px;height:30px;border-radius:7px;background:#fbfaf7;display:inline-flex;align-items:center;justify-content:center;color:#1a1915;font-weight:800;font-size:15px;line-height:1;vertical-align:middle}
-  .wordmark{color:#fbfaf7;font-size:17px;font-weight:600;vertical-align:middle}
+  .card{max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #e8e8e4}
+  .header{background:#1a1915;padding:26px 40px;display:flex;align-items:center;gap:10px}
+  .wordmark{color:#fbfaf7;font-size:17px;font-weight:600}
   .body{padding:36px 40px}
-  h1{margin:0 0 10px;font-size:22px;font-weight:700;color:#1a1915;line-height:1.3}
-  .sub{margin:0 0 28px;font-size:15px;line-height:1.6;color:#6b6b65}
-  .step{display:flex;gap:14px;margin-bottom:24px;align-items:flex-start}
-  .step-num{min-width:26px;height:26px;border-radius:50%;background:#f4f3ef;border:1px solid #e0dfd9;color:#1a1915;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;margin-top:1px;flex-shrink:0}
-  .step-body{flex:1}
-  .step-label{font-size:14px;font-weight:600;color:#1a1915;margin:0 0 8px}
-  .code{background:#f4f3ef;border-radius:6px;padding:11px 14px;font-family:'SF Mono','JetBrains Mono',monospace;font-size:12.5px;color:#1a1915;margin:0;word-break:break-all}
-  .step-note{margin:6px 0 0;font-size:12px;color:#9a9a95;line-height:1.5}
+  h1{margin:0 0 8px;font-size:21px;font-weight:700;color:#1a1915;line-height:1.3}
+  .sub{margin:0 0 32px;font-size:14px;line-height:1.65;color:#6b6b65}
+  .step{margin-bottom:28px}
+  .step-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .step-num{min-width:24px;height:24px;border-radius:50%;background:#1a1915;color:#fbfaf7;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+  .step-label{font-size:14px;font-weight:600;color:#1a1915;margin:0}
+  .code{background:#f4f3ef;border-radius:6px;padding:11px 14px;font-family:'JetBrains Mono','SF Mono',monospace;font-size:12.5px;color:#1a1915;margin:0 0 8px;word-break:break-all;display:block}
+  .step-note{font-size:12px;color:#9a9a95;line-height:1.55;margin:0}
+  .step-note a{color:#1a1915;font-weight:500}
+  .aws-steps{background:#f4f3ef;border-radius:8px;padding:14px 16px;margin:8px 0;font-size:12.5px;color:#54524a;line-height:1.7}
+  .aws-steps strong{color:#1a1915;display:block;margin-bottom:4px}
+  .aws-step-line{padding-left:12px;border-left:2px solid #d4d3cd;margin:3px 0}
   .divider{border:none;border-top:1px solid #f0efe9;margin:28px 0}
   .example-box{background:#f4f3ef;border-radius:8px;padding:16px 18px;margin:0}
   .example-label{font-size:11px;font-weight:600;color:#9a9a95;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px}
   .example-q{font-size:13px;color:#1a1915;margin:0 0 6px;padding-left:12px;border-left:2px solid #d4d3cd}
   .example-q:last-child{margin-bottom:0}
-  .btn{display:inline-block;background:#1a1915;color:#fbfaf7;padding:13px 26px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;margin-top:24px}
-  .footer{padding:20px 40px;border-top:1px solid #f0efe9;font-size:12px;color:#b0afa9}
+  .btn{display:inline-block;background:#1a1915;color:#fbfaf7;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13.5px;margin-top:24px}
+  .footer{padding:20px 40px;border-top:1px solid #f0efe9;font-size:12px;color:#b0afa9;line-height:1.6}
   .footer a{color:#b0afa9}
 </style></head>
 <body>
 <div class="card">
   <div class="header">
-    <span class="glyph">n</span>
+    <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">
+      <rect width="32" height="32" rx="7" fill="#fbfaf7"/>
+      <path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#1a1915"/>
+    </svg>
     <span class="wordmark" style="margin-left:8px">nable</span>
   </div>
   <div class="body">
-    <h1>You're two minutes from your first answer.</h1>
-    <p class="sub">nable connects your AI editor directly to your cloud billing APIs. Ask questions in plain English, get answers in seconds, no dashboard required.</p>
+    <h1>Set up nable in 5 minutes.</h1>
+    <p class="sub">Three steps. The wizard handles the rest — no config file editing, no manual env vars.</p>
 
     <div class="step">
-      <span class="step-num">1</span>
-      <div class="step-body">
-        <p class="step-label">Install</p>
-        <div class="code">pip install finops-mcp &amp;&amp; finops setup</div>
+      <div class="step-header">
+        <span class="step-num">1</span>
+        <p class="step-label">Install and run the setup wizard</p>
       </div>
+      <code class="code">pip install finops-mcp &amp;&amp; finops setup</code>
+      <p class="step-note">The wizard walks through everything and auto-configures Claude Desktop at the end.</p>
     </div>
 
     <div class="step">
-      <span class="step-num">2</span>
-      <div class="step-body">
-        <p class="step-label">Connect your cloud provider</p>
-        <div class="code">finops setup aws</div>
-        <p class="step-note">The wizard asks for your access key and writes everything to your editor config automatically. Nothing leaves your machine.</p>
+      <div class="step-header">
+        <span class="step-num">2</span>
+        <p class="step-label">Create an AWS access key (2 min)</p>
       </div>
+      <p class="step-note" style="margin-bottom:8px">When the wizard asks for your AWS key, here's how to get one:</p>
+      <div class="aws-steps">
+        <strong>In the AWS Console:</strong>
+        <div class="aws-step-line"><a href="https://console.aws.amazon.com/iam/home#/users" style="color:#1a1915;font-weight:500">console.aws.amazon.com/iam</a> → Users → your username</div>
+        <div class="aws-step-line">Security credentials → Access keys → Create access key</div>
+        <div class="aws-step-line">Choose "Other" → Create → copy both values into the wizard</div>
+      </div>
+      <p class="step-note">If you need a read-only IAM policy first, run <code style="font-family:monospace;font-size:11.5px;background:#f4f3ef;padding:1px 5px;border-radius:4px">finops setup aws --iam-template</code> and it generates one for you.</p>
     </div>
 
     <div class="step">
-      <span class="step-num">3</span>
-      <div class="step-body">
-        <p class="step-label">Restart your editor and ask</p>
-        <div class="code">What are my AWS costs this month?</div>
-        <p class="step-note">Works with Claude Desktop, Cursor, Windsurf, and VS Code.</p>
+      <div class="step-header">
+        <span class="step-num">3</span>
+        <p class="step-label">Restart Claude Desktop and ask</p>
       </div>
+      <code class="code">What are my AWS costs this month?</code>
+      <p class="step-note">Also works with Cursor, Windsurf, and VS Code. Once you see a cost breakdown, you're live.</p>
     </div>
 
     <hr class="divider">
 
     <div class="example-box">
-      <p class="example-label">Then ask anything</p>
-      <p class="example-q">What drove our AWS bill up 40% last month?</p>
-      <p class="example-q">Which team is closest to their budget limit?</p>
+      <p class="example-label">What to ask once you're in</p>
+      <p class="example-q">What drove our AWS bill up last month?</p>
+      <p class="example-q">Which team is closest to their budget?</p>
       <p class="example-q">Show me instances I can rightsize right now.</p>
-      <p class="example-q">What's our Snowflake spend by warehouse?</p>
+      <p class="example-q">What will our bill look like next month?</p>
     </div>
 
     <a href="https://getnable.com/docs" class="btn">Full setup guide →</a>
   </div>
   <div class="footer">
     You're getting this because you signed up at getnable.com.
-    Questions? Reply to this email.<br>
+    Reply to this email with any questions.<br>
     <a href="https://getnable.com">getnable.com</a> · <a href="mailto:hello@getnable.com">hello@getnable.com</a>
   </div>
 </div>

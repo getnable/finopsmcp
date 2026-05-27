@@ -293,10 +293,15 @@ def setup_aws_account() -> None:
         # IAM access key — collect and store here so the user never has to
         # run aws configure or manually edit claude_desktop_config.json.
         print("""
-  Create an access key in the AWS Console:
-    1. IAM → Users → your user → Security credentials
-    2. Access keys → Create access key → choose "Other" → Create
-    3. Copy both values below (the secret is only shown once)
+  Create an AWS access key (takes ~90 seconds):
+
+  1. Open this URL in your browser:
+     https://console.aws.amazon.com/iam/home#/users
+
+  2. Click your username → Security credentials → Access keys
+     → Create access key → choose "Other" → Create
+
+  3. Copy both values below. The secret is only shown once.
 """)
         access_key = _prompt("  AWS Access Key ID (starts with AKIA...)")
         while not access_key.startswith("AK") or len(access_key) < 16:
