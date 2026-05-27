@@ -91,7 +91,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 88%,transparent);backdrop-filter:saturate(140%) blur(16px);-webkit-backdrop-filter:saturate(140%) blur(16px);border-bottom:1px solid var(--line)}
 .nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px;padding:0 32px;max-width:1280px;margin:0 auto}
 .logo{display:flex;align-items:center;gap:10px;font-family:'Space Grotesk';font-weight:500;font-size:17px;letter-spacing:-.02em;color:var(--fg)}
-.logo .mark{width:26px;height:26px;border-radius:6px;background:var(--fg);color:var(--bg);display:inline-flex;align-items:center;justify-content:center;font-family:'Space Grotesk';font-weight:600;font-size:15px}
+.logo .mark-img{width:26px;height:26px;border-radius:6px;display:block;flex-shrink:0}
 .nav ul{display:flex;list-style:none;gap:32px;color:var(--fg-2);font-size:13.5px}
 .nav ul a:hover{color:var(--fg)}
 .nav .right{display:flex;align-items:center;gap:12px}
@@ -135,7 +135,7 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .email-capture button{padding:0 14px;background:var(--accent);color:var(--bg);font-family:'JetBrains Mono';font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:0;white-space:nowrap;transition:.18s;display:flex;align-items:center;gap:6px;flex-shrink:0}
 .email-capture button:hover{filter:brightness(1.08)}
 .email-capture button:disabled{opacity:.6;cursor:not-allowed}
-@media(max-width:880px){.hero.editorial .email-capture{margin-left:auto;margin-right:auto}}
+.hero.editorial .email-capture{margin-left:auto;margin-right:auto}
 
 /* live console */
 .console{position:relative;border:1px solid var(--line-2);border-radius:12px;background:var(--bg-1);overflow:hidden;box-shadow:0 0 0 1px rgba(95,232,160,.04),0 32px 80px -32px rgba(0,0,0,.6),0 0 80px -20px rgba(95,232,160,.06)}

@@ -112,7 +112,7 @@ function Nav(){
     <nav className="nav">
       <div className="nav-inner">
         <a href="#top" className="logo">
-          <span className="mark">n</span>
+          <img src="favicon.svg" alt="" width="26" height="26" className="mark-img" />
           <span>nable</span>
         </a>
         <ul>
@@ -686,7 +686,7 @@ function Footer(){
         <div className="foot">
           <div>
             <a href="#top" className="logo" style={{marginBottom:18}}>
-              <span className="mark">n</span>
+              <img src="favicon.svg" alt="" width="26" height="26" className="mark-img" />
               <span>nable</span>
             </a>
             <p style={{color:"var(--fg-3)",fontSize:13,maxWidth:"34ch",lineHeight:1.55,marginTop:10}}>The FinOps runtime for the AI-native engineering team. Made in Austin, TX.</p>
