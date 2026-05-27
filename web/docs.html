@@ -289,36 +289,30 @@
     <!-- Activate Team license -->
     <div id="activate-license" class="section-anchor">
       <h2 class="section-title">Activate your Team license</h2>
-      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">After purchasing a Team plan, you receive a license key by email and on your account page at <a href="https://getnable.com/account" style="color:var(--fg);text-decoration:underline">getnable.com/account</a>. Keys start with <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">FINOPS-1-</code>. Here is how to activate it.</p>
+      <p class="text-sm leading-relaxed mb-5" style="color:var(--muted)">After purchase, your license key is emailed to you. Keys start with <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">FINOPS-1-</code>. Run one command and it handles everything.</p>
 
       <div class="space-y-4">
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">1</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-1" style="color:var(--text)">Copy your license key from the email or account page.</p>
-            <p class="text-sm" style="color:var(--muted)">It looks like: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">FINOPS-1-your-key-here</code></p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Run the license command with your key</p>
+            <div class="code-wrap">
+              <div class="code-block p-4"><span class="cmd">finops setup license</span> FINOPS-1-your-key-here</div>
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+            <p class="text-xs mt-2" style="color:var(--muted)">This validates the key, stores it in your OS keyring, and writes it directly into your Claude Desktop config. No manual JSON editing.</p>
           </div>
         </div>
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">2</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Open your Claude Desktop config file.</p>
-            <p class="text-sm mb-2" style="color:var(--muted)">On Mac: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">~/Library/Application Support/Claude/claude_desktop_config.json</code></p>
-            <p class="text-sm mb-2" style="color:var(--muted)">On Windows: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">%APPDATA%\Claude\claude_desktop_config.json</code></p>
-            <p class="text-sm mb-2" style="color:var(--muted)">Add the key to the <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">env</code> block for the finops server:</p>
-            <div class="code-block p-4 text-xs">
-              <span style="color:var(--fg-3)">"env"</span>: {<br/>
-              &nbsp;&nbsp;<span style="color:var(--blue-hi)">"FINOPS_LICENSE_KEY"</span>: <span style="color:var(--fg-3)">"FINOPS-1-your-key-here"</span><br/>
-              }
-            </div>
-          </div>
-        </div>
-        <div class="flex items-start gap-3">
-          <div class="step-num mt-0.5">3</div>
-          <div class="flex-1">
             <p class="text-sm" style="color:var(--text)">Restart Claude Desktop. Team features unlock immediately.</p>
           </div>
         </div>
+      </div>
+
+      <div class="info-box mt-5">
+        <strong style="color:var(--fg)">Check your status anytime:</strong> <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">finops setup license-status</code>
       </div>
     </div>
 
