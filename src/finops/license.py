@@ -7,7 +7,7 @@ free         Permanent. ~90% of the platform. No key required.
              Cost queries, anomaly detection, rightsizing, PR comments,
              Slack/Teams alerts, all connectors, snapshots, attribution.
 
-trial        30 days of full Pro access from first install. Kicks in
+trial        7 days of full Pro access from first install. Kicks in
              automatically when no key is set. Uses the same dual-store
              (OS keyring + file) so deleting one source can't reset it.
 
@@ -53,7 +53,7 @@ _VALID_PLANS    = {"pro", "trial", "enterprise"}
 _UPGRADE_URL    = "https://getnable.com/#pricing"
 _CHECKOUT_URL   = "https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"   # direct Stripe checkout
 _ACTIVATE_CMD   = "finops setup license"             # shown after purchase
-_TRIAL_DAYS  = 30
+_TRIAL_DAYS  = 7
 _TRIAL_FILE  = Path.home() / ".finops-mcp" / "trial_start"
 
 # Keyring service/username — intentionally generic to avoid being obvious
@@ -218,7 +218,7 @@ def generate_key(email: str, plan: str = "pro") -> str:
 def validate_key(key: str) -> LicenseStatus:
     """Parse and verify a license key string."""
     if not key:
-        # No key — give a 30-day pro trial, then drop to free forever
+        # No key — give a 7-day pro trial, then drop to free forever
         trial_start   = _get_or_create_trial_start()
         days_used     = (date.today() - trial_start).days
         days_remaining = max(0, _TRIAL_DAYS - days_used)
@@ -403,7 +403,7 @@ def require_pro(feature: str) -> dict | None:
         marker = "▶" if key == feature else " "
         lines.append(f"  {marker} {desc}")
     lines.append(f"\n  You hit this because '{friendly}' requires Team.")
-    lines.append(f"\n  → First month free: {_CHECKOUT_URL}")
+    lines.append(f"\n  → 7-day free trial: {_CHECKOUT_URL}")
     lines.append(f"  → Then activate:    {_ACTIVATE_CMD} <your-key>")
 
     return {
