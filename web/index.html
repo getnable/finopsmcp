@@ -3,22 +3,26 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>nable · Find out why your cloud bill went up</title>
-<meta name="description" content="Type a question, get the real answer. nable connects your AWS, Azure, GCP, and SaaS billing so you can ask what happened and actually fix it. No dashboards. Your data stays on your machine." />
-<meta property="og:title" content="nable · Find out why your cloud bill went up" />
-<meta property="og:description" content="Type a question, get the real answer. nable connects your AWS, Azure, GCP, and SaaS billing so you can ask what happened and actually fix it. No dashboards. Your data stays on your machine." />
+<title>nable · FinOps for the AI-native team</title>
+<meta name="description" content="The FinOps runtime that lives inside Claude, Cursor, and your editor. Ask in plain English. Your data stays on your machine." />
+<meta property="og:title" content="nable · FinOps for the AI-native team" />
+<meta property="og:description" content="The FinOps runtime that lives inside Claude, Cursor, and your editor. Ask in plain English. Your data stays on your machine." />
 <meta property="og:url" content="https://getnable.com" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="nable" />
 <meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="nable · Find out why your cloud bill went up" />
-<meta name="twitter:description" content="Type a question, get the real answer. nable connects your AWS, Azure, GCP, and SaaS billing so you can ask what happened and actually fix it. No dashboards." />
+<meta name="twitter:title" content="nable · FinOps for the AI-native team" />
+<meta name="twitter:description" content="The FinOps runtime that lives inside Claude, Cursor, and your editor. Ask in plain English. Your data stays on your machine." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+<!-- Vercel insights -->
 <script defer src="/_vercel/insights/script.js"></script>
+<script defer src="/_vercel/speed-insights/script.js"></script>
+
 <!-- Reddit Pixel -->
 <script>!function(w,d){if(!w.rdt){var p=w.rdt=function(){p.sendEvent?p.sendEvent.apply(p,arguments):p.callQueue.push(arguments)};p.callQueue=[];var t=d.createElement("script");t.src="https://www.redditstatic.com/ads/pixel.js?pixel_id=a2_j2alwdqkuaih",t.async=!0;var s=d.getElementsByTagName("script")[0];s.parentNode.insertBefore(t,s)}}(window,document);rdt('init','a2_j2alwdqkuaih');rdt('track','PageVisit');</script>
 
-<!-- PostHog - product analytics + DAU/MAU -->
+<!-- PostHog -->
 <script>
   !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
   posthog.init("phc_zcaQqoAXrSghjtbE6VB83p4RjfmcpqezKWV9GdZy4dPv", {
@@ -27,1645 +31,295 @@
     capture_pageview: true,
     capture_pageleave: true,
     session_recording: {
-      maskAllInputs: true,         // masks email fields so PII stays out of recordings
-      maskTextSelector: "[data-ph-mask]", // opt-in masking for sensitive copy
+      maskAllInputs: true,
+      maskTextSelector: "[data-ph-mask]",
     },
     disable_session_recording: false,
   });
 </script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+
 <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
 <style>
-  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  html,body{background:var(--bg);color:var(--fg);font-family:'DM Sans',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px;letter-spacing:-0.005em}
-  h1,h2,h3,h4,.logo{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif}
-  :root{
-    --bg:#fbfaf7;
-    --bg-2:#f4f2ec;
-    --bg-3:#ebe8e0;
-    --fg:#1a1915;
-    --fg-2:#54524a;
-    --fg-3:#8b8879;
-    --fg-4:#c1bdaf;
-    --line:#e6e2d6;
-    --line-2:#d9d4c4;
-    --accent:#1a1915;
-    --accent-ink:#fbfaf7;
-    --hl:#3b6e3a;     /* very subdued green for status only */
-    --alert:#b8533a;  /* subdued rust for anomalies */
-    --mono:'JetBrains Mono',ui-monospace,monospace;
-    --r:6px;
-  }
-  ::selection{background:#1a1915;color:#fbfaf7}
-  a{color:inherit;text-decoration:none}
-  .mono{font-family:var(--mono)}
-  .num{font-family:var(--mono);font-feature-settings:"tnum"}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--fg);font-family:'DM Sans',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.55;font-size:15px;letter-spacing:-.005em}
+h1,h2,h3,h4,.display{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-weight:400;letter-spacing:-.03em;color:var(--fg)}
+.mono,.num{font-family:'JetBrains Mono',ui-monospace,monospace;font-feature-settings:"tnum","cv02","cv03"}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+::selection{background:var(--accent);color:var(--bg)}
 
-  /* layout */
-  .wrap{max-width:1140px;margin:0 auto;padding:0 32px}
+/* graphite default (matches TWEAK_DEFAULTS) */
+:root{
+  --bg:#15140f;
+  --bg-1:#1a1914;
+  --bg-2:#221f17;
+  --bg-3:#2a261c;
+  --line:#2e2920;
+  --line-2:#3d3729;
+  --fg:#f3efe6;
+  --fg-2:#bbb6a4;
+  --fg-3:#7e7a6c;
+  --fg-4:#4a4639;
+  --accent:#e4a76b;
+  --accent-dim:#a07242;
+  --warn:#ffb46b;
+  --alert:#d97757;
+  --grid:rgba(255,255,255,.025);
+}
 
-  /* nav */
-  .nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 86%,transparent);backdrop-filter:saturate(140%) blur(14px);-webkit-backdrop-filter:saturate(140%) blur(14px);border-bottom:1px solid var(--line)}
-  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:60px}
-  .logo{display:flex;align-items:center;gap:9px;font-weight:500;letter-spacing:-.02em;font-size:16px}
-  .logo img{width:24px;height:24px;border-radius:6px;display:block}
-  .nav ul{display:flex;list-style:none;gap:28px;color:var(--fg-2);font-size:14px}
-  .nav ul a:hover{color:var(--fg)}
-  .nav .right{display:flex;gap:10px;align-items:center}
-  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:6px;font-size:13.5px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:.15s;letter-spacing:-.005em}
-  .btn-primary{background:#22c55e;color:#fff}
-  .btn-primary:hover{background:#16a34a}
-  .btn-ghost{color:var(--fg-2);border-color:var(--line)}
-  .btn-ghost:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
-  /* theme toggle */
-  .theme-tog{background:transparent;border:0;padding:6px;cursor:pointer;color:var(--fg-3);display:inline-flex;align-items:center;border-radius:999px}
-  .theme-tog:hover{color:var(--fg)}
-  .theme-tog-track{position:relative;display:inline-flex;align-items:center;justify-content:space-between;width:46px;height:22px;border:1px solid var(--line);border-radius:999px;background:var(--bg-2);padding:0 5px}
-  .theme-tog-sun,.theme-tog-moon{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;color:var(--fg-3);transition:color .2s}
-  .theme-tog-knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--fg);transition:transform .22s ease}
-  .theme-tog-knob.on{transform:translateX(22px)}
-  .btn .arr{transition:transform .18s}
-  .btn:hover .arr{transform:translateX(2px)}
+/* layout */
+.wrap{max-width:1280px;margin:0 auto;padding:0 32px}
+@media(max-width:640px){.wrap{padding:0 18px}}
 
-  /* type */
-  h1,h2,h3,h4{font-weight:500;letter-spacing:-.025em;color:var(--fg);font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif}
-  h1{font-size:clamp(40px,5.6vw,68px);line-height:1.04;letter-spacing:-.035em;font-weight:400}
-  h2{font-size:clamp(30px,3.6vw,44px);line-height:1.08;letter-spacing:-.03em;font-weight:400}
-  h3{font-size:18px}
-  p{color:var(--fg-2);line-height:1.6}
-  .label{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em}
+/* top ticker */
+.ticker{border-bottom:1px solid var(--line);background:var(--bg-1);font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--fg-3);letter-spacing:.04em;position:relative;z-index:60}
+.ticker-inner{display:flex;align-items:center;gap:28px;height:28px;padding:0 32px;overflow:hidden;white-space:nowrap}
+.ticker .seg{display:inline-flex;align-items:center;gap:8px;flex-shrink:0}
+.ticker .seg .dot{width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 2s ease-in-out infinite}
+.ticker .seg b{color:var(--fg-2);font-weight:500}
+.ticker .sep{color:var(--fg-4)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
-  /* hero */
-  .hero{padding:84px 0 80px;text-align:center}
-  .hero .wrap{display:flex;flex-direction:column;align-items:center}
-  .hero .lede{margin-top:24px;font-size:17px;max-width:50ch;color:var(--fg-2);line-height:1.55;text-align:center}
-  .hero-cta{margin-top:32px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center}
-  .install{display:inline-flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:7px;padding:8px 12px;font-family:var(--mono);font-size:13px;color:var(--fg-2);background:var(--bg)}
-  .install .prompt{color:var(--fg-3)}
-  .install button{margin-left:4px;border:1px solid var(--line);border-radius:5px;background:transparent;color:var(--fg-3);padding:2px 8px;font-family:var(--mono);font-size:11px;cursor:pointer}
-  .install button:hover{color:var(--fg);border-color:var(--line-2)}
-  .clients{margin-top:64px;display:flex;align-items:center;gap:20px;flex-wrap:wrap;color:var(--fg-3);font-size:13px;justify-content:center}
-  .clients .l{font-family:var(--mono);font-size:11.5px;color:var(--fg-4);letter-spacing:.04em}
-  .client-pill{position:relative;display:inline-flex;align-items:center;gap:8px;color:var(--fg-2);cursor:default;user-select:none;outline:none}
-  .client-pill::before{content:"";width:14px;height:14px;border-radius:3px;background:var(--bg-3);border:1px solid var(--line);flex-shrink:0;transition:border-color .15s}
-  .client-pill:hover::before,.client-pill:focus-within::before{border-color:var(--line-2)}
-  .client-pill:hover,.client-pill:focus-within{color:var(--fg)}
-  .client-pop{position:absolute;top:calc(100% + 10px);left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:14px 16px;width:220px;box-shadow:0 4px 24px rgba(0,0,0,.08);z-index:100;
-    opacity:0;visibility:hidden;transition:opacity .12s,visibility .12s;pointer-events:none}
-  .client-pill:hover .client-pop,.client-pill:focus-within .client-pop{opacity:1;visibility:visible}
-  .client-pop::before{content:"";position:absolute;top:-5px;left:50%;transform:translateX(-50%) rotate(45deg);width:8px;height:8px;background:var(--bg);border-left:1px solid var(--line-2);border-top:1px solid var(--line-2)}
-  .client-pop .cp-name{font-weight:500;font-size:13px;color:var(--fg);margin-bottom:6px}
-  .client-pop .cp-status{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;color:var(--hl);margin-bottom:8px}
-  .client-pop .cp-status::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--hl);flex-shrink:0}
-  .client-pop .cp-path{font-family:var(--mono);font-size:11px;color:var(--fg-3);line-height:1.5;word-break:break-all}
-  .client-pop .cp-note{font-size:12px;color:var(--fg-3);margin-top:6px;line-height:1.4}
+/* nav */
+.nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 88%,transparent);backdrop-filter:saturate(140%) blur(16px);-webkit-backdrop-filter:saturate(140%) blur(16px);border-bottom:1px solid var(--line)}
+.nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px;padding:0 32px;max-width:1280px;margin:0 auto}
+.logo{display:flex;align-items:center;gap:10px;font-family:'Space Grotesk';font-weight:500;font-size:17px;letter-spacing:-.02em;color:var(--fg)}
+.logo .mark{width:26px;height:26px;border-radius:6px;background:var(--fg);color:var(--bg);display:inline-flex;align-items:center;justify-content:center;font-family:'Space Grotesk';font-weight:600;font-size:15px}
+.nav ul{display:flex;list-style:none;gap:32px;color:var(--fg-2);font-size:13.5px}
+.nav ul a:hover{color:var(--fg)}
+.nav .right{display:flex;align-items:center;gap:12px}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:7px;font-size:13.5px;font-weight:500;border:1px solid transparent;transition:.18s;letter-spacing:-.005em;min-height:38px}
+.btn-primary{background:var(--accent);color:#15140f}
+.btn-primary:hover{filter:brightness(1.1);box-shadow:0 0 28px -4px var(--accent)}
+.btn-ghost{color:var(--fg-2);border-color:var(--line-2);background:transparent}
+.btn-ghost:hover{color:var(--fg);border-color:var(--fg-3);background:var(--bg-2)}
+.btn .arr{transition:transform .18s}
+.btn:hover .arr{transform:translateX(2px)}
+@media(max-width:880px){.nav ul{display:none}}
 
-  /* terminal */
-  .terminal{margin-top:56px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg);box-shadow:0 1px 0 rgba(0,0,0,.02),0 16px 40px -22px rgba(0,0,0,.12);width:100%;max-width:780px;text-align:left}
-  .term-bar{display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--line);background:var(--bg-2)}
-  .term-bar .dots{display:flex;gap:6px}
-  .term-bar .dots i{width:9px;height:9px;border-radius:50%;background:var(--line-2)}
-  .term-title{margin-left:6px;font-family:var(--mono);font-size:11.5px;color:var(--fg-3)}
-  .term-status{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--fg-3)}
-  .term-status .dot{width:6px;height:6px;border-radius:50%;background:var(--hl)}
-  .term-body{padding:30px 36px;display:flex;flex-direction:column;gap:22px}
-  .msg{display:flex;gap:14px;align-items:flex-start}
-  .av{font-family:var(--mono);font-size:11px;color:var(--fg-3);min-width:34px;padding-top:3px;letter-spacing:.04em;text-transform:uppercase}
-  .bubble{flex:1}
-  .bubble p{color:var(--fg);font-size:14.5px;line-height:1.6}
-  .bubble.user p{color:var(--fg-2)}
-  .bubble .table{margin-top:14px;font-family:var(--mono);font-size:13px;display:flex;flex-direction:column}
-  .bubble .table .r{display:grid;grid-template-columns:1fr auto auto;gap:24px;padding:9px 0;border-bottom:1px dashed var(--line);align-items:center}
-  .bubble .table .r:last-child{border-bottom:0}
-  .bubble .table .r.hd{color:var(--fg-3);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;border-bottom-style:solid}
-  .bubble .table .r .delta{color:var(--fg-3)}
-  .bubble .table .r .delta.up{color:var(--alert)}
-  .bubble .table .r .delta.down{color:var(--hl)}
-  .bubble .table .r.total{padding-top:12px;border-bottom:0}
-  .bubble .table .r.total b{color:var(--fg)}
-  .anomaly{color:var(--alert)}
-  .anomaly::before{content:"● ";font-size:10px;vertical-align:middle;margin-right:2px}
+/* hero */
+.hero{position:relative;padding:84px 0 96px;overflow:hidden}
+.hero-grid-bg{position:absolute;inset:0;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:64px 64px;mask-image:radial-gradient(ellipse at 50% 30%,#000 0%,transparent 70%);pointer-events:none}
+.hero-inner{position:relative;display:grid;grid-template-columns:1.05fr 1fr;gap:64px;align-items:start}
+.hero.editorial .hero-inner{grid-template-columns:1fr;text-align:center;justify-items:center}
+.hero.editorial .hero-left{max-width:780px}
+.hero.editorial .hero-right{width:100%;max-width:880px;margin-top:24px}
+.eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:28px;padding:5px 11px;border:1px solid var(--line-2);border-radius:99px;background:var(--bg-1)}
+.eyebrow .d{width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);animation:pulse 2s ease-in-out infinite}
+h1.display{font-size:clamp(46px,6.4vw,90px);line-height:.96;letter-spacing:-.045em;font-weight:300}
+h1.display .accent{font-style:italic;font-weight:400;color:var(--accent);font-family:'Space Grotesk'}
+h1.display .strike{position:relative;color:var(--fg-3);font-style:italic;font-weight:300}
+h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52%;height:2px;background:var(--accent);transform:rotate(-2deg)}
+.lede{margin-top:28px;font-size:18px;color:var(--fg-2);line-height:1.55;max-width:46ch}
+.hero.editorial .lede{margin-left:auto;margin-right:auto}
+.hero-cta-row{margin-top:36px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.hero.editorial .hero-cta-row{justify-content:center}
+.install{display:inline-flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:8px;font-family:'JetBrains Mono';font-size:13px;color:var(--fg-2);overflow:hidden;height:42px}
+.install .prompt{padding:0 12px;color:var(--fg-3);display:flex;align-items:center;border-right:1px solid var(--line)}
+.install .cmd{padding:0 14px;color:var(--fg);display:flex;align-items:center;white-space:nowrap}
+.install button{padding:0 14px;font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3);border-left:1px solid var(--line);letter-spacing:.06em;text-transform:uppercase;transition:.15s;background:var(--bg-1)}
+.install button:hover{color:var(--accent);background:var(--bg-2)}
 
-  /* trust strip */
-  .trust-strip{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-top:36px;justify-content:center}
-  .trust-item{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--fg-2)}
-  .trust-item strong{color:var(--fg);font-weight:600}
-  .trust-sep{width:1px;height:14px;background:var(--line-2);flex-shrink:0;opacity:0.6}
-  @media(max-width:640px){.trust-sep{display:none}.trust-strip{gap:12px}}
+/* email capture form */
+.email-capture{display:flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:8px;overflow:hidden;height:42px;max-width:380px;width:100%;position:relative}
+.email-capture.center{margin-left:auto;margin-right:auto}
+.email-capture input{flex:1;background:transparent;border:0;padding:0 14px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--fg);outline:none;min-width:0}
+.email-capture input::placeholder{color:var(--fg-3)}
+.email-capture button{padding:0 14px;background:var(--accent);color:var(--bg);font-family:'JetBrains Mono';font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:0;white-space:nowrap;transition:.18s;display:flex;align-items:center;gap:6px;flex-shrink:0}
+.email-capture button:hover{filter:brightness(1.08)}
+.email-capture button:disabled{opacity:.6;cursor:not-allowed}
+@media(max-width:880px){.hero.editorial .email-capture{margin-left:auto;margin-right:auto}}
 
-  /* card shadows for depth */
-  .terminal{box-shadow:0 1px 0 rgba(0,0,0,.02),0 8px 32px -8px rgba(0,0,0,.10),0 24px 48px -16px rgba(0,0,0,.06)}
-  .codecard{box-shadow:0 1px 0 rgba(0,0,0,.02),0 4px 16px -4px rgba(0,0,0,.08)}
-  .price.feat{box-shadow:0 0 0 1.5px #22C55E,0 8px 32px -8px rgba(34,197,94,.12)}
+/* live console */
+.console{position:relative;border:1px solid var(--line-2);border-radius:12px;background:var(--bg-1);overflow:hidden;box-shadow:0 0 0 1px rgba(95,232,160,.04),0 32px 80px -32px rgba(0,0,0,.6),0 0 80px -20px rgba(95,232,160,.06)}
+.console-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--bg-2);font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3)}
+.console-bar .dots{display:flex;gap:6px}
+.console-bar .dots i{width:8px;height:8px;border-radius:50%;background:var(--line-2);display:inline-block}
+.console-bar .title{margin-left:6px;color:var(--fg-3)}
+.console-bar .status{margin-left:auto;display:inline-flex;align-items:center;gap:6px;color:var(--accent-dim)}
+.console-bar .status::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);animation:pulse 2s ease-in-out infinite}
+.console-body{padding:28px 28px 22px;display:flex;flex-direction:column;gap:24px;min-height:480px}
+.msg{display:flex;gap:14px;align-items:flex-start;animation:fadeup .45s ease both}
+@keyframes fadeup{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.av{font-family:'JetBrains Mono';font-size:10px;color:var(--fg-3);min-width:36px;padding-top:5px;letter-spacing:.1em;text-transform:uppercase;flex-shrink:0}
+.msg .av.you{color:var(--fg-2)}
+.msg .av.ai{color:var(--accent)}
+.bubble{flex:1;font-size:14px;line-height:1.65;color:var(--fg)}
+.bubble.user{color:var(--fg-2)}
+.bubble .ttable{margin-top:14px;font-family:'JetBrains Mono';font-size:12.5px;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.bubble .ttable .r{display:grid;grid-template-columns:1.6fr 1fr .9fr;gap:18px;padding:9px 14px;border-bottom:1px solid var(--line);align-items:center}
+.bubble .ttable .r:last-child{border-bottom:0}
+.bubble .ttable .r.hd{color:var(--fg-3);font-size:10px;letter-spacing:.08em;text-transform:uppercase;background:var(--bg-2)}
+.bubble .ttable .r .v{color:var(--fg)}
+.bubble .ttable .r .d.up{color:var(--alert)}
+.bubble .ttable .r .d.down{color:var(--accent)}
+.bubble .ttable .r.total{background:var(--bg-2);font-weight:500}
+.bubble .ttable .r.total .v{color:var(--fg)}
+.bubble .anomaly{color:var(--alert);font-weight:500}
+.bubble .anomaly::before{content:"! ";font-family:'JetBrains Mono'}
+.cursor{display:inline-block;width:7px;height:14px;background:var(--accent);vertical-align:-2px;animation:blink 1s steps(1) infinite;margin-left:2px}
+@keyframes blink{50%{opacity:0}}
+.thinking{display:inline-flex;gap:4px;padding-top:6px}
+.thinking i{width:5px;height:5px;border-radius:50%;background:var(--fg-3);animation:think 1.4s ease-in-out infinite}
+.thinking i:nth-child(2){animation-delay:.2s}
+.thinking i:nth-child(3){animation-delay:.4s}
+@keyframes think{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+.q-pager{display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--line);background:var(--bg-2);font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3)}
+.q-pager .dots{display:flex;gap:5px;margin-left:auto}
+.q-pager .dots i{width:5px;height:5px;border-radius:50%;background:var(--line-2);cursor:pointer;transition:.15s}
+.q-pager .dots i.on{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.q-pager .dots i:hover{background:var(--fg-3)}
 
-  /* sections */
-  section{padding:96px 0;border-top:1px solid var(--line)}
-  .section-head{margin-bottom:48px;max-width:760px;text-align:center;margin-left:auto;margin-right:auto}
-  .section-head .label{display:block;margin-bottom:14px}
-  .section-head h2{margin-bottom:14px}
-  .section-head p{font-size:16px;max-width:56ch;margin-left:auto;margin-right:auto}
+/* trust strip */
+.trust{margin-top:48px;display:grid;gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.trust .ti{padding:22px 24px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.trust .ti:last-child{border-right:0}
+.trust .ti .lab{font-family:'JetBrains Mono';font-size:10.5px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase}
+.trust .ti .val{font-family:'Space Grotesk';font-size:26px;color:var(--fg);letter-spacing:-.02em;line-height:1.05}
+.trust .ti .val .sub{color:var(--fg-3);font-size:13px;margin-left:6px;letter-spacing:0}
+@media(max-width:880px){.trust{grid-template-columns:repeat(2,1fr)!important}.trust .ti:nth-child(2){border-right:0}.trust .ti:nth-child(-n+2){border-bottom:1px solid var(--line)}}
 
-  /* steps */
-  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid var(--line)}
-  .step{padding:28px 28px 28px 0;border-right:1px solid var(--line);transition:background .18s}
-  .step:hover{background:var(--bg-2)}
-  .step:nth-child(1){padding-left:0}
-  .step:nth-child(4){border-right:0;padding-right:0}
-  .step:not(:nth-child(1)){padding-left:28px}
-  .step .n{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.04em;margin-bottom:18px}
-  .step h3{margin-bottom:6px;font-size:16px;font-weight:500}
-  .step p{font-size:14px}
-  .step .cmd{margin-top:18px;font-family:var(--mono);font-size:12.5px;color:var(--fg-2)}
-  .step .cmd .c{color:var(--fg-3)}
+/* sections */
+section{padding:128px 0;border-top:1px solid var(--line);position:relative}
+section.tight{padding:88px 0}
+.section-head{margin-bottom:64px;max-width:780px}
+.section-head .label{font-family:'JetBrains Mono';font-size:11px;color:var(--accent-dim);letter-spacing:.1em;text-transform:uppercase;display:flex;align-items:center;gap:10px;margin-bottom:18px}
+.section-head .label::before{content:"";width:24px;height:1px;background:var(--accent-dim)}
+.section-head h2{font-size:clamp(36px,4.4vw,56px);line-height:1.04;letter-spacing:-.035em;font-weight:300}
+.section-head h2 em{font-style:italic;font-weight:400;color:var(--accent)}
+.section-head p{margin-top:20px;color:var(--fg-2);font-size:17px;line-height:1.6;max-width:60ch}
 
-  /* config */
-  .config{margin-top:36px}
-  .codecard{border:1px solid var(--line);border-radius:10px;background:var(--bg);overflow:hidden}
-  .codecard .hd{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:var(--fg-3);background:var(--bg-2)}
-  .codecard pre{padding:20px 22px;font-family:var(--mono);font-size:13px;line-height:1.75;color:var(--fg);overflow:auto}
-  .codecard .k{color:var(--fg)}
-  .codecard .s{color:var(--alert)}
-  .codecard .c{color:var(--fg-3)}
+/* thesis */
+.thesis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-top:1px solid var(--line)}
+.thesis-card{padding:36px 32px 36px 0;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:14px}
+.thesis-card:nth-child(2){padding-left:32px}
+.thesis-card:last-child{border-right:0;padding-left:32px;padding-right:0}
+.thesis-card .n{font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3);letter-spacing:.08em}
+.thesis-card h3{font-family:'Space Grotesk';font-size:22px;font-weight:400;letter-spacing:-.02em;color:var(--fg);line-height:1.2}
+.thesis-card p{color:var(--fg-2);font-size:14.5px;line-height:1.6}
+@media(max-width:880px){.thesis{grid-template-columns:1fr}.thesis-card{padding:28px 0!important;border-right:0;border-bottom:1px solid var(--line)}.thesis-card:last-child{border-bottom:0}}
 
-  /* features */
-  .features{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--line)}
-  .feature{padding:36px 36px 36px 0;border-bottom:1px solid var(--line);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:14px;transition:background .18s}
-  .feature:hover{background:var(--bg-2)}
-  .feature:nth-child(2n){border-right:0;padding-right:0;padding-left:36px}
-  .feature:nth-last-child(-n+2){border-bottom:0}
-  .feature .feat-icon{width:36px;height:36px;border-radius:8px;background:var(--bg-3);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--fg-2);flex-shrink:0}
-  .feature .num{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.04em}
-  .feature h3{font-size:22px;font-weight:500;letter-spacing:-.02em;line-height:1.2;color:var(--fg)}
-  .feature p{font-size:14.5px;line-height:1.6;max-width:46ch}
+/* architecture */
+.arch{position:relative;padding:48px 0;background:var(--bg-1);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.arch-grid{position:absolute;inset:0;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(ellipse at 50% 50%,#000 0%,transparent 80%);pointer-events:none}
+.arch-row{position:relative;display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:0;align-items:center;max-width:1080px;margin:0 auto;padding:0 28px}
+.arch-col{display:flex;flex-direction:column;gap:10px;align-items:center;padding:18px}
+.arch-col .lab{font-family:'JetBrains Mono';font-size:10.5px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase;text-align:center}
+.arch-node{width:100%;max-width:240px;padding:18px 20px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:10px;display:flex;flex-direction:column;gap:8px}
+.arch-node.center{border-color:var(--accent-dim);background:linear-gradient(180deg,var(--bg-2),var(--bg-1));box-shadow:0 0 32px -8px rgba(95,232,160,.12);position:relative}
+.arch-node h4{font-family:'Space Grotesk';font-size:16px;font-weight:500;letter-spacing:-.01em;color:var(--fg)}
+.arch-node .sub{font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3);letter-spacing:.02em}
+.arch-node .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.arch-node .chips span{font-family:'JetBrains Mono';font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--line-2);color:var(--fg-2);background:var(--bg-1)}
+.arch-arrow{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;color:var(--fg-3);font-family:'JetBrains Mono';font-size:10px;letter-spacing:.06em;padding:0 8px}
+.arch-arrow .line{width:100%;min-width:60px;height:1px;background:linear-gradient(90deg,transparent,var(--accent-dim) 40%,var(--accent-dim) 60%,transparent);position:relative}
+.arch-arrow .line::before,.arch-arrow .line::after{content:"";position:absolute;top:-2px;width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.arch-arrow .line::before{left:30%;animation:dataflow 2.4s ease-in-out infinite}
+.arch-arrow .line::after{left:70%;animation:dataflow 2.4s ease-in-out infinite .8s}
+@keyframes dataflow{0%{transform:translateX(-30px);opacity:0}30%,70%{opacity:1}100%{transform:translateX(30px);opacity:0}}
+@media(max-width:880px){.arch-row{grid-template-columns:1fr;gap:12px}.arch-arrow{transform:rotate(90deg);padding:0;min-height:32px}.arch-arrow .line{min-width:40px;width:40px}.arch-col{padding:8px 18px}}
 
-  /* connectors pill grid */
-  .conn-grid{display:flex;flex-wrap:wrap;gap:10px;margin-top:40px}
-  .conn-pill{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border:1px solid var(--line);border-radius:999px;font-size:13.5px;color:var(--fg-2);background:var(--bg);letter-spacing:-.01em;transition:border-color .15s,color .15s}
-  .conn-pill:hover{border-color:var(--line-2);color:var(--fg)}
-  .conn-group-label{width:100%;font-family:var(--mono);font-size:11px;color:var(--fg-4);letter-spacing:.06em;text-transform:uppercase;margin-top:20px;margin-bottom:2px}
-  .badge{font-family:var(--mono);font-size:11.5px;letter-spacing:.02em}
-  .badge.ok::before, .badge.warn::before, .badge.partial::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;vertical-align:1px}
-  .badge.ok{color:var(--fg)}
-  .badge.ok::before{background:var(--hl)}
-  .badge.warn{color:var(--fg-2)}
-  .badge.warn::before{background:var(--alert);opacity:.8}
-  .badge.partial{color:var(--fg-3)}
-  .badge.partial::before{background:var(--fg-4)}
+/* question marquee */
+.qmarq{margin-top:24px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:32px 0;overflow:hidden;position:relative;mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+.qmarq .track{display:flex;gap:18px;animation:scroll 80s linear infinite;width:max-content}
+.qmarq:hover .track{animation-play-state:paused}
+.qmarq .q{font-family:'Space Grotesk';font-size:22px;font-weight:300;color:var(--fg-2);letter-spacing:-.015em;white-space:nowrap;display:inline-flex;align-items:center;gap:18px}
+.qmarq .q::after{content:"·";color:var(--accent);font-size:28px}
+@keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
-  /* security */
-  .pull blockquote{font-size:clamp(26px,3vw,38px);line-height:1.25;letter-spacing:-.025em;font-weight:400;color:var(--fg);max-width:36ch}
-  .pull p{margin-top:24px;font-size:15.5px;max-width:60ch;line-height:1.65}
-  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:32px}
-  .chip{padding:6px 12px;border:1px solid var(--line);border-radius:999px;font-size:12.5px;color:var(--fg-2);font-family:var(--mono)}
+/* connectors */
+.conn-wrap{display:grid;grid-template-columns:1.2fr 2fr;gap:64px;align-items:start}
+@media(max-width:880px){.conn-wrap{grid-template-columns:1fr;gap:32px}}
+.conn-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg-1)}
+.conn{padding:22px 18px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;transition:.18s;cursor:default}
+.conn:nth-child(4n){border-right:0}
+.conn:nth-last-child(-n+4){border-bottom:0}
+.conn:hover{background:var(--bg-2)}
+.conn .nm{font-family:'Space Grotesk';font-size:14px;color:var(--fg);font-weight:500;letter-spacing:-.01em}
+.conn .px{font-family:'JetBrains Mono';font-size:10.5px;color:var(--fg-3);line-height:1.4}
+.conn .tag{font-family:'JetBrains Mono';font-size:9.5px;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;display:inline-flex;align-items:center;gap:5px;margin-top:auto;padding-top:6px}
+.conn .tag::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 4px var(--accent)}
+.conn .tag.beta{color:var(--warn)}
+.conn .tag.beta::before{background:var(--warn);box-shadow:0 0 4px var(--warn)}
+@media(max-width:760px){.conn-grid{grid-template-columns:repeat(2,1fr)}.conn{border-right:1px solid var(--line)!important;border-bottom:1px solid var(--line)!important}.conn:nth-child(2n){border-right:0!important}.conn:nth-last-child(-n+2){border-bottom:0!important}}
 
-  /* pricing */
-  .pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-  .price{padding:36px 32px 36px 0;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:22px;transition:background .18s}
-  .price:not(:first-child){padding-left:32px}
-  .price:last-child{border-right:0;padding-right:0}
-  .price .tier{font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--fg-3);text-transform:uppercase}
-  .price .amt{font-size:46px;line-height:1;letter-spacing:-.03em;font-weight:400;color:var(--fg)}
-  .price .amt .small{font-size:22px;color:var(--fg-3)}
-  .price .amt-sub{font-size:13px;color:var(--fg-3);margin-top:8px;font-family:var(--mono)}
-  .price ul{list-style:none;display:flex;flex-direction:column;gap:9px;font-size:14px;color:var(--fg-2)}
-  .price ul li{display:flex;gap:10px;line-height:1.5}
-  .price ul li::before{content:"·";color:var(--fg-3);width:8px;text-align:center}
-  .price ul li.locked{color:var(--fg-4)}
-  .price ul li.locked::before{content:"·"}
-  .price .cta{margin-top:auto;padding-top:8px;padding-bottom:0;border-top:none}
-  .price .cta a{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--fg);border-bottom:1px solid var(--line)}
-  .price .cta a:hover{border-bottom-color:var(--fg)}
-  .price.feat{margin:0 -1px;border-left:1px solid var(--line);padding-left:32px;padding-right:32px}
-  .price:hover{background:var(--bg-2)}
-  .price.feat .cta a{color:var(--fg);font-weight:500}
-  .price .free-badge{display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);border:1px solid var(--line);border-radius:4px;padding:2px 7px;margin-bottom:4px}
-  .free-setup-form{padding-top:4px}
-  .free-setup-form .fs-label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.03em;margin-bottom:10px}
-  .free-setup-form .fs-field{display:flex;gap:0;border-bottom:1px solid var(--fg);padding-bottom:8px}
-  .free-setup-form input[type=email]{flex:1;background:transparent;border:0;color:var(--fg);padding:6px 0;font-family:'DM Sans',sans-serif;font-size:14px;outline:none;min-height:44px}
-  .free-setup-form input[type=email]::placeholder{color:var(--fg-3)}
-  .free-setup-form .fs-btn{background:transparent;border:0;color:var(--fg);font-size:13px;cursor:pointer;padding:0 2px;white-space:nowrap}
-  .free-setup-steps{padding-top:4px}
-  .free-setup-steps .fs-confirmed{font-family:var(--mono);font-size:11.5px;color:var(--hl);margin-bottom:14px}
-  .free-setup-steps ol{padding-left:0;list-style:none;display:flex;flex-direction:column;gap:10px}
-  .free-setup-steps ol li{display:flex;flex-direction:column;gap:3px}
-  .free-setup-steps ol li .step-label{font-size:11.5px;color:var(--fg-3);font-family:var(--mono)}
-  .free-setup-steps ol li code{font-family:var(--mono);font-size:12.5px;background:var(--bg-3,#f0efec);color:var(--fg);padding:4px 7px;border-radius:4px;display:inline-block;margin-top:2px;word-break:break-word}
-  .free-setup-steps .fs-docs{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--fg);border-bottom:1px solid var(--line);margin-top:12px}
-  .free-setup-steps .fs-docs:hover{border-bottom-color:var(--fg)}
+/* pricing */
+.pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-1)}
+.tier{padding:36px 32px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:22px;background:var(--bg-1)}
+.tier:last-child{border-right:0}
+.tier.feat{background:linear-gradient(180deg,var(--bg-2),var(--bg-1));border-left:1px solid var(--accent-dim);border-right:1px solid var(--accent-dim);position:relative}
+.tier.feat::before{content:"MOST COMMON";position:absolute;top:0;right:18px;font-family:'JetBrains Mono';font-size:9.5px;letter-spacing:.1em;background:var(--accent);color:var(--bg);padding:3px 9px;border-radius:0 0 5px 5px}
+.tier .name{font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase}
+.tier .amt{font-family:'Space Grotesk';font-size:48px;line-height:1;letter-spacing:-.035em;color:var(--fg);font-weight:300}
+.tier .amt .sm{font-family:'JetBrains Mono';font-size:13px;color:var(--fg-3);margin-left:6px;letter-spacing:.02em}
+.tier .desc{font-size:14px;color:var(--fg-2);line-height:1.55;min-height:42px}
+.tier ul{list-style:none;display:flex;flex-direction:column;gap:10px;font-size:13.5px;color:var(--fg-2);line-height:1.5}
+.tier ul li{display:flex;gap:10px;align-items:flex-start}
+.tier ul li::before{content:"+";color:var(--accent-dim);font-family:'JetBrains Mono';font-weight:500;flex-shrink:0;width:10px}
+.tier ul li.dim{color:var(--fg-3)}
+.tier ul li.dim::before{content:"·";color:var(--fg-4)}
+.tier .cta{margin-top:auto;padding-top:8px}
+@media(max-width:880px){.pricing{grid-template-columns:1fr}.tier{border-right:0;border-bottom:1px solid var(--line)}.tier.feat{border-left:0;border-right:0;border-top:1px solid var(--accent-dim);border-bottom:1px solid var(--accent-dim)}.tier:last-child{border-bottom:0}}
 
-  /* for teams strip */
-  .for-teams-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line)}
-  .ft-card{padding:32px 32px 32px 0;border-right:1px solid var(--line)}
-  .ft-card:nth-child(2){padding-left:32px}
-  .ft-card:last-child{border-right:0;padding-right:0;padding-left:32px}
-  .ft-n{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.04em;margin-bottom:16px}
-  .ft-card h3{font-size:18px;font-weight:500;letter-spacing:-.02em;line-height:1.25;margin-bottom:10px;color:var(--fg)}
-  .ft-card p{font-size:14px;line-height:1.6;color:var(--fg-2);max-width:34ch}
-  @media(max-width:920px){
-    .for-teams-grid{grid-template-columns:1fr}
-    .ft-card{padding:24px 0!important;border-right:0;border-bottom:1px solid var(--line)}
-    .ft-card:last-child{border-bottom:0}
-  }
+/* bento (telemetry) */
+.bento{display:grid;grid-template-columns:1.4fr 1fr 1fr;grid-template-rows:auto auto;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-1)}
+.bento-cell{padding:24px 26px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px;position:relative}
+.bento-cell:nth-child(3n),.bento-cell.span-end{border-right:0}
+.bento-cell.row-end{border-bottom:0}
+.bento-cell .lab{font-family:'JetBrains Mono';font-size:10px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase}
+.bento-cell .big{font-family:'Space Grotesk';font-size:32px;line-height:1.05;letter-spacing:-.025em;color:var(--fg);font-weight:300}
+.bento-cell .big .delta{color:var(--accent);font-size:14px;margin-left:8px;font-family:'JetBrains Mono'}
+.bento-cell p{color:var(--fg-2);font-size:13.5px;line-height:1.55}
+.bento-cell.tall{grid-row:span 2;border-bottom:0}
+.sparkline{height:36px;margin-top:8px}
+.sparkline svg{width:100%;height:100%;display:block}
+@media(max-width:760px){.bento{grid-template-columns:1fr}.bento-cell{border-right:0!important}.bento-cell.tall{grid-row:span 1}.bento-cell.row-end{border-bottom:1px solid var(--line)}.bento-cell:last-child{border-bottom:0!important}}
 
-  /* CTA */
-  .cta{padding:120px 0 110px;border-top:1px solid var(--line)}
-  .cta h2{max-width:18ch;margin-bottom:22px}
-  .cta .row{display:grid;grid-template-columns:1.4fr 1fr;gap:80px;align-items:end}
-  .cta-form .lab{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em;margin-bottom:12px}
-  .cta-form .field{display:flex;gap:8px;border-bottom:1px solid var(--fg);padding-bottom:8px}
-  .cta-form input{flex:1;background:transparent;border:0;color:var(--fg);padding:6px 0;font-family:'DM Sans',sans-serif;font-size:16px;outline:none}
-  .cta-form input::placeholder{color:var(--fg-3)}
-  .cta-form .submit{background:transparent;border:0;color:var(--fg);font-size:14px;cursor:pointer;padding:0 4px;display:inline-flex;align-items:center;gap:6px}
-  .cta-form .helper{margin-top:14px;font-size:12.5px;color:var(--fg-3)}
+/* foot cta */
+.foot-cta{padding:140px 0 110px;border-top:1px solid var(--line);text-align:center;position:relative;overflow:hidden}
+.foot-cta-grid{position:absolute;inset:0;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:80px 80px;mask-image:radial-gradient(ellipse at 50% 50%,#000 0%,transparent 65%);pointer-events:none}
+.foot-cta h2{font-size:clamp(48px,6vw,84px);line-height:.98;letter-spacing:-.04em;font-weight:300}
+.foot-cta h2 em{font-style:italic;color:var(--accent);font-weight:400}
+footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-1)}
+.foot{display:grid;grid-template-columns:1.6fr repeat(3,1fr);gap:48px}
+.foot h5{font-family:'JetBrains Mono';font-size:10.5px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:18px;font-weight:500}
+.foot a{display:block;color:var(--fg-2);font-size:13.5px;padding:4px 0}
+.foot a:hover{color:var(--fg)}
+.foot-meta{display:flex;align-items:center;justify-content:space-between;margin-top:56px;padding-top:24px;border-top:1px solid var(--line);font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3);letter-spacing:.04em}
+@media(max-width:880px){.foot{grid-template-columns:1fr 1fr;gap:32px}.foot-meta{flex-direction:column;gap:12px;align-items:flex-start}}
 
-  /* Trial modal */
-  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px}
-  .modal{background:var(--bg);border:1px solid var(--line);border-radius:12px;width:100%;max-width:780px;overflow:hidden;display:grid;grid-template-columns:1fr 1fr}
-  .modal-left{padding:44px 40px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:28px}
-  .modal-left h3{font-size:22px;font-weight:400;letter-spacing:-.02em;line-height:1.2}
-  .modal-left .price-row{display:flex;align-items:baseline;gap:6px}
-  .modal-left .price-big{font-size:42px;font-weight:400;letter-spacing:-.03em}
-  .modal-left .price-after{font-size:13px;color:var(--fg-3);font-family:var(--mono)}
-  .modal-left ul{list-style:none;display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:var(--fg-2)}
-  .modal-left ul li::before{content:"·";margin-right:10px;color:var(--fg-4)}
-  .modal-right{padding:44px 40px;display:flex;flex-direction:column;gap:20px}
-  .modal-right h4{font-size:15px;font-weight:500;letter-spacing:-.01em}
-  .modal-right label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.04em;display:block;margin-bottom:6px}
-  .modal-right input[type=email]{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--fg);outline:none}
-  .modal-right input[type=email]:focus{border-color:var(--fg-2)}
-  .modal-right .modal-submit{width:100%;background:#22c55e;color:#fff;border:0;border-radius:6px;padding:11px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;cursor:pointer;margin-top:4px}
-  .modal-right .modal-submit:hover{background:#16a34a}
-  .modal-right .modal-note{font-size:11.5px;color:var(--fg-3);line-height:1.5;font-family:var(--mono)}
-  .modal-pip{margin-top:auto;padding-top:20px;border-top:1px solid var(--line)}
-  .modal-pip .step-label{font-family:var(--mono);font-size:10.5px;color:var(--fg-4);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
-  .modal-pip .install{font-family:var(--mono);font-size:12.5px;color:var(--fg-2);background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 14px;display:flex;align-items:center;gap:10px}
-  .modal-pip .install .prompt{color:var(--fg-4)}
-  .modal-close{position:absolute;top:16px;right:18px;background:transparent;border:0;font-size:20px;cursor:pointer;color:var(--fg-3);line-height:1}
-  .modal-close:hover{color:var(--fg)}
-  @media(max-width:640px){.modal{grid-template-columns:1fr}.modal-left{border-right:0;border-bottom:1px solid var(--line);padding:32px 24px}.modal-right{padding:32px 24px}}
+/* focus rings */
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
 
-  /* footer */
-  .foot-subscribe{display:flex;align-items:center;justify-content:space-between;gap:32px;padding:32px 0;border-bottom:1px solid var(--line);margin-bottom:48px}
-  @media(max-width:640px){.foot-subscribe{flex-direction:column;align-items:flex-start}}
-  footer{border-top:1px solid var(--line);padding:36px 0 56px}
-  .foot{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:36px}
-  .foot h5{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em;margin-bottom:14px;font-weight:400}
-  .foot a{display:block;color:var(--fg-2);font-size:14px;padding:3px 0}
-  .foot a:hover{color:var(--fg)}
-  .foot-bottom{margin-top:48px;display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:11.5px;color:var(--fg-3);padding-top:18px;border-top:1px solid var(--line)}
+/* responsive */
+@media(max-width:980px){
+  .hero-inner{grid-template-columns:1fr;gap:48px}
+  .hero{padding:60px 0 72px}
+  h1.display{font-size:54px}
+}
+@media(max-width:640px){
+  .hero{padding:56px 0 60px}
+  h1.display{font-size:44px}
+  .hero-cta-row{flex-direction:column;align-items:flex-start}
+  section{padding:88px 0}
+}
 
-  @media (max-width:920px){
-    .features{grid-template-columns:1fr}
-    .feature{border-right:0;padding-right:0;padding-left:0!important;padding-top:32px;padding-bottom:32px}
-    .steps{grid-template-columns:1fr 1fr}
-    .step{padding:24px!important;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
-    .step:nth-child(2n){border-right:0}
-    .step:nth-last-child(-n+2){border-bottom:0}
-    .pricing{grid-template-columns:1fr;grid-auto-rows:auto}
-    .price{padding:32px 0!important;border-right:0;border-bottom:1px solid var(--line);align-self:start}
-    .price.feat{margin:0;padding:32px 0!important;border-left:0;align-self:start}
-    .price:last-child{border-bottom:0}
-    .price .cta{margin-top:16px}
-    .nav ul{display:none}
-    .cta .row{grid-template-columns:1fr;gap:48px}
-    .foot{grid-template-columns:1fr 1fr}
-  }
-
-  /* 375px mobile */
-  @media (max-width:375px){
-    .wrap{padding:0 16px}
-    h1{font-size:36px}
-    .hero{padding:56px 0 48px}
-    .hero .lede{font-size:15px}
-    .foot{grid-template-columns:1fr}
-  }
-
-  /* Focus rings — keyboard nav */
-  :focus-visible{outline:2px solid var(--fg);outline-offset:2px;border-radius:3px}
-  input:focus-visible,textarea:focus-visible{outline:2px solid var(--fg-2);outline-offset:0}
-  .client-pill:focus-visible{outline:2px solid var(--fg);outline-offset:3px}
-
-  /* Touch targets — 44x44px minimum */
-  .btn{min-height:36px;min-width:36px}
-  .theme-tog{min-width:44px;min-height:44px}
-  .modal-close{min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center}
-  .install button{min-height:28px;min-width:36px;padding:4px 10px}
-  .fs-btn{min-height:44px;padding:0 8px}
-  .cta-form .submit{min-height:44px;padding:0 8px}
-
-  /* prefers-reduced-motion */
-  @media (prefers-reduced-motion: reduce){
-    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
-    .theme-tog-knob{transition:none}
-  }
+/* prefers-reduced-motion */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
 </style>
-<script defer src="/_vercel/speed-insights/script.js"></script>
 </head>
 <body>
-
 <div id="app"></div>
-
 <script type="text/babel" src="tweaks-panel.jsx"></script>
-<script type="text/babel" data-presets="env,react">
-const { useState, useEffect } = React;
-
-const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
-  "palette": "linen",
-  "accentMode": "neutral"
-}/*EDITMODE-END*/;
-
-const PALETTES = {
-  linen:    { bg:"#fbfaf7", bg2:"#f4f2ec", bg3:"#ebe8e0", fg:"#1a1915", fg2:"#54524a", fg3:"#8b8879", fg4:"#c1bdaf", line:"#e6e2d6", line2:"#d9d4c4" },
-  paper:    { bg:"#ffffff", bg2:"#f7f7f5", bg3:"#eeeeea", fg:"#161616", fg2:"#525252", fg3:"#8a8a85", fg4:"#c4c4be", line:"#ebebe6", line2:"#dedeD8" },
-  graphite: { bg:"#15140f", bg2:"#1c1a14", bg3:"#23211a", fg:"#f3efe6", fg2:"#bbb6a4", fg3:"#7e7a6c", fg4:"#4a4639", line:"#2e2b20", line2:"#3d3929" },
-};
-const ACCENTS = {
-  neutral: { hl:"#3b6e3a", alert:"#b8533a" },
-  forest:  { hl:"#2f5f2e", alert:"#9d4630" },
-  cobalt:  { hl:"#365a9b", alert:"#b8533a" },
-};
-
-function applyTheme(t){
-  const r = document.documentElement;
-  const p = PALETTES[t.palette] || PALETTES.linen;
-  const a = ACCENTS[t.accentMode] || ACCENTS.neutral;
-  r.style.setProperty('--bg', p.bg);
-  r.style.setProperty('--bg-2', p.bg2);
-  r.style.setProperty('--bg-3', p.bg3);
-  r.style.setProperty('--fg', p.fg);
-  r.style.setProperty('--fg-2', p.fg2);
-  r.style.setProperty('--fg-3', p.fg3);
-  r.style.setProperty('--fg-4', p.fg4);
-  r.style.setProperty('--line', p.line);
-  r.style.setProperty('--line-2', p.line2);
-  r.style.setProperty('--hl', a.hl);
-  r.style.setProperty('--alert', a.alert);
-  r.style.setProperty('--accent', p.fg);
-  r.style.setProperty('--accent-ink', p.bg);
-}
-
-function Logo(){
-  return (
-    <a href="#" className="logo">
-      <img src="/favicon.svg" alt="nable" />
-      <span>nable</span>
-    </a>
-  );
-}
-
-function ThemeToggle({ dark, onToggle }){
-  return (
-    <button className="theme-tog" onClick={onToggle} aria-label={dark?"Switch to linen":"Switch to graphite"} title={dark?"Switch to linen":"Switch to graphite"}>
-      <span className="theme-tog-track">
-        <span className="theme-tog-sun" aria-hidden>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-        </span>
-        <span className="theme-tog-moon" aria-hidden>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-        </span>
-        <span className={"theme-tog-knob " + (dark ? "on" : "")}></span>
-      </span>
-    </button>
-  );
-}
-
-function PromoBanner({ onTrial }){
-  return (
-    <div style={{background:"var(--bg-3)",borderBottom:"1px solid var(--line-2)",textAlign:"center",padding:"10px 16px",fontSize:13.5,color:"var(--fg-2)",position:"relative",zIndex:100}}>
-      <span style={{color:"#22C55E",fontWeight:600,marginRight:6}}>FREE TRIAL</span>
-      First month free. No charge until day 31, cancel any time.&nbsp;
-      <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02" style={{color:"var(--fg)",textDecoration:"underline",textUnderlineOffset:3}}>Start free →</a>
-    </div>
-  );
-}
-
-function Nav({ dark, onToggle, onTrial, onSignIn }){
-  return (
-    <nav className="nav">
-      <div className="wrap nav-inner">
-        <Logo />
-        <ul>
-          <li><a href="#product">Product</a></li>
-          <li><a href="#connectors">Connectors</a></li>
-          <li><a href="#pricing">Pricing</a></li>
-          <li><a href="/docs" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked', { location: 'nav' }); }}>Docs</a></li>
-          <li><a href="/account">Account</a></li>
-        </ul>
-        <div className="right">
-          <ThemeToggle dark={dark} onToggle={onToggle} />
-          <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02" className="btn btn-primary">Start free <span className="arr">→</span></a>
-        </div>
-      </div>
-    </nav>
-  );
-}
-
-const CLIENT_INFO = [
-  {
-    name: "Claude Desktop",
-    status: "Full MCP support",
-    path: "~/Library/Application Support/Claude/claude_desktop_config.json",
-    note: "Official MCP client from Anthropic. All tools available.",
-  },
-  {
-    name: "Cursor",
-    status: "Full MCP support",
-    path: ".cursor/mcp.json  (project)  or  ~/.cursor/mcp.json  (global)",
-    note: "Works in Agent mode. Use global config to enable across all projects.",
-  },
-  {
-    name: "Windsurf",
-    status: "Full MCP support",
-    path: "~/.codeium/windsurf/mcp_config.json",
-    note: "Codeium's editor. Same MCP protocol, same tools.",
-  },
-  {
-    name: "Cline",
-    status: "Full MCP support",
-    path: "VS Code settings → Cline → MCP Servers",
-    note: "Configure via the Cline extension settings panel in VS Code.",
-  },
-  {
-    name: "Zed",
-    status: "Full MCP support",
-    path: "~/.config/zed/settings.json  →  context_servers",
-    note: "Zed's context servers use the MCP protocol natively.",
-  },
-];
-
-function ClientPill({ client }){
-  return (
-    <span className="client-pill" tabIndex={0}>
-      {client.name}
-      <div className="client-pop">
-        <div className="cp-name">{client.name}</div>
-        <div className="cp-status">{client.status}</div>
-        <div className="cp-path">{client.path}</div>
-        {client.note && <div className="cp-note">{client.note}</div>}
-      </div>
-    </span>
-  );
-}
-
-function Clients(){
-  return (
-    <div className="clients">
-      <span className="l">Works with</span>
-      {CLIENT_INFO.map(c => <ClientPill key={c.name} client={c} />)}
-    </div>
-  );
-}
-
-function HeroEmailCapture(){
-  const [email, setEmail] = React.useState('');
-  const [status, setStatus] = React.useState('idle'); // idle | loading | sent
-  const [copied, setCopied] = React.useState(false);
-
-  async function handleSubmit(e){
-    e.preventDefault();
-    if(status !== 'idle') return;
-    setStatus('loading');
-    try {
-      const res = await fetch('/api/subscribe', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ email, source: 'hero' }),
-      });
-      if(!res.ok) throw new Error('subscribe failed');
-      if(window.posthog){ posthog.identify(email, { email, plan: 'free' }); posthog.capture('hero_cta', { email }); }
-      if(window.rdt) rdt('track', 'SignUp', {}, {email: email});
-      setStatus('sent');
-    } catch(err){ setStatus('idle'); console.warn('subscribe failed', err); }
-  }
-
-  function handleCopy(){
-    navigator.clipboard.writeText('pip install finops-mcp && finops setup').catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-    if(window.posthog) posthog.capture('copy_install_cmd', { location: 'hero' });
-  }
-
-  return (
-    <div style={{marginTop:28,maxWidth:460}}>
-      <form onSubmit={handleSubmit} style={{display:"flex",alignItems:"center",gap:0,border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 2px 8px rgba(0,0,0,.12)"}}>
-        <input
-          type="email"
-          placeholder="your@company.com"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          required
-          aria-label="Work email"
-          style={{flex:1,background:"transparent",border:"none",padding:"12px 16px",fontFamily:"'DM Sans',sans-serif",fontSize:14,color:"var(--fg)",outline:"none",minHeight:44}}
-        />
-        <button
-          type="submit"
-          disabled={status !== 'idle'}
-          style={{background:"#22c55e",color:"#fff",border:"none",padding:"12px 22px",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,cursor:status !== 'idle' ? "default" : "pointer",whiteSpace:"nowrap",minHeight:44,letterSpacing:"-.01em",transition:"opacity .15s",opacity:status !== 'idle' ? 0.7 : 1,flexShrink:0}}>
-          {status === 'loading' ? "Sending..." : status === 'sent' ? "Check your email ✓" : "Get setup guide"}
-        </button>
-      </form>
-      <p style={{marginTop:8,fontSize:12,color:"var(--fg-3)"}}>Free &middot; No credit card &middot; Setup guide sent instantly</p>
-
-      <div style={{display:"flex",alignItems:"center",gap:10,margin:"16px 0 10px",color:"var(--fg-4)"}}>
-        <div style={{flex:1,height:"1px",background:"var(--line)"}}/>
-        <span style={{fontSize:11,letterSpacing:".04em",textTransform:"uppercase"}}>or install directly</span>
-        <div style={{flex:1,height:"1px",background:"var(--line)"}}/>
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:0,background:"var(--bg-2)",border:"1px solid var(--line)",borderRadius:8,overflow:"hidden",fontFamily:"var(--mono)",fontSize:13}}>
-        <span style={{padding:"11px 14px",color:"var(--fg-3)",userSelect:"none",flexShrink:0}}>$</span>
-        <span style={{flex:1,padding:"11px 0",color:"var(--fg)",letterSpacing:"-.01em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>pip install finops-mcp &amp;&amp; finops setup</span>
-        <button onClick={handleCopy} style={{background:"none",border:"none",borderLeft:"1px solid var(--line)",padding:"11px 16px",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:500,color:copied?"#22c55e":"var(--fg-2)",cursor:"pointer",whiteSpace:"nowrap",transition:"color .15s",flexShrink:0}}>
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function BottomCta(){
-  const [email, setEmail] = React.useState('');
-  const [sent, setSent] = React.useState(false);
-
-  async function handleSubmit(e){
-    e.preventDefault();
-    if(sent) return;
-    setSent(true);
-    try {
-      await fetch('/api/subscribe', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ email, source: 'bottom_cta' }),
-      });
-      if(window.posthog){ posthog.identify(email, { email, plan: 'free' }); posthog.capture('bottom_cta', { email }); }
-      if(window.rdt) rdt('track', 'SignUp', {}, {email: email});
-    } catch(err){ /* non-blocking */ }
-    const url = `https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02?prefilled_email=${encodeURIComponent(email)}`;
-    window.location.href = url;
-  }
-
-  return (
-    <div style={{marginTop:48,paddingTop:40,borderTop:"1px solid var(--line)",textAlign:"center"}}>
-      <p style={{fontSize:14,color:"var(--fg-3)",margin:"0 0 14px"}}>Want the setup guide sent to you?</p>
-      <form onSubmit={handleSubmit} style={{display:"flex",alignItems:"center",gap:0,maxWidth:380,margin:"0 auto",border:"1px solid var(--line-2)",borderRadius:8,overflow:"hidden",background:"var(--bg)",boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
-        <input
-          type="email"
-          placeholder="your@company.com"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          required
-          style={{flex:1,background:"transparent",border:"none",padding:"11px 14px",fontSize:14,color:"var(--fg)",outline:"none",minHeight:44}}
-        />
-        <button type="submit" style={{background:"#22c55e",color:"#fff",border:"none",padding:"11px 18px",fontSize:13,fontWeight:500,cursor:"pointer",whiteSpace:"nowrap",minHeight:44,letterSpacing:"-.01em"}}>
-          {sent ? "Sent ✓" : "Send guide →"}
-        </button>
-      </form>
-      <p style={{marginTop:8,fontSize:12,color:"var(--fg-4)"}}>Free &middot; No credit card &middot; Unsubscribe anytime</p>
-    </div>
-  );
-}
-
-function Hero({ onTrial }){
-  return (
-    <header className="hero">
-      <div className="wrap">
-        <div className="label" style={{marginBottom:18}}>v0.8.36 · 17 connectors · free to start</div>
-        <h1 style={{background:"linear-gradient(135deg,var(--fg) 0%,var(--fg-2) 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>Your cloud bill<br/>has answers.</h1>
-        <p className="lede">
-          nable connects your billing data directly to your AI editor. Ask what spiked, which team caused it, and what to do. No dashboards. No tickets.
-        </p>
-        <HeroEmailCapture />
-        <div className="hero-cta" style={{marginTop:12}}>
-          <a href="#product" className="btn btn-ghost" style={{fontSize:13,color:"var(--fg-3)",border:"none",padding:"4px 0"}}>See how it works ↓</a>
-          <a href="/docs" className="btn btn-ghost" style={{fontSize:13,color:"var(--fg-3)",border:"none",padding:"4px 0"}} onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked', { location: 'hero' }); }}>Read the docs</a>
-        </div>
-
-        <TrustStrip />
-
-        <Clients />
-
-        <Terminal />
-        <BottomCta />
-      </div>
-    </header>
-  );
-}
-
-function TrustStrip(){
-  return (
-    <div className="trust-strip">
-      <div className="trust-item">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        <a href="https://pypi.org/project/finops-mcp/" target="_blank" rel="noopener" style={{color:"inherit",textDecoration:"none"}}><strong>4,100+</strong> installs / month ↗</a>
-      </div>
-      <div className="trust-sep"/>
-      <div className="trust-item">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        <span><strong>17</strong> cloud &amp; SaaS providers</span>
-      </div>
-      <div className="trust-sep"/>
-      <div className="trust-item">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <span><strong>100%</strong> local, nothing leaves your machine</span>
-      </div>
-      <div className="trust-sep"/>
-      <div className="trust-item">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span>Free to start, no card required</span>
-      </div>
-    </div>
-  );
-}
-
-function Terminal(){
-  return (
-    <div className="terminal" id="product">
-      <div className="term-bar">
-        <div className="dots"><i></i><i></i><i></i></div>
-        <span className="term-title">claude · mcp[finops] connected</span>
-        <span className="term-status"><span className="dot"></span>nable active</span>
-      </div>
-      <div className="term-body">
-        <div className="msg">
-          <div className="av">you</div>
-          <div className="bubble user">
-            <p>How much did we spend on compute last month across all providers?</p>
-          </div>
-        </div>
-
-        <div className="msg">
-          <div className="av">ai</div>
-          <div className="bubble">
-            <p>April 2026 compute, normalized to USD across all three clouds:</p>
-            <div className="table">
-              <div className="r hd"><span>Provider</span><span>Spend</span><span>Δ vs Mar</span></div>
-              <div className="r"><span>AWS · EC2 + Fargate</span><span className="num">$18,420</span><span className="num delta up">+18.6%</span></div>
-              <div className="r"><span>Azure · Virtual Machines</span><span className="num">$6,310</span><span className="num delta up">+4.2%</span></div>
-              <div className="r"><span>GCP · Compute Engine</span><span className="num">$4,870</span><span className="num delta down">−3.4%</span></div>
-              <div className="r total"><span><b>Total</b></span><span className="num"><b>$29,600</b></span><span className="num delta up">+12.0%</span></div>
-            </div>
-            <p style={{marginTop:14}}>
-              Three new c6i.4xlarge instances in us-east-1 account for $1,890 of the AWS delta.
-            </p>
-          </div>
-        </div>
-
-        <div className="msg">
-          <div className="av">you</div>
-          <div className="bubble user">
-            <p>Any anomalies this week?</p>
-          </div>
-        </div>
-
-        <div className="msg">
-          <div className="av">ai</div>
-          <div className="bubble">
-            <p>
-              <span className="anomaly">Unusual spike detected</span>{" "}
-              Datadog usage is up <span style={{color:"var(--alert)"}}>+127%</span> vs your same-weekday baseline. $4,100 today vs $1,810 average.
-            </p>
-            <div className="table" style={{marginTop:12}}>
-              <div className="r hd"><span>Tag driver</span><span>Delta</span><span>% of spike</span></div>
-              <div className="r"><span>team=platform</span><span className="num delta up">+$2,290</span><span className="num delta up">78%</span></div>
-              <div className="r"><span>team=infra</span><span className="num delta up">+$480</span><span className="num delta up">16%</span></div>
-              <div className="r"><span>(untagged)</span><span className="num delta up">+$180</span><span className="num delta up">6%</span></div>
-            </div>
-            <p style={{marginTop:12}}>I've opened JIRA-2841 and tagged @sre.</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function QuickStart(){
-  return (
-    <section style={{paddingTop:0}}>
-      <div className="wrap">
-        <p style={{fontSize:13,color:"var(--fg-3)",marginBottom:24,fontFamily:"var(--mono)"}}>One command gets you running. 30-day trial, no card required. All Team features unlocked.</p>
-        <div className="steps">
-          <div className="step">
-            <div className="n">01</div>
-            <h3>Install</h3>
-            <div className="cmd"><span className="c">$</span> pip install finops-mcp <span style={{opacity:0.4}}>&amp;&amp; finops setup</span></div>
-            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Anaconda or pip errors? <a href="/docs#install" style={{color:"var(--fg-3)"}}>See install options →</a></div>
-          </div>
-          <div className="step">
-            <div className="n">02</div>
-            <h3>Connect AWS</h3>
-            <div className="cmd"><span className="c">$</span> finops setup aws</div>
-            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Works with your existing AWS setup. Read-only, 2 min.</div>
-          </div>
-          <div className="step">
-            <div className="n">03</div>
-            <h3>Add to your editor</h3>
-            <div className="cmd c">// one line in your MCP config</div>
-          </div>
-          <div className="step">
-            <div className="n">04</div>
-            <h3>Ask anything</h3>
-            <div className="cmd c">// "Why did our bill spike last week?"</div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const FiSignal    = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
-const FiGrid      = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>;
-const FiK8s       = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>;
-const FiAlert     = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-const FiServer    = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>;
-const FiBar       = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>;
-const FiPR        = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>;
-const FiTrash     = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>;
-
-const FEATURES = [
-  { icon: FiSignal, h:"It tells you who caused the spike, not just that one happened.", p:"Most tools say your bill went up 40%. nable says the payments team's new node group in us-east-1 drove $1,840 of it. Anomaly detection fires only when something is genuinely unusual, so you stop ignoring alerts and start acting on them." },
-  { icon: FiGrid,   h:"Shared cost views your whole team can run in seconds.", p:"Month over month, day over day, cost by tag, cost by team, top spenders, rightsizing opportunities. Pre-built views that anyone on the team can pull up just by asking. No SQL, no dashboard logins, no waiting for the FinOps team to run a report." },
-  { icon: FiK8s,    h:"Kubernetes costs by cluster, namespace, team, and workload.", p:"Any cluster, not just EKS. nable splits node costs down to every pod, deployment, and namespace, groups spend by any label like team or env for chargeback, scores cluster efficiency 0-100 with a letter grade, flags idle nodes and over-provisioned workloads, and tracks how costs trend over time. The breakdown your cloud bill was never going to give you." },
-  { icon: FiAlert,  h:"See what a Terraform change will cost before you apply it.", p:"Run terraform plan and nable gives you a line-by-line cost delta: what is being added, changed, and removed, with the monthly dollar impact for each resource. You find out the expensive part before it ships, not when the bill arrives." },
-  { icon: FiServer, h:"All your AI spend in one place, with unit economics.", p:"OpenAI, Anthropic, Bedrock, Langfuse: one view. See which teams are using expensive models when cheaper ones would do. Cost per thousand requests, cost per user, cache hit rate. The numbers your AI budget actually needs to make good decisions." },
-  { icon: FiBar,    h:"Connect your cloud bill to your business. Answer the so-what question.", p:"Tell nable your MRR, MAU, and paying customer count. When your AWS bill goes up, it tells you whether that is growth-driven and healthy or pure cost inflation with no business justification. Hosting as a percent of MRR, cost per customer, cost per API call, and how each is trending over time." },
-  { icon: FiPR,     h:"Engineers see the cost impact before the PR merges.", p:"nable comments on every pull request that touches infrastructure with a per-resource cost breakdown. No pipeline changes, no dashboards to check. The number is right there in the review where the decision actually gets made." },
-  { icon: FiTrash,  h:"Find waste and actually clean it up.", p:"Idle EC2 instances, unattached EBS volumes, oversized RDS instances, ghost Kubernetes workloads. nable finds them, tells you what they cost, and removes them on your say-so. Not another list you will get to eventually. Actual remediation with an audit trail." },
-];
-
-function Features(){
-  return (
-    <section>
-      <div className="wrap">
-        <div className="section-head">
-          <div className="label">/ Capabilities</div>
-          <h2>Ask questions. Get answers. Fix things.</h2>
-          <p>Most cloud cost tools give you a dashboard and leave you to figure it out. nable connects your real billing data to your AI editor so you can ask what happened, understand why, and actually do something about it. Every provider in one place, no SQL required.</p>
-        </div>
-
-        <div className="features">
-          {FEATURES.map((f,i)=>(
-            <article className="feature" key={i}>
-              <div className="feat-icon"><f.icon /></div>
-              <h3>{f.h}</h3>
-              <p>{f.p}</p>
-            </article>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const CONN_CLOUD   = ["AWS","Azure","GCP","Kubernetes"];
-const CONN_AI      = ["OpenAI","Anthropic","AWS Bedrock","Langfuse"];
-const CONN_SAAS    = ["Datadog","Snowflake","MongoDB Atlas","Twilio","Cloudflare","New Relic","PagerDuty","GitHub","Vercel"];
-
-function Connectors(){
-  return (
-    <section id="connectors">
-      <div className="wrap">
-        <div className="section-head">
-          <div className="label">/ Connectors</div>
-          <h2>Every signal. One agent.</h2>
-          <p>nable normalizes spend across cloud, AI, and SaaS into a single schema. Your AI reasons across billing, Kubernetes, observability, and deployments together, the cross-stack context that makes recommendations actually actionable.</p>
-        </div>
-
-        <div className="conn-grid">
-          <div className="conn-group-label">Cloud &amp; Infra</div>
-          {CONN_CLOUD.map(n => <span className="conn-pill" key={n}>{n}</span>)}
-          <div className="conn-group-label">AI &amp; LLMs</div>
-          {CONN_AI.map(n => <span className="conn-pill" key={n}>{n}</span>)}
-          <div className="conn-group-label">SaaS</div>
-          {CONN_SAAS.map(n => <span className="conn-pill" key={n}>{n}</span>)}
-        </div>
-
-        <div style={{marginTop:48,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16}}>
-          <div style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>Read-only by default</span>
-            </div>
-            <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>Every connector requests the minimum IAM/OAuth scope needed. nable never writes to your cloud.</p>
-          </div>
-          <div style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>Credentials in OS keyring</span>
-            </div>
-            <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>Fernet-encrypted and stored in macOS Keychain, Windows Credential Manager, or libsecret. Never written to disk in plain text.</p>
-          </div>
-          <div style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-              <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>Direct to your cloud APIs</span>
-            </div>
-            <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>Queries go laptop to cloud API. There is no nable proxy, no data warehouse, no third-party hop.</p>
-          </div>
-          <div style={{padding:"18px 20px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg)"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              <span style={{fontSize:13,fontWeight:600,color:"var(--fg)"}}>Role-based access control</span>
-            </div>
-            <p style={{fontSize:13,color:"var(--fg-3)",lineHeight:1.6,margin:0}}>Viewer, Analyst, and Admin roles scoped per team member. Admins control which connectors each role can query.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Security(){
-  return (
-    <section>
-      <div className="wrap">
-        <div className="section-head">
-          <div className="label">/ Security</div>
-        </div>
-        <div className="pull">
-          <blockquote>
-            Nothing leaves your machine. Queries go direct from your laptop to your cloud APIs.
-          </blockquote>
-          <p>
-            Credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). The vault key lives on your hardware. There is no nable server in the middle. There is no cloud sync. Nothing to breach on our end because there is nothing on our end.
-          </p>
-          <p style={{marginTop:16}}>
-            Run <code style={{fontFamily:"var(--mono)",fontSize:13,background:"var(--bg-2)",padding:"2px 7px",borderRadius:4}}>finops setup aws --iam-template</code> to generate a least-privilege IAM policy with exactly the permissions nable needs, nothing more. <code style={{fontFamily:"var(--mono)",fontSize:13,background:"var(--bg-2)",padding:"2px 7px",borderRadius:4}}>finops-doctor</code> verifies your credentials are read-only and your vault is locked down.
-          </p>
-          <div className="chips">
-            <span className="chip">Fernet encryption</span>
-            <span className="chip">OS keyring</span>
-            <span className="chip">Read-only IAM policy generator</span>
-            <span className="chip">Credential scope validator</span>
-            <span className="chip">Role-based access control</span>
-            <span className="chip">Team-scoped keys</span>
-            <span className="chip">Local audit log</span>
-            <span className="chip">No vendor cloud access</span>
-            <span className="chip">finops-doctor health check</span>
-            <span className="chip">Audit log every action</span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Pricing({ onTrial }){
-  const [freeEmail, setFreeEmail] = React.useState('');
-  const [freeSetup, setFreeSetup] = React.useState(false);
-
-  async function handleFreeSubmit(e){
-    e.preventDefault();
-    setFreeSetup(true);
-    try {
-      await fetch('/api/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: freeEmail, source: 'free_tier' }),
-      });
-      if (window.posthog) posthog.identify(freeEmail, { email: freeEmail, plan: 'free' });
-      if (window.rdt) rdt('track', 'SignUp', {}, {email: freeEmail});
-    } catch(err) { console.warn('subscribe failed', err); }
-  }
-
-  const configSnippet = `{
-  "mcpServers": {
-    "finops": {
-      "command": "finops-mcp"
-    }
-  }
-}`;
-
-  return (
-    <section id="pricing">
-      <div className="wrap">
-        <div className="section-head">
-          <div className="label">/ Pricing</div>
-          <h2>Simple, transparent pricing.</h2>
-          <p>Install free, 30 days of Team features included. Subscribe when you're ready.</p>
-        </div>
-
-        <div className="pricing">
-
-          {/* Free - permanent */}
-          <div className="price">
-            <div className="tier">Free · No card required</div>
-            <div>
-              <div className="amt">$0<span className="small"> / month</span></div>
-              <div className="amt-sub">forever · no credit card · no expiry</div>
-            </div>
-            <ul>
-              <li>All 17 cloud, SaaS &amp; AI connectors</li>
-              <li>FOCUS 2.0 normalized cost data across all providers</li>
-              <li>Cost queries, trends &amp; history</li>
-              <li>Anomaly detection</li>
-              <li>Rightsizing recommendations</li>
-              <li>Budgets &amp; spend alerts</li>
-              <li>Kubernetes cost analysis, efficiency scoring &amp; label-based chargeback</li>
-            </ul>
-
-            {!freeSetup ? (
-              <div className="free-setup-form">
-                <div className="fs-label">Get your setup guide</div>
-                <form className="fs-field" onSubmit={handleFreeSubmit}>
-                  <input
-                    type="email"
-                    placeholder="you@company.com"
-                    value={freeEmail}
-                    onChange={e => setFreeEmail(e.target.value)}
-                    required
-                  />
-                  <button className="fs-btn" type="submit">Get started →</button>
-                </form>
-              </div>
-            ) : (
-              <div className="free-setup-steps">
-                <div className="fs-confirmed">✓ {freeEmail} · setup below</div>
-                <ol>
-                  <li>
-                    <span className="step-label">1 · Install</span>
-                    <code>pip install finops-mcp &amp;&amp; finops setup</code>
-                  </li>
-                  <li>
-                    <span className="step-label">2 · Generate a least-privilege IAM policy</span>
-                    <code>finops setup aws --iam-template</code>
-                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Outputs a CloudFormation template scoped to exactly what nable needs.</span>
-                  </li>
-                  <li>
-                    <span className="step-label">3 · Store credentials securely</span>
-                    <code>finops setup aws</code>
-                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Credentials go into your OS keyring. Never a .env file.</span>
-                  </li>
-                  <li>
-                    <span className="step-label">4 · Add to Claude Desktop</span>
-                    <code style={{whiteSpace:'pre',display:'block',lineHeight:1.5}}>{"~/Library/Application Support/Claude/\nclaude_desktop_config.json"}</code>
-                  </li>
-                  <li>
-                    <span className="step-label">5 · Paste this config</span>
-                    <code style={{whiteSpace:'pre',display:'block',lineHeight:1.6,fontSize:11.5}}>{configSnippet}</code>
-                  </li>
-                  <li>
-                    <span className="step-label">6 · Verify your setup</span>
-                    <code>finops-doctor</code>
-                    <span style={{display:'block',fontFamily:'var(--mono)',fontSize:11,color:'var(--fg-3)',marginTop:4}}>Confirms credentials are read-only and vault is locked. Set NABLE_NO_TELEMETRY=1 to disable anonymous usage pings.</span>
-                  </li>
-                </ol>
-                <a className="fs-docs" href="https://getnable.com/docs" target="_blank" rel="noopener">
-                  Full docs &amp; connector setup →
-                </a>
-              </div>
-            )}
-          </div>
-
-          {/* Team - featured */}
-          <div className="price feat">
-            <div className="tier">Team</div>
-            <div>
-              <div className="amt">
-                $19<span className="small">.99 / mo</span>
-              </div>
-              <div className="amt-sub" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                <span style={{background:"#22C55E",color:"#1a1a1a",fontWeight:700,fontSize:11,padding:"2px 7px",borderRadius:4,letterSpacing:"0.04em"}}>FREE TRIAL</span>
-                <span>First month free · cancel any time</span>
-              </div>
-            </div>
-            <ul>
-              <li>Everything in Free</li>
-              <li>Savings Plan &amp; RI coverage and gap analysis</li>
-              <li>Cross-provider budget policies across all clouds and SaaS</li>
-              <li>PR cost comments on every pull request</li>
-              <li>Anomaly-to-ticket pipeline</li>
-              <li>Unit economics per customer, API call, and feature</li>
-              <li>Org-wide cost rollup across all accounts</li>
-            </ul>
-            <div className="cta"><a href="#" onClick={(e)=>{ if(window.posthog) posthog.capture('team_subscribe_clicked'); onTrial(e); }}>Subscribe: first month free →</a></div>
-          </div>
-
-          {/* Enterprise */}
-          <div className="price">
-            <div className="tier">Enterprise</div>
-            <div>
-              <div className="amt" style={{fontSize:34}}>Custom</div>
-              <div className="amt-sub">volume · dedicated support</div>
-            </div>
-            <ul>
-              <li>Everything in Team</li>
-              <li>Unlimited connectors &amp; history</li>
-              <li>Custom connector development</li>
-              <li>SSO / SAML via OIDC</li>
-              <li>Dedicated Slack channel</li>
-              <li>On-prem / private VPC deploy</li>
-            </ul>
-            <div className="cta"><a href="mailto:hello@getnable.com">Contact sales →</a></div>
-          </div>
-
-        </div>
-      </div>
-    </section>
-  );
-}
-
-
-function Testimonials(){
-  const quotes = [
-    {
-      text: "I asked 'which team is driving the EC2 spike' and it came back with a tag breakdown in 10 seconds. Would have taken me 30 minutes in Cost Explorer.",
-      name: "matth3w_r",
-      title: "SRE · r/aws",
-      savings: null,
-    },
-    {
-      text: "Finally a cost tool that works the way I actually think. I just type a question and get an answer. No dashboards, no SQL. Set it up in 10 minutes.",
-      name: "devops_weekly reader",
-      title: "DevOps Engineer",
-      savings: null,
-    },
-    {
-      text: "Our Datadog bill doubled out of nowhere. nable traced it to a single new logging pipeline in 2 queries. The attribution by tag alone is worth it.",
-      name: "k.tanaka",
-      title: "Platform Lead · Early user",
-      savings: "$2,800/mo recovered",
-    },
-  ];
-  return (
-    <section style={{padding:"80px 0 0"}}>
-      <div className="wrap">
-        <div className="section-head">
-          <div className="label">/ What users say</div>
-          <p style={{fontSize:13,color:"var(--fg-3)",fontFamily:"var(--mono)",marginTop:8}}>4,100+ installs last month. Here's what people are finding.</p>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:20,marginTop:8}}>
-          {quotes.map((q,i) => (
-            <div key={i} style={{
-              background:"var(--bg-2)",
-              border:"1px solid var(--line)",
-              borderRadius:10,
-              padding:"24px 24px 20px",
-              display:"flex",
-              flexDirection:"column",
-              gap:16,
-            }}>
-              <p style={{
-                fontSize:14.5,
-                lineHeight:1.65,
-                color:"var(--fg)",
-                margin:0,
-                flex:1,
-              }}>&ldquo;{q.text}&rdquo;</p>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
-                <div>
-                  <div style={{fontWeight:500,fontSize:13,color:"var(--fg)"}}>{q.name}</div>
-                  <div style={{fontFamily:"var(--mono)",fontSize:10.5,color:"var(--fg-3)",marginTop:2}}>{q.title}</div>
-                </div>
-                {q.savings && (
-                  <div style={{
-                    fontFamily:"var(--mono)",
-                    fontSize:10.5,
-                    color:"#22C55E",
-                    background:"rgba(34,197,94,.08)",
-                    border:"1px solid rgba(34,197,94,.2)",
-                    borderRadius:5,
-                    padding:"3px 9px",
-                    whiteSpace:"nowrap",
-                  }}>{q.savings}</div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function CompareTable(){
-  const rows = [
-    { feature: "Cloud + SaaS connectors (17)", free: true, team: true },
-    { feature: "Cost queries, trends, history", free: true, team: true },
-    { feature: "Anomaly detection", free: true, team: true },
-    { feature: "Rightsizing recommendations", free: true, team: true },
-    { feature: "Budgets & spend alerts", free: true, team: true },
-    { feature: "Kubernetes cost analysis, efficiency scoring, label chargeback", free: true, team: true },
-    { feature: "PR cost comments & CI gate", free: true, team: true },
-    { feature: "AWS Cost Explorer", free: true, team: true },
-    { feature: "Unit economics (cost per customer, per API call, per feature)", free: false, team: true },
-    { feature: "Anomaly alerts via Slack or Teams", free: false, team: true },
-    { feature: "AWS CUR (line-item granularity)", free: false, team: true },
-    { feature: "Savings Plan & RI coverage analysis with ROI projections", free: false, team: true },
-    { feature: "Commitment purchase recommendations with projected savings", free: false, team: true },
-    { feature: "PR cost comments: infra delta on every pull request", free: false, team: true },
-    { feature: "Anomaly-to-ticket pipeline (Jira, Linear, GitHub)", free: false, team: true },
-    { feature: "Org-wide rollup across all accounts and cloud providers", free: false, team: true },
-  ];
-  const Check = () => (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{display:"inline-block",verticalAlign:"middle"}}>
-      <circle cx="8" cy="8" r="8" fill="#22C55E" fillOpacity="0.15"/>
-      <path d="M5 8l2 2 4-4" stroke="#22C55E" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  );
-  const Dash = () => (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{display:"inline-block",verticalAlign:"middle"}}>
-      <path d="M5 8h6" stroke="var(--fg-4)" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
-  );
-  return (
-    <section style={{paddingBottom:0}}>
-      <div className="wrap">
-        <div className="section-head">
-          <div className="label">/ Compare</div>
-          <h2>Free vs Team</h2>
-        </div>
-        <div style={{overflowX:"auto",marginTop:32}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
-            <thead>
-              <tr>
-                <th style={{textAlign:"left",padding:"10px 16px",color:"var(--fg-3)",fontWeight:500,fontSize:12,letterSpacing:".05em",textTransform:"uppercase",borderBottom:"1px solid var(--line)",width:"60%"}}>Feature</th>
-                <th style={{textAlign:"center",padding:"10px 16px",color:"var(--fg-3)",fontWeight:500,fontSize:12,letterSpacing:".05em",textTransform:"uppercase",borderBottom:"1px solid var(--line)"}}>Free</th>
-                <th style={{textAlign:"center",padding:"10px 16px",fontWeight:600,fontSize:12,letterSpacing:".05em",textTransform:"uppercase",borderBottom:"2px solid #22C55E",color:"#22C55E"}}>Team</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r,i) => (
-                <tr key={i} style={{background: i%2===0 ? "transparent" : "var(--bg-2)"}}>
-                  <td style={{padding:"11px 16px",color:"var(--fg-2)",borderBottom:"1px solid var(--line)"}}>{r.feature}</td>
-                  <td style={{textAlign:"center",padding:"11px 16px",borderBottom:"1px solid var(--line)"}}>{r.free ? <Check/> : <Dash/>}</td>
-                  <td style={{textAlign:"center",padding:"11px 16px",borderBottom:"1px solid var(--line)"}}>{r.team ? <Check/> : <Dash/>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-const FAQS = [
-  {
-    q: "Does it work with my existing AWS setup?",
-    a: "Yes. nable uses read-only IAM credentials via Cost Explorer (free tier) or CUR via S3 (Team). Run finops setup aws --iam-template to generate an exact least-privilege IAM policy — only the permissions nable needs, nothing more. finops-doctor validates that your credentials are read-only before saving them. No changes to your AWS account structure required."
-  },
-  {
-    q: "What data does nable actually read?",
-    a: "Billing and cost data only. Specifically: Cost Explorer API, CUR (Cost and Usage Reports) in S3, CloudWatch metrics for rightsizing signals, and equivalent APIs for other connected providers. It never writes to your cloud account. Everything travels direct from your machine to your cloud APIs — no nable server is in the path."
-  },
-  {
-    q: "How does it work across a team?",
-    a: "Each engineer installs nable locally — credentials stay on their own machine. The Team plan adds a shared Postgres store so org-wide cost history, budgets, and anomaly state are consistent across machines. RBAC gives admins control over who can query what: Viewer (read dashboards), Analyst (run queries, export reports), Admin (configure connectors, manage budgets, create API keys). One subscription covers the whole org."
-  },
-  {
-    q: "What IAM permissions does nable actually need?",
-    a: "For AWS: ce:GetCostAndUsage, ce:GetRightsizingRecommendation, s3:GetObject on your CUR bucket, and cloudwatch:GetMetricData for rightsizing. That's it. Run finops setup aws --iam-template to get the exact policy JSON to paste into your AWS console. For Azure and GCP, nable uses equivalent read-only built-in roles (Cost Management Reader, BigQuery Data Viewer)."
-  },
-  {
-    q: "Does it support SSO or SAML?",
-    a: "The Team plan uses API key auth — each team member gets a scoped key tied to their role. Enterprise adds OIDC/SAML SSO so login goes through your existing identity provider (Okta, Azure AD, Google Workspace, etc.). If your security policy requires SSO before you can evaluate, email hello@getnable.com and we'll set up an Enterprise trial."
-  },
-  {
-    q: "Is there a self-hosted or on-prem option?",
-    a: "nable is local-first by design — the MCP server runs on each engineer's machine, so there is no nable cloud to opt out of. Your billing data never touches our infrastructure. For teams that want a centralized shared database instead of per-machine installs, the Team plan supports a self-managed Postgres instance inside your own VPC. Enterprise adds a private VPC deployment with centralized credential management and audit logging piped to your SIEM."
-  },
-  {
-    q: "What happens when I cancel?",
-    a: "You drop back to the free tier instantly. Your credentials, local config, and cost history stay intact on your machine. There is nothing stored on our end to delete."
-  },
-];
-
-function FAQ(){
-  const [open, setOpen] = React.useState(null);
-  return (
-    <section style={{paddingTop:80,paddingBottom:80}}>
-      <div className="wrap" style={{maxWidth:760}}>
-        <div className="section-head">
-          <div className="label">/ FAQ</div>
-          <h2>Common questions</h2>
-        </div>
-        <div style={{marginTop:40,display:"flex",flexDirection:"column",gap:2}}>
-          {FAQS.map((f,i) => (
-            <div key={i} style={{borderBottom:"1px solid var(--line)"}}>
-              <button
-                onClick={()=>setOpen(open===i ? null : i)}
-                style={{width:"100%",textAlign:"left",background:"none",border:"none",padding:"18px 0",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:16}}
-              >
-                <span style={{fontSize:15,fontWeight:500,color:"var(--fg)",fontFamily:"'Space Grotesk',ui-sans-serif,system-ui,sans-serif"}}>{f.q}</span>
-                <span style={{color:"var(--fg-3)",fontSize:20,lineHeight:1,flexShrink:0,transform:open===i?"rotate(45deg)":"none",transition:"transform .2s",fontWeight:300}}>+</span>
-              </button>
-              {open===i && (
-                <p style={{paddingBottom:18,fontSize:14,lineHeight:1.7,color:"var(--fg-2)",marginTop:-6}}>{f.a}</p>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Footer(){
-  const [footEmail, setFootEmail] = React.useState('');
-  const [done, setDone] = React.useState(false);
-
-  async function handleFooterSubmit(e){
-    e.preventDefault();
-    setDone(true);
-    try {
-      await fetch('/api/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: footEmail, source: 'footer' }),
-      });
-      if (window.posthog) posthog.identify(footEmail, { email: footEmail, plan: 'free' });
-      if (window.rdt) rdt('track', 'SignUp', {}, {email: footEmail});
-    } catch(err) { console.warn('subscribe failed', err); }
-  }
-
-  return (
-    <footer>
-      <div className="wrap">
-        <div className="foot-subscribe">
-          <div>
-            <div style={{fontFamily:"var(--mono)",fontSize:11,letterSpacing:".06em",color:"var(--fg-3)",textTransform:"uppercase",marginBottom:8}}>Stay in the loop</div>
-            <p style={{fontSize:13.5,color:"var(--fg-2)",margin:0}}>New connectors, cost-anatomy posts. No spam.</p>
-          </div>
-          {!done ? (
-            <form style={{display:"flex",gap:8}} onSubmit={handleFooterSubmit}>
-              <input type="email" placeholder="you@company.com" required value={footEmail} onChange={(e)=>setFootEmail(e.target.value)} style={{flex:1,background:"var(--bg-2)",border:"1px solid var(--line)",borderRadius:6,padding:"8px 12px",fontFamily:"var(--sans, inherit)",fontSize:13.5,color:"var(--fg)",outline:"none"}} />
-              <button type="submit" style={{background:"#22c55e",color:"#fff",border:0,borderRadius:6,padding:"8px 16px",fontSize:13.5,cursor:"pointer",whiteSpace:"nowrap"}}>Subscribe →</button>
-            </form>
-          ) : (
-            <div style={{fontFamily:"var(--mono)",fontSize:13,color:"var(--hl)"}}>● subscribed. see you Monday.</div>
-          )}
-        </div>
-        <div className="foot">
-          <div>
-            <Logo />
-            <p style={{marginTop:14,color:"var(--fg-3)",fontSize:13.5,maxWidth:"32ch",lineHeight:1.55}}>
-              Cloud cost intelligence over MCP. For teams who'd rather ask than open another dashboard.
-            </p>
-          </div>
-          <div>
-            <h5>Product</h5>
-            <a href="#product">Live demo</a>
-            <a href="#connectors">Connectors</a>
-            <a href="#pricing">Pricing</a>
-            <a href="/docs" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked', { location: 'footer_product' }); }}>Install guide</a>
-          </div>
-          <div>
-            <h5>Resources</h5>
-            <a href="/docs" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked', { location: 'footer_resources' }); }}>Docs</a>
-            <a href="https://github.com/chaandannn/finopsmcp/releases" target="_blank" rel="noopener">Changelog</a>
-            <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP overview</a>
-          </div>
-          <div>
-            <h5>Company</h5>
-            <a href="mailto:hello@getnable.com">hello@getnable.com</a>
-            <a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener">GitHub</a>
-            <a href="mailto:hello@getnable.com">Privacy &amp; Terms</a>
-          </div>
-        </div>
-        <div className="foot-bottom">
-          <span>© 2026 nable inc.</span>
-          <span style={{color:"var(--fg-4)",fontSize:12}}>v0.8.36 · 17 connectors</span>
-        </div>
-      </div>
-    </footer>
-  );
-}
-
-function Tweaks({ open, t, setTweak }){
-  if(!open) return null;
-  return (
-    <window.TweaksPanel title="Tweaks">
-      <window.TweakSection title="Palette">
-        <window.TweakRadio label="Background"
-          value={t.palette}
-          options={[
-            {value:"linen",label:"Linen"},
-            {value:"paper",label:"Paper"},
-            {value:"graphite",label:"Graphite"},
-          ]}
-          onChange={(v)=>setTweak("palette",v)} />
-      </window.TweakSection>
-      <window.TweakSection title="Status accents">
-        <window.TweakRadio label="Mood"
-          value={t.accentMode}
-          options={[
-            {value:"neutral",label:"Sage / Rust"},
-            {value:"forest",label:"Forest"},
-            {value:"cobalt",label:"Cobalt"},
-          ]}
-          onChange={(v)=>setTweak("accentMode",v)} />
-      </window.TweakSection>
-    </window.TweaksPanel>
-  );
-}
-
-function TrialModal({ onClose }){
-  const [email, setEmail] = useState("");
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      await fetch('/api/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, source: 'trial' }),
-      });
-      if (window.posthog) posthog.identify(email, { email, plan: 'trial' });
-      posthog?.capture('trial_started', { email });
-    } catch(err) { /* non-blocking */ }
-    const base = "https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02";
-    const url = email
-      ? `${base}?prefilled_email=${encodeURIComponent(email)}`
-      : base;
-    window.location.href = url;
-  };
-  return (
-    <div className="modal-backdrop" onClick={(e)=>{ if(e.target===e.currentTarget) onClose(); }}>
-      <div className="modal" style={{position:"relative"}}>
-        <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
-
-        {/* Left: what's included */}
-        <div className="modal-left">
-          <div>
-            <div className="label" style={{marginBottom:12}}>/ Team Plan</div>
-            <h3>Unlock tickets, email reports, and org rollup.</h3>
-          </div>
-          <div>
-            <div className="price-row">
-              <span className="price-big">$19.99</span>
-              <span className="price-after">/ mo</span>
-            </div>
-            <div style={{marginTop:6,fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>First month free. Not charged until day 31. Cancel any time.</div>
-          </div>
-          <ul>
-            <li>Everything in the free tier, plus:</li>
-            <li>Ticket auto-creation: Jira, Linear, GitHub Issues</li>
-            <li>Scheduled email reports at any frequency</li>
-            <li>Commitment purchase recommendations + ROI</li>
-            <li>Org-wide multi-account cost rollup</li>
-            <li>OU breakdown &amp; account anomaly detection</li>
-          </ul>
-          <div style={{marginTop:"auto",paddingTop:16,borderTop:"1px solid var(--line)",fontFamily:"var(--mono)",fontSize:11.5,color:"var(--fg-3)"}}>
-            Already installed? Your in-product trial counts. Subscribe to keep Team features after it ends. Either way, first month is free.
-          </div>
-        </div>
-
-        {/* Right: email form + pip install */}
-        <div className="modal-right">
-          <h4>Start free. $19.99/mo after day 31.</h4>
-          <form onSubmit={handleSubmit} style={{display:"flex",flexDirection:"column",gap:16}}>
-            <div>
-              <label htmlFor="trial-email">EMAIL</label>
-              <input
-                id="trial-email"
-                type="email"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e)=>setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <button className="modal-submit" type="submit">
-              Continue to checkout →
-            </button>
-            <div className="modal-note">
-              Card required. Not charged until day 31.<br/>
-              Cancel any time. No questions asked.
-            </div>
-          </form>
-
-          <div className="modal-pip">
-            <div className="step-label">Step 1: after checkout</div>
-            <div className="install">
-              <span className="prompt">$</span>
-              <span>pip install finops-mcp &amp;&amp; finops setup</span>
-            </div>
-            <div style={{fontSize:"11px",color:"var(--fg-3)",marginTop:"6px"}}>Anaconda? Use <code style={{fontSize:"11px"}}>uvx finops-mcp setup</code> instead. It runs in an isolated env. <a href="/docs#install" style={{color:"var(--fg-3)", textDecoration:"underline"}}>Install guide</a></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SignInModal({ onClose }){
-  const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
-  const [code, setCode] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleEmail = async (e) => {
-    e.preventDefault();
-    setLoading(true); setError("");
-    try {
-      const r = await fetch("/api/account/send-code", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ email }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Failed to send code");
-      setSent(true);
-    } catch(err) {
-      setError(err.message);
-    } finally { setLoading(false); }
-  };
-
-  const handleCode = async (e) => {
-    e.preventDefault();
-    setLoading(true); setError("");
-    try {
-      const r = await fetch("/api/account/verify-code", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ email, code }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || "Invalid code");
-      // Store session token and redirect to account page
-      sessionStorage.setItem("nable_token", d.token);
-      sessionStorage.setItem("nable_email", d.email);
-      sessionStorage.setItem("nable_plan", d.plan);
-      if (d.license_key) sessionStorage.setItem("nable_license", d.license_key);
-      window.location.href = "/account";
-    } catch(err) {
-      setError(err.message);
-    } finally { setLoading(false); }
-  };
-
-  const handleSso = () => {
-    window.location.href = "mailto:hello@getnable.com?subject=SSO%20Access%20Request";
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={(e)=>{ if(e.target===e.currentTarget) onClose(); }}>
-      <div className="modal" style={{position:"relative",gridTemplateColumns:"1fr",maxWidth:440}}>
-        <button className="modal-close" onClick={onClose} aria-label="Close">×</button>
-        <div className="modal-right" style={{padding:"44px 40px"}}>
-          <h4>Sign in to nable</h4>
-          <p style={{fontFamily:"var(--mono)",fontSize:12,color:"var(--fg-3)",marginTop:4}}>
-            {sent ? `Check ${email} for a 6-digit code.` : "Enter your email to receive a sign-in code."}
-          </p>
-          {!sent ? (
-            <form onSubmit={handleEmail} style={{display:"flex",flexDirection:"column",gap:16,marginTop:20}}>
-              <div>
-                <label htmlFor="signin-email">EMAIL</label>
-                <input
-                  id="signin-email"
-                  type="email"
-                  placeholder="you@company.com"
-                  value={email}
-                  onChange={(e)=>setEmail(e.target.value)}
-                  required
-                  autoFocus
-                />
-              </div>
-              {error && <div style={{color:"var(--alert)",fontSize:13}}>{error}</div>}
-              <button className="modal-submit" type="submit" disabled={loading}>
-                {loading ? "Sending…" : "Send code →"}
-              </button>
-              <div style={{display:"flex",alignItems:"center",gap:12,margin:"4px 0"}}>
-                <div style={{flex:1,height:1,background:"var(--line)"}}/>
-                <span style={{fontSize:12,color:"var(--fg-3)"}}>or</span>
-                <div style={{flex:1,height:1,background:"var(--line)"}}/>
-              </div>
-              <button type="button" onClick={handleSso}
-                style={{background:"var(--bg-2)",color:"var(--fg-3)",border:"1px solid var(--line)",borderRadius:6,padding:"10px 0",cursor:"pointer",fontFamily:"var(--mono)",fontSize:12}}>
-                Enterprise SSO? Email us →
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleCode} style={{display:"flex",flexDirection:"column",gap:16,marginTop:20}}>
-              <div>
-                <label htmlFor="signin-code">6-DIGIT CODE</label>
-                <input
-                  id="signin-code"
-                  type="text"
-                  inputMode="numeric"
-                  pattern="\d{6}"
-                  maxLength={6}
-                  placeholder="123456"
-                  value={code}
-                  onChange={(e)=>setCode(e.target.value.replace(/\D/g,""))}
-                  required
-                  autoFocus
-                />
-              </div>
-              {error && <div style={{color:"var(--alert)",fontSize:13}}>{error}</div>}
-              <button className="modal-submit" type="submit" disabled={loading}>
-                {loading ? "Verifying…" : "Verify & sign in →"}
-              </button>
-              <button type="button" onClick={()=>{setSent(false);setCode("");setError("");}}
-                style={{background:"none",border:"none",color:"var(--fg-3)",cursor:"pointer",fontSize:13,textDecoration:"underline"}}>
-                Use a different email
-              </button>
-            </form>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function App(){
-  const [tweaksOpen, setTweaksOpen] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [signInOpen, setSignInOpen] = useState(false);
-  const [t, setTweak] = window.useTweaks(TWEAK_DEFAULTS);
-  useEffect(()=>{ applyTheme(t); },[t]);
-  const dark = t.palette === "graphite";
-  const toggle = () => setTweak("palette", dark ? "linen" : "graphite");
-  useEffect(()=>{
-    function onMsg(e){
-      const d = e.data || {};
-      if(d.type === "__activate_edit_mode") setTweaksOpen(true);
-      if(d.type === "__deactivate_edit_mode") setTweaksOpen(false);
-    }
-    window.addEventListener("message", onMsg);
-    window.parent.postMessage({type:"__edit_mode_available"}, "*");
-    return ()=>window.removeEventListener("message", onMsg);
-  },[]);
-  const openModal = (e) => { e.preventDefault(); setModalOpen(true); };
-  const openSignIn = (e) => { e.preventDefault(); setSignInOpen(true); };
-  return (
-    <>
-      <Nav dark={dark} onToggle={toggle} onTrial={openModal} onSignIn={openSignIn} />
-      <PromoBanner onTrial={openModal} />
-      <Hero onTrial={openModal} />
-      <Features />
-      <Connectors />
-      <Security />
-      <Pricing onTrial={openModal} />
-      <Testimonials />
-      <CompareTable />
-      <FAQ />
-      <Footer />
-      <Tweaks open={tweaksOpen} t={t} setTweak={setTweak} />
-      {modalOpen && <TrialModal onClose={()=>setModalOpen(false)} />}
-      {signInOpen && <SignInModal onClose={()=>setSignInOpen(false)} />}
-    </>
-  );
-}
-
-ReactDOM.createRoot(document.getElementById("app")).render(<App />);
-
-// Scroll depth milestones: fires once per session at 25/50/75/90%
-// posthog stub is synchronously available so no guard needed here
-(function() {
-  const milestones = [25, 50, 75, 90];
-  const fired = new Set();
-  window.addEventListener('scroll', function() {
-    const scrollable = document.body.scrollHeight - window.innerHeight;
-    if (scrollable <= 0) return;
-    const pct = Math.round((window.scrollY / scrollable) * 100);
-    milestones.forEach(function(m) {
-      if (pct >= m && !fired.has(m)) {
-        fired.add(m);
-        posthog.capture('scroll_depth', { pct: m });
-      }
-    });
-  }, { passive: true });
-})();
-
-// IntersectionObserver setup deferred so React has time to render the DOM
-setTimeout(function() {
-  // Terminal demo viewed: fires once when terminal section enters viewport
-  var termEl = document.querySelector('.terminal');
-  if (termEl && window.IntersectionObserver) {
-    var termObs = new IntersectionObserver(function(entries) {
-      if (entries[0].isIntersecting) {
-        posthog.capture('terminal_demo_viewed');
-        termObs.disconnect();
-      }
-    }, { threshold: 0.5 });
-    termObs.observe(termEl);
-  }
-
-  // Pricing section viewed: fires once when #pricing enters viewport
-  var pricingEl = document.getElementById('pricing');
-  if (pricingEl && window.IntersectionObserver) {
-    var pricingObs = new IntersectionObserver(function(entries) {
-      if (entries[0].isIntersecting) {
-        posthog.capture('pricing_viewed');
-        pricingObs.disconnect();
-      }
-    }, { threshold: 0.3 });
-    pricingObs.observe(pricingEl);
-  }
-}, 600);
-
-// Scroll to hash after React renders (handles navigation from other pages)
-if (window.location.hash) {
-  setTimeout(() => {
-    const el = document.querySelector(window.location.hash);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 120);
-}
-</script>
-
+<script type="text/babel" src="app.jsx"></script>
 </body>
 </html>
