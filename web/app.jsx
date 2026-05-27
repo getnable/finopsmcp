@@ -49,7 +49,7 @@ function applyPalette(name){
 }
 
 /* Email capture — posts to /api/subscribe */
-function EmailCapture({ source = "hero", placeholder = "work email", btnLabel = "Get started", center = false }){
+function EmailCapture({ source = "hero", placeholder = "email", btnLabel = "Get started", center = false }){
   const [email, setEmail] = useState("");
   const [state, setState] = useState("idle"); // idle | loading | done | error
 
@@ -91,7 +91,7 @@ function EmailCapture({ source = "hero", placeholder = "work email", btnLabel = 
         placeholder={placeholder}
         required
         autoComplete="email"
-        aria-label="Work email"
+        aria-label="Email"
       />
       <button type="submit" disabled={state === "loading"}>
         {state === "loading" ? "..." : btnLabel} <span className="arr">→</span>
@@ -678,7 +678,7 @@ function FootCta(){
               Talk to founders
             </a>
           </div>
-          <EmailCapture source="footer" placeholder="drop your work email, we'll send the setup guide" btnLabel="Send it" center={true} />
+          <EmailCapture source="footer" placeholder="drop your email, we'll send the setup guide" btnLabel="Send it" center={true} />
         </div>
         <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-3)",letterSpacing:".04em"}}>
           $ pip install finops-mcp &amp;&amp; finops setup
