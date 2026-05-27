@@ -8,22 +8,23 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:      #fbfaf7;
-      --bg-2:    #f4f2ec;
-      --bg-3:    #ebe8e0;
-      --fg:      #1a1915;
-      --fg-2:    #54524a;
-      --fg-3:    #8b8879;
-      --fg-4:    #c1bdaf;
-      --line:    #e6e2d6;
-      --line-2:  #d9d4c4;
-      --hl:      #3b6e3a;
-      --alert:   #b8533a;
-      --mono:    'JetBrains Mono', ui-monospace, monospace;
+      --bg:        #15140f;
+      --bg-2:      #1c1b15;
+      --bg-3:      #252419;
+      --fg:        #f3efe6;
+      --fg-2:      #b8b09e;
+      --fg-3:      #7a7267;
+      --fg-4:      #4a4540;
+      --line:      #2a2820;
+      --line-2:    #333028;
+      --accent:    #e4a76b;
+      --accent-dim:#a07242;
+      --alert:     #e07060;
+      --mono:      'JetBrains Mono', ui-monospace, monospace;
       /* compat aliases so existing inline styles keep working */
       --text:     var(--fg);
       --muted:    var(--fg-2);
@@ -32,17 +33,19 @@
       --surface2: var(--bg-3);
       --border:   var(--line);
       --border2:  var(--line-2);
-      --blue:     var(--fg);
-      --blue-dim: var(--fg-2);
-      --blue-hi:  #fbfaf7;   /* bright on dark code blocks */
+      --blue:     var(--accent);
+      --blue-dim: var(--accent-dim);
+      --blue-hi:  var(--accent);   /* accent color on dark code blocks */
+      --code-bg:  #0d0c09;
     }
-    /* inside the env-var reference table, --blue-hi must be dark (light bg) */
-    table { --blue-hi: var(--fg); }
+    /* inside env-var reference table */
+    table { --blue-hi: var(--accent); }
+    ::selection { background: var(--fg); color: var(--bg); }
 
     html, body {
       background: var(--bg);
       color: var(--fg);
-      font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+      font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
       font-feature-settings: "ss01","cv11";
       -webkit-font-smoothing: antialiased;
       line-height: 1.5;
@@ -61,41 +64,41 @@
     .nav-group { font-family: var(--mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-4); padding: 16px 10px 4px; }
     .card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; }
     .code-wrap { position: relative; }
-    .code-block { background: var(--fg); border-radius: 8px; font-family: var(--mono); font-size: 12.5px; line-height: 1.85; color: var(--bg); }
+    .code-block { background: var(--code-bg); border-radius: 8px; font-family: var(--mono); font-size: 12.5px; line-height: 1.85; color: var(--fg-2); }
     .code-block .cm { color: var(--fg-3); }
-    .copy-btn { position: absolute; top: 10px; right: 10px; background: rgba(251,250,247,0.07); border: 1px solid rgba(251,250,247,0.12); color: var(--fg-3); border-radius: 5px; padding: 3px 10px; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.15s; font-family: 'Geist', sans-serif; }
-    .copy-btn:hover { background: rgba(251,250,247,0.15); color: var(--bg); }
-    .copy-btn.copied { color: #86efac; border-color: rgba(134,239,172,0.3); }
+    .copy-btn { position: absolute; top: 10px; right: 10px; background: rgba(243,239,230,0.07); border: 1px solid rgba(243,239,230,0.12); color: var(--fg-3); border-radius: 5px; padding: 3px 10px; font-size: 11px; font-weight: 500; cursor: pointer; transition: all 0.15s; font-family: 'Space Grotesk', sans-serif; }
+    .copy-btn:hover { background: rgba(243,239,230,0.15); color: var(--fg); }
+    .copy-btn.copied { color: var(--accent); border-color: rgba(228,167,107,0.35); }
     .badge { display: inline-flex; align-items: center; gap: 5px; background: var(--bg-3); border: 1px solid var(--line-2); color: var(--fg-2); border-radius: 5px; font-size: 11px; font-weight: 600; padding: 2px 8px; font-family: var(--mono); letter-spacing: 0.02em; }
-    .badge-green { background: rgba(59,110,58,0.08); border-color: rgba(59,110,58,0.22); color: var(--hl); }
-    .badge-yellow { background: rgba(140,100,40,0.07); border-color: rgba(140,100,40,0.2); color: #6b5000; }
+    .badge-green { background: rgba(228,167,107,0.08); border-color: rgba(228,167,107,0.22); color: var(--accent); }
+    .badge-yellow { background: rgba(228,167,107,0.08); border-color: rgba(228,167,107,0.2); color: var(--accent-dim); }
     .badge-red { background: rgba(184,83,58,0.08); border-color: rgba(184,83,58,0.22); color: var(--alert); }
-    .step-num { width: 24px; height: 24px; border-radius: 50%; background: #22c55e; color: #fff; font-family: var(--mono); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--bg); font-family: var(--mono); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .perm-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
     .perm-row:last-child { border-bottom: none; }
     .connector-logo { width: 20px; height: 20px; object-fit: contain; filter: grayscale(1); opacity: 0.65; }
     .section-anchor { padding-top: 80px; margin-top: -80px; }
     h2.section-title { font-size: 1.15rem; font-weight: 500; letter-spacing: -0.025em; color: var(--fg); margin-bottom: 8px; display: flex; align-items: center; gap: 9px; }
     .divider { border: none; border-top: 1px solid var(--line); margin: 40px 0; }
-    .env-key { color: #fbfaf7; font-family: var(--mono); font-size: 12px; }
-    .env-val { color: var(--fg-4); font-family: var(--mono); font-size: 12px; }
-    .check { color: var(--hl); font-weight: 600; }
+    .env-key { color: var(--accent); font-family: var(--mono); font-size: 12px; }
+    .env-val { color: var(--fg-3); font-family: var(--mono); font-size: 12px; }
+    .check { color: var(--accent); font-weight: 600; }
     .warn-box { background: rgba(184,140,58,0.05); border: 1px solid rgba(184,140,58,0.18); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--fg-2); }
     .info-box { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--fg-2); }
     .trial-banner { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; display: flex; align-items: center; gap: 14px; }
-    .trial-badge { background: #22c55e; color: #fff; border-radius: 5px; font-size: 11px; font-weight: 600; padding: 3px 10px; white-space: nowrap; font-family: var(--mono); letter-spacing: 0.02em; }
-    .btn-primary { background: #22c55e; color: #fff; font-weight: 500; border-radius: 7px; padding: 8px 16px; font-size: 13px; display: inline-block; text-decoration: none; letter-spacing: -0.005em; }
-    .btn-primary:hover { background: #16a34a; }
+    .trial-badge { background: var(--accent); color: var(--bg); border-radius: 5px; font-size: 11px; font-weight: 600; padding: 3px 10px; white-space: nowrap; font-family: var(--mono); letter-spacing: 0.02em; }
+    .btn-primary { background: var(--accent); color: var(--bg); font-weight: 500; border-radius: 7px; padding: 8px 16px; font-size: 13px; display: inline-block; text-decoration: none; letter-spacing: -0.005em; }
+    .btn-primary:hover { background: var(--accent-dim); }
     /* code syntax on dark bg */
-    .cmd { color: #fbfaf7; }
-    .str { color: var(--fg-4); }
-    .dim-code { color: var(--fg-3); }
+    .cmd { color: var(--fg); }
+    .str { color: var(--fg-3); }
+    .dim-code { color: var(--fg-4); }
     /* fix Tailwind bg-blue-50 used in inline code snippets */
-    code.bg-blue-50 { background: var(--bg-3) !important; color: var(--fg) !important; }
+    code.bg-blue-50 { background: var(--bg-3) !important; color: var(--fg-2) !important; }
     /* section category divider labels */
     p.cat-label { font-family: var(--mono); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-4); margin-bottom: 24px; }
     /* provider lettermark badges - same language as the N logo */
-    .pbadge { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:5px; background:#22c55e; color:#fff; font-family:var(--mono); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; flex-shrink:0; }
+    .pbadge { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:5px; background:var(--accent-dim); color:var(--bg); font-family:var(--mono); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; flex-shrink:0; }
   </style>
 <!-- PostHog -->
 <script>
@@ -113,8 +116,8 @@
     <div class="flex items-center gap-6">
       <a href="/" class="flex items-center gap-3">
         <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="32" height="32" rx="7" fill="#1a1915"/>
-          <path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#fbfaf7"/>
+          <rect width="32" height="32" rx="7" fill="var(--bg-2)" stroke="var(--line-2)" stroke-width="1"/>
+          <path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="var(--accent)"/>
         </svg>
         <span class="font-medium text-base tracking-tight" style="color:var(--fg);letter-spacing:-0.02em">nable</span>
       </a>
@@ -197,7 +200,7 @@
 
       <div class="trial-banner mb-8">
         <span class="trial-badge">30-day free trial</span>
-        <p class="text-sm" style="color:var(--muted)">All Team features are unlocked for your first 30 days. No credit card, no license key. Just install and go.</p>
+        <p class="text-sm" style="color:var(--muted)">All Team features are unlocked for your first 30 days. Your trial license key is emailed to you at purchase. No credit card required to start.</p>
       </div>
     </div>
 
@@ -304,8 +307,8 @@
             <p class="text-sm mb-2" style="color:var(--muted)">On Windows: <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">%APPDATA%\Claude\claude_desktop_config.json</code></p>
             <p class="text-sm mb-2" style="color:var(--muted)">Add the key to the <code class="text-xs px-1 py-0.5 rounded" style="background:var(--surface2)">env</code> block for the finops server:</p>
             <div class="code-block p-4 text-xs">
-              <span style="color:#c1bdaf">"env"</span>: {<br/>
-              &nbsp;&nbsp;<span style="color:var(--blue-hi)">"FINOPS_LICENSE_KEY"</span>: <span style="color:#c1bdaf">"FINOPS-1-your-key-here"</span><br/>
+              <span style="color:var(--fg-3)">"env"</span>: {<br/>
+              &nbsp;&nbsp;<span style="color:var(--blue-hi)">"FINOPS_LICENSE_KEY"</span>: <span style="color:var(--fg-3)">"FINOPS-1-your-key-here"</span><br/>
               }
             </div>
           </div>
@@ -332,9 +335,9 @@
           <p class="text-xs mb-3" style="color:var(--muted)">Edit <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></p>
           <div class="code-block p-4 text-xs">
             {<br/>
-            &nbsp;&nbsp;<span style="color:#c1bdaf">"mcpServers"</span>: {<br/>
+            &nbsp;&nbsp;<span style="color:var(--fg-3)">"mcpServers"</span>: {<br/>
             &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--blue-hi)">"finops"</span>: {<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#c1bdaf">"command"</span>: <span style="color:#fbfaf7">"finops-mcp"</span><br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--fg-3)">"command"</span>: <span style="color:var(--fg)">"finops-mcp"</span><br/>
             &nbsp;&nbsp;&nbsp;&nbsp;}<br/>
             &nbsp;&nbsp;}<br/>
             }
@@ -347,8 +350,8 @@
           <p class="text-xs mb-3" style="color:var(--muted)">Settings → MCP → Add server, or edit <code>~/.cursor/mcp.json</code></p>
           <div class="code-block p-4 text-xs">
             {<br/>
-            &nbsp;&nbsp;<span style="color:#c1bdaf">"mcpServers"</span>: {<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--blue-hi)">"finops"</span>: { <span style="color:#c1bdaf">"command"</span>: <span style="color:#fbfaf7">"finops-mcp"</span> }<br/>
+            &nbsp;&nbsp;<span style="color:var(--fg-3)">"mcpServers"</span>: {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--blue-hi)">"finops"</span>: { <span style="color:var(--fg-3)">"command"</span>: <span style="color:var(--fg)">"finops-mcp"</span> }<br/>
             &nbsp;&nbsp;}<br/>
             }
           </div>
@@ -359,8 +362,8 @@
           <p class="text-xs mb-3" style="color:var(--muted)">Edit <code>~/.codeium/windsurf/mcp_config.json</code></p>
           <div class="code-block p-4 text-xs">
             {<br/>
-            &nbsp;&nbsp;<span style="color:#c1bdaf">"mcpServers"</span>: {<br/>
-            &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--blue-hi)">"finops"</span>: { <span style="color:#c1bdaf">"command"</span>: <span style="color:#fbfaf7">"finops-mcp"</span> }<br/>
+            &nbsp;&nbsp;<span style="color:var(--fg-3)">"mcpServers"</span>: {<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--blue-hi)">"finops"</span>: { <span style="color:var(--fg-3)">"command"</span>: <span style="color:var(--fg)">"finops-mcp"</span> }<br/>
             &nbsp;&nbsp;}<br/>
             }
           </div>
@@ -1198,7 +1201,7 @@
         </p>
 
         <div class="warn-box mb-4" style="border-color:rgba(184,140,58,0.25);background:rgba(184,140,58,0.04);">
-          <div style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#6b5000;margin-bottom:6px;">Approximation notice</div>
+          <div style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--accent-dim);margin-bottom:6px;">Approximation notice</div>
           <p style="font-size:13px;color:var(--fg-2);line-height:1.6;">
             Like CloudHealth and Apptio, this is an approximation. AWS applies SP discounts using internal logic that is not fully exposed in the CUR.
             Specifically: <strong>family-based SP allocation order</strong> (AWS picks which resources to cover first) is not deterministic from CUR data alone,
@@ -1211,8 +1214,8 @@
         <div class="card p-5 mb-2">
           <div style="font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-4);margin-bottom:12px;">Example output</div>
           <div style="font-family:var(--mono);font-size:12px;line-height:2;color:var(--fg-2);">
-            <div><span style="color:var(--fg)">payments</span> &nbsp;effective_cost: $8,240 &nbsp;on_demand_equiv: $11,800 &nbsp;<span style="color:var(--hl)">savings: $3,560 (30.2%)</span></div>
-            <div><span style="color:var(--fg)">platform</span> &nbsp;effective_cost: $14,100 &nbsp;on_demand_equiv: $19,300 &nbsp;<span style="color:var(--hl)">savings: $5,200 (26.9%)</span></div>
+            <div><span style="color:var(--fg)">payments</span> &nbsp;effective_cost: $8,240 &nbsp;on_demand_equiv: $11,800 &nbsp;<span style="color:var(--accent)">savings: $3,560 (30.2%)</span></div>
+            <div><span style="color:var(--fg)">platform</span> &nbsp;effective_cost: $14,100 &nbsp;on_demand_equiv: $19,300 &nbsp;<span style="color:var(--accent)">savings: $5,200 (26.9%)</span></div>
             <div><span style="color:var(--fg)">__untagged__</span> &nbsp;effective_cost: $2,100 &nbsp;on_demand_equiv: $2,900 &nbsp;savings: $800 (27.6%)</div>
           </div>
         </div>
