@@ -876,6 +876,9 @@ def main(args: list[str] | None = None) -> None:
 
     aws_p = sub.add_parser("aws")
     aws_p.add_argument("--org", action="store_true", help="Auto-discover accounts from AWS Organizations")
+    aws_p.add_argument("--iam-template", action="store_true", help="Print least-privilege IAM CloudFormation template")
+    aws_p.add_argument("--iam-terraform", action="store_true", help="Print least-privilege IAM Terraform snippet")
+    aws_p.add_argument("--check-scope", action="store_true", help="Verify your AWS key is read-only")
     sub.add_parser("azure")
     sub.add_parser("gcp")
     sub.add_parser("datadog")
@@ -1028,15 +1031,15 @@ def main(args: list[str] | None = None) -> None:
         fmt = "terraform" if (parsed.action == "terraform") else "cloudformation"
         print_iam_template(fmt)
         return
-    elif parsed.cmd == "aws" and parsed.action in ("--iam-template", "iam-template"):
+    elif parsed.cmd == "aws" and getattr(parsed, "iam_template", False):
         from .security.iam_setup import print_iam_template
         print_iam_template("cloudformation")
         return
-    elif parsed.cmd == "aws" and parsed.action in ("--iam-terraform", "iam-terraform"):
+    elif parsed.cmd == "aws" and getattr(parsed, "iam_terraform", False):
         from .security.iam_setup import print_iam_template
         print_iam_template("terraform")
         return
-    elif parsed.cmd == "aws" and parsed.action in ("--check-scope", "check-scope"):
+    elif parsed.cmd == "aws" and getattr(parsed, "check_scope", False):
         from .security.iam_setup import check_credential_scope
         print("\n  Checking AWS credential scope...\n")
         result = check_credential_scope()
@@ -1490,12 +1493,31 @@ def _configure_claude_desktop_inner() -> None:
     config_path = next((p for p in config_paths if p.parent.exists()), None)
 
     if config_path is None:
-        print("\n  ──────────────────────────────────────────────────")
-        print("  Claude Desktop not found. To finish setup manually:")
-        print("  1. Install Claude Desktop from https://claude.ai/download")
-        print("  2. Run 'finops setup claude' after installing")
-        print("  ──────────────────────────────────────────────────")
-        return
+        import platform as _platform
+        # On macOS, Claude Desktop may be installed but not yet launched,
+        # so its config directory does not exist yet. Create it so setup can proceed.
+        if _platform.system() == "Darwin":
+            mac_claude_dir = Path.home() / "Library" / "Application Support" / "Claude"
+            mac_app = Path("/Applications/Claude.app")
+            mac_app_user = Path.home() / "Applications" / "Claude.app"
+            if mac_app.exists() or mac_app_user.exists():
+                mac_claude_dir.mkdir(parents=True, exist_ok=True)
+                config_path = mac_claude_dir / "claude_desktop_config.json"
+                print("\n  (Claude Desktop app found but not yet launched — creating config directory.)")
+            else:
+                print("\n  ──────────────────────────────────────────────────")
+                print("  Claude Desktop not found. To finish setup manually:")
+                print("  1. Install Claude Desktop from https://claude.ai/download")
+                print("  2. Open Claude Desktop at least once, then run 'finops setup claude'")
+                print("  ──────────────────────────────────────────────────")
+                return
+        else:
+            print("\n  ──────────────────────────────────────────────────")
+            print("  Claude Desktop not found. To finish setup manually:")
+            print("  1. Install Claude Desktop from https://claude.ai/download")
+            print("  2. Run 'finops setup claude' after installing")
+            print("  ──────────────────────────────────────────────────")
+            return
 
     # Determine the best launch strategy:
     # 1. uvx  — isolated venv, works in corporate environments with no PATH issues

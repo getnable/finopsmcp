@@ -116,7 +116,7 @@ def show_welcome() -> None:
     print()
 
     # ── Trial callout ────────────────────────────────────────────────────────
-    _line(green("✓") + bold("  1-month free trial — all features unlocked."))
+    _line(green("✓") + bold("  30-day free trial — all features unlocked."))
     _line(dim("   No credit card required."))
     print()
 

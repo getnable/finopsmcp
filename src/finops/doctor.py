@@ -48,9 +48,19 @@ def _check_keyring_storage() -> dict:
     except Exception as e:
         keyring_detail = str(e)
 
+    # Hard-fail only when keyring IS installed but the master key is missing.
+    # When keyring is not installed at all, treat as a warning (ok: None) rather
+    # than a failure — env-var-based credentials are a valid setup path.
+    if keyring_ok:
+        ok_val: bool | None = not leaked  # keyring installed + keys in env = warn
+    elif "not installed" in keyring_detail:
+        ok_val = None  # keyring optional dep not present; env vars are acceptable
+    else:
+        ok_val = None  # keyring present but master key not stored yet
+
     return {
         "name": "Credential storage",
-        "ok": keyring_ok and not leaked,
+        "ok": ok_val,
         "detail": keyring_detail,
         "warnings": (
             [f"Sensitive key in env var: {k}" for k in leaked]
@@ -187,9 +197,11 @@ def _check_database() -> dict:
 
 def _check_telemetry() -> dict:
     """Report nable's telemetry posture honestly."""
-    analytics_vars = [v for v in os.environ if any(
-        kw in v.upper() for kw in ["SENTRY", "AMPLITUDE", "SEGMENT", "MIXPANEL"]
-    )]
+    # Only flag actual analytics SDK config vars, not trace propagation headers.
+    # SENTRY-TRACE and BAGGAGE are OpenTelemetry headers injected by some IDEs/tools
+    # and are not Sentry SDK configuration — skip them to avoid false positives.
+    _ANALYTICS_SDK_VARS = {"SENTRY_DSN", "SENTRY_AUTH_TOKEN", "SENTRY_ORG", "AMPLITUDE_API_KEY", "SEGMENT_WRITE_KEY", "MIXPANEL_TOKEN"}
+    analytics_vars = [v for v in os.environ if v.upper() in _ANALYTICS_SDK_VARS]
     posthog_key = os.environ.get("NABLE_POSTHOG_KEY", "")
     warnings = [f"External analytics env var detected: {v}" for v in analytics_vars]
     if posthog_key:

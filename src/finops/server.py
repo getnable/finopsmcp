@@ -612,7 +612,7 @@ async def get_costs_by_service(
     else:
         targets = await _active(_ALL_CONNECTORS)
     if not targets:
-        return {"error": "No providers configured."}
+        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, or another provider, then restart your AI client."}
 
     combined: dict[str, dict[str, float]] = {}
     errors: dict[str, str] = {}
@@ -731,7 +731,7 @@ async def compare_providers(
     pool = _CLOUD_CONNECTORS if category == "cloud" else _SAAS_CONNECTORS if category == "saas" else _ALL_CONNECTORS
     targets = await _active(pool)
     if not targets:
-        return {"error": "No providers configured."}
+        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, or another provider, then restart your AI client."}
 
     provider_totals: list[dict] = []
     grand_total = 0.0
@@ -797,7 +797,7 @@ async def get_cost_trends(
 
     targets = await _active(pool)
     if not targets:
-        return {"error": "No providers configured."}
+        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, or another provider, then restart your AI client."}
 
     grand_total, by_provider, _ = await _gather_costs(targets, start, end, granularity)
 
@@ -990,7 +990,7 @@ async def get_total_spend_all_sources(
 
     targets = await _active(_ALL_CONNECTORS)
     if not targets:
-        return {"error": "No providers configured."}
+        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, or another provider, then restart your AI client."}
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed)
 
