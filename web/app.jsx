@@ -136,7 +136,7 @@ function Nav(){
           <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
              className="btn btn-primary"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'}); }}>
-            Start free <span className="arr">→</span>
+            Get started free <span className="arr">→</span>
           </a>
         </div>
       </div>
@@ -152,25 +152,22 @@ function Hero({ layout, interaction }){
       <div className="wrap">
         <div className="hero-inner">
           <div className="hero-left">
-            <div className="eyebrow"><span className="d"></span> FinOps · MCP runtime · v0.8.36</div>
+            <div className="eyebrow"><span className="d"></span> FinOps · works in Claude, Cursor, Windsurf · v0.8.36</div>
             <h1 className="display">
               The cloud bill,<br/>
               <span className="strike">in a dashboard.</span><br/>
               <span className="accent">In your editor.</span>
             </h1>
             <p className="lede">
-              nable is a FinOps runtime that connects AWS, Azure, GCP and your SaaS billing directly to Claude, Cursor, and any MCP-aware editor. Plain-English questions. Real answers. Nothing leaves your machine.
+              Real billing data from AWS, Azure, GCP, and 14 SaaS tools, live in Claude or Cursor. Ask anything in plain English. Nothing leaves your machine.
             </p>
             <div className="hero-cta-row">
               <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
                  className="btn btn-primary"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero',cta:'start_free_trial'}); }}>
-                Start free trial <span className="arr">→</span>
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero',cta:'get_started_free'}); }}>
+                Get started free <span className="arr">→</span>
               </a>
               <CopyInstall />
-            </div>
-            <div style={{marginTop:20,position:"relative"}}>
-              <EmailCapture source="hero" placeholder="work email for setup guide" btnLabel="Send guide" />
             </div>
             <TrustStrip />
           </div>
@@ -203,9 +200,9 @@ function CopyInstall(){
 
 function TrustStrip(){
   const items = [
-    {lab:"installs / mo", val:"4,127", sub:"+38% WoW"},
-    {lab:"providers", val:"17", sub:"AWS · Azure · GCP ..."},
-    {lab:"data egress", val:"0", sub:"bytes / runtime"},
+    {lab:"installs / mo", val:"4,127", sub:"+38% week over week"},
+    {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
+    {lab:"local only", val:"0 bytes", sub:"sent to our servers"},
   ];
   return (
     <div className="trust" style={{marginTop:56,gridTemplateColumns:"repeat(3,1fr)"}}>
@@ -666,12 +663,11 @@ function FootCta(){
           <em>Start asking questions.</em>
         </h2>
         <div style={{marginTop:48,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
-          <EmailCapture source="footer" placeholder="work email" btnLabel="Get started" center={true} />
           <div style={{display:"flex",alignItems:"center",gap:14}}>
             <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
                className="btn btn-primary" style={{padding:"14px 22px",fontSize:14}}
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'}); }}>
-              Install nable <span className="arr">→</span>
+              Get started free <span className="arr">→</span>
             </a>
             <a href="mailto:chandanirving@gmail.com?subject=nable - talk to founders"
                className="btn btn-ghost" style={{padding:"14px 22px",fontSize:14}}
@@ -679,6 +675,7 @@ function FootCta(){
               Talk to founders
             </a>
           </div>
+          <EmailCapture source="footer" placeholder="drop your work email, we'll send the setup guide" btnLabel="Send it" center={true} />
         </div>
         <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-3)",letterSpacing:".04em"}}>
           $ pip install finops-mcp &amp;&amp; finops setup
@@ -698,7 +695,7 @@ function Footer(){
               <LogoMark />
               <span>nable</span>
             </a>
-            <p style={{color:"var(--fg-3)",fontSize:13,maxWidth:"34ch",lineHeight:1.55,marginTop:10}}>The FinOps runtime for the AI-native engineering team. Made in Austin, TX.</p>
+            <p style={{color:"var(--fg-3)",fontSize:13,maxWidth:"34ch",lineHeight:1.55,marginTop:10}}>Your cloud bill, in your editor. Made in Austin, TX.</p>
           </div>
           <div>
             <h5>Product</h5>
