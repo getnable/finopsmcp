@@ -874,44 +874,45 @@ def main(args: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="finops setup", description="FinOps MCP provider configuration wizard")
     sub = parser.add_subparsers(dest="cmd")
 
-    aws_p = sub.add_parser("aws")
-    aws_p.add_argument("--org", action="store_true", help="Auto-discover accounts from AWS Organizations")
+    aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
+    aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
     aws_p.add_argument("--iam-template", action="store_true", help="Print least-privilege IAM CloudFormation template")
-    aws_p.add_argument("--iam-terraform", action="store_true", help="Print least-privilege IAM Terraform snippet")
-    aws_p.add_argument("--check-scope", action="store_true", help="Verify your AWS key is read-only")
-    sub.add_parser("azure")
-    sub.add_parser("gcp")
-    sub.add_parser("datadog")
-    sub.add_parser("langfuse")
-    sub.add_parser("snowflake")
-    sub.add_parser("github")
-    sub.add_parser("stripe")
-    sub.add_parser("mongodb")
-    sub.add_parser("twilio")
-    sub.add_parser("cloudflare")
-    sub.add_parser("vercel")
-    sub.add_parser("slack")
-    sub.add_parser("teams")
-    sub.add_parser("sso")
-    sub.add_parser("openai")
-    sub.add_parser("anthropic")
-    sub.add_parser("cohere")
-    sub.add_parser("mistral")
-    sub.add_parser("newrelic")
-    sub.add_parser("pagerduty")
-    sub.add_parser("databricks")
-    sub.add_parser("claude")    # configure Claude Desktop MCP entry
-    sub.add_parser("aws-cur")   # deploy CUR CloudFormation stack
-    config_p = sub.add_parser("config")  # configure user preferences
+    aws_p.add_argument("--iam-terraform",action="store_true", help="Print least-privilege IAM Terraform snippet")
+    aws_p.add_argument("--check-scope",  action="store_true", help="Verify your AWS key is read-only")
+    sub.add_parser("azure",        help="Connect Azure Cost Management")
+    sub.add_parser("gcp",          help="Connect GCP Cloud Billing / BigQuery export")
+    sub.add_parser("datadog",      help="Connect Datadog usage and cost API")
+    sub.add_parser("langfuse",     help="Connect Langfuse LLM observability costs")
+    sub.add_parser("snowflake",    help="Connect Snowflake credit consumption")
+    sub.add_parser("github",       help="Connect GitHub Actions minutes and Copilot seats")
+    sub.add_parser("stripe",       help="Connect Stripe fees via Balance Transactions API")
+    sub.add_parser("mongodb",      help="Connect MongoDB Atlas invoice API")
+    sub.add_parser("twilio",       help="Connect Twilio usage records")
+    sub.add_parser("cloudflare",   help="Connect Cloudflare billing and subscriptions")
+    sub.add_parser("vercel",       help="Connect Vercel invoice API (Enterprise only)")
+    sub.add_parser("slack",        help="Configure Slack anomaly alerts and digest")
+    sub.add_parser("teams",        help="Configure Microsoft Teams alerts")
+    sub.add_parser("sso",          help="Configure enterprise SSO (OIDC / Okta / Azure AD)")
+    sub.add_parser("openai",       help="Connect OpenAI usage and billing API")
+    sub.add_parser("anthropic",    help="Connect Anthropic usage API")
+    sub.add_parser("cohere",       help="Connect Cohere API usage")
+    sub.add_parser("mistral",      help="Connect Mistral AI API usage")
+    sub.add_parser("newrelic",     help="Connect New Relic data ingest and seat costs")
+    sub.add_parser("pagerduty",    help="Connect PagerDuty seat counts")
+    sub.add_parser("databricks",   help="Connect Databricks DBU consumption and job costs")
+    sub.add_parser("claude",       help="Register nable in Claude Desktop config")
+    sub.add_parser("aws-cur",      help="Deploy AWS CUR pipeline via CloudFormation")
+    config_p = sub.add_parser("config", help="Configure user preferences (persona, etc.)")
     config_p.add_argument("--persona", metavar="ROLE", default="",
                           help="Set response persona: engineer, finops, finance, platform")
 
-    lic_p = sub.add_parser("license")  # activate a Team license key
+    lic_p = sub.add_parser("license",       help="Activate a Team license key (FINOPS-1-...)")
     lic_p.add_argument("key", nargs="?", default="", help="License key (FINOPS-1-...)")
-    sub.add_parser("license-status")   # check current license without restarting
-    infra_p = sub.add_parser("infra")  # overview of all connector setup packages
+    sub.add_parser("license-status",        help="Check current license plan and expiry")
+    infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
 
+    sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
     iam_p = sub.add_parser("iam-template")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
 
@@ -1074,6 +1075,10 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "license-status":
         _run_license_status()
+        return
+    elif parsed.cmd == "doctor":
+        from .doctor import main as _doctor_main
+        _doctor_main()
         return
     elif parsed.cmd == "infra":
         _run_infra_overview(getattr(parsed, "provider", ""))

@@ -44,7 +44,7 @@ _env_secret = os.environ.get("FINOPS_LICENSE_SECRET", "")
 # treated as invalid so users fall through to the free/trial tier safely.
 _SECRET = _env_secret.encode() if _env_secret else b""
 if not _env_secret:
-    log.warning(
+    log.debug(
         "FINOPS_LICENSE_SECRET is not set. Pro license key validation is disabled. "
         "Set this env var to the secret used when keys were issued."
     )

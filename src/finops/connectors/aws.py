@@ -170,11 +170,26 @@ class AWSConnector(BaseConnector):
                     kwargs["NextPageToken"] = token
             except Exception as exc:
                 err_code = getattr(exc, "response", {}).get("Error", {}).get("Code", "") if hasattr(exc, "response") else type(exc).__name__
-                if "DataUnavailableException" in err_code or "DataUnavailableException" in str(exc):
+                err_str = str(exc)
+                if "DataUnavailableException" in err_code or "DataUnavailableException" in err_str:
                     raise RuntimeError(
                         "AWS Cost Explorer data is not yet available for this account. "
                         "Cost Explorer needs up to 24 hours to backfill data after it is first enabled. "
                         "Try again tomorrow, or check the AWS Console > Billing > Cost Explorer."
+                    ) from exc
+                if err_code in ("InvalidClientTokenId", "AuthFailure") or "InvalidClientTokenId" in err_str:
+                    raise RuntimeError(
+                        "AWS credentials are invalid. Check your AWS_ACCESS_KEY_ID and "
+                        "AWS_SECRET_ACCESS_KEY, then run: finops setup aws"
+                    ) from exc
+                if err_code == "AccessDenied" or "AccessDenied" in err_str:
+                    raise RuntimeError(
+                        "AWS credentials are valid but missing Cost Explorer permissions. "
+                        "Add ce:GetCostAndUsage to your IAM policy, or run: finops setup aws --iam-template"
+                    ) from exc
+                if err_code == "ExpiredTokenException" or "ExpiredToken" in err_str:
+                    raise RuntimeError(
+                        "AWS session token has expired. Re-run: finops setup aws"
                     ) from exc
                 raise
 
