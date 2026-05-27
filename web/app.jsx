@@ -581,7 +581,7 @@ function Pricing(){
         <div className="section-head">
           <div className="label">Pricing</div>
           <h2>Free to ask.<br/><em>Pay to ship.</em></h2>
-          <p>Free tier is permanently free for individuals and small teams. Team adds the things you'd hand a contractor to build: alerts, tickets, attribution, commitment modeling.</p>
+          <p>Solo is free forever. Team adds the automation layer: the things you'd otherwise hire a contractor to build and maintain.</p>
         </div>
         <div className="pricing">
           <div className="tier">
@@ -607,21 +607,24 @@ function Pricing(){
           <div className="tier feat">
             <span className="name">Team</span>
             <span className="amt mono">$19.99<span className="sm">/ user / mo</span></span>
-            <p className="desc">For finance + platform teams who need alerts, attribution, and a paper trail.</p>
+            <p className="desc">For finance + platform teams who need the spend to actually go down, not just be visible.</p>
             <ul>
               <li>Everything in Solo</li>
-              <li>Slack / Teams anomaly alerts</li>
-              <li>Auto-ticketing · Jira · Linear · GitHub</li>
-              <li>Cost attribution by team · service · tag</li>
-              <li>Commitment modeling · SP / RI / CUD ROI</li>
-              <li>Multi-account org rollup</li>
-              <li>Scheduled email reports</li>
+              <li>Anomaly alerts to Slack or Teams the moment spend spikes</li>
+              <li>PR cost comments: dollar impact of Terraform changes before merge</li>
+              <li>Auto-create Jira, Linear, or GitHub tickets from anomalies and rightsizing findings</li>
+              <li>Budget enforcement: warn at 80%, block queries at 100%</li>
+              <li>Kubernetes cost by namespace, workload, and Helm release</li>
+              <li>RI / SP / CUD break-even modeling: buy or wait</li>
+              <li>Cost attribution by team, service, and tag across all providers</li>
+              <li>Multi-account org rollup with per-account drill-down</li>
+              <li>Weekly email digest, no AI session required</li>
             </ul>
             <div className="cta">
               <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
                  className="btn btn-primary" style={{width:"100%",justifyContent:"center"}}
                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',tier:'team'}); }}>
-                Start 30-day trial <span className="arr">→</span>
+                Start free <span className="arr">→</span>
               </a>
             </div>
           </div>
