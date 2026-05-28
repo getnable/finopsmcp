@@ -133,7 +133,7 @@ function Nav(){
         </ul>
         <div className="right">
           <a href="/account.html" className="btn btn-ghost">Sign in</a>
-          <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
+          <a href="#install"
              className="btn btn-primary"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'}); }}>
             Get started free <span className="arr">→</span>
@@ -161,12 +161,7 @@ function Hero({ layout, interaction }){
             <p className="lede">
               Real billing data from AWS, Azure, GCP, and 14 SaaS tools, live in Claude or Cursor. Ask anything in plain English. Nothing leaves your machine.
             </p>
-            <div className="hero-cta-row">
-              <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
-                 className="btn btn-primary"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero',cta:'get_started_free'}); }}>
-                Get started free <span className="arr">→</span>
-              </a>
+            <div className="hero-cta-row" id="install">
               <CopyInstall />
             </div>
             <TrustStrip />
@@ -611,7 +606,7 @@ function FootCta(){
         </h2>
         <div style={{marginTop:48,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
+            <a href="#install"
                className="btn btn-primary" style={{padding:"14px 22px",fontSize:14}}
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'}); }}>
               Get started free <span className="arr">→</span>
