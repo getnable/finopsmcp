@@ -203,7 +203,7 @@ function CopyInstall(){
 
 function TrustStrip(){
   const items = [
-    {lab:"installs / mo", val:"4,127", sub:"+38% week over week"},
+    {lab:"installs / mo", val:"4,264", sub:"via PyPI · updated daily"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
     {lab:"local only", val:"0 bytes", sub:"sent to our servers"},
   ];
@@ -631,6 +631,35 @@ function FootCta(){
   );
 }
 
+/* Founder note */
+function FounderNote(){
+  return (
+    <section id="founder" style={{borderTop:"1px solid var(--line)"}}>
+      <div className="wrap" style={{maxWidth:680,paddingTop:80,paddingBottom:80}}>
+        <div className="label" style={{marginBottom:24}}>Why I built this</div>
+        <p style={{fontSize:17,lineHeight:1.75,color:"var(--fg-2)",marginBottom:28}}>
+          I built this because I spent most of my day bouncing between dashboards that barely showed what I actually needed, the AWS console, and Claude. I'd ask Claude a question, manually paste in numbers, get an answer, then go back and repeat the whole thing.
+        </p>
+        <p style={{fontSize:17,lineHeight:1.75,color:"var(--fg-2)",marginBottom:28}}>
+          A lot of FinOps tools are shipping MCP integrations now. But they're all built for enterprise, priced for enterprise, and none of them fit the way I actually work. They give you visibility. They don't help you think.
+        </p>
+        <p style={{fontSize:17,lineHeight:1.75,color:"var(--fg-2)",marginBottom:36}}>
+          nable solves the problems I actually had. The recommendations go deeper than anything I've seen out of the box, and for the first time I can actually reason through my own optimization opportunities instead of just staring at a graph.
+        </p>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <div style={{width:40,height:40,borderRadius:"50%",background:"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            <span style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:600,color:"var(--bg)"}}>CB</span>
+          </div>
+          <div>
+            <div style={{fontSize:14,fontWeight:500,color:"var(--fg)"}}>Chandan Bukkapatnam</div>
+            <div style={{fontSize:13,color:"var(--fg-3)"}}>Founder · <a href="mailto:chandanirving@gmail.com" style={{color:"var(--accent)"}}>chandanirving@gmail.com</a></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Footer(){
   return (
     <footer>
@@ -751,6 +780,7 @@ function App(){
       <Architecture />
       <Connectors />
       <Pricing />
+      <FounderNote />
       <FootCta />
       <Footer />
       <Tweaks />
