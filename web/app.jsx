@@ -775,9 +775,6 @@ function App(){
     <>
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
-      <QMarquee />
-      <Thesis />
-      <Architecture />
       <Connectors />
       <Pricing />
       <FounderNote />
