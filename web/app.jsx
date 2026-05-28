@@ -583,72 +583,10 @@ function Pricing(){
           <h2>Free to ask.<br/><em>Pay to ship.</em></h2>
           <p>Solo is free forever. Team adds the automation layer: the things you'd otherwise hire a contractor to build and maintain.</p>
         </div>
-        <div className="pricing">
-          <div className="tier">
-            <span className="name">Solo</span>
-            <span className="amt mono">$0<span className="sm">/ forever</span></span>
-            <p className="desc">Ask questions of your own clouds. Read-only. Unlimited queries.</p>
-            <ul>
-              <li>All 17 connectors</li>
-              <li>AWS deep audit (gp2, NAT, log retention...)</li>
-              <li>Rightsizing recommendations in Claude</li>
-              <li>z-score anomaly findings</li>
-              <li className="dim">Slack / Teams alerts</li>
-              <li className="dim">Ticket auto-creation</li>
-            </ul>
-            <div className="cta">
-              <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
-                 className="btn btn-ghost" style={{width:"100%",justifyContent:"center"}}
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',tier:'solo'}); }}>
-                Install
-              </a>
-            </div>
-          </div>
-          <div className="tier feat">
-            <span className="name">Team</span>
-            <span className="amt mono">$39.99<span className="sm">/ user / mo</span></span>
-            <p className="desc">For finance + platform teams who need the spend to actually go down, not just be visible.</p>
-            <ul>
-              <li>Everything in Solo</li>
-              <li>Anomaly alerts to Slack or Teams the moment spend spikes</li>
-              <li>PR cost comments: dollar impact of Terraform changes before merge</li>
-              <li>Auto-create Jira, Linear, or GitHub tickets from anomalies and rightsizing findings</li>
-              <li>Budget enforcement: warn at 80%, block queries at 100%</li>
-              <li>Kubernetes cost by namespace, workload, and Helm release</li>
-              <li>RI / SP / CUD break-even modeling: buy or wait</li>
-              <li>Cost attribution by team, service, and tag across all providers</li>
-              <li>Multi-account org rollup with per-account drill-down</li>
-              <li>Weekly email digest, no AI session required</li>
-            </ul>
-            <div className="cta">
-              <a href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
-                 className="btn btn-primary" style={{width:"100%",justifyContent:"center"}}
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',tier:'team'}); }}>
-                Start free <span className="arr">→</span>
-              </a>
-            </div>
-          </div>
-          <div className="tier">
-            <span className="name">Enterprise</span>
-            <span className="amt mono">Custom</span>
-            <p className="desc">SSO, on-prem connector hosting, private MCP registry, dedicated success.</p>
-            <ul>
-              <li>SSO · SCIM · audit log streaming</li>
-              <li>On-prem / VPC connector runners</li>
-              <li>Private MCP tool registry</li>
-              <li>Custom connectors built to spec</li>
-              <li>Dedicated FinOps engineer</li>
-              <li>Procurement-ready MSA</li>
-            </ul>
-            <div className="cta">
-              <a href="mailto:chandanirving@gmail.com?subject=nable Enterprise"
-                 className="btn btn-ghost" style={{width:"100%",justifyContent:"center"}}
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',tier:'enterprise'}); }}>
-                Talk to founders
-              </a>
-            </div>
-          </div>
-        </div>
+        <stripe-pricing-table
+          pricing-table-id="prctbl_1TbtrKAFO1XH5H8Ch5LzmryG"
+          publishable-key="pk_live_51TVMMYAFO1XH5H8CU6vWgFzrRn8hxfHjuv0KKKCy5kmrjYZagu8paA6vKChy2fhq6OFWKtQ30aVMkRqZZc1SOGiR00KeLHqAqN">
+        </stripe-pricing-table>
       </div>
     </section>
   );

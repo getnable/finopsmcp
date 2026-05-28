@@ -15,6 +15,9 @@
 <meta name="twitter:description" content="The FinOps runtime that lives inside Claude, Cursor, and your editor. Ask in plain English. Your data stays on your machine." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 
+<!-- Stripe pricing table -->
+<script async src="https://js.stripe.com/v3/pricing-table.js"></script>
+
 <!-- Vercel insights -->
 <script defer src="/_vercel/insights/script.js"></script>
 <script defer src="/_vercel/speed-insights/script.js"></script>
@@ -250,23 +253,8 @@ section.tight{padding:88px 0}
 .conn .tag.beta::before{background:var(--warn);box-shadow:0 0 4px var(--warn)}
 @media(max-width:760px){.conn-grid{grid-template-columns:repeat(2,1fr)}.conn{border-right:1px solid var(--line)!important;border-bottom:1px solid var(--line)!important}.conn:nth-child(2n){border-right:0!important}.conn:nth-last-child(-n+2){border-bottom:0!important}}
 
-/* pricing */
-.pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-1)}
-.tier{padding:36px 32px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:22px;background:var(--bg-1)}
-.tier:last-child{border-right:0}
-.tier.feat{background:linear-gradient(180deg,var(--bg-2),var(--bg-1));border-left:1px solid var(--accent-dim);border-right:1px solid var(--accent-dim);position:relative}
-.tier.feat::before{content:"MOST COMMON";position:absolute;top:0;right:18px;font-family:'JetBrains Mono';font-size:9.5px;letter-spacing:.1em;background:var(--accent);color:var(--bg);padding:3px 9px;border-radius:0 0 5px 5px}
-.tier .name{font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase}
-.tier .amt{font-family:'Space Grotesk';font-size:48px;line-height:1;letter-spacing:-.035em;color:var(--fg);font-weight:300}
-.tier .amt .sm{font-family:'JetBrains Mono';font-size:13px;color:var(--fg-3);margin-left:6px;letter-spacing:.02em}
-.tier .desc{font-size:14px;color:var(--fg-2);line-height:1.55;min-height:42px}
-.tier ul{list-style:none;display:flex;flex-direction:column;gap:10px;font-size:13.5px;color:var(--fg-2);line-height:1.5}
-.tier ul li{display:flex;gap:10px;align-items:flex-start}
-.tier ul li::before{content:"+";color:var(--accent-dim);font-family:'JetBrains Mono';font-weight:500;flex-shrink:0;width:10px}
-.tier ul li.dim{color:var(--fg-3)}
-.tier ul li.dim::before{content:"·";color:var(--fg-4)}
-.tier .cta{margin-top:auto;padding-top:8px}
-@media(max-width:880px){.pricing{grid-template-columns:1fr}.tier{border-right:0;border-bottom:1px solid var(--line)}.tier.feat{border-left:0;border-right:0;border-top:1px solid var(--accent-dim);border-bottom:1px solid var(--accent-dim)}.tier:last-child{border-bottom:0}}
+/* pricing — Stripe pricing table */
+stripe-pricing-table{display:block;width:100%;margin-top:8px}
 
 /* bento (telemetry) */
 .bento{display:grid;grid-template-columns:1.4fr 1fr 1fr;grid-template-rows:auto auto;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-1)}
