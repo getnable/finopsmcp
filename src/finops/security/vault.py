@@ -285,8 +285,14 @@ class Vault:
         if key is None:
             key_path = data / "vault.key"
             key = cls._load_or_create_key(key_path)
-            # Try to promote to keyring for better security
+            # Try to promote to keyring for better security; delete the file
+            # once the key is safely stored so it doesn't sit world-readable.
             if cls._save_keyring(key):
                 log.info("Vault: promoted master key to OS keyring")
+                try:
+                    key_path.unlink()
+                    log.info("Vault: removed vault.key file after keyring promotion")
+                except OSError:
+                    pass
 
         return cls(db_path, key)

@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import stat
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,6 +50,7 @@ def _save_yaml(data: dict) -> None:
         # yaml not installed — write minimal format manually
         import json
         _ACCOUNTS_FILE.write_text(json.dumps(data, indent=2))
+    _ACCOUNTS_FILE.chmod(0o600)
 
 
 def list_accounts() -> list[AccountConfig]:

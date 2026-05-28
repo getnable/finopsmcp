@@ -67,6 +67,7 @@ def _print_aws_accounts() -> None:
         return
 
     data = _load_yaml()
+
     default_name = data.get("default_account", "")
 
     print(f"\n  AWS accounts ({len(accounts)}):\n")
@@ -352,7 +353,8 @@ def setup_aws_account() -> None:
             _warn("That doesn't look like a valid Secret Access Key")
             secret_key = _prompt("  AWS Secret Access Key", secret=True)
 
-        # Store in vault and expose to current process so the connection test works
+        # All inputs collected and validated. Store only now so a Ctrl-C mid-prompt
+        # never leaves partial credentials in the vault.
         vault = Vault.default()
         vault.store("AWS_ACCESS_KEY_ID", access_key)
         vault.store("AWS_SECRET_ACCESS_KEY", secret_key)
@@ -728,12 +730,18 @@ def setup_slack() -> None:
         channel = _prompt("  Channel (e.g. #finops-alerts)", default="#finops-alerts")
         vault.store("SLACK_BOT_TOKEN", token)
         vault.store("SLACK_CHANNEL", channel)
-    digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-    try:
-        parts = digest_time.split(":")
-        hour, minute = parts[0].strip(), parts[1].strip() if len(parts) > 1 else "0"
-    except Exception:
-        hour, minute = "9", "0"
+    while True:
+        digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
+        try:
+            parts = digest_time.split(":")
+            hour_int = int(parts[0].strip())
+            minute_int = int(parts[1].strip()) if len(parts) > 1 else 0
+            if 0 <= hour_int <= 23 and 0 <= minute_int <= 59:
+                hour, minute = str(hour_int), str(minute_int)
+                break
+            _warn(f"Invalid time '{digest_time}'. Hour must be 0-23 and minute 0-59.")
+        except (ValueError, IndexError):
+            _warn(f"Invalid time '{digest_time}'. Use HH:MM format, e.g. 09:00.")
     vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
     _ok("Slack configured")
 
@@ -744,12 +752,18 @@ def setup_teams() -> None:
     vault = Vault.default()
     url = _prompt("  Incoming Webhook URL (from Teams channel → Connectors)", secret=True)
     vault.store("TEAMS_WEBHOOK_URL", url)
-    digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-    try:
-        parts = digest_time.split(":")
-        hour, minute = parts[0].strip(), parts[1].strip() if len(parts) > 1 else "0"
-    except Exception:
-        hour, minute = "9", "0"
+    while True:
+        digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
+        try:
+            parts = digest_time.split(":")
+            hour_int = int(parts[0].strip())
+            minute_int = int(parts[1].strip()) if len(parts) > 1 else 0
+            if 0 <= hour_int <= 23 and 0 <= minute_int <= 59:
+                hour, minute = str(hour_int), str(minute_int)
+                break
+            _warn(f"Invalid time '{digest_time}'. Hour must be 0-23 and minute 0-59.")
+        except (ValueError, IndexError):
+            _warn(f"Invalid time '{digest_time}'. Use HH:MM format, e.g. 09:00.")
     vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
     _ok("Teams configured")
 
@@ -1200,6 +1214,7 @@ def _offer_email_signup() -> None:
 
     print("─" * 60)
     print("  Want the quickstart guide sent to your inbox?")
+    print("  Your email will be sent to getnable.com to deliver the guide.")
     print()
     try:
         email = input("  Your email (Enter to skip): ").strip()
@@ -1375,6 +1390,7 @@ def _inject_license_into_claude_config(key: str) -> None:
 
         if updated:
             config_path.write_text(json.dumps(config, indent=2))
+            config_path.chmod(0o600)
             print("  ✓  Written to Claude Desktop config automatically.")
         else:
             print("  →  Add to your Claude Desktop config manually:")
@@ -1410,26 +1426,27 @@ def _inject_aws_into_claude_config(access_key: str, secret_key: str, region: str
     try:
         try:
             config = json.loads(config_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            config = {}
+        except (json.JSONDecodeError, OSError) as parse_err:
+            _warn(f"Could not parse Claude Desktop config: {parse_err}")
+            _warn(f"Check {config_path} manually before re-running setup.")
+            return
 
         servers = config.get("mcpServers", {})
         updated_server = None
         for server_name, server_cfg in servers.items():
             if "finops" in server_name.lower() or "nable" in server_name.lower():
                 env = server_cfg.setdefault("env", {})
-                env["AWS_ACCESS_KEY_ID"] = access_key
-                env["AWS_SECRET_ACCESS_KEY"] = secret_key
                 env["AWS_DEFAULT_REGION"] = region
                 updated_server = server_name
 
         if updated_server:
             config_path.write_text(json.dumps(config, indent=2) + "\n")
-            _ok(f"AWS credentials written to Claude Desktop config ({updated_server}).")
+            config_path.chmod(0o600)
+            _ok(f"AWS region written to Claude Desktop config ({updated_server}).")
             print("  Restart Claude Desktop to apply.")
         else:
             print("\n  nable is not yet in Claude Desktop config.")
-            print("  Run 'finops setup claude' to register it. AWS credentials will be included.")
+            print("  Run 'finops setup claude' to register it.")
     except Exception as e:
         _warn(f"Could not update Claude Desktop config: {e}")
         print("  Credentials are saved in the vault and will load at MCP server startup.")
@@ -1608,20 +1625,24 @@ def _configure_claude_desktop_inner() -> None:
         try:
             with open(config_path) as f:
                 config = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            config = {}
+        except (json.JSONDecodeError, OSError) as parse_err:
+            _warn(f"Could not parse Claude Desktop config: {parse_err}")
+            _warn(f"Check {config_path} manually before re-running 'finops setup claude'.")
+            return
     else:
         config = {}
 
     config.setdefault("mcpServers", {})
 
-    # Pull any credentials already stored in the vault so they land in the
-    # env block automatically. The user then never has to edit the JSON.
+    # Pull non-secret config from the vault into the env block.
+    # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are intentionally excluded:
+    # the MCP server loads them from the vault at startup via load_vault_to_env(),
+    # so they never need to appear in plaintext in claude_desktop_config.json.
     vault_env: dict[str, str] = {}
     try:
         from .security.vault import Vault
         _v = Vault.default()
-        for _k in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "FINOPS_LICENSE_KEY"):
+        for _k in ("FINOPS_LICENSE_KEY",):
             _val = _v.get(_k)
             if _val:
                 vault_env[_k] = _val
@@ -1675,6 +1696,7 @@ def _configure_claude_desktop_inner() -> None:
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
         f.write("\n")
+    config_path.chmod(0o600)
 
     _ok(f"Claude Desktop configured → {config_path}")
     print("  Restart Claude Desktop for the changes to take effect.")

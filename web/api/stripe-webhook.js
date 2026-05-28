@@ -11,6 +11,10 @@
 
 import crypto from "node:crypto";
 
+// In-memory deduplication for events seen within the same Lambda warm instance.
+// TODO: replace with a persistent KV store (e.g. Vercel KV / Redis) for cross-instance deduplication.
+const processedEvents = new Set();
+
 // Set FINOPS_LICENSE_SECRET in Vercel project environment variables.
 // Must match the FINOPS_LICENSE_SECRET env var on the MCP server side.
 const LICENSE_SECRET = process.env.FINOPS_LICENSE_SECRET;
@@ -197,6 +201,13 @@ export default async function handler(req, res) {
   if (event.type !== "checkout.session.completed") {
     return res.status(200).json({ received: true, skipped: event.type });
   }
+
+  // Deduplicate within the same Lambda warm instance
+  if (processedEvents.has(event.id)) {
+    console.log(`Duplicate event ${event.id} - skipping`);
+    return res.status(200).json({ received: true, deduplicated: true });
+  }
+  processedEvents.add(event.id);
 
   const session = event.data.object;
   const email =
