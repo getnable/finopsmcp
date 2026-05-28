@@ -133,11 +133,13 @@ function Nav(){
         </ul>
         <div className="right">
           <a href="/account.html" className="btn btn-ghost">Sign in</a>
-          <a href="#install"
-             className="btn btn-primary"
-             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'}); }}>
+          <button className="btn btn-primary"
+             onClick={()=>{
+               document.getElementById('install')?.scrollIntoView({behavior:'smooth'});
+               if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'});
+             }}>
             Get started free <span className="arr">→</span>
-          </a>
+          </button>
         </div>
       </div>
     </nav>
@@ -606,11 +608,13 @@ function FootCta(){
         </h2>
         <div style={{marginTop:48,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <a href="#install"
-               className="btn btn-primary" style={{padding:"14px 22px",fontSize:14}}
-               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'}); }}>
+            <button className="btn btn-primary" style={{padding:"14px 22px",fontSize:14}}
+               onClick={()=>{
+                 document.getElementById('install')?.scrollIntoView({behavior:'smooth'});
+                 if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'});
+               }}>
               Get started free <span className="arr">→</span>
-            </a>
+            </button>
             <a href="mailto:chandanirving@gmail.com?subject=nable - talk to founders"
                className="btn btn-ghost" style={{padding:"14px 22px",fontSize:14}}
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'talk_to_founders'}); }}>
