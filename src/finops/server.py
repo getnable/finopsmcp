@@ -2357,6 +2357,46 @@ async def create_scorecard_tickets(
 
 
 @mcp.tool()
+async def create_ticket(
+    title: str,
+    body: str,
+    priority: str = "medium",
+    labels: list[str] | None = None,
+) -> dict:
+    """
+    Create a ticket in the configured ticketing system (Jira, Linear, or GitHub Issues)
+    with a custom title and body. Use this for any finding, recommendation, or action
+    item that doesn't fit a specific category.
+
+    Args:
+        title: Ticket title / issue summary
+        body:  Full ticket description with context and action items
+        priority: "low", "medium", "high", or "critical" (default: medium)
+        labels: Optional list of labels/tags to apply (default: ["finops"])
+
+    Examples:
+        - "Create a Jira ticket to disable Textract in non-prod environments"
+        - "File a GitHub issue to switch LambdaClassifier from Sonnet to Haiku"
+        - "Open a Linear task for the NAT gateway consolidation"
+    """
+    if err := require_pro("ticket_creation"):
+        return err
+
+    try:
+        from .integrations.ticketing import create_custom_ticket as _create
+
+        url = _create(title=title, body=body, priority=priority, labels=labels or ["finops"])
+        if not url:
+            return {
+                "error": "Ticket was not created. Check that JIRA_URL / LINEAR_API_KEY / GITHUB_TOKEN is configured.",
+                "hint": "Run: finops setup to configure your ticketing integration.",
+            }
+        return {"ticket_url": url, "title": title, "priority": priority}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def fetch_invoice_emails() -> dict:
     """
     Fetch unread invoice emails from the configured IMAP mailbox, extract

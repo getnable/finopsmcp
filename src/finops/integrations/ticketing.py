@@ -545,6 +545,16 @@ def create_commitment_gap_ticket(gap: dict[str, Any]) -> str | None:
     return _dispatch(title, body, priority, labels)
 
 
+def create_custom_ticket(
+    title: str,
+    body: str,
+    priority: str = "medium",
+    labels: list[str] | None = None,
+) -> str | None:
+    """Create a ticket with arbitrary title and body. Used for ad-hoc findings."""
+    return _dispatch(title, body, priority, labels or ["finops"])
+
+
 def create_tickets_for_unnotified(limit: int = 20) -> list[str]:
     """
     Called by scheduler after anomaly detection. Creates tickets for all
