@@ -216,12 +216,12 @@
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">1</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install the package</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install and run the welcome wizard</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">pip install</span> finops-mcp</div>
+              <div class="code-block p-4"><span class="cmd">pip install</span> finops-mcp &amp;&amp; <span class="cmd">finops welcome</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">Note the hyphen: <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops-mcp</code>, not <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops mcp</code>. On Anaconda? Use: <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp</code></p>
+            <p class="text-xs mt-2" style="color:var(--muted)">The welcome command walks you through connecting Claude and your first cloud account. Takes about 3 minutes. On Anaconda? Use: <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp</code> then <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops welcome</code>.</p>
           </div>
         </div>
 
@@ -229,12 +229,12 @@
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">2</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Connect your first cloud provider</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Or connect providers individually</p>
             <div class="code-wrap">
               <div class="code-block p-4"><span class="cm"># Pick whichever you care about most:</span><br/><span class="cmd">finops setup aws</span><br/><span class="cmd">finops setup azure</span><br/><span class="cmd">finops setup gcp</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">The wizard creates a <strong style="color:var(--fg)">read-only IAM policy</strong>, walks through the API key, and stores credentials in your OS keyring. You don't need all 17 connectors — one is enough to start.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">The wizard creates a <strong style="color:var(--fg)">read-only IAM policy</strong>, walks through the API key, and stores credentials in your OS keyring. You don't need all 17 connectors. One is enough to start.</p>
           </div>
         </div>
 

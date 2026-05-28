@@ -960,6 +960,7 @@ def main(args: list[str] | None = None) -> None:
     infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
 
+    sub.add_parser("welcome",      help="Guided onboarding: connect Claude + your first cloud account")
     sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
     iam_p = sub.add_parser("iam-template")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
@@ -1123,6 +1124,10 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "license-status":
         _run_license_status()
+        return
+    elif parsed.cmd == "welcome":
+        from .welcome import run_welcome_flow
+        run_welcome_flow()
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main

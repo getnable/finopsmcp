@@ -182,18 +182,24 @@ function Hero({ layout, interaction }){
 
 function CopyInstall(){
   const [copied, setCopied] = useState(false);
+  const cmd = "pip install finops-mcp && finops welcome";
   return (
-    <div className="install" role="group" aria-label="Install command">
-      <span className="prompt">$</span>
-      <span className="cmd">pip install finops-mcp</span>
-      <button onClick={() => {
-        navigator.clipboard?.writeText("pip install finops-mcp && finops setup");
-        setCopied(true);
-        setTimeout(()=>setCopied(false),1600);
-        if(window.posthog) posthog.capture('install_copied');
-      }}>
-        {copied ? "copied" : "copy"}
-      </button>
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      <div className="install" role="group" aria-label="Install command">
+        <span className="prompt">$</span>
+        <span className="cmd">{cmd}</span>
+        <button onClick={() => {
+          navigator.clipboard?.writeText(cmd);
+          setCopied(true);
+          setTimeout(()=>setCopied(false),1600);
+          if(window.posthog) posthog.capture('install_copied');
+        }}>
+          {copied ? "copied" : "copy"}
+        </button>
+      </div>
+      <p className="mono" style={{fontSize:11,color:"var(--fg-3)",letterSpacing:".04em",paddingLeft:2}}>
+        installs the MCP server · guided setup runs automatically
+      </p>
     </div>
   );
 }
@@ -619,7 +625,7 @@ function FootCta(){
           <EmailCapture source="footer" placeholder="drop your email, we'll send the setup guide" btnLabel="Send it" center={true} />
         </div>
         <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-3)",letterSpacing:".04em"}}>
-          $ pip install finops-mcp &amp;&amp; finops setup
+          $ pip install finops-mcp &amp;&amp; finops welcome
         </p>
       </div>
     </section>
