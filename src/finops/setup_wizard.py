@@ -55,6 +55,39 @@ def _err(msg: str) -> None:
     print(f"  ✗ {msg}", file=sys.stderr)
 
 
+# ── AWS account listing ───────────────────────────────────────────────────────
+
+def _print_aws_accounts() -> None:
+    """Print all configured AWS accounts in a readable table."""
+    from .accounts import list_accounts, _load_yaml
+
+    accounts = list_accounts()
+    if not accounts:
+        print("  No AWS accounts configured yet. Run: finops setup aws")
+        return
+
+    data = _load_yaml()
+    default_name = data.get("default_account", "")
+
+    print(f"\n  AWS accounts ({len(accounts)}):\n")
+    for acct in accounts:
+        is_default = acct.name == default_name
+        marker = "*" if is_default else " "
+        acct_id = f"  [{acct.account_id}]" if acct.account_id else ""
+        auth = ""
+        if acct.role_arn:
+            auth = f"  role: {acct.role_arn}"
+        elif acct.profile:
+            auth = f"  profile: {acct.profile}"
+        else:
+            auth = "  IAM key"
+        print(f"   {marker} {acct.name}{acct_id}{auth}")
+
+    print(f"\n  * = default account")
+    print(f"  Add another: finops setup aws --add")
+    print(f"  Org import:  finops setup aws --org")
+
+
 # ── Provider wizards ──────────────────────────────────────────────────────────
 
 _VALID_AWS_REGIONS = {
@@ -395,6 +428,19 @@ def setup_aws_account() -> None:
         })
     except Exception:
         pass
+
+    # Print a summary of all accounts so far
+    all_accounts = list_accounts()
+    print(f"\n  Accounts configured ({len(all_accounts)}):")
+    for acct in all_accounts:
+        marker = " *" if acct.name == name else "  "
+        acct_id = f"  [{acct.account_id}]" if acct.account_id else ""
+        print(f"   {marker} {acct.name}{acct_id}")
+
+    # Offer to add another account without re-running the command
+    another = _prompt("\n  Add another AWS account? (y/N)", default="n").lower()
+    if another in ("y", "yes"):
+        setup_aws_account()
 
 
 def setup_aws_org() -> None:
@@ -876,6 +922,8 @@ def main(args: list[str] | None = None) -> None:
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
+    aws_p.add_argument("--add",          action="store_true", help="Add another AWS account (skips intro)")
+    aws_p.add_argument("--list",         action="store_true", help="List all configured AWS accounts")
     aws_p.add_argument("--iam-template", action="store_true", help="Print least-privilege IAM CloudFormation template")
     aws_p.add_argument("--iam-terraform",action="store_true", help="Print least-privilege IAM Terraform snippet")
     aws_p.add_argument("--check-scope",  action="store_true", help="Verify your AWS key is read-only")
@@ -1084,9 +1132,12 @@ def main(args: list[str] | None = None) -> None:
         _run_infra_overview(getattr(parsed, "provider", ""))
         return
     elif parsed.cmd == "aws":
-        # Route: --org flag triggers org discovery, otherwise account registration
-        if getattr(parsed, "org", False):
+        if getattr(parsed, "list", False):
+            _print_aws_accounts()
+        elif getattr(parsed, "org", False):
             setup_aws_org()
+        elif getattr(parsed, "add", False):
+            setup_aws_account()
         else:
             setup_aws_account()
         return
