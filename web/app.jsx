@@ -125,8 +125,6 @@ function Nav(){
           <span>nable</span>
         </a>
         <ul>
-          <li><a href="#thesis">Thesis</a></li>
-          <li><a href="#runtime">Runtime</a></li>
           <li><a href="#connectors">Connectors</a></li>
           <li><a href="#pricing">Pricing</a></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
@@ -615,7 +613,8 @@ function FootCta(){
                }}>
               Get started free <span className="arr">→</span>
             </button>
-            <a href="mailto:chandanirving@gmail.com?subject=nable - talk to founders"
+            <a href="https://mail.google.com/mail/?view=cm&to=chandanirving@gmail.com&su=nable - talk to founders"
+               target="_blank" rel="noopener noreferrer"
                className="btn btn-ghost" style={{padding:"14px 22px",fontSize:14}}
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'talk_to_founders'}); }}>
               Talk to founders
@@ -652,7 +651,7 @@ function FounderNote(){
           </div>
           <div>
             <div style={{fontSize:14,fontWeight:500,color:"var(--fg)"}}>Chandan Bukkapatnam</div>
-            <div style={{fontSize:13,color:"var(--fg-3)"}}>Founder · <a href="mailto:chandanirving@gmail.com" style={{color:"var(--accent)"}}>chandanirving@gmail.com</a></div>
+            <div style={{fontSize:13,color:"var(--fg-3)"}}>Founder · <a href="https://mail.google.com/mail/?view=cm&to=chandanirving@gmail.com" target="_blank" rel="noopener noreferrer" style={{color:"var(--accent)"}}>chandanirving@gmail.com</a></div>
           </div>
         </div>
       </div>
@@ -691,7 +690,7 @@ function Footer(){
             <h5>Company</h5>
             <a href="#">About</a>
             <a href="#">Investors</a>
-            <a href="mailto:chandanirving@gmail.com">Contact</a>
+            <a href="https://mail.google.com/mail/?view=cm&to=chandanirving@gmail.com" target="_blank" rel="noopener noreferrer">Contact</a>
           </div>
         </div>
         <div className="foot-meta">
