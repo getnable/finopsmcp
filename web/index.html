@@ -96,7 +96,8 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .logo{display:flex;align-items:center;gap:10px;font-family:'Space Grotesk';font-weight:500;font-size:17px;letter-spacing:-.02em;color:var(--fg)}
 .logo .mark-img{width:26px;height:26px;border-radius:6px;display:block;flex-shrink:0}
 .nav ul{display:flex;list-style:none;gap:32px;color:var(--fg-2);font-size:13.5px}
-.nav ul a:hover{color:var(--fg)}
+.nav ul a:hover,.nav ul .nav-link:hover{color:var(--fg)}
+.nav-link{background:none;border:none;color:var(--fg-2);font-size:13.5px;cursor:pointer;padding:0;font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:-.005em;transition:.18s}
 .nav .right{display:flex;align-items:center;gap:12px}
 .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:7px;font-size:13.5px;font-weight:500;border:1px solid transparent;transition:.18s;letter-spacing:-.005em;min-height:38px}
 .btn-primary{background:var(--accent);color:#15140f}
@@ -282,6 +283,9 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 .foot a:hover{color:var(--fg)}
 .foot-meta{display:flex;align-items:center;justify-content:space-between;margin-top:56px;padding-top:24px;border-top:1px solid var(--line);font-family:'JetBrains Mono';font-size:11px;color:var(--fg-3);letter-spacing:.04em}
 @media(max-width:880px){.foot{grid-template-columns:1fr 1fr;gap:32px}.foot-meta{flex-direction:column;gap:12px;align-items:flex-start}}
+
+/* faq */
+#faq h2{font-size:clamp(28px,3.2vw,42px);line-height:1.1;letter-spacing:-.03em;font-weight:300}
 
 /* focus rings */
 :focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}

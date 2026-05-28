@@ -117,6 +117,9 @@ function LogoMark(){
 
 /* Nav */
 function Nav(){
+  function scrollTo(id){
+    document.getElementById(id)?.scrollIntoView({behavior:'smooth'});
+  }
   return (
     <nav className="nav">
       <div className="nav-inner">
@@ -125,15 +128,16 @@ function Nav(){
           <span>nable</span>
         </a>
         <ul>
-          <li><a href="#connectors">Connectors</a></li>
-          <li><a href="#pricing">Pricing</a></li>
+          <li><button className="nav-link" onClick={()=>scrollTo('connectors')}>Connectors</button></li>
+          <li><button className="nav-link" onClick={()=>scrollTo('pricing')}>Pricing</button></li>
+          <li><button className="nav-link" onClick={()=>{ scrollTo('faq'); if(window.posthog) posthog.capture('nav_clicked',{item:'faq'}); }}>FAQ</button></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
         </ul>
         <div className="right">
           <a href="/account.html" className="btn btn-ghost">Sign in</a>
           <button className="btn btn-primary"
              onClick={()=>{
-               document.getElementById('install')?.scrollIntoView({behavior:'smooth'});
+               scrollTo('install');
                if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'});
              }}>
             Get started free <span className="arr">→</span>
@@ -152,14 +156,14 @@ function Hero({ layout, interaction }){
       <div className="wrap">
         <div className="hero-inner">
           <div className="hero-left">
-            <div className="eyebrow"><span className="d"></span> FinOps · works in Claude, Cursor, Windsurf · v0.8.36</div>
+            <div className="eyebrow"><span className="d"></span> MCP server · Claude, Cursor, Windsurf · free to start</div>
             <h1 className="display">
-              The cloud bill,<br/>
+              Your cloud bill,<br/>
               <span className="strike">in a dashboard.</span><br/>
               <span className="accent">In your editor.</span>
             </h1>
             <p className="lede">
-              Real billing data from AWS, Azure, GCP, and 14 SaaS tools, live in Claude or Cursor. Ask anything in plain English. Nothing leaves your machine.
+              Connect AWS, Azure, GCP, and 14 SaaS tools to Claude or Cursor. Ask about spend, get rightsizing recommendations, auto-create tickets. Runs locally. Your data never leaves your machine.
             </p>
             <div className="hero-cta-row" id="install">
               <CopyInstall />
@@ -675,8 +679,8 @@ function Footer(){
             <h5>Product</h5>
             <a href="#connectors">Connectors</a>
             <a href="#pricing">Pricing</a>
+            <a href="#faq">FAQ</a>
             <a href="#">Changelog</a>
-            <a href="#">Status</a>
           </div>
           <div>
             <h5>Resources</h5>
@@ -698,6 +702,121 @@ function Footer(){
         </div>
       </div>
     </footer>
+  );
+}
+
+/* FAQ */
+const FAQ_ITEMS = [
+  {
+    q: "How is this different from just asking Claude?",
+    a: "Claude doesn't have your billing data. nable gives Claude the tools to pull it live from AWS, Azure, GCP, and your SaaS providers. Without nable, you paste numbers in manually and hope nothing's stale. With it, Claude can query, analyze, and act on your actual bill in real time."
+  },
+  {
+    q: "Where do my credentials and billing data go?",
+    a: "Nowhere. nable runs entirely on your machine. Credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). Billing data is queried directly from provider APIs. We never see it."
+  },
+  {
+    q: "What editors does it work with?",
+    a: "Claude Desktop, Cursor, Windsurf, Zed, and anything that supports MCP. The setup wizard configures your editor automatically. If you use multiple editors, run the wizard once per editor."
+  },
+  {
+    q: "How long does setup take?",
+    a: "About 5 minutes. Run `pip install finops-mcp && finops welcome`, follow the prompts, and you're done. The wizard handles the MCP config and credential storage."
+  },
+  {
+    q: "Is the free tier actually free?",
+    a: "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and all 17 connectors. Team adds automated ticket creation, scheduled digests, and commitment analysis."
+  },
+  {
+    q: "I only have one AWS account. Is this worth it?",
+    a: "Yes. Rightsizing and anomaly detection alone are usually worth it. Most people find savings in the first session. You can add more providers later."
+  },
+  {
+    q: "Do you support multiple AWS accounts or organizations?",
+    a: "Yes. Run `finops setup aws --add` to connect additional accounts. You can query across all of them in a single conversation. Multi-account org rollups are on the roadmap for Q3."
+  },
+  {
+    q: "Is my data sent to Anthropic or any AI provider?",
+    a: "That depends on how you use Claude. nable itself never sends your data anywhere. What you share with Claude in conversation is governed by Anthropic's terms, same as any other Claude conversation."
+  },
+];
+
+function FAQ(){
+  const [open, setOpen] = useState(null);
+  return (
+    <section id="faq" style={{borderTop:"1px solid var(--line)"}}>
+      <div className="wrap" style={{maxWidth:720,paddingTop:80,paddingBottom:80}}>
+        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--accent-dim)",letterSpacing:".1em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
+          <span style={{width:24,height:1,background:"var(--accent-dim)",display:"inline-block"}}></span>
+          FAQ
+        </div>
+        <h2 style={{marginBottom:48}}>Questions we actually get.</h2>
+        <div style={{display:"flex",flexDirection:"column"}}>
+          {FAQ_ITEMS.map((item, i) => {
+            const isOpen = open === i;
+            return (
+              <div key={i} style={{
+                borderBottom:"1px solid var(--line)",
+              }}>
+                <button
+                  onClick={()=>setOpen(isOpen ? null : i)}
+                  style={{
+                    width:"100%",
+                    display:"flex",
+                    justifyContent:"space-between",
+                    alignItems:"center",
+                    padding:"20px 0",
+                    background:"none",
+                    border:"none",
+                    color:"var(--fg)",
+                    fontFamily:"'DM Sans',sans-serif",
+                    fontSize:16,
+                    fontWeight:500,
+                    textAlign:"left",
+                    cursor:"pointer",
+                    gap:16,
+                  }}
+                  aria-expanded={isOpen}
+                >
+                  <span>{item.q}</span>
+                  <span style={{
+                    flexShrink:0,
+                    width:22,
+                    height:22,
+                    borderRadius:"50%",
+                    border:"1px solid var(--line-2)",
+                    display:"flex",
+                    alignItems:"center",
+                    justifyContent:"center",
+                    color:"var(--fg-3)",
+                    fontSize:16,
+                    transition:"transform .2s",
+                    transform: isOpen ? "rotate(45deg)" : "none",
+                  }}>+</span>
+                </button>
+                {isOpen && (
+                  <p style={{
+                    fontSize:15,
+                    lineHeight:1.7,
+                    color:"var(--fg-2)",
+                    paddingBottom:20,
+                    margin:0,
+                  }}>{item.a}</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{marginTop:48,display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:14,color:"var(--fg-3)"}}>Still have questions?</span>
+          <a href="https://mail.google.com/mail/?view=cm&to=chandanirving@gmail.com&su=nable question"
+             target="_blank" rel="noopener noreferrer"
+             style={{fontSize:14,color:"var(--accent)",textDecoration:"none",fontWeight:500}}>
+            Email us directly →
+          </a>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -775,6 +894,7 @@ function App(){
       <Hero layout={t.layout} interaction={t.interaction} />
       <Connectors />
       <Pricing />
+      <FAQ />
       <FounderNote />
       <FootCta />
       <Footer />
