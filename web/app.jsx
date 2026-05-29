@@ -3,7 +3,7 @@ const { useState, useEffect, useRef } = React;
 /* tweak defaults */
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "palette": "graphite",
-  "layout": "editorial",
+  "layout": "split",
   "interaction": "cycling"
 }/*EDITMODE-END*/;
 
