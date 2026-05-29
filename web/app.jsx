@@ -573,27 +573,16 @@ function Connectors(){
         <div className="section-head">
           <div className="label">Connectors</div>
           <h2>Seventeen sources.<br/><em>One conversation.</em></h2>
-          <p>Every connector is a real API integration, not a CSV export. New providers ship monthly. Suggest one and we'll quote a date.</p>
+          <p>Every connector is a real API integration, not a CSV export. New providers ship monthly.</p>
         </div>
-        <div className="conn-wrap">
-          <div>
-            <div className="mono" style={{fontSize:11,color:"var(--fg-3)",letterSpacing:".08em",textTransform:"uppercase",marginBottom:16}}>Roadmap</div>
-            <ul style={{listStyle:"none",display:"flex",flexDirection:"column",gap:12,fontSize:14,color:"var(--fg-2)",lineHeight:1.5}}>
-              <li style={{display:"flex",justifyContent:"space-between",borderBottom:"1px solid var(--line)",paddingBottom:10}}><span>Render · Fly · Railway</span><span className="mono" style={{fontSize:11,color:"var(--accent-dim)"}}>Q2 '26</span></li>
-              <li style={{display:"flex",justifyContent:"space-between",borderBottom:"1px solid var(--line)",paddingBottom:10}}><span>Supabase · Neon · PlanetScale</span><span className="mono" style={{fontSize:11,color:"var(--accent-dim)"}}>Q2 '26</span></li>
-              <li style={{display:"flex",justifyContent:"space-between",borderBottom:"1px solid var(--line)",paddingBottom:10}}><span>OCI · IBM Cloud</span><span className="mono" style={{fontSize:11,color:"var(--accent-dim)"}}>Q3 '26</span></li>
-              <li style={{display:"flex",justifyContent:"space-between"}}><span>SAP Concur · NetSuite</span><span className="mono" style={{fontSize:11,color:"var(--fg-3)"}}>requested</span></li>
-            </ul>
-          </div>
-          <div className="conn-grid">
-            {CONNECTORS.map((c,i) => (
-              <div className="conn" key={i}>
-                <span className="nm">{c.nm}</span>
-                <span className="px">{c.px}</span>
-                <span className={"tag " + (c.tag === "beta" ? "beta" : "")}>{c.tag}</span>
-              </div>
-            ))}
-          </div>
+        <div className="conn-grid">
+          {CONNECTORS.map((c,i) => (
+            <div className="conn" key={i}>
+              <span className="nm">{c.nm}</span>
+              <span className="px">{c.px}</span>
+              <span className={"tag " + (c.tag === "beta" ? "beta" : "")}>{c.tag}</span>
+            </div>
+          ))}
         </div>
       </div>
     </section>
