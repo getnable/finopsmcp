@@ -132,6 +132,7 @@ function Nav(){
           <li><button className="nav-link" onClick={()=>scrollTo('pricing')}>Pricing</button></li>
           <li><button className="nav-link" onClick={()=>{ scrollTo('faq'); if(window.posthog) posthog.capture('nav_clicked',{item:'faq'}); }}>FAQ</button></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
+          <li><a href="/about">About</a></li>
         </ul>
         <div className="right">
           <a href="/account.html" className="btn btn-ghost">Sign in</a>
