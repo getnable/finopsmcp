@@ -238,8 +238,8 @@ function TrustStrip(){
     <div className="trust" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
       {items.map((t,i) => (
         <div className="ti" key={i}>
-          <span className="val mono">{t.val}<span className="sub">{t.sub}</span></span>
           <span className="lab">{t.lab}</span>
+          <span className="val mono">{t.val}<span className="sub">{t.sub}</span></span>
         </div>
       ))}
     </div>
