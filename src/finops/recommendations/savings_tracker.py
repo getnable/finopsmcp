@@ -25,7 +25,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import case, func, select, update
 
 from ..storage.db import get_engine, savings_recommendations
 
@@ -186,17 +186,31 @@ def get_summary() -> dict[str, Any]:
       - acted_on_monthly_usd:  estimated savings from acted-on recs
       - verified_monthly_usd:  actual measured savings (verified recs)
       - counts by status and source
+
+    Uses GROUP BY aggregation rather than a full table scan so this stays
+    fast as the recommendations table grows.
     """
+    sr = savings_recommendations
     engine = get_engine()
+
+    # Aggregate counts and sums per (status, source) in one query
     with engine.connect() as conn:
-        rows = conn.execute(
+        agg_rows = conn.execute(
             select(
-                savings_recommendations.c.status,
-                savings_recommendations.c.source,
-                savings_recommendations.c.estimated_monthly_savings_usd,
-                savings_recommendations.c.verified_monthly_savings_usd,
-            )
+                sr.c.status,
+                sr.c.source,
+                func.count().label("cnt"),
+                func.sum(sr.c.estimated_monthly_savings_usd).label("sum_est"),
+                func.sum(sr.c.verified_monthly_savings_usd).label("sum_verified"),
+            ).group_by(sr.c.status, sr.c.source)
         ).fetchall()
+
+        total_count = conn.execute(
+            select(func.count()).select_from(sr)
+        ).scalar() or 0
+
+    # Known status buckets for by_source breakdown
+    _STATUS_KEYS = ("open", "acted_on", "verified", "dismissed", "expired")
 
     potential = 0.0
     acted_estimated = 0.0
@@ -204,34 +218,39 @@ def get_summary() -> dict[str, Any]:
     by_status: dict[str, int] = {}
     by_source: dict[str, dict] = {}
 
-    for r in rows:
-        s = r.status
-        src = r.source
-        est = r.estimated_monthly_savings_usd or 0.0
-        actual = r.verified_monthly_savings_usd or 0.0
+    for row in agg_rows:
+        s = row.status
+        src = row.source
+        cnt = row.cnt or 0
+        sum_est = float(row.sum_est or 0.0)
+        sum_ver = float(row.sum_verified or 0.0)
 
-        by_status[s] = by_status.get(s, 0) + 1
+        by_status[s] = by_status.get(s, 0) + cnt
+
         if src not in by_source:
-            by_source[src] = {"open": 0, "acted_on": 0, "verified": 0,
-                               "dismissed": 0, "potential_usd": 0.0, "verified_usd": 0.0}
-        by_source[src][s if s in by_source[src] else "dismissed"] = \
-            by_source[src].get(s, 0) + 1
-        by_source[src]["potential_usd"] += est if s == "open" else 0
-        by_source[src]["verified_usd"] += actual if s == "verified" else 0
+            by_source[src] = {k: 0 for k in _STATUS_KEYS}
+            by_source[src]["potential_usd"] = 0.0
+            by_source[src]["verified_usd"] = 0.0
+
+        # Only bucket into known status keys; unknown statuses fall under "dismissed"
+        bucket = s if s in _STATUS_KEYS else "dismissed"
+        by_source[src][bucket] = by_source[src].get(bucket, 0) + cnt
+        by_source[src]["potential_usd"] += sum_est if s == "open" else 0.0
+        by_source[src]["verified_usd"] += sum_ver if s == "verified" else 0.0
 
         if s == "open":
-            potential += est
+            potential += sum_est
         elif s == "acted_on":
-            acted_estimated += est
+            acted_estimated += sum_est
         elif s == "verified":
-            verified_actual += actual
+            verified_actual += sum_ver
 
     return {
         "potential_monthly_usd": round(potential, 2),
         "acted_on_monthly_usd": round(acted_estimated, 2),   # estimated, not yet verified
         "verified_monthly_usd": round(verified_actual, 2),   # confirmed actual savings
         "verified_annual_usd": round(verified_actual * 12, 2),
-        "total_recommendations": len(rows),
+        "total_recommendations": total_count,
         "by_status": by_status,
         "by_source": by_source,
     }
