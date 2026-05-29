@@ -6,7 +6,7 @@ Algorithm for each resource:
   2. Find the matching closing `}` using brace counting.
   3. If a `tags = {` block exists: insert missing keys before its closing `}`.
   4. If no tags block: inject a complete `tags = { ... }` before the resource's `}`.
-  5. FIXME placeholder values: "Name" tag → resource name, others → "FIXME-<key>".
+  5. FIXME placeholder values: "Name" tag -> resource name, others -> "FIXME-<key>".
 """
 from __future__ import annotations
 
@@ -24,6 +24,14 @@ _TF_RESOURCE_SOURCE_RE = re.compile(
     re.MULTILINE,
 )
 
+# Matches heredoc opening: <<EOT, <<-EOT, <<'EOT', <<-'EOT'
+_HEREDOC_OPEN_RE = re.compile(r"<<-?'?([A-Z_][A-Z_0-9]*)'?")
+
+
+def _contains_heredoc(text: str) -> bool:
+    """Return True if text contains a HCL heredoc (<<EOT ... EOT)."""
+    return bool(_HEREDOC_OPEN_RE.search(text))
+
 
 # ── Brace helpers ─────────────────────────────────────────────────────────────
 
@@ -31,14 +39,38 @@ def _find_matching_brace(content: str, open_pos: int) -> int:
     """Return position of the `}` that closes the `{` at open_pos.
 
     Handles nested braces. Returns -1 if not found.
-    Ignores `{` / `}` inside single-line strings (double-quoted), which
-    covers the common case of `"${...}"` interpolations.
+    Ignores `{` / `}` inside:
+      - single-line double-quoted strings
+      - heredoc blocks (<<EOT ... EOT or <<-EOT ... EOT)
     """
     depth = 0
     i = open_pos
     in_string = False
     while i < len(content):
         c = content[i]
+
+        # Detect heredoc opening: <<[-]['"]?MARKER
+        hm = _HEREDOC_OPEN_RE.match(content, i)
+        if hm and not in_string:
+            marker = hm.group(1)
+            # Skip past the opening line
+            nl = content.find("\n", hm.end())
+            if nl == -1:
+                break
+            i = nl + 1
+            # Scan lines until we find the terminator alone on a line
+            term_re = re.compile(r"^[ \t]*" + re.escape(marker) + r"[ \t]*$", re.MULTILINE)
+            tm = term_re.search(content, i)
+            if tm:
+                i = tm.end()
+                # Step past the trailing newline if present
+                if i < len(content) and content[i] == "\n":
+                    i += 1
+            else:
+                # Unterminated heredoc — bail out
+                return -1
+            continue
+
         if c == '"' and (i == 0 or content[i - 1] != "\\"):
             in_string = not in_string
         elif not in_string:
@@ -63,7 +95,16 @@ def _patch_block(block: str, res_name: str, missing_tags: list[str]) -> str:
     """Return a patched version of a resource block with missing tags added.
 
     block is the raw text from `resource "..." "..." {` to its closing `}`.
+    Blocks containing heredocs are returned unchanged — heredoc support is
+    not yet implemented and patching them blindly would corrupt the file.
     """
+    if _contains_heredoc(block):
+        log.warning(
+            "Resource '%s' contains a heredoc — skipping tag patch to avoid corruption",
+            res_name,
+        )
+        return block
+
     # Look for an existing tags = { ... } block
     tags_re = re.compile(r'^(?P<indent>\s+)tags\s*=\s*\{', re.MULTILINE)
     tags_match = tags_re.search(block)
@@ -257,7 +298,14 @@ def _patch_instance_size(block: str, attr: str, new_value: str) -> tuple[str, bo
 
     Returns (patched_block, was_changed).
     Only replaces the attribute if it already exists in the block — never injects.
+    Blocks containing heredocs are returned unchanged.
     """
+    if _contains_heredoc(block):
+        log.warning(
+            "Block contains a heredoc — skipping instance size patch for '%s'", attr
+        )
+        return block, False
+
     pattern = re.compile(
         rf'^(?P<prefix>\s+{re.escape(attr)}\s*=\s*")(?P<val>[^"]+)"',
         re.MULTILINE,
@@ -295,7 +343,11 @@ def generate_rightsizing_diff(
     resource_name: str,
     new_value: str,
 ) -> str | None:
-    """Return a unified diff for changing an instance type/class, or None if unchanged."""
+    """Return a unified diff for changing an instance type/class, or None if unchanged.
+
+    Returns None (with a warning) if the target resource block contains a heredoc.
+    Full heredoc support is not yet implemented; patching blindly would corrupt the file.
+    """
     attr = _INSTANCE_SIZE_ATTR.get(resource_type)
     if not attr:
         log.warning("No size attribute mapping for resource type %s", resource_type)
@@ -317,6 +369,13 @@ def generate_rightsizing_diff(
         block_start = match.start()
         block_end = close_pos + 1
         block = original[block_start:block_end]
+
+        if _contains_heredoc(block):
+            log.warning(
+                "Resource %s.%s contains a heredoc — skipping rightsizing diff to avoid corruption",
+                resource_type, resource_name,
+            )
+            return None
 
         patched_block, changed = _patch_instance_size(block, attr, new_value)
         if not changed:
@@ -348,7 +407,9 @@ def apply_rightsizing_fix(
 ) -> bool:
     """Write the patched instance type/class to disk.
 
-    Returns True if the file was modified.
+    Returns True if the file was modified, False if unchanged or a heredoc was detected.
+    Refuses to patch resource blocks that contain heredocs — use generate_rightsizing_diff
+    to inspect the block first and apply the change manually if needed.
     """
     attr = _INSTANCE_SIZE_ATTR.get(resource_type)
     if not attr:
@@ -369,6 +430,13 @@ def apply_rightsizing_fix(
         block_start = match.start()
         block_end = close_pos + 1
         block = original[block_start:block_end]
+
+        if _contains_heredoc(block):
+            log.warning(
+                "Resource %s.%s contains a heredoc — refusing to apply rightsizing fix to avoid corruption",
+                resource_type, resource_name,
+            )
+            return False
 
         patched_block, changed = _patch_instance_size(block, attr, new_value)
         if not changed:
