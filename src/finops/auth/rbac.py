@@ -38,10 +38,10 @@ import hashlib
 import logging
 import os
 import secrets
-import threading
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 log = logging.getLogger("finops.auth.rbac")
 
@@ -99,19 +99,21 @@ class Identity:
         }
 
 
-# ── Thread-local identity context ──────────────────────────────────────────────
+# ── Async-safe identity context ────────────────────────────────────────────────
+# ContextVar is the correct primitive for asyncio: each task gets its own copy,
+# so concurrent coroutines sharing a thread cannot bleed identity into each other.
 
-_ctx = threading.local()
+_identity: ContextVar[Optional[Identity]] = ContextVar("_identity", default=None)
 
 
 def set_current_identity(ident: Identity | None) -> None:
-    """Attach an identity to the current thread (called by auth middleware)."""
-    _ctx.identity = ident
+    """Attach an identity to the current async task (called by auth middleware)."""
+    _identity.set(ident)
 
 
 def current_identity() -> Identity | None:
-    """Return the identity for the current request thread, or None if permissive."""
-    return getattr(_ctx, "identity", None)
+    """Return the identity for the current async task, or None if permissive."""
+    return _identity.get()
 
 
 # ── Auth enforcement ───────────────────────────────────────────────────────────
