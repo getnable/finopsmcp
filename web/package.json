@@ -1,0 +1,9 @@
+{
+  "name": "nable-web",
+  "scripts": {
+    "build": "esbuild app.jsx --jsx=transform --outfile=app.js && esbuild tweaks-panel.jsx --jsx=transform --outfile=tweaks-panel.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

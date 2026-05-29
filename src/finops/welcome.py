@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 # ── Colour helpers ─────────────────────────────────────────────────────────────
@@ -32,6 +33,35 @@ def cyan(t: str) -> str:   return _c("36", t)
 def yellow(t: str) -> str: return _c("33", t)
 def amber(t: str) -> str:  return _c("33", t)
 def white(t: str) -> str:  return _c("97", t)
+
+
+# ── Telemetry ──────────────────────────────────────────────────────────────────
+
+_POSTHOG_TOKEN = "phc_zcaQqoAXrSghjtbE6VB83p4RjfmcpqezKWV9GdZy4dPv"
+_POSTHOG_ENDPOINT = "https://us.i.posthog.com/capture/"
+_VERSION = "0.8.36"
+
+
+def _fire_telemetry(event: str, properties: dict) -> None:
+    """Send a PostHog event. Fire-and-forget: never raises."""
+    if os.environ.get("NABLE_NO_TELEMETRY", "") == "1":
+        return
+
+    def _send() -> None:
+        try:
+            import httpx
+            payload = {
+                "api_key": _POSTHOG_TOKEN,
+                "event": event,
+                "distinct_id": "install",
+                "properties": properties,
+            }
+            httpx.post(_POSTHOG_ENDPOINT, json=payload, timeout=5)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_send, daemon=True)
+    t.start()
 
 
 # ── Sentinel ───────────────────────────────────────────────────────────────────
@@ -87,6 +117,7 @@ def show_welcome() -> None:
         return
 
     _mark_welcomed()
+    _fire_telemetry("install_completed", {"source": "finops_welcome", "version": _VERSION})
     _print_header()
 
     _line(bold("Ask your AI about cloud costs in plain English:"))
