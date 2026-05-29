@@ -148,7 +148,7 @@ function Nav(){
   return (
     <nav className="nav">
       <div className="nav-inner">
-        <a href="#top" className="logo">
+        <a href="/" className="logo">
           <LogoMark />
           <span>nable</span>
         </a>
