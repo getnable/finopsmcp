@@ -188,17 +188,17 @@ function Hero({ layout, interaction }){
               <span className="accent">In your editor.</span>
             </h1>
             <p className="lede">
-              Connect AWS, Azure, GCP, and 14 SaaS tools to Claude or Cursor. Ask about spend, get rightsizing recommendations, auto-create tickets. Runs locally. Your data never leaves your machine.
+              Connect AWS, Azure, GCP, and 14 SaaS tools to Claude or Cursor. Ask about spend, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally. Your data never leaves your machine.
             </p>
             <div className="hero-cta-row" id="install">
               <CopyInstall />
             </div>
-            <TrustStrip />
           </div>
           <div className="hero-right">
             <Console interaction={interaction} />
           </div>
         </div>
+        <TrustStrip />
       </div>
     </header>
   );
@@ -235,7 +235,7 @@ function TrustStrip(){
     {lab:"local only", val:"0 bytes", sub:"sent to our servers"},
   ];
   return (
-    <div className="trust" style={{marginTop:56,gridTemplateColumns:"repeat(3,1fr)"}}>
+    <div className="trust" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
       {items.map((t,i) => (
         <div className="ti" key={i}>
           <span className="val mono">{t.val}<span className="sub">{t.sub}</span></span>
@@ -422,9 +422,9 @@ function Depth(){
   const cards = [
     {
       n: "01",
-      h: "Rightsizing that actually ships",
-      p: "Cross-references CloudWatch utilization, Compute Optimizer signals, and 14 days of CPU/memory data. Doesn't just flag underused instances. Models the migration path, quantifies the monthly saving, and generates the IaC PR or Jira ticket to act on it.",
-      chips: ["CloudWatch","Compute Optimizer","14-day window","IaC PR generation"],
+      h: "Rightsizing that closes the loop",
+      p: "Cross-references CloudWatch, Compute Optimizer, and 14 days of CPU/memory data. Then reads your Terraform state, finds the resource, patches the instance type in the .tf file, and opens the PR. After you merge and apply, nable checks AWS to confirm the change and records the realized saving.",
+      chips: ["CloudWatch","Compute Optimizer","Terraform state","PR + verified savings"],
     },
     {
       n: "02",
@@ -474,7 +474,7 @@ function Depth(){
 /* Architecture */
 function Architecture(){
   return (
-    <section id="arch">
+    <section id="arch" className="alt">
       <div className="wrap">
         <div className="section-head">
           <div className="label">Architecture</div>
@@ -568,7 +568,7 @@ const CONNECTORS = [
 
 function Connectors(){
   return (
-    <section id="connectors">
+    <section id="connectors" className="alt">
       <div className="wrap">
         <div className="section-head">
           <div className="label">Connectors</div>
@@ -658,11 +658,12 @@ const SOLO_FEATURES = [
 
 const TEAM_FEATURES = [
   "Everything in Solo",
-  "Auto-create tickets (Jira, Linear, GitHub)",
+  "Terraform remediation: patch files, open PR",
   "Scheduled cost digests via email",
   "Commitment analysis and RI recommendations",
   "Org-level rollups across accounts",
   "Budget enforcement and alerts",
+  "Ticket creation (Jira, Linear, GitHub Issues)",
   "RBAC for team access control",
 ];
 
@@ -681,8 +682,8 @@ function Pricing(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">Pricing</div>
-          <h2>Free to ask.<br/><em>Pay to automate.</em></h2>
-          <p>Solo is free forever. Team adds the actions layer: ticket creation, digests, budget enforcement, and org rollups.</p>
+          <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
+          <p>Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget enforcement, and org rollups.</p>
         </div>
         <div className="pricing-grid">
 
@@ -722,7 +723,7 @@ function Pricing(){
                 <span className="pricing-amount">$39</span>
                 <span className="pricing-per">.99 / mo</span>
               </div>
-              <p className="pricing-desc">The automation layer. Ships work that would otherwise take a contractor to set up.</p>
+              <p className="pricing-desc">The remediation layer. Finds the waste, writes the fix, opens the PR, tracks whether it actually shipped.</p>
               <a
                 href="https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01"
                 target="_blank"
@@ -751,6 +752,40 @@ function Pricing(){
   );
 }
 
+/* Mid-page CTA */
+function MidCta(){
+  return (
+    <section id="mid-cta" style={{borderTop:"1px solid var(--line)",borderBottom:"1px solid var(--line)"}}>
+      <div className="wrap" style={{paddingTop:72,paddingBottom:72}}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:24,textAlign:"center"}}>
+          <div>
+            <h2 style={{marginBottom:10}}>Ready to stop guessing?</h2>
+            <p style={{color:"var(--fg-2)",maxWidth:"46ch",margin:"0 auto",lineHeight:1.6}}>
+              Five minutes from install to your first real insight. Free forever for solo use.
+            </p>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"center"}}>
+            <button className="btn btn-primary"
+              onClick={()=>{
+                document.getElementById('install')?.scrollIntoView({behavior:'smooth'});
+                if(window.posthog) posthog.capture('cta_clicked',{location:'mid_cta',cta:'start_free'});
+              }}>
+              Get started free <span className="arr">→</span>
+            </button>
+            <a href="/docs.html" className="btn btn-ghost"
+              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'mid_cta',cta:'docs'}); }}>
+              Read the docs
+            </a>
+          </div>
+          <p className="mono" style={{fontSize:11,color:"var(--fg-4)",letterSpacing:".05em"}}>
+            pip install finops-mcp &amp;&amp; finops welcome
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* Foot CTA */
 function FootCta(){
   return (
@@ -759,8 +794,8 @@ function FootCta(){
       <div className="wrap" style={{position:"relative"}}>
         <div className="eyebrow" style={{marginBottom:32,display:"inline-flex"}}><span className="d"></span> Free tier · no credit card</div>
         <h2 className="display">
-          Stop building dashboards.<br/>
-          <em>Start asking questions.</em>
+          Stop staring at graphs.<br/>
+          <em>Start closing tickets.</em>
         </h2>
         <div style={{marginTop:48,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
@@ -863,7 +898,7 @@ function Footer(){
 const FAQ_ITEMS = [
   {
     q: "How is this different from just asking Claude?",
-    a: "Without nable, you copy numbers from AWS dashboards and paste them into Claude. That works for simple questions. But Claude won't know to cross-reference your CloudWatch CPU metrics against Compute Optimizer, run Z-score anomaly detection against a 28-day baseline, model your Savings Plan coverage gap, or attribute a cost spike to a specific tag. nable ships all of that analysis pre-built. You ask a question in plain English and get findings a FinOps engineer would have taken hours to produce. The Jira ticket at the end is just the last step."
+    a: "Without nable, you copy numbers from dashboards and paste them into Claude. That works for simple questions. But Claude won't know to cross-reference CloudWatch metrics against Compute Optimizer, run Z-score detection against a 28-day baseline, model your Savings Plan coverage gap, or read your Terraform state to find which resource needs changing. nable ships all of that analysis pre-built. When it surfaces a rightsizing rec, it doesn't stop there — it reads your Terraform state, patches the .tf file, and opens the PR. The finding and the fix happen in the same conversation."
   },
   {
     q: "Where do my credentials and billing data go?",
@@ -894,7 +929,7 @@ const FAQ_ITEMS = [
 function FAQ(){
   const [open, setOpen] = useState(null);
   return (
-    <section id="faq" style={{borderTop:"1px solid var(--line)"}}>
+    <section id="faq" className="alt" style={{borderTop:"1px solid var(--line)"}}>
       <div className="wrap" style={{maxWidth:720,paddingTop:80,paddingBottom:80}}>
         <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--accent-dim)",letterSpacing:".1em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
           <span style={{width:24,height:1,background:"var(--accent-dim)",display:"inline-block"}}></span>
@@ -919,7 +954,7 @@ function FAQ(){
                     background:"none",
                     border:"none",
                     color:"var(--fg)",
-                    fontFamily:"'DM Sans',sans-serif",
+                    fontFamily:"'Inter',sans-serif",
                     fontSize:16,
                     fontWeight:500,
                     textAlign:"left",
@@ -1044,6 +1079,7 @@ function App(){
       <Hero layout={t.layout} interaction={t.interaction} />
       <Connectors />
       <Depth />
+      <MidCta />
       <Architecture />
       <Pricing />
       <FAQ />
