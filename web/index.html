@@ -127,7 +127,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .hero.editorial .hero-right{width:100%;max-width:880px;margin-top:24px}
 .eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:'Instrument Sans',system-ui,sans-serif;font-size:11px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:28px;padding:5px 11px;border:1px solid var(--line-2);border-radius:var(--r-xs);background:var(--bg-1)}
 .eyebrow .d{width:5px;height:5px;border-radius:50%;background:var(--accent)}
-h1.display{font-size:clamp(40px,4.6vw,68px);line-height:1.1;letter-spacing:-.04em;font-weight:300}
+h1.display{font-size:clamp(40px,4.6vw,68px);line-height:1.05;letter-spacing:-.04em;font-weight:300}
 h1.display .accent{font-style:italic;font-weight:400;color:var(--accent);font-family:'Fraunces',Georgia,serif}
 h1.display .strike{position:relative;color:var(--fg-3);font-style:italic;font-weight:300;white-space:nowrap}
 h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52%;height:2px;background:var(--accent);transform:rotate(-2deg)}
@@ -198,12 +198,12 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .trust .ti:last-child{border-right:0}
 .trust .ti .lab{font-family:'Instrument Sans',system-ui,sans-serif;font-size:10.5px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase}
 .trust .ti .val{font-family:'Geist Mono','JetBrains Mono',monospace;font-feature-settings:"tnum";font-size:26px;color:var(--fg);letter-spacing:-.02em;line-height:1.05}
-.trust .ti .val .sub{color:var(--fg-3);font-size:13px;margin-left:6px;letter-spacing:0}
+.trust .ti .val .sub{color:var(--fg-3);font-size:13px;margin-left:6px;letter-spacing:0;font-family:'Instrument Sans',system-ui,sans-serif}
 @media(max-width:880px){.trust{grid-template-columns:repeat(2,1fr)!important}.trust .ti:nth-child(2){border-right:0}.trust .ti:nth-child(-n+2){border-bottom:1px solid var(--line)}}
 
 /* sections */
-section{padding:112px 0;border-top:1px solid var(--line);position:relative}
-section.tight{padding:72px 0}
+section{padding:80px 0;border-top:1px solid var(--line);position:relative}
+section.tight{padding:56px 0}
 section.alt{background:var(--bg-1)}
 section.alt+section:not(.alt){border-top-color:transparent;background:var(--bg)}
 section:not(.alt)+section.alt{border-top-color:transparent}
