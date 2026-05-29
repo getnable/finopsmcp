@@ -783,7 +783,7 @@ function FootCta(){
                }}>
               Get started free <span className="arr">→</span>
             </button>
-            <a href="https://mail.google.com/mail/?view=cm&to=chandanirving@gmail.com&su=nable - talk to founders"
+            <a href="mailto:chandanbukkapatnam@yahoo.com?subject=nable - talk to founders"
                target="_blank" rel="noopener noreferrer"
                className="btn btn-ghost" style={{padding:"14px 22px",fontSize:14}}
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'talk_to_founders'}); }}>
@@ -821,7 +821,7 @@ function FounderNote(){
           </div>
           <div>
             <div style={{fontSize:14,fontWeight:500,color:"var(--fg)"}}>Chandan Bukkapatnam</div>
-            <div style={{fontSize:13,color:"var(--fg-3)"}}>Founder · <a href="https://mail.google.com/mail/?view=cm&to=chandanirving@gmail.com" target="_blank" rel="noopener noreferrer" style={{color:"var(--accent)"}}>chandanirving@gmail.com</a></div>
+            <div style={{fontSize:13,color:"var(--fg-3)"}}>Founder · <a href="mailto:chandanbukkapatnam@yahoo.com" target="_blank" rel="noopener noreferrer" style={{color:"var(--accent)"}}>chandanbukkapatnam@yahoo.com</a></div>
           </div>
         </div>
       </div>
@@ -859,7 +859,7 @@ function Footer(){
             <h5>Company</h5>
             <a href="/about">About</a>
             <a href="/about#investors">Investors</a>
-            <a href="https://mail.google.com/mail/?view=cm&to=chandanirving@gmail.com" target="_blank" rel="noopener noreferrer">Contact</a>
+            <a href="mailto:chandanbukkapatnam@yahoo.com" target="_blank" rel="noopener noreferrer">Contact</a>
           </div>
         </div>
         <div className="foot-meta">
@@ -971,7 +971,7 @@ function FAQ(){
         </div>
         <div style={{marginTop:48,display:"flex",alignItems:"center",gap:12}}>
           <span style={{fontSize:14,color:"var(--fg-3)"}}>Still have questions?</span>
-          <a href="https://mail.google.com/mail/?view=cm&to=chandanirving@gmail.com&su=nable question"
+          <a href="mailto:chandanbukkapatnam@yahoo.com?subject=nable question"
              target="_blank" rel="noopener noreferrer"
              style={{fontSize:14,color:"var(--accent)",textDecoration:"none",fontWeight:500}}>
             Email us directly →
