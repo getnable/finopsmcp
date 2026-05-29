@@ -795,7 +795,7 @@ function Footer(){
 const FAQ_ITEMS = [
   {
     q: "How is this different from just asking Claude?",
-    a: "Claude is a great thinker. It just has no idea what you're spending. nable gives Claude live access to your actual bill plus the domain knowledge to act on it. Not just 'your AWS spend is $18k' but 'here are the 3 instances driving 60% of the increase, they're running at 8% CPU, and here's a rightsizing plan that saves $1,400/mo.' It can also open the ticket, post to Slack, and set a budget alert. A connector moves data. nable gives Claude the context to reason about cloud costs the way a FinOps engineer would."
+    a: "Without nable, you copy numbers from AWS dashboards and paste them into Claude. Every follow-up question means another copy-paste, and the data is already stale by the time you ask. nable connects Claude directly to your billing APIs, so you can have a real back-and-forth: ask what spiked, drill into a team, open a Jira ticket, set a budget alert — all in one conversation. No tabs. No exports. No stale data."
   },
   {
     q: "Where do my credentials and billing data go?",
