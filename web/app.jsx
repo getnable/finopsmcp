@@ -579,19 +579,105 @@ function Telemetry(){
 }
 
 /* Pricing */
+const SOLO_FEATURES = [
+  "Cost queries across all providers",
+  "Anomaly detection",
+  "Rightsizing recommendations",
+  "All 17 connectors",
+  "Local only — no data leaves your machine",
+  "Works in Claude, Cursor, Windsurf, Zed",
+];
+
+const TEAM_FEATURES = [
+  "Everything in Solo",
+  "Auto-create tickets (Jira, Linear, GitHub)",
+  "Scheduled cost digests via email",
+  "Commitment analysis and RI recommendations",
+  "Org-level rollups across accounts",
+  "Budget enforcement and alerts",
+  "RBAC for team access control",
+];
+
+function CheckIcon(){
+  return (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true" style={{flexShrink:0,marginTop:1}}>
+      <circle cx="7.5" cy="7.5" r="7" stroke="currentColor" strokeWidth="1"/>
+      <path d="M4.5 7.5L6.5 9.5L10.5 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
 function Pricing(){
   return (
     <section id="pricing">
       <div className="wrap">
         <div className="section-head">
           <div className="label">Pricing</div>
-          <h2>Free to ask.<br/><em>Pay to ship.</em></h2>
-          <p>Solo is free forever. Team adds the automation layer: the things you'd otherwise hire a contractor to build and maintain.</p>
+          <h2>Free to ask.<br/><em>Pay to automate.</em></h2>
+          <p>Solo is free forever. Team adds the actions layer: ticket creation, digests, budget enforcement, and org rollups.</p>
         </div>
-        <stripe-pricing-table
-          pricing-table-id="prctbl_1TbtrKAFO1XH5H8Ch5LzmryG"
-          publishable-key="pk_live_51TVMMYAFO1XH5H8CU6vWgFzrRn8hxfHjuv0KKKCy5kmrjYZagu8paA6vKChy2fhq6OFWKtQ30aVMkRqZZc1SOGiR00KeLHqAqN">
-        </stripe-pricing-table>
+        <div className="pricing-grid">
+
+          {/* Solo */}
+          <div className="pricing-card">
+            <div className="pricing-top">
+              <div className="pricing-name">Solo</div>
+              <div className="pricing-price">
+                <span className="pricing-amount">Free</span>
+                <span className="pricing-per">forever</span>
+              </div>
+              <p className="pricing-desc">Everything you need to query, investigate, and understand your cloud costs.</p>
+              <button className="btn btn-ghost pricing-cta"
+                onClick={()=>{
+                  document.getElementById('install')?.scrollIntoView({behavior:'smooth'});
+                  if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'});
+                }}>
+                Get started free <span className="arr">→</span>
+              </button>
+            </div>
+            <div className="pricing-features">
+              {SOLO_FEATURES.map((f,i) => (
+                <div key={i} className="pricing-feature">
+                  <CheckIcon />
+                  <span>{f}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Team */}
+          <div className="pricing-card featured">
+            <div className="pricing-badge">7-day free trial</div>
+            <div className="pricing-top">
+              <div className="pricing-name">Team</div>
+              <div className="pricing-price">
+                <span className="pricing-amount">$39</span>
+                <span className="pricing-per">.99 / mo</span>
+              </div>
+              <p className="pricing-desc">The automation layer. Ships work that would otherwise take a contractor to set up.</p>
+              <a
+                href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-primary pricing-cta"
+                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'team'}); }}>
+                Start free trial <span className="arr">→</span>
+              </a>
+            </div>
+            <div className="pricing-features">
+              {TEAM_FEATURES.map((f,i) => (
+                <div key={i} className="pricing-feature">
+                  <CheckIcon />
+                  <span>{f}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+        <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-4)",textAlign:"center",letterSpacing:".04em"}}>
+          No credit card for Solo. Team trial requires a card, cancel any time.
+        </p>
       </div>
     </section>
   );

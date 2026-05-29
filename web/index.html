@@ -15,9 +15,6 @@
 <meta name="twitter:description" content="The FinOps runtime that lives inside Claude, Cursor, and your editor. Ask in plain English. Your data stays on your machine." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 
-<!-- Stripe pricing table -->
-<script async src="https://js.stripe.com/v3/pricing-table.js"></script>
-
 <!-- Vercel insights -->
 <script defer src="/_vercel/insights/script.js"></script>
 <script defer src="/_vercel/speed-insights/script.js"></script>
@@ -254,8 +251,24 @@ section.tight{padding:88px 0}
 .conn .tag.beta::before{background:var(--warn);box-shadow:0 0 4px var(--warn)}
 @media(max-width:760px){.conn-grid{grid-template-columns:repeat(2,1fr)}.conn{border-right:1px solid var(--line)!important;border-bottom:1px solid var(--line)!important}.conn:nth-child(2n){border-right:0!important}.conn:nth-last-child(-n+2){border-bottom:0!important}}
 
-/* pricing — Stripe pricing table */
-stripe-pricing-table{display:block;width:100%;margin-top:8px}
+/* pricing */
+.pricing-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-1)}
+.pricing-card{padding:40px 40px 48px;display:flex;flex-direction:column;gap:0;position:relative}
+.pricing-card:first-child{border-right:1px solid var(--line)}
+.pricing-card.featured{background:var(--bg-2)}
+.pricing-badge{position:absolute;top:20px;right:20px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--bg);background:var(--accent);padding:3px 10px;border-radius:99px;letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+.pricing-top{display:flex;flex-direction:column;gap:16px;margin-bottom:36px}
+.pricing-name{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--fg-3);letter-spacing:.1em;text-transform:uppercase}
+.pricing-price{display:flex;align-items:baseline;gap:0}
+.pricing-amount{font-family:'Space Grotesk',sans-serif;font-size:48px;font-weight:300;letter-spacing:-.04em;color:var(--fg);line-height:1}
+.pricing-per{font-size:15px;color:var(--fg-3);margin-left:4px;letter-spacing:-.01em}
+.pricing-desc{font-size:14px;color:var(--fg-2);line-height:1.6;max-width:36ch}
+.pricing-cta{width:100%;justify-content:center;padding:12px;font-size:14px}
+.pricing-features{display:flex;flex-direction:column;gap:12px}
+.pricing-feature{display:flex;align-items:flex-start;gap:10px;font-size:14px;color:var(--fg-2);line-height:1.45}
+.pricing-feature svg{color:var(--accent)}
+.pricing-card.featured .pricing-feature svg{color:var(--accent)}
+@media(max-width:760px){.pricing-grid{grid-template-columns:1fr}.pricing-card:first-child{border-right:0;border-bottom:1px solid var(--line)}.pricing-card{padding:32px 24px 40px}}
 
 /* bento (telemetry) */
 .bento{display:grid;grid-template-columns:1.4fr 1fr 1fr;grid-template-rows:auto auto;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--bg-1)}
