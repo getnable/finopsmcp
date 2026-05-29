@@ -237,3 +237,151 @@ def apply_fixes(tf_dir: str, violations: list[dict]) -> list[str]:
         log.info("patched %s (%d violations)", file_path, len(file_violations))
 
     return modified
+
+
+# ── Rightsizing: instance type / class patching ───────────────────────────────
+
+# Maps Terraform resource type -> the attribute that controls instance sizing
+_INSTANCE_SIZE_ATTR: dict[str, str] = {
+    "aws_instance":                      "instance_type",
+    "aws_db_instance":                   "instance_class",
+    "aws_rds_cluster_instance":          "instance_class",
+    "aws_elasticache_cluster":           "node_type",
+    "aws_elasticache_replication_group": "node_type",
+    "aws_redshift_cluster":              "node_type",
+}
+
+
+def _patch_instance_size(block: str, attr: str, new_value: str) -> tuple[str, bool]:
+    """Replace the sizing attribute value in a resource block.
+
+    Returns (patched_block, was_changed).
+    Only replaces the attribute if it already exists in the block — never injects.
+    """
+    pattern = re.compile(
+        rf'^(?P<prefix>\s+{re.escape(attr)}\s*=\s*")(?P<val>[^"]+)"',
+        re.MULTILINE,
+    )
+    match = pattern.search(block)
+    if not match:
+        return block, False
+    start = match.start("val")
+    end = match.end("val")
+    return block[:start] + new_value + block[end:], True
+
+
+def find_resource_file(tf_dir: str, resource_type: str, resource_name: str) -> str | None:
+    """Scan .tf files to find which file declares a specific resource.
+
+    Returns the absolute path of the first matching file, or None.
+    """
+    pattern = re.compile(
+        rf'^resource\s+"{re.escape(resource_type)}"\s+"{re.escape(resource_name)}"\s*\{{',
+        re.MULTILINE,
+    )
+    for tf_file in sorted(Path(tf_dir).rglob("*.tf")):
+        try:
+            content = tf_file.read_text()
+        except OSError:
+            continue
+        if pattern.search(content):
+            return str(tf_file)
+    return None
+
+
+def generate_rightsizing_diff(
+    file_path: str,
+    resource_type: str,
+    resource_name: str,
+    new_value: str,
+) -> str | None:
+    """Return a unified diff for changing an instance type/class, or None if unchanged."""
+    attr = _INSTANCE_SIZE_ATTR.get(resource_type)
+    if not attr:
+        log.warning("No size attribute mapping for resource type %s", resource_type)
+        return None
+
+    original = Path(file_path).read_text()
+    patched = original
+    offset = 0
+
+    for match in _TF_RESOURCE_SOURCE_RE.finditer(original):
+        if match.group("type") != resource_type or match.group("name") != resource_name:
+            continue
+        open_pos = original.index("{", match.start())
+        close_pos = _find_matching_brace(original, open_pos)
+        if close_pos == -1:
+            log.warning("Could not find block end for %s.%s", resource_type, resource_name)
+            continue
+
+        block_start = match.start()
+        block_end = close_pos + 1
+        block = original[block_start:block_end]
+
+        patched_block, changed = _patch_instance_size(block, attr, new_value)
+        if not changed:
+            continue
+
+        adj_start = block_start + offset
+        adj_end = block_end + offset
+        patched = patched[:adj_start] + patched_block + patched[adj_end:]
+        offset += len(patched_block) - len(block)
+
+    if patched == original:
+        return None
+
+    orig_lines = original.splitlines(keepends=True)
+    patched_lines = patched.splitlines(keepends=True)
+    diff = difflib.unified_diff(
+        orig_lines, patched_lines,
+        fromfile=f"a/{file_path}",
+        tofile=f"b/{file_path}",
+    )
+    return "".join(diff)
+
+
+def apply_rightsizing_fix(
+    file_path: str,
+    resource_type: str,
+    resource_name: str,
+    new_value: str,
+) -> bool:
+    """Write the patched instance type/class to disk.
+
+    Returns True if the file was modified.
+    """
+    attr = _INSTANCE_SIZE_ATTR.get(resource_type)
+    if not attr:
+        return False
+
+    original = Path(file_path).read_text()
+    patched = original
+    offset = 0
+
+    for match in _TF_RESOURCE_SOURCE_RE.finditer(original):
+        if match.group("type") != resource_type or match.group("name") != resource_name:
+            continue
+        open_pos = original.index("{", match.start())
+        close_pos = _find_matching_brace(original, open_pos)
+        if close_pos == -1:
+            continue
+
+        block_start = match.start()
+        block_end = close_pos + 1
+        block = original[block_start:block_end]
+
+        patched_block, changed = _patch_instance_size(block, attr, new_value)
+        if not changed:
+            continue
+
+        adj_start = block_start + offset
+        adj_end = block_end + offset
+        patched = patched[:adj_start] + patched_block + patched[adj_end:]
+        offset += len(patched_block) - len(block)
+
+    if patched == original:
+        return False
+
+    Path(file_path).write_text(patched)
+    log.info("Applied rightsizing fix to %s (%s.%s -> %s)", file_path, resource_type, resource_name, new_value)
+    return True

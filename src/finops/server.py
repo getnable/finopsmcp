@@ -5564,6 +5564,79 @@ async def open_terraform_tag_pr(
     }
 
 
+@mcp.tool()
+async def open_rightsizing_pr(
+    tf_dir: str,
+    github_repo: str | None = None,
+    recommendation_ids: list[int] | None = None,
+    resource_overrides: list[dict] | None = None,
+    branch: str = "fix/rightsizing",
+    base_branch: str = "main",
+    pr_title: str | None = None,
+    dry_run: bool = False,
+    patch_only: bool = False,
+) -> dict:
+    """
+    Apply rightsizing recommendations to Terraform source, optionally opening a GitHub PR.
+
+    nable reads your Terraform state (terraform.tfstate or `terraform show -json`) to
+    automatically resolve AWS instance IDs to their Terraform resource addresses. No
+    manual mapping needed as long as your tf_dir has state available.
+
+    Resolution order:
+      1. Terraform state (automatic — reads instance IDs from state)
+      2. resource_overrides (manual fallback if state is unavailable)
+      3. recommended_config stored in DB
+
+    Modes:
+      dry_run=True    Show diffs only. Nothing written to disk.
+      patch_only=True Write .tf files locally. No git, no PR. Use your own workflow.
+      default         Write files, commit to a branch, push, open GitHub PR.
+
+    After merging and running `terraform apply`, nable auto-verifies savings by
+    checking AWS and updates the recommendation to "verified".
+
+    Args:
+        tf_dir:              Path to the Terraform working directory.
+        github_repo:         "owner/repo" for GitHub PR. Not needed for dry_run or patch_only.
+        recommendation_ids:  Specific rec IDs to act on. Omit to process all open rightsizing recs.
+        resource_overrides:  Manual fallback if state resolution fails.
+                             Format: [{"recommendation_id": 42, "tf_resource_type": "aws_instance",
+                                       "tf_resource_name": "api_server"}, ...]
+        branch:              Branch to create. Defaults to "fix/rightsizing".
+        base_branch:         PR target branch. Defaults to "main".
+        pr_title:            PR title. Auto-generated from saving amount if omitted.
+        dry_run:             Show diffs without writing files or creating the PR.
+        patch_only:          Patch files locally, skip git and GitHub.
+
+    Examples:
+        - "Show me what the rightsizing changes would look like"
+        - "Apply the rightsizing fixes to my Terraform repo"
+        - "Open a rightsizing PR against acme/infra"
+        - "Patch the Terraform files but don't create a PR, I'll handle the git flow"
+    """
+    if err := require_role("analyst"):
+        return err
+
+    safe_dir = _resolve_safe_path(tf_dir, must_exist=True)
+    if isinstance(safe_dir, dict):
+        return safe_dir
+    tf_dir = safe_dir
+
+    from .remediation.rightsizing_pr import open_rightsizing_pr as _open_pr
+    return _open_pr(
+        tf_dir=tf_dir,
+        github_repo=github_repo,
+        recommendation_ids=recommendation_ids,
+        resource_overrides=resource_overrides,
+        branch=branch,
+        base_branch=base_branch,
+        pr_title=pr_title,
+        dry_run=dry_run,
+        patch_only=patch_only,
+    )
+
+
 def main() -> None:
     import logging
     import sys
