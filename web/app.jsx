@@ -709,7 +709,7 @@ function Footer(){
 const FAQ_ITEMS = [
   {
     q: "How is this different from just asking Claude?",
-    a: "Claude doesn't have your billing data. nable gives Claude the tools to pull it live from AWS, Azure, GCP, and your SaaS providers. Without nable, you paste numbers in manually and hope nothing's stale. With it, Claude can query, analyze, and act on your actual bill in real time."
+    a: "Claude is a great thinker. It just has no idea what you're spending. nable gives Claude live access to your actual bill plus the domain knowledge to act on it. Not just 'your AWS spend is $18k' but 'here are the 3 instances driving 60% of the increase, they're running at 8% CPU, and here's a rightsizing plan that saves $1,400/mo.' It can also open the ticket, post to Slack, and set a budget alert. A connector moves data. nable gives Claude the context to reason about cloud costs the way a FinOps engineer would."
   },
   {
     q: "Where do my credentials and billing data go?",
