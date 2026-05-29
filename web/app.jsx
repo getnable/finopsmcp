@@ -881,7 +881,7 @@ function Footer(){
             <h5>Company</h5>
             <a href="/about">About</a>
             <a href="/about#investors">Investors</a>
-            <a href="mailto:chandanbukkapatnam@yahoo.com" target="_blank" rel="noopener noreferrer">Contact</a>
+            <a href="mailto:hello@getnable.com" target="_blank" rel="noopener noreferrer">Contact</a>
           </div>
         </div>
         <div className="foot-meta">
@@ -993,7 +993,7 @@ function FAQ(){
         </div>
         <div style={{marginTop:48,display:"flex",alignItems:"center",gap:12}}>
           <span style={{fontSize:14,color:"var(--fg-3)"}}>Still have questions?</span>
-          <a href="mailto:chandanbukkapatnam@yahoo.com?subject=nable question"
+          <a href="mailto:hello@getnable.com?subject=nable%20question"
              target="_blank" rel="noopener noreferrer"
              style={{fontSize:14,color:"var(--accent)",textDecoration:"none",fontWeight:500}}>
             Email us directly →
