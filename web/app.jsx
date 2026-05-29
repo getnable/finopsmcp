@@ -578,12 +578,13 @@ const CONNECTORS = [
   {nm:"Cloudflare", px:"Billing API",                    tag:"live"},
   {nm:"GitHub",     px:"Actions mins · Copilot seats",   tag:"live"},
   {nm:"Vercel",     px:"Invoice API · enterprise",       tag:"live"},
-  {nm:"PagerDuty",  px:"Seat count",                     tag:"live"},
   {nm:"New Relic",  px:"Data ingest · user counts",      tag:"live"},
   {nm:"Linear",     px:"Seat plan · usage rollup",       tag:"live"},
   {nm:"OpenAI",     px:"Usage API · per-model spend",    tag:"live"},
   {nm:"Anthropic",  px:"Org usage · per-model spend",    tag:"live"},
   {nm:"Stripe",     px:"Billing meter · platform fees",  tag:"beta"},
+  {nm:"PagerDuty",  px:"License spend · on-call costs",  tag:"beta"},
+  {nm:"Coming soon",px:"Vote on the next connector",     tag:"soon"},
 ];
 
 function Connectors(){
@@ -592,7 +593,7 @@ function Connectors(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">Connectors</div>
-          <h2>Seventeen sources.<br/><em>One conversation.</em></h2>
+          <h2>17 sources.<br/><em>One conversation.</em></h2>
           <p>Every connector is a real API integration, not a CSV export. New providers ship monthly.</p>
         </div>
         <div className="conn-grid">
@@ -600,7 +601,7 @@ function Connectors(){
             <div className="conn" key={i}>
               <span className="nm">{c.nm}</span>
               <span className="px">{c.px}</span>
-              <span className={"tag " + (c.tag === "beta" ? "beta" : "")}>{c.tag}</span>
+              <span className={"tag " + (c.tag === "beta" ? "beta" : c.tag === "soon" ? "soon" : "")}>{c.tag}</span>
             </div>
           ))}
         </div>
