@@ -67,7 +67,7 @@ What are my AWS costs this month?
 
 Once you see a real cost breakdown, you're live. Also works with Cursor, Windsurf, and VS Code.
 
-**1-month free trial, all features unlocked. No credit card required.**
+**14-day free trial, all features unlocked. No credit card required.**
 
 ---
 

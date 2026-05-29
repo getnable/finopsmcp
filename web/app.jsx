@@ -159,6 +159,7 @@ function Nav(){
           <li><button className="nav-link" onClick={()=>{ scrollTo('faq'); if(window.posthog) posthog.capture('nav_clicked',{item:'faq'}); }}>FAQ</button></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
           <li><a href="/about">About</a></li>
+          <li><a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a></li>
         </ul>
         <div className="right">
           <a href="/account.html" className="btn btn-ghost">Sign in</a>
@@ -725,8 +726,8 @@ function Pricing(){
             <div className="pricing-top">
               <div className="pricing-name">Team</div>
               <div className="pricing-price">
-                <span className="pricing-amount">$39</span>
-                <span className="pricing-per">.99 / mo</span>
+                <span className="pricing-amount">$40</span>
+                <span className="pricing-per">/ mo</span>
               </div>
               <p className="pricing-desc">The remediation layer. Finds the waste, writes the fix, opens the PR, tracks whether it actually shipped.</p>
               <a
@@ -890,6 +891,7 @@ function Footer(){
             <a href="/about">About</a>
             <a href="/about#investors">Investors</a>
             <a href="mailto:hello@getnable.com" target="_blank" rel="noopener noreferrer">Contact</a>
+            <a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer">GitHub</a>
           </div>
         </div>
         <div className="foot-meta">
@@ -905,7 +907,7 @@ function Footer(){
 const FAQ_ITEMS = [
   {
     q: "How is this different from just asking Claude?",
-    a: "Without nable, you copy numbers from dashboards and paste them into Claude. That works for simple questions. But Claude won't know to cross-reference CloudWatch metrics against Compute Optimizer, run Z-score detection against a 28-day baseline, model your Savings Plan coverage gap, or read your Terraform state to find which resource needs changing. nable ships all of that analysis pre-built. When it surfaces a rightsizing rec, it doesn't stop there — it reads your Terraform state, patches the .tf file, and opens the PR. The finding and the fix happen in the same conversation."
+    a: "Without nable, you copy numbers from dashboards and paste them into Claude. That works for simple questions. But Claude won't know to cross-reference CloudWatch metrics against Compute Optimizer, run Z-score detection against a 28-day baseline, model your Savings Plan coverage gap, or read your Terraform state to find which resource needs changing. nable ships all of that analysis pre-built. When it surfaces a rightsizing rec, it goes further: reads your Terraform state, patches the .tf file, and opens the PR. The finding and the fix happen in the same conversation."
   },
   {
     q: "Where do my credentials and billing data go?",
