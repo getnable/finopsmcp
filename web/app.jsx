@@ -187,7 +187,7 @@ function Hero({ layout, interaction }){
             <h1 className="display">
               Your cloud bill,<br/>
               <span className="strike">in a dashboard.</span><br/>
-              <span className="accent">Waste found. PR merged.</span>
+              <span className="accent">Waste found.<br/>PR merged.</span>
             </h1>
             <p className="lede">
               Connect AWS, Azure, GCP, and 17 providers to Claude or Cursor. Ask about spend, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally. Your data never leaves your machine.
