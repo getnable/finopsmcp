@@ -116,7 +116,15 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .btn-ghost:hover{color:var(--fg);border-color:var(--fg-3);background:var(--bg-2)}
 .btn .arr{transition:transform .18s}
 .btn:hover .arr{transform:translateX(2px)}
-@media(max-width:880px){.nav ul{display:none}}
+@media(max-width:880px){.nav ul{display:none}.nav .right{display:none}}
+.nav-hamburger{display:none;align-items:center;justify-content:center;width:40px;height:40px;color:var(--fg-2);border-radius:var(--r-md);transition:color .18s,background .18s}
+.nav-hamburger:hover{color:var(--fg);background:var(--bg-2)}
+@media(max-width:880px){.nav-hamburger{display:flex}}
+@media(min-width:881px){.nav-hamburger{display:none}}
+.nav-mobile-menu{position:fixed;top:64px;left:0;right:0;bottom:0;background:var(--bg);z-index:49;display:flex;flex-direction:column;padding:32px;gap:8px;overflow-y:auto}
+.nav-mobile-item{font-family:'Instrument Sans',system-ui,sans-serif;font-size:18px;font-weight:400;color:var(--fg);padding:14px 0;border:none;border-bottom:1px solid var(--line);background:none;text-align:left;cursor:pointer;letter-spacing:-.015em;transition:color .18s;display:block;width:100%}
+.nav-mobile-item:last-of-type{border-bottom:none}
+.nav-mobile-item:hover{color:var(--accent)}
 
 /* hero */
 .hero{position:relative;padding:80px 0 80px;overflow:hidden}
@@ -137,7 +145,8 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .hero.editorial .hero-cta-row{justify-content:center}
 .install{display:inline-flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:var(--r-md);font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;color:var(--fg-2);overflow:hidden;height:42px;max-width:100%}
 @media(max-width:640px){.install{overflow-x:auto;width:100%}.install .cmd{font-size:11px;padding:0 10px}}
-@media(max-width:880px){.hero-inner{grid-template-columns:1fr;gap:40px}.hero-right{display:none}.hero-left{display:flex;flex-direction:column;align-items:center;text-align:center}.lede{max-width:52ch}.hero-cta-row{justify-content:center}.install-note{text-align:center}}
+@media(max-width:880px){.hero-inner{grid-template-columns:1fr;gap:40px}.hero-right{display:none}.hero-left{display:flex;flex-direction:column;align-items:center;text-align:center}.lede{max-width:52ch}.hero-cta-row{display:none}.hero-mobile-cta{display:block;width:100%;max-width:420px}.install-note{text-align:center}}
+.hero-mobile-cta{display:none}
 .install .prompt{padding:0 12px;color:var(--fg-3);display:flex;align-items:center;border-right:1px solid var(--line)}
 .install .cmd{padding:0 14px;color:var(--fg);display:flex;align-items:center;white-space:nowrap}
 .install button{padding:0 14px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11px;color:var(--fg-3);border-left:1px solid var(--line);letter-spacing:.06em;text-transform:uppercase;transition:.15s;background:var(--bg-1)}

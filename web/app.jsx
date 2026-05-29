@@ -49,6 +49,28 @@ function applyPalette(name){
   Object.entries(p).forEach(([k,v]) => root.style.setProperty(k,v));
 }
 
+/* Scroll depth tracking */
+function useScrollTracking() {
+  useEffect(() => {
+    if (!window.posthog) return;
+    const sections = ['connectors', 'depth', 'architecture', 'pricing', 'faq', 'foot-cta'];
+    const seen = new Set();
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && !seen.has(entry.target.id)) {
+          seen.add(entry.target.id);
+          posthog.capture('section_viewed', { section: entry.target.id });
+        }
+      });
+    }, { threshold: 0.2 });
+    sections.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
+  }, []);
+}
+
 /* Email capture — posts to /api/subscribe */
 function EmailCapture({ source = "hero", placeholder = "email", btnLabel = "Get started", center = false }){
   const [email, setEmail] = useState("");
@@ -143,9 +165,13 @@ function Ticker({ installs }){
 
 /* Nav */
 function Nav(){
+  const [open, setOpen] = useState(false);
+
   function scrollTo(id){
     document.getElementById(id)?.scrollIntoView({behavior:'smooth'});
+    setOpen(false);
   }
+
   return (
     <nav className="nav">
       <div className="nav-inner">
@@ -171,7 +197,43 @@ function Nav(){
             Get started free <span className="arr">→</span>
           </button>
         </div>
+        <button
+          className="nav-hamburger"
+          aria-label={open ? "Close menu" : "Open menu"}
+          aria-expanded={open}
+          onClick={()=>setOpen(o=>!o)}
+        >
+          {open ? (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M4 4L16 16M16 4L4 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          )}
+        </button>
       </div>
+      {open && (
+        <div className="nav-mobile-menu">
+          <button className="nav-mobile-item" onClick={()=>scrollTo('connectors')}>Connectors</button>
+          <button className="nav-mobile-item" onClick={()=>{ scrollTo('pricing'); if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</button>
+          <button className="nav-mobile-item" onClick={()=>{ scrollTo('faq'); if(window.posthog) posthog.capture('nav_clicked',{item:'faq'}); }}>FAQ</button>
+          <a className="nav-mobile-item" href="/docs.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
+          <a className="nav-mobile-item" href="/about" onClick={()=>setOpen(false)}>About</a>
+          <a className="nav-mobile-item" href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a>
+          <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:10}}>
+            <a href="/account.html" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
+            <button className="btn btn-primary" style={{justifyContent:"center"}}
+              onClick={()=>{
+                scrollTo('install');
+                if(window.posthog) posthog.capture('cta_clicked',{location:'nav_mobile',cta:'start_free'});
+              }}>
+              Get started free <span className="arr">→</span>
+            </button>
+          </div>
+        </div>
+      )}
     </nav>
   );
 }
@@ -198,6 +260,12 @@ function Hero({ layout, interaction }){
                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero',cta:'docs'}); }}>
                 Read the docs
               </a>
+            </div>
+            <div className="hero-mobile-cta">
+              <p style={{fontSize:13, color:"var(--fg-3)", marginBottom:12, letterSpacing:".01em"}}>
+                On mobile? Get the setup guide sent to your inbox.
+              </p>
+              <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Send guide" />
             </div>
           </div>
           <div className="hero-right">
@@ -1090,6 +1158,7 @@ function Tweaks(){
 /* App */
 function App(){
   const [t, setT] = useState(TWEAK_DEFAULTS);
+  useScrollTracking();
   useEffect(() => {
     applyPalette(t.palette);
     function onTweaks(e){ setT(e.detail); }
