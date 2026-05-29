@@ -117,7 +117,7 @@ function LogoMark(){
 }
 
 /* Ticker */
-function Ticker(){
+function Ticker({ installs }){
   return (
     <div className="ticker">
       <div className="ticker-inner">
@@ -127,7 +127,7 @@ function Ticker(){
           <span>v0.8.36 · runtime healthy</span>
         </span>
         <span className="sep">·</span>
-        <span className="seg">4,264 installs / mo via PyPI</span>
+        <span className="seg">{installs ? fmtNum(installs) : "4k+"} installs / mo via PyPI</span>
         <span className="sep">·</span>
         <span className="seg">17 connectors · AWS · Azure · GCP +14</span>
         <span className="sep">·</span>
@@ -234,9 +234,23 @@ function CopyInstall(){
   );
 }
 
+function fmtNum(n){
+  if(n >= 1000) return (n/1000).toFixed(1).replace(/\.0$/,"") + "k";
+  return String(n);
+}
+
 function TrustStrip(){
+  const [installs, setInstalls] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/pypi-stats")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if(d?.data?.last_month) setInstalls(d.data.last_month); })
+      .catch(() => {});
+  }, []);
+
   const items = [
-    {lab:"installs / mo", val:"4,264", sub:"via PyPI · updated daily"},
+    {lab:"installs / mo", val: installs ? fmtNum(installs) : "4k+", sub:"via PyPI · live"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
     {lab:"local only", val:"0 bytes", sub:"sent to our servers"},
   ];
