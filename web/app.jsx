@@ -115,6 +115,31 @@ function LogoMark(){
   );
 }
 
+/* Ticker */
+function Ticker(){
+  return (
+    <div className="ticker">
+      <div className="ticker-inner">
+        <span className="seg">
+          <span className="dot"></span>
+          <b>finops-mcp</b>
+          <span>v0.8.36 · runtime healthy</span>
+        </span>
+        <span className="sep">·</span>
+        <span className="seg">4,264 installs / mo via PyPI</span>
+        <span className="sep">·</span>
+        <span className="seg">17 connectors · AWS · Azure · GCP +14</span>
+        <span className="sep">·</span>
+        <span className="seg">
+          <a href="/about" style={{color:"var(--accent)",textDecoration:"none",fontWeight:500}}>
+            About &amp; investors →
+          </a>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* Nav */
 function Nav(){
   function scrollTo(id){
@@ -973,9 +998,11 @@ function App(){
 
   return (
     <>
+      <Ticker />
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
       <Connectors />
+      <Architecture />
       <Pricing />
       <FAQ />
       <FootCta />
