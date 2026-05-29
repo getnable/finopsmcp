@@ -182,7 +182,6 @@ function Hero({ layout, interaction }){
       <div className="wrap">
         <div className="hero-inner">
           <div className="hero-left">
-            <div className="eyebrow"><span className="d"></span> MCP server · Claude, Cursor, Windsurf · free to start</div>
             <h1 className="display">
               Your cloud bill,<br/>
               <span className="strike">in a dashboard.</span><br/>
