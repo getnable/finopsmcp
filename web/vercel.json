@@ -1,7 +1,8 @@
 {
   "rewrites": [
     { "source": "/docs", "destination": "/docs.html" },
-    { "source": "/account", "destination": "/account.html" }
+    { "source": "/account", "destination": "/account.html" },
+    { "source": "/about", "destination": "/about.html" }
   ],
   "redirects": [
     { "source": "/api/sso/:path*", "has": [{"type": "query", "key": "error"}], "destination": "/account?error=sso_not_configured", "permanent": false }

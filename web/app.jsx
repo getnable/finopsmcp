@@ -777,8 +777,8 @@ function Footer(){
           </div>
           <div>
             <h5>Company</h5>
-            <a href="#">About</a>
-            <a href="#">Investors</a>
+            <a href="/about">About</a>
+            <a href="/about#investors">Investors</a>
             <a href="https://mail.google.com/mail/?view=cm&to=chandanirving@gmail.com" target="_blank" rel="noopener noreferrer">Contact</a>
           </div>
         </div>
@@ -977,7 +977,6 @@ function App(){
       <Connectors />
       <Pricing />
       <FAQ />
-      <FounderNote />
       <FootCta />
       <Footer />
       <Tweaks />
