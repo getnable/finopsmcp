@@ -192,6 +192,10 @@ function Hero({ layout, interaction }){
             </p>
             <div className="hero-cta-row" id="install">
               <CopyInstall />
+              <a href="/docs.html" className="btn btn-ghost"
+                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero',cta:'docs'}); }}>
+                Read the docs
+              </a>
             </div>
           </div>
           <div className="hero-right">
