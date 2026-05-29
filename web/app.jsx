@@ -1103,7 +1103,6 @@ function App(){
       <Hero layout={t.layout} interaction={t.interaction} />
       <Connectors />
       <Depth />
-      <MidCta />
       <Architecture />
       <Pricing />
       <FAQ />
