@@ -17,12 +17,13 @@ const PALETTES = {
     "--grid":"rgba(255,255,255,.03)"
   },
   graphite: {
-    "--bg":"#15140f","--bg-1":"#1a1914","--bg-2":"#221f17","--bg-3":"#2a261c",
-    "--line":"#2e2920","--line-2":"#3d3729",
-    "--fg":"#f3efe6","--fg-2":"#bbb6a4","--fg-3":"#7e7a6c","--fg-4":"#4a4639",
-    "--accent":"#e4a76b","--accent-dim":"#a07242",
-    "--warn":"#ffb46b","--alert":"#d97757",
-    "--grid":"rgba(255,255,255,.025)"
+    "--bg":"#0d0f10","--bg-1":"#111416","--bg-2":"#181c1f","--bg-3":"#1e2327",
+    "--line":"#242a2e","--line-2":"#2e3539",
+    "--fg":"#f0f2f3","--fg-2":"#94a3ab","--fg-3":"#56656d","--fg-4":"#2d3a40",
+    "--accent":"#4db8d4","--accent-dim":"#2c7d91",
+    "--warn":"#e6a840","--alert":"#e05c4b",
+    "--success":"#3cba7a",
+    "--grid":"rgba(255,255,255,.02)"
   },
   paper: {
     "--bg":"#fbfaf7","--bg-1":"#f6f4ee","--bg-2":"#eeebe2","--bg-3":"#e5e1d3",
@@ -74,7 +75,7 @@ function EmailCapture({ source = "hero", placeholder = "email", btnLabel = "Get 
 
   if(state === "done"){
     return (
-      <p className="mono" style={{fontSize:12,color:"var(--accent)",letterSpacing:".06em",
+      <p style={{fontFamily:"'Instrument Sans',system-ui,sans-serif",fontSize:12,color:"var(--accent)",letterSpacing:".02em",
         textAlign: center ? "center" : "left", marginTop: 8}}>
         Check your inbox. Setup guide on its way.
       </p>
@@ -98,7 +99,7 @@ function EmailCapture({ source = "hero", placeholder = "email", btnLabel = "Get 
       </button>
       {state === "error" && (
         <span style={{position:"absolute",bottom:-20,left:0,fontSize:11,
-          color:"var(--alert)",fontFamily:"'JetBrains Mono',monospace"}}>
+          color:"var(--alert)",fontFamily:"'Instrument Sans',system-ui,sans-serif"}}>
           Something went wrong. Try again.
         </span>
       )}
@@ -185,10 +186,10 @@ function Hero({ layout, interaction }){
             <h1 className="display">
               Your cloud bill,<br/>
               <span className="strike">in a dashboard.</span><br/>
-              <span className="accent">In your editor.</span>
+              <span className="accent">Waste found. PR merged.</span>
             </h1>
             <p className="lede">
-              Connect AWS, Azure, GCP, and 14 SaaS tools to Claude or Cursor. Ask about spend, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally. Your data never leaves your machine.
+              Connect AWS, Azure, GCP, and 17 providers to Claude or Cursor. Ask about spend, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally. Your data never leaves your machine.
             </p>
             <div className="hero-cta-row" id="install">
               <CopyInstall />
@@ -832,7 +833,10 @@ function FounderNote(){
   return (
     <section id="founder" style={{borderTop:"1px solid var(--line)"}}>
       <div className="wrap" style={{maxWidth:680,paddingTop:80,paddingBottom:80}}>
-        <div className="label" style={{marginBottom:24}}>Why I built this</div>
+        <div style={{fontFamily:"'Instrument Sans',system-ui,sans-serif",fontWeight:500,fontSize:11,color:"var(--accent-dim)",letterSpacing:".08em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:24}}>
+          <span style={{width:24,height:1,background:"var(--accent-dim)",display:"inline-block"}}></span>
+          Why I built this
+        </div>
         <p style={{fontSize:17,lineHeight:1.75,color:"var(--fg-2)",marginBottom:28}}>
           I built this because I spent most of my day bouncing between dashboards that barely showed what I actually needed, the AWS console, and Claude. I'd ask Claude a question, manually paste in numbers, get an answer, then go back and repeat the whole thing.
         </p>
@@ -934,7 +938,7 @@ function FAQ(){
   return (
     <section id="faq" className="alt" style={{borderTop:"1px solid var(--line)"}}>
       <div className="wrap" style={{maxWidth:720,paddingTop:80,paddingBottom:80}}>
-        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--accent-dim)",letterSpacing:".1em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
+        <div style={{fontFamily:"'Instrument Sans',system-ui,sans-serif",fontWeight:500,fontSize:11,color:"var(--accent-dim)",letterSpacing:".08em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
           <span style={{width:24,height:1,background:"var(--accent-dim)",display:"inline-block"}}></span>
           FAQ
         </div>
@@ -957,7 +961,7 @@ function FAQ(){
                     background:"none",
                     border:"none",
                     color:"var(--fg)",
-                    fontFamily:"'Inter',sans-serif",
+                    fontFamily:"'Instrument Sans',system-ui,sans-serif",
                     fontSize:16,
                     fontWeight:500,
                     textAlign:"left",
@@ -1011,7 +1015,7 @@ function FAQ(){
 /* Tweaks panel */
 const PALETTE_OPTIONS = [
   {value:"onyx",     label:"Onyx",     swatch:["#0a0a0c","#5fe8a0","#15151a"]},
-  {value:"graphite", label:"Graphite", swatch:["#15140f","#e4a76b","#221f17"]},
+  {value:"graphite", label:"Graphite", swatch:["#0d0f10","#4db8d4","#181c1f"]},
   {value:"paper",    label:"Paper",    swatch:["#fbfaf7","#1f8a5b","#e3dfcf"]},
   {value:"mono",     label:"Mono",     swatch:["#ffffff","#0a0a0a","#e6e6e3"]},
 ];
@@ -1080,15 +1084,11 @@ function App(){
     <>
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
-      <Thesis />
-      <QMarquee />
       <Connectors />
       <Depth />
-      <Telemetry />
       <MidCta />
       <Architecture />
       <Pricing />
-      <FounderNote />
       <FAQ />
       <FootCta />
       <Footer />
