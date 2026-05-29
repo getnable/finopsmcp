@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import stat
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import (
@@ -499,7 +499,7 @@ def archive_old_snapshots(days_to_keep: int = 365) -> int:
     Returns the number of rows archived.
     """
     engine = get_engine()
-    cutoff = (datetime.utcnow() - timedelta(days=days_to_keep)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days_to_keep)).strftime("%Y-%m-%d")
 
     with engine.begin() as conn:
         # Select rows to archive

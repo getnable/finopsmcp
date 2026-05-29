@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def save_metrics(
     from sqlalchemy import select, delete
 
     engine = get_engine()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     row = {
         "metric_date":       metric_date,

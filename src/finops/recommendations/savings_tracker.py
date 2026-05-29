@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import case, func, select, update
@@ -81,7 +81,7 @@ def record_recommendation(
                         estimated_monthly_savings_usd=estimated_monthly_savings_usd,
                         description=description,
                         current_config=json.dumps(current_config),
-                        generated_at=datetime.utcnow(),
+                        generated_at=datetime.now(timezone.utc),
                         acted_on_at=None,
                         verified_at=None,
                         dismissed_at=None,
@@ -105,7 +105,7 @@ def record_recommendation(
                 description=description,
                 estimated_monthly_savings_usd=estimated_monthly_savings_usd,
                 status="open",
-                generated_at=datetime.utcnow(),
+                generated_at=datetime.now(timezone.utc),
                 dedup_key=key,
             )
         )
@@ -123,7 +123,7 @@ def mark_acted_on(rec_id: int) -> bool:
                 savings_recommendations.c.id == rec_id,
                 savings_recommendations.c.status == "open",
             )
-            .values(status="acted_on", acted_on_at=datetime.utcnow())
+            .values(status="acted_on", acted_on_at=datetime.now(timezone.utc))
         )
         return r.rowcount > 0
 
@@ -136,7 +136,7 @@ def mark_verified(rec_id: int, actual_monthly_savings_usd: float) -> bool:
             .where(savings_recommendations.c.id == rec_id)
             .values(
                 status="verified",
-                verified_at=datetime.utcnow(),
+                verified_at=datetime.now(timezone.utc),
                 verified_monthly_savings_usd=actual_monthly_savings_usd,
             )
         )
@@ -154,7 +154,7 @@ def mark_dismissed(rec_id: int, reason: str = "") -> bool:
             )
             .values(
                 status="dismissed",
-                dismissed_at=datetime.utcnow(),
+                dismissed_at=datetime.now(timezone.utc),
                 dismiss_reason=reason or None,
             )
         )
@@ -163,7 +163,7 @@ def mark_dismissed(rec_id: int, reason: str = "") -> bool:
 
 def expire_stale(days: int = _EXPIRY_DAYS) -> int:
     """Mark open recommendations older than `days` as expired."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     engine = get_engine()
     with engine.begin() as conn:
         r = conn.execute(

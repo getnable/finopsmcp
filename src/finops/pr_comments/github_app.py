@@ -29,7 +29,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -311,7 +311,7 @@ def _post_check_run(
             "head_sha":    sha,
             "status":      "completed",
             "conclusion":  conclusion,
-            "completed_at": datetime.utcnow().isoformat() + "Z",
+            "completed_at": datetime.now(timezone.utc).isoformat() + "Z",
             "output": {"title": title, "summary": summary},
         },
     )
