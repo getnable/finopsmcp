@@ -812,7 +812,7 @@ function FootCta(){
                }}>
               Get started free <span className="arr">→</span>
             </button>
-            <a href="mailto:chandanbukkapatnam@yahoo.com?subject=nable - talk to founders"
+            <a href="mailto:chandan@getnable.com?subject=nable - talk to founders"
                target="_blank" rel="noopener noreferrer"
                className="btn btn-ghost" style={{padding:"14px 22px",fontSize:14}}
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'talk_to_founders'}); }}>
@@ -853,7 +853,7 @@ function FounderNote(){
           </div>
           <div>
             <div style={{fontSize:14,fontWeight:500,color:"var(--fg)"}}>Chandan Bukkapatnam</div>
-            <div style={{fontSize:13,color:"var(--fg-3)"}}>Founder · <a href="mailto:chandanbukkapatnam@yahoo.com" target="_blank" rel="noopener noreferrer" style={{color:"var(--accent)"}}>chandanbukkapatnam@yahoo.com</a></div>
+            <div style={{fontSize:13,color:"var(--fg-3)"}}>Founder · <a href="mailto:chandan@getnable.com" target="_blank" rel="noopener noreferrer" style={{color:"var(--accent)"}}>chandan@getnable.com</a></div>
           </div>
         </div>
       </div>

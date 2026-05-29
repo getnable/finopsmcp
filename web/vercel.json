@@ -2,7 +2,10 @@
   "rewrites": [
     { "source": "/docs", "destination": "/docs.html" },
     { "source": "/account", "destination": "/account.html" },
-    { "source": "/about", "destination": "/about.html" }
+    { "source": "/about", "destination": "/about.html" },
+    { "source": "/connectors", "destination": "/" },
+    { "source": "/pricing", "destination": "/" },
+    { "source": "/faq", "destination": "/" }
   ],
   "redirects": [
     { "source": "/api/sso/:path*", "has": [{"type": "query", "key": "error"}], "destination": "/account?error=sso_not_configured", "permanent": false }
@@ -15,7 +18,7 @@
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
         { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
-        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://us-assets.i.posthog.com https://www.redditstatic.com https://js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src 'self' https://us.i.posthog.com https://us-assets.i.posthog.com https://www.redditstatic.com https://alb.reddit.com https://api.stripe.com; img-src 'self' data: https://www.redditstatic.com https://*.stripe.com; frame-src https://js.stripe.com https://hooks.stripe.com; frame-ancestors 'none'" }
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://us-assets.i.posthog.com https://www.redditstatic.com https://js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src 'self' https://us.i.posthog.com https://us-assets.i.posthog.com https://www.redditstatic.com https://alb.reddit.com https://api.stripe.com https://pixel-config.reddit.com; img-src 'self' data: https://www.redditstatic.com https://*.stripe.com https://alb.reddit.com; frame-src https://js.stripe.com https://hooks.stripe.com; frame-ancestors 'none'" }
       ]
     }
   ]
