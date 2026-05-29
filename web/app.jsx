@@ -656,7 +656,7 @@ function Pricing(){
               </div>
               <p className="pricing-desc">The automation layer. Ships work that would otherwise take a contractor to set up.</p>
               <a
-                href="https://buy.stripe.com/eVq14mbe9ffE3le3wC2Nq02"
+                href="https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn btn-primary pricing-cta"
