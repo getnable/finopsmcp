@@ -1052,7 +1052,6 @@ function App(){
 
   return (
     <>
-      <Ticker />
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
       <Connectors />
