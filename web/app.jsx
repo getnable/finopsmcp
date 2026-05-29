@@ -418,6 +418,60 @@ function Thesis(){
   );
 }
 
+/* Depth */
+function Depth(){
+  const cards = [
+    {
+      n: "01",
+      h: "Rightsizing that actually ships",
+      p: "Cross-references CloudWatch utilization, Compute Optimizer signals, and 14 days of CPU/memory data. Doesn't just flag underused instances. Models the migration path, quantifies the monthly saving, and generates the IaC PR or Jira ticket to act on it.",
+      chips: ["CloudWatch","Compute Optimizer","14-day window","IaC PR generation"],
+    },
+    {
+      n: "02",
+      h: "Anomaly detection with attribution",
+      p: "Z-score detection against a 28-day rolling baseline. When something spikes, nable doesn't just tell you the number. It breaks the spike down by tag, team, and service, then pages whoever owns it. False positive rate is near zero because it uses your own baseline.",
+      chips: ["Z-score","28-day baseline","tag attribution","Slack/PagerDuty alert"],
+    },
+    {
+      n: "03",
+      h: "Commitment analysis",
+      p: "Models your Savings Plan and Reserved Instance coverage gap across AWS, Azure, and GCP. Tells you exactly what buying more coverage would save by service and term, based on your actual usage patterns, not list-price estimates.",
+      chips: ["Savings Plans","Reserved Instances","GCP CUDs","coverage modeling"],
+    },
+    {
+      n: "04",
+      h: "Multi-provider, one conversation",
+      p: "17 billing APIs normalized into a single query layer. Ask about total compute spend across AWS and Azure in the same question. Compare Datadog costs against observability budget. No switching tabs, no exporting CSVs between systems.",
+      chips: ["17 providers","cross-cloud","SaaS included","normalized spend"],
+    },
+  ];
+
+  return (
+    <section id="depth" style={{borderTop:"1px solid var(--line)"}}>
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">What's under the hood</div>
+          <h2>Not a pipe.<br/><em>An analyst.</em></h2>
+          <p>The value isn't connecting Claude to your bill. It's the analysis that runs before Claude ever responds.</p>
+        </div>
+        <div className="depth-grid">
+          {cards.map((c,i) => (
+            <div className="depth-card" key={i}>
+              <span className="depth-n">{c.n}</span>
+              <h3 className="depth-h">{c.h}</h3>
+              <p className="depth-p">{c.p}</p>
+              <div className="depth-chips">
+                {c.chips.map((ch,j) => <span key={j}>{ch}</span>)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* Architecture */
 function Architecture(){
   return (
@@ -821,7 +875,7 @@ function Footer(){
 const FAQ_ITEMS = [
   {
     q: "How is this different from just asking Claude?",
-    a: "Without nable, you copy numbers from AWS dashboards and paste them into Claude. Every follow-up question means another copy-paste, and the data is already stale by the time you ask. nable connects Claude directly to your billing APIs, so you can have a real back-and-forth: ask what spiked, drill into a team, open a Jira ticket, set a budget alert — all in one conversation. No tabs. No exports. No stale data."
+    a: "Without nable, you copy numbers from AWS dashboards and paste them into Claude. That works for simple questions. But Claude won't know to cross-reference your CloudWatch CPU metrics against Compute Optimizer, run Z-score anomaly detection against a 28-day baseline, model your Savings Plan coverage gap, or attribute a cost spike to a specific tag. nable ships all of that analysis pre-built. You ask a question in plain English and get findings a FinOps engineer would have taken hours to produce. The Jira ticket at the end is just the last step."
   },
   {
     q: "Where do my credentials and billing data go?",
@@ -1002,6 +1056,7 @@ function App(){
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
       <Connectors />
+      <Depth />
       <Architecture />
       <Pricing />
       <FAQ />
