@@ -1076,11 +1076,15 @@ function App(){
     <>
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
+      <Thesis />
+      <QMarquee />
       <Connectors />
       <Depth />
+      <Telemetry />
       <MidCta />
       <Architecture />
       <Pricing />
+      <FounderNote />
       <FAQ />
       <FootCta />
       <Footer />
