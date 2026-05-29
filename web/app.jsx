@@ -186,7 +186,7 @@ function Hero({ layout, interaction }){
           <div className="hero-left">
             <h1 className="display">
               Your cloud bill,<br/>
-              <span className="strike">in a dashboard.</span><br/>
+              <span className="strike">in a dashboard.</span>
               <span className="accent">Waste found.<br/>Money saved.</span>
             </h1>
             <p className="lede">
