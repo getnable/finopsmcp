@@ -18,7 +18,7 @@ from pathlib import Path
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float, Index, Integer, JSON, MetaData,
-    String, Table, Text, create_engine, text, select, delete,
+    String, Table, Text, create_engine, event, text, select, delete,
 )
 from sqlalchemy.engine import Engine
 
@@ -482,12 +482,24 @@ def get_engine() -> Engine:
         db_path = Path(db_path_env).expanduser() if db_path_env else data_dir() / "finops.db"
         _ENGINE = create_engine(
             f"sqlite:///{db_path}",
-            connect_args={"check_same_thread": False},
+            connect_args={
+                "check_same_thread": False,
+                # SQLAlchemy's SQLite dialect maps this to PRAGMA busy_timeout at the
+                # Python sqlite3 level — prevents immediate failure under concurrent writes.
+                "timeout": 15,
+            },
         )
+
+        @event.listens_for(_ENGINE, "connect")
+        def _set_sqlite_pragmas(dbapi_conn, _connection_record):
+            """Apply WAL mode and busy_timeout on every new connection."""
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=15000")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
         metadata.create_all(_ENGINE)
-        with _ENGINE.connect() as conn:
-            conn.execute(text("PRAGMA journal_mode=WAL"))
-            conn.execute(text("PRAGMA foreign_keys=ON"))
         db_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
     return _ENGINE
