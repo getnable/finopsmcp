@@ -40,7 +40,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" />
 
 <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
@@ -48,9 +48,9 @@
 
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{background:var(--bg);color:var(--fg);font-family:'DM Sans',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.55;font-size:15px;letter-spacing:-.005em}
-h1,h2,h3,h4,.display{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-weight:400;letter-spacing:-.03em;color:var(--fg)}
-.mono,.num{font-family:'JetBrains Mono',ui-monospace,monospace;font-feature-settings:"tnum","cv02","cv03"}
+html,body{background:var(--bg);color:var(--fg);font-family:'Inter',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;line-height:1.6;font-size:16px;letter-spacing:-.011em;font-feature-settings:"cv02","cv03","cv04","cv11"}
+h1,h2,h3,h4,.display{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-weight:400;letter-spacing:-.035em;color:var(--fg);line-height:1.08}
+.mono,.num{font-family:'JetBrains Mono',ui-monospace,monospace;font-feature-settings:"tnum"}
 a{color:inherit;text-decoration:none}
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
 ::selection{background:var(--fg);color:var(--bg)}
@@ -94,7 +94,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .logo .mark-img{width:26px;height:26px;border-radius:6px;display:block;flex-shrink:0}
 .nav ul{display:flex;list-style:none;gap:32px;color:var(--fg-2);font-size:13.5px}
 .nav ul a:hover,.nav ul .nav-link:hover{color:var(--fg)}
-.nav-link{background:none;border:none;color:var(--fg-2);font-size:13.5px;cursor:pointer;padding:0;font-family:'DM Sans',sans-serif;font-weight:400;letter-spacing:-.005em;transition:.18s}
+.nav-link{background:none;border:none;color:var(--fg-2);font-size:13.5px;cursor:pointer;padding:0;font-family:'Inter',sans-serif;font-weight:400;letter-spacing:-.005em;transition:.18s}
 .nav .right{display:flex;align-items:center;gap:12px}
 .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:7px;font-size:13.5px;font-weight:500;border:1px solid transparent;transition:.18s;letter-spacing:-.005em;min-height:38px}
 .btn-primary{background:var(--accent);color:#15140f}
@@ -118,7 +118,7 @@ h1.display{font-size:clamp(46px,6.4vw,90px);line-height:.96;letter-spacing:-.045
 h1.display .accent{font-style:italic;font-weight:400;color:var(--accent);font-family:'Space Grotesk'}
 h1.display .strike{position:relative;color:var(--fg-3);font-style:italic;font-weight:300}
 h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52%;height:2px;background:var(--accent);transform:rotate(-2deg)}
-.lede{margin-top:28px;font-size:18px;color:var(--fg-2);line-height:1.55;max-width:46ch}
+.lede{margin-top:28px;font-size:17px;color:var(--fg-2);line-height:1.65;max-width:46ch}
 .hero.editorial .lede{margin-left:auto;margin-right:auto}
 .hero-cta-row{margin-top:36px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .hero.editorial .hero-cta-row{justify-content:center}
@@ -131,7 +131,7 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 /* email capture form */
 .email-capture{display:flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:8px;overflow:hidden;height:42px;max-width:380px;width:100%;position:relative}
 .email-capture.center{margin-left:auto;margin-right:auto}
-.email-capture input{flex:1;background:transparent;border:0;padding:0 14px;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--fg);outline:none;min-width:0}
+.email-capture input{flex:1;background:transparent;border:0;padding:0 14px;font-family:'Inter',sans-serif;font-size:14px;color:var(--fg);outline:none;min-width:0}
 .email-capture input::placeholder{color:var(--fg-3)}
 .email-capture button{padding:0 14px;background:var(--accent);color:var(--bg);font-family:'JetBrains Mono';font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:0;white-space:nowrap;transition:.18s;display:flex;align-items:center;gap:6px;flex-shrink:0}
 .email-capture button:hover{filter:brightness(1.08)}
@@ -195,7 +195,7 @@ section.tight{padding:88px 0}
 .section-head .label::before{content:"";width:24px;height:1px;background:var(--accent-dim)}
 .section-head h2{font-size:clamp(36px,4.4vw,56px);line-height:1.04;letter-spacing:-.035em;font-weight:300}
 .section-head h2 em{font-style:italic;font-weight:400;color:var(--accent)}
-.section-head p{margin-top:20px;color:var(--fg-2);font-size:17px;line-height:1.6;max-width:60ch}
+.section-head p{margin-top:20px;color:var(--fg-2);font-size:16px;line-height:1.65;max-width:60ch}
 
 /* thesis */
 .thesis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-top:1px solid var(--line)}
