@@ -869,7 +869,6 @@ function Footer(){
             <a href="#connectors">Connectors</a>
             <a href="#pricing">Pricing</a>
             <a href="#faq">FAQ</a>
-            <a href="#">Changelog</a>
           </div>
           <div>
             <h5>Resources</h5>
