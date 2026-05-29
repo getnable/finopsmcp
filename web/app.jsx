@@ -821,10 +821,6 @@ const FAQ_ITEMS = [
     q: "Do you support multiple AWS accounts or organizations?",
     a: "Yes. Run `finops setup aws --add` to connect additional accounts. You can query across all of them in a single conversation. Multi-account org rollups are on the roadmap for Q3."
   },
-  {
-    q: "Is my data sent to Anthropic or any AI provider?",
-    a: "That depends on how you use Claude. nable itself never sends your data anywhere. What you share with Claude in conversation is governed by Anthropic's terms, same as any other Claude conversation."
-  },
 ];
 
 function FAQ(){
