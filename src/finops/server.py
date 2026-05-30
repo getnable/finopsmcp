@@ -7631,5 +7631,170 @@ async def get_service_cost(
     )
 
 
+@mcp.tool()
+async def scan_lambda_concurrency_waste(
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Scans Lambda functions with provisioned concurrency for over-provisioning waste.
+    Provisioned concurrency costs money even when idle.
+    Returns functions where average utilization is below 50% with savings estimates.
+
+    Args:
+        regions: AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
+                 Defaults to all common regions.
+
+    Examples:
+        - "Scan Lambda provisioned concurrency for waste"
+        - "Find Lambda functions with over-provisioned concurrency"
+        - "How much are we wasting on idle Lambda concurrency?"
+        - "Show Lambda concurrency waste in us-east-1"
+    """
+    try:
+        from .recommendations.lambda_concurrency import scan_lambda_concurrency_waste as _scan
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS connector is not configured."}
+
+        findings = await _scan(aws_client=aws, regions=regions)
+
+        total_wasted = sum(f["wasted_monthly_cost"] for f in findings)
+        return {
+            "findings": findings,
+            "total_findings": len(findings),
+            "total_wasted_monthly_cost": round(total_wasted, 4),
+            "total_wasted_annual_cost": round(total_wasted * 12, 2),
+            "note": (
+                "Utilization data covers the last 14 days. "
+                "Functions with no CloudWatch data are treated as fully idle."
+            ),
+        }
+    except Exception as exc:
+        log.error("scan_lambda_concurrency_waste failed: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def scan_s3_bucket_key_opportunities() -> dict:
+    """
+    Scans S3 buckets using KMS encryption without Bucket Keys enabled.
+    S3 Bucket Keys reduce KMS API calls by up to 99%, cutting KMS costs dramatically.
+    Returns affected buckets with the exact AWS CLI command to fix each one.
+
+    Examples:
+        - "Find S3 buckets missing bucket keys"
+        - "Which S3 buckets could save on KMS costs?"
+        - "Scan S3 for bucket key opportunities"
+        - "How much are we wasting on KMS calls from S3?"
+    """
+    try:
+        from .recommendations.s3_bucket_keys import scan_s3_bucket_key_opportunities as _scan
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS connector is not configured."}
+
+        findings = await _scan(aws_client=aws)
+
+        total_savings = sum(f["estimated_savings"] for f in findings)
+        return {
+            "findings": findings,
+            "total_findings": len(findings),
+            "total_estimated_monthly_savings": round(total_savings, 4),
+            "total_estimated_annual_savings": round(total_savings * 12, 2),
+            "note": (
+                "KMS call estimates use CloudWatch AllRequests metrics when available, "
+                "otherwise a conservative fallback of 100,000 calls/month per bucket. "
+                "Enable S3 request metrics in CloudWatch for more accurate estimates."
+            ),
+        }
+    except Exception as exc:
+        log.error("scan_s3_bucket_key_opportunities failed: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def scan_graviton_migration_opportunities(
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Scans for EC2 instances that can migrate to Graviton (arm64) for 20-40% cost savings.
+    Returns a ranked list of migration candidates with estimated monthly savings.
+    Graviton instances offer the same performance for most workloads at lower cost.
+
+    Args:
+        regions: AWS regions to scan. Defaults to us-east-1. Example: ["us-east-1", "eu-west-1"].
+
+    Examples:
+        - "Which EC2 instances can we move to Graviton?"
+        - "How much can we save by switching to arm64 instances?"
+        - "Scan us-east-1 and eu-west-1 for Graviton migration opportunities"
+    """
+    if err := require_role("analyst"):
+        return str(err)
+
+    try:
+        from .recommendations.graviton import scan_graviton_opportunities
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return "AWS is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+
+        candidates = await scan_graviton_opportunities(aws, regions=regions)
+
+        if not candidates:
+            scanned = ", ".join(regions) if regions else "us-east-1"
+            return (
+                f"No Graviton migration candidates found in: {scanned}.\n"
+                "All running x86_64 instances either already use Graviton-equivalent "
+                "types or their instance type is not in the migration map."
+            )
+
+        total_savings = sum(r["savings_estimate"] for r in candidates)
+
+        lines: list[str] = [
+            f"**{len(candidates)} instance{'s' if len(candidates) != 1 else ''} identified. "
+            f"Estimated total monthly saving: ${total_savings:,.2f}**",
+            "",
+            "| Instance | Name | Type | Graviton Equivalent | Monthly Cost | Monthly Saving | Saving % |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+
+        for r in candidates:
+            name = r["name_tag"] or r["instance_id"]
+            lines.append(
+                f"| {r['instance_id']} "
+                f"| {name} "
+                f"| {r['instance_type']} "
+                f"| {r['graviton_equivalent']} "
+                f"| ${r['current_monthly_cost_estimate']:,.2f} "
+                f"| ${r['savings_estimate']:,.2f} "
+                f"| {r['savings_pct']:.1f}% |"
+            )
+
+        lines += [
+            "",
+            "**How to migrate:** Most workloads (web servers, APIs, background workers) "
+            "require only an instance type change and a reboot. Verify your AMI supports "
+            "arm64 (Amazon Linux 2/2023 and Ubuntu 20.04+ are multi-arch). "
+            "Test in staging before switching production.",
+        ]
+
+        nudge = _team_nudge(
+            f"You have {len(candidates)} Graviton migration "
+            f"opportunit{'ies' if len(candidates) != 1 else 'y'} "
+            f"worth ${total_savings:,.0f}/mo. To auto-create Jira, Linear, or GitHub "
+            f"tickets so these actually get fixed, upgrade to Team:"
+        )
+        if nudge:
+            lines += ["", nudge]
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error scanning for Graviton opportunities: {e}"
+
+
 if __name__ == "__main__":
     main()
