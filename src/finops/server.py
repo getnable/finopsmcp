@@ -7920,6 +7920,199 @@ async def scan_s3_bucket_key_opportunities() -> dict:
 
 
 @mcp.tool()
+async def recommend_lambda_snapstart(
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Finds Java Lambda functions that would benefit from SnapStart.
+    SnapStart eliminates cold starts for Java functions at no extra cost,
+    replacing expensive provisioned concurrency. Functions that are paying
+    for PC just to reduce cold starts are the primary targets.
+
+    Args:
+        regions: AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
+                 Defaults to all common regions.
+
+    Examples:
+        - "Which Java Lambda functions should use SnapStart?"
+        - "Find Lambda functions wasting money on provisioned concurrency"
+        - "Scan for SnapStart opportunities"
+        - "Which Java Lambdas are paying for cold-start reduction unnecessarily?"
+    """
+    try:
+        from .recommendations.lambda_snapstart import recommend_lambda_snapstart as _scan
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS connector is not configured."}
+
+        findings = await _scan(aws_client=aws, regions=regions)
+
+        replaceable = [f for f in findings if f["has_provisioned_concurrency"]]
+        total_replaceable_cost = sum(f["monthly_pc_cost"] for f in replaceable)
+
+        return {
+            "findings": findings,
+            "total_java_functions": len(findings),
+            "functions_with_replaceable_pc": len(replaceable),
+            "total_monthly_pc_cost_replaceable": round(total_replaceable_cost, 4),
+            "total_annual_pc_cost_replaceable": round(total_replaceable_cost * 12, 2),
+            "note": (
+                "SnapStart is free. It caches a post-init snapshot and restores it "
+                "on cold start, eliminating init latency without provisioned concurrency."
+            ),
+        }
+    except Exception as exc:
+        log.error("recommend_lambda_snapstart failed: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def audit_efs_cross_az_mounts(
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Detects EFS file systems with EC2 instances mounting from a different AZ.
+    Cross-AZ EFS mounts cost $0.02/GB in data transfer charges that appear
+    silently on the bill. The fix is adding a mount target in each instance AZ.
+
+    Args:
+        regions: AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
+                 Defaults to all common regions.
+
+    Examples:
+        - "Find EFS mounts crossing availability zones"
+        - "Which EFS file systems are generating cross-AZ transfer costs?"
+        - "Audit EFS cross-AZ data transfer waste"
+        - "Are any EC2 instances mounting EFS from the wrong AZ?"
+    """
+    try:
+        from .recommendations.efs_cross_az import audit_efs_cross_az_mounts as _scan
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS connector is not configured."}
+
+        findings = await _scan(aws_client=aws, regions=regions)
+
+        total_cost = sum(f["estimated_monthly_cost"] for f in findings)
+        return {
+            "findings": findings,
+            "total_findings": len(findings),
+            "total_estimated_monthly_cost": round(total_cost, 4),
+            "total_estimated_annual_cost": round(total_cost * 12, 2),
+            "note": (
+                "Cross-AZ detection uses security group membership as a proxy for "
+                "EFS connectivity. Transfer cost is estimated from CloudWatch I/O metrics."
+            ),
+        }
+    except Exception as exc:
+        log.error("audit_efs_cross_az_mounts failed: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def audit_nlb_cross_zone_costs(
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Audits Network Load Balancers with cross-zone load balancing enabled.
+    Cross-zone LB charges $0.01/GB for cross-AZ traffic. For high-throughput
+    NLBs this adds up. Disabling it is safe when AZs have equal capacity.
+
+    Args:
+        regions: AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
+                 Defaults to all common regions.
+
+    Examples:
+        - "Find NLBs generating cross-zone load balancing charges"
+        - "Which NLBs should have cross-zone LB disabled?"
+        - "Audit NLB cross-AZ costs"
+        - "How much are we spending on NLB cross-zone traffic?"
+    """
+    try:
+        from .recommendations.nlb_cross_zone import audit_nlb_cross_zone_costs as _scan
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS connector is not configured."}
+
+        findings = await _scan(aws_client=aws, regions=regions)
+
+        actionable = [
+            f for f in findings
+            if f["recommendation"] != "monitor_no_action_needed"
+        ]
+        total_cost = sum(f["estimated_cross_az_cost"] for f in findings)
+
+        return {
+            "findings": findings,
+            "total_findings": len(findings),
+            "actionable_findings": len(actionable),
+            "total_estimated_monthly_cross_az_cost": round(total_cost, 4),
+            "total_estimated_annual_cross_az_cost": round(total_cost * 12, 2),
+            "note": (
+                "Cost estimate assumes 50% of NLB traffic crosses AZ boundaries. "
+                "Disable cross-zone LB only when target groups have balanced capacity per AZ."
+            ),
+        }
+    except Exception as exc:
+        log.error("audit_nlb_cross_zone_costs failed: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def audit_s3_intelligent_tiering(
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Finds S3 buckets using Intelligent-Tiering where the monitoring fee
+    exceeds the tiering savings. IT costs $0.0025 per 1,000 monitored objects,
+    making it more expensive than S3 Standard for objects smaller than 128KB.
+
+    Args:
+        regions: Unused (S3 is global). Present for API consistency.
+
+    Examples:
+        - "Find S3 buckets where Intelligent-Tiering is costing more than it saves"
+        - "Which buckets should disable Intelligent-Tiering?"
+        - "Audit S3 IT small object waste"
+        - "Are we wasting money on S3 Intelligent-Tiering for small files?"
+    """
+    try:
+        from .recommendations.s3_intelligent_tiering import audit_s3_intelligent_tiering as _scan
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS connector is not configured."}
+
+        findings = await _scan(aws_client=aws, regions=regions)
+
+        waste_findings = [
+            f for f in findings
+            if f["recommendation"].startswith("LIKELY_WASTE")
+        ]
+        total_monitoring_cost = sum(
+            f["monthly_monitoring_cost"] for f in findings
+            if f["monthly_monitoring_cost"] is not None
+        )
+
+        return {
+            "findings": findings,
+            "total_it_buckets": len(findings),
+            "likely_waste_buckets": len(waste_findings),
+            "total_monthly_monitoring_cost": round(total_monitoring_cost, 4),
+            "note": (
+                "Objects below 128KB cost more in IT monitoring fees than they save "
+                "in storage tiering. Enable S3 bucket metrics for accurate object size data."
+            ),
+        }
+    except Exception as exc:
+        log.error("audit_s3_intelligent_tiering failed: %s", exc, exc_info=True)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
 async def scan_graviton_migration_opportunities(
     regions: list[str] | None = None,
 ) -> str:
