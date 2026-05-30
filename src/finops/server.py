@@ -2677,6 +2677,90 @@ async def audit_aws_waste(
 
 
 @mcp.tool()
+async def audit_public_ipv4_addresses(
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Audits all public IPv4 addresses across your AWS accounts.
+    Since Feb 2024, AWS charges $3.60/month per public IPv4, including ones on stopped instances.
+    Identifies unattached Elastic IPs (pure waste) and IPs on stopped instances.
+    Returns total monthly cost and release recommendations.
+
+    Args:
+        regions: List of AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
+                 Defaults to all opted-in regions.
+
+    Examples:
+        - "Audit our public IPv4 addresses"
+        - "Find unattached Elastic IPs we can release"
+        - "How much are we spending on public IPv4 addresses?"
+        - "Show Elastic IPs on stopped instances"
+    """
+    try:
+        from .recommendations.public_ipv4 import audit_public_ipv4
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None:
+            return "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+
+        result = await audit_public_ipv4(aws, regions=regions)
+
+        unattached = result["unattached_eips"]
+        stopped = result["stopped_instance_eips"]
+        waste = result["total_monthly_waste"]
+        total_ips = result["total_ips_found"]
+
+        lines: list[str] = ["## Public IPv4 Audit", ""]
+
+        if unattached:
+            lines.append(f"**Unattached Elastic IPs** (release immediately) -- {len(unattached)} found")
+            lines.append("")
+            lines.append("| IP | Allocation ID | Region | Monthly Cost |")
+            lines.append("|---|---|---|---|")
+            for eip in sorted(unattached, key=lambda x: x["region"]):
+                lines.append(
+                    f"| {eip['public_ip']} | {eip['allocation_id']} "
+                    f"| {eip['region']} | ${eip['monthly_cost']:.2f} |"
+                )
+            lines.append("")
+        else:
+            lines.append("**Unattached Elastic IPs:** None found.")
+            lines.append("")
+
+        if stopped:
+            lines.append(f"**IPs on stopped instances** -- {len(stopped)} found")
+            lines.append("")
+            lines.append("| IP | Instance ID | Region | Monthly Cost |")
+            lines.append("|---|---|---|---|")
+            for eip in sorted(stopped, key=lambda x: x["region"]):
+                lines.append(
+                    f"| {eip['public_ip']} | {eip['instance_id']} "
+                    f"| {eip['region']} | ${eip['monthly_cost']:.2f} |"
+                )
+            lines.append("")
+        else:
+            lines.append("**IPs on stopped instances:** None found.")
+            lines.append("")
+
+        waste_count = len(unattached) + len(stopped)
+        lines.append(f"Total monthly waste: ${waste:.2f} across {waste_count} address{'es' if waste_count != 1 else ''}")
+        lines.append(f"Total public IPs found: {total_ips} across all scanned regions")
+        lines.append("")
+
+        if unattached:
+            lines.append("To release unattached IPs:")
+            lines.append("```")
+            for eip in unattached:
+                lines.append(f"aws ec2 release-address --allocation-id {eip['allocation_id']} --region {eip['region']}")
+            lines.append("```")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        log.error("audit_public_ipv4_addresses failed: %s", e, exc_info=True)
+        return f"Error running IPv4 audit: {e}"
+
+
+@mcp.tool()
 async def get_instance_deep_analysis(
     instance_id: str,
     region: str = "us-east-1",
