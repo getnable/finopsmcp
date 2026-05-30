@@ -295,7 +295,7 @@ function CopyInstall(){
           {copied ? "copied" : "copy"}
         </button>
       </div>
-      <p className="mono" style={{fontSize:11,color:"var(--fg-3)",letterSpacing:".04em",paddingLeft:2}}>
+      <p style={{fontSize:11,color:"var(--fg-3)",letterSpacing:".04em",paddingLeft:2,fontFamily:"'Instrument Sans',system-ui,sans-serif"}}>
         installs the MCP server · guided setup runs automatically
       </p>
     </div>
@@ -871,7 +871,7 @@ function Pricing(){
           </div>
 
         </div>
-        <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-4)",textAlign:"center",letterSpacing:".04em"}}>
+        <p style={{marginTop:32,fontSize:12,color:"var(--fg-4)",textAlign:"center",fontFamily:"'Instrument Sans',system-ui,sans-serif"}}>
           No credit card for Solo. Team trial requires a card, cancel any time.
         </p>
       </div>
@@ -1157,7 +1157,7 @@ function PaletteSwatches({ value, onChange }){
               display:"flex",alignItems:"center",gap:8,padding:"7px 9px",
               border:"1px solid",borderColor: on ? "var(--accent)" : "rgba(255,255,255,.12)",
               borderRadius:7,background:"rgba(255,255,255,.03)",color:"var(--fg)",
-              fontFamily:"'DM Sans',sans-serif",fontSize:12,cursor:"pointer",
+              fontFamily:"'Instrument Sans',system-ui,sans-serif",fontSize:12,cursor:"pointer",
               boxShadow: on ? "0 0 0 2px rgba(95,232,160,.18)" : "none",
               transition:".15s"
             }}>
