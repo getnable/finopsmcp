@@ -128,6 +128,30 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+// Simple in-memory rate limiter (resets on cold start — good enough for edge)
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RATE_LIMIT_MAX = 5; // max 5 subscribes per IP per hour
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip) || { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+
+  if (now > entry.resetAt) {
+    // Window expired, reset
+    entry.count = 0;
+    entry.resetAt = now + RATE_LIMIT_WINDOW_MS;
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return false; // rate limited
+  }
+
+  entry.count++;
+  rateLimitMap.set(ip, entry);
+  return true; // allowed
+}
+
 export default async function handler(req) {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -140,10 +164,24 @@ export default async function handler(req) {
     return Response.redirect("https://getnable.com", 302);
   }
 
-  // Basic rate limiting via IP — edge runtime provides cf headers or x-forwarded-for
+  // Rate limiting via IP — edge runtime provides cf headers or x-forwarded-for
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  // Log for monitoring; actual hard rate limiting requires Vercel KV or similar
   console.log(`subscribe request from ip=${ip}`);
+
+  // Prune stale entries to prevent unbounded memory growth
+  if (rateLimitMap.size > 100) {
+    const now = Date.now();
+    for (const [key, val] of rateLimitMap) {
+      if (now > val.resetAt) rateLimitMap.delete(key);
+    }
+  }
+
+  if (!checkRateLimit(ip)) {
+    return new Response(JSON.stringify({ error: "Too many requests. Try again later." }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    });
+  }
 
   let body;
   try {
