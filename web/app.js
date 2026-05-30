@@ -416,12 +416,13 @@ const SOLO_FEATURES = [
 const TEAM_FEATURES = [
   "Everything in Solo",
   "Terraform remediation: patch files, open PR",
-  "Scheduled cost digests via email",
-  "Commitment analysis and RI recommendations",
-  "Org-level rollups across accounts",
-  "Budget enforcement and alerts",
+  "Slack alerts \u2014 anomalies, budget warnings, weekly digest",
+  "Publish cost reports to Notion for the whole team",
   "Ticket creation (Jira, Linear, GitHub Issues)",
-  "RBAC for team access control"
+  "Scheduled cost digests via email",
+  "Budget enforcement and alerts",
+  "Commitment analysis and RI recommendations",
+  "No shared database required"
 ];
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
@@ -556,7 +557,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Where do my credentials and billing data go?",
-    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. In solo mode, cost data stays in a local SQLite database. In team mode, it goes to your team's own Postgres instance \u2014 not nable's servers. We never see your data."
+    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data stays in a local SQLite database on your machine. We never see your data. For teams, findings are shared via Slack alerts and Notion \u2014 no shared database required."
   },
   {
     q: "What editors does it work with?",

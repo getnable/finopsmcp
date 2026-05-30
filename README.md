@@ -98,7 +98,7 @@ finops setup license  # activate a Team plan key
 
 ## How it works
 
-Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) — they never leave your machine. In solo mode, cost data is stored in a local SQLite database. In team mode, it goes to your team's own Postgres instance. We never see your data.
+Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) — they never leave your machine. Cost data is stored in a local SQLite database. We never see your data. Teams share findings via Slack alerts, Notion publishing, and CSV exports. No shared database required.
 
 nable is read-only by default. It never writes to your AWS account unless you explicitly enable cleanup mode. Run `finops setup aws --iam-template` to generate a least-privilege IAM policy with exactly the permissions nable needs.
 
