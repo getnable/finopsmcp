@@ -8897,6 +8897,12 @@ async def run_full_cost_audit(
 
     lines.append("")
     lines.append("*Run any individual tool for full details and remediation commands.*")
+    lines.append("")
+    lines.append("**What do you want to do with these results?**")
+    lines.append("- `export to CSV` — save to ~/Downloads for Excel or Sheets")
+    lines.append("- `publish to Notion` — share with your team (requires NOTION_API_KEY)")
+    lines.append("- `push to n8n` — trigger your automation workflow")
+    lines.append("- `tell me more about #1` — deep dive on the top opportunity")
 
     if errors:
         lines.append(f"\n*Scanners skipped (no data or not configured): {', '.join(errors)}*")
@@ -9472,6 +9478,118 @@ async def publish_cost_report_to_notion(
         f"Share the page with your team from Notion. "
         f"They don't need nable installed to view it."
     )
+
+
+@mcp.tool()
+async def what_can_nable_do() -> str:
+    """
+    Shows everything nable can help with, tailored to what's connected.
+
+    Call this when the user asks:
+        - "What can you do?"
+        - "What features do you have?"
+        - "What should I try first?"
+        - "What else can nable do?"
+        - "Show me what's available"
+        - "Help" or "getting started"
+
+    Always call this after a user connects their first account — it gives
+    them a clear picture of what's now possible without overwhelming them.
+    """
+    connected = []
+    not_connected = []
+
+    for name, connector in _CLOUD_CONNECTORS.items():
+        try:
+            if await connector.is_configured():
+                connected.append(name)
+            else:
+                not_connected.append(name)
+        except Exception:
+            not_connected.append(name)
+
+    has_aws = "aws" in connected
+    has_slack = "slack" in connected
+    has_notion = "notion" in connected
+    has_n8n = "n8n" in connected
+
+    lines = ["## What nable can do for you", ""]
+
+    # Core — always available
+    lines += [
+        "### Find savings",
+        '- **"What are my biggest savings opportunities?"** — runs 20 scanners, ranked by dollar impact',
+        '- **"Why did my bill spike?"** — anomaly detection with tag attribution',
+        '- **"Show me rightsizing recommendations"** — EC2, RDS, Lambda, EKS',
+        '- **"What Graviton instances can I migrate to?"** — 20-40% compute savings',
+        '- **"Audit my public IPv4 addresses"** — $3.60/mo per unused IP since Feb 2024',
+        '- **"Any spot instance opportunities?"** — up to 90% savings on eligible workloads',
+        "",
+    ]
+
+    if has_aws:
+        lines += [
+            "### Fix savings (Terraform close-the-loop)",
+            '- **"Open a PR for the top rightsizing rec"** — reads tfstate, patches .tf, opens GitHub PR',
+            '- **"Apply the tag fixes"** — writes missing tags directly to your .tf files',
+            "",
+        ]
+
+    lines += [
+        "### Understand your bill",
+        '- **"Break down my AWS spend by service"** — last 30/60/90 days',
+        '- **"What are my Bedrock costs by model?"** — per-token, per-model breakdown',
+        '- **"How much am I spending on Textract?"** — and which environments are calling it',
+        '- **"Show my commitment coverage"** — RI and Savings Plan gaps',
+        "",
+        "### Share findings",
+        '- **"Export to CSV"** — saves to ~/Downloads, opens clean in Excel or Sheets',
+    ]
+
+    if has_notion:
+        lines.append('- **"Publish to Notion"** — updates your team\'s shared cost dashboard')
+    else:
+        lines.append('- **"Publish to Notion"** — share with your team *(run `finops setup notion` to enable)*')
+
+    if has_n8n:
+        lines.append('- **"Push to n8n"** — triggers your automation workflow')
+    else:
+        lines.append('- **"Push to n8n"** — wire cost events into any automation *(run `finops setup n8n` to enable)*')
+
+    lines.append("")
+    lines += [
+        "### Automate",
+    ]
+
+    if has_slack:
+        lines.append("- Anomaly alerts → Slack (connected)")
+    else:
+        lines.append('- **Slack alerts** — anomaly and budget notifications *(run `finops setup slack` to enable)*')
+
+    lines += [
+        '- **Weekly digest** — top spend drivers every Monday via email',
+        '- **Budget enforcement** — alerts at 80%, blocks at 100%',
+        "",
+    ]
+
+    # What's not connected yet
+    if not_connected:
+        missing = [p for p in not_connected if p not in ("notion", "n8n", "slack")]
+        if missing:
+            lines += [
+                "### Connect more providers",
+                f"You have **{len(connected)}** provider(s) connected. These are available:",
+            ]
+            for p in missing[:6]:
+                lines.append(f"- `finops setup {p}`")
+            if len(missing) > 6:
+                lines.append(f"- ...and {len(missing) - 6} more (`finops setup` to see the full list)")
+            lines.append("")
+
+    lines.append("---")
+    lines.append("*Ask about any of these in plain English. No commands to memorize.*")
+
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
