@@ -250,7 +250,7 @@ function CopyInstall() {
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
     if (window.posthog) posthog.capture("install_copied");
-  } }, copied ? "copied" : "copy")), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { fontSize: 11, color: "var(--fg-3)", letterSpacing: ".04em", paddingLeft: 2 } }, "installs the MCP server \xB7 guided setup runs automatically"));
+  } }, copied ? "copied" : "copy")), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 11, color: "var(--fg-3)", letterSpacing: ".04em", paddingLeft: 2, fontFamily: "'Instrument Sans',system-ui,sans-serif" } }, "installs the MCP server \xB7 guided setup runs automatically"));
 }
 function fmtNum(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
@@ -490,7 +490,7 @@ function Pricing() {
     annual ? "Get annual plan" : "Start free trial",
     " ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  )), /* @__PURE__ */ React.createElement("div", { className: "pricing-features" }, TEAM_FEATURES.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "pricing-feature" }, /* @__PURE__ */ React.createElement(CheckIcon, null), /* @__PURE__ */ React.createElement("span", null, f)))))), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { marginTop: 32, fontSize: 12, color: "var(--fg-4)", textAlign: "center", letterSpacing: ".04em" } }, "No credit card for Solo. Team trial requires a card, cancel any time.")));
+  )), /* @__PURE__ */ React.createElement("div", { className: "pricing-features" }, TEAM_FEATURES.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "pricing-feature" }, /* @__PURE__ */ React.createElement(CheckIcon, null), /* @__PURE__ */ React.createElement("span", null, f)))))), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 32, fontSize: 12, color: "var(--fg-4)", textAlign: "center", fontFamily: "'Instrument Sans',system-ui,sans-serif" } }, "No credit card for Solo. Team trial requires a card, cancel any time.")));
 }
 function MidCta() {
   return /* @__PURE__ */ React.createElement("section", { id: "mid-cta", style: { borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { paddingTop: 72, paddingBottom: 72 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 24, textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { style: { marginBottom: 10 } }, "Ready to stop guessing?"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-2)", maxWidth: "46ch", margin: "0 auto", lineHeight: 1.6 } }, "Five minutes from install to your first real insight. Free forever for solo use.")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "center" } }, /* @__PURE__ */ React.createElement(
@@ -666,7 +666,7 @@ function PaletteSwatches({ value, onChange }) {
           borderRadius: 7,
           background: "rgba(255,255,255,.03)",
           color: "var(--fg)",
-          fontFamily: "'DM Sans',sans-serif",
+          fontFamily: "'Instrument Sans',system-ui,sans-serif",
           fontSize: 12,
           cursor: "pointer",
           boxShadow: on ? "0 0 0 2px rgba(95,232,160,.18)" : "none",
