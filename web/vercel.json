@@ -12,6 +12,18 @@
   ],
   "headers": [
     {
+      "source": "/api/pypi-stats",
+      "headers": [
+        { "key": "Cache-Control", "value": "s-maxage=21600, stale-while-revalidate=3600" }
+      ]
+    },
+    {
+      "source": "/api/pypi-version",
+      "headers": [
+        { "key": "Cache-Control", "value": "s-maxage=3600, stale-while-revalidate=300" }
+      ]
+    },
+    {
       "source": "/(.*)",
       "headers": [
         { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
