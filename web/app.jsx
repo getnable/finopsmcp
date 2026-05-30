@@ -263,9 +263,9 @@ function Hero({ layout, interaction }){
             </div>
             <div className="hero-mobile-cta">
               <p style={{fontSize:13, color:"var(--fg-3)", marginBottom:12, letterSpacing:".01em"}}>
-                On mobile? Get the setup guide sent to your inbox.
+                Drop your email and we'll send the setup guide straight to you.
               </p>
-              <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Send guide" />
+              <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Send it" />
             </div>
           </div>
           <div className="hero-right">
@@ -1218,8 +1218,8 @@ function App(){
     <>
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
-      <Connectors />
       <Depth />
+      <Connectors />
       <Architecture version={version} />
       <Pricing />
       <FAQ />

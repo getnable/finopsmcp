@@ -240,7 +240,7 @@ function Hero({ layout, interaction }) {
       }
     },
     "Read the docs"
-  )), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { style: { fontSize: 13, color: "var(--fg-3)", marginBottom: 12, letterSpacing: ".01em" } }, "On mobile? Get the setup guide sent to your inbox."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Send guide" }))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction }))), /* @__PURE__ */ React.createElement(TrustStrip, null)));
+  )), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { style: { fontSize: 13, color: "var(--fg-3)", marginBottom: 12, letterSpacing: ".01em" } }, "Drop your email and we'll send the setup guide straight to you."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Send it" }))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction }))), /* @__PURE__ */ React.createElement(TrustStrip, null)));
 }
 function CopyInstall() {
   const [copied, setCopied] = useState(false);
@@ -722,6 +722,6 @@ function App() {
     }).catch(() => {
     });
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
 }
 ReactDOM.createRoot(document.getElementById("app")).render(/* @__PURE__ */ React.createElement(App, null));
