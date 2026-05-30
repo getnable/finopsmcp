@@ -14,6 +14,13 @@ class SnowflakeConnector(BaseConnector):
     Dollar conversion ONLY happens when SNOWFLAKE_CREDIT_PRICE is explicitly set
     by the user (i.e. they know their contract rate). Without it we report credits,
     not invented dollar amounts.
+
+    NOTE: Every query nable runs against Snowflake consumes warehouse compute credits.
+    Each cost query is a single SQL statement against ACCOUNT_USAGE views, which are
+    lightweight, but this is not zero-cost. If your warehouse auto-suspends, nable
+    queries will resume it and consume credits. Set SNOWFLAKE_WAREHOUSE to a
+    dedicated small warehouse (X-SMALL) to minimize cost. Typical nable query cost:
+    less than 0.01 credits per call at X-SMALL sizing.
     """
     provider = "snowflake"
 

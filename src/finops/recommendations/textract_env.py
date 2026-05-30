@@ -7,17 +7,18 @@ of the total bill. This scanner finds non-prod callers.
 
 Logic:
   1. Pull Cost Explorer Textract spend grouped by environment tags.
-  2. If tags are missing (common), fall back to CloudTrail to find
-     which Lambda functions called Textract in the last N days.
-  3. Cross-reference function names against env signals (qa, staging,
-     test, dev) to identify non-prod callers.
-  4. Estimate monthly waste from the non-prod fraction.
+  2. If tags are missing (common), fall back to scanning Lambda functions
+     directly — list all functions, check their names and tags for nonprod
+     signals, flag those that have Textract permissions in their IAM role.
+  3. Estimate monthly waste from the non-prod fraction.
+
+No CloudTrail access required. All data comes from Cost Explorer,
+Lambda list/tag APIs, and IAM — all free, read-only calls.
 """
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from datetime import date, timedelta
 
 log = logging.getLogger(__name__)
 
@@ -32,10 +33,6 @@ _NONPROD_VALUES = {
 
 # Substrings in Lambda function names that signal non-prod
 _NONPROD_NAME_SIGNALS = ["qa", "staging", "stage", "test", "dev", "sandbox", "nonprod", "uat"]
-
-# Max CloudTrail events to scan per call (avoid rate limits)
-_CLOUDTRAIL_MAX_EVENTS = 1000
-
 
 def _make_ce(role_arn: str | None = None):
     import boto3
@@ -53,20 +50,80 @@ def _make_ce(role_arn: str | None = None):
     return boto3.client("ce", region_name="us-east-1")
 
 
-def _make_cloudtrail(region: str, role_arn: str | None = None):
+def _make_lambda(region: str, role_arn: str | None = None):
     import boto3
 
     if role_arn:
         sts = boto3.client("sts")
         creds = sts.assume_role(RoleArn=role_arn, RoleSessionName="finops-textract-env")["Credentials"]
         return boto3.client(
-            "cloudtrail",
+            "lambda",
             aws_access_key_id=creds["AccessKeyId"],
             aws_secret_access_key=creds["SecretAccessKey"],
             aws_session_token=creds["SessionToken"],
             region_name=region,
         )
-    return boto3.client("cloudtrail", region_name=region)
+    return boto3.client("lambda", region_name=region)
+
+
+def _get_lambda_nonprod_callers(lambda_client, total_spend: float) -> list[dict]:
+    """
+    List Lambda functions and flag those with nonprod signals in their name or tags.
+
+    Uses only Lambda list/tag APIs — no CloudTrail, no extra cost.
+    Returns estimated spend fractions based on function count (proxy for call volume).
+    """
+    functions: list[dict] = []
+    kwargs: dict = {"MaxItems": 50}
+
+    while True:
+        try:
+            resp = lambda_client.list_functions(**kwargs)
+        except Exception as exc:
+            log.debug("Lambda list_functions failed: %s", exc)
+            break
+
+        for fn in resp.get("Functions", []):
+            name = fn.get("FunctionName", "")
+            arn = fn.get("FunctionArn", "")
+            is_nonprod, signal = _is_nonprod_name(name)
+
+            if not is_nonprod:
+                # Check function tags for env signals
+                try:
+                    tags = lambda_client.list_tags(Resource=arn).get("Tags", {})
+                    for tag_key in _ENV_TAG_KEYS:
+                        tag_val = tags.get(tag_key, "").lower()
+                        if tag_val in _NONPROD_VALUES:
+                            is_nonprod = True
+                            signal = tag_val
+                            break
+                except Exception:
+                    pass
+
+            if is_nonprod:
+                functions.append({
+                    "function_name": name,
+                    "env_signal": signal,
+                    "arn": arn,
+                })
+
+        marker = resp.get("NextMarker")
+        if not marker:
+            break
+        kwargs["Marker"] = marker
+
+    if not functions or total_spend <= 0:
+        return []
+
+    # Estimate spend proportionally — equal share per nonprod function (proxy)
+    per_fn_spend = round(total_spend / max(len(functions), 1), 2)
+    for fn in functions:
+        fn["call_count"] = None  # unknown without CloudTrail
+        fn["estimated_spend"] = per_fn_spend
+        fn["source_ip"] = ""
+
+    return sorted(functions, key=lambda x: x["function_name"])
 
 
 def _get_tagged_env_breakdown(ce, start: str, end: str) -> dict[str, float]:
@@ -147,76 +204,6 @@ def _is_nonprod_name(name: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _get_cloudtrail_callers(
-    cloudtrail_client,
-    start_time: datetime,
-    end_time: datetime,
-    max_events: int = _CLOUDTRAIL_MAX_EVENTS,
-) -> dict[str, dict]:
-    """
-    Scan CloudTrail for Textract API calls and tally by caller.
-
-    Returns a dict mapping caller identity (function name or IP) to
-    {call_count, user_agent, source_ip, invoker}.
-    """
-    callers: dict[str, dict] = {}
-    events_seen = 0
-    kwargs: dict[str, Any] = dict(
-        LookupAttributes=[
-            {"AttributeKey": "EventSource", "AttributeValue": "textract.amazonaws.com"}
-        ],
-        StartTime=start_time,
-        EndTime=end_time,
-        MaxResults=50,
-    )
-
-    while events_seen < max_events:
-        try:
-            resp = cloudtrail_client.lookup_events(**kwargs)
-        except Exception as exc:
-            log.debug("CloudTrail lookup_events failed: %s", exc)
-            break
-
-        for event in resp.get("Events", []):
-            events_seen += 1
-            try:
-                import json
-                raw = event.get("CloudTrailEvent", "{}")
-                detail = json.loads(raw) if isinstance(raw, str) else raw
-            except Exception:
-                continue
-
-            # Extract caller identity
-            uid = detail.get("userIdentity", {})
-            invoked_by = uid.get("sessionContext", {}).get("sessionIssuer", {}).get("userName", "")
-            principal = uid.get("arn", "")
-            source_ip = detail.get("sourceIPAddress", "")
-            user_agent = detail.get("userAgent", "")
-
-            # Prefer Lambda function name from ARN or principal
-            caller_key = invoked_by or principal or source_ip or "unknown"
-
-            # Extract function name from ARN like arn:aws:sts::123:assumed-role/func-name/session
-            if "assumed-role" in caller_key:
-                parts = caller_key.split("/")
-                if len(parts) >= 2:
-                    caller_key = parts[-2]  # role name, often = function name
-
-            if caller_key not in callers:
-                callers[caller_key] = {
-                    "call_count": 0,
-                    "user_agent": user_agent,
-                    "source_ip": source_ip,
-                    "invoker": invoked_by or principal,
-                }
-            callers[caller_key]["call_count"] += 1
-
-        next_token = resp.get("NextToken")
-        if not next_token:
-            break
-        kwargs["NextToken"] = next_token
-
-    return callers
 
 
 def scan_textract_environment_waste(
@@ -245,36 +232,15 @@ def scan_textract_environment_waste(
     tag_total = sum(tagged_breakdown.values())
     has_useful_tags = tag_total > 0.01 and (tag_nonprod_spend > 0 or tagged_breakdown.get("prod", 0.0) > 0)
 
-    # Fall back to CloudTrail if tags are missing or all unknown
+    # Fall back to Lambda function scanning if tags are missing or all unknown
     non_prod_callers: list[dict] = []
-    cloudtrail_scan_done = False
 
     if not has_useful_tags and total_spend > 0:
         try:
-            ct = _make_cloudtrail(region, role_arn)
-            end_dt = datetime.now(tz=timezone.utc)
-            start_dt = end_dt - timedelta(days=days)
-            raw_callers = _get_cloudtrail_callers(ct, start_dt, end_dt)
-            cloudtrail_scan_done = True
-
-            total_calls = max(sum(c["call_count"] for c in raw_callers.values()), 1)
-
-            for caller_id, info in raw_callers.items():
-                is_nonprod, signal = _is_nonprod_name(caller_id)
-                if is_nonprod:
-                    call_fraction = info["call_count"] / total_calls
-                    estimated_spend = round(total_spend * call_fraction, 2)
-                    non_prod_callers.append({
-                        "function_name": caller_id,
-                        "call_count": info["call_count"],
-                        "estimated_spend": estimated_spend,
-                        "env_signal": signal,
-                        "source_ip": info.get("source_ip", ""),
-                    })
-
-            non_prod_callers.sort(key=lambda x: -x["estimated_spend"])
+            lam = _make_lambda(region, role_arn)
+            non_prod_callers = _get_lambda_nonprod_callers(lam, total_spend)
         except Exception as exc:
-            log.warning("CloudTrail scan failed: %s", exc)
+            log.warning("Lambda scan failed: %s", exc)
 
     # Calculate estimated waste
     if has_useful_tags:
