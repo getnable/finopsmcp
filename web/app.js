@@ -428,7 +428,7 @@ function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/aFa28q1DzffEdZS2sy2Nq03";
-const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/eVq00i6XT1oOg80d7c2Nq04";
+const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/5kQ28q6XT8RgdZS8QW2Nq05";
 function Pricing() {
   const [annual, setAnnual] = useState(false);
   const teamPrice = annual ? "$400" : "$40";
