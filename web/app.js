@@ -430,10 +430,10 @@ const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/aFa28q1DzffEdZS2sy2Nq03";
 const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01";
 function Pricing() {
   const [annual, setAnnual] = useState(false);
-  const teamPrice = annual ? "$399" : "$40";
+  const teamPrice = annual ? "$400" : "$40";
   const teamPer = annual ? "/ yr" : "/ mo";
-  const teamSub = annual ? "$33/mo \xB7 save $81" : null;
-  const teamSavings = annual ? "Save $81 \u2014 2 months free" : "7-day free trial";
+  const teamSub = annual ? "$33/mo \xB7 save $80" : null;
+  const teamSavings = annual ? "Save $80 \u2014 2 months free" : "7-day free trial";
   const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan = annual ? "team_annual" : "team_monthly";
   return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget enforcement, and org rollups."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
