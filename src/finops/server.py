@@ -6145,15 +6145,18 @@ async def forecast_costs(
     """
     try:
         from .ml.forecasting import Forecaster
-        f = Forecaster.for_account(account_id, service=service, days=history_days)
+        aws = _CLOUD_CONNECTORS.get("aws")
+        aws_configured = aws and await aws.is_configured()
+        f = Forecaster.for_account(
+            account_id,
+            service=service,
+            days=history_days,
+            aws_connector=aws if aws_configured else None,
+        )
         if not f._series:
             return {
                 "error": "No historical data found for this account/service.",
-                "hint": (
-                    "Forecasting requires at least 14 days of daily snapshots. "
-                    "Run `take_snapshot_now` to capture today's data, then set up the daily cron: "
-                    "`finops schedule snapshots`. Forecasting will unlock automatically once enough history exists."
-                ),
+                "hint": "Connect your AWS account with `finops setup aws` to enable forecasting.",
             }
         return f.predict_dict(horizon_days)
     except Exception as e:

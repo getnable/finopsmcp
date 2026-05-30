@@ -276,16 +276,75 @@ class Forecaster:
         account_id: str,
         service: str | None = None,
         days: int = 90,
+        aws_connector=None,
     ) -> "Forecaster":
         """
-        Construct a Forecaster, pulling historical daily costs from the DB
-        and re-fitting (or loading cached params).
+        Construct a Forecaster with historical daily costs.
+
+        Data source priority:
+          1. Local cost_snapshots DB (accumulated via take_snapshot_now)
+          2. AWS Cost Explorer directly (13 months of daily history available
+             immediately — no snapshot setup required)
+
+        Passing aws_connector enables the Cost Explorer fallback so forecasting
+        works on day one without any snapshot history.
         """
         f = cls(account_id, service)
         series = f._load_series(days)
+        if not series and aws_connector is not None:
+            series = f._load_series_from_ce(aws_connector, days)
         if series:
             f.fit(series)
         return f
+
+    def _load_series_from_ce(self, aws_connector, days: int) -> list[float]:
+        """Pull daily cost totals directly from AWS Cost Explorer.
+
+        Returns up to `days` days of history. Works on day one — Cost Explorer
+        has 13 months of history available without any local setup.
+        """
+        import asyncio
+        try:
+            import boto3
+            end = date.today()
+            start = end - timedelta(days=days)
+
+            loop = asyncio.get_event_loop()
+            ce = boto3.client("ce", region_name="us-east-1")
+
+            kwargs: dict = dict(
+                TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
+                Granularity="DAILY",
+                Metrics=["UnblendedCost"],
+            )
+            if self.service:
+                kwargs["Filter"] = {
+                    "Dimensions": {"Key": "SERVICE", "Values": [self.service]}
+                }
+
+            def _fetch():
+                return ce.get_cost_and_usage(**kwargs)
+
+            resp = loop.run_until_complete(
+                asyncio.get_event_loop().run_in_executor(None, _fetch)
+            ) if asyncio.get_event_loop().is_running() else _fetch()
+
+            series = []
+            for period in resp.get("ResultsByTime", []):
+                amount = float(
+                    period.get("Total", {})
+                    .get("UnblendedCost", {})
+                    .get("Amount", 0.0)
+                )
+                series.append(amount)
+            log.info(
+                "Loaded %d days of CE history for forecasting (no local snapshots needed)",
+                len(series),
+            )
+            return series
+        except Exception as exc:
+            log.debug("CE series fallback failed: %s", exc)
+            return []
 
     def _load_series(self, days: int) -> list[float]:
         """Pull daily cost totals from cost_snapshots."""
