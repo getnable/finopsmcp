@@ -7,6 +7,7 @@ Run via:  finops-mcp  or  python -m finops.server
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import statistics
@@ -276,26 +277,36 @@ async def _gather_costs(
     granularity: str = "MONTHLY",
     service_filter: str | None = None,
 ) -> tuple[float, dict[str, dict], dict[str, float]]:
-    """Run cost queries across targets, return (grand_total, by_provider, grand_by_service)."""
-    grand_total = 0.0
-    by_provider: dict[str, dict] = {}
-    grand_by_service: dict[str, float] = {}
+    """Run cost queries across targets concurrently, return (grand_total, by_provider, grand_by_service)."""
 
-    for name, connector in targets.items():
+    async def _safe_fetch(name: str, connector: Any):
         try:
             summary = await connector.get_costs(start, end, granularity=granularity)
-            by_provider[name] = _summary_to_dict(summary)
-            grand_total += summary.total_usd
-            for svc, amt in summary.by_service.items():
-                if service_filter and service_filter.lower() not in svc.lower():
-                    continue
-                grand_by_service[svc] = grand_by_service.get(svc, 0.0) + amt
+            return name, summary, None
         except Exception as exc:
             log.error(
                 "Connector fetch failed: connector=%s error_type=%s error=%s timestamp=%s",
                 name, type(exc).__name__, exc, datetime.utcnow().isoformat(),
             )
-            by_provider[name] = {"error": str(exc)}
+            return name, None, str(exc)
+
+    items = list(targets.items())
+    fetch_results = await asyncio.gather(*[_safe_fetch(n, c) for n, c in items])
+
+    grand_total = 0.0
+    by_provider: dict[str, dict] = {}
+    grand_by_service: dict[str, float] = {}
+
+    for name, summary, error in fetch_results:
+        if error is not None:
+            by_provider[name] = {"error": error}
+            continue
+        by_provider[name] = _summary_to_dict(summary)
+        grand_total += summary.total_usd
+        for svc, amt in summary.by_service.items():
+            if service_filter and service_filter.lower() not in svc.lower():
+                continue
+            grand_by_service[svc] = grand_by_service.get(svc, 0.0) + amt
 
     return grand_total, by_provider, grand_by_service
 
@@ -2751,26 +2762,39 @@ async def get_rds_rightsizing_recommendations(
         import boto3
         from .analyzers.waste import check_rds_rightsizing
 
+        loop = asyncio.get_event_loop()
+
         if regions is None:
             try:
-                ec2g = boto3.client("ec2", region_name="us-east-1")
-                resp = ec2g.describe_regions(
-                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                regions = await loop.run_in_executor(
+                    None,
+                    lambda: [
+                        r["RegionName"]
+                        for r in boto3.client("ec2", region_name="us-east-1").describe_regions(
+                            Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                        ).get("Regions", [])
+                    ],
                 )
-                regions = [r["RegionName"] for r in resp.get("Regions", [])]
             except Exception:
                 regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
-        all_findings: list[dict] = []
-        for region in regions:
+        async def _scan_region_rds_rs(region: str) -> list[dict]:
             try:
-                rds = boto3.client("rds", region_name=region)
-                cw = boto3.client("cloudwatch", region_name=region)
-                findings = check_rds_rightsizing(rds, cw, region, cpu_threshold_pct=cpu_threshold)
-                all_findings.extend(findings)
+                return await loop.run_in_executor(
+                    None,
+                    lambda: check_rds_rightsizing(
+                        boto3.client("rds", region_name=region),
+                        boto3.client("cloudwatch", region_name=region),
+                        region,
+                        cpu_threshold_pct=cpu_threshold,
+                    ),
+                )
             except Exception as exc:
                 log.warning("RDS rightsizing scan failed for region %s: %s", region, exc)
+                return []
 
+        region_results = await asyncio.gather(*[_scan_region_rds_rs(r) for r in regions])
+        all_findings: list[dict] = [f for findings in region_results for f in findings]
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
@@ -2811,26 +2835,38 @@ async def get_idle_rds_instances(
         import boto3
         from .analyzers.waste import check_rds_idle
 
+        loop = asyncio.get_event_loop()
+
         if regions is None:
             try:
-                ec2g = boto3.client("ec2", region_name="us-east-1")
-                resp = ec2g.describe_regions(
-                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                regions = await loop.run_in_executor(
+                    None,
+                    lambda: [
+                        r["RegionName"]
+                        for r in boto3.client("ec2", region_name="us-east-1").describe_regions(
+                            Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                        ).get("Regions", [])
+                    ],
                 )
-                regions = [r["RegionName"] for r in resp.get("Regions", [])]
             except Exception:
                 regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
-        all_findings: list[dict] = []
-        for region in regions:
+        async def _scan_region_rds_idle(region: str) -> list[dict]:
             try:
-                rds = boto3.client("rds", region_name=region)
-                cw = boto3.client("cloudwatch", region_name=region)
-                findings = check_rds_idle(rds, cw, region)
-                all_findings.extend(findings)
+                return await loop.run_in_executor(
+                    None,
+                    lambda: check_rds_idle(
+                        boto3.client("rds", region_name=region),
+                        boto3.client("cloudwatch", region_name=region),
+                        region,
+                    ),
+                )
             except Exception as exc:
                 log.warning("RDS idle scan failed for region %s: %s", region, exc)
+                return []
 
+        region_results = await asyncio.gather(*[_scan_region_rds_idle(r) for r in regions])
+        all_findings: list[dict] = [f for findings in region_results for f in findings]
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
@@ -2872,29 +2908,40 @@ async def get_idle_load_balancers(
         import boto3
         from .analyzers.waste import check_idle_load_balancers
 
+        loop = asyncio.get_event_loop()
+
         if regions is None:
             try:
-                ec2g = boto3.client("ec2", region_name="us-east-1")
-                resp = ec2g.describe_regions(
-                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                regions = await loop.run_in_executor(
+                    None,
+                    lambda: [
+                        r["RegionName"]
+                        for r in boto3.client("ec2", region_name="us-east-1").describe_regions(
+                            Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                        ).get("Regions", [])
+                    ],
                 )
-                regions = [r["RegionName"] for r in resp.get("Regions", [])]
             except Exception:
                 regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
-        all_findings: list[dict] = []
-        for region in regions:
+        async def _scan_region_elb(region: str) -> list[dict]:
             try:
-                elbv2 = boto3.client("elbv2", region_name=region)
-                elb = boto3.client("elb", region_name=region)
-                cw = boto3.client("cloudwatch", region_name=region)
-                findings = check_idle_load_balancers(
-                    elbv2, elb, cw, region, request_threshold=request_threshold
+                return await loop.run_in_executor(
+                    None,
+                    lambda: check_idle_load_balancers(
+                        boto3.client("elbv2", region_name=region),
+                        boto3.client("elb", region_name=region),
+                        boto3.client("cloudwatch", region_name=region),
+                        region,
+                        request_threshold=request_threshold,
+                    ),
                 )
-                all_findings.extend(findings)
             except Exception as exc:
                 log.warning("Load balancer idle scan failed for region %s: %s", region, exc)
+                return []
 
+        region_results = await asyncio.gather(*[_scan_region_elb(r) for r in regions])
+        all_findings: list[dict] = [f for findings in region_results for f in findings]
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
