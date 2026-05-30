@@ -7632,6 +7632,211 @@ async def get_service_cost(
 
 
 @mcp.tool()
+async def identify_nonprod_scheduling_opportunities(
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Identifies non-production EC2 instances running 24/7 that could be scheduled.
+    Dev/staging environments typically only need to run during business hours.
+    Scheduling saves 60-70% on non-production compute costs.
+    Returns instances with idle patterns and recommended schedules.
+
+    Args:
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+
+    Examples:
+        - "Find non-prod instances we could schedule to save money"
+        - "Which dev and staging instances are running nights and weekends?"
+        - "How much could we save by scheduling non-production environments?"
+        - "Show me EC2 instances tagged dev or staging that run 24/7"
+    """
+    try:
+        from .recommendations.nonprod_scheduler import identify_nonprod_resources
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return "AWS is not configured. Run 'uvx finops-mcp setup' to connect."
+
+        result = await identify_nonprod_resources(aws_client=aws, regions=regions)
+
+        if "error" in result:
+            return f"Error: {result['error']}"
+
+        instances = result.get("schedulable_instances", [])
+        total_waste = result.get("total_monthly_waste", 0.0)
+        total = result.get("total_instances", 0)
+
+        if total == 0:
+            return (
+                "No schedulable non-production instances found.\n"
+                "Either there are no instances tagged dev/staging/test/qa/sandbox, "
+                "or they are not significantly idle during off-hours."
+            )
+
+        lines = ["## Non-production Scheduling Opportunities", ""]
+        lines.append(
+            "| Instance | Type | Environment | Region | Idle hrs/wk | Monthly Cost | Monthly Saving |"
+        )
+        lines.append(
+            "|----------|------|-------------|--------|-------------|--------------|----------------|"
+        )
+        for inst in instances:
+            name_label = inst["name"] or inst["instance_id"]
+            lines.append(
+                f"| {name_label} ({inst['instance_id']}) "
+                f"| {inst['instance_type']} "
+                f"| {inst['environment']} "
+                f"| {inst['region']} "
+                f"| {inst['idle_hours_per_week']:.0f} "
+                f"| ${inst['monthly_cost_estimate']:,.2f} "
+                f"| ${inst['potential_monthly_savings']:,.2f} |"
+            )
+
+        lines.append("")
+        lines.append(f"Estimated total monthly saving: ${total_waste:,.2f}")
+        lines.append(
+            "These instances are running 24/7 but appear idle nights and weekends."
+        )
+        lines.append(
+            "Recommended schedule: Monday-Friday 08:00-18:00 UTC "
+            "(50 hrs/wk vs 168 hrs/wk currently)."
+        )
+        lines.append("")
+        lines.append("Next step: Use EventBridge Scheduler or AWS Instance Scheduler.")
+        lines.append(
+            "Each instance record includes an aws_scheduler_command with the CLI command to set this up."
+        )
+
+        nudge = _team_nudge(
+            f"To auto-create Jira, Linear, or GitHub tickets for these {total} "
+            f"scheduling opportunities, upgrade to Team:"
+        )
+        if nudge:
+            lines.append("")
+            lines.append(nudge)
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        log.error("identify_nonprod_scheduling_opportunities failed: %s", e, exc_info=True)
+        return f"Error: {e}"
+
+
+@mcp.tool()
+async def audit_rds_manual_snapshots(
+    regions: list[str] | None = None,
+    age_threshold_days: int = 30,
+) -> str:
+    """
+    Audits RDS manual snapshots for cost waste. Manual snapshots never auto-expire.
+    Identifies orphaned snapshots (source DB deleted) and old snapshots past the
+    retention threshold. RDS snapshot storage costs $0.095/GB-month.
+
+    Args:
+        regions:            AWS regions to scan. Defaults to all opted-in regions.
+        age_threshold_days: Flag snapshots older than this many days. Default: 30.
+
+    Examples:
+        - "Audit RDS snapshots for waste"
+        - "Find orphaned RDS snapshots from deleted databases"
+        - "How much are we paying for old RDS manual snapshots?"
+        - "List RDS snapshots older than 60 days"
+        - "What RDS snapshots can we safely delete?"
+    """
+    try:
+        from .recommendations.rds_snapshots import audit_rds_manual_snapshots as _audit
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return "AWS is not configured. Run 'uvx finops-mcp setup' to connect."
+
+        result = await _audit(
+            aws_client=aws,
+            regions=regions,
+            age_threshold_days=age_threshold_days,
+        )
+
+        if "error" in result:
+            return f"Error: {result['error']}"
+
+        orphaned = result.get("orphaned_snapshots", [])
+        old = result.get("old_snapshots", [])
+        total_monthly = result.get("total_monthly_cost", 0.0)
+        potential_savings = result.get("potential_monthly_savings", 0.0)
+        total_snapshots = result.get("total_snapshots", 0)
+        total_size_gb = result.get("total_size_gb", 0.0)
+
+        if total_snapshots == 0:
+            return "No manual RDS snapshots found across the scanned regions."
+
+        lines = ["## RDS Manual Snapshot Audit", ""]
+        lines.append(
+            f"Found {total_snapshots} manual snapshots totalling {total_size_gb:.1f} GB "
+            f"(${total_monthly:,.2f}/mo)."
+        )
+        lines.append(
+            f"Potential saving if flagged snapshots are deleted: ${potential_savings:,.2f}/mo."
+        )
+        lines.append("")
+
+        if orphaned:
+            lines.append(f"### Orphaned Snapshots ({len(orphaned)}) - Source DB no longer exists")
+            lines.append("")
+            lines.append("| Snapshot ID | DB Identifier | Size (GB) | Age (days) | Monthly Cost |")
+            lines.append("|-------------|---------------|-----------|------------|--------------|")
+            for snap in orphaned:
+                lines.append(
+                    f"| {snap['snapshot_id']} "
+                    f"| {snap['db_identifier']} "
+                    f"| {snap['size_gb']:.1f} "
+                    f"| {snap['age_days']} "
+                    f"| ${snap['monthly_cost']:,.4f} |"
+                )
+            lines.append("")
+
+        if old:
+            lines.append(
+                f"### Old Snapshots ({len(old)}) - Older than {age_threshold_days} days, source DB exists"
+            )
+            lines.append("")
+            lines.append("| Snapshot ID | DB Identifier | Size (GB) | Age (days) | Monthly Cost |")
+            lines.append("|-------------|---------------|-----------|------------|--------------|")
+            for snap in old:
+                lines.append(
+                    f"| {snap['snapshot_id']} "
+                    f"| {snap['db_identifier']} "
+                    f"| {snap['size_gb']:.1f} "
+                    f"| {snap['age_days']} "
+                    f"| ${snap['monthly_cost']:,.4f} |"
+                )
+            lines.append("")
+
+        if not orphaned and not old:
+            lines.append(
+                f"All {total_snapshots} snapshots are recent (under {age_threshold_days} days) "
+                f"and their source DBs still exist. No immediate action needed."
+            )
+
+        lines.append(
+            "To delete a snapshot: "
+            "`aws rds delete-db-snapshot --db-snapshot-identifier <snapshot-id> --region <region>`"
+        )
+
+        nudge = _team_nudge(
+            f"To auto-create Jira, Linear, or GitHub tickets for these snapshot findings, "
+            f"upgrade to Team:"
+        )
+        if nudge:
+            lines.append("")
+            lines.append(nudge)
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        log.error("audit_rds_manual_snapshots failed: %s", e, exc_info=True)
+        return f"Error: {e}"
+
+
+@mcp.tool()
 async def scan_lambda_concurrency_waste(
     regions: list[str] | None = None,
 ) -> dict:
