@@ -511,7 +511,7 @@ function Depth(){
     {
       n: "01",
       h: "Your biggest savings, in one question.",
-      p: "Ask 'where am I wasting money?' and get a ranked list of every opportunity across your infrastructure — sorted by dollar impact, not category. No dashboard to configure. No report to schedule. No knowing what to look for. Just results.",
+      p: "Ask 'where am I wasting money?' and get a ranked list of every opportunity across your infrastructure, sorted by dollar impact. No dashboard to configure. No report to schedule. No knowing what to look for. Just results.",
       chips: ["ranked by $","works day one","no setup","20 scanners"],
     },
     {
@@ -523,13 +523,13 @@ function Depth(){
     {
       n: "03",
       h: "AI spend tracked like a first-class cost.",
-      p: "Bedrock, OpenAI, Anthropic — these don't fit in the usual cost buckets. nable tracks AI spend by model, by use case, by team. It spots where expensive models are doing work cheaper ones handle just as well, and flags environments burning AI budget unnecessarily.",
+      p: "Bedrock, OpenAI, Anthropic. These don't fit in the usual cost buckets. nable tracks AI spend by model, by use case, by team. It spots where expensive models are doing work cheaper ones handle just as well, and flags environments burning AI budget unnecessarily.",
       chips: ["by model","by team","model routing","AI-native"],
     },
     {
       n: "04",
       h: "It tells you who to call.",
-      p: "When spend spikes, you don't need another chart. You need to know which team owns it. nable attributes anomalies to the service, team, or environment that caused them, then alerts whoever owns it in Slack or Teams — before finance notices.",
+      p: "When spend spikes, you don't need another chart. You need to know which team owns it. nable attributes anomalies to the service, team, or environment that caused them, then alerts whoever owns it in Slack or Teams. Before finance notices.",
       chips: ["team attribution","Slack / Teams","near-zero false positives","28-day baseline"],
     },
   ];
@@ -748,7 +748,7 @@ const SOLO_FEATURES = [
 const TEAM_FEATURES = [
   "Everything in Solo",
   "Terraform remediation: patch files, open PR",
-  "Slack and Teams alerts — anomalies, budgets, weekly digest",
+  "Slack and Teams alerts: anomalies, budgets, weekly digest",
   "Publish cost reports to Notion for the whole team",
   "Ticket creation (Jira, Linear, GitHub Issues)",
   "Scheduled cost digests via email",
@@ -775,7 +775,7 @@ function Pricing(){
   const teamPrice    = annual ? "$400" : "$40";
   const teamPer      = annual ? "/ yr" : "/ mo";
   const teamSub      = annual ? "$33/mo · save $80" : null;
-  const teamSavings  = annual ? "Save $80 — 2 months free" : "7-day free trial";
+  const teamSavings  = annual ? "Save $80 · 2 months free" : "7-day free trial";
   const teamLink     = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan     = annual ? "team_annual" : "team_monthly";
 
@@ -1035,7 +1035,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Where do my credentials and billing data go?",
-    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data stays in a local SQLite database on your machine. We never see your data. For teams, findings are shared via Slack alerts and Notion — no shared database required."
+    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data stays in a local SQLite database on your machine. We never see your data. For teams, findings are shared via Slack alerts and Notion. No shared database required."
   },
   {
     q: "What editors does it work with?",

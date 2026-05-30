@@ -335,7 +335,7 @@ function Depth() {
     {
       n: "01",
       h: "Your biggest savings, in one question.",
-      p: "Ask 'where am I wasting money?' and get a ranked list of every opportunity across your infrastructure \u2014 sorted by dollar impact, not category. No dashboard to configure. No report to schedule. No knowing what to look for. Just results.",
+      p: "Ask 'where am I wasting money?' and get a ranked list of every opportunity across your infrastructure, sorted by dollar impact. No dashboard to configure. No report to schedule. No knowing what to look for. Just results.",
       chips: ["ranked by $", "works day one", "no setup", "20 scanners"]
     },
     {
@@ -347,13 +347,13 @@ function Depth() {
     {
       n: "03",
       h: "AI spend tracked like a first-class cost.",
-      p: "Bedrock, OpenAI, Anthropic \u2014 these don't fit in the usual cost buckets. nable tracks AI spend by model, by use case, by team. It spots where expensive models are doing work cheaper ones handle just as well, and flags environments burning AI budget unnecessarily.",
+      p: "Bedrock, OpenAI, Anthropic. These don't fit in the usual cost buckets. nable tracks AI spend by model, by use case, by team. It spots where expensive models are doing work cheaper ones handle just as well, and flags environments burning AI budget unnecessarily.",
       chips: ["by model", "by team", "model routing", "AI-native"]
     },
     {
       n: "04",
       h: "It tells you who to call.",
-      p: "When spend spikes, you don't need another chart. You need to know which team owns it. nable attributes anomalies to the service, team, or environment that caused them, then alerts whoever owns it in Slack or Teams \u2014 before finance notices.",
+      p: "When spend spikes, you don't need another chart. You need to know which team owns it. nable attributes anomalies to the service, team, or environment that caused them, then alerts whoever owns it in Slack or Teams. Before finance notices.",
       chips: ["team attribution", "Slack / Teams", "near-zero false positives", "28-day baseline"]
     }
   ];
@@ -416,7 +416,7 @@ const SOLO_FEATURES = [
 const TEAM_FEATURES = [
   "Everything in Solo",
   "Terraform remediation: patch files, open PR",
-  "Slack and Teams alerts \u2014 anomalies, budgets, weekly digest",
+  "Slack and Teams alerts: anomalies, budgets, weekly digest",
   "Publish cost reports to Notion for the whole team",
   "Ticket creation (Jira, Linear, GitHub Issues)",
   "Scheduled cost digests via email",
@@ -434,7 +434,7 @@ function Pricing() {
   const teamPrice = annual ? "$400" : "$40";
   const teamPer = annual ? "/ yr" : "/ mo";
   const teamSub = annual ? "$33/mo \xB7 save $80" : null;
-  const teamSavings = annual ? "Save $80 \u2014 2 months free" : "7-day free trial";
+  const teamSavings = annual ? "Save $80 \xB7 2 months free" : "7-day free trial";
   const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan = annual ? "team_annual" : "team_monthly";
   return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget enforcement, and org rollups."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
@@ -557,7 +557,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Where do my credentials and billing data go?",
-    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data stays in a local SQLite database on your machine. We never see your data. For teams, findings are shared via Slack alerts and Notion \u2014 no shared database required."
+    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data stays in a local SQLite database on your machine. We never see your data. For teams, findings are shared via Slack alerts and Notion. No shared database required."
   },
   {
     q: "What editors does it work with?",
