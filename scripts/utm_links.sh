@@ -1,0 +1,17 @@
+#!/bin/bash
+# Generate UTM-tagged links for common channels
+BASE="https://getnable.com"
+echo "LinkedIn post:"
+echo "${BASE}?utm_source=linkedin&utm_medium=social&utm_campaign=launch"
+echo ""
+echo "HN comment:"
+echo "${BASE}?utm_source=hackernews&utm_medium=social&utm_campaign=launch"
+echo ""
+echo "Twitter/X:"
+echo "${BASE}?utm_source=twitter&utm_medium=social&utm_campaign=launch"
+echo ""
+echo "Reddit:"
+echo "${BASE}?utm_source=reddit&utm_medium=social&utm_campaign=launch"
+echo ""
+echo "Email:"
+echo "${BASE}?utm_source=email&utm_medium=email&utm_campaign=launch"

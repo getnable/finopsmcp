@@ -38,6 +38,34 @@
   });
 </script>
 
+<script>
+(function() {
+  // Capture UTM params and pass to PostHog
+  const params = new URLSearchParams(window.location.search);
+  const utm = {};
+  ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'].forEach(k => {
+    const v = params.get(k);
+    if (v) utm[k] = v;
+  });
+  // Also capture reddit click id
+  const rdt = params.get('rdt_cid');
+  if (rdt) utm['rdt_cid'] = rdt;
+
+  if (Object.keys(utm).length > 0) {
+    // Store in session
+    sessionStorage.setItem('nable_utm', JSON.stringify(utm));
+    // Register as PostHog super properties
+    if (window.posthog) posthog.register(utm);
+  } else {
+    // Restore from session (for subsequent page views in same session)
+    const stored = sessionStorage.getItem('nable_utm');
+    if (stored && window.posthog) {
+      try { posthog.register(JSON.parse(stored)); } catch {}
+    }
+  }
+})();
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" />

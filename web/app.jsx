@@ -139,14 +139,14 @@ function LogoMark(){
 }
 
 /* Ticker */
-function Ticker({ installs }){
+function Ticker({ installs, version }){
   return (
     <div className="ticker">
       <div className="ticker-inner">
         <span className="seg">
           <span className="dot"></span>
           <b>finops-mcp</b>
-          <span>v0.8.36 · runtime healthy</span>
+          <span>{version ? `v${version}` : "v0.8.36"} · runtime healthy</span>
         </span>
         <span className="sep">·</span>
         <span className="seg">{installs ? fmtNum(installs) : "4k+"} installs / mo via PyPI</span>
@@ -560,7 +560,7 @@ function Depth(){
 }
 
 /* Architecture */
-function Architecture(){
+function Architecture({ version }){
   return (
     <section id="arch" className="alt">
       <div className="wrap">
@@ -585,7 +585,7 @@ function Architecture(){
               <span className="lab">runtime · local</span>
               <div className="arch-node center">
                 <h4>nable runtime</h4>
-                <span className="sub">finops-mcp / 0.8.36</span>
+                <span className="sub">finops-mcp / {version || "0.8.36"}</span>
                 <div className="chips"><span>keyring</span><span>fernet</span><span>read-only</span><span>audit-log</span></div>
               </div>
             </div>
@@ -907,6 +907,9 @@ function FootCta(){
         <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-3)",letterSpacing:".04em"}}>
           $ pip install finops-mcp &amp;&amp; finops welcome
         </p>
+        <p style={{marginTop:24,fontSize:13,color:"var(--fg-3)"}}>
+          Building something? <a href="/about" style={{color:"var(--accent-dim)"}}>Read the founder note and investor thesis →</a>
+        </p>
       </div>
     </section>
   );
@@ -944,7 +947,7 @@ function FounderNote(){
   );
 }
 
-function Footer(){
+function Footer({ version }){
   return (
     <footer>
       <div className="wrap">
@@ -979,7 +982,7 @@ function Footer(){
         </div>
         <div className="foot-meta">
           <span>2026 nable, inc. · all rights reserved</span>
-          <span>finops-mcp / 0.8.36 · runtime healthy</span>
+          <span>finops-mcp / {version || "0.8.36"} · runtime healthy</span>
         </div>
       </div>
     </footer>
