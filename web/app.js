@@ -667,6 +667,7 @@ function Tweaks() {
 }
 function App() {
   const [t, setT] = useState(TWEAK_DEFAULTS);
+  const [version, setVersion] = useState(null);
   useScrollTracking();
   useEffect(() => {
     applyPalette(t.palette);
@@ -676,6 +677,12 @@ function App() {
     window.addEventListener("nable:tweaks", onTweaks);
     return () => window.removeEventListener("nable:tweaks", onTweaks);
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(Architecture, null), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, null), /* @__PURE__ */ React.createElement(Tweaks, null));
+  useEffect(() => {
+    fetch("/api/pypi-version").then((r) => r.ok ? r.json() : null).then((d) => {
+      if (d?.version) setVersion(d.version);
+    }).catch(() => {
+    });
+  }, []);
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
 }
 ReactDOM.createRoot(document.getElementById("app")).render(/* @__PURE__ */ React.createElement(App, null));

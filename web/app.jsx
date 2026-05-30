@@ -1161,12 +1161,19 @@ function Tweaks(){
 /* App */
 function App(){
   const [t, setT] = useState(TWEAK_DEFAULTS);
+  const [version, setVersion] = useState(null);
   useScrollTracking();
   useEffect(() => {
     applyPalette(t.palette);
     function onTweaks(e){ setT(e.detail); }
     window.addEventListener("nable:tweaks", onTweaks);
     return () => window.removeEventListener("nable:tweaks", onTweaks);
+  }, []);
+  useEffect(() => {
+    fetch("/api/pypi-version")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if(d?.version) setVersion(d.version); })
+      .catch(() => {});
   }, []);
 
   return (
@@ -1175,11 +1182,11 @@ function App(){
       <Hero layout={t.layout} interaction={t.interaction} />
       <Connectors />
       <Depth />
-      <Architecture />
+      <Architecture version={version} />
       <Pricing />
       <FAQ />
       <FootCta />
-      <Footer />
+      <Footer version={version} />
       <Tweaks />
     </>
   );

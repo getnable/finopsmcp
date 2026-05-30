@@ -195,13 +195,80 @@
 
     <!-- Quick start -->
     <div id="quickstart" class="section-anchor">
-      <div class="badge mb-4">Getting started</div>
-      <h1 class="text-3xl font-black mb-3" style="color:var(--text)">Get up and running in 5 minutes</h1>
-      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">Install nable, connect a provider, then ask your AI editor about your cloud costs in plain English. You don't need all 17 connectors. Start with the one you care about most.</p>
+      <div class="badge mb-4">2-minute quickstart</div>
+      <h1 class="text-3xl font-black mb-3" style="color:var(--text)">Up and running in two minutes</h1>
+      <p class="text-base leading-relaxed mb-6" style="color:var(--muted)">Install nable, point it at your AI editor, then ask about your cloud spend. You only need one provider to start.</p>
 
-      <div class="trial-banner mb-8">
-        <span class="trial-badge">7-day free trial</span>
-        <p class="text-sm" style="color:var(--muted)">All Team features are unlocked for your first 7 days. Your trial license key is emailed to you at purchase. Cancel any time.</p>
+      <!-- What you need -->
+      <div class="card p-5 mb-8">
+        <p class="text-xs font-semibold mb-3" style="color:var(--fg-3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">What you need</p>
+        <ul class="space-y-2 list-none m-0 p-0">
+          <li class="flex items-center gap-3 text-sm" style="color:var(--fg-2)">
+            <span class="check">&#10003;</span>
+            <span><strong style="color:var(--fg)">Python 3.10+</strong> with pip</span>
+          </li>
+          <li class="flex items-center gap-3 text-sm" style="color:var(--fg-2)">
+            <span class="check">&#10003;</span>
+            <span><strong style="color:var(--fg)">Claude Desktop</strong> or <strong style="color:var(--fg)">Cursor</strong> (or any MCP-compatible editor)</span>
+          </li>
+          <li class="flex items-center gap-3 text-sm" style="color:var(--fg-2)">
+            <span class="check">&#10003;</span>
+            <span>Read-only credentials for at least one cloud account (AWS, Azure, or GCP)</span>
+          </li>
+        </ul>
+      </div>
+
+      <!-- 3-step quickstart -->
+      <div class="space-y-6">
+
+        <!-- Step 1: Install -->
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">1</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install</p>
+            <div class="code-wrap">
+              <div class="code-block p-4"><span class="cmd">pip install finops-mcp</span></div>
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+            <p class="text-xs mt-2" style="color:var(--muted)">On Anaconda or without pip? Use <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp</code> instead.</p>
+          </div>
+        </div>
+
+        <!-- Step 2: Configure -->
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">2</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Configure your editor and connect a provider</p>
+            <div class="code-wrap">
+              <div class="code-block p-4"><span class="cmd">finops welcome</span></div>
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+            <p class="text-xs mt-2" style="color:var(--muted)">The wizard writes your MCP config and walks through connecting your first account. Takes about two minutes. Then fully quit and reopen your editor.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">Prefer manual setup? Add this to your editor's MCP config:</p>
+            <div class="code-wrap mt-2">
+              <div class="code-block p-4"><span class="cm">// Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json</span><br/><span class="cm">// Cursor: ~/.cursor/mcp.json</span><br/>{<br/>&nbsp;&nbsp;<span class="str">"mcpServers"</span>: {<br/>&nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"finops"</span>: { <span class="str">"command"</span>: <span class="str">"finops-mcp"</span> }<br/>&nbsp;&nbsp;}<br/>}</div>
+              <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: Ask your first question -->
+        <div class="flex items-start gap-3">
+          <div class="step-num mt-0.5">3</div>
+          <div class="flex-1">
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Ask your first question</p>
+            <div class="card p-4" style="background:var(--surface2)">
+              <p class="text-xs mb-2" style="color:var(--fg-3);font-family:var(--mono);letter-spacing:0.04em">In Claude Desktop or Cursor, type:</p>
+              <p class="text-sm font-medium" style="color:var(--fg)">"What are my top 5 AWS cost drivers this month, and did anything spike unexpectedly?"</p>
+            </div>
+            <p class="text-xs mt-2" style="color:var(--muted)">nable breaks down your spend by service, flags anomalies, and explains what changed. No SQL, no dashboards.</p>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="info-box mt-6">
+        <strong style="color:var(--fg)">Security note:</strong> Credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine.
       </div>
     </div>
 
@@ -209,7 +276,7 @@
 
     <!-- Installation -->
     <div id="install" class="section-anchor">
-      <h2 class="section-title">Installation</h2>
+      <h2 class="section-title">Detailed installation</h2>
 
       <div class="space-y-4">
 
@@ -248,7 +315,7 @@
               <div class="code-block p-4"><span class="cm">// Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json</span><br/><span class="cm">// Cursor: ~/.cursor/mcp.json</span><br/>{<br/>&nbsp;&nbsp;<span class="str">"mcpServers"</span>: {<br/>&nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"finops"</span>: { <span class="str">"command"</span>: <span class="str">"finops-mcp"</span> }<br/>&nbsp;&nbsp;}<br/>}</div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">Run <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops setup</code> to have this written automatically, or paste it manually. Then <strong style="color:var(--fg)">fully quit and reopen</strong> your editor — most clients only read config at startup.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">Run <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops setup</code> to have this written automatically, or paste it manually. Then <strong style="color:var(--fg)">fully quit and reopen</strong> your editor -- most clients only read config at startup.</p>
           </div>
         </div>
 
@@ -274,7 +341,7 @@
               <p class="text-xs mb-2" style="color:var(--fg-3);font-family:var(--mono);letter-spacing:0.04em">In Claude Desktop or Cursor, type:</p>
               <p class="text-sm font-medium" style="color:var(--fg)">"What are my top 5 AWS cost drivers this month, and did anything spike unexpectedly?"</p>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">nable will break down your spend by service, flag anomalies, and explain what changed — in plain English. No SQL, no dashboards.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">nable will break down your spend by service, flag anomalies, and explain what changed. No SQL, no dashboards.</p>
           </div>
         </div>
 
