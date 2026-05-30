@@ -252,7 +252,7 @@ function Hero({ layout, interaction }){
               <span className="accent">Waste found.<br/>Money saved.</span>
             </h1>
             <p className="lede">
-              Connect AWS, Azure, GCP, and 17 providers to Claude or Cursor. Ask about spend, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally. Your data never leaves your machine.
+              Connect AWS, Azure, GCP, and 17 providers to Claude or Cursor. Ask about spend, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally. Your credentials never leave your machine. We never see your data.
             </p>
             <div className="hero-cta-row" id="install">
               <CopyInstall />
@@ -320,7 +320,7 @@ function TrustStrip(){
   const items = [
     {lab:"installs / mo", val: installs ? fmtNum(installs) : "4k+", sub:"via PyPI · live"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
-    {lab:"local only", val:"0 bytes", sub:"sent to our servers"},
+    {lab:"sent to nable", val:"0 bytes", sub:"your data stays in your infrastructure"},
   ];
   return (
     <div className="trust" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
@@ -567,7 +567,7 @@ function Architecture({ version }){
         <div className="section-head">
           <div className="label">Architecture</div>
           <h2>Headless by design.<br/><em>Your data never moves.</em></h2>
-          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. We never see your bill.</p>
+          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine. We never see your data.</p>
         </div>
         <div className="arch">
           <div className="arch-grid"></div>
@@ -741,7 +741,7 @@ const SOLO_FEATURES = [
   "Anomaly detection",
   "Rightsizing recommendations",
   "All 17 connectors",
-  "Local only — no data leaves your machine",
+  "Your credentials never leave your machine",
   "Works in Claude, Cursor, Windsurf, Zed",
 ];
 
@@ -1034,7 +1034,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Where do my credentials and billing data go?",
-    a: "Nowhere. nable runs entirely on your machine. Credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). Billing data is queried directly from provider APIs. We never see it."
+    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. In solo mode, cost data stays in a local SQLite database. In team mode, it goes to your team's own Postgres instance — not nable's servers. We never see your data."
   },
   {
     q: "What editors does it work with?",
