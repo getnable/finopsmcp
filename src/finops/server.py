@@ -8584,5 +8584,131 @@ async def audit_cloudwatch_logs_ia_opportunities(
         return f"Error running CloudWatch Logs IA audit: {e}"
 
 
+@mcp.tool()
+async def recommend_database_savings_plans() -> dict:
+    """
+    Recommend AWS Database Savings Plans for RDS and Aurora spend.
+
+    Database Savings Plans (launched re:Invent 2025) offer up to 45% savings
+    on RDS and Aurora, separate from Compute Savings Plans. Most teams do not
+    know these exist yet.
+
+    Pulls last 30 days of RDS/Aurora spend from Cost Explorer, checks existing
+    Database SP coverage, and recommends a 1-year no-upfront plan sized to
+    the uncovered baseline. Uses a conservative 30% discount estimate.
+
+    Returns current_monthly_rds_spend, current_sp_coverage_pct,
+    uncovered_monthly_spend, recommended_sp_hourly_commitment,
+    estimated_monthly_savings, estimated_annual_savings, payback_days,
+    recommendation_type.
+
+    Examples:
+        - "Should we buy Database Savings Plans?"
+        - "How much could we save on RDS with a Database SP?"
+        - "What is our RDS/Aurora Savings Plan coverage?"
+        - "Recommend a Database Savings Plan for our Aurora spend"
+    """
+    try:
+        from .recommendations.database_savings_plans import (
+            recommend_database_savings_plans as _recommend,
+        )
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS is not configured. Run 'uvx finops-mcp setup' to connect."}
+
+        result = _recommend()
+        if result is None:
+            return {"error": "Could not retrieve RDS spend data. Check AWS credentials."}
+        return result
+
+    except Exception as e:
+        log.error("recommend_database_savings_plans failed: %s", e, exc_info=True)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def audit_ebs_snapshot_replication(
+    regions: list[str] | None = None,
+) -> dict:
+    """
+    Audit EBS snapshots replicated cross-region for cost waste.
+
+    EBS snapshots replicated across regions cost $0.05/GB-month in each
+    region, plus inter-region transfer when the copy was made. Many teams
+    replicate snapshots for DR but never clean up old or orphaned copies.
+
+    Identifies orphaned copies (source volume deleted), excessive copies
+    (more than 3 regions), and old copies (over 90 days) where a newer
+    copy exists.
+
+    Args:
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+
+    Returns cross_region_findings with snapshot_id, volume_id, source_region,
+    copy_regions, total_size_gb, total_monthly_cost, excess_copies, orphaned,
+    recommendation. Plus summary totals and potential_monthly_savings.
+
+    Examples:
+        - "Audit our EBS snapshot replication costs"
+        - "Find orphaned cross-region EBS snapshots"
+        - "Which EBS snapshots are replicated to too many regions?"
+        - "How much are we spending on cross-region snapshot storage?"
+    """
+    try:
+        from .recommendations.ebs_snapshot_replication import (
+            audit_ebs_snapshot_replication as _audit,
+        )
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS is not configured. Run 'uvx finops-mcp setup' to connect."}
+
+        return await _audit(aws_client=aws, regions=regions)
+
+    except Exception as e:
+        log.error("audit_ebs_snapshot_replication failed: %s", e, exc_info=True)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def audit_s3_transfer_acceleration() -> dict:
+    """
+    Find S3 buckets with Transfer Acceleration enabled that are unlikely to benefit.
+
+    S3 Transfer Acceleration adds $0.04-0.08/GB on top of standard S3 transfer
+    costs. It is often enabled speculatively and forgotten. It rarely helps for
+    low-volume buckets, buckets in us-east-1, or buckets already behind CloudFront.
+
+    Flags buckets as likely waste if transfer volume is under 1 GB/month, bucket
+    is in us-east-1, or bucket is already fronted by a CloudFront distribution.
+    Includes a ready-to-run AWS CLI disable command for each flagged bucket.
+
+    Returns findings with bucket_name, region, ta_enabled, monthly_transfer_gb,
+    monthly_ta_cost, behind_cloudfront, likely_waste, reason, disable_command.
+    Plus total_monthly_ta_cost and potential_monthly_savings.
+
+    Examples:
+        - "Which S3 buckets have Transfer Acceleration enabled?"
+        - "Find S3 TA enabled buckets that don't need it"
+        - "How much are we wasting on S3 Transfer Acceleration?"
+        - "Audit S3 Transfer Acceleration usage"
+    """
+    try:
+        from .recommendations.s3_transfer_acceleration import (
+            audit_s3_transfer_acceleration as _audit,
+        )
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS is not configured. Run 'uvx finops-mcp setup' to connect."}
+
+        return await _audit(aws_client=aws)
+
+    except Exception as e:
+        log.error("audit_s3_transfer_acceleration failed: %s", e, exc_info=True)
+        return {"error": str(e)}
+
+
 if __name__ == "__main__":
     main()
