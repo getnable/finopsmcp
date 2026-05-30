@@ -523,7 +523,7 @@ function Depth(){
     {
       n: "03",
       h: "AI spend tracked like a first-class cost.",
-      p: "Bedrock, OpenAI, Anthropic. These don't fit in the usual cost buckets. nable tracks AI spend by model, by use case, by team. It spots where expensive models are doing work cheaper ones handle just as well, and flags environments burning AI budget unnecessarily.",
+      p: "Bedrock, OpenAI, Anthropic. These don't fit in the usual cost buckets. nable tracks AI spend by model and by team. It spots where expensive models are doing work cheaper ones handle just as well, and flags environments burning AI budget unnecessarily.",
       chips: ["by model","by team","model routing","AI-native"],
     },
     {
