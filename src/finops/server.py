@@ -8734,6 +8734,9 @@ async def run_full_cost_audit(
     from .recommendations.s3_transfer_acceleration import audit_s3_transfer_acceleration as _s3ta
     from .recommendations.ebs_snapshot_replication import audit_ebs_snapshot_replication as _ebs_rep
     from .recommendations.database_savings_plans import recommend_database_savings_plans as _dbsp
+    from .recommendations.textract_env import scan_textract_environment_waste as _textract
+    from .recommendations.bedrock_routing import recommend_bedrock_model_routing as _bedrock
+    from .recommendations.commitments import analyze_commitments as _commitments
 
     tasks = [
         run("graviton",       scan_graviton_opportunities(aws_client=aws, regions=regions)),
@@ -8752,6 +8755,9 @@ async def run_full_cost_audit(
         run("s3_ta",          _s3ta(aws_client=aws)),
         run("ebs_rep",        _ebs_rep(aws_client=aws, regions=regions)),
         run("db_sp",          _dbsp(aws_client=aws)),
+        run("textract",       _textract(aws_client=aws)),
+        run("bedrock",        _bedrock(aws_client=aws)),
+        run("commitments",    _commitments(aws_client=aws)),
     ]
 
     results = await asyncio.gather(*tasks)
@@ -8841,6 +8847,22 @@ async def run_full_cost_audit(
                 s = data.get("estimated_monthly_savings", 0) if isinstance(data, dict) else 0
                 if s > 0:
                     out.append({"title": "Purchase Database Savings Plan for RDS/Aurora", "monthly_savings": s, "category": "Commitments", "detail": f"Up to 35% off, ${s:.2f}/mo saving"})
+            elif name == "textract":
+                waste = data.get("estimated_monthly_waste", 0) if isinstance(data, dict) else 0
+                callers = data.get("non_prod_callers", []) if isinstance(data, dict) else []
+                if waste > 0:
+                    out.append({"title": f"Disable Textract in non-prod ({len(callers)} caller(s))", "monthly_savings": waste, "category": "AI/ML", "detail": f"${waste:.2f}/mo from QA/staging environments"})
+            elif name == "bedrock":
+                opps = data.get("routing_opportunities", []) if isinstance(data, dict) else []
+                total = data.get("total_monthly_savings", 0) if isinstance(data, dict) else 0
+                if total > 0:
+                    models = [o.get("current_model", "?") for o in opps[:2]]
+                    out.append({"title": f"Route Bedrock tasks to cheaper models ({', '.join(models)})", "monthly_savings": total, "category": "AI/ML", "detail": f"Short tasks to Haiku, ${total:.2f}/mo saving"})
+            elif name == "commitments":
+                s = data.get("estimated_monthly_savings", 0) if isinstance(data, dict) else 0
+                coverage = data.get("current_coverage_pct", 0) if isinstance(data, dict) else 0
+                if s > 0 and coverage < 80:
+                    out.append({"title": f"Purchase Savings Plans / Reserved Instances ({coverage:.0f}% covered)", "monthly_savings": s, "category": "Commitments", "detail": f"${s:.2f}/mo saving at current spend"})
         except Exception as exc:
             log.warning("audit norm failed for %s: %s", name, exc)
         return out
