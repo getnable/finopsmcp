@@ -334,27 +334,27 @@ function Depth() {
   const cards = [
     {
       n: "01",
+      h: "Ask once. Get ranked savings.",
+      p: "Say 'where am I wasting money?' and 20 scanners fire in parallel \u2014 Graviton migration, public IPv4, Spot adoption, Lambda concurrency, S3 Bucket Keys, non-prod scheduling, and more. Results come back ranked by dollar impact in under 60 seconds. No dashboards. No setup. No knowing what to look for.",
+      chips: ["20 scanners", "concurrent", "ranked by impact", "works day one"]
+    },
+    {
+      n: "02",
       h: "Rightsizing that closes the loop",
       p: "Cross-references CloudWatch, Compute Optimizer, and 14 days of CPU/memory data. Then reads your Terraform state, finds the resource, patches the instance type in the .tf file, and opens the PR. After you merge and apply, nable checks AWS to confirm the change and records the realized saving.",
       chips: ["CloudWatch", "Compute Optimizer", "Terraform state", "PR + verified savings"]
     },
     {
-      n: "02",
-      h: "Anomaly detection with attribution",
-      p: "Z-score detection against a 28-day rolling baseline. When something spikes, nable doesn't just tell you the number. It breaks the spike down by tag, team, and service, then pages whoever owns it. False positive rate is near zero because it uses your own baseline.",
-      chips: ["Z-score", "28-day baseline", "tag attribution", "Slack/PagerDuty alert"]
-    },
-    {
       n: "03",
-      h: "Commitment analysis",
-      p: "Models your Savings Plan and Reserved Instance coverage gap across AWS, Azure, and GCP. Tells you exactly what buying more coverage would save by service and term, based on your actual usage patterns, not list-price estimates.",
-      chips: ["Savings Plans", "Reserved Instances", "GCP CUDs", "coverage modeling"]
+      h: "AI cost intelligence",
+      p: "Identifies Bedrock and Textract waste that no infrastructure tool touches. Spots which Lambda functions are calling Sonnet for tasks Haiku handles equally well. Finds QA environments running Textract on production document volume. Estimates savings per model, per environment.",
+      chips: ["Bedrock model routing", "Textract env detection", "per-model cost", "AI-native"]
     },
     {
       n: "04",
-      h: "Multi-provider, one conversation",
-      p: "17 billing APIs normalized into a single query layer. Ask about total compute spend across AWS and Azure in the same question. Compare Datadog costs against observability budget. No switching tabs, no exporting CSVs between systems.",
-      chips: ["17 providers", "cross-cloud", "SaaS included", "normalized spend"]
+      h: "Anomaly detection with attribution",
+      p: "Z-score detection against a 28-day rolling baseline. When something spikes, nable doesn't just tell you the number. It breaks the spike down by tag, team, and service, then pages whoever owns it in Slack or Teams. False positive rate is near zero because it uses your own baseline.",
+      chips: ["Z-score", "28-day baseline", "tag attribution", "Slack / Teams alert"]
     }
   ];
   return /* @__PURE__ */ React.createElement("section", { id: "depth", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "What's under the hood"), /* @__PURE__ */ React.createElement("h2", null, "Not a pipe.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "An analyst.")), /* @__PURE__ */ React.createElement("p", null, "The value isn't connecting Claude to your bill. It's the analysis that runs before Claude ever responds.")), /* @__PURE__ */ React.createElement("div", { className: "depth-grid" }, cards.map((c, i) => /* @__PURE__ */ React.createElement("div", { className: "depth-card", key: i }, /* @__PURE__ */ React.createElement("span", { className: "depth-n" }, c.n), /* @__PURE__ */ React.createElement("h3", { className: "depth-h" }, c.h), /* @__PURE__ */ React.createElement("p", { className: "depth-p" }, c.p), /* @__PURE__ */ React.createElement("div", { className: "depth-chips" }, c.chips.map((ch, j) => /* @__PURE__ */ React.createElement("span", { key: j }, ch))))))));
