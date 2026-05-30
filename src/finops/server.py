@@ -8001,5 +8001,395 @@ async def scan_graviton_migration_opportunities(
         return f"Error scanning for Graviton opportunities: {e}"
 
 
+@mcp.tool()
+async def recommend_spot_adoption(
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Scans on-demand EC2 instances and recommends which ones to migrate to spot for 60-80% savings.
+
+    Checks env tags (dev/staging/test = stateless), ASG membership, CPU variance over 14 days,
+    and interruption frequency from public Spot Advisor data. Returns RECOMMENDED, POSSIBLE, or
+    NOT_RECOMMENDED per instance sorted by monthly savings.
+
+    Args:
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+                 Example: ["us-east-1", "eu-west-1"].
+
+    Examples:
+        - "Which EC2 instances should we move to spot?"
+        - "Show spot adoption opportunities in us-east-1"
+        - "How much can we save by switching to spot instances?"
+    """
+    if err := require_role("analyst"):
+        return str(err)
+
+    try:
+        from .recommendations.spot_adoption import recommend_spot_adoption as _scan
+
+        candidates = _scan(regions=regions)
+
+        if not candidates:
+            scanned = ", ".join(regions) if regions else "all regions"
+            return (
+                f"No spot adoption candidates found in: {scanned}.\n"
+                "All running instances are already on spot, or no on-demand "
+                "instances were found."
+            )
+
+        recommended = [c for c in candidates if c["recommendation"] == "RECOMMENDED"]
+        possible     = [c for c in candidates if c["recommendation"] == "POSSIBLE"]
+        total_savings = sum(c["monthly_savings"] for c in recommended + possible)
+
+        lines: list[str] = [
+            f"**{len(candidates)} on-demand instance(s) analyzed. "
+            f"Potential spot savings: ${total_savings:,.2f}/mo "
+            f"({len(recommended)} RECOMMENDED, {len(possible)} POSSIBLE)**",
+            "",
+            "| Instance | Name | Type | Region | Env | In ASG | Interruption % | Recommendation | Monthly Saving | Saving % |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+
+        for c in candidates:
+            name = c["name"] or c["instance_id"]
+            lines.append(
+                f"| {c['instance_id']} "
+                f"| {name} "
+                f"| {c['instance_type']} "
+                f"| {c['region']} "
+                f"| {c['environment'] or '-'} "
+                f"| {'yes' if c['in_asg'] else 'no'} "
+                f"| {c['interruption_freq_pct']:.1f}% "
+                f"| {c['recommendation']} "
+                f"| ${c['monthly_savings']:,.2f} "
+                f"| {c['savings_pct']:.1f}% |"
+            )
+
+        lines += [
+            "",
+            "**How to migrate:** Use a Launch Template with a mixed instances policy. "
+            "Set OnDemandPercentageAboveBaseCapacity=0 to run fully on spot. "
+            "Add capacity-optimized allocation strategy and 5+ instance types "
+            "for interruption resilience. Always test in staging first.",
+        ]
+
+        nudge = _team_nudge(
+            f"You have {len(recommended)} RECOMMENDED spot migration "
+            f"opportunit{'ies' if len(recommended) != 1 else 'y'} "
+            f"worth ${total_savings:,.0f}/mo. To auto-create Jira, Linear, or GitHub "
+            f"tickets so these actually get fixed, upgrade to Team:"
+        )
+        if nudge:
+            lines += ["", nudge]
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error scanning for spot adoption opportunities: {e}"
+
+
+@mcp.tool()
+async def audit_spot_diversification(
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Audits Auto Scaling Groups using spot instances for instance type diversification.
+
+    ASGs with fewer than 3 instance types are HIGH_RISK — a single capacity pool
+    tightening can take down the entire fleet. Best practice is 5+ types with
+    capacity-optimized allocation strategy.
+
+    Args:
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+                 Example: ["us-east-1", "eu-west-1"].
+
+    Examples:
+        - "Are our ASGs diversified enough for spot?"
+        - "Check spot diversification in us-east-1"
+        - "Which ASGs are at risk from spot interruptions?"
+    """
+    if err := require_role("analyst"):
+        return str(err)
+
+    try:
+        from .recommendations.spot_diversification import audit_spot_diversification as _audit
+
+        results = _audit(regions=regions)
+
+        if not results:
+            scanned = ", ".join(regions) if regions else "all regions"
+            return (
+                f"No spot-using ASGs found in: {scanned}.\n"
+                "Either no ASGs use spot instances, or no ASGs exist in the scanned regions."
+            )
+
+        high   = [r for r in results if r["risk_level"] == "HIGH_RISK"]
+        medium = [r for r in results if r["risk_level"] == "MEDIUM_RISK"]
+        ok     = [r for r in results if r["risk_level"] == "OK"]
+
+        lines: list[str] = [
+            f"**{len(results)} spot ASG(s) audited: "
+            f"{len(high)} HIGH_RISK, {len(medium)} MEDIUM_RISK, {len(ok)} OK**",
+            "",
+            "| ASG Name | Region | Types | Instance Types | Strategy | Spot % | Risk |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+
+        for r in results:
+            types_str = ", ".join(r["instance_types"]) if r["instance_types"] else "-"
+            lines.append(
+                f"| {r['asg_name']} "
+                f"| {r['region']} "
+                f"| {r['instance_types_count']} "
+                f"| {types_str} "
+                f"| {r['allocation_strategy']} "
+                f"| {r['spot_pct']:.1f}% "
+                f"| {r['risk_level']} |"
+            )
+
+        if high or medium:
+            lines += [
+                "",
+                "**How to fix:** Add instance types via MixedInstancesPolicy overrides. "
+                "Use capacity-optimized allocation strategy. "
+                "Target 5+ types across multiple families (m5, m6i, c5, r5, etc.) "
+                "to avoid correlated interruptions.",
+            ]
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error auditing spot diversification: {e}"
+
+
+@mcp.tool()
+async def audit_cloudwatch_metric_cardinality(
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Audits CloudWatch custom metric cardinality across your AWS account.
+
+    Custom metrics above the 10,000 free-tier threshold cost $0.30/metric/month.
+    High-cardinality dimensions (pod_id, request_id, trace_id) can cause a single
+    microservice to emit thousands of metrics, costing thousands of dollars per month.
+
+    Excludes AWS/* namespaces (those are free). Flags namespaces with >100 metrics,
+    identifies the dimensions causing the explosion, and estimates monthly cost.
+
+    Args:
+        regions: List of AWS regions to scan. Defaults to all opted-in regions.
+
+    Examples:
+        - "Audit CloudWatch metric cardinality"
+        - "Which namespaces have too many custom metrics?"
+        - "Find CloudWatch metrics costing us money"
+        - "Show high-cardinality CloudWatch dimensions"
+    """
+    if err := require_role("analyst"):
+        return err
+    try:
+        from .recommendations.cloudwatch_cardinality import audit_cloudwatch_metric_cardinality as _audit
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None:
+            return "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+
+        result = await _audit(aws, regions=regions)
+
+        total = result["total_custom_metrics"]
+        cost = result["estimated_monthly_cost"]
+        findings = result["high_cardinality_namespaces"]
+
+        lines: list[str] = ["## CloudWatch Custom Metric Cardinality Audit", ""]
+        lines.append(f"Total custom metrics found: **{total:,}**")
+        lines.append(f"Estimated monthly cost (above 10k free tier): **${cost:,.2f}**")
+        lines.append("")
+
+        if not findings:
+            lines.append("No high-cardinality namespaces found (all under 100 metrics).")
+            return "\n".join(lines)
+
+        lines.append(f"**High-cardinality namespaces** ({len(findings)} found):")
+        lines.append("")
+        lines.append("| Namespace | Metrics | Est. Monthly Cost | Problem Dimensions |")
+        lines.append("|---|---|---|---|")
+        for f in findings:
+            dims = ", ".join(f["high_cardinality_dimensions"]) if f["high_cardinality_dimensions"] else "unknown"
+            lines.append(
+                f"| {f['namespace']} | {f['metric_count']:,} "
+                f"| ${f['estimated_monthly_cost']:,.2f} | {dims} |"
+            )
+        lines.append("")
+        lines.append("**Recommendations:**")
+        lines.append("")
+        for f in findings:
+            lines.append(f"- {f['recommendation']}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        log.error("audit_cloudwatch_metric_cardinality failed: %s", e, exc_info=True)
+        return f"Error running CloudWatch cardinality audit: {e}"
+
+
+@mcp.tool()
+async def audit_cloudwatch_orphaned_alarms(
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Finds CloudWatch alarms on deleted resources (orphaned alarms).
+
+    Standard alarms cost $0.10/alarm/month. Composite alarms cost $0.30/alarm/month.
+    Alarms on terminated EC2 instances, deleted SQS queues, or deprovisioned
+    endpoints stay in INSUFFICIENT_DATA state indefinitely and keep billing.
+
+    Flags alarms in INSUFFICIENT_DATA for >7 days. For EC2 and SQS alarms,
+    verifies the backing resource still exists.
+
+    Args:
+        regions: List of AWS regions to scan. Defaults to all opted-in regions.
+
+    Examples:
+        - "Find orphaned CloudWatch alarms"
+        - "Which CloudWatch alarms can we delete?"
+        - "Show alarms on deleted resources"
+        - "How much are we wasting on CloudWatch alarms?"
+    """
+    if err := require_role("analyst"):
+        return err
+    try:
+        from .recommendations.cloudwatch_alarms import audit_cloudwatch_orphaned_alarms as _audit
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None:
+            return "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+
+        result = await _audit(aws, regions=regions)
+
+        total = result["total_alarms"]
+        orphaned = result["orphaned_alarms"]
+        waste = result["total_monthly_waste"]
+
+        lines: list[str] = ["## CloudWatch Orphaned Alarm Audit", ""]
+        lines.append(f"Total alarms scanned: **{total}**")
+        lines.append(f"Likely orphaned alarms: **{len(orphaned)}**")
+        lines.append(f"Monthly waste: **${waste:.2f}**")
+        lines.append("")
+
+        if not orphaned:
+            lines.append("No orphaned alarms found.")
+            return "\n".join(lines)
+
+        lines.append("| Alarm | Namespace | Metric | State | Days in INSUFFICIENT_DATA | Monthly Cost | Resource Exists |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for alarm in orphaned:
+            resource_col = (
+                "No" if alarm["resource_exists"] is False
+                else "Yes" if alarm["resource_exists"] is True
+                else "Unknown"
+            )
+            lines.append(
+                f"| {alarm['alarm_name']} | {alarm['namespace']} "
+                f"| {alarm['metric_name']} | {alarm['state']} "
+                f"| {alarm['days_insufficient_data'] or 'N/A'} "
+                f"| ${alarm['monthly_cost']:.2f} | {resource_col} |"
+            )
+
+        lines.append("")
+        lines.append("To delete orphaned alarms (verify before running):")
+        lines.append("```")
+        by_region: dict[str, list[str]] = {}
+        for alarm in orphaned:
+            by_region.setdefault(alarm["region"], []).append(alarm["alarm_name"])
+        for region, names in by_region.items():
+            quoted = " ".join(f'"{n}"' for n in names)
+            lines.append(f"aws cloudwatch delete-alarms --alarm-names {quoted} --region {region}")
+        lines.append("```")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        log.error("audit_cloudwatch_orphaned_alarms failed: %s", e, exc_info=True)
+        return f"Error running CloudWatch alarm audit: {e}"
+
+
+@mcp.tool()
+async def audit_cloudwatch_logs_ia_opportunities(
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Finds CloudWatch Log groups that can be migrated to Infrequent Access class.
+
+    IA class cuts ingestion cost 50%: $0.075/GB (Standard) to $0.0375/GB (IA).
+    Log groups older than 30 days with >1 GB/month ingestion that are still on
+    STANDARD class are candidates.
+
+    Limitation: IA class does not support metric filters, subscription filters,
+    or live tail. Confirm before migrating.
+
+    Args:
+        regions: List of AWS regions to scan. Defaults to all opted-in regions.
+
+    Examples:
+        - "Find CloudWatch log groups to migrate to Infrequent Access"
+        - "Where can we cut CloudWatch Logs costs?"
+        - "Show log groups eligible for IA storage class"
+        - "How much can we save on CloudWatch log ingestion?"
+    """
+    if err := require_role("analyst"):
+        return err
+    try:
+        from .recommendations.cloudwatch_logs_ia import audit_cloudwatch_logs_ia_opportunities as _audit
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None:
+            return "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+
+        result = await _audit(aws, regions=regions)
+
+        total_scanned = result["total_groups_scanned"]
+        candidates = result["candidates"]
+        total_savings = result["total_monthly_savings"]
+
+        lines: list[str] = ["## CloudWatch Logs Infrequent Access Migration Audit", ""]
+        lines.append(f"Log groups scanned: **{total_scanned}**")
+        lines.append(f"IA migration candidates: **{len(candidates)}**")
+        lines.append(f"Potential monthly savings: **${total_savings:,.2f}**")
+        lines.append("")
+
+        if not candidates:
+            lines.append(
+                "No candidates found. Either all log groups are already on IA class, "
+                "ingesting less than 1 GB/month, or younger than 30 days."
+            )
+            return "\n".join(lines)
+
+        lines.append("| Log Group | Ingestion (GB/mo) | Standard Cost | IA Cost | Savings | Retention |")
+        lines.append("|---|---|---|---|---|---|")
+        for c in candidates[:25]:  # cap table at 25 rows
+            retention = f"{c['retention_days']}d" if c["retention_days"] else "infinite"
+            lines.append(
+                f"| {c['log_group_name']} "
+                f"| {c['monthly_ingestion_gb']:.2f} "
+                f"| ${c['monthly_cost_standard']:.4f} "
+                f"| ${c['monthly_cost_ia']:.4f} "
+                f"| ${c['monthly_savings']:.4f} "
+                f"| {retention} |"
+            )
+
+        if len(candidates) > 25:
+            lines.append(f"_...and {len(candidates) - 25} more_")
+
+        lines.append("")
+        lines.append(
+            "**Before migrating:** confirm no metric filters or subscription filters "
+            "exist on the log group. Check with: "
+            "`aws logs describe-metric-filters --log-group-name <name>`"
+        )
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        log.error("audit_cloudwatch_logs_ia_opportunities failed: %s", e, exc_info=True)
+        return f"Error running CloudWatch Logs IA audit: {e}"
+
+
 if __name__ == "__main__":
     main()
