@@ -518,7 +518,7 @@ def _run_sqlite_migrations(engine: Engine) -> None:
         # (table, column, ALTER TABLE statement)
         ("anomalies",  "metadata",        "ALTER TABLE anomalies ADD COLUMN metadata TEXT"),
         ("budgets",    "critical_at_pct", "ALTER TABLE budgets ADD COLUMN critical_at_pct REAL NOT NULL DEFAULT 100.0"),
-        ("budgets",    "warn_at_pct",     "ALTER TABLE budgets ADD COLUMN warn_at_pct REAL NOT NULL DEFAULT 80.0"),
+        ("budgets",    "alert_at_pct",    "ALTER TABLE budgets ADD COLUMN alert_at_pct REAL NOT NULL DEFAULT 80.0"),
     ]
 
     with engine.connect() as conn:

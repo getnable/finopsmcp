@@ -140,7 +140,7 @@ async def scan_s3_bucket_key_opportunities(aws_client: Any) -> list[dict]:
             enc_resp = s3_client.get_bucket_encryption(Bucket=bucket_name)
         except s3_client.exceptions.ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code", "")
-            if error_code in ("ServerSideEncryptionConfigurationNotFoundError", "NoSuchBucketPolicy"):
+            if error_code in ("ServerSideEncryptionConfigurationNotFound", "NoSuchBucketPolicy"):
                 # No encryption configured — not relevant
                 continue
             log.debug("get_bucket_encryption failed for %s: %s", bucket_name, exc)

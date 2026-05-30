@@ -325,9 +325,9 @@ class Forecaster:
             def _fetch():
                 return ce.get_cost_and_usage(**kwargs)
 
-            resp = loop.run_until_complete(
-                asyncio.get_event_loop().run_in_executor(None, _fetch)
-            ) if asyncio.get_event_loop().is_running() else _fetch()
+            # Always run synchronously via a thread — this method is called
+            # from within an async context via run_in_executor by the caller.
+            resp = _fetch()
 
             series = []
             for period in resp.get("ResultsByTime", []):
@@ -355,7 +355,7 @@ class Forecaster:
             start = (date.today() - timedelta(days=days)).isoformat()
             if self.service:
                 q = text("""
-                    SELECT snapshot_date, SUM(total_cost) as total
+                    SELECT snapshot_date, SUM(amount_usd) as total
                     FROM cost_snapshots
                     WHERE account_id = :aid
                       AND service    = :svc
@@ -365,7 +365,7 @@ class Forecaster:
                 params = {"aid": self.account_id, "svc": self.service, "start": start}
             else:
                 q = text("""
-                    SELECT snapshot_date, SUM(total_cost) as total
+                    SELECT snapshot_date, SUM(amount_usd) as total
                     FROM cost_snapshots
                     WHERE account_id = :aid
                       AND snapshot_date >= :start

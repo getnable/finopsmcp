@@ -115,7 +115,7 @@ async def audit_public_ipv4(
     aws_client: AWSConnector instance (or anything with ._session).
     regions: explicit list of regions to scan; defaults to all opted-in regions.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     session = getattr(aws_client, "_session", None)
 
     # Resolve region list

@@ -74,6 +74,7 @@ def _get_lambda_nonprod_callers(lambda_client, total_spend: float) -> list[dict]
     Returns estimated spend fractions based on function count (proxy for call volume).
     """
     functions: list[dict] = []
+    total_fn_count = 0
     kwargs: dict = {"MaxItems": 50}
 
     while True:
@@ -84,6 +85,7 @@ def _get_lambda_nonprod_callers(lambda_client, total_spend: float) -> list[dict]
             break
 
         for fn in resp.get("Functions", []):
+            total_fn_count += 1
             name = fn.get("FunctionName", "")
             arn = fn.get("FunctionArn", "")
             is_nonprod, signal = _is_nonprod_name(name)
@@ -116,8 +118,9 @@ def _get_lambda_nonprod_callers(lambda_client, total_spend: float) -> list[dict]
     if not functions or total_spend <= 0:
         return []
 
-    # Estimate spend proportionally — equal share per nonprod function (proxy)
-    per_fn_spend = round(total_spend / max(len(functions), 1), 2)
+    # Estimate spend proportionally — share of total functions that are nonprod
+    # Divides by TOTAL function count so 4 nonprod out of 200 gets 2%, not 100%
+    per_fn_spend = round(total_spend / max(total_fn_count, 1), 2)
     for fn in functions:
         fn["call_count"] = None  # unknown without CloudTrail
         fn["estimated_spend"] = per_fn_spend
@@ -266,7 +269,7 @@ def scan_textract_environment_waste(
         )
     elif total_spend == 0:
         recommendation = "No Textract spend found in the selected period."
-    elif not has_useful_tags and not cloudtrail_scan_done:
+    elif not has_useful_tags and not non_prod_callers:
         recommendation = (
             "Tag hygiene is insufficient to assess environment breakdown. "
             "Add Environment tags to Textract callers to enable automatic waste detection."
@@ -293,7 +296,7 @@ def scan_textract_environment_waste(
         "monthly_total_estimate": monthly_total,
         "tagged_env_breakdown": {k: round(v, 2) for k, v in tagged_breakdown.items()},
         "has_useful_tags": has_useful_tags,
-        "cloudtrail_scan_done": cloudtrail_scan_done,
+        "lambda_scan_done": bool(non_prod_callers is not None),
         "non_prod_callers": non_prod_callers,
         "estimated_monthly_waste": estimated_monthly_waste,
         "non_prod_pct": round(non_prod_pct * 100, 1),
