@@ -361,19 +361,13 @@ async def list_connected_providers() -> dict:
 @mcp.tool()
 async def check_connector_health() -> dict:
     """
-    Actively test every configured connector with a real API call and report
-    health status, last successful data time, and specific fix instructions
-    for any failures.
-
-    Unlike list_connected_providers (which only checks if credentials exist),
-    this actually calls each API and measures response time.
+    Actively test every configured connector with a real API call. Reports
+    health status, last successful data time, and fix instructions for failures.
 
     Examples:
         - "Are all my connectors healthy?"
         - "Which connectors are broken or stale?"
-        - "Check if AWS is still working"
         - "Why am I not getting data from Datadog?"
-        - "Show connector health dashboard"
     """
     import asyncio
     import time
@@ -493,17 +487,15 @@ async def get_cost_summary(
     Get total spend summarized by service, account, and region.
 
     Args:
-        provider: Specific provider name (e.g. "aws", "datadog", "snowflake"). None = all.
-        category: "cloud" or "saas" to filter by type. None = all.
+        provider: Provider name (e.g. "aws", "datadog"). None = all.
+        category: "cloud" or "saas". None = all.
         start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
         end_date: ISO date. Defaults to today.
         granularity: "DAILY" or "MONTHLY".
-        account: Named AWS account from accounts.yaml (e.g. "anway", "easystreet").
-                 Uses the default account when omitted.
+        account: Named AWS account from accounts.yaml. Uses default when omitted.
 
     Examples:
-        - "How much did we spend total last month?"
-        - "What did we spend on SaaS tools this quarter?"
+        - "How much did we spend last month?"
         - "Give me an AWS cost summary for January"
         - "What did the anway account spend this month?"
     """
@@ -584,17 +576,15 @@ async def get_costs_by_service(
     Cost breakdown by service, optionally filtered to a keyword.
 
     Args:
-        service_filter: Case-insensitive substring to match service names (e.g. "compute", "storage", "logs").
+        service_filter: Case-insensitive substring (e.g. "compute", "storage").
         provider: Specific provider. None = all.
         category: "cloud" or "saas". None = all.
         start_date: ISO date. Defaults to 30 days ago.
         end_date: ISO date. Defaults to today.
-        account: Named AWS account from accounts.yaml (e.g. "anway", "easystreet").
+        account: Named AWS account from accounts.yaml.
 
     Examples:
-        - "How much did compute cost us across all clouds?"
-        - "What did we spend on storage?"
-        - "How much are we paying for GitHub Actions?"
+        - "How much did compute cost us?"
         - "Show me all Datadog product costs"
         - "What did the easystreet account spend on EC2?"
     """
@@ -682,12 +672,11 @@ async def get_top_cost_drivers(
         category: "cloud" or "saas". None = all.
         start_date: ISO date. Defaults to 30 days ago.
         end_date: ISO date. Defaults to today.
-        account: Named AWS account from accounts.yaml (e.g. "anway", "easystreet").
+        account: Named AWS account from accounts.yaml.
 
     Examples:
         - "What are our biggest cost drivers this month?"
         - "Top 5 most expensive things in AWS"
-        - "What SaaS tools are costing us the most?"
         - "Top cost drivers in the easystreet account"
     """
     result = await get_costs_by_service(
@@ -1800,30 +1789,21 @@ async def export_cost_report(
     open_file: bool = True,
 ) -> dict:
     """
-    Export a cost report as an HTML file (printable to PDF) and/or CSV files.
-
-    Generates a clean, shareable report that anyone can open — no Claude Desktop
-    or nable required. Finance teams get CSVs; stakeholders get HTML with a
-    'Print / Save PDF' button.
-
-    Files are saved to: ~/.finops/exports/
+    Export a cost report as HTML (printable to PDF) and/or CSV. Saved to
+    ~/.finops/exports/. No Claude Desktop required to open.
 
     Args:
-        title: Report title (default: "Cloud Cost Report — <period>")
-        sections: Which sections to include. Options:
-                  "cost_summary", "services", "anomalies", "rightsizing",
-                  "savings", "budgets". Default: all available.
-        formats: ["html", "csv"] — default: both. "html" = single file with
-                 print-to-PDF button. "csv" = zip of CSVs + individual files.
-        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        title: Report title. Defaults to "Cloud Cost Report <period>".
+        sections: Sections to include: cost_summary, services, anomalies,
+                  rightsizing, savings, budgets. Default: all.
+        formats: ["html", "csv"]. Default: both.
+        start_date: ISO date. Defaults to 30 days ago.
         end_date: ISO date. Defaults to today.
-        open_file: Open the HTML report in the default browser (default True).
+        open_file: Open HTML in browser after export (default True).
 
     Examples:
         - "Export a cost report for this month"
-        - "Give me a CSV export of our anomalies and rightsizing recs"
-        - "Generate a PDF report I can send to finance"
-        - "Export just the rightsizing and savings sections as CSV"
+        - "Give me a CSV export of anomalies and rightsizing"
         - "Make a weekly cost report for the team"
     """
     from datetime import date as _date, timedelta
@@ -2625,23 +2605,17 @@ async def audit_aws_waste(
 ) -> dict:
     """
     Deep AWS waste audit: scans EC2, EBS, RDS, Lambda, NAT Gateways, CloudWatch
-    Logs, S3, and CloudTrail for waste patterns that Cost Explorer misses. Goes
-    beyond Compute Optimizer with checks like: gp2→gp3 migration, infinite log
-    retention, idle NAT gateways, over-retained RDS backups, and unassociated
-    Elastic IPs. Returns findings sorted by estimated monthly savings.
+    Logs, S3, and CloudTrail for waste. Returns findings sorted by monthly savings.
 
     Args:
-        regions: List of AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
-                 Defaults to all opted-in regions — can be slow for large accounts.
-        checks: Subset of checks to run. Available: ebs, snapshots, eips, nat,
-                rds, cloudtrail, cloudwatch, s3, lambda, ec2. Defaults to all.
-        account_id: AWS account ID label (auto-discovered from STS if not provided).
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+        checks: Subset to run: ebs, snapshots, eips, nat, rds, cloudtrail,
+                cloudwatch, s3, lambda, ec2. Defaults to all.
+        account_id: AWS account ID (auto-discovered from STS if not provided).
 
     Examples:
         - "Run a full AWS waste audit"
-        - "Scan us-east-1 for EBS and Lambda waste"
         - "Find all idle NAT gateways and unattached EBS volumes"
-        - "What AWS resources are we paying for but not using?"
         - "Audit CloudWatch log groups for missing retention policies"
     """
     try:
@@ -2681,19 +2655,16 @@ async def audit_public_ipv4_addresses(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Audits all public IPv4 addresses across your AWS accounts.
-    Since Feb 2024, AWS charges $3.60/month per public IPv4, including ones on stopped instances.
-    Identifies unattached Elastic IPs (pure waste) and IPs on stopped instances.
-    Returns total monthly cost and release recommendations.
+    Audits public IPv4 addresses across AWS. Since Feb 2024, AWS charges
+    $3.60/month per IP including stopped instances. Finds unattached Elastic IPs
+    and IPs on stopped instances with release recommendations.
 
     Args:
-        regions: List of AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
-                 Defaults to all opted-in regions.
+        regions: AWS regions to scan. Defaults to all opted-in regions.
 
     Examples:
-        - "Audit our public IPv4 addresses"
         - "Find unattached Elastic IPs we can release"
-        - "How much are we spending on public IPv4 addresses?"
+        - "How much are we spending on public IPv4?"
         - "Show Elastic IPs on stopped instances"
     """
     try:
@@ -2768,19 +2739,17 @@ async def get_instance_deep_analysis(
 ) -> dict:
     """
     Deep CloudWatch analysis for a specific EC2 instance. Returns CPU, network,
-    disk utilization percentiles (avg/p95/max), a rightsizing recommendation with
-    estimated savings, and the AWS Compute Optimizer recommendation if available.
+    and disk utilization percentiles, a rightsizing recommendation, and the
+    Compute Optimizer recommendation if available.
 
     Args:
         instance_id: EC2 instance ID (e.g. "i-0abc1234567890def")
-        region: AWS region where the instance lives (default: us-east-1)
-        lookback_days: Days of metrics history to analyze (default: 14, max: 63)
+        region: AWS region (default: us-east-1)
+        lookback_days: Days of metrics to analyze (default: 14, max: 63)
 
     Examples:
-        - "Analyze instance i-0abc1234 in us-east-1"
         - "Is i-0abc1234 over-provisioned?"
-        - "Show me CPU and memory trends for i-0abc1234 over the last 30 days"
-        - "What does Compute Optimizer recommend for i-0abc1234?"
+        - "Show CPU trends for i-0abc1234 over the last 30 days"
     """
     try:
         from .analyzers.optimizer import get_instance_deep_analysis as _analyze
@@ -2799,20 +2768,16 @@ async def scan_cloudwatch_waste(
     regions: list[str] | None = None,
 ) -> dict:
     """
-    Scans all CloudWatch Log Groups for missing retention policies (infinite
-    retention is expensive at $0.03/GB-month). Returns groups with no retention
-    set, estimated monthly storage cost, and recommended retention periods by
-    log type (application, vpc-flow, cloudtrail, lambda, rds, etc). Also
-    generates ready-to-run AWS CLI commands to fix the top offenders.
+    Finds CloudWatch Log Groups with no retention policy (infinite retention
+    costs $0.03/GB-month). Returns groups, estimated monthly cost, recommended
+    retention periods by log type, and CLI commands to fix top offenders.
 
     Args:
-        regions: List of regions to scan. Defaults to all opted-in regions.
+        regions: Regions to scan. Defaults to all opted-in regions.
 
     Examples:
         - "Which CloudWatch log groups have no retention policy?"
-        - "How much are we spending on CloudWatch log storage?"
         - "Scan for infinite log retention across all regions"
-        - "Show me log groups we should set expiry on"
     """
     try:
         from .analyzers.optimizer import scan_cloudwatch_log_waste
@@ -7520,6 +7485,60 @@ async def get_textract_costs(days: int = 30, account: str = "") -> str:
 
 
 @mcp.tool()
+async def audit_textract_environment_waste(days: int = 30) -> dict:
+    """
+    Analyzes Textract spend by environment to find non-production API calls.
+    Textract charges per page — QA and staging environments often call it
+    unnecessarily. Identifies which Lambda functions or services are calling
+    Textract in non-prod and estimates the monthly waste.
+
+    Use this when:
+        - Textract is a top cost driver
+        - User asks about AI/ML service costs
+        - User asks why their Textract bill is high
+        - User wants to reduce document processing costs
+
+    Args:
+        days: Number of days to analyze (default 30).
+    """
+    try:
+        from .recommendations.textract_env import scan_textract_environment_waste
+        region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+        return scan_textract_environment_waste(days=days, region=region)
+    except Exception as e:
+        return {"error": f"Textract environment audit unavailable: {e}"}
+
+
+@mcp.tool()
+async def recommend_bedrock_model_routing(days: int = 30) -> dict:
+    """
+    Analyzes Bedrock model usage to find invocations that could route to
+    cheaper models without quality loss. Sonnet costs 20x more than Haiku.
+    Classification, extraction, and short-context tasks rarely need Sonnet.
+
+    Identifies which Lambda functions are using Sonnet for tasks that Haiku
+    handles equally well, and estimates monthly savings from routing.
+
+    Use this when:
+        - Bedrock is a top cost driver
+        - User asks about LLM costs or AI spend
+        - User asks how to reduce Bedrock costs
+        - User wants to optimize model usage
+        - "Why is my Bedrock bill so high?"
+        - "Can I use a cheaper model?"
+
+    Args:
+        days: Number of days to analyze (default 30).
+    """
+    try:
+        from .recommendations.bedrock_routing import recommend_bedrock_model_routing as _recommend
+        region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+        return _recommend(days=days, region=region)
+    except Exception as e:
+        return {"error": f"Bedrock routing analysis unavailable: {e}"}
+
+
+@mcp.tool()
 async def get_marketplace_costs(days: int = 30, account: str = "") -> str:
     """
     Break down AWS Marketplace costs by product and vendor.
@@ -7636,19 +7655,15 @@ async def identify_nonprod_scheduling_opportunities(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Identifies non-production EC2 instances running 24/7 that could be scheduled.
-    Dev/staging environments typically only need to run during business hours.
-    Scheduling saves 60-70% on non-production compute costs.
-    Returns instances with idle patterns and recommended schedules.
+    Finds non-production EC2 instances (dev/staging/test) running 24/7.
+    Scheduling to business hours only saves 60-70% on compute costs.
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
 
     Examples:
         - "Find non-prod instances we could schedule to save money"
-        - "Which dev and staging instances are running nights and weekends?"
         - "How much could we save by scheduling non-production environments?"
-        - "Show me EC2 instances tagged dev or staging that run 24/7"
     """
     try:
         from .recommendations.nonprod_scheduler import identify_nonprod_resources
@@ -7727,20 +7742,17 @@ async def audit_rds_manual_snapshots(
     age_threshold_days: int = 30,
 ) -> str:
     """
-    Audits RDS manual snapshots for cost waste. Manual snapshots never auto-expire.
-    Identifies orphaned snapshots (source DB deleted) and old snapshots past the
-    retention threshold. RDS snapshot storage costs $0.095/GB-month.
+    Audits RDS manual snapshots for waste. Manual snapshots never auto-expire
+    and cost $0.095/GB-month. Finds orphaned snapshots (source DB deleted)
+    and old snapshots past the retention threshold.
 
     Args:
-        regions:            AWS regions to scan. Defaults to all opted-in regions.
-        age_threshold_days: Flag snapshots older than this many days. Default: 30.
+        regions: AWS regions to scan. Defaults to all opted-in regions.
+        age_threshold_days: Flag snapshots older than this. Default: 30 days.
 
     Examples:
-        - "Audit RDS snapshots for waste"
         - "Find orphaned RDS snapshots from deleted databases"
         - "How much are we paying for old RDS manual snapshots?"
-        - "List RDS snapshots older than 60 days"
-        - "What RDS snapshots can we safely delete?"
     """
     try:
         from .recommendations.rds_snapshots import audit_rds_manual_snapshots as _audit
@@ -7841,19 +7853,16 @@ async def scan_lambda_concurrency_waste(
     regions: list[str] | None = None,
 ) -> dict:
     """
-    Scans Lambda functions with provisioned concurrency for over-provisioning waste.
-    Provisioned concurrency costs money even when idle.
-    Returns functions where average utilization is below 50% with savings estimates.
+    Scans Lambda functions with provisioned concurrency for waste. Provisioned
+    concurrency costs money even when idle. Returns functions below 50% avg
+    utilization with savings estimates.
 
     Args:
-        regions: AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
-                 Defaults to all common regions.
+        regions: AWS regions to scan. Defaults to all common regions.
 
     Examples:
-        - "Scan Lambda provisioned concurrency for waste"
         - "Find Lambda functions with over-provisioned concurrency"
         - "How much are we wasting on idle Lambda concurrency?"
-        - "Show Lambda concurrency waste in us-east-1"
     """
     try:
         from .recommendations.lambda_concurrency import scan_lambda_concurrency_waste as _scan
@@ -7883,14 +7892,12 @@ async def scan_lambda_concurrency_waste(
 @mcp.tool()
 async def scan_s3_bucket_key_opportunities() -> dict:
     """
-    Scans S3 buckets using KMS encryption without Bucket Keys enabled.
-    S3 Bucket Keys reduce KMS API calls by up to 99%, cutting KMS costs dramatically.
-    Returns affected buckets with the exact AWS CLI command to fix each one.
+    Finds S3 buckets using KMS encryption without Bucket Keys enabled.
+    Bucket Keys reduce KMS API calls by up to 99%. Returns affected buckets
+    with the CLI command to fix each one.
 
     Examples:
         - "Find S3 buckets missing bucket keys"
-        - "Which S3 buckets could save on KMS costs?"
-        - "Scan S3 for bucket key opportunities"
         - "How much are we wasting on KMS calls from S3?"
     """
     try:
@@ -7924,20 +7931,15 @@ async def recommend_lambda_snapstart(
     regions: list[str] | None = None,
 ) -> dict:
     """
-    Finds Java Lambda functions that would benefit from SnapStart.
-    SnapStart eliminates cold starts for Java functions at no extra cost,
-    replacing expensive provisioned concurrency. Functions that are paying
-    for PC just to reduce cold starts are the primary targets.
+    Finds Java Lambda functions that should use SnapStart. SnapStart eliminates
+    cold starts for free, replacing expensive provisioned concurrency.
 
     Args:
-        regions: AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
-                 Defaults to all common regions.
+        regions: AWS regions to scan. Defaults to all common regions.
 
     Examples:
         - "Which Java Lambda functions should use SnapStart?"
         - "Find Lambda functions wasting money on provisioned concurrency"
-        - "Scan for SnapStart opportunities"
-        - "Which Java Lambdas are paying for cold-start reduction unnecessarily?"
     """
     try:
         from .recommendations.lambda_snapstart import recommend_lambda_snapstart as _scan
@@ -7972,19 +7974,15 @@ async def audit_efs_cross_az_mounts(
     regions: list[str] | None = None,
 ) -> dict:
     """
-    Detects EFS file systems with EC2 instances mounting from a different AZ.
-    Cross-AZ EFS mounts cost $0.02/GB in data transfer charges that appear
-    silently on the bill. The fix is adding a mount target in each instance AZ.
+    Finds EC2 instances mounting EFS from a different AZ. Cross-AZ mounts cost
+    $0.02/GB in hidden transfer charges. Fix by adding a mount target per AZ.
 
     Args:
-        regions: AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
-                 Defaults to all common regions.
+        regions: AWS regions to scan. Defaults to all common regions.
 
     Examples:
         - "Find EFS mounts crossing availability zones"
         - "Which EFS file systems are generating cross-AZ transfer costs?"
-        - "Audit EFS cross-AZ data transfer waste"
-        - "Are any EC2 instances mounting EFS from the wrong AZ?"
     """
     try:
         from .recommendations.efs_cross_az import audit_efs_cross_az_mounts as _scan
@@ -8016,18 +8014,14 @@ async def audit_nlb_cross_zone_costs(
     regions: list[str] | None = None,
 ) -> dict:
     """
-    Audits Network Load Balancers with cross-zone load balancing enabled.
-    Cross-zone LB charges $0.01/GB for cross-AZ traffic. For high-throughput
-    NLBs this adds up. Disabling it is safe when AZs have equal capacity.
+    Finds NLBs with cross-zone load balancing enabled. Cross-zone LB charges
+    $0.01/GB for cross-AZ traffic. Safe to disable when AZs have equal capacity.
 
     Args:
-        regions: AWS regions to scan (e.g. ["us-east-1", "eu-west-1"]).
-                 Defaults to all common regions.
+        regions: AWS regions to scan. Defaults to all common regions.
 
     Examples:
         - "Find NLBs generating cross-zone load balancing charges"
-        - "Which NLBs should have cross-zone LB disabled?"
-        - "Audit NLB cross-AZ costs"
         - "How much are we spending on NLB cross-zone traffic?"
     """
     try:
@@ -8066,18 +8060,16 @@ async def audit_s3_intelligent_tiering(
     regions: list[str] | None = None,
 ) -> dict:
     """
-    Finds S3 buckets using Intelligent-Tiering where the monitoring fee
-    exceeds the tiering savings. IT costs $0.0025 per 1,000 monitored objects,
-    making it more expensive than S3 Standard for objects smaller than 128KB.
+    Finds S3 buckets using Intelligent-Tiering where the monitoring fee exceeds
+    savings. IT costs $0.0025/1,000 objects, making it more expensive than
+    S3 Standard for objects smaller than 128KB.
 
     Args:
         regions: Unused (S3 is global). Present for API consistency.
 
     Examples:
-        - "Find S3 buckets where Intelligent-Tiering is costing more than it saves"
-        - "Which buckets should disable Intelligent-Tiering?"
-        - "Audit S3 IT small object waste"
-        - "Are we wasting money on S3 Intelligent-Tiering for small files?"
+        - "Find S3 buckets where Intelligent-Tiering costs more than it saves"
+        - "Are we wasting money on S3 IT for small files?"
     """
     try:
         from .recommendations.s3_intelligent_tiering import audit_s3_intelligent_tiering as _scan
@@ -8117,17 +8109,15 @@ async def scan_graviton_migration_opportunities(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Scans for EC2 instances that can migrate to Graviton (arm64) for 20-40% cost savings.
-    Returns a ranked list of migration candidates with estimated monthly savings.
-    Graviton instances offer the same performance for most workloads at lower cost.
+    Finds EC2 instances that can migrate to Graviton (arm64) for 20-40% savings.
+    Returns ranked candidates with estimated monthly savings per instance.
 
     Args:
-        regions: AWS regions to scan. Defaults to us-east-1. Example: ["us-east-1", "eu-west-1"].
+        regions: AWS regions to scan. Defaults to us-east-1.
 
     Examples:
         - "Which EC2 instances can we move to Graviton?"
         - "How much can we save by switching to arm64 instances?"
-        - "Scan us-east-1 and eu-west-1 for Graviton migration opportunities"
     """
     if err := require_role("analyst"):
         return str(err)
@@ -8199,19 +8189,15 @@ async def recommend_spot_adoption(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Scans on-demand EC2 instances and recommends which ones to migrate to spot for 60-80% savings.
-
-    Checks env tags (dev/staging/test = stateless), ASG membership, CPU variance over 14 days,
-    and interruption frequency from public Spot Advisor data. Returns RECOMMENDED, POSSIBLE, or
-    NOT_RECOMMENDED per instance sorted by monthly savings.
+    Finds on-demand EC2 instances to migrate to spot for 60-80% savings. Uses
+    env tags, ASG membership, CPU variance, and Spot Advisor interruption data.
+    Returns RECOMMENDED, POSSIBLE, or NOT_RECOMMENDED per instance.
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
-                 Example: ["us-east-1", "eu-west-1"].
 
     Examples:
         - "Which EC2 instances should we move to spot?"
-        - "Show spot adoption opportunities in us-east-1"
         - "How much can we save by switching to spot instances?"
     """
     if err := require_role("analyst"):
@@ -8286,19 +8272,15 @@ async def audit_spot_diversification(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Audits Auto Scaling Groups using spot instances for instance type diversification.
-
-    ASGs with fewer than 3 instance types are HIGH_RISK — a single capacity pool
-    tightening can take down the entire fleet. Best practice is 5+ types with
-    capacity-optimized allocation strategy.
+    Audits ASGs using spot for instance type diversification. ASGs with fewer
+    than 3 types are HIGH_RISK. Best practice: 5+ types with capacity-optimized
+    allocation to avoid correlated interruptions.
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
-                 Example: ["us-east-1", "eu-west-1"].
 
     Examples:
         - "Are our ASGs diversified enough for spot?"
-        - "Check spot diversification in us-east-1"
         - "Which ASGs are at risk from spot interruptions?"
     """
     if err := require_role("analyst"):
@@ -8360,23 +8342,16 @@ async def audit_cloudwatch_metric_cardinality(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Audits CloudWatch custom metric cardinality across your AWS account.
-
-    Custom metrics above the 10,000 free-tier threshold cost $0.30/metric/month.
-    High-cardinality dimensions (pod_id, request_id, trace_id) can cause a single
-    microservice to emit thousands of metrics, costing thousands of dollars per month.
-
-    Excludes AWS/* namespaces (those are free). Flags namespaces with >100 metrics,
-    identifies the dimensions causing the explosion, and estimates monthly cost.
+    Audits CloudWatch custom metric cardinality. Custom metrics above the 10,000
+    free-tier threshold cost $0.30/metric/month. High-cardinality dimensions like
+    pod_id or request_id can cause thousands of metrics per microservice.
 
     Args:
-        regions: List of AWS regions to scan. Defaults to all opted-in regions.
+        regions: AWS regions to scan. Defaults to all opted-in regions.
 
     Examples:
-        - "Audit CloudWatch metric cardinality"
         - "Which namespaces have too many custom metrics?"
         - "Find CloudWatch metrics costing us money"
-        - "Show high-cardinality CloudWatch dimensions"
     """
     if err := require_role("analyst"):
         return err
@@ -8429,22 +8404,15 @@ async def audit_cloudwatch_orphaned_alarms(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Finds CloudWatch alarms on deleted resources (orphaned alarms).
-
-    Standard alarms cost $0.10/alarm/month. Composite alarms cost $0.30/alarm/month.
-    Alarms on terminated EC2 instances, deleted SQS queues, or deprovisioned
-    endpoints stay in INSUFFICIENT_DATA state indefinitely and keep billing.
-
-    Flags alarms in INSUFFICIENT_DATA for >7 days. For EC2 and SQS alarms,
-    verifies the backing resource still exists.
+    Finds CloudWatch alarms on deleted resources. Standard alarms cost
+    $0.10/month, composite $0.30/month. Terminated instances and deleted
+    queues leave alarms stuck in INSUFFICIENT_DATA indefinitely.
 
     Args:
-        regions: List of AWS regions to scan. Defaults to all opted-in regions.
+        regions: AWS regions to scan. Defaults to all opted-in regions.
 
     Examples:
         - "Find orphaned CloudWatch alarms"
-        - "Which CloudWatch alarms can we delete?"
-        - "Show alarms on deleted resources"
         - "How much are we wasting on CloudWatch alarms?"
     """
     if err := require_role("analyst"):
@@ -8509,22 +8477,16 @@ async def audit_cloudwatch_logs_ia_opportunities(
     regions: list[str] | None = None,
 ) -> str:
     """
-    Finds CloudWatch Log groups that can be migrated to Infrequent Access class.
-
-    IA class cuts ingestion cost 50%: $0.075/GB (Standard) to $0.0375/GB (IA).
-    Log groups older than 30 days with >1 GB/month ingestion that are still on
-    STANDARD class are candidates.
-
-    Limitation: IA class does not support metric filters, subscription filters,
-    or live tail. Confirm before migrating.
+    Finds CloudWatch Log groups to migrate to Infrequent Access class. IA cuts
+    ingestion cost 50% ($0.075 to $0.0375/GB). Candidates: groups older than
+    30 days with >1 GB/month still on STANDARD. Note: IA does not support
+    metric filters or subscription filters.
 
     Args:
-        regions: List of AWS regions to scan. Defaults to all opted-in regions.
+        regions: AWS regions to scan. Defaults to all opted-in regions.
 
     Examples:
         - "Find CloudWatch log groups to migrate to Infrequent Access"
-        - "Where can we cut CloudWatch Logs costs?"
-        - "Show log groups eligible for IA storage class"
         - "How much can we save on CloudWatch log ingestion?"
     """
     if err := require_role("analyst"):
@@ -8587,26 +8549,14 @@ async def audit_cloudwatch_logs_ia_opportunities(
 @mcp.tool()
 async def recommend_database_savings_plans() -> dict:
     """
-    Recommend AWS Database Savings Plans for RDS and Aurora spend.
-
-    Database Savings Plans (launched re:Invent 2025) offer up to 45% savings
-    on RDS and Aurora, separate from Compute Savings Plans. Most teams do not
-    know these exist yet.
-
-    Pulls last 30 days of RDS/Aurora spend from Cost Explorer, checks existing
-    Database SP coverage, and recommends a 1-year no-upfront plan sized to
-    the uncovered baseline. Uses a conservative 30% discount estimate.
-
-    Returns current_monthly_rds_spend, current_sp_coverage_pct,
-    uncovered_monthly_spend, recommended_sp_hourly_commitment,
-    estimated_monthly_savings, estimated_annual_savings, payback_days,
-    recommendation_type.
+    Recommends AWS Database Savings Plans for RDS and Aurora spend. Database
+    SPs (re:Invent 2025) offer up to 45% savings, separate from Compute SPs.
+    Sizes a 1-year no-upfront plan to uncovered baseline spend.
 
     Examples:
         - "Should we buy Database Savings Plans?"
         - "How much could we save on RDS with a Database SP?"
         - "What is our RDS/Aurora Savings Plan coverage?"
-        - "Recommend a Database Savings Plan for our Aurora spend"
     """
     try:
         from .recommendations.database_savings_plans import (
@@ -8632,27 +8582,16 @@ async def audit_ebs_snapshot_replication(
     regions: list[str] | None = None,
 ) -> dict:
     """
-    Audit EBS snapshots replicated cross-region for cost waste.
-
-    EBS snapshots replicated across regions cost $0.05/GB-month in each
-    region, plus inter-region transfer when the copy was made. Many teams
-    replicate snapshots for DR but never clean up old or orphaned copies.
-
-    Identifies orphaned copies (source volume deleted), excessive copies
-    (more than 3 regions), and old copies (over 90 days) where a newer
-    copy exists.
+    Audits cross-region EBS snapshot replication for waste. Replicated snapshots
+    cost $0.05/GB-month in each region. Finds orphaned copies (source volume
+    deleted), excessive copies (more than 3 regions), and old copies where a
+    newer copy exists.
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
 
-    Returns cross_region_findings with snapshot_id, volume_id, source_region,
-    copy_regions, total_size_gb, total_monthly_cost, excess_copies, orphaned,
-    recommendation. Plus summary totals and potential_monthly_savings.
-
     Examples:
-        - "Audit our EBS snapshot replication costs"
         - "Find orphaned cross-region EBS snapshots"
-        - "Which EBS snapshots are replicated to too many regions?"
         - "How much are we spending on cross-region snapshot storage?"
     """
     try:
@@ -8674,25 +8613,14 @@ async def audit_ebs_snapshot_replication(
 @mcp.tool()
 async def audit_s3_transfer_acceleration() -> dict:
     """
-    Find S3 buckets with Transfer Acceleration enabled that are unlikely to benefit.
-
-    S3 Transfer Acceleration adds $0.04-0.08/GB on top of standard S3 transfer
-    costs. It is often enabled speculatively and forgotten. It rarely helps for
-    low-volume buckets, buckets in us-east-1, or buckets already behind CloudFront.
-
-    Flags buckets as likely waste if transfer volume is under 1 GB/month, bucket
-    is in us-east-1, or bucket is already fronted by a CloudFront distribution.
-    Includes a ready-to-run AWS CLI disable command for each flagged bucket.
-
-    Returns findings with bucket_name, region, ta_enabled, monthly_transfer_gb,
-    monthly_ta_cost, behind_cloudfront, likely_waste, reason, disable_command.
-    Plus total_monthly_ta_cost and potential_monthly_savings.
+    Finds S3 buckets with Transfer Acceleration enabled that won't benefit.
+    TA adds $0.04-0.08/GB and is often forgotten. Flags buckets as waste if
+    volume is under 1 GB/month, bucket is in us-east-1, or it is behind
+    CloudFront. Returns a CLI disable command for each flagged bucket.
 
     Examples:
-        - "Which S3 buckets have Transfer Acceleration enabled?"
         - "Find S3 TA enabled buckets that don't need it"
         - "How much are we wasting on S3 Transfer Acceleration?"
-        - "Audit S3 Transfer Acceleration usage"
     """
     try:
         from .recommendations.s3_transfer_acceleration import (
