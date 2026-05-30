@@ -6149,7 +6149,11 @@ async def forecast_costs(
         if not f._series:
             return {
                 "error": "No historical data found for this account/service.",
-                "hint": "Run `take_snapshot_now` first to populate cost history.",
+                "hint": (
+                    "Forecasting requires at least 14 days of daily snapshots. "
+                    "Run `take_snapshot_now` to capture today's data, then set up the daily cron: "
+                    "`finops schedule snapshots`. Forecasting will unlock automatically once enough history exists."
+                ),
             }
         return f.predict_dict(horizon_days)
     except Exception as e:

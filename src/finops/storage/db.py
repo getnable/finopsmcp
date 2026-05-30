@@ -476,6 +476,7 @@ def get_engine() -> Engine:
             connect_args={"connect_timeout": 10},
         )
         metadata.create_all(_ENGINE)
+        _run_sqlite_migrations(_ENGINE)
     else:
         # Local SQLite mode (default)
         db_path_env = os.environ.get("FINOPS_DB_PATH", "")
@@ -500,9 +501,38 @@ def get_engine() -> Engine:
             cursor.close()
 
         metadata.create_all(_ENGINE)
+        _run_sqlite_migrations(_ENGINE)
         db_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
     return _ENGINE
+
+
+def _run_sqlite_migrations(engine: Engine) -> None:
+    """Apply additive schema migrations for SQLite.
+
+    SQLite does not support ALTER TABLE DROP COLUMN or ALTER TABLE MODIFY.
+    Only ADD COLUMN is safe. Each migration is idempotent — if the column
+    already exists, the PRAGMA check skips it.
+    """
+    migrations: list[tuple[str, str, str]] = [
+        # (table, column, ALTER TABLE statement)
+        ("anomalies",  "metadata",        "ALTER TABLE anomalies ADD COLUMN metadata TEXT"),
+        ("budgets",    "critical_at_pct", "ALTER TABLE budgets ADD COLUMN critical_at_pct REAL NOT NULL DEFAULT 100.0"),
+        ("budgets",    "warn_at_pct",     "ALTER TABLE budgets ADD COLUMN warn_at_pct REAL NOT NULL DEFAULT 80.0"),
+    ]
+
+    with engine.connect() as conn:
+        for table, column, stmt in migrations:
+            try:
+                # Check existing columns via PRAGMA
+                rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+                existing = {row[1] for row in rows}  # row[1] = column name
+                if column not in existing:
+                    conn.execute(text(stmt))
+                    conn.commit()
+                    log.info("Migration applied: %s.%s", table, column)
+            except Exception as exc:
+                log.warning("Migration skipped (%s.%s): %s", table, column, exc)
 
 
 def archive_old_snapshots(days_to_keep: int = 365) -> int:
