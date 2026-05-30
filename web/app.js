@@ -426,8 +426,44 @@ const TEAM_FEATURES = [
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
+const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/REPLACE_WITH_ANNUAL_LINK";
+const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01";
 function Pricing() {
-  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget enforcement, and org rollups.")), /* @__PURE__ */ React.createElement("div", { className: "pricing-grid" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-card" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-top" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-name" }, "Solo"), /* @__PURE__ */ React.createElement("div", { className: "pricing-price" }, /* @__PURE__ */ React.createElement("span", { className: "pricing-amount" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pricing-per" }, "forever")), /* @__PURE__ */ React.createElement("p", { className: "pricing-desc" }, "Everything you need to query, investigate, and understand your cloud costs."), /* @__PURE__ */ React.createElement(
+  const [annual, setAnnual] = useState(false);
+  const teamPrice = annual ? "$33" : "$40";
+  const teamPer = annual ? "/ mo, billed $399/yr" : "/ mo";
+  const teamSavings = annual ? "Save $81 \u2014 2 months free" : "7-day free trial";
+  const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
+  const teamPlan = annual ? "team_annual" : "team_monthly";
+  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget enforcement, and org rollups."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => setAnnual((a) => !a),
+      style: {
+        width: 44,
+        height: 24,
+        borderRadius: 12,
+        border: "1px solid var(--line-2)",
+        background: annual ? "var(--accent)" : "var(--bg-2)",
+        position: "relative",
+        cursor: "pointer",
+        transition: "background .2s",
+        flexShrink: 0
+      },
+      "aria-label": "Toggle annual billing"
+    },
+    /* @__PURE__ */ React.createElement("span", { style: {
+      position: "absolute",
+      top: 3,
+      left: annual ? 20 : 3,
+      width: 16,
+      height: 16,
+      borderRadius: "50%",
+      background: annual ? "var(--bg)" : "var(--fg-3)",
+      transition: "left .2s, background .2s",
+      display: "block"
+    } })
+  ), /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg)" : "var(--fg-3)", fontWeight: annual ? 500 : 400, transition: "color .15s" } }, "Annual"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 500, color: "var(--success)", background: "rgba(60,186,122,.12)", padding: "2px 7px", borderRadius: 2, letterSpacing: ".03em" } }, "SAVE 17%")))), /* @__PURE__ */ React.createElement("div", { className: "pricing-grid" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-card" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-top" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-name" }, "Solo"), /* @__PURE__ */ React.createElement("div", { className: "pricing-price" }, /* @__PURE__ */ React.createElement("span", { className: "pricing-amount" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pricing-per" }, "forever")), /* @__PURE__ */ React.createElement("p", { className: "pricing-desc" }, "Everything you need to query, investigate, and understand your cloud costs."), /* @__PURE__ */ React.createElement(
     "button",
     {
       className: "btn btn-ghost pricing-cta",
@@ -438,18 +474,19 @@ function Pricing() {
     },
     "Get started free ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  )), /* @__PURE__ */ React.createElement("div", { className: "pricing-features" }, SOLO_FEATURES.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "pricing-feature" }, /* @__PURE__ */ React.createElement(CheckIcon, null), /* @__PURE__ */ React.createElement("span", null, f))))), /* @__PURE__ */ React.createElement("div", { className: "pricing-card featured" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-badge" }, "7-day free trial"), /* @__PURE__ */ React.createElement("div", { className: "pricing-top" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-name" }, "Team"), /* @__PURE__ */ React.createElement("div", { className: "pricing-price" }, /* @__PURE__ */ React.createElement("span", { className: "pricing-amount" }, "$40"), /* @__PURE__ */ React.createElement("span", { className: "pricing-per" }, "/ mo")), /* @__PURE__ */ React.createElement("p", { className: "pricing-desc" }, "The remediation layer. Finds the waste, writes the fix, opens the PR, tracks whether it actually shipped."), /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { className: "pricing-features" }, SOLO_FEATURES.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "pricing-feature" }, /* @__PURE__ */ React.createElement(CheckIcon, null), /* @__PURE__ */ React.createElement("span", null, f))))), /* @__PURE__ */ React.createElement("div", { className: "pricing-card featured" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-badge" }, teamSavings), /* @__PURE__ */ React.createElement("div", { className: "pricing-top" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-name" }, "Team"), /* @__PURE__ */ React.createElement("div", { className: "pricing-price" }, /* @__PURE__ */ React.createElement("span", { className: "pricing-amount" }, teamPrice), /* @__PURE__ */ React.createElement("span", { className: "pricing-per" }, teamPer)), /* @__PURE__ */ React.createElement("p", { className: "pricing-desc" }, "The remediation layer. Finds the waste, writes the fix, opens the PR, tracks whether it actually shipped."), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01",
+      href: teamLink,
       target: "_blank",
       rel: "noopener noreferrer",
       className: "btn btn-primary pricing-cta",
       onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: "team" });
+        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: teamPlan, billing: annual ? "annual" : "monthly" });
       }
     },
-    "Start free trial ",
+    annual ? "Get annual plan" : "Start free trial",
+    " ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   )), /* @__PURE__ */ React.createElement("div", { className: "pricing-features" }, TEAM_FEATURES.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "pricing-feature" }, /* @__PURE__ */ React.createElement(CheckIcon, null), /* @__PURE__ */ React.createElement("span", null, f)))))), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { marginTop: 32, fontSize: 12, color: "var(--fg-4)", textAlign: "center", letterSpacing: ".04em" } }, "No credit card for Solo. Team trial requires a card, cancel any time.")));
 }

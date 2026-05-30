@@ -765,7 +765,18 @@ function CheckIcon(){
   );
 }
 
+const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/REPLACE_WITH_ANNUAL_LINK";
+const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01";
+
 function Pricing(){
+  const [annual, setAnnual] = useState(false);
+
+  const teamPrice    = annual ? "$33"  : "$40";
+  const teamPer      = annual ? "/ mo, billed $399/yr" : "/ mo";
+  const teamSavings  = annual ? "Save $81 — 2 months free" : "7-day free trial";
+  const teamLink     = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
+  const teamPlan     = annual ? "team_annual" : "team_monthly";
+
   return (
     <section id="pricing">
       <div className="wrap">
@@ -773,6 +784,30 @@ function Pricing(){
           <div className="label">Pricing</div>
           <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
           <p>Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget enforcement, and org rollups.</p>
+
+          {/* Billing toggle */}
+          <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center",marginTop:24}}>
+            <span style={{fontSize:13,color:annual?"var(--fg-3)":"var(--fg)",fontWeight:annual?400:500,transition:"color .15s"}}>Monthly</span>
+            <button
+              onClick={()=>setAnnual(a=>!a)}
+              style={{
+                width:44,height:24,borderRadius:12,border:"1px solid var(--line-2)",
+                background:annual?"var(--accent)":"var(--bg-2)",
+                position:"relative",cursor:"pointer",transition:"background .2s",flexShrink:0,
+              }}
+              aria-label="Toggle annual billing"
+            >
+              <span style={{
+                position:"absolute",top:3,left:annual?20:3,width:16,height:16,
+                borderRadius:"50%",background:annual?"var(--bg)":"var(--fg-3)",
+                transition:"left .2s, background .2s",display:"block",
+              }}/>
+            </button>
+            <span style={{display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:13,color:annual?"var(--fg)":"var(--fg-3)",fontWeight:annual?500:400,transition:"color .15s"}}>Annual</span>
+              <span style={{fontSize:11,fontWeight:500,color:"var(--success)",background:"rgba(60,186,122,.12)",padding:"2px 7px",borderRadius:2,letterSpacing:".03em"}}>SAVE 17%</span>
+            </span>
+          </div>
         </div>
         <div className="pricing-grid">
 
@@ -805,21 +840,21 @@ function Pricing(){
 
           {/* Team */}
           <div className="pricing-card featured">
-            <div className="pricing-badge">7-day free trial</div>
+            <div className="pricing-badge">{teamSavings}</div>
             <div className="pricing-top">
               <div className="pricing-name">Team</div>
               <div className="pricing-price">
-                <span className="pricing-amount">$40</span>
-                <span className="pricing-per">/ mo</span>
+                <span className="pricing-amount">{teamPrice}</span>
+                <span className="pricing-per">{teamPer}</span>
               </div>
               <p className="pricing-desc">The remediation layer. Finds the waste, writes the fix, opens the PR, tracks whether it actually shipped.</p>
               <a
-                href="https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01"
+                href={teamLink}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn btn-primary pricing-cta"
-                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'team'}); }}>
-                Start free trial <span className="arr">→</span>
+                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:teamPlan,billing:annual?'annual':'monthly'}); }}>
+                {annual ? "Get annual plan" : "Start free trial"} <span className="arr">→</span>
               </a>
             </div>
             <div className="pricing-features">
