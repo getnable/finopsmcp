@@ -767,7 +767,7 @@ function CheckIcon(){
 }
 
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/aFa28q1DzffEdZS2sy2Nq03";
-const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01";
+const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/eVq00i6XT1oOg80d7c2Nq04";
 
 function Pricing(){
   const [annual, setAnnual] = useState(false);
