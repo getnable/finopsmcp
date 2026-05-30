@@ -9147,5 +9147,332 @@ async def export_cost_report_csv(
     )
 
 
+@mcp.tool()
+async def push_to_n8n(
+    event_type: str = "audit_complete",
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Runs the cost audit and pushes results to your n8n workflow via webhook.
+
+    n8n can then trigger any downstream action: create a Jira ticket,
+    send a Slack message, update a spreadsheet, page on-call, or anything
+    else in your automation stack.
+
+    Setup: in n8n, add a Webhook node and copy the URL. Set N8N_WEBHOOK_URL
+    in your environment. Run: finops setup n8n
+
+    event_type options: audit_complete, anomaly_summary
+
+    Use when:
+        - "Send the cost report to n8n"
+        - "Trigger my n8n workflow"
+        - "Push cost findings to my automation"
+        - "Wire this into n8n"
+    """
+    import time
+    from .connectors.saas.n8n import N8nConnector
+
+    n8n = N8nConnector()
+    if not await n8n.is_configured():
+        return (
+            "N8N_WEBHOOK_URL is not set. "
+            "In n8n, add a Webhook node and copy the URL. "
+            "Then run: finops setup n8n"
+        )
+
+    if event_type == "anomaly_summary":
+        from .anomaly.detector import get_active_anomalies
+        anomalies_list = get_active_anomalies(limit=20)
+        if not anomalies_list:
+            return "No active anomalies to push to n8n."
+        sent = 0
+        for anomaly in anomalies_list:
+            ok = await n8n.send_anomaly(anomaly)
+            if ok:
+                sent += 1
+        return (
+            f"Pushed {sent}/{len(anomalies_list)} anomaly events to n8n."
+        )
+
+    # Default: audit_complete
+    try:
+        from .analyzers.optimizer import run_deep_audit
+        t0 = time.monotonic()
+        report = run_deep_audit(regions=regions)
+        duration = time.monotonic() - t0
+
+        findings = report.get("findings", [])
+        monthly_savings = report.get("total_estimated_monthly_savings", 0.0)
+
+        aws = _CLOUD_CONNECTORS.get("aws")
+        account = ""
+        if aws is not None:
+            try:
+                import boto3
+                sts = boto3.client("sts")
+                account = sts.get_caller_identity().get("Account", "")
+            except Exception:
+                pass
+
+        ok = await n8n.send_audit_summary(
+            findings=findings,
+            total_savings=monthly_savings,
+            account=account,
+            scan_duration_s=duration,
+        )
+
+        if ok:
+            return (
+                f"Pushed audit_complete event to n8n. "
+                f"{len(findings)} findings, ${monthly_savings:,.2f}/mo potential savings."
+            )
+        return "n8n webhook call failed. Check N8N_WEBHOOK_URL and that the webhook node is active."
+    except Exception as exc:
+        log.error("push_to_n8n audit failed: %s", exc, exc_info=True)
+        return f"Audit failed: {exc}"
+
+
+@mcp.tool()
+async def publish_cost_report_to_notion(
+    regions: list[str] | None = None,
+) -> str:
+    """
+    Runs the full cost audit and publishes results to your team's Notion page.
+
+    The Notion page can be shared with anyone on the team — they don't need
+    nable installed. Use this to give leadership, finance, and engineering
+    leads a shared cost view without a separate dashboard.
+
+    Requires NOTION_API_KEY and NOTION_PAGE_ID environment variables.
+    Set them with: finops setup notion
+
+    Use when:
+        - "Share the cost report with my team"
+        - "Publish this to Notion"
+        - "Update the team dashboard"
+        - "Post the cost summary to Notion"
+    """
+    require_role("analyst")
+
+    from .connectors.saas.notion import NotionConnector
+    notion = NotionConnector()
+
+    if not await notion.is_configured():
+        return (
+            "Notion is not configured. Set NOTION_API_KEY and NOTION_PAGE_ID, "
+            "or run: finops setup notion"
+        )
+
+    aws = _CLOUD_CONNECTORS.get("aws")
+    if aws is None or not await aws.is_configured():
+        return "AWS is not configured. Run 'uvx finops-mcp setup' to connect."
+
+    import asyncio
+    from datetime import datetime as _dt
+
+    findings: list[dict] = []
+
+    async def _run(name: str, coro):
+        try:
+            return name, await coro
+        except Exception as exc:
+            log.warning("notion audit scanner %s failed: %s", name, exc)
+            return name, None
+
+    from .recommendations.graviton import scan_graviton_opportunities
+    from .recommendations.public_ipv4 import audit_public_ipv4
+    from .recommendations.lambda_concurrency import scan_lambda_concurrency_waste as _lc
+    from .recommendations.s3_bucket_keys import scan_s3_bucket_key_opportunities as _s3bk
+    from .recommendations.nonprod_scheduler import identify_nonprod_resources
+    from .recommendations.rds_snapshots import audit_rds_manual_snapshots as _rds_snap
+    from .recommendations.spot_adoption import scan_spot_adoption_opportunities
+    from .recommendations.cloudwatch_cardinality import audit_cloudwatch_metric_cardinality as _cw_card
+    from .recommendations.cloudwatch_alarms import audit_cloudwatch_orphaned_alarms as _cw_alarms
+    from .recommendations.cloudwatch_logs_ia import audit_cloudwatch_logs_ia_opportunities as _cw_logs
+    from .recommendations.lambda_snapstart import recommend_lambda_snapstart as _snapstart
+    from .recommendations.nlb_cross_zone import audit_nlb_cross_zone_costs as _nlb
+    from .recommendations.s3_intelligent_tiering import audit_s3_intelligent_tiering as _s3it
+    from .recommendations.s3_transfer_acceleration import audit_s3_transfer_acceleration as _s3ta
+    from .recommendations.ebs_snapshot_replication import audit_ebs_snapshot_replication as _ebs_rep
+    from .recommendations.database_savings_plans import recommend_database_savings_plans as _dbsp
+    from .recommendations.textract_env import scan_textract_environment_waste as _textract
+    from .recommendations.bedrock_routing import recommend_bedrock_model_routing as _bedrock
+    from .recommendations.commitments import analyze_commitments as _commitments
+
+    tasks = [
+        _run("graviton",       scan_graviton_opportunities(aws_client=aws, regions=regions)),
+        _run("ipv4",           audit_public_ipv4(aws_client=aws, regions=regions)),
+        _run("lambda_pc",      _lc(aws_client=aws, regions=regions)),
+        _run("s3_bucket_keys", _s3bk(aws_client=aws)),
+        _run("nonprod",        identify_nonprod_resources(aws_client=aws, regions=regions)),
+        _run("rds_snapshots",  _rds_snap(aws_client=aws, regions=regions)),
+        _run("spot",           scan_spot_adoption_opportunities(aws_client=aws, regions=regions)),
+        _run("cw_cardinality", _cw_card(aws_client=aws, regions=regions)),
+        _run("cw_alarms",      _cw_alarms(aws_client=aws, regions=regions)),
+        _run("cw_logs_ia",     _cw_logs(aws_client=aws, regions=regions)),
+        _run("snapstart",      _snapstart(aws_client=aws, regions=regions)),
+        _run("nlb",            _nlb(aws_client=aws, regions=regions)),
+        _run("s3_it",          _s3it(aws_client=aws)),
+        _run("s3_ta",          _s3ta(aws_client=aws)),
+        _run("ebs_rep",        _ebs_rep(aws_client=aws, regions=regions)),
+        _run("db_sp",          _dbsp(aws_client=aws)),
+        _run("textract",       _textract(aws_client=aws)),
+        _run("bedrock",        _bedrock(aws_client=aws)),
+        _run("commitments",    _commitments(aws_client=aws)),
+    ]
+
+    results = await asyncio.gather(*tasks)
+
+    def _norm(name, data) -> list[dict]:
+        if data is None:
+            return []
+        out: list[dict] = []
+        try:
+            if name == "graviton" and isinstance(data, list):
+                for r in data:
+                    s = r.get("savings_estimate", 0) or 0
+                    if s > 0:
+                        out.append({"title": f"Migrate {r.get('instance_id','?')} ({r.get('instance_type','?')} -> {r.get('graviton_equivalent','?')})", "monthly_savings": s, "category": "Compute"})
+            elif name == "ipv4":
+                waste = data.get("total_monthly_waste", 0) or 0
+                if waste > 0:
+                    n = len(data.get("unattached_eips", []))
+                    out.append({"title": f"Release {n} unattached Elastic IP(s)", "monthly_savings": waste, "category": "Network"})
+            elif name == "lambda_pc" and isinstance(data, list):
+                for r in data:
+                    s = r.get("wasted_monthly_cost", 0) or 0
+                    if s > 0:
+                        out.append({"title": f"Reduce provisioned concurrency on {r.get('function_name','?')}", "monthly_savings": s, "category": "Compute"})
+            elif name == "s3_bucket_keys" and isinstance(data, list):
+                for r in data:
+                    s = r.get("estimated_savings", 0) or 0
+                    if s > 0:
+                        out.append({"title": f"Enable S3 Bucket Key on {r.get('bucket_name','?')}", "monthly_savings": s, "category": "Storage"})
+            elif name == "nonprod":
+                items = data.get("schedulable_instances", []) if isinstance(data, dict) else []
+                for r in items:
+                    s = r.get("potential_monthly_savings", 0) or 0
+                    if s > 0:
+                        out.append({"title": f"Schedule non-prod instance {r.get('name', r.get('instance_id','?'))}", "monthly_savings": s, "category": "Compute"})
+            elif name == "rds_snapshots":
+                items = data.get("snapshots", data) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                total = sum(r.get("monthly_cost", 0) for r in items)
+                if total > 0:
+                    out.append({"title": f"Delete {len(items)} old/orphaned RDS manual snapshots", "monthly_savings": total, "category": "Storage"})
+            elif name == "spot" and isinstance(data, list):
+                for r in data:
+                    s = r.get("monthly_savings", 0) or 0
+                    if s > 0 and r.get("recommendation") == "RECOMMENDED":
+                        out.append({"title": f"Convert {r.get('instance_id','?')} ({r.get('instance_type','?')}) to Spot", "monthly_savings": s, "category": "Compute"})
+            elif name == "cw_cardinality" and isinstance(data, list):
+                for r in data:
+                    s = r.get("estimated_monthly_cost", 0) or 0
+                    if s > 0:
+                        out.append({"title": f"Reduce CloudWatch metric cardinality in {r.get('namespace','?')}", "monthly_savings": s, "category": "Observability"})
+            elif name == "cw_alarms":
+                items = data.get("orphaned_alarms", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                total = sum(r.get("monthly_cost", 0) for r in items)
+                if total > 0:
+                    out.append({"title": f"Delete {len(items)} orphaned CloudWatch alarm(s)", "monthly_savings": total, "category": "Observability"})
+            elif name == "cw_logs_ia" and isinstance(data, list):
+                total = sum(r.get("monthly_savings", 0) for r in data)
+                if total > 0:
+                    out.append({"title": f"Move {len(data)} log group(s) to Infrequent Access", "monthly_savings": total, "category": "Observability"})
+            elif name == "snapstart" and isinstance(data, list):
+                total = sum(r.get("monthly_pc_cost", 0) for r in data if r.get("recommendation") == "ENABLE_SNAPSTART_REPLACE_PC")
+                if total > 0:
+                    count = len([r for r in data if r.get("recommendation") == "ENABLE_SNAPSTART_REPLACE_PC"])
+                    out.append({"title": f"Enable Lambda SnapStart on {count} Java function(s)", "monthly_savings": total, "category": "Compute"})
+            elif name == "nlb" and isinstance(data, list):
+                for r in data:
+                    s = r.get("estimated_cross_az_cost", 0) or 0
+                    if s > 10:
+                        out.append({"title": f"Disable cross-zone on NLB {r.get('nlb_name','?')}", "monthly_savings": s, "category": "Network"})
+            elif name == "s3_it" and isinstance(data, list):
+                waste = [r for r in data if r.get("recommendation") == "DISABLE_INTELLIGENT_TIERING"]
+                total = sum(r.get("net_monthly_cost", 0) for r in waste)
+                if total > 0:
+                    out.append({"title": f"Disable S3 Intelligent-Tiering on {len(waste)} bucket(s)", "monthly_savings": total, "category": "Storage"})
+            elif name == "s3_ta":
+                items = data.get("findings", data) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                waste = [r for r in items if r.get("likely_waste")]
+                total = sum(r.get("monthly_ta_cost", 0) for r in waste)
+                if total > 0:
+                    out.append({"title": f"Disable S3 Transfer Acceleration on {len(waste)} bucket(s)", "monthly_savings": total, "category": "Storage"})
+            elif name == "ebs_rep":
+                total = data.get("potential_monthly_savings", 0) if isinstance(data, dict) else 0
+                n = len(data.get("excess_copies", [])) if isinstance(data, dict) else 0
+                if total > 0:
+                    out.append({"title": f"Clean up {n} excess EBS cross-region snapshot copies", "monthly_savings": total, "category": "Storage"})
+            elif name == "db_sp":
+                s = data.get("estimated_monthly_savings", 0) if isinstance(data, dict) else 0
+                if s > 0:
+                    out.append({"title": "Purchase Database Savings Plan for RDS/Aurora", "monthly_savings": s, "category": "Commitments"})
+            elif name == "textract":
+                waste = data.get("estimated_monthly_waste", 0) if isinstance(data, dict) else 0
+                callers = data.get("non_prod_callers", []) if isinstance(data, dict) else []
+                if waste > 0:
+                    out.append({"title": f"Disable Textract in non-prod ({len(callers)} caller(s))", "monthly_savings": waste, "category": "AI/ML"})
+            elif name == "bedrock":
+                opps = data.get("routing_opportunities", []) if isinstance(data, dict) else []
+                total = data.get("total_monthly_savings", 0) if isinstance(data, dict) else 0
+                if total > 0:
+                    models = [o.get("current_model", "?") for o in opps[:2]]
+                    out.append({"title": f"Route Bedrock tasks to cheaper models ({', '.join(models)})", "monthly_savings": total, "category": "AI/ML"})
+            elif name == "commitments":
+                s = data.get("estimated_monthly_savings", 0) if isinstance(data, dict) else 0
+                coverage = data.get("current_coverage_pct", 0) if isinstance(data, dict) else 0
+                if s > 0 and coverage < 80:
+                    out.append({"title": f"Purchase Savings Plans / Reserved Instances ({coverage:.0f}% covered)", "monthly_savings": s, "category": "Commitments"})
+        except Exception as exc:
+            log.warning("notion audit norm failed for %s: %s", name, exc)
+        return out
+
+    for name, data in results:
+        findings.extend(_norm(name, data))
+
+    findings.sort(key=lambda x: x.get("monthly_savings", 0), reverse=True)
+    top_findings = findings[:20]
+
+    if not top_findings:
+        return "No savings opportunities found — nothing to publish."
+
+    total_monthly = sum(f["monthly_savings"] for f in top_findings)
+    total_annual = total_monthly * 12
+
+    account_name = ""
+    try:
+        accounts = await aws.list_accounts()
+        if accounts:
+            account_name = accounts[0].get("name", "")
+    except Exception:
+        pass
+
+    report = {
+        "findings": top_findings,
+        "total_monthly_savings": total_monthly,
+        "total_annual_savings": total_annual,
+        "scan_timestamp": _dt.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "account": account_name,
+    }
+
+    try:
+        page_url = await notion.write_cost_report(report)
+    except Exception as e:
+        log.error("publish_cost_report_to_notion failed: %s", e, exc_info=True)
+        return f"Failed to publish to Notion: {e}"
+
+    return (
+        f"Cost report published to Notion.\n\n"
+        f"URL: {page_url}\n\n"
+        f"Findings: {len(top_findings)} opportunities, "
+        f"${total_monthly:,.2f}/mo estimated saving "
+        f"(${total_annual:,.2f}/yr).\n\n"
+        f"Share the page with your team from Notion. "
+        f"They don't need nable installed to view it."
+    )
+
+
 if __name__ == "__main__":
     main()

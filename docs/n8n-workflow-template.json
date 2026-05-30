@@ -1,0 +1,188 @@
+{
+  "name": "nable Cost Events",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nable-events",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "nable Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "nable-events"
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "rules": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "anomaly_detected",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "anomaly"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.event }}",
+                    "rightValue": "audit_complete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "audit"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch-event-type",
+      "name": "Event Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "channel": "#finops-alerts",
+        "text": ":rotating_light: *Cost Anomaly Detected* — {{ $json.data.severity | upper }} severity\n\n*Service:* {{ $json.data.service }} ({{ $json.data.provider | upper }})\n*Spike:* +{{ $json.data.spike_pct }}% vs baseline\n*Delta:* ${{ $json.data.delta_usd }}\n*Account:* {{ $json.data.account }}\n*Z-score:* {{ $json.data.z_score }}\n\n*Recommended action:* {{ $json.data.recommended_action }}",
+        "otherOptions": {}
+      },
+      "id": "slack-anomaly-alert",
+      "name": "Slack Anomaly Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [700, 180],
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {}
+      },
+      "id": "respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [700, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Audit complete — add your own action here.\n// Example: create a Jira ticket, send an email, update a Google Sheet.\n//\n// Available data:\n//   $json.data.total_monthly_savings   — estimated monthly savings in USD\n//   $json.data.total_annual_savings    — estimated annual savings in USD\n//   $json.data.top_opportunities       — array of {rank, title, category, monthly_savings}\n//   $json.data.account                 — AWS account ID\n//   $json.data.scan_duration_s         — how long the audit took\n\nconst d = $json.data;\nconst lines = d.top_opportunities.slice(0, 5).map(\n  (o) => `${o.rank}. ${o.title} — $${o.monthly_savings}/mo`\n);\n\nreturn [\n  {\n    json: {\n      summary: `nable audit: $${d.total_monthly_savings}/mo in potential savings`,\n      account: d.account,\n      top_opportunities_text: lines.join('\\n'),\n      raw: d,\n    },\n  },\n];"
+      },
+      "id": "audit-handler",
+      "name": "Handle Audit Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    }
+  ],
+  "connections": {
+    "nable Webhook": {
+      "main": [
+        [
+          {
+            "node": "Event Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Event Type": {
+      "main": [
+        [
+          {
+            "node": "Slack Anomaly Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Audit Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Anomaly Alert": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Audit Results": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2026-05-30T00:00:00.000Z",
+      "updatedAt": "2026-05-30T00:00:00.000Z",
+      "id": "nable",
+      "name": "nable"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-05-30T00:00:00.000Z",
+  "versionId": "1"
+}

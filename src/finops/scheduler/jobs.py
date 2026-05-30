@@ -132,6 +132,13 @@ async def _detect_and_alert() -> list[dict]:
                 notified = notified or ok
             except Exception:
                 log.exception("Teams alert failed for anomaly %d", anomaly_id)
+        try:
+            from ..connectors.saas.n8n import N8nConnector
+            _n8n = N8nConnector()
+            if await _n8n.is_configured():
+                await _n8n.send_anomaly(anomaly_dict)
+        except Exception:
+            log.exception("n8n alert failed for anomaly %d", anomaly_id)
         if notified:
             mark_notified(anomaly_id)
 

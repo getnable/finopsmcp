@@ -746,6 +746,63 @@ def setup_slack() -> None:
     _ok("Slack configured")
 
 
+def setup_n8n() -> None:
+    _section("n8n: Workflow Automation Webhook")
+    print("""  In n8n:
+    1. Create a new workflow
+    2. Add a Webhook node as the trigger
+    3. Set HTTP Method to POST
+    4. Copy the Test URL or Production URL below
+
+  nable will POST structured JSON to this URL when anomalies are detected,
+  audits complete, or budgets are exceeded. You can then route events to
+  Jira, PagerDuty, Slack, email, or any other tool in your stack.
+
+  Optional: import the ready-made template from docs/n8n-workflow-template.json
+  in your n8n instance (File > Import from file) to get a working flow in minutes.
+""")
+    from .security.vault import Vault
+    vault = Vault.default()
+    url = _prompt("  n8n Webhook URL (https://your-n8n-instance/webhook/...)", secret=False)
+    if not url:
+        _warn("No URL entered. Run 'finops setup n8n' to try again.")
+        return
+    if not url.startswith("http"):
+        _warn("URL should start with http:// or https://")
+        return
+    vault.store("N8N_WEBHOOK_URL", url)
+    _ok("n8n webhook URL stored")
+
+    # Send a test ping
+    import asyncio
+    import httpx
+    from datetime import datetime, timezone
+
+    test_payload = {
+        "event": "test",
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": "nable",
+        "data": {"message": "nable connected successfully. Cost events will POST to this URL."},
+    }
+    print("\n  Sending test ping to n8n...")
+    try:
+        async def _ping() -> int:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, json=test_payload)
+                return r.status_code
+
+        status = asyncio.run(_ping())
+        if status < 300:
+            _ok(f"Test ping delivered (HTTP {status}). n8n is ready to receive nable events.")
+        else:
+            _warn(
+                f"n8n returned HTTP {status}. "
+                "Make sure the webhook node is active and the URL is correct."
+            )
+    except Exception as exc:
+        _warn(f"Test ping failed: {exc}. Check the URL and your n8n instance.")
+
+
 def setup_teams() -> None:
     _section("Microsoft Teams: Cost Alerts and Daily Digest")
     from .security.vault import Vault
@@ -954,6 +1011,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("vercel",       help="Connect Vercel invoice API (Enterprise only)")
     sub.add_parser("slack",        help="Configure Slack anomaly alerts and digest")
     sub.add_parser("teams",        help="Configure Microsoft Teams alerts")
+    sub.add_parser("n8n",          help="Configure n8n workflow automation webhook")
     sub.add_parser("sso",          help="Configure enterprise SSO (OIDC / Okta / Azure AD)")
     sub.add_parser("openai",       help="Connect OpenAI usage and billing API")
     sub.add_parser("anthropic",    help="Connect Anthropic usage API")
@@ -998,6 +1056,7 @@ def main(args: list[str] | None = None) -> None:
         "gcp": setup_gcp,
         "slack": setup_slack,
         "teams": setup_teams,
+        "n8n": setup_n8n,
         "sso": setup_sso,
         "datadog": lambda: setup_saas_api_key("Datadog", [
             ("DATADOG_API_KEY", "API Key", True),
@@ -1166,7 +1225,7 @@ def main(args: list[str] | None = None) -> None:
         # Interactive full setup
         _wizard_select_persona()
 
-        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams", "n8n"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")
