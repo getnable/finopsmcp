@@ -7653,6 +7653,7 @@ async def get_service_cost(
 @mcp.tool()
 async def identify_nonprod_scheduling_opportunities(
     regions: list[str] | None = None,
+    max_results: int = 50,
 ) -> str:
     """
     Finds non-production EC2 instances (dev/staging/test) running 24/7.
@@ -7660,6 +7661,7 @@ async def identify_nonprod_scheduling_opportunities(
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
+        max_results: Max instances to return (default 50).
 
     Examples:
         - "Find non-prod instances we could schedule to save money"
@@ -7687,6 +7689,9 @@ async def identify_nonprod_scheduling_opportunities(
                 "or they are not significantly idle during off-hours."
             )
 
+        shown = instances[:max_results]
+        omitted = len(instances) - len(shown)
+
         lines = ["## Non-production Scheduling Opportunities", ""]
         lines.append(
             "| Instance | Type | Environment | Region | Idle hrs/wk | Monthly Cost | Monthly Saving |"
@@ -7694,7 +7699,7 @@ async def identify_nonprod_scheduling_opportunities(
         lines.append(
             "|----------|------|-------------|--------|-------------|--------------|----------------|"
         )
-        for inst in instances:
+        for inst in shown:
             name_label = inst["name"] or inst["instance_id"]
             lines.append(
                 f"| {name_label} ({inst['instance_id']}) "
@@ -7705,6 +7710,9 @@ async def identify_nonprod_scheduling_opportunities(
                 f"| ${inst['monthly_cost_estimate']:,.2f} "
                 f"| ${inst['potential_monthly_savings']:,.2f} |"
             )
+
+        if omitted > 0:
+            lines.append(f"_Showing top {max_results} by savings. {omitted} more findings omitted._")
 
         lines.append("")
         lines.append(f"Estimated total monthly saving: ${total_waste:,.2f}")
@@ -8058,6 +8066,7 @@ async def audit_nlb_cross_zone_costs(
 @mcp.tool()
 async def audit_s3_intelligent_tiering(
     regions: list[str] | None = None,
+    max_results: int = 50,
 ) -> dict:
     """
     Finds S3 buckets using Intelligent-Tiering where the monitoring fee exceeds
@@ -8066,6 +8075,7 @@ async def audit_s3_intelligent_tiering(
 
     Args:
         regions: Unused (S3 is global). Present for API consistency.
+        max_results: Max buckets to return in findings (default 50).
 
     Examples:
         - "Find S3 buckets where Intelligent-Tiering costs more than it saves"
@@ -8089,15 +8099,21 @@ async def audit_s3_intelligent_tiering(
             if f["monthly_monitoring_cost"] is not None
         )
 
+        shown = findings[:max_results]
+        omitted = len(findings) - len(shown)
+        note = (
+            "Objects below 128KB cost more in IT monitoring fees than they save "
+            "in storage tiering. Enable S3 bucket metrics for accurate object size data."
+        )
+        if omitted > 0:
+            note += f" Showing top {max_results} by impact. {omitted} more findings omitted."
+
         return {
-            "findings": findings,
+            "findings": shown,
             "total_it_buckets": len(findings),
             "likely_waste_buckets": len(waste_findings),
             "total_monthly_monitoring_cost": round(total_monitoring_cost, 4),
-            "note": (
-                "Objects below 128KB cost more in IT monitoring fees than they save "
-                "in storage tiering. Enable S3 bucket metrics for accurate object size data."
-            ),
+            "note": note,
         }
     except Exception as exc:
         log.error("audit_s3_intelligent_tiering failed: %s", exc, exc_info=True)
@@ -8402,6 +8418,7 @@ async def audit_cloudwatch_metric_cardinality(
 @mcp.tool()
 async def audit_cloudwatch_orphaned_alarms(
     regions: list[str] | None = None,
+    max_results: int = 50,
 ) -> str:
     """
     Finds CloudWatch alarms on deleted resources. Standard alarms cost
@@ -8410,6 +8427,7 @@ async def audit_cloudwatch_orphaned_alarms(
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
+        max_results: Max orphaned alarms to return (default 50).
 
     Examples:
         - "Find orphaned CloudWatch alarms"
@@ -8439,9 +8457,12 @@ async def audit_cloudwatch_orphaned_alarms(
             lines.append("No orphaned alarms found.")
             return "\n".join(lines)
 
+        shown = orphaned[:max_results]
+        omitted = len(orphaned) - len(shown)
+
         lines.append("| Alarm | Namespace | Metric | State | Days in INSUFFICIENT_DATA | Monthly Cost | Resource Exists |")
         lines.append("|---|---|---|---|---|---|---|")
-        for alarm in orphaned:
+        for alarm in shown:
             resource_col = (
                 "No" if alarm["resource_exists"] is False
                 else "Yes" if alarm["resource_exists"] is True
@@ -8454,11 +8475,14 @@ async def audit_cloudwatch_orphaned_alarms(
                 f"| ${alarm['monthly_cost']:.2f} | {resource_col} |"
             )
 
+        if omitted > 0:
+            lines.append(f"_Showing top {max_results} by cost. {omitted} more findings omitted._")
+
         lines.append("")
         lines.append("To delete orphaned alarms (verify before running):")
         lines.append("```")
         by_region: dict[str, list[str]] = {}
-        for alarm in orphaned:
+        for alarm in shown:
             by_region.setdefault(alarm["region"], []).append(alarm["alarm_name"])
         for region, names in by_region.items():
             quoted = " ".join(f'"{n}"' for n in names)
@@ -8580,6 +8604,7 @@ async def recommend_database_savings_plans() -> dict:
 @mcp.tool()
 async def audit_ebs_snapshot_replication(
     regions: list[str] | None = None,
+    max_results: int = 50,
 ) -> dict:
     """
     Audits cross-region EBS snapshot replication for waste. Replicated snapshots
@@ -8589,6 +8614,7 @@ async def audit_ebs_snapshot_replication(
 
     Args:
         regions: AWS regions to scan. Defaults to all opted-in regions.
+        max_results: Max findings to return (default 50).
 
     Examples:
         - "Find orphaned cross-region EBS snapshots"
@@ -8603,7 +8629,17 @@ async def audit_ebs_snapshot_replication(
         if aws is None or not await aws.is_configured():
             return {"error": "AWS is not configured. Run 'uvx finops-mcp setup' to connect."}
 
-        return await _audit(aws_client=aws, regions=regions)
+        result = await _audit(aws_client=aws, regions=regions)
+        if "error" in result:
+            return result
+
+        findings = result.get("cross_region_findings", [])
+        if len(findings) > max_results:
+            omitted = len(findings) - max_results
+            result["cross_region_findings"] = findings[:max_results]
+            result["truncated"] = f"Showing top {max_results} by impact. {omitted} more findings omitted."
+
+        return result
 
     except Exception as e:
         log.error("audit_ebs_snapshot_replication failed: %s", e, exc_info=True)
@@ -8645,37 +8681,24 @@ async def run_full_cost_audit(
 ) -> str:
     """
     ALWAYS call this tool first when a user asks anything about cloud costs,
-    savings, spend, waste, optimization, or their bill. It runs all cost
-    optimization scanners in parallel and returns a ranked list of the highest-
-    impact savings opportunities with dollar estimates.
+    savings, spend, waste, optimization, or their bill. Runs all 16 cost
+    optimization scanners in parallel and returns the highest-impact savings
+    opportunities ranked by estimated monthly savings.
 
-    Use this tool for ANY of these questions or variations of them:
-        - "What are my cloud costs?"
-        - "How much am I spending?"
-        - "How can I save money?"
-        - "Where am I wasting money?"
-        - "What should I optimize?"
-        - "What's my AWS bill looking like?"
-        - "Help me reduce my cloud spend"
-        - "What are my biggest savings opportunities?"
-        - "Show me what I'm overpaying for"
-        - "What can I cut?"
-        - "Am I over-provisioned?"
-        - "What's eating my budget?"
-        - "Run a cost audit"
-        - "Scan my infrastructure"
-        - "What are quick wins on cloud cost?"
-        - "How do I reduce my bill?"
+    Use for any variation of:
+        - "What are my cloud costs?" / "How much am I spending?"
+        - "How can I save money?" / "Where am I wasting money?"
+        - "What should I optimize?" / "Run a cost audit"
+        - "Help me reduce my cloud spend" / "Am I over-provisioned?"
+        - "What are quick wins on cloud cost?" / "What's eating my budget?"
 
-    Covers: Graviton migration, public IPv4 waste, Lambda concurrency, S3 Bucket
-    Keys, non-prod scheduling, RDS snapshots, spot adoption, CloudWatch cardinality,
+    Covers: Graviton, public IPv4, Lambda concurrency, S3 Bucket Keys,
+    non-prod scheduling, RDS snapshots, spot adoption, CloudWatch cardinality,
     CloudWatch orphaned alarms, Logs IA migration, Lambda SnapStart, EFS cross-AZ,
-    NLB cross-zone, S3 Intelligent-Tiering, S3 Transfer Acceleration, EBS snapshot
-    replication, and Database Savings Plans.
+    NLB cross-zone, S3 IT, S3 Transfer Acceleration, EBS replication, Database SPs.
 
-    Each scanner runs independently — a failure in one does not block the others.
-    Returns the top findings ranked by estimated monthly savings. After showing
-    the ranked list, ask the user which opportunity they want to investigate first.
+    Each scanner runs independently. After showing results, ask the user which
+    opportunity to investigate first.
     """
     require_role("analyst")
 

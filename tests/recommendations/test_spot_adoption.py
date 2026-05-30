@@ -207,6 +207,16 @@ def _make_instance(
     return inst
 
 
+def _make_metric_data_response_empty(instance_ids: list[str]) -> dict:
+    """Return a get_metric_data response with no data points per instance."""
+    return {
+        "MetricDataResults": [
+            {"Id": f"m{i}", "Timestamps": [], "Values": []}
+            for i, _ in enumerate(instance_ids)
+        ]
+    }
+
+
 def test_recommend_spot_skips_spot_instances() -> None:
     """Instances already on spot must be excluded."""
     spot_inst = _make_instance("i-spot", "m5.large", lifecycle="spot")
@@ -224,7 +234,7 @@ def test_recommend_spot_skips_spot_instances() -> None:
         }
         ec2.get_paginator.return_value.paginate.return_value = _make_ec2_page([spot_inst])
         asg.get_paginator.return_value.paginate.return_value = [{"AutoScalingGroups": []}]
-        cw.get_metric_statistics.return_value = {"Datapoints": []}
+        cw.get_metric_data.return_value = {"MetricDataResults": []}
 
         results = recommend_spot_adoption(regions=["us-east-1"])
     assert results == []
@@ -256,7 +266,7 @@ def test_recommend_spot_output_structure() -> None:
                 ]
             }
         ]
-        cw.get_metric_statistics.return_value = {"Datapoints": []}
+        cw.get_metric_data.return_value = _make_metric_data_response_empty(["i-od123"])
 
         results = recommend_spot_adoption(regions=["us-east-1"])
 
@@ -292,7 +302,9 @@ def test_recommend_spot_sorted_by_savings_desc() -> None:
         }
         ec2.get_paginator.return_value.paginate.return_value = _make_ec2_page(instances)
         asg.get_paginator.return_value.paginate.return_value = [{"AutoScalingGroups": []}]
-        cw.get_metric_statistics.return_value = {"Datapoints": []}
+        cw.get_metric_data.return_value = _make_metric_data_response_empty(
+            ["i-small", "i-large", "i-mid"]
+        )
 
         results = recommend_spot_adoption(regions=["us-east-1"])
 
@@ -318,7 +330,7 @@ def test_recommend_spot_prod_instance_not_recommended() -> None:
         }
         ec2.get_paginator.return_value.paginate.return_value = _make_ec2_page([inst])
         asg.get_paginator.return_value.paginate.return_value = [{"AutoScalingGroups": []}]
-        cw.get_metric_statistics.return_value = {"Datapoints": []}
+        cw.get_metric_data.return_value = _make_metric_data_response_empty(["i-prod"])
 
         results = recommend_spot_adoption(regions=["us-east-1"])
 

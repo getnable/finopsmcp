@@ -78,7 +78,7 @@ def _monthly_ondemand_cost(instance_type: str) -> float:
 def _get_cpu_variance(cw_client: Any, instance_id: str, days: int) -> float:
     """
     Return std-dev of hourly CPU utilization over `days` days.
-    Returns 0.0 if no data is available (treated as stable / unknown).
+    Single-instance fallback; use _batch_get_cpu_variance when scanning many instances.
     """
     end   = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
@@ -99,6 +99,62 @@ def _get_cpu_variance(cw_client: Any, instance_id: str, days: int) -> float:
     except Exception as exc:
         log.debug("CloudWatch CPU variance unavailable for %s: %s", instance_id, exc)
         return 0.0
+
+
+def _batch_get_cpu_variance(
+    cw_client: Any,
+    instance_ids: list[str],
+    days: int,
+) -> dict[str, float]:
+    """
+    Fetch hourly Average CPUUtilization for multiple instances in a single
+    get_metric_data call. Returns {instance_id: stddev}. Chunks at 500 queries.
+    """
+    if not instance_ids:
+        return {}
+
+    end   = datetime.now(timezone.utc)
+    start = end - timedelta(days=days)
+
+    queries = [
+        {
+            "Id": f"m{i}",
+            "MetricStat": {
+                "Metric": {
+                    "Namespace": "AWS/EC2",
+                    "MetricName": "CPUUtilization",
+                    "Dimensions": [{"Name": "InstanceId", "Value": iid}],
+                },
+                "Period": 3600,
+                "Stat": "Average",
+            },
+            "ReturnData": True,
+        }
+        for i, iid in enumerate(instance_ids)
+    ]
+
+    raw: dict[str, list[float]] = {iid: [] for iid in instance_ids}
+
+    try:
+        chunk_size = 500
+        for chunk_start in range(0, len(queries), chunk_size):
+            chunk = queries[chunk_start : chunk_start + chunk_size]
+            resp = cw_client.get_metric_data(
+                MetricDataQueries=chunk,
+                StartTime=start,
+                EndTime=end,
+            )
+            for r in resp.get("MetricDataResults", []):
+                idx = int(r["Id"][1:])
+                iid = instance_ids[idx]
+                raw[iid] = r.get("Values", [])
+    except Exception as exc:
+        log.warning("Batched CPU variance fetch failed: %s", exc)
+
+    return {
+        iid: (statistics.stdev(vals) if len(vals) >= 2 else 0.0)
+        for iid, vals in raw.items()
+    }
 
 
 def _classify(
@@ -164,7 +220,8 @@ def _analyze_region(
     asg_members: set[str],
     region: str,
 ) -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
+    # Collect all on-demand instances first
+    on_demand_instances: list[dict[str, Any]] = []
     try:
         paginator = ec2_client.get_paginator("describe_instances")
         pages = paginator.paginate(
@@ -173,51 +230,61 @@ def _analyze_region(
         for page in pages:
             for reservation in page.get("Reservations", []):
                 for inst in reservation.get("Instances", []):
-                    # Skip spot instances — they are already on spot
                     if inst.get("InstanceLifecycle") == "spot":
                         continue
-
-                    iid   = inst["InstanceId"]
-                    itype = inst["InstanceType"]
-                    tags  = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
-                    name  = tags.get("Name", "")
-                    env   = (
-                        tags.get("env")
-                        or tags.get("environment")
-                        or tags.get("stage")
-                        or ""
-                    )
-
-                    in_asg      = iid in asg_members
-                    is_stateless = _is_stateless(inst)
-                    cpu_var     = _get_cpu_variance(cw_client, iid, _LOOKBACK_DAYS)
-                    freq        = _get_interruption_freq(itype)
-                    discount    = _get_spot_discount(itype)
-
-                    ondemand_cost = _monthly_ondemand_cost(itype)
-                    spot_cost     = round(ondemand_cost * (1.0 - discount), 2)
-                    savings       = round(ondemand_cost - spot_cost, 2)
-                    savings_pct   = round(discount * 100, 1)
-
-                    recommendation = _classify(freq, in_asg, is_stateless, cpu_var)
-
-                    results.append({
-                        "instance_id":            iid,
-                        "instance_type":          itype,
-                        "name":                   name,
-                        "region":                 region,
-                        "environment":            env,
-                        "in_asg":                 in_asg,
-                        "interruption_freq_pct":  round(freq * 100, 1),
-                        "recommendation":         recommendation,
-                        "monthly_ondemand_cost":  ondemand_cost,
-                        "monthly_spot_estimate":  spot_cost,
-                        "monthly_savings":        savings,
-                        "savings_pct":            savings_pct,
-                        "cpu_variance_stddev":    round(cpu_var, 1),
-                    })
+                    on_demand_instances.append(inst)
     except Exception as exc:
         log.warning("Spot adoption scan failed for region %s: %s", region, exc)
+        return []
+
+    if not on_demand_instances:
+        return []
+
+    # Single batched CloudWatch call for all instances
+    instance_ids = [inst["InstanceId"] for inst in on_demand_instances]
+    cpu_variance_by_id = _batch_get_cpu_variance(cw_client, instance_ids, _LOOKBACK_DAYS)
+
+    results: list[dict[str, Any]] = []
+    for inst in on_demand_instances:
+        iid   = inst["InstanceId"]
+        itype = inst["InstanceType"]
+        tags  = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+        name  = tags.get("Name", "")
+        env   = (
+            tags.get("env")
+            or tags.get("environment")
+            or tags.get("stage")
+            or ""
+        )
+
+        in_asg       = iid in asg_members
+        is_stateless = _is_stateless(inst)
+        cpu_var      = cpu_variance_by_id.get(iid, 0.0)
+        freq         = _get_interruption_freq(itype)
+        discount     = _get_spot_discount(itype)
+
+        ondemand_cost = _monthly_ondemand_cost(itype)
+        spot_cost     = round(ondemand_cost * (1.0 - discount), 2)
+        savings       = round(ondemand_cost - spot_cost, 2)
+        savings_pct   = round(discount * 100, 1)
+
+        recommendation = _classify(freq, in_asg, is_stateless, cpu_var)
+
+        results.append({
+            "instance_id":           iid,
+            "instance_type":         itype,
+            "name":                  name,
+            "region":                region,
+            "environment":           env,
+            "in_asg":                in_asg,
+            "interruption_freq_pct": round(freq * 100, 1),
+            "recommendation":        recommendation,
+            "monthly_ondemand_cost": ondemand_cost,
+            "monthly_spot_estimate": spot_cost,
+            "monthly_savings":       savings,
+            "savings_pct":           savings_pct,
+            "cpu_variance_stddev":   round(cpu_var, 1),
+        })
     return results
 
 

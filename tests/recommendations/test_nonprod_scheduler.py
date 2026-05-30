@@ -116,12 +116,24 @@ def _make_ec2_instance(iid: str, itype: str, name: str, env_value: str) -> dict:
 
 
 def _make_cw_datapoints(cpu_values: list[float]) -> list[dict]:
+    """Legacy helper kept for reference. Tests now use _make_metric_data_response."""
     base = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
     from datetime import timedelta
     return [
         {"Timestamp": base + timedelta(hours=i), "Maximum": v}
         for i, v in enumerate(cpu_values)
     ]
+
+
+def _make_metric_data_response(instance_ids: list[str], cpu_values_per_instance: list[list[float]]) -> dict:
+    """Return a get_metric_data response with one MetricDataResult per instance."""
+    base = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+    from datetime import timedelta
+    results = []
+    for i, (iid, cpu_values) in enumerate(zip(instance_ids, cpu_values_per_instance)):
+        timestamps = [base + timedelta(hours=j) for j in range(len(cpu_values))]
+        results.append({"Id": f"m{i}", "Timestamps": timestamps, "Values": cpu_values})
+    return {"MetricDataResults": results}
 
 
 class TestIdentifyNonprodResources:
@@ -162,7 +174,7 @@ class TestIdentifyNonprodResources:
         page = {"Reservations": [{"Instances": [prod_inst]}]}
         mock_ec2.get_paginator.return_value.paginate.return_value = [page]
         mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
-        mock_cw.get_metric_statistics.return_value = {"Datapoints": []}
+        # Prod instance is excluded before CloudWatch is called — no CW mock needed
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -183,9 +195,7 @@ class TestIdentifyNonprodResources:
 
         # 100 hours, 80 of them idle (CPU < 5%)
         cpu_values = [0.5] * 80 + [50.0] * 20
-        mock_cw.get_metric_statistics.return_value = {
-            "Datapoints": _make_cw_datapoints(cpu_values)
-        }
+        mock_cw.get_metric_data.return_value = _make_metric_data_response(["i-dev1"], [cpu_values])
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -212,11 +222,8 @@ class TestIdentifyNonprodResources:
         mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
 
         # Only ~6% idle: 10 out of 168 hours idle per week
-        # Sample: 10 idle out of 168 total -> (10/168)*168 = 10 idle hrs/wk
         cpu_values = [0.5] * 10 + [60.0] * 158
-        mock_cw.get_metric_statistics.return_value = {
-            "Datapoints": _make_cw_datapoints(cpu_values)
-        }
+        mock_cw.get_metric_data.return_value = _make_metric_data_response(["i-dev2"], [cpu_values])
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -237,7 +244,7 @@ class TestIdentifyNonprodResources:
         mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
 
         # No CloudWatch data
-        mock_cw.get_metric_statistics.return_value = {"Datapoints": []}
+        mock_cw.get_metric_data.return_value = {"MetricDataResults": [{"Id": "m0", "Timestamps": [], "Values": []}]}
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -261,10 +268,11 @@ class TestIdentifyNonprodResources:
         mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
 
         # Both heavily idle
-        cpu_values = [0.5] * 168
-        mock_cw.get_metric_statistics.return_value = {
-            "Datapoints": _make_cw_datapoints(cpu_values)
-        }
+        cpu_values_large = [0.5] * 168
+        cpu_values_small = [0.5] * 168
+        mock_cw.get_metric_data.return_value = _make_metric_data_response(
+            ["i-large", "i-small"], [cpu_values_large, cpu_values_small]
+        )
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -288,9 +296,7 @@ class TestIdentifyNonprodResources:
         mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
 
         cpu_values = [0.5] * 120 + [60.0] * 48
-        mock_cw.get_metric_statistics.return_value = {
-            "Datapoints": _make_cw_datapoints(cpu_values)
-        }
+        mock_cw.get_metric_data.return_value = _make_metric_data_response(["i-perf"], [cpu_values])
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
