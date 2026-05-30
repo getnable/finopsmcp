@@ -270,8 +270,14 @@ export default async function handler(req) {
     );
   }
 
-  // Verify CSRF state
-  if (state && ACCOUNT_SECRET) {
+  // ACCOUNT_SECRET is required when SSO is configured — it protects both CSRF state and session tokens
+  if (!ACCOUNT_SECRET) {
+    console.error("ACCOUNT_SECRET is not set — SSO is misconfigured");
+    return Response.redirect("https://getnable.com/?sso_error=misconfigured", 302);
+  }
+
+  // Verify CSRF state (required when present)
+  if (state) {
     const valid = await verifyState(ACCOUNT_SECRET, state);
     if (!valid) {
       return Response.redirect("https://getnable.com/?sso_error=invalid_state", 302);
