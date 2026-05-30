@@ -510,27 +510,27 @@ function Depth(){
   const cards = [
     {
       n: "01",
-      h: "Ask once. Get ranked savings.",
-      p: "Say 'where am I wasting money?' and 20 scanners fire in parallel — Graviton migration, public IPv4, Spot adoption, Lambda concurrency, S3 Bucket Keys, non-prod scheduling, and more. Results come back ranked by dollar impact in under 60 seconds. No dashboards. No setup. No knowing what to look for.",
-      chips: ["20 scanners","concurrent","ranked by impact","works day one"],
+      h: "Your biggest savings, in one question.",
+      p: "Ask 'where am I wasting money?' and get a ranked list of every opportunity across your infrastructure — sorted by dollar impact, not category. No dashboard to configure. No report to schedule. No knowing what to look for. Just results.",
+      chips: ["ranked by $","works day one","no setup","20 scanners"],
     },
     {
       n: "02",
-      h: "Rightsizing that closes the loop",
-      p: "Cross-references CloudWatch, Compute Optimizer, and 14 days of CPU/memory data. Then reads your Terraform state, finds the resource, patches the instance type in the .tf file, and opens the PR. After you merge and apply, nable checks AWS to confirm the change and records the realized saving.",
-      chips: ["CloudWatch","Compute Optimizer","Terraform state","PR + verified savings"],
+      h: "From recommendation to merged PR.",
+      p: "Most tools stop at 'you should downsize that.' nable reads your Terraform, patches the file, and opens the pull request. After it merges, nable checks whether the saving actually landed and records the realized amount.",
+      chips: ["Terraform","PR opened","saving verified","end-to-end"],
     },
     {
       n: "03",
-      h: "AI cost intelligence",
-      p: "Identifies Bedrock and Textract waste that no infrastructure tool touches. Spots which Lambda functions are calling Sonnet for tasks Haiku handles equally well. Finds QA environments running Textract on production document volume. Estimates savings per model, per environment.",
-      chips: ["Bedrock model routing","Textract env detection","per-model cost","AI-native"],
+      h: "AI spend tracked like a first-class cost.",
+      p: "Bedrock, OpenAI, Anthropic — these don't fit in the usual cost buckets. nable tracks AI spend by model, by use case, by team. It spots where expensive models are doing work cheaper ones handle just as well, and flags environments burning AI budget unnecessarily.",
+      chips: ["by model","by team","model routing","AI-native"],
     },
     {
       n: "04",
-      h: "Anomaly detection with attribution",
-      p: "Z-score detection against a 28-day rolling baseline. When something spikes, nable doesn't just tell you the number. It breaks the spike down by tag, team, and service, then pages whoever owns it in Slack or Teams. False positive rate is near zero because it uses your own baseline.",
-      chips: ["Z-score","28-day baseline","tag attribution","Slack / Teams alert"],
+      h: "It tells you who to call.",
+      p: "When spend spikes, you don't need another chart. You need to know which team owns it. nable attributes anomalies to the service, team, or environment that caused them, then alerts whoever owns it in Slack or Teams — before finance notices.",
+      chips: ["team attribution","Slack / Teams","near-zero false positives","28-day baseline"],
     },
   ];
 
