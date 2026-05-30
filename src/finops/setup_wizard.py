@@ -1011,6 +1011,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("vercel",       help="Connect Vercel invoice API (Enterprise only)")
     sub.add_parser("slack",        help="Configure Slack anomaly alerts and digest")
     sub.add_parser("teams",        help="Configure Microsoft Teams alerts")
+    sub.add_parser("notion",       help="Configure Notion cost report publishing")
     sub.add_parser("n8n",          help="Configure n8n workflow automation webhook")
     sub.add_parser("sso",          help="Configure enterprise SSO (OIDC / Okta / Azure AD)")
     sub.add_parser("openai",       help="Connect OpenAI usage and billing API")
@@ -1056,6 +1057,10 @@ def main(args: list[str] | None = None) -> None:
         "gcp": setup_gcp,
         "slack": setup_slack,
         "teams": setup_teams,
+        "notion": lambda: setup_saas_api_key("Notion", [
+            ("NOTION_API_KEY", "Integration Token (from notion.so/my-integrations)", True),
+            ("NOTION_PAGE_ID", "Target Page ID (from the page URL)", False),
+        ]),
         "n8n": setup_n8n,
         "sso": setup_sso,
         "datadog": lambda: setup_saas_api_key("Datadog", [
@@ -1225,7 +1230,7 @@ def main(args: list[str] | None = None) -> None:
         # Interactive full setup
         _wizard_select_persona()
 
-        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams", "n8n"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams", "notion", "n8n"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")
