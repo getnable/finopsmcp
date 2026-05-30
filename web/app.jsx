@@ -748,7 +748,7 @@ const SOLO_FEATURES = [
 const TEAM_FEATURES = [
   "Everything in Solo",
   "Terraform remediation: patch files, open PR",
-  "Slack alerts — anomalies, budget warnings, weekly digest",
+  "Slack and Teams alerts — anomalies, budgets, weekly digest",
   "Publish cost reports to Notion for the whole team",
   "Ticket creation (Jira, Linear, GitHub Issues)",
   "Scheduled cost digests via email",
