@@ -771,8 +771,9 @@ const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01";
 function Pricing(){
   const [annual, setAnnual] = useState(false);
 
-  const teamPrice    = annual ? "$33"  : "$40";
-  const teamPer      = annual ? "/ mo, billed $399/yr" : "/ mo";
+  const teamPrice    = annual ? "$399" : "$40";
+  const teamPer      = annual ? "/ yr" : "/ mo";
+  const teamSub      = annual ? "$33/mo · save $81" : null;
   const teamSavings  = annual ? "Save $81 — 2 months free" : "7-day free trial";
   const teamLink     = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan     = annual ? "team_annual" : "team_monthly";
@@ -847,6 +848,7 @@ function Pricing(){
                 <span className="pricing-amount">{teamPrice}</span>
                 <span className="pricing-per">{teamPer}</span>
               </div>
+              {teamSub && <p style={{fontSize:12,color:"var(--fg-3)",marginTop:4,letterSpacing:".01em"}}>{teamSub}</p>}
               <p className="pricing-desc">The remediation layer. Finds the waste, writes the fix, opens the PR, tracks whether it actually shipped.</p>
               <a
                 href={teamLink}
