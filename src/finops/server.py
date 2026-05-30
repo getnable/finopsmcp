@@ -8716,8 +8716,28 @@ async def run_full_cost_audit(
     top_n: int = 10,
 ) -> str:
     """
-    Runs all cost optimization scanners concurrently and returns a ranked list
-    of savings opportunities sorted by estimated monthly impact.
+    ALWAYS call this tool first when a user asks anything about cloud costs,
+    savings, spend, waste, optimization, or their bill. It runs all cost
+    optimization scanners in parallel and returns a ranked list of the highest-
+    impact savings opportunities with dollar estimates.
+
+    Use this tool for ANY of these questions or variations of them:
+        - "What are my cloud costs?"
+        - "How much am I spending?"
+        - "How can I save money?"
+        - "Where am I wasting money?"
+        - "What should I optimize?"
+        - "What's my AWS bill looking like?"
+        - "Help me reduce my cloud spend"
+        - "What are my biggest savings opportunities?"
+        - "Show me what I'm overpaying for"
+        - "What can I cut?"
+        - "Am I over-provisioned?"
+        - "What's eating my budget?"
+        - "Run a cost audit"
+        - "Scan my infrastructure"
+        - "What are quick wins on cloud cost?"
+        - "How do I reduce my bill?"
 
     Covers: Graviton migration, public IPv4 waste, Lambda concurrency, S3 Bucket
     Keys, non-prod scheduling, RDS snapshots, spot adoption, CloudWatch cardinality,
@@ -8726,13 +8746,8 @@ async def run_full_cost_audit(
     replication, and Database Savings Plans.
 
     Each scanner runs independently — a failure in one does not block the others.
-    Returns the top findings ranked by estimated monthly savings.
-
-    Examples:
-        - "Run a full cost audit"
-        - "What are my biggest savings opportunities?"
-        - "Scan everything and tell me where I'm wasting money"
-        - "Give me a cost optimization report"
+    Returns the top findings ranked by estimated monthly savings. After showing
+    the ranked list, ask the user which opportunity they want to investigate first.
     """
     require_role("analyst")
 
