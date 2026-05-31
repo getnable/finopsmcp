@@ -250,7 +250,7 @@ function CopyInstall() {
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
     if (window.posthog) posthog.capture("install_copied");
-  } }, copied ? "copied" : "copy")), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 11, color: "var(--fg-3)", letterSpacing: ".04em", paddingLeft: 2, fontFamily: "'Instrument Sans',system-ui,sans-serif" } }, "installs the MCP server \xB7 guided setup runs automatically"));
+  } }, copied ? "copied" : "copy")));
 }
 function fmtNum(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
