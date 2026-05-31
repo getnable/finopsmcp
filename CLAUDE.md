@@ -6,7 +6,7 @@
 
 **No exclamation points** in professional output.
 
-**No Oxford-comma abuse** — keep punctuation minimal.
+**No Oxford-comma abuse.** Keep punctuation minimal.
 
 These rules apply to every file written or edited in this project: markdown docs, landing page copy, README, VC briefs, emails, code comments, everything.
 
@@ -18,7 +18,7 @@ Do not deviate without explicit user approval.
 In QA mode, flag any code that does not match DESIGN.md.
 
 Key rules that will catch you:
-- Display font is Fraunces (serif), not Space Grotesk or Inter.
+- All text uses Instrument Sans. Fraunces was evaluated and rejected (read DESIGN.md for rationale).
 - Body font is Instrument Sans, not Inter.
 - Monospace (Berkeley Mono or Geist Mono) is reserved for actual technical content: code, commands, instance IDs, hex values, data table numbers. Not section labels. Not nav links.
 - Accent is ice blue (#4db8d4), not amber.

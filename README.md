@@ -6,7 +6,7 @@
 
 **Connect Claude to your real AWS, Azure, GCP, and SaaS billing data. Ask questions in plain English. Get answers in seconds.**
 
-👉 **[getnable.com](https://getnable.com)** — quickstart guide, docs, and free tier
+👉 **[getnable.com](https://getnable.com)** · quickstart guide, docs, and free tier
 
 ![nable in Claude Desktop](docs/claude-cost-answer.png)
 
@@ -98,7 +98,7 @@ finops setup license  # activate a Team plan key
 
 ## How it works
 
-Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) — they never leave your machine. Cost data is stored in a local SQLite database. We never see your data. Teams share findings via Slack alerts, Notion publishing, and CSV exports. No shared database required.
+Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine. Cost data is stored in a local SQLite database. We never see your data. Teams share findings via Slack alerts, Notion publishing, and CSV exports. No shared database required.
 
 nable is read-only by default. It never writes to your AWS account unless you explicitly enable cleanup mode. Run `finops setup aws --iam-template` to generate a least-privilege IAM policy with exactly the permissions nable needs.
 
@@ -178,8 +178,8 @@ nable is not just a connector that pipes billing data into Claude. It runs activ
 
 ## Team plan
 
-- **Slack / Teams anomaly alerts** — get notified the moment spend spikes, not the next morning
-- **Ticket auto-creation** — Jira, Linear, or GitHub issues for anomalies, rightsizing, and waste
+- **Slack / Teams anomaly alerts:** get notified the moment spend spikes, not the next morning
+- **Ticket auto-creation:** Jira, Linear, or GitHub issues for anomalies, rightsizing, and waste
 - Cost attribution by team, service, or tag
 - Scheduled email reports
 - Commitment purchase recommendations with ROI projections
@@ -201,7 +201,7 @@ finops setup claude    # re-run Claude Desktop configuration only
 |---|---|
 | Tools don't appear in Claude | Switch to uvx config or use absolute path |
 | `command not found: finops-mcp` | Re-install with `pip install finops-mcp` or use `uvx` |
-| AWS returns no data | Run `finops setup aws` — the wizard writes credentials to your editor config automatically |
+| AWS returns no data | Run `finops setup aws`. The wizard writes credentials to your editor config automatically. |
 | Python 3.8/3.9 errors | nable requires Python 3.10+: `python3.10 -m pip install finops-mcp` |
 | Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
 | Permission denied | Install to user: `pip install --user finops-mcp` or use `uvx` |

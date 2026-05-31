@@ -71,7 +71,7 @@ function useScrollTracking() {
   }, []);
 }
 
-/* Email capture — posts to /api/subscribe */
+/* Email capture: posts to /api/subscribe */
 function EmailCapture({ source = "hero", placeholder = "email", btnLabel = "Get started", center = false }){
   const [email, setEmail] = useState("");
   const [state, setState] = useState("idle"); // idle | loading | done | error
@@ -567,7 +567,7 @@ function Architecture({ version }){
         <div className="section-head">
           <div className="label">Architecture</div>
           <h2>Headless by design.<br/><em>Your data never moves.</em></h2>
-          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine. We never see your data. Works out of the box in AWS GovCloud — no data leaves your environment.</p>
+          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine. We never see your data. Works out of the box in AWS GovCloud: no data leaves your environment.</p>
         </div>
         <div className="arch">
           <div className="arch-grid"></div>
@@ -888,7 +888,7 @@ function MidCta(){
           <div>
             <h2 style={{marginBottom:10}}>Ready to stop guessing?</h2>
             <p style={{color:"var(--fg-2)",maxWidth:"46ch",margin:"0 auto",lineHeight:1.6}}>
-              Five minutes from install to your first real insight. Free forever for solo use.
+              Four minutes from install to your first real insight. Free forever for solo use.
             </p>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"center"}}>
@@ -1043,7 +1043,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How long does setup take?",
-    a: "About 5 minutes. Run `pip install finops-mcp && finops welcome`, follow the prompts, and you're done. The wizard handles the MCP config and credential storage."
+    a: "About 4 minutes. Run `pip install finops-mcp && finops welcome`, follow the prompts, and you're done. The wizard handles the MCP config and credential storage."
   },
   {
     q: "Is the free tier actually free?",
@@ -1226,7 +1226,9 @@ function App(){
       <Connectors />
       <Architecture version={version} />
       <Pricing />
+      <MidCta />
       <FAQ />
+      <FounderNote />
       <FootCta />
       <Footer version={version} />
       <Tweaks />
