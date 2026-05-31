@@ -13,15 +13,26 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import base64
 import csv
 import io
 import json
 import logging
+import os
 import socket
 import threading
 from datetime import datetime, date, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Any
+
+# Optional single shared password. Set FINOPS_DASHBOARD_PASSWORD to enable.
+# If not set, dashboard is open (trust the network / VPN).
+_DASHBOARD_PASSWORD = os.environ.get("FINOPS_DASHBOARD_PASSWORD", "")
+
+# Path to bundled Chart.js (served locally so dashboard works offline / GovCloud)
+_STATIC_DIR = Path(__file__).parent / "static"
+_CHARTJS_PATH = _STATIC_DIR / "chart.min.js"
 
 log = logging.getLogger(__name__)
 
@@ -606,7 +617,7 @@ _DASHBOARD_HTML = """\
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/chart.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -814,11 +825,10 @@ footer a:hover{color:var(--accent)}
   </div>
 
   <div class="bottom-row">
-    <div class="panel">
-      <div class="panel-title">Efficiency Scorecard</div>
-      <ul class="scorecard-list" id="scorecard-list">
-        <li style="color:var(--fg3);font-size:13px">Loading...</li>
-      </ul>
+    <div class="panel" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px">
+      <div class="panel-title" style="text-align:center">Efficiency Score</div>
+      <div id="efficiency-pct" style="font-size:72px;font-weight:300;letter-spacing:-.04em;color:var(--accent);font-family:'Instrument Sans',sans-serif;line-height:1">--</div>
+      <div id="efficiency-label" style="font-size:13px;color:var(--fg3);letter-spacing:.04em;text-transform:uppercase">calculating...</div>
     </div>
     <div class="panel">
       <div class="panel-title">Savings Opportunities</div>
@@ -952,8 +962,8 @@ function render(d){
   // Trend chart (line)
   renderTrendChart(d.trend||[]);
 
-  // Scorecard
-  renderScorecard(d.scorecard||{});
+  // Efficiency percentage
+  renderEfficiency(d.finops_score||0);
 
   // Savings opportunities
   renderOpportunities(d.recent_opportunities||[]);
@@ -1072,28 +1082,20 @@ function renderTrendChart(trend){
   });
 }
 
-// ── Scorecard ─────────────────────────────────────────────────────────────────
-function renderScorecard(sc){
-  const dims=sc.dimensions||[];
-  const el=document.getElementById('scorecard-list');
-  if(dims.length===0){
-    el.innerHTML='<li style="color:var(--fg3);font-size:13px">No scorecard data. Run a cost scan first.</li>';
-    return;
-  }
-  el.innerHTML=dims.map(d=>{
-    const g=String(d.grade||'F').toLowerCase();
-    const score=d.score||0;
-    return `<li class="sc-item">
-      <div class="sc-header">
-        <span class="sc-name">${esc(d.name)}</span>
-        <span class="sc-meta">
-          <span class="sc-score">${score}/100</span>
-          <span class="sc-grade grade-pill-${g}">${d.grade||'F'}</span>
-        </span>
-      </div>
-      <div class="sc-bar-bg"><div class="sc-bar-fill sc-bar-${g}" style="width:${score}%"></div></div>
-    </li>`;
-  }).join('');
+// ── Efficiency percentage ─────────────────────────────────────────────────────
+function renderEfficiency(score){
+  const pct=document.getElementById('efficiency-pct');
+  const lbl=document.getElementById('efficiency-label');
+  if(!pct||!lbl) return;
+  const s=Math.round(score||0);
+  pct.textContent=s+'%';
+  let color, label;
+  if(s>=80){color='var(--success)';label='Well optimized';}
+  else if(s>=60){color='var(--accent)';label='Room to improve';}
+  else if(s>=40){color='var(--warn)';label='Needs attention';}
+  else{color='var(--alert)';label='Critical gaps';}
+  pct.style.color=color;
+  lbl.textContent=label;
 }
 
 // ── Savings opportunities ─────────────────────────────────────────────────────
@@ -1172,11 +1174,48 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _check_auth(self) -> bool:
+        """Return True if auth passes (or auth is disabled)."""
+        if not _DASHBOARD_PASSWORD:
+            return True
+        auth_header = self.headers.get("Authorization", "")
+        if not auth_header.startswith("Basic "):
+            return False
+        try:
+            credentials = base64.b64decode(auth_header[6:]).decode("utf-8")
+            _, password = credentials.split(":", 1)
+            return password == _DASHBOARD_PASSWORD
+        except Exception:
+            return False
+
+    def _send_auth_challenge(self) -> None:
+        body = b"<h2>nable Dashboard</h2><p>Enter your dashboard password.</p>"
+        self.send_response(401)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("WWW-Authenticate", 'Basic realm="nable Dashboard"')
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:  # noqa: N802
         from urllib.parse import urlparse, parse_qs
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
+
+        # Serve bundled Chart.js (no CDN, works offline + GovCloud)
+        if path == "/static/chart.min.js":
+            if _CHARTJS_PATH.exists():
+                body = _CHARTJS_PATH.read_bytes()
+                self._send(200, "application/javascript", body)
+            else:
+                self._send(404, "text/plain", b"Chart.js not bundled")
+            return
+
+        # Auth check (skip for health endpoint so monitoring works)
+        if path != "/health" and not self._check_auth():
+            self._send_auth_challenge()
+            return
 
         # Dashboard
         if path == "/" or path == "/index.html":
