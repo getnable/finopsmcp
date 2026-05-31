@@ -1174,28 +1174,91 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _check_auth(self) -> bool:
-        """Return True if auth passes (or auth is disabled)."""
+    def _cookie_valid(self) -> bool:
+        """Check if the session cookie contains the correct token."""
         if not _DASHBOARD_PASSWORD:
             return True
-        auth_header = self.headers.get("Authorization", "")
-        if not auth_header.startswith("Basic "):
-            return False
-        try:
-            credentials = base64.b64decode(auth_header[6:]).decode("utf-8")
-            _, password = credentials.split(":", 1)
-            return password == _DASHBOARD_PASSWORD
-        except Exception:
-            return False
+        cookie_header = self.headers.get("Cookie", "")
+        token = base64.b64encode(_DASHBOARD_PASSWORD.encode()).decode()
+        return f"nable_session={token}" in cookie_header
 
-    def _send_auth_challenge(self) -> None:
-        body = b"<h2>nable Dashboard</h2><p>Enter your dashboard password.</p>"
-        self.send_response(401)
-        self.send_header("Content-Type", "text/html")
-        self.send_header("WWW-Authenticate", 'Basic realm="nable Dashboard"')
+    def _serve_login_page(self, error: bool = False) -> None:
+        error_html = '<p style="color:#e05c4b;margin:0 0 16px;font-size:13px">Incorrect password. Try again.</p>' if error else ""
+        body = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>nable Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&display=swap"/>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0d0f10;color:#f0f2f3;font-family:'Instrument Sans',system-ui,sans-serif;
+  display:flex;align-items:center;justify-content:center;min-height:100vh}}
+.card{{background:#111416;border:1px solid #242a2e;border-radius:12px;padding:40px;width:360px}}
+.logo{{display:flex;align-items:center;gap:10px;margin-bottom:32px}}
+.logo svg{{flex-shrink:0}}
+.logo span{{font-size:18px;font-weight:500;letter-spacing:-.02em}}
+h1{{font-size:16px;font-weight:500;margin-bottom:6px}}
+p.sub{{color:#56656d;font-size:13px;margin-bottom:24px}}
+label{{display:block;font-size:12px;color:#94a3ab;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}}
+input{{width:100%;background:#181c1f;border:1px solid #2e3539;border-radius:6px;
+  color:#f0f2f3;font-family:inherit;font-size:14px;padding:10px 12px;outline:none}}
+input:focus{{border-color:#4db8d4}}
+button{{margin-top:16px;width:100%;background:#4db8d4;border:none;border-radius:8px;
+  color:#0d0f10;cursor:pointer;font-family:inherit;font-size:14px;font-weight:500;
+  padding:11px;transition:filter .15s}}
+button:hover{{filter:brightness(1.1)}}
+.hint{{color:#56656d;font-size:11px;margin-top:16px;text-align:center;line-height:1.5}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg width="26" height="26" viewBox="0 0 32 32">
+      <rect width="32" height="32" rx="7" fill="#4db8d4"/>
+      <path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#0d0f10"/>
+    </svg>
+    <span>nable</span>
+  </div>
+  <h1>Dashboard access</h1>
+  <p class="sub">This dashboard is password protected.</p>
+  {error_html}
+  <form method="POST" action="/login">
+    <label>Password</label>
+    <input type="password" name="password" placeholder="Enter dashboard password" autofocus autocomplete="current-password"/>
+    <button type="submit">Sign in</button>
+  </form>
+  <p class="hint">Password set via<br><code style="color:#4db8d4">FINOPS_DASHBOARD_PASSWORD</code> environment variable</p>
+</div>
+</body>
+</html>""".encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_POST(self) -> None:  # noqa: N802
+        """Handle login form submission."""
+        from urllib.parse import urlparse, parse_qs
+        if urlparse(self.path).path != "/login":
+            self._send(404, "text/plain", b"Not found")
+            return
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length).decode("utf-8")
+        params = parse_qs(body)
+        submitted = params.get("password", [""])[0]
+        if submitted == _DASHBOARD_PASSWORD:
+            token = base64.b64encode(_DASHBOARD_PASSWORD.encode()).decode()
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", f"nable_session={token}; Path=/; HttpOnly; SameSite=Strict")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        else:
+            self._serve_login_page(error=True)
 
     def do_GET(self) -> None:  # noqa: N802
         from urllib.parse import urlparse, parse_qs
@@ -1212,10 +1275,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(404, "text/plain", b"Chart.js not bundled")
             return
 
-        # Auth check (skip for health endpoint so monitoring works)
-        if path != "/health" and not self._check_auth():
-            self._send_auth_challenge()
-            return
+        # Auth check (skip for health + login page so they're always reachable)
+        if path not in ("/health", "/login") and not self._cookie_valid():
+            if _DASHBOARD_PASSWORD:
+                self._serve_login_page()
+                return
 
         # Dashboard
         if path == "/" or path == "/index.html":
@@ -1318,6 +1382,14 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = Fal
     print(f"\n  nable dashboard running at http://{host}:{actual_port}")
     if host == "0.0.0.0":
         print(f"  Share this URL with your team: http://{local_ip}:{actual_port}")
+    if _DASHBOARD_PASSWORD:
+        print(f"\n  Password protected. To sign in:")
+        print(f"    URL:      http://{local_ip}:{actual_port}")
+        print(f"    Password: {_DASHBOARD_PASSWORD}")
+        print(f"\n  To remove the password: restart without FINOPS_DASHBOARD_PASSWORD set.")
+    else:
+        print(f"\n  No password set. Dashboard is open to anyone on your network.")
+        print(f"  To add a password: FINOPS_DASHBOARD_PASSWORD=yourpassword finops serve")
     print("  Press Ctrl+C to stop.\n")
 
     if open_browser:
