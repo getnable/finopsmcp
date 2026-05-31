@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>nable — Textract Remediation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&family=Geist+Mono:wght@400;500&display=swap"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#1a1b1e;
+  color:#ececec;
+  font-family:'Instrument Sans',system-ui,sans-serif;
+  font-size:15px;
+  line-height:1.6;
+  padding:32px;
+  max-width:820px;
+}
+
+.user-msg{
+  display:flex;
+  justify-content:flex-end;
+  margin-bottom:24px;
+}
+.user-bubble{
+  background:#2f3136;
+  border-radius:18px 18px 4px 18px;
+  padding:12px 18px;
+  max-width:72%;
+  font-size:14px;
+  color:#e0e0e0;
+}
+
+.response{padding:4px 0 28px}
+.response p{margin-bottom:12px;color:#d0d0d0;font-size:14px}
+strong{color:#ececec;font-weight:600}
+
+.nable-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+  font-weight:500;
+  color:#4db8d4;
+  margin-bottom:10px;
+}
+.nable-dot{width:6px;height:6px;border-radius:50%;background:#3cba7a}
+
+/* Step divider */
+.step{
+  border-top:1px solid #2a2b2e;
+  padding-top:18px;
+  margin-top:18px;
+}
+.step h3{
+  font-size:14px;
+  font-weight:600;
+  color:#ececec;
+  margin-bottom:8px;
+}
+
+/* Code block */
+pre{
+  background:#111315;
+  border:1px solid #2a2b2e;
+  border-radius:7px;
+  padding:14px 16px;
+  margin:10px 0;
+  overflow-x:auto;
+  font-family:'Geist Mono',monospace;
+  font-size:12.5px;
+  line-height:1.75;
+  color:#a8b8c0;
+}
+.kw{color:#c792ea}   /* keyword */
+.fn{color:#82aaff}   /* function */
+.st{color:#c3e88d}   /* string */
+.cm{color:#546e7a;font-style:italic} /* comment */
+.fl{color:#f78c6c}   /* flag */
+.nm{color:#ffcb6b}   /* number/value */
+.cmd{color:#4db8d4}  /* aws cli */
+
+/* Bullet list */
+ul.lambda-list{
+  list-style:none;
+  margin:10px 0;
+  padding:0;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+ul.lambda-list li{
+  font-family:'Geist Mono',monospace;
+  font-size:12.5px;
+  color:#c792ea;
+  padding:2px 0 2px 16px;
+  position:relative;
+}
+ul.lambda-list li::before{
+  content:'•';
+  position:absolute;
+  left:0;
+  color:#56656d;
+}
+
+/* Inline code */
+code{
+  font-family:'Geist Mono',monospace;
+  font-size:12px;
+  background:#1e2327;
+  padding:1px 5px;
+  border-radius:3px;
+  color:#c3e88d;
+}
+
+/* Pricing table */
+ul.pricing{
+  list-style:none;
+  margin:8px 0;
+  padding:0;
+}
+ul.pricing li{
+  padding:3px 0;
+  font-size:13.5px;
+  color:#d0d0d0;
+}
+
+.bottom-line{
+  background:#1e2327;
+  border-left:3px solid #3cba7a;
+  padding:10px 14px;
+  margin:16px 0;
+  font-size:13.5px;
+  color:#d0d0d0;
+  border-radius:0 4px 4px 0;
+}
+
+.meta{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-top:14px;
+  color:#56656d;
+  font-size:12px;
+}
+ol.order{
+  padding-left:20px;
+  margin:8px 0;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+ol.order li{font-size:13.5px;color:#d0d0d0}
+</style>
+</head>
+<body>
+
+<div class="user-msg">
+  <div class="user-bubble">how do i remediate textract?</div>
+</div>
+
+<div class="response">
+  <div class="nable-badge">
+    <span class="nable-dot"></span>
+    NABLE
+  </div>
+
+  <p>Based on everything we found this session, here's the specific playbook:</p>
+
+  <div class="step">
+    <h3>Step 1: Find out what you're actually calling (5 minutes)</h3>
+    <p>Run this in your AWS account for each operation to see where the volume is:</p>
+    <pre><span class="cmd">aws</span> cloudwatch get-metric-statistics \
+  --namespace AWS/Textract \
+  --metric-name SuccessfulRequestCount \
+  --dimensions Name=Operation,Value=AnalyzeDocument \
+  --start-time 2026-04-27T00:00:00Z \
+  --end-time 2026-05-27T00:00:00Z \
+  --period 2592000 --statistics Sum
+
+<span class="cm"># Run again for each:</span>
+<span class="cm"># Value=DetectDocumentText</span>
+<span class="cm"># Value=AnalyzeExpense</span>
+<span class="cm"># Value=AnalyzeID</span></pre>
+    <p>This tells you which API you're hammering and the exact volume. Everything else follows from this.</p>
+  </div>
+
+  <div class="step">
+    <h3>Step 2: Kill non-prod Textract (highest confidence fix)</h3>
+    <p>Your log groups show 4 environments running Textract Lambdas:</p>
+    <ul class="lambda-list">
+      <li>company-textract-lambda-prd</li>
+      <li>company-textract-lambda-qa</li>
+      <li>company-textract-lambda-stg</li>
+      <li>company-textract-lambda-dev <span style="color:#56656d">(inferred)</span></li>
+    </ul>
+    <p>In your Lambda code, add an environment gate:</p>
+    <pre><span class="kw">import</span> os
+
+<span class="kw">def</span> <span class="fn">process_document</span>(document):
+    <span class="kw">if</span> os.environ.<span class="fn">get</span>(<span class="st">"ENV"</span>) == <span class="st">"production"</span>:
+        <span class="kw">return</span> <span class="fn">call_textract</span>(document)
+    <span class="kw">else</span>:
+        <span class="kw">return</span> <span class="fn">load_fixture_response</span>(document)  <span class="cm"># pre-saved Textract output</span></pre>
+    <p>Save a handful of real Textract responses as JSON fixtures for QA/staging to use. Non-prod never touches the API again.</p>
+  </div>
+
+  <div class="step">
+    <h3>Step 3: Check if you're using the right API tier</h3>
+    <p>Pricing per 1,000 pages:</p>
+    <ul class="pricing">
+      <li><code>DetectDocumentText</code>: $1.50 (raw text only)</li>
+      <li><code>AnalyzeDocument</code> tables: $15</li>
+      <li><code>AnalyzeDocument</code> forms: $50</li>
+      <li><code>AnalyzeExpense</code>: $10</li>
+    </ul>
+    <p>If your downstream code only needs the raw text blocks, switch from <code>AnalyzeDocument</code> to <code>DetectDocumentText</code>. One line change, 10-33x cheaper.</p>
+    <pre><span class="cm"># Before (expensive if you only need text)</span>
+response = textract.<span class="fn">analyze_document</span>(
+    Document={<span class="st">"S3Object"</span>: {<span class="st">"Bucket"</span>: bucket, <span class="st">"Name"</span>: key}},
+    FeatureTypes=[<span class="st">"TABLES"</span>, <span class="st">"FORMS"</span>]
+)
+
+<span class="cm"># After (if you only use Blocks of type LINE or WORD)</span>
+response = textract.<span class="fn">detect_document_text</span>(
+    Document={<span class="st">"S3Object"</span>: {<span class="st">"Bucket"</span>: bucket, <span class="st">"Name"</span>: key}}
+)</pre>
+  </div>
+
+  <div class="step">
+    <h3>Step 4: Add a result cache</h3>
+    <p>If the same documents get reprocessed (retries, re-runs, duplicate uploads), cache the output:</p>
+    <pre><span class="kw">import</span> hashlib, json, boto3
+
+<span class="kw">def</span> <span class="fn">get_textract_result</span>(bucket, key):
+    doc_hash = hashlib.<span class="fn">md5</span>(f<span class="st">"{bucket}/{key}"</span>.<span class="fn">encode</span>()).<span class="fn">hexdigest</span>()
+    cache_key = f<span class="st">"textract-cache/{doc_hash}.json"</span>
+
+    s3 = boto3.<span class="fn">client</span>(<span class="st">"s3"</span>)
+
+    <span class="cm"># Check cache first</span>
+    <span class="kw">try</span>:
+        cached = s3.<span class="fn">get_object</span>(Bucket=bucket, Key=cache_key)
+        <span class="kw">return</span> json.<span class="fn">loads</span>(cached[<span class="st">"Body"</span>].<span class="fn">read</span>())
+    <span class="kw">except</span> s3.exceptions.NoSuchKey:
+        <span class="kw">pass</span>
+
+    <span class="cm"># Cache miss — call Textract</span>
+    result = textract.<span class="fn">detect_document_text</span>(
+        Document={<span class="st">"S3Object"</span>: {<span class="st">"Bucket"</span>: bucket, <span class="st">"Name"</span>: key}}
+    )
+    s3.<span class="fn">put_object</span>(Bucket=bucket, Key=cache_key, Body=json.<span class="fn">dumps</span>(result))
+    <span class="kw">return</span> result</pre>
+    <p>S3 storage for cached results is essentially free compared to Textract API costs.</p>
+  </div>
+
+  <div class="step">
+    <h3>Order of operations</h3>
+    <ol class="order">
+      <li>Run the CloudWatch query first — know your baseline</li>
+      <li>Ship the non-prod environment gate — fastest savings, lowest risk</li>
+      <li>Evaluate API tier — only if Step 1 shows you're using <code>AnalyzeDocument</code></li>
+      <li>Add caching — if Step 1 shows repeated document processing</li>
+    </ol>
+
+    <div class="bottom-line">
+      Step 2 alone could save $960–$1,900/mo with a deploy, no accuracy risk, no behavioral change in prod.
+    </div>
+  </div>
+
+  <div class="meta">
+    <span>4m ago</span>
+  </div>
+</div>
+
+</body>
+</html>

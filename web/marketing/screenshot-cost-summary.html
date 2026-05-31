@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>nable — Cost Summary</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&family=Geist+Mono:wght@400;500&display=swap"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#1a1b1e;
+  color:#ececec;
+  font-family:'Instrument Sans',system-ui,sans-serif;
+  font-size:15px;
+  line-height:1.6;
+  padding:32px;
+  max-width:820px;
+}
+
+/* Claude Desktop message bubble style */
+.user-msg{
+  display:flex;
+  justify-content:flex-end;
+  margin-bottom:24px;
+}
+.user-bubble{
+  background:#2f3136;
+  border-radius:18px 18px 4px 18px;
+  padding:12px 18px;
+  max-width:72%;
+  font-size:14px;
+  color:#e0e0e0;
+}
+
+.response{
+  padding:4px 0 28px;
+  border-bottom:1px solid #2a2b2e;
+  margin-bottom:28px;
+}
+
+.response p{margin-bottom:12px;color:#d0d0d0;font-size:14px}
+
+/* Bold inline */
+strong{color:#ececec;font-weight:600}
+
+/* The savings table */
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin:16px 0;
+  font-size:13.5px;
+}
+thead tr{background:#2a2b2e}
+thead th{
+  padding:10px 16px;
+  text-align:left;
+  color:#a0a0a0;
+  font-weight:500;
+  letter-spacing:.02em;
+}
+tbody tr{border-bottom:1px solid #232427}
+tbody tr:last-child{border-bottom:none}
+tbody td{padding:11px 16px;color:#d8d8d8}
+tbody td:first-child{color:#e8e8e8}
+tbody td:nth-child(2){font-family:'Geist Mono',monospace;color:#4db8d4;font-size:13px}
+tbody td:nth-child(3){color:#94a3ab;font-size:13px}
+
+/* Grade badge */
+.grade{
+  display:inline-block;
+  font-size:22px;
+  font-weight:600;
+  color:#e6a840;
+  font-family:'Geist Mono',monospace;
+}
+.score{color:#94a3ab;font-size:13px;margin-left:6px}
+
+/* Bottom line emphasis */
+.bottom-line{
+  background:#1e2327;
+  border-left:3px solid #4db8d4;
+  padding:10px 14px;
+  margin:16px 0;
+  font-size:13.5px;
+  color:#d0d0d0;
+  border-radius:0 4px 4px 0;
+}
+
+/* Timestamp */
+.meta{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-top:14px;
+  color:#56656d;
+  font-size:12px;
+}
+
+/* Nable badge */
+.nable-badge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:12px;
+  font-weight:500;
+  color:#4db8d4;
+  margin-bottom:10px;
+}
+.nable-dot{width:6px;height:6px;border-radius:50%;background:#3cba7a}
+</style>
+</head>
+<body>
+
+<div class="user-msg">
+  <div class="user-bubble">hey just downloaded nable, what is my cloud spend and savings</div>
+</div>
+
+<div class="response">
+  <div class="nable-badge">
+    <span class="nable-dot"></span>
+    NABLE
+  </div>
+
+  <p>We already pulled all of this earlier in the session. Here's the summary:</p>
+
+  <p>
+    <strong>Cloud spend (last 30 days): $13,703/mo</strong><br/>
+    Only AWS is connected. Top drivers: Textract ($4,830), Bedrock ($3,817), DocumentDB ($1,906), RDS ($740).
+  </p>
+
+  <p><strong>Projected May total: ~$15,742</strong> <span style="color:#94a3ab">(you're on day 27 of 31)</span></p>
+
+  <p><strong>Identified savings: $2,392 – $4,032/mo</strong></p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Action</th>
+        <th>Savings/mo</th>
+        <th>Effort</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Disable Textract in QA/staging</td>
+        <td>$960 – $1,900</td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td>Route classifier Lambda to Haiku</td>
+        <td>$500 – $1,200</td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td>Buy DocumentDB + RDS Reserved Instances</td>
+        <td>$925</td>
+        <td>Zero (AWS console)</td>
+      </tr>
+      <tr>
+        <td>Set CloudWatch log retention (166 groups)</td>
+        <td>$3</td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td>Delete stopped Windows Server EC2</td>
+        <td>$4</td>
+        <td>Zero</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="bottom-line">
+    <strong>Biggest immediate win:</strong> Buy the RIs today, zero code changes, $925/mo back.
+  </div>
+
+  <p>
+    <strong>FinOps grade: <span class="grade">D</span><span class="score">(49.5/100)</span></strong>
+    — two F grades on tag hygiene and commitment coverage are the main drags.
+  </p>
+
+  <p>Want to dig into any of these specifically?</p>
+
+  <div class="meta">
+    <span>5m ago</span>
+  </div>
+</div>
+
+</body>
+</html>
