@@ -1,4 +1,4 @@
-# Design System — nable
+# Design System: nable
 
 ## Product Context
 
@@ -22,7 +22,7 @@
 
 ## Typography
 
-All fonts are Instrument Sans across the entire site. Fraunces was evaluated and rejected — it read as try-hard at hero scale and inconsistent with the cold precision aesthetic.
+All fonts are Instrument Sans across the entire site. Fraunces was evaluated and rejected: it read as try-hard at hero scale and inconsistent with the cold precision aesthetic.
 
 - **All headings and body:** Instrument Sans
 - **Hero accent lines:** Instrument Sans, weight 600

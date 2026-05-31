@@ -856,7 +856,7 @@
         <div class="code-block p-3 text-xs">
           <span class="env-key">DATABRICKS_HOST</span>=<span class="env-val">https://adb-1234567890.1.azuredatabricks.net</span><br/>
           <span class="env-key">DATABRICKS_TOKEN</span>=<span class="env-val">dapi...</span><br/>
-          <span class="env-key">DATABRICKS_ACCOUNT_ID</span>=<span class="env-val">your-account-id</span> &nbsp;<span style="color:var(--dim)"># optional — enables exact billing via the Usage Download API</span><br/>
+          <span class="env-key">DATABRICKS_ACCOUNT_ID</span>=<span class="env-val">your-account-id</span> &nbsp;<span style="color:var(--dim)"># optional: enables exact billing via the Usage Download API</span><br/>
           <span class="env-key">DATABRICKS_DBU_PRICE</span>=<span class="env-val">0.40</span> &nbsp;<span style="color:var(--dim)"># optional — override with your contract rate (default $0.40/DBU)</span>
         </div>
       </div>
@@ -1452,12 +1452,12 @@
         <div class="card p-5">
           <p class="font-semibold text-sm mb-2" style="color:var(--text)"><code class="text-xs bg-blue-50 px-1 rounded">command not found: finops</code> after pip install</p>
           <p class="text-sm mb-3" style="color:var(--muted)">pip installed the package but the executable isn't in your PATH. This is common on macOS when using the system Python or Homebrew.</p>
-          <p class="text-sm font-medium mb-1" style="color:var(--text)">Fix — find and add the pip bin directory:</p>
+          <p class="text-sm font-medium mb-1" style="color:var(--text)">Fix: find and add the pip bin directory:</p>
           <div class="code-wrap mt-2">
             <div class="code-block p-4"><span class="cm"># Find where pip puts executables</span><br/><span class="cmd">python3 -m site --user-base</span><br/><span class="cm"># Add /bin to that path, e.g.:</span><br/><span class="cmd">export PATH="$HOME/Library/Python/3.11/bin:$PATH"</span><br/><span class="cm"># Add that export line to ~/.zshrc to make it permanent</span></div>
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
           </div>
-          <p class="text-xs mt-2" style="color:var(--muted)">Or use pipx: <code class="text-xs bg-blue-50 px-1 rounded">pipx install finops-mcp</code> — it handles PATH automatically.</p>
+          <p class="text-xs mt-2" style="color:var(--muted)">Or use pipx: <code class="text-xs bg-blue-50 px-1 rounded">pipx install finops-mcp</code>. It handles PATH automatically.</p>
         </div>
         <div class="card p-5">
           <p class="font-semibold text-sm mb-2" style="color:var(--text)"><code class="text-xs bg-blue-50 px-1 rounded">python3: command not found</code> / pip not available</p>
@@ -1466,7 +1466,7 @@
             <div class="code-block p-4"><span class="cmd">python3 --version</span></div>
             <button class="copy-btn" onclick="copyCode(this)">Copy</button>
           </div>
-          <p class="text-sm mt-3" style="color:var(--muted)">If that fails, install Python from <a href="https://python.org" class="underline">python.org</a> or via Homebrew: <code class="text-xs bg-blue-50 px-1 rounded">brew install python</code>. On Windows, install from the Microsoft Store or python.org — make sure to check "Add Python to PATH" during setup.</p>
+          <p class="text-sm mt-3" style="color:var(--muted)">If that fails, install Python from <a href="https://python.org" class="underline">python.org</a> or via Homebrew: <code class="text-xs bg-blue-50 px-1 rounded">brew install python</code>. On Windows, install from the Microsoft Store or python.org. Make sure to check "Add Python to PATH" during setup.</p>
         </div>
         <div class="card p-5">
           <p class="font-semibold text-sm mb-2" style="color:var(--text)">AWS connected but showing no data / zero costs</p>
