@@ -295,9 +295,6 @@ function CopyInstall(){
           {copied ? "copied" : "copy"}
         </button>
       </div>
-      <p style={{fontSize:11,color:"var(--fg-3)",letterSpacing:".04em",paddingLeft:2,fontFamily:"'Instrument Sans',system-ui,sans-serif"}}>
-        installs the MCP server · guided setup runs automatically
-      </p>
     </div>
   );
 }
