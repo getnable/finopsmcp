@@ -1863,7 +1863,7 @@ async def generate_account_dashboard(
             elif sys.platform.startswith("linux"):
                 subprocess.Popen(["xdg-open", path])
             elif sys.platform == "win32":
-                subprocess.Popen(["start", path], shell=True)
+                os.startfile(path)  # noqa: S606 — startfile is safe; no shell
         except Exception:
             pass  # opening the browser is best-effort
 

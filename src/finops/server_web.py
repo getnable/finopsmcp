@@ -19,16 +19,51 @@ import io
 import json
 import logging
 import os
+import re
+import secrets
 import socket
 import threading
+import time as _time_module
 from datetime import datetime, date, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
-# Optional single shared password. Set FINOPS_DASHBOARD_PASSWORD to enable.
-# If not set, dashboard is open (trust the network / VPN).
-_DASHBOARD_PASSWORD = os.environ.get("FINOPS_DASHBOARD_PASSWORD", "")
+# ── Dashboard authentication ─────────────────────────────────────────────────
+# Password is required by default. If FINOPS_DASHBOARD_PASSWORD is not set,
+# a secure random password is generated at startup and printed once.
+# Set FINOPS_DASHBOARD_PASSWORD=off to explicitly disable auth (not recommended).
+
+_DASHBOARD_PASSWORD: str = os.environ.get("FINOPS_DASHBOARD_PASSWORD", "").strip()
+_AUTH_DISABLED: bool = _DASHBOARD_PASSWORD.lower() == "off"
+_PASSWORD_AUTO_GENERATED: bool = False
+if _AUTH_DISABLED:
+    _DASHBOARD_PASSWORD = ""
+elif not _DASHBOARD_PASSWORD:
+    # Auto-generate a strong password rather than defaulting to open.
+    # Printed clearly at startup — user can override with FINOPS_DASHBOARD_PASSWORD.
+    _DASHBOARD_PASSWORD = secrets.token_urlsafe(14)
+    _PASSWORD_AUTO_GENERATED = True
+
+# Server-side session store: token → expiry (unix timestamp).
+# Tokens are 32-byte URL-safe random strings — never derived from the password.
+_SESSIONS: dict[str, float] = {}
+_SESSION_TTL_SECONDS: int = 8 * 3600  # 8 hours
+
+
+def _create_session() -> str:
+    token = secrets.token_urlsafe(32)
+    _SESSIONS[token] = _time_module.time() + _SESSION_TTL_SECONDS
+    # Prune expired sessions (keep dict bounded)
+    expired = [t for t, exp in _SESSIONS.items() if _time_module.time() > exp]
+    for t in expired:
+        _SESSIONS.pop(t, None)
+    return token
+
+
+def _session_valid(token: str) -> bool:
+    expiry = _SESSIONS.get(token, 0)
+    return _time_module.time() < expiry
 
 # Path to bundled Chart.js (served locally so dashboard works offline / GovCloud)
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -1401,12 +1436,17 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:  # type: ignore[override]
         log.debug("web: " + format, *args)
 
+    def _localhost_origin(self) -> str:
+        port = self.server.server_address[1]
+        return f"http://localhost:{port}"
+
     def _send(self, status: int, content_type: str, body: bytes) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._localhost_origin())
+        self.send_header("Vary", "Origin")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1417,17 +1457,20 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._localhost_origin())
+        self.send_header("Vary", "Origin")
         self.end_headers()
         self.wfile.write(body)
 
     def _cookie_valid(self) -> bool:
-        """Check if the session cookie contains the correct token."""
-        if not _DASHBOARD_PASSWORD:
+        """Validate the session cookie against the server-side session store."""
+        if _AUTH_DISABLED or not _DASHBOARD_PASSWORD:
             return True
         cookie_header = self.headers.get("Cookie", "")
-        token = base64.b64encode(_DASHBOARD_PASSWORD.encode()).decode()
-        return f"nable_session={token}" in cookie_header
+        m = re.search(r"nable_session=([A-Za-z0-9_=-]+)", cookie_header)
+        if not m:
+            return False
+        return _session_valid(m.group(1))
 
     def _serve_login_page(self, error: bool = False) -> None:
         error_html = '<p style="color:#e05c4b;margin:0 0 16px;font-size:13px">Incorrect password. Try again.</p>' if error else ""
@@ -1520,11 +1563,14 @@ button:hover{{filter:brightness(1.1)}}
         body = self.rfile.read(length).decode("utf-8")
         params = parse_qs(body)
         submitted = params.get("password", [""])[0]
-        if submitted == _DASHBOARD_PASSWORD:
-            token = base64.b64encode(_DASHBOARD_PASSWORD.encode()).decode()
+        if _DASHBOARD_PASSWORD and secrets.compare_digest(submitted, _DASHBOARD_PASSWORD):
+            session_token = _create_session()
             self.send_response(302)
             self.send_header("Location", "/")
-            self.send_header("Set-Cookie", f"nable_session={token}; Path=/; HttpOnly; SameSite=Strict")
+            self.send_header(
+                "Set-Cookie",
+                f"nable_session={session_token}; Path=/; HttpOnly; SameSite=Strict",
+            )
             self.send_header("Content-Length", "0")
             self.end_headers()
         else:
@@ -1652,14 +1698,21 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = Fal
     print(f"\n  nable dashboard running at http://{host}:{actual_port}")
     if host == "0.0.0.0":
         print(f"  Share this URL with your team: http://{local_ip}:{actual_port}")
-    if _DASHBOARD_PASSWORD:
-        print(f"\n  Password protected. To sign in:")
+    if _AUTH_DISABLED:
+        print(f"\n  Auth disabled (FINOPS_DASHBOARD_PASSWORD=off).")
+        print(f"  Anyone on your network can access this dashboard.")
+    elif _PASSWORD_AUTO_GENERATED:
+        print(f"\n  Dashboard secured with an auto-generated password.")
         print(f"    URL:      http://{local_ip}:{actual_port}")
         print(f"    Password: {_DASHBOARD_PASSWORD}")
-        print(f"\n  To remove the password: restart without FINOPS_DASHBOARD_PASSWORD set.")
+        print(f"\n  To set your own: FINOPS_DASHBOARD_PASSWORD=yourpassword finops serve")
+        print(f"  To disable auth: FINOPS_DASHBOARD_PASSWORD=off finops serve")
     else:
-        print(f"\n  No password set. Dashboard is open to anyone on your network.")
-        print(f"  To add a password: FINOPS_DASHBOARD_PASSWORD=yourpassword finops serve")
+        masked = "*" * len(_DASHBOARD_PASSWORD)
+        print(f"\n  Password protected.")
+        print(f"    URL:      http://{local_ip}:{actual_port}")
+        print(f"    Password: {masked}  (set via FINOPS_DASHBOARD_PASSWORD)")
+        print(f"\n  To disable auth: FINOPS_DASHBOARD_PASSWORD=off finops serve")
     print("  Press Ctrl+C to stop.\n")
 
     if open_browser:
