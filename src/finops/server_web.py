@@ -305,43 +305,102 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
     except Exception as exc:
         log.debug("Scorecard build failed: %s", exc)
 
-    # Savings opportunities: merge live high-value scanners with stored recs.
-    opportunities: list[dict] = []
-
-    # 1. Stored recommendations from the local DB (idle resources, etc.)
-    try:
-        from .recommendations.savings_tracker import list_recommendations
-        recs = list_recommendations(status="open", limit=10)
-        for r in recs:
-            opportunities.append({
-                "description": r.get("description", ""),
-                "monthly_saving": round(r.get("estimated_monthly_savings_usd", 0.0), 2),
-                "resource": r.get("resource_name", r.get("resource_id", "")),
-                "effort": r.get("effort", "MEDIUM"),
-                "impact": r.get("impact", "medium"),
-                "service": r.get("service", r.get("source", "")),
-            })
-    except Exception:
-        pass
-
-    # 2. Live high-value scanners (the ones that surface the big wins).
-    #    Only run for AWS-connected accounts. Each is best-effort.
+    # ── Savings pipeline ────────────────────────────────────────────────────
+    # 1. Run live scanners and persist results to savings_recommendations so
+    #    they get stable IDs and can be marked as acted-on from the dashboard.
     aws = configured.get("aws")
+    account_id = result.get("account_id", "")
+
     if aws is not None:
         try:
-            opportunities.extend(await _live_opportunities(aws))
+            live_opps = await _live_opportunities(aws)
+            # Persist each into the savings tracker DB (upserts by dedup_key)
+            from .recommendations.savings_tracker import record_recommendation
+            for opp in live_opps:
+                try:
+                    record_recommendation(
+                        source=opp.get("service", "scanner"),
+                        provider="aws",
+                        resource_id=opp.get("resource", opp.get("service", "unknown")),
+                        resource_type=opp.get("service", ""),
+                        resource_name=opp.get("resource", ""),
+                        current_config={},
+                        recommended_config={"action": opp.get("effort", "")},
+                        description=opp.get("description", ""),
+                        estimated_monthly_savings_usd=opp.get("monthly_saving", 0.0),
+                        account_id=account_id,
+                    )
+                except Exception as exc:
+                    log.debug("Failed to persist opportunity: %s", exc)
         except Exception as exc:
-            log.debug("Live opportunity scan failed: %s", exc)
+            log.debug("Live scanner run failed: %s", exc)
 
-    # Sort by monthly saving descending, keep the top 8.
-    opportunities.sort(key=lambda o: o.get("monthly_saving", 0) or 0, reverse=True)
-    result["recent_opportunities"] = opportunities[:8]
-    result["opportunities_count"] = len(opportunities)
-    result["opportunities_total_saving"] = round(
-        sum(o.get("monthly_saving", 0) or 0 for o in opportunities), 2
-    )
+    # 2. Read all open opportunities from DB (now includes scanner results).
+    #    This gives us stable IDs for mark-as-done.
+    from .recommendations.savings_tracker import list_recommendations, get_summary
+    try:
+        open_recs = list_recommendations(status="open", limit=20)
+        result["recent_opportunities"] = [
+            {
+                "id": r["id"],
+                "description": r["description"],
+                "monthly_saving": round(r["estimated_monthly_savings_usd"], 2),
+                "resource": r["resource_name"] or r["resource_id"],
+                "service": r["source"],
+                "effort": _effort_from_source(r["source"]),
+                "impact": _impact_from_saving(r["estimated_monthly_savings_usd"]),
+            }
+            for r in open_recs
+        ]
+        result["opportunities_count"] = len(open_recs)
+        result["opportunities_total_saving"] = round(
+            sum(r["estimated_monthly_savings_usd"] for r in open_recs), 2
+        )
+    except Exception as exc:
+        log.debug("Could not read open recs: %s", exc)
+        result["opportunities_count"] = 0
+        result["opportunities_total_saving"] = 0.0
+        result["recent_opportunities"] = []
+
+    # 3. Savings ledger summary (identified → acted on → verified)
+    try:
+        summary = get_summary()
+        result["savings_ledger"] = {
+            "identified_monthly": summary.get("potential_monthly_usd", 0.0),
+            "acted_on_monthly": summary.get("acted_on_monthly_usd", 0.0),
+            "verified_monthly": summary.get("verified_monthly_usd", 0.0),
+            "verified_annual": summary.get("verified_annual_usd", 0.0),
+            "counts": summary.get("by_status", {}),
+        }
+    except Exception:
+        result["savings_ledger"] = {
+            "identified_monthly": result["opportunities_total_saving"],
+            "acted_on_monthly": 0.0,
+            "verified_monthly": 0.0,
+            "verified_annual": 0.0,
+            "counts": {},
+        }
 
     return result
+
+
+def _effort_from_source(source: str) -> str:
+    """Map scanner source names to effort levels."""
+    zero_effort = {"Commitments", "RDS", "EC2", "commitments", "dbsp"}
+    low_effort = {"Textract", "textract", "Lambda", "snapstart"}
+    if source in zero_effort:
+        return "ZERO"
+    if source in low_effort:
+        return "LOW"
+    return "MEDIUM"
+
+
+def _impact_from_saving(monthly_usd: float) -> str:
+    if monthly_usd >= 500:
+        return "high"
+    if monthly_usd >= 100:
+        return "medium"
+    return "low"
 
 
 # Cache for live scanner results. Keyed by AWS account id, value is
@@ -1429,11 +1488,34 @@ button:hover{{filter:brightness(1.1)}}
         self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802
-        """Handle login form submission."""
+        """Handle POST endpoints: /login and /api/mark-done."""
         from urllib.parse import urlparse, parse_qs
-        if urlparse(self.path).path != "/login":
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
+
+        if path == "/api/mark-done":
+            if not self._cookie_valid():
+                self._send(401, "application/json", b'{"error":"Unauthorized"}')
+                return
+            rec_id_str = qs.get("id", [""])[0]
+            try:
+                rec_id = int(rec_id_str)
+                from .recommendations.savings_tracker import mark_acted_on
+                ok = mark_acted_on(rec_id)
+                body = json.dumps({"ok": ok, "id": rec_id}).encode()
+                self._send(200, "application/json", body)
+            except (ValueError, TypeError):
+                self._send(400, "application/json", b'{"error":"Invalid id"}')
+            except Exception as exc:
+                body = json.dumps({"error": str(exc)}).encode()
+                self._send(500, "application/json", body)
+            return
+
+        if path != "/login":
             self._send(404, "text/plain", b"Not found")
             return
+
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length).decode("utf-8")
         params = parse_qs(body)
