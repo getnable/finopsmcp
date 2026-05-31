@@ -752,6 +752,7 @@ const TEAM_FEATURES = [
   "Budget enforcement and alerts",
   "Commitment analysis and RI recommendations",
   "No shared database required",
+  "Team dashboard at http://your-ip:8080 — no install for viewers",
 ];
 
 function CheckIcon(){
