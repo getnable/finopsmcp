@@ -286,6 +286,25 @@ html,body{
 .opp-total-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3)}
 .opp-total-value{font-size:15px;font-weight:700;font-family:var(--mono);color:var(--success)}
 
+/* ── Loading skeleton ────────────────────────────────────────────────────── */
+.skeleton{
+  background:linear-gradient(90deg,var(--bg3) 25%,var(--bg2) 50%,var(--bg3) 75%);
+  background-size:200% 100%;
+  animation:shimmer 1.5s infinite;
+  border-radius:4px;
+  display:inline-block;
+}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.sk-val{height:36px;width:80px}
+.sk-sub{height:12px;width:140px;margin-top:10px}
+.sk-chart{height:100%;width:100%;border-radius:8px}
+.sk-row{height:14px;width:100%;margin-bottom:10px}
+.loading-hint{
+  font-size:11px;color:var(--fg3);
+  position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
+  white-space:nowrap;
+}
+
 /* ── Error banner ────────────────────────────────────────────────────────── */
 .err-banner{
   background:rgba(224,92,75,.07);border:1px solid rgba(224,92,75,.18);
@@ -347,20 +366,20 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
     <!-- MTD Spend -->
     <div class="card">
       <div class="card-label">MTD Spend</div>
-      <div class="card-value" id="stat-mtd">--</div>
-      <div class="card-sub" id="stat-mtd-sub">loading...</div>
+      <div class="card-value" id="stat-mtd"><span class="skeleton sk-val"></span></div>
+      <div class="card-sub" id="stat-mtd-sub"><span class="skeleton sk-sub"></span></div>
     </div>
     <!-- Projected -->
     <div class="card">
       <div class="card-label">Projected <span id="proj-month">Month</span> Total</div>
-      <div class="card-value" id="stat-proj">--</div>
-      <div class="card-sub" id="stat-proj-sub">run-rate estimate</div>
+      <div class="card-value" id="stat-proj"><span class="skeleton sk-val"></span></div>
+      <div class="card-sub" id="stat-proj-sub"><span class="skeleton sk-sub"></span></div>
     </div>
     <!-- Identified savings -->
     <div class="card">
       <div class="card-label">Identified Savings</div>
-      <div class="card-value down" id="stat-savings">--</div>
-      <div class="card-sub" id="stat-savings-sub">per month</div>
+      <div class="card-value down" id="stat-savings"><span class="skeleton sk-val"></span></div>
+      <div class="card-sub" id="stat-savings-sub"><span class="skeleton sk-sub"></span></div>
       <div class="ledger-mini" id="ledger-mini">
         <div class="lm-row"><span class="lm-dot" style="background:var(--warn)"></span><span id="lm-acted">$0</span> acted on</div>
         <div class="lm-row"><span class="lm-dot" style="background:var(--success)"></span><span id="lm-verified">$0</span> verified</div>
@@ -369,9 +388,9 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
     <!-- FinOps Grade -->
     <div class="card">
       <div class="card-label">FinOps Grade</div>
-      <div class="grade-display">
-        <span class="grade-letter grade-f" id="grade-letter">--</span>
-        <span class="grade-score-text" id="grade-score">--/100</span>
+      <div class="grade-display" id="grade-display">
+        <span class="skeleton" style="height:48px;width:36px;border-radius:4px"></span>
+        <span class="skeleton" style="height:16px;width:80px"></span>
       </div>
       <div class="grade-trend" id="grade-trend"></div>
       <div class="grade-gaps" id="grade-gaps"></div>
@@ -406,14 +425,21 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
         <div class="panel-title">Spend by Service — Last <span id="chart-days">30</span> Days</div>
         <span class="panel-chip" id="svc-badge">AWS ONLY</span>
       </div>
-      <div class="chart-wrap"><canvas id="chart-svc"></canvas></div>
+      <div class="chart-wrap" style="position:relative">
+        <canvas id="chart-svc"></canvas>
+        <div class="skeleton sk-chart" id="sk-svc" style="position:absolute;inset:0"></div>
+      </div>
     </div>
     <div class="panel">
       <div class="panel-hdr">
         <div class="panel-title">Cost Trend</div>
         <span class="panel-chip">MONTHLY</span>
       </div>
-      <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
+      <div class="chart-wrap" style="position:relative">
+        <canvas id="chart-trend"></canvas>
+        <div class="skeleton sk-chart" id="sk-trend" style="position:absolute;inset:0"></div>
+        <div class="loading-hint" id="loading-hint">Fetching AWS cost data... first load takes ~15s</div>
+      </div>
     </div>
   </div>
 
@@ -621,13 +647,14 @@ function render(d){
     document.getElementById('ledger-mini').style.display='flex';
   }
 
-  // Card 4: FinOps Grade
+  // Card 4: FinOps Grade — replace skeleton with real content
   const grade=d.finops_grade||'--';
   const score=parseFloat(d.finops_score||0);
+  const gradeDisplay=document.getElementById('grade-display');
+  gradeDisplay.innerHTML=
+    `<span class="grade-letter grade-${(grade||'f').toLowerCase()}" id="grade-letter">${grade}</span>`+
+    `<span class="grade-score-text" id="grade-score">${score.toFixed(1)} / 100</span>`;
   const gradeEl=document.getElementById('grade-letter');
-  gradeEl.textContent=grade;
-  gradeEl.className='grade-letter grade-'+(grade.toLowerCase()||'f');
-  document.getElementById('grade-score').textContent=score.toFixed(1)+' / 100';
   // Trend
   const trendEl=document.getElementById('grade-trend');
   const trend=d.finops_trend||'no_history';
@@ -649,6 +676,24 @@ function render(d){
   const sb=document.getElementById('svc-badge');
   if(provs.length===1){sb.textContent=provs[0].toUpperCase()+' ONLY';}
   else if(provs.length>1){sb.textContent='ALL PROVIDERS';}
+
+  // Hide chart skeletons
+  const skSvc=document.getElementById('sk-svc');
+  const skTrend=document.getElementById('sk-trend');
+  const loadHint=document.getElementById('loading-hint');
+  if(skSvc) skSvc.style.display='none';
+  if(skTrend) skTrend.style.display='none';
+  if(loadHint) loadHint.style.display='none';
+
+  // Replace stat card skeletons with values
+  ['stat-mtd','stat-proj','stat-savings'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.querySelectorAll('.skeleton').forEach(s=>s.remove());
+  });
+  ['stat-mtd-sub','stat-proj-sub','stat-savings-sub'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.querySelectorAll('.skeleton').forEach(s=>s.remove());
+  });
 
   // Charts
   renderSvcChart(d.top_services||[]);

@@ -322,14 +322,12 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
     except Exception:
         pass
 
-    # Efficiency scorecard — build with real data inputs so dimensions light up.
-    # build_scorecard() is synchronous (DB queries), run it in a thread.
+    # Efficiency scorecard — built with real inputs, hard 8-second budget.
+    # All AWS calls are optional; any timeout falls back to no-data scoring.
     try:
         from .scoring.scorecard import build_scorecard
-        import asyncio as _aio
 
-        # Gather inputs for each dimension.
-        # idle_resources: open recs from savings tracker (empty list = no waste = 100pts)
+        # idle_resources from savings tracker (local DB — fast, no network)
         _idle: list[dict] = []
         try:
             from .recommendations.savings_tracker import list_recommendations as _lr
@@ -344,36 +342,28 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
         except Exception:
             pass
 
-        # commitment_data: try the cache from live scanners, or fetch inline
-        _commit_dict: dict | None = None
-        try:
-            from .recommendations.commitments import analyze_commitments as _ac
-            _ca = await _aio.get_event_loop().run_in_executor(None, _ac)
-            if _ca is not None:
-                _commit_dict = {
-                    "savings_plan_coverage_pct": _ca.savings_plan_coverage_pct,
-                    "savings_plan_utilization_pct": _ca.savings_plan_utilization_pct,
-                    "ri_coverage_pct": _ca.ri_coverage_pct,
-                    "ri_utilization_pct": _ca.ri_utilization_pct,
-                    "uncovered_on_demand_usd": _ca.uncovered_on_demand_usd,
-                }
-        except Exception:
-            pass
+        # Commitment data — fetched once per hour with a 5s timeout, then cached.
+        # Passing a non-None dict prevents build_scorecard from making its own
+        # analyze_commitments call (which would add 5-10 s per request).
+        _commit_dict = await _get_commitment_data()
 
         def _run_scorecard():
             return build_scorecard(
                 scope="overall",
                 label="Overall",
-                idle_resources=_idle,          # drives Waste Reduction
-                commitment_data=_commit_dict,  # drives Commitment Coverage
+                idle_resources=_idle,
+                commitment_data=_commit_dict,
                 total_monthly_spend=result.get("total_spend_mtd", 0.0),
             )
 
-        sc_obj = await _aio.get_event_loop().run_in_executor(None, _run_scorecard)
+        # Hard 8-second budget. If the scorecard DB query hangs, don't block the page.
+        sc_obj = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, _run_scorecard),
+            timeout=8.0,
+        )
         sc_dict = sc_obj.as_dict()
         sc_dict["overall_score"] = sc_dict.pop("total_score", sc_dict.get("overall_score", 0))
         sc_dict["overall_grade"] = sc_dict.pop("grade", sc_dict.get("overall_grade", "N/A"))
-        # Add trend info for the grade card
         sc_dict["trend"] = sc_obj.trend
         sc_dict["trend_delta"] = round(sc_obj.trend_delta, 1)
         result["scorecard"] = sc_dict
@@ -381,6 +371,8 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
         result["finops_score"] = sc_dict["overall_score"]
         result["finops_trend"] = sc_obj.trend
         result["finops_trend_delta"] = round(sc_obj.trend_delta, 1)
+    except asyncio.TimeoutError:
+        log.debug("Scorecard timed out — returning without scorecard data")
     except Exception as exc:
         log.debug("Scorecard build failed: %s", exc)
 
@@ -392,7 +384,9 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
 
     if aws is not None:
         try:
-            live_opps = await _live_opportunities(aws)
+            # Hard 25-second budget for the scanner suite.
+            # First call hits AWS; subsequent calls serve from 12-hour cache instantly.
+            live_opps = await asyncio.wait_for(_live_opportunities(aws), timeout=25.0)
             # Persist each into the savings tracker DB (upserts by dedup_key)
             from .recommendations.savings_tracker import record_recommendation
             for opp in live_opps:
@@ -492,6 +486,57 @@ _OPP_CACHE_TTL = timedelta(hours=12)
 def clear_opportunity_cache() -> None:
     """Force the next dashboard load to re-run all live scanners."""
     _OPP_CACHE.clear()
+
+
+# Process-level commitment data cache (1-hour TTL).
+# Shared so build_scorecard never calls analyze_commitments on every request.
+_COMMIT_CACHE: dict[str, Any] | None = None
+_COMMIT_CACHE_UNTIL: datetime = datetime.now(tz=timezone.utc)
+
+
+async def _get_commitment_data() -> dict[str, Any]:
+    """Return commitment coverage dict, fetching once per hour with a 5s timeout.
+
+    Always returns a non-None dict so build_scorecard never triggers its own
+    internal analyze_commitments call (which would add 5-10 s per request).
+    """
+    global _COMMIT_CACHE, _COMMIT_CACHE_UNTIL
+
+    now = datetime.now(tz=timezone.utc)
+    if _COMMIT_CACHE is not None and now < _COMMIT_CACHE_UNTIL:
+        return _COMMIT_CACHE
+
+    # Default: neutral 50% coverage so the scorecard stays honest about uncertainty
+    default: dict[str, Any] = {
+        "savings_plan_coverage_pct": 0.0,
+        "savings_plan_utilization_pct": 100.0,
+        "ri_coverage_pct": 0.0,
+        "ri_utilization_pct": 100.0,
+        "uncovered_on_demand_usd": 0.0,
+        "_source": "default",
+    }
+
+    try:
+        from .recommendations.commitments import analyze_commitments as _ac
+        ca = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, _ac),
+            timeout=5.0,
+        )
+        if ca is not None:
+            default = {
+                "savings_plan_coverage_pct": ca.savings_plan_coverage_pct,
+                "savings_plan_utilization_pct": ca.savings_plan_utilization_pct,
+                "ri_coverage_pct": ca.ri_coverage_pct,
+                "ri_utilization_pct": ca.ri_utilization_pct,
+                "uncovered_on_demand_usd": ca.uncovered_on_demand_usd,
+                "_source": "live",
+            }
+    except (asyncio.TimeoutError, Exception) as exc:
+        log.debug("Commitment data fetch skipped: %s", exc)
+
+    _COMMIT_CACHE = default
+    _COMMIT_CACHE_UNTIL = now + timedelta(hours=1)
+    return default
 
 
 async def _live_opportunities(aws: Any) -> list[dict]:
@@ -1659,8 +1704,20 @@ button:hover{{filter:brightness(1.1)}}
             provider_param = qs.get("provider", ["all"])[0]
             try:
                 loop = asyncio.new_event_loop()
-                data = loop.run_until_complete(_fetch_dashboard_data(days=days_param, provider=provider_param))
+                # 30-second hard cap on the whole data fetch. First load may be
+                # slower (scanner cold start); subsequent loads hit the 12h cache.
+                data = loop.run_until_complete(
+                    asyncio.wait_for(
+                        _fetch_dashboard_data(days=days_param, provider=provider_param),
+                        timeout=30.0,
+                    )
+                )
                 loop.close()
+            except asyncio.TimeoutError:
+                data = {
+                    "error": "Data fetch timed out. The AWS API is slow — try refreshing in a moment.",
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                }
             except Exception as exc:
                 data = {"error": str(exc), "generated_at": datetime.now(timezone.utc).isoformat()}
             body = json.dumps(data).encode()
