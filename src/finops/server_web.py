@@ -181,56 +181,55 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
             for svc, amt in sorted_svcs
         ]
 
-        # 3-month cost trend from snapshots
+        # 3-month cost trend: query CE directly for each calendar month.
+        # This is reliable regardless of whether local snapshots exist.
         try:
-            from .storage.db import cost_snapshots, get_engine
-            from sqlalchemy import select, func as sqlfunc
+            current_label = today.strftime("%B")
+            trend_entries: list[dict] = []
 
-            engine = get_engine()
-            three_months_ago = (today.replace(day=1) - timedelta(days=60)).replace(day=1)
-            with engine.connect() as conn:
-                rows = conn.execute(
-                    select(
-                        cost_snapshots.c.snapshot_date,
-                        sqlfunc.sum(cost_snapshots.c.amount_usd).label("total"),
-                    )
-                    .where(cost_snapshots.c.snapshot_date >= three_months_ago.isoformat())
-                    .group_by(cost_snapshots.c.snapshot_date)
-                    .order_by(cost_snapshots.c.snapshot_date)
-                ).fetchall()
-
-            # Group by year-month
-            by_month: dict[str, float] = {}
-            for row in rows:
-                ym = str(row.snapshot_date)[:7]  # YYYY-MM
-                by_month[ym] = by_month.get(ym, 0.0) + float(row.total or 0)
-
-            current_ym = today.strftime("%Y-%m")
-            trend_entries = []
-            for ym, total in sorted(by_month.items()):
-                month_dt = datetime.strptime(ym, "%Y-%m")
-                label = month_dt.strftime("%B")
-                if ym == current_ym:
-                    trend_entries.append({"month": f"{label} (partial)", "actual": round(total, 2), "projected": None})
+            # Build 3-month windows: [two months ago, last month, this month MTD]
+            month_windows = []
+            for months_back in (2, 1, 0):
+                if months_back == 0:
+                    m_start = mtd_start
+                    m_end = today
+                    label = f"{current_label} (partial)"
                 else:
-                    trend_entries.append({"month": label, "actual": round(total, 2), "projected": None})
+                    # Compute first and last day of the target month
+                    ref = today.replace(day=1)
+                    for _ in range(months_back):
+                        ref = (ref - timedelta(days=1)).replace(day=1)
+                    m_start = ref
+                    m_end = (ref.replace(month=ref.month % 12 + 1, day=1) - timedelta(days=1)) if ref.month < 12 else ref.replace(month=12, day=31)
+                    label = m_start.strftime("%B")
+                month_windows.append((label, m_start, m_end))
 
-            # Add projected entry for current month
+            month_totals = await asyncio.gather(*[
+                _sum_costs(s, e) for _, s, e in month_windows
+            ], return_exceptions=True)
+
+            for (label, _, _), result_or_exc in zip(month_windows, month_totals):
+                if isinstance(result_or_exc, Exception):
+                    total = 0.0
+                else:
+                    total = result_or_exc[0]
+                trend_entries.append({"month": label, "actual": round(total, 2), "projected": None})
+
+            # Projected point
             if result["projected_month_total"] > 0:
-                current_label = today.strftime("%B") + " (projected)"
-                trend_entries.append({"month": current_label, "actual": None, "projected": result["projected_month_total"]})
+                trend_entries.append({
+                    "month": f"{current_label} (projected)",
+                    "actual": None,
+                    "projected": result["projected_month_total"],
+                })
 
             result["trend"] = trend_entries
         except Exception as exc:
-            log.debug("Trend data fetch failed: %s", exc)
-            # Fallback: synthesize trend from MTD and last month
+            log.debug("Trend CE fetch failed: %s", exc)
+            # Last-resort fallback with only the data already in hand
             current_label = today.strftime("%B")
-            last_label = last_month_end.strftime("%B")
-            two_months_ago_end = last_month_start - timedelta(days=1)
-            two_months_ago_label = two_months_ago_end.strftime("%B")
             result["trend"] = [
-                {"month": two_months_ago_label, "actual": round(last_total * 0.88, 2), "projected": None},
-                {"month": last_label, "actual": round(last_total, 2), "projected": None},
+                {"month": last_month_end.strftime("%B"), "actual": round(last_total, 2), "projected": None},
                 {"month": f"{current_label} (partial)", "actual": round(mtd_total, 2), "projected": None},
                 {"month": f"{current_label} (projected)", "actual": None, "projected": result["projected_month_total"]},
             ]
@@ -288,38 +287,23 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
     except Exception:
         pass
 
-    # Efficiency scorecard
+    # Efficiency scorecard — uses scoring.scorecard.build_scorecard
     try:
-        from .recommendations.scorecard import get_efficiency_scorecard
-        sc = get_efficiency_scorecard()
-        result["scorecard"] = sc
-        result["finops_grade"] = sc.get("overall_grade", "N/A")
-        result["finops_score"] = sc.get("overall_score", 0.0)
+        from .scoring.scorecard import build_scorecard
+        sc_obj = build_scorecard(
+            scope="overall",
+            label="Overall",
+            total_monthly_spend=result.get("total_spend_mtd", 0.0),
+        )
+        sc_dict = sc_obj.as_dict()
+        # Normalise dimension keys for the dashboard
+        sc_dict["overall_score"] = sc_dict.pop("total_score", sc_dict.get("overall_score", 0))
+        sc_dict["overall_grade"] = sc_dict.pop("grade", sc_dict.get("overall_grade", "N/A"))
+        result["scorecard"] = sc_dict
+        result["finops_grade"] = sc_dict["overall_grade"]
+        result["finops_score"] = sc_dict["overall_score"]
     except Exception as exc:
-        log.debug("Scorecard unavailable: %s", exc)
-        # Derive a basic grade from savings coverage
-        score = 0.0
-        try:
-            savings_pct = (result["savings_achieved_mtd"] / result["total_spend_mtd"] * 100) if result["total_spend_mtd"] > 0 else 0.0
-            waste_score = min(100.0, savings_pct * 10)
-            anomaly_score = max(0.0, 100.0 - result["anomalies_open"] * 20)
-            score = round((waste_score + anomaly_score) / 2, 1)
-        except Exception:
-            pass
-        grade = "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D" if score >= 60 else "F"
-        result["finops_grade"] = grade
-        result["finops_score"] = score
-        result["scorecard"] = {
-            "overall_grade": grade,
-            "overall_score": score,
-            "dimensions": [
-                {"name": "Waste Reduction", "score": 0, "grade": "F"},
-                {"name": "Anomaly Response", "score": 0, "grade": "F"},
-                {"name": "Compute Efficiency", "score": 0, "grade": "F"},
-                {"name": "Commitment Coverage", "score": 0, "grade": "F"},
-                {"name": "Tag Hygiene", "score": 0, "grade": "F"},
-            ],
-        }
+        log.debug("Scorecard build failed: %s", exc)
 
     # Savings opportunities: merge live high-value scanners with stored recs.
     opportunities: list[dict] = []
@@ -407,30 +391,37 @@ async def _live_opportunities(aws: Any) -> list[dict]:
     from .recommendations.commitments import analyze_commitments as _commit
     from .recommendations.public_ipv4 import audit_public_ipv4 as _ipv4
     from .recommendations.graviton import scan_graviton_opportunities as _grav
+    from .recommendations.database_savings_plans import recommend_database_savings_plans as _dbsp
+    from .recommendations.lambda_snapstart import recommend_lambda_snapstart as _snapstart
 
     loop = asyncio.get_event_loop()
 
     # Sync scanners run in a thread so they don't block the event loop.
-    # Async scanners (ipv4, graviton) are awaited directly.
-    tex_fut   = loop.run_in_executor(None, _tex)
-    bed_fut   = loop.run_in_executor(None, _bed)
+    tex_fut    = loop.run_in_executor(None, _tex)
+    bed_fut    = loop.run_in_executor(None, _bed)
     commit_fut = loop.run_in_executor(None, _commit)
+    dbsp_fut   = loop.run_in_executor(None, _dbsp)
 
-    tex_raw, bed_raw, commit_raw, ipv4_raw, grav_raw = await asyncio.gather(
+    (tex_raw, bed_raw, commit_raw, dbsp_raw,
+     ipv4_raw, grav_raw, snap_raw) = await asyncio.gather(
         tex_fut,
         bed_fut,
         commit_fut,
+        dbsp_fut,
         _ipv4(aws_client=aws),
         _grav(aws_client=aws),
+        _snapstart(aws_client=aws),
         return_exceptions=True,
     )
 
     raw_map = {
-        "textract": tex_raw,
-        "bedrock":  bed_raw,
-        "commit":   commit_raw,
-        "ipv4":     ipv4_raw,
-        "graviton": grav_raw,
+        "textract":  tex_raw,
+        "bedrock":   bed_raw,
+        "commit":    commit_raw,
+        "dbsp":      dbsp_raw,
+        "ipv4":      ipv4_raw,
+        "graviton":  grav_raw,
+        "snapstart": snap_raw,
     }
 
     for name, data in raw_map.items():
@@ -485,12 +476,36 @@ async def _live_opportunities(aws: Any) -> list[dict]:
                             "resource": "RDS / DocumentDB / EC2", "effort": "ZERO",
                             "impact": "high", "service": "Commitments",
                         })
+            elif name == "dbsp" and isinstance(data, dict):
+                s = data.get("estimated_monthly_savings", 0) or 0
+                cov = data.get("current_sp_coverage_pct", 100) or 100
+                if s > 0 and cov < 80:
+                    out.append({
+                        "description": f"Buy Database Savings Plans for RDS/Aurora ({cov:.0f}% covered today)",
+                        "monthly_saving": round(s, 2),
+                        "resource": "RDS / Aurora", "effort": "ZERO",
+                        "impact": "high", "service": "RDS",
+                    })
+            elif name == "snapstart" and isinstance(data, list) and data:
+                total = sum(r.get("monthly_pc_cost", 0) or 0 for r in data)
+                if total > 0:
+                    out.append({
+                        "description": f"Enable Lambda SnapStart on {len(data)} Java function(s) to eliminate provisioned concurrency cost",
+                        "monthly_saving": round(total, 2),
+                        "resource": "AWS Lambda", "effort": "LOW",
+                        "impact": "medium", "service": "Lambda",
+                    })
             elif name == "ipv4" and isinstance(data, dict):
                 w = data.get("total_monthly_waste", 0) or 0
-                if w > 0:
-                    n = len(data.get("unattached_eips", []))
+                unattached = data.get("unattached_eips", []) or []
+                stopped = data.get("stopped_instance_eips", []) or []
+                n = len(unattached) + len(stopped)
+                if w > 0 and n > 0:
+                    parts = []
+                    if unattached: parts.append(f"{len(unattached)} unattached")
+                    if stopped: parts.append(f"{len(stopped)} on stopped instances")
                     out.append({
-                        "description": f"Release {n} unattached Elastic IP(s)",
+                        "description": f"Release {n} idle Elastic IP(s) ({', '.join(parts)})",
                         "monthly_saving": round(w, 2),
                         "resource": "Elastic IPs", "effort": "ZERO",
                         "impact": "low", "service": "EC2",

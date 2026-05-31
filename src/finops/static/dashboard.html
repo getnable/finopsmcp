@@ -54,8 +54,15 @@ body{padding:0 0 60px}
 /* Main content area */
 .main{padding:28px 0 0}
 
-/* Section label */
-.section-label{font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px}
+/* Top bar: section label + provider filters */
+.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:12px}
+.section-label{font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.1em}
+.provider-filters{display:flex;align-items:center;gap:0}
+.pf-btn{background:var(--bg1);border:1px solid var(--line);color:var(--fg3);font-family:var(--font);font-size:11px;font-weight:500;padding:5px 12px;cursor:pointer;transition:background .15s,color .15s;letter-spacing:.02em}
+.pf-btn:first-child{border-radius:var(--r-lg) 0 0 var(--r-lg)}
+.pf-btn:last-child{border-radius:0 var(--r-lg) var(--r-lg) 0}
+.pf-btn:not(:first-child){border-left:none}
+.pf-btn.active{background:var(--bg3);color:var(--fg);border-color:var(--line2)}
 
 /* Stat cards */
 .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
@@ -150,7 +157,12 @@ footer a:hover{filter:brightness(1.15)}
 
   <div id="error-banner" class="error-banner" style="display:none"></div>
 
-  <div class="section-label">Overview</div>
+  <div class="top-bar">
+    <div class="section-label">Overview</div>
+    <div class="provider-filters" id="provider-filters" style="display:none">
+      <button class="pf-btn active" data-provider="all">All</button>
+    </div>
+  </div>
 
   <div class="cards">
     <div class="card">
@@ -239,7 +251,7 @@ function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 
 // ── State ────────────────────────────────────────────────────────────────────
 const selectedDays = 30;
-const selectedProvider = 'all';
+let selectedProvider = 'all';
 let serviceChart = null;
 let trendChart = null;
 
@@ -327,6 +339,9 @@ function render(d){
   const dims=(d.scorecard||{}).dimensions||[];
   const weak=dims.filter(dim=>(dim.score||0)<50).map(dim=>dim.name.toLowerCase());
   document.getElementById('score-gaps').textContent=weak.length?weak.length+' gap'+(weak.length>1?'s':'')+': '+weak.join(', '):'';
+
+  // Provider filter bar (only if >1 provider connected)
+  initProviderFilters(providers);
 
   // Chart days label + service badge
   document.getElementById('chart-days').textContent=selectedDays;
@@ -466,6 +481,24 @@ function renderOpportunities(opps, count){
       </div>
     </li>`;
   }).join('');
+}
+
+// ── Provider filters ─────────────────────────────────────────────────────────
+function initProviderFilters(providers){
+  const bar = document.getElementById('provider-filters');
+  if(!providers||providers.length<=1){bar.style.display='none';return;}
+  bar.style.display='flex';
+  const labels={'aws':'AWS','azure':'Azure','gcp':'GCP','datadog':'Datadog','snowflake':'Snowflake'};
+  bar.innerHTML='<button class="pf-btn'+(selectedProvider==='all'?' active':'')+'" data-provider="all">All</button>'
+    +providers.map(p=>`<button class="pf-btn${selectedProvider===p?' active':''}" data-provider="${p}">${labels[p]||p.toUpperCase()}</button>`).join('');
+  bar.querySelectorAll('.pf-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      selectedProvider=btn.dataset.provider;
+      bar.querySelectorAll('.pf-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      loadData();
+    });
+  });
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
