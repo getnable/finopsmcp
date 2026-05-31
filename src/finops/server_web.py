@@ -360,9 +360,34 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
     return result
 
 
+# Cache for live scanner results. Keyed by AWS account id, value is
+# (fetched_at: datetime, opportunities: list[dict]). Refreshes at most
+# every 12 hours so scanner calls don't run on every dashboard load.
+_OPP_CACHE: dict[str, tuple[datetime, list[dict]]] = {}
+_OPP_CACHE_TTL = timedelta(hours=12)
+
+
 async def _live_opportunities(aws: Any) -> list[dict]:
-    """Run the high-value scanners live and normalize into dashboard opportunities."""
+    """Run the high-value scanners live and normalize into dashboard opportunities.
+
+    Results are cached per AWS account for 12 hours.
+    """
     import asyncio
+
+    # Try to get a stable cache key (account id or a fixed sentinel).
+    try:
+        cache_key = str(getattr(aws, "account_id", None) or "default")
+    except Exception:
+        cache_key = "default"
+
+    now = datetime.now(tz=timezone.utc)
+    cached = _OPP_CACHE.get(cache_key)
+    if cached is not None:
+        fetched_at, opps = cached
+        if now - fetched_at < _OPP_CACHE_TTL:
+            log.debug("Returning cached opportunities for %s (age %s)", cache_key, now - fetched_at)
+            return opps
+
     out: list[dict] = []
 
     async def _safe(name: str, coro):
@@ -441,6 +466,9 @@ async def _live_opportunities(aws: Any) -> list[dict]:
         except Exception as exc:
             log.debug("normalize %s failed: %s", name, exc)
 
+    # Store in cache.
+    _OPP_CACHE[cache_key] = (now, out)
+    log.debug("Cached %d opportunities for %s", len(out), cache_key)
     return out
 
 
