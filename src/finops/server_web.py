@@ -367,6 +367,11 @@ _OPP_CACHE: dict[str, tuple[datetime, list[dict]]] = {}
 _OPP_CACHE_TTL = timedelta(hours=12)
 
 
+def clear_opportunity_cache() -> None:
+    """Force the next dashboard load to re-run all live scanners."""
+    _OPP_CACHE.clear()
+
+
 async def _live_opportunities(aws: Any) -> list[dict]:
     """Run the high-value scanners live and normalize into dashboard opportunities.
 
@@ -403,16 +408,35 @@ async def _live_opportunities(aws: Any) -> list[dict]:
     from .recommendations.public_ipv4 import audit_public_ipv4 as _ipv4
     from .recommendations.graviton import scan_graviton_opportunities as _grav
 
-    results = await asyncio.gather(
-        _safe("textract", _tex(aws_client=aws)),
-        _safe("bedrock",  _bed(aws_client=aws)),
-        _safe("commit",   _commit(aws_client=aws)),
-        _safe("ipv4",     _ipv4(aws_client=aws)),
-        _safe("graviton", _grav(aws_client=aws)),
+    loop = asyncio.get_event_loop()
+
+    # Sync scanners run in a thread so they don't block the event loop.
+    # Async scanners (ipv4, graviton) are awaited directly.
+    tex_fut   = loop.run_in_executor(None, _tex)
+    bed_fut   = loop.run_in_executor(None, _bed)
+    commit_fut = loop.run_in_executor(None, _commit)
+
+    tex_raw, bed_raw, commit_raw, ipv4_raw, grav_raw = await asyncio.gather(
+        tex_fut,
+        bed_fut,
+        commit_fut,
+        _ipv4(aws_client=aws),
+        _grav(aws_client=aws),
+        return_exceptions=True,
     )
 
-    for name, data in results:
-        if not data:
+    raw_map = {
+        "textract": tex_raw,
+        "bedrock":  bed_raw,
+        "commit":   commit_raw,
+        "ipv4":     ipv4_raw,
+        "graviton": grav_raw,
+    }
+
+    for name, data in raw_map.items():
+        if data is None or isinstance(data, BaseException):
+            if isinstance(data, BaseException):
+                log.debug("scanner %s raised: %s", name, data)
             continue
         try:
             if name == "textract" and isinstance(data, dict):
@@ -434,16 +458,33 @@ async def _live_opportunities(aws: Any) -> list[dict]:
                         "resource": "Amazon Bedrock", "effort": "MEDIUM",
                         "impact": "high", "service": "Bedrock",
                     })
-            elif name == "commit" and isinstance(data, dict):
-                s = data.get("estimated_monthly_savings", 0) or 0
-                cov = data.get("current_coverage_pct", 100) or 100
-                if s > 0 and cov < 80:
-                    out.append({
-                        "description": f"Buy Reserved Instances / Savings Plans ({cov:.0f}% covered today)",
-                        "monthly_saving": round(s, 2),
-                        "resource": "RDS / DocumentDB / EC2", "effort": "ZERO",
-                        "impact": "high", "service": "Commitments",
-                    })
+            elif name == "commit":
+                # analyze_commitments returns a CommitmentAnalysis dataclass or None
+                if data is None:
+                    continue
+                recs = getattr(data, "recommendations", []) or []
+                for rec in recs:
+                    s = rec.get("monthly_savings", 0) or 0
+                    if s > 0:
+                        out.append({
+                            "description": rec.get("description", "Buy Reserved Instances / Savings Plans"),
+                            "monthly_saving": round(s, 2),
+                            "resource": "RDS / DocumentDB / EC2", "effort": "ZERO",
+                            "impact": "high", "service": "Commitments",
+                        })
+                # Also surface a summary if uncovered on-demand is significant and no recs yet
+                if not recs:
+                    uncovered = getattr(data, "uncovered_on_demand_usd", 0) or 0
+                    avg_cov = ((getattr(data, "savings_plan_coverage_pct", 0) or 0)
+                               + (getattr(data, "ri_coverage_pct", 0) or 0)) / 2
+                    savings_est = round(uncovered * 0.4 * 0.55, 2)  # ~40% of uncovered, ~55% RI discount
+                    if savings_est > 50 and avg_cov < 80:
+                        out.append({
+                            "description": f"Buy Reserved Instances / Savings Plans ({avg_cov:.0f}% commitment coverage today)",
+                            "monthly_saving": savings_est,
+                            "resource": "RDS / DocumentDB / EC2", "effort": "ZERO",
+                            "impact": "high", "service": "Commitments",
+                        })
             elif name == "ipv4" and isinstance(data, dict):
                 w = data.get("total_monthly_waste", 0) or 0
                 if w > 0:
