@@ -107,6 +107,24 @@ body{padding:0 0 60px}
 .sc-bar-bg{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden}
 .sc-bar-fill{height:100%;border-radius:2px;transition:width .5s ease}
 
+/* Mini ledger in savings card */
+.ledger-mini{display:flex;flex-direction:column;gap:4px}
+.lm-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--fg3)}
+.lm-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+/* Savings pipeline ledger (full row) */
+.ledger-row{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:20px 28px;margin-bottom:14px;display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;gap:0}
+.ledger-stage{display:flex;flex-direction:column;gap:4px;padding:0 16px}
+.ledger-stage:first-child{padding-left:0}
+.ledger-stage:last-child{padding-right:0}
+.ls-label{font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.08em}
+.ls-value{font-size:26px;font-weight:600;font-family:var(--mono);line-height:1}
+.ls-sub{font-size:11px;color:var(--fg3);margin-top:2px}
+.ls-identified{color:var(--fg)}
+.ls-acted{color:var(--warn)}
+.ls-verified{color:var(--success)}
+.ledger-arrow{font-size:18px;color:var(--line2);padding:0 8px;user-select:none}
+
 /* Savings opportunities */
 .opp-list{list-style:none;display:flex;flex-direction:column}
 .opp-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
@@ -124,6 +142,9 @@ body{padding:0 0 60px}
 .effort-medium{background:rgba(230,168,64,.12);color:var(--warn);border:1px solid rgba(230,168,64,.2)}
 .effort-zero{background:rgba(77,184,212,.12);color:var(--accent);border:1px solid rgba(77,184,212,.2)}
 .effort-high{background:rgba(224,92,75,.12);color:var(--alert);border:1px solid rgba(224,92,75,.2)}
+.done-btn{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:var(--r-xs);border:1px solid var(--line2);background:var(--bg3);color:var(--fg3);cursor:pointer;transition:background .15s,color .15s,border-color .15s;white-space:nowrap;flex-shrink:0}
+.done-btn:hover{background:rgba(60,186,122,.12);color:var(--success);border-color:rgba(60,186,122,.3)}
+.done-btn.marking{opacity:.5;pointer-events:none}
 
 /* Error banner */
 .error-banner{background:rgba(224,92,75,.08);border:1px solid rgba(224,92,75,.2);border-radius:var(--r-lg);padding:12px 16px;color:var(--alert);font-size:13px;margin-bottom:16px}
@@ -179,12 +200,37 @@ footer a:hover{filter:brightness(1.15)}
       <div class="card-label">Identified Savings</div>
       <div class="card-value down" id="stat-savings">...</div>
       <div class="card-sub neutral" id="stat-savings-sub">per month</div>
+      <div class="ledger-mini" id="ledger-mini" style="margin-top:10px;display:none">
+        <span class="lm-item"><span class="lm-dot" style="background:var(--warn)"></span><span id="lm-acted">$0</span> acted on</span>
+        <span class="lm-item"><span class="lm-dot" style="background:var(--success)"></span><span id="lm-verified">$0</span> verified</span>
+      </div>
     </div>
     <div class="card">
       <div class="card-label">FinOps Score</div>
       <div class="score-big" id="score-big" style="color:var(--fg3)">--%</div>
       <div class="score-sub" id="score-sub">calculating...</div>
       <div class="score-gaps" id="score-gaps"></div>
+    </div>
+  </div>
+
+  <!-- Savings pipeline ledger -->
+  <div class="ledger-row" id="ledger-row" style="display:none">
+    <div class="ledger-stage">
+      <div class="ls-label">Identified</div>
+      <div class="ls-value ls-identified" id="ls-identified">$0</div>
+      <div class="ls-sub" id="ls-identified-sub">per month — 0 open</div>
+    </div>
+    <div class="ledger-arrow">›</div>
+    <div class="ledger-stage">
+      <div class="ls-label">Acted On</div>
+      <div class="ls-value ls-acted" id="ls-acted">$0</div>
+      <div class="ls-sub" id="ls-acted-sub">estimated savings</div>
+    </div>
+    <div class="ledger-arrow">›</div>
+    <div class="ledger-stage">
+      <div class="ls-label">Verified Savings</div>
+      <div class="ls-value ls-verified" id="ls-verified">$0</div>
+      <div class="ls-sub" id="ls-verified-sub">confirmed by spend drop</div>
     </div>
   </div>
 
@@ -318,10 +364,19 @@ function render(d){
     projSubEl.className='card-sub neutral';
   }
 
-  // Card 3: Identified savings
+  // Card 3: Identified savings + mini ledger
   document.getElementById('stat-savings').textContent=fmt(d.opportunities_total_saving||0);
   const oppCount=d.opportunities_count||0;
   document.getElementById('stat-savings-sub').textContent='per month — '+oppCount+' opportunit'+(oppCount===1?'y':'ies');
+  const ledger=d.savings_ledger||{};
+  const actedOn=ledger.acted_on_monthly||0;
+  const verified=ledger.verified_monthly||0;
+  if(actedOn>0||verified>0){
+    document.getElementById('lm-acted').textContent=fmt(actedOn);
+    document.getElementById('lm-verified').textContent=fmt(verified);
+    document.getElementById('ledger-mini').style.display='flex';
+  }
+
 
   // Card 4: FinOps score (percentage only, no letter grade)
   const scorePct=Math.round(d.finops_score||0);
@@ -357,8 +412,9 @@ function render(d){
   // Scorecard
   renderScorecard(d.scorecard||{});
 
-  // Opportunities
+  // Opportunities + ledger
   renderOpportunities(d.recent_opportunities||[],oppCount);
+  renderLedger(d.savings_ledger||{},oppCount);
 }
 
 // ── Services bar chart ────────────────────────────────────────────────────────
@@ -450,6 +506,30 @@ function renderScorecard(sc){
   }).join('');
 }
 
+// ── Savings pipeline ledger ───────────────────────────────────────────────────
+function renderLedger(ledger, oppCount){
+  const row=document.getElementById('ledger-row');
+  const identified=ledger.identified_monthly||0;
+  const actedOn=ledger.acted_on_monthly||0;
+  const verified=ledger.verified_monthly||0;
+  const counts=ledger.counts||{};
+
+  // Show ledger row once there is any data
+  if(identified>0||actedOn>0||verified>0){
+    row.style.display='grid';
+  }
+
+  document.getElementById('ls-identified').textContent=fmt(identified);
+  document.getElementById('ls-identified-sub').textContent='per month — '+(counts.open||oppCount||0)+' open';
+  document.getElementById('ls-acted').textContent=fmt(actedOn);
+  const actedCount=counts.acted_on||0;
+  document.getElementById('ls-acted-sub').textContent=actedCount>0?actedCount+' action'+(actedCount>1?'s':'')+' taken':'no actions yet';
+  document.getElementById('ls-verified').textContent=fmt(verified);
+  const verCount=counts.verified||0;
+  const annualized=ledger.verified_annual||0;
+  document.getElementById('ls-verified-sub').textContent=verCount>0?fmt(annualized)+'/yr confirmed':'pending verification';
+}
+
 // ── Savings opportunities ─────────────────────────────────────────────────────
 function renderOpportunities(opps, count){
   document.getElementById('opp-badge').textContent=(count||opps.length)+' OPEN';
@@ -468,9 +548,9 @@ function renderOpportunities(opps, count){
     if(effort==='LOW') effortClass='effort-low';
     else if(effort==='ZERO') effortClass='effort-zero';
     else if(effort==='HIGH') effortClass='effort-high';
-    // Format saving: if there's a range in the description, keep it; otherwise show single value
     const saving=fmt(o.monthly_saving||0)+'/mo';
-    return `<li class="opp-item">
+    const idAttr=o.id?`data-rec-id="${o.id}"`:'';
+    return `<li class="opp-item" ${idAttr}>
       <span class="opp-dot ${dotClass}"></span>
       <div class="opp-body">
         <div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div>
@@ -478,9 +558,32 @@ function renderOpportunities(opps, count){
       <div class="opp-right">
         <span class="opp-saving">${saving}</span>
         <span class="effort-badge ${effortClass}">${effortLabel}</span>
+        ${o.id?`<button class="done-btn" onclick="markDone(${o.id},this)">&#10003; Done</button>`:''}
       </div>
     </li>`;
   }).join('');
+}
+
+// ── Mark opportunity as done ──────────────────────────────────────────────────
+async function markDone(id, btn){
+  btn.classList.add('marking');
+  btn.textContent='Saving…';
+  try{
+    const r=await fetch('/api/mark-done?id='+id,{method:'POST'});
+    if(r.ok){
+      const li=btn.closest('li');
+      li.style.transition='opacity .3s';
+      li.style.opacity='0';
+      setTimeout(()=>li.remove(),320);
+      loadData(); // refresh counts
+    }else{
+      btn.textContent='Error';
+      btn.classList.remove('marking');
+    }
+  }catch(e){
+    btn.textContent='Error';
+    btn.classList.remove('marking');
+  }
 }
 
 // ── Provider filters ─────────────────────────────────────────────────────────
