@@ -50,3 +50,17 @@ Thumbs.db
 *.log
 logs/
 .gstack/
+
+# Node (root-level tooling only)
+node_modules/
+package.json
+package-lock.json
+
+# Scratch / research files
+COST_RESEARCH.md
+.design-audit/
+dashboard.html
+
+# Office temp files
+~$*
+*.docx

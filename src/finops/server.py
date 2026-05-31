@@ -7558,6 +7558,7 @@ async def get_databricks_job_costs(
     }
 
 
+<<<<<<< Updated upstream
 @mcp.tool()
 async def get_focus_costs(
     start_date: str | None = None,
@@ -10179,5 +10180,7 @@ Run `finops serve` first if the server is not running.
         return f"Error: {exc}"
 
 
+=======
+>>>>>>> Stashed changes
 if __name__ == "__main__":
     main()
