@@ -141,7 +141,7 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
             account_id = ""
             for _name, connector in configured.items():
                 try:
-                    summary = await connector.get_cost_summary(start, end)
+                    summary = await connector.get_costs(start, end)
                     total += summary.total_usd
                     for svc, amt in summary.by_service.items():
                         by_service[svc] = by_service.get(svc, 0.0) + amt
