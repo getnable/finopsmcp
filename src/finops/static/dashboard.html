@@ -68,16 +68,10 @@ body{padding:0 0 60px}
 .card-sub.up{color:var(--alert)}
 .card-sub.down{color:var(--success)}
 .card-sub.neutral{color:var(--fg3)}
-/* Grade card */
-.grade-row{display:flex;align-items:baseline;gap:10px;line-height:1;margin-bottom:6px}
-.grade-letter{font-size:44px;font-weight:600;font-family:var(--mono);line-height:1}
-.grade-score{font-size:15px;color:var(--fg3);font-family:var(--mono)}
-.grade-a{color:var(--success)}
-.grade-b{color:var(--accent)}
-.grade-c{color:var(--warn)}
-.grade-d,.grade-f{color:var(--alert)}
-.grade-delta{font-size:12px;color:var(--accent);margin-top:4px}
-.grade-gaps{font-size:11px;color:var(--fg3);margin-top:4px}
+/* Score card */
+.score-big{font-size:44px;font-weight:600;font-family:var(--mono);line-height:1;margin-bottom:6px}
+.score-sub{font-size:12px;color:var(--fg3);margin-top:4px}
+.score-gaps{font-size:11px;color:var(--fg3);margin-top:4px}
 
 /* Panel */
 .panel{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:20px 22px}
@@ -102,19 +96,9 @@ body{padding:0 0 60px}
 .sc-item{display:flex;flex-direction:column;gap:6px}
 .sc-header{display:flex;align-items:center;justify-content:space-between}
 .sc-name{font-size:13px;color:var(--fg)}
-.sc-meta{display:flex;align-items:center;gap:8px}
 .sc-score{font-size:12px;font-family:var(--mono);color:var(--fg3)}
-.sc-grade{font-size:11px;font-weight:700;width:18px;text-align:center;font-family:var(--mono)}
-.grade-pill-a{color:var(--success)}
-.grade-pill-b{color:var(--accent)}
-.grade-pill-c{color:var(--warn)}
-.grade-pill-d,.grade-pill-f{color:var(--alert)}
 .sc-bar-bg{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden}
 .sc-bar-fill{height:100%;border-radius:2px;transition:width .5s ease}
-.sc-bar-a{background:var(--success)}
-.sc-bar-b{background:var(--accent)}
-.sc-bar-c{background:var(--warn)}
-.sc-bar-d,.sc-bar-f{background:rgba(224,92,75,.5)}
 
 /* Savings opportunities */
 .opp-list{list-style:none;display:flex;flex-direction:column}
@@ -185,13 +169,10 @@ footer a:hover{filter:brightness(1.15)}
       <div class="card-sub neutral" id="stat-savings-sub">per month</div>
     </div>
     <div class="card">
-      <div class="card-label">FinOps Grade</div>
-      <div class="grade-row">
-        <span class="grade-letter grade-d" id="grade-letter">D</span>
-        <span class="grade-score" id="grade-score">-- / 100</span>
-      </div>
-      <div class="grade-delta" id="grade-delta"></div>
-      <div class="grade-gaps" id="grade-gaps"></div>
+      <div class="card-label">FinOps Score</div>
+      <div class="score-big" id="score-big" style="color:var(--fg3)">--%</div>
+      <div class="score-sub" id="score-sub">calculating...</div>
+      <div class="score-gaps" id="score-gaps"></div>
     </div>
   </div>
 
@@ -216,7 +197,7 @@ footer a:hover{filter:brightness(1.15)}
     <div class="panel">
       <div class="panel-hdr">
         <div class="panel-title">Efficiency Scorecard</div>
-        <span class="panel-badge" id="scorecard-badge">OVERALL --</span>
+        <span class="panel-badge" id="scorecard-badge">EFFICIENCY</span>
       </div>
       <ul class="scorecard-list" id="scorecard-list">
         <li class="sc-item"><span style="color:var(--fg3);font-size:13px">Loading...</span></li>
@@ -254,24 +235,7 @@ function fmtDelta(n){
   return sign+fmt(Math.abs(n)).replace('$','')+' ';
 }
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function gradeColor(g){
-  const gl=String(g||'f').toLowerCase();
-  if(gl==='a') return 'var(--success)';
-  if(gl==='b') return 'var(--accent)';
-  if(gl==='c') return 'var(--warn)';
-  return 'var(--alert)';
-}
-function gradeBarClass(g){
-  const gl=String(g||'f').toLowerCase();
-  if(gl==='a') return 'sc-bar-a';
-  if(gl==='b') return 'sc-bar-b';
-  if(gl==='c') return 'sc-bar-c';
-  return 'sc-bar-d';
-}
-function gradePillClass(g){
-  const gl=String(g||'f').toLowerCase();
-  return 'grade-pill-'+gl;
-}
+
 
 // ── State ────────────────────────────────────────────────────────────────────
 const selectedDays = 30;
@@ -347,17 +311,22 @@ function render(d){
   const oppCount=d.opportunities_count||0;
   document.getElementById('stat-savings-sub').textContent='per month — '+oppCount+' opportunit'+(oppCount===1?'y':'ies');
 
-  // Card 4: FinOps grade
-  const grade=d.finops_grade||'N/A';
-  const score=parseFloat(d.finops_score||0).toFixed(1);
-  const gradeLetterEl=document.getElementById('grade-letter');
-  gradeLetterEl.textContent=grade;
-  gradeLetterEl.className='grade-letter grade-'+grade.toLowerCase();
-  document.getElementById('grade-score').textContent=score+' / 100';
-  // Surface critical gaps from scorecard dimensions
+  // Card 4: FinOps score (percentage only, no letter grade)
+  const scorePct=Math.round(d.finops_score||0);
+  const scoreBig=document.getElementById('score-big');
+  scoreBig.textContent=scorePct+'%';
+  let scoreColor,scoreLabel;
+  if(scorePct>=80){scoreColor='var(--success)';scoreLabel='Well optimized';}
+  else if(scorePct>=60){scoreColor='var(--accent)';scoreLabel='Room to improve';}
+  else if(scorePct>=40){scoreColor='var(--warn)';scoreLabel='Needs attention';}
+  else{scoreColor='var(--alert)';scoreLabel='Critical gaps';}
+  scoreBig.style.color=scoreColor;
+  document.getElementById('score-sub').textContent=scoreLabel;
+  document.getElementById('score-sub').style.color=scoreColor;
+  // List the weakest dimensions
   const dims=(d.scorecard||{}).dimensions||[];
-  const failing=dims.filter(dim=>dim.grade==='F'||dim.grade==='D').map(dim=>dim.name.toLowerCase());
-  document.getElementById('grade-gaps').textContent=failing.length?failing.length+' critical gap'+(failing.length>1?'s':'')+': '+failing.join(', '):'';
+  const weak=dims.filter(dim=>(dim.score||0)<50).map(dim=>dim.name.toLowerCase());
+  document.getElementById('score-gaps').textContent=weak.length?weak.length+' gap'+(weak.length>1?'s':'')+': '+weak.join(', '):'';
 
   // Chart days label + service badge
   document.getElementById('chart-days').textContent=selectedDays;
@@ -437,31 +406,30 @@ function renderTrendChart(trend){
 }
 
 // ── Efficiency scorecard ──────────────────────────────────────────────────────
-function renderScorecard(sc){
-  const overall=sc.overall_grade||'--';
-  const dims=sc.dimensions||[];
-  document.getElementById('scorecard-badge').textContent='OVERALL '+overall;
+function scoreBarColor(s){
+  if(s>=80) return 'var(--success)';
+  if(s>=60) return 'var(--accent)';
+  if(s>=40) return 'var(--warn)';
+  return 'rgba(224,92,75,.6)';
+}
 
+function renderScorecard(sc){
+  const dims=sc.dimensions||[];
   const el=document.getElementById('scorecard-list');
   if(!dims.length){
     el.innerHTML='<li class="sc-item"><span style="color:var(--fg3);font-size:13px">Run a cost audit to generate scorecard data.</span></li>';
     return;
   }
   el.innerHTML=dims.map(dim=>{
-    const g=dim.grade||'F';
     const s=Math.round(dim.score||0);
-    const barClass=gradeBarClass(g);
-    const pillClass=gradePillClass(g);
+    const color=scoreBarColor(s);
     return `<li class="sc-item">
       <div class="sc-header">
         <span class="sc-name">${esc(dim.name)}</span>
-        <div class="sc-meta">
-          <span class="sc-score">${s} / 100</span>
-          <span class="sc-grade ${pillClass}">${g}</span>
-        </div>
+        <span class="sc-score">${s} / 100</span>
       </div>
       <div class="sc-bar-bg">
-        <div class="sc-bar-fill ${barClass}" style="width:${s}%"></div>
+        <div class="sc-bar-fill" style="width:${s}%;background:${color}"></div>
       </div>
     </li>`;
   }).join('');
