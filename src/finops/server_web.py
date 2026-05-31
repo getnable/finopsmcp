@@ -322,21 +322,65 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
     except Exception:
         pass
 
-    # Efficiency scorecard — uses scoring.scorecard.build_scorecard
+    # Efficiency scorecard — build with real data inputs so dimensions light up.
+    # build_scorecard() is synchronous (DB queries), run it in a thread.
     try:
         from .scoring.scorecard import build_scorecard
-        sc_obj = build_scorecard(
-            scope="overall",
-            label="Overall",
-            total_monthly_spend=result.get("total_spend_mtd", 0.0),
-        )
+        import asyncio as _aio
+
+        # Gather inputs for each dimension.
+        # idle_resources: open recs from savings tracker (empty list = no waste = 100pts)
+        _idle: list[dict] = []
+        try:
+            from .recommendations.savings_tracker import list_recommendations as _lr
+            for r in _lr(status="open", limit=50):
+                sav = r.get("estimated_monthly_savings_usd", 0) or 0
+                if sav > 0:
+                    _idle.append({
+                        "resource_id": r.get("resource_id", ""),
+                        "monthly_cost_usd": sav,
+                        "resource_type": r.get("resource_type", ""),
+                    })
+        except Exception:
+            pass
+
+        # commitment_data: try the cache from live scanners, or fetch inline
+        _commit_dict: dict | None = None
+        try:
+            from .recommendations.commitments import analyze_commitments as _ac
+            _ca = await _aio.get_event_loop().run_in_executor(None, _ac)
+            if _ca is not None:
+                _commit_dict = {
+                    "savings_plan_coverage_pct": _ca.savings_plan_coverage_pct,
+                    "savings_plan_utilization_pct": _ca.savings_plan_utilization_pct,
+                    "ri_coverage_pct": _ca.ri_coverage_pct,
+                    "ri_utilization_pct": _ca.ri_utilization_pct,
+                    "uncovered_on_demand_usd": _ca.uncovered_on_demand_usd,
+                }
+        except Exception:
+            pass
+
+        def _run_scorecard():
+            return build_scorecard(
+                scope="overall",
+                label="Overall",
+                idle_resources=_idle,          # drives Waste Reduction
+                commitment_data=_commit_dict,  # drives Commitment Coverage
+                total_monthly_spend=result.get("total_spend_mtd", 0.0),
+            )
+
+        sc_obj = await _aio.get_event_loop().run_in_executor(None, _run_scorecard)
         sc_dict = sc_obj.as_dict()
-        # Normalise dimension keys for the dashboard
         sc_dict["overall_score"] = sc_dict.pop("total_score", sc_dict.get("overall_score", 0))
         sc_dict["overall_grade"] = sc_dict.pop("grade", sc_dict.get("overall_grade", "N/A"))
+        # Add trend info for the grade card
+        sc_dict["trend"] = sc_obj.trend
+        sc_dict["trend_delta"] = round(sc_obj.trend_delta, 1)
         result["scorecard"] = sc_dict
         result["finops_grade"] = sc_dict["overall_grade"]
         result["finops_score"] = sc_dict["overall_score"]
+        result["finops_trend"] = sc_obj.trend
+        result["finops_trend_delta"] = round(sc_obj.trend_delta, 1)
     except Exception as exc:
         log.debug("Scorecard build failed: %s", exc)
 
