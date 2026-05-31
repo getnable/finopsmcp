@@ -79,7 +79,7 @@ class AuditLogger:
         user_identity: str | None = None,
     ) -> None:
         """
-        Append one audit record. Never raises — log failures are warnings only.
+        Append one audit record. Never raises: log failures are warnings only.
 
         Args:
             tool: MCP tool name
