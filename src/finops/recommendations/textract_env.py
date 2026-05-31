@@ -50,6 +50,23 @@ def _make_ce(role_arn: str | None = None):
     return boto3.client("ce", region_name="us-east-1")
 
 
+def _make_cloudtrail(region: str = "us-east-1", role_arn: str | None = None):
+    """Return a CloudTrail client, optionally assuming a cross-account role."""
+    import boto3
+
+    if role_arn:
+        sts = boto3.client("sts")
+        creds = sts.assume_role(RoleArn=role_arn, RoleSessionName="finops-textract-env")["Credentials"]
+        return boto3.client(
+            "cloudtrail",
+            aws_access_key_id=creds["AccessKeyId"],
+            aws_secret_access_key=creds["SecretAccessKey"],
+            aws_session_token=creds["SessionToken"],
+            region_name=region,
+        )
+    return boto3.client("cloudtrail", region_name=region)
+
+
 def _make_lambda(region: str, role_arn: str | None = None):
     import boto3
 
@@ -194,6 +211,49 @@ def _get_total_textract_spend(ce, start: str, end: str) -> float:
     return total
 
 
+def _get_cloudtrail_callers(ct, start, end) -> dict:
+    """
+    Look up CloudTrail events for Textract API calls within [start, end].
+
+    Returns a dict keyed by caller ARN with call_count and a sample of
+    the caller role name. Returns {} on any error (CloudTrail access is
+    optional; the scanner falls back to Lambda heuristics without it).
+    """
+    from datetime import timezone
+
+    callers: dict = {}
+    try:
+        kwargs: dict = {
+            "LookupAttributes": [{"AttributeKey": "EventName", "AttributeValue": "DetectDocumentText"}],
+            "StartTime": start if start.tzinfo else start.replace(tzinfo=timezone.utc),
+            "EndTime": end if end.tzinfo else end.replace(tzinfo=timezone.utc),
+            "MaxResults": 50,
+        }
+        while True:
+            resp = ct.lookup_events(**kwargs)
+            for event in resp.get("Events", []):
+                import json as _json
+                try:
+                    detail = _json.loads(event.get("CloudTrailEvent", "{}"))
+                except Exception:
+                    continue
+                uid = detail.get("userIdentity", {})
+                arn = uid.get("arn", "unknown")
+                role = uid.get("sessionContext", {}).get("sessionIssuer", {}).get("userName", "")
+                key = role or arn
+                if key not in callers:
+                    callers[key] = {"arn": arn, "role": role, "call_count": 0}
+                callers[key]["call_count"] += 1
+            next_token = resp.get("NextToken")
+            if not next_token:
+                break
+            kwargs["NextToken"] = next_token
+    except Exception as exc:
+        log.debug("CloudTrail lookup failed (optional): %s", exc)
+        return {}
+    return callers
+
+
 def _is_nonprod_name(name: str) -> tuple[bool, str]:
     """
     Check if a function/service name contains non-prod signals.
@@ -235,15 +295,39 @@ def scan_textract_environment_waste(
     tag_total = sum(tagged_breakdown.values())
     has_useful_tags = tag_total > 0.01 and (tag_nonprod_spend > 0 or tagged_breakdown.get("prod", 0.0) > 0)
 
-    # Fall back to Lambda function scanning if tags are missing or all unknown
+    # Try CloudTrail first, then fall back to Lambda function scanning
     non_prod_callers: list[dict] = []
+    cloudtrail_scan_done = False
 
     if not has_useful_tags and total_spend > 0:
         try:
-            lam = _make_lambda(region, role_arn)
-            non_prod_callers = _get_lambda_nonprod_callers(lam, total_spend)
+            from datetime import datetime, timezone
+            ct = _make_cloudtrail(region, role_arn)
+            ct_start = datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc)
+            ct_end = datetime.combine(end, datetime.min.time()).replace(tzinfo=timezone.utc)
+            ct_callers = _get_cloudtrail_callers(ct, ct_start, ct_end)
+            cloudtrail_scan_done = True
+            # Convert CT callers dict to the same format as Lambda callers
+            for key, info in ct_callers.items():
+                is_np, signal = _is_nonprod_name(key)
+                if is_np:
+                    est = (info["call_count"] / max(sum(c["call_count"] for c in ct_callers.values()), 1)) * total_spend
+                    non_prod_callers.append({
+                        "function_name": key,
+                        "env_signal": signal,
+                        "estimated_spend": round(est, 2),
+                        "call_count": info["call_count"],
+                        "source": "cloudtrail",
+                    })
         except Exception as exc:
-            log.warning("Lambda scan failed: %s", exc)
+            log.debug("CloudTrail scan failed, falling back to Lambda: %s", exc)
+
+        if not non_prod_callers:
+            try:
+                lam = _make_lambda(region, role_arn)
+                non_prod_callers = _get_lambda_nonprod_callers(lam, total_spend)
+            except Exception as exc:
+                log.warning("Lambda scan failed: %s", exc)
 
     # Calculate estimated waste
     if has_useful_tags:
@@ -296,7 +380,7 @@ def scan_textract_environment_waste(
         "monthly_total_estimate": monthly_total,
         "tagged_env_breakdown": {k: round(v, 2) for k, v in tagged_breakdown.items()},
         "has_useful_tags": has_useful_tags,
-        "lambda_scan_done": bool(non_prod_callers is not None),
+        "cloudtrail_scan_done": cloudtrail_scan_done,
         "non_prod_callers": non_prod_callers,
         "estimated_monthly_waste": estimated_monthly_waste,
         "non_prod_pct": round(non_prod_pct * 100, 1),

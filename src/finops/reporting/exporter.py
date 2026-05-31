@@ -1,5 +1,5 @@
 """
-nable report exporter — CSV and HTML/printable-PDF output.
+nable report exporter: CSV and HTML/printable-PDF output.
 
 Generates shareable reports from nable data that can be opened by anyone,
 no Claude Desktop required. Finance teams get CSVs; stakeholders get HTML
@@ -435,7 +435,7 @@ def write_report(
         "savings": {...},
         "budgets": {...},
     }
-    formats: ["html", "csv"] — defaults to both
+    formats: ["html", "csv"] (defaults to both)
     """
     if formats is None:
         formats = ["html", "csv"]
