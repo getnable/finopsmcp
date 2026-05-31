@@ -29,6 +29,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
+from .auth import sso as _sso
+
 # ── Dashboard authentication ─────────────────────────────────────────────────
 # Password is required by default. If FINOPS_DASHBOARD_PASSWORD is not set,
 # a secure random password is generated at startup and printed once.
@@ -549,6 +551,36 @@ def clear_opportunity_cache() -> None:
     _OPP_CACHE.clear()
 
 
+# ── Read-only share tokens ────────────────────────────────────────────────────
+# Mapping of token → expiry datetime. Generated at startup and on demand.
+# Tokens grant view-only access via /view?token=X → cookie → /view.
+# The token never appears in URLs after the first exchange.
+
+_RO_TOKEN_TTL = timedelta(hours=24)
+_RO_TOKENS: dict[str, datetime] = {}
+
+
+def _generate_ro_token() -> str:
+    """Create a new read-only share token valid for 24 hours."""
+    token = secrets.token_urlsafe(32)
+    _RO_TOKENS[token] = datetime.now(tz=timezone.utc) + _RO_TOKEN_TTL
+    # Clean up expired tokens
+    now = datetime.now(tz=timezone.utc)
+    expired = [t for t, exp in _RO_TOKENS.items() if now > exp]
+    for t in expired:
+        _RO_TOKENS.pop(t, None)
+    return token
+
+
+def _ro_token_valid(token: str) -> bool:
+    expiry = _RO_TOKENS.get(token)
+    return expiry is not None and datetime.now(tz=timezone.utc) < expiry
+
+
+# Generate a share token at module load so it's ready on first startup.
+_SHARE_TOKEN: str = _generate_ro_token()
+
+
 # Process-level commitment data cache (1-hour TTL).
 # Shared so build_scorecard never calls analyze_commitments on every request.
 _COMMIT_CACHE: dict[str, Any] | None = None
@@ -1056,6 +1088,184 @@ button:hover{opacity:.88}
 </body>
 </html>
 """
+
+
+# ── Power BI / OData ──────────────────────────────────────────────────────────
+
+def _odata_response(entity_set: str, rows: list[dict], host: str, scheme: str = "http") -> bytes:
+    """Wrap rows in OData v4 JSON envelope."""
+    return json.dumps({
+        "@odata.context": f"{scheme}://{host}/odata/$metadata#{entity_set}",
+        "value": rows,
+    }).encode()
+
+
+def _odata_row_id(rows: list[dict]) -> list[dict]:
+    """Add synthetic integer 'id' field required by OData EntityType key."""
+    return [{**r, "id": i + 1} for i, r in enumerate(rows)]
+
+
+_ODATA_METADATA = """\
+<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx" Version="4.0">
+  <edmx:DataServices>
+    <Schema xmlns="http://docs.oasis-open.org/odata/ns/edm" Namespace="nable">
+      <EntityType Name="CostRecord">
+        <Key><PropertyRef Name="id"/></Key>
+        <Property Name="id"            Type="Edm.Int32"   Nullable="false"/>
+        <Property Name="service"       Type="Edm.String"/>
+        <Property Name="provider"      Type="Edm.String"/>
+        <Property Name="account_id"    Type="Edm.String"/>
+        <Property Name="snapshot_date" Type="Edm.Date"/>
+        <Property Name="amount_usd"    Type="Edm.Decimal" Precision="19" Scale="4"/>
+        <Property Name="region"        Type="Edm.String"/>
+      </EntityType>
+      <EntityType Name="Opportunity">
+        <Key><PropertyRef Name="id"/></Key>
+        <Property Name="id"             Type="Edm.Int32"   Nullable="false"/>
+        <Property Name="title"          Type="Edm.String"/>
+        <Property Name="category"       Type="Edm.String"/>
+        <Property Name="monthly_savings" Type="Edm.Decimal" Precision="19" Scale="2"/>
+        <Property Name="annual_savings"  Type="Edm.Decimal" Precision="19" Scale="2"/>
+        <Property Name="status"         Type="Edm.String"/>
+        <Property Name="created_at"     Type="Edm.Date"/>
+      </EntityType>
+      <EntityType Name="Anomaly">
+        <Key><PropertyRef Name="id"/></Key>
+        <Property Name="id"             Type="Edm.Int32"   Nullable="false"/>
+        <Property Name="service"        Type="Edm.String"/>
+        <Property Name="detected_at"    Type="Edm.DateTimeOffset"/>
+        <Property Name="severity"       Type="Edm.String"/>
+        <Property Name="pct_change"     Type="Edm.Decimal" Precision="10" Scale="2"/>
+        <Property Name="current_amount" Type="Edm.Decimal" Precision="19" Scale="4"/>
+        <Property Name="baseline_mean"  Type="Edm.Decimal" Precision="19" Scale="4"/>
+        <Property Name="acknowledged"   Type="Edm.Boolean"/>
+      </EntityType>
+      <EntityContainer Name="NableContainer">
+        <EntitySet Name="Costs"         EntityType="nable.CostRecord"/>
+        <EntitySet Name="Opportunities" EntityType="nable.Opportunity"/>
+        <EntitySet Name="Anomalies"     EntityType="nable.Anomaly"/>
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>"""
+
+
+_POWERBI_GUIDE_HTML = """\
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nable - Power BI Connector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.0/dist/fonts/geist-mono/style.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0f10;color:#f0f2f3;font-family:'Instrument Sans',system-ui,sans-serif;padding:40px 24px}
+.wrap{max-width:720px;margin:0 auto}
+.logo{display:flex;align-items:center;gap:10px;margin-bottom:40px}
+.logo svg{flex-shrink:0}
+.logo span{font-size:18px;font-weight:500;letter-spacing:-.02em}
+h1{font-size:22px;font-weight:500;margin-bottom:8px}
+.sub{color:#56656d;font-size:14px;margin-bottom:36px}
+h2{font-size:13px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:#94a3ab;margin-bottom:12px}
+.card{background:#111416;border:1px solid #242a2e;border-radius:12px;padding:24px;margin-bottom:24px}
+ol{padding-left:18px;color:#c8d4d9;font-size:14px;line-height:1.9}
+ol li{margin-bottom:4px}
+code{background:#181c1f;border:1px solid #2e3539;border-radius:4px;padding:2px 7px;
+  font-family:'Geist Mono','JetBrains Mono',monospace;font-size:12.5px;color:#4db8d4}
+.url-box{background:#181c1f;border:1px solid #2e3539;border-radius:8px;padding:14px 16px;
+  font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;color:#4db8d4;
+  word-break:break-all;margin:12px 0}
+.tag-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.tag{background:#181c1f;border:1px solid #242a2e;border-radius:2px;padding:3px 10px;
+  font-size:12px;color:#94a3ab}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
+th{text-align:left;color:#56656d;font-weight:400;padding:6px 0;border-bottom:1px solid #242a2e}
+td{padding:8px 0;border-bottom:1px solid #1a1e22;color:#c8d4d9}
+td:first-child{color:#f0f2f3}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">
+    <svg width="26" height="26" viewBox="0 0 32 32">
+      <rect width="32" height="32" rx="7" fill="#4db8d4"/>
+      <path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#0d0f10"/>
+    </svg>
+    <span>nable</span>
+  </div>
+
+  <h1>Power BI Connector</h1>
+  <p class="sub">Connect Power BI Desktop to live nable cost data via OData v4.</p>
+
+  <div class="card">
+    <h2>Connect Power BI Desktop</h2>
+    <ol>
+      <li>Open Power BI Desktop.</li>
+      <li>Click <strong>Get Data</strong> and search for <strong>OData feed</strong>.</li>
+      <li>Paste the service URL and click OK:</li>
+    </ol>
+    <div class="url-box" id="svc-url">http://localhost:8080/odata</div>
+    <ol start="4">
+      <li>In the Navigator panel, select the tables you want: <code>Costs</code>, <code>Opportunities</code>, or <code>Anomalies</code>.</li>
+      <li>Click <strong>Load</strong> (or <strong>Transform Data</strong> to apply filters first).</li>
+      <li>Build your report. Refresh at any time to pull the latest data from nable.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Available Tables</h2>
+    <table>
+      <thead><tr><th>Table</th><th>Description</th><th>Key columns</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Costs</td>
+          <td>Daily cost snapshots across all connected providers</td>
+          <td>service, provider, account_id, snapshot_date, amount_usd</td>
+        </tr>
+        <tr>
+          <td>Opportunities</td>
+          <td>Savings recommendations ranked by impact</td>
+          <td>title, category, monthly_savings, annual_savings, status</td>
+        </tr>
+        <tr>
+          <td>Anomalies</td>
+          <td>Detected cost spikes from the last 90 days</td>
+          <td>service, detected_at, severity, pct_change, current_amount</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tag-row">
+      <span class="tag">OData v4</span>
+      <span class="tag">JSON format</span>
+      <span class="tag">Live data</span>
+      <span class="tag">90-day history</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Direct Endpoints</h2>
+    <p style="font-size:13px;color:#94a3ab;margin-bottom:12px">Or query individual entity sets:</p>
+    <table>
+      <thead><tr><th>URL</th><th>Returns</th></tr></thead>
+      <tbody>
+        <tr><td><code>/odata/$metadata</code></td><td>EDMX schema (XML)</td></tr>
+        <tr><td><code>/odata/Costs</code></td><td>Cost records (JSON)</td></tr>
+        <tr><td><code>/odata/Opportunities</code></td><td>Savings recommendations (JSON)</td></tr>
+        <tr><td><code>/odata/Anomalies</code></td><td>Anomaly events (JSON)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<script>
+var h = window.location.host || 'localhost:8080';
+document.getElementById('svc-url').textContent = window.location.protocol + '//' + h + '/odata';
+</script>
+</body>
+</html>"""
 
 
 # ── Dashboard HTML ────────────────────────────────────────────────────────────
@@ -1628,8 +1838,55 @@ class _Handler(BaseHTTPRequestHandler):
             return False
         return _session_valid(m.group(1))
 
-    def _serve_login_page(self, error: bool = False) -> None:
-        error_html = '<p style="color:#e05c4b;margin:0 0 16px;font-size:13px">Incorrect password. Try again.</p>' if error else ""
+    def _ro_cookie_valid(self) -> bool:
+        """Validate a read-only share session cookie."""
+        cookie_header = self.headers.get("Cookie", "")
+        m = re.search(r"nable_view=([A-Za-z0-9_=-]+)", cookie_header)
+        if not m:
+            return False
+        return _session_valid(m.group(1))
+
+    def _any_auth_valid(self) -> bool:
+        """Return True if the request has either full or read-only access."""
+        return self._cookie_valid() or self._ro_cookie_valid()
+
+    def _serve_login_page(self, error: bool = False, sso_error: str = "") -> None:
+        error_html = ""
+        if error:
+            error_html = '<p style="color:#e05c4b;margin:0 0 16px;font-size:13px">Incorrect password. Try again.</p>'
+        elif sso_error:
+            error_html = f'<p style="color:#e05c4b;margin:0 0 16px;font-size:13px">{sso_error}</p>'
+
+        sso_block = ""
+        if _sso.SSO_ENABLED:
+            divider = '<div style="display:flex;align-items:center;gap:10px;margin:20px 0"><hr style="flex:1;border:none;border-top:1px solid #242a2e"/><span style="color:#56656d;font-size:12px">or</span><hr style="flex:1;border:none;border-top:1px solid #242a2e"/></div>' if _DASHBOARD_PASSWORD else ""
+            sso_block = f"""{divider}<a href="/sso/login" style="display:block;text-decoration:none;margin-top:{'0' if not _DASHBOARD_PASSWORD else '0'}">
+  <button type="button" style="width:100%;background:#181c1f;border:1px solid #2e3539;border-radius:8px;
+    color:#f0f2f3;cursor:pointer;font-family:inherit;font-size:14px;font-weight:500;
+    padding:11px;transition:border-color .15s;display:flex;align-items:center;justify-content:center;gap:8px"
+    onmouseover="this.style.borderColor='#4db8d4'" onmouseout="this.style.borderColor='#2e3539'">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+    </svg>
+    Sign in with SSO
+  </button>
+</a>"""
+
+        pw_block = ""
+        if _DASHBOARD_PASSWORD:
+            pw_block = f"""{error_html}<form method="POST" action="/login">
+    <label>Password</label>
+    <input type="password" name="password" placeholder="Enter dashboard password" autofocus autocomplete="current-password"/>
+    <button type="submit">Sign in</button>
+  </form>
+  <p class="hint">Password set via<br><code style="color:#4db8d4">FINOPS_DASHBOARD_PASSWORD</code> environment variable</p>"""
+        elif sso_error:
+            pw_block = error_html
+
+        subtitle = "Sign in to access the dashboard."
+        if _sso.SSO_ENABLED and not _DASHBOARD_PASSWORD:
+            subtitle = "Sign in with your organization account."
+
         body = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1669,14 +1926,9 @@ button:hover{{filter:brightness(1.1)}}
     <span>nable</span>
   </div>
   <h1>Dashboard access</h1>
-  <p class="sub">This dashboard is password protected.</p>
-  {error_html}
-  <form method="POST" action="/login">
-    <label>Password</label>
-    <input type="password" name="password" placeholder="Enter dashboard password" autofocus autocomplete="current-password"/>
-    <button type="submit">Sign in</button>
-  </form>
-  <p class="hint">Password set via<br><code style="color:#4db8d4">FINOPS_DASHBOARD_PASSWORD</code> environment variable</p>
+  <p class="sub">{subtitle}</p>
+  {pw_block}
+  {sso_block}
 </div>
 </body>
 </html>""".encode()
@@ -1738,7 +1990,7 @@ button:hover{{filter:brightness(1.1)}}
         path = parsed.path
         qs = parse_qs(parsed.query)
 
-        # Serve bundled Chart.js (no CDN, works offline + GovCloud)
+        # Serve bundled static assets (Chart.js, fonts — no CDN, works offline + GovCloud)
         if path == "/static/chart.min.js":
             if _CHARTJS_PATH.exists():
                 body = _CHARTJS_PATH.read_bytes()
@@ -1747,9 +1999,109 @@ button:hover{{filter:brightness(1.1)}}
                 self._send(404, "text/plain", b"Chart.js not bundled")
             return
 
-        # Auth check (skip for health + login page so they're always reachable)
-        if path not in ("/health", "/login") and not self._cookie_valid():
-            if _DASHBOARD_PASSWORD:
+        if path.startswith("/static/fonts/"):
+            fname = path.removeprefix("/static/fonts/")
+            fpath = _STATIC_DIR / "fonts" / fname
+            if fpath.exists() and fpath.suffix in (".woff2", ".woff", ".css"):
+                if fpath.suffix == ".css":
+                    mime = "text/css"
+                elif fpath.suffix == ".woff2":
+                    mime = "font/woff2"
+                else:
+                    mime = "font/woff"
+                self._send(200, mime, fpath.read_bytes())
+            else:
+                self._send(404, "text/plain", b"Font not found")
+            return
+
+        # ── Read-only share link (/view?token=X) ─────────────────────────────
+        if path == "/view":
+            token_param = qs.get("token", [""])[0]
+            if token_param:
+                # Token exchange: validate token → set read-only cookie → redirect to /view
+                if _ro_token_valid(token_param):
+                    ro_session = _create_session()  # re-use same session TTL
+                    _RO_TOKENS.pop(token_param, None)  # consume the token (one-time exchange)
+                    # Regenerate a fresh token so the share URL stays alive
+                    _RO_TOKENS[token_param] = datetime.now(tz=timezone.utc) + _RO_TOKEN_TTL
+                    # Audit log
+                    client_ip = self.client_address[0]
+                    log.info("Read-only share link accessed from %s", client_ip)
+                    self.send_response(302)
+                    self.send_header("Location", "/view")
+                    self.send_header(
+                        "Set-Cookie",
+                        f"nable_view={ro_session}; Path=/; HttpOnly; SameSite=Strict",
+                    )
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                else:
+                    body = b"<h2>Link expired or invalid. Ask for a new share link.</h2>"
+                    self._send(403, "text/html; charset=utf-8", body)
+                return
+
+            # /view without token — check read-only cookie
+            if self._ro_cookie_valid() or self._cookie_valid():
+                html = _load_dashboard_html().replace(
+                    "</body>",
+                    "<script>window._READONLY=true;</script></body>",
+                )
+                self._send(200, "text/html; charset=utf-8", html.encode())
+            else:
+                body = b"<h2>This link has expired. Ask for a new share link.</h2>"
+                self._send(403, "text/html; charset=utf-8", body)
+            return
+
+        # ── SSO endpoints (pre-auth, no cookie required) ─────────────────────
+        if path == "/sso/login":
+            if not _sso.SSO_ENABLED:
+                self._send(404, "text/plain", b"SSO not configured")
+                return
+            try:
+                auth_url = _sso.build_auth_url()
+                self.send_response(302)
+                self.send_header("Location", auth_url)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            except Exception as exc:
+                log.error("SSO login error: %s", exc)
+                self._serve_login_page(sso_error=f"SSO configuration error: {exc}")
+            return
+
+        if path == "/sso/callback":
+            if not _sso.SSO_ENABLED:
+                self._send(404, "text/plain", b"SSO not configured")
+                return
+            code = qs.get("code", [""])[0]
+            state = qs.get("state", [""])[0]
+            error_param = qs.get("error_description", qs.get("error", [""]))[0]
+            if error_param:
+                self._serve_login_page(sso_error=f"IdP returned error: {error_param}")
+                return
+            if not code or not state:
+                self._serve_login_page(sso_error="Missing code or state in SSO callback")
+                return
+            try:
+                identity = _sso.exchange_code(code, state)
+                session_token = _create_session()
+                log.info("SSO login: %s (%s)", identity["name"], identity["email"])
+                self.send_response(302)
+                self.send_header("Location", "/")
+                self.send_header(
+                    "Set-Cookie",
+                    f"nable_session={session_token}; Path=/; HttpOnly; SameSite=Lax",
+                )
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            except Exception as exc:
+                log.warning("SSO callback failed: %s", exc)
+                self._serve_login_page(sso_error=f"Sign-in failed: {exc}")
+            return
+
+        # Auth check — skip for health, login, and SSO paths (handled above).
+        # Use _any_auth_valid so read-only share-link sessions can reach /api/data.
+        if path not in ("/health", "/login", "/view") and not self._any_auth_valid():
+            if _DASHBOARD_PASSWORD or _sso.SSO_ENABLED:
                 self._serve_login_page()
                 return
 
@@ -1769,8 +2121,8 @@ button:hover{{filter:brightness(1.1)}}
             except (ValueError, IndexError):
                 days_param = 30
             provider_param = qs.get("provider", ["all"])[0]
+            loop = asyncio.new_event_loop()
             try:
-                loop = asyncio.new_event_loop()
                 # 30-second hard cap on the whole data fetch. First load may be
                 # slower (scanner cold start); subsequent loads hit the 12h cache.
                 data = loop.run_until_complete(
@@ -1779,14 +2131,15 @@ button:hover{{filter:brightness(1.1)}}
                         timeout=30.0,
                     )
                 )
-                loop.close()
             except asyncio.TimeoutError:
                 data = {
-                    "error": "Data fetch timed out. The AWS API is slow — try refreshing in a moment.",
+                    "error": "Data fetch timed out. The AWS API is slow. Try refreshing in a moment.",
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 }
             except Exception as exc:
                 data = {"error": str(exc), "generated_at": datetime.now(timezone.utc).isoformat()}
+            finally:
+                loop.close()
             body = json.dumps(data).encode()
             self._send(200, "application/json", body)
 
@@ -1816,6 +2169,50 @@ button:hover{{filter:brightness(1.1)}}
 
         elif path == "/tableau/anomalies.csv":
             self._send_csv(_fetch_tableau_anomalies(), "anomalies.csv")
+
+        # Power BI connector guide
+        elif path == "/powerbi":
+            self._send(200, "text/html; charset=utf-8", _POWERBI_GUIDE_HTML.encode())
+
+        # OData v4 service document
+        elif path == "/odata" or path == "/odata/":
+            host = self.headers.get("Host", "localhost:8080")
+            scheme = self.headers.get("X-Forwarded-Proto", "http")
+            body = json.dumps({
+                "@odata.context": f"{scheme}://{host}/odata/$metadata",
+                "value": [
+                    {"name": "Costs",         "kind": "EntitySet", "url": "Costs"},
+                    {"name": "Opportunities", "kind": "EntitySet", "url": "Opportunities"},
+                    {"name": "Anomalies",     "kind": "EntitySet", "url": "Anomalies"},
+                ],
+            }).encode()
+            self._send(200, "application/json;odata.metadata=minimal", body)
+
+        # OData v4 EDMX metadata
+        elif path == "/odata/$metadata":
+            self._send(200, "application/xml; charset=utf-8", _ODATA_METADATA.encode())
+
+        # OData v4 entity sets
+        elif path == "/odata/Costs":
+            host = self.headers.get("Host", "localhost:8080")
+            scheme = self.headers.get("X-Forwarded-Proto", "http")
+            rows = _odata_row_id(_fetch_tableau_costs())
+            self._send(200, "application/json;odata.metadata=minimal",
+                       _odata_response("Costs", rows, host, scheme))
+
+        elif path == "/odata/Opportunities":
+            host = self.headers.get("Host", "localhost:8080")
+            scheme = self.headers.get("X-Forwarded-Proto", "http")
+            rows = _odata_row_id(_fetch_tableau_opportunities())
+            self._send(200, "application/json;odata.metadata=minimal",
+                       _odata_response("Opportunities", rows, host, scheme))
+
+        elif path == "/odata/Anomalies":
+            host = self.headers.get("Host", "localhost:8080")
+            scheme = self.headers.get("X-Forwarded-Proto", "http")
+            rows = _odata_row_id(_fetch_tableau_anomalies())
+            self._send(200, "application/json;odata.metadata=minimal",
+                       _odata_response("Anomalies", rows, host, scheme))
 
         else:
             self._send(404, "text/plain", b"Not found")
@@ -1869,6 +2266,11 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = Fal
     if _AUTH_DISABLED:
         print(f"\n  Auth disabled (FINOPS_DASHBOARD_PASSWORD=off).")
         print(f"  Anyone on your network can access this dashboard.")
+    elif _sso.SSO_ENABLED:
+        print(f"\n  SSO enabled ({_sso.SSO_ISSUER})")
+        print(f"  Sign in at: http://{local_ip}:{actual_port}/sso/login")
+        if _DASHBOARD_PASSWORD:
+            print(f"  Password auth also active.")
     elif _PASSWORD_AUTO_GENERATED:
         print(f"\n  Dashboard secured with an auto-generated password.")
         print(f"    URL:      http://{local_ip}:{actual_port}")
@@ -1881,6 +2283,7 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = Fal
         print(f"    URL:      http://{local_ip}:{actual_port}")
         print(f"    Password: {masked}  (set via FINOPS_DASHBOARD_PASSWORD)")
         print(f"\n  To disable auth: FINOPS_DASHBOARD_PASSWORD=off finops serve")
+    print(f"\n  Integrations: /tableau  /powerbi  /odata")
     print("  Press Ctrl+C to stop.\n")
 
     if open_browser:

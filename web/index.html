@@ -226,7 +226,7 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .q-pager{display:flex;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--line);background:var(--bg-2);font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11px;color:var(--fg-3)}
 .q-pager .dots{display:flex;gap:2px;margin-left:auto}
 .q-pager .dots i{width:5px;height:5px;border-radius:50%;background:var(--line-2);cursor:pointer;transition:.15s;padding:6px;box-sizing:content-box}
-.q-pager .dots i.on{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.q-pager .dots i.on{background:var(--accent)}
 .q-pager .dots i:hover{background:var(--fg-3)}
 
 /* trust strip */
@@ -297,9 +297,9 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .conn .nm{font-family:'Instrument Sans',system-ui,sans-serif;font-size:14px;color:var(--fg);font-weight:500;letter-spacing:-.01em}
 .conn .px{font-family:'Instrument Sans',system-ui,sans-serif;font-size:10.5px;color:var(--fg-3);line-height:1.4}
 .conn .tag{font-family:'Instrument Sans',system-ui,sans-serif;font-size:9.5px;color:var(--accent);letter-spacing:.08em;text-transform:uppercase;display:inline-flex;align-items:center;gap:5px;margin-top:auto;padding-top:6px}
-.conn .tag::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 4px var(--accent)}
+.conn .tag::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent)}
 .conn .tag.beta{color:var(--warn)}
-.conn .tag.beta::before{background:var(--warn);box-shadow:0 0 4px var(--warn)}
+.conn .tag.beta::before{background:var(--warn)}
 .conn .tag.soon{color:var(--fg-3)}
 .conn .tag.soon::before{background:var(--fg-3);box-shadow:none}
 @media(max-width:760px){.conn-grid{grid-template-columns:repeat(3,1fr)}.conn{border-right:1px solid var(--line)!important;border-bottom:1px solid var(--line)!important;padding:14px 12px;gap:4px}.conn:nth-child(3n){border-right:0!important}.conn:nth-last-child(-n+3){border-bottom:0!important}.conn .px{display:none}.conn .nm{font-size:13px}.conn .tag{font-size:9px;padding-top:4px}}
@@ -341,7 +341,7 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 #mid-cta h2{font-size:clamp(24px,3vw,36px);font-weight:400;letter-spacing:-.025em;line-height:1.15}
 
 /* foot cta */
-.foot-cta{padding:140px 0 110px;border-top:1px solid var(--line);text-align:center;position:relative;overflow:hidden}
+.foot-cta{padding:80px 0;border-top:1px solid var(--line);text-align:center;position:relative;overflow:hidden}
 .foot-cta-grid{display:none}
 .foot-cta h2{font-size:clamp(48px,6vw,84px);line-height:.98;letter-spacing:-.04em;font-weight:300}
 .foot-cta h2 em{font-style:italic;color:var(--accent);font-weight:400}

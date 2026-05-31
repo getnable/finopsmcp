@@ -4,9 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>nable | Cost Dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/fonts/fonts.css">
 <script src="/static/chart.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -14,7 +12,7 @@
 /* ── Design tokens ─────────────────────────────────────────────────────────── */
 :root{
   /* Dark (default) */
-  --bg:        #0c0e10;
+  --bg:        #0d0f10;
   --bg1:       #111416;
   --bg2:       #181c1f;
   --bg3:       #1e2428;
@@ -103,8 +101,8 @@ html,body{
 
 /* Section label */
 .section-label{
-  font-size:10px;font-weight:700;letter-spacing:.12em;
-  text-transform:uppercase;color:var(--accent);margin-bottom:16px;
+  font-size:10px;font-weight:500;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--accent-dim);margin-bottom:16px;
 }
 
 /* Top bar: label + controls */
@@ -402,7 +400,7 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
   <div class="charts-row">
     <div class="panel">
       <div class="panel-hdr">
-        <div class="panel-title">Spend by Service — Last <span id="chart-days">30</span> Days</div>
+        <div class="panel-title">Spend by Service: Last <span id="chart-days">30</span> Days</div>
         <span class="panel-chip" id="svc-badge">AWS ONLY</span>
       </div>
       <div class="chart-wrap" style="position:relative">
@@ -576,7 +574,7 @@ function render(d){
 
   // Nav
   const acct=d.account_id||'';
-  document.getElementById('hdr-title').textContent='Cost Dashboard'+(acct?' — Account '+acct:'');
+  document.getElementById('hdr-title').textContent='Cost Dashboard'+(acct?', Account '+acct:'');
   const provs=d.connected_providers||[];
   const pb=document.getElementById('prov-badge');
   const pl=document.getElementById('prov-label');
@@ -610,7 +608,7 @@ function render(d){
   const oppTotal=d.opportunities_total_saving||0;
   document.getElementById('stat-savings').textContent=fmt(oppTotal);
   document.getElementById('stat-savings-sub').textContent=
-    'per month — '+oppCount+' opportunit'+(oppCount===1?'y':'ies');
+    'per month, '+oppCount+' opportunit'+(oppCount===1?'y':'ies');
   const ledger=d.savings_ledger||{};
   const actedOn=ledger.acted_on_monthly||0;
   const verifiedOn=ledger.verified_monthly||0;
@@ -851,6 +849,25 @@ async function markDone(id,btn){
       loadData();
     }else{btn.textContent='Error';btn.classList.remove('marking');}
   }catch{btn.textContent='Error';btn.classList.remove('marking');}
+}
+
+// ── Read-only mode ────────────────────────────────────────────────────────────
+if(window._READONLY){
+  // Add a subtle view-only banner
+  const banner=document.createElement('div');
+  banner.style.cssText='position:fixed;bottom:16px;right:16px;background:var(--bg3);border:1px solid var(--line2);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--fg3);font-weight:500;letter-spacing:.04em;text-transform:uppercase;z-index:100;pointer-events:none';
+  banner.textContent='View only';
+  document.body.appendChild(banner);
+}
+
+// Hide action buttons in read-only mode
+const _origRenderOpps=renderOpportunities;
+function renderOpportunities(opps,count,totalSaving){
+  _origRenderOpps(opps,count,totalSaving);
+  if(window._READONLY){
+    document.querySelectorAll('.done-btn').forEach(b=>b.remove());
+    document.querySelectorAll('.theme-btn').forEach(b=>b.style.display='none');
+  }
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

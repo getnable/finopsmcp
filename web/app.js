@@ -184,11 +184,11 @@ function Nav() {
   } }, "Docs")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "https://github.com/chaandannn/finopsmcp", target: "_blank", rel: "noopener noreferrer", onClick: () => {
     if (window.posthog) posthog.capture("nav_clicked", { item: "github" });
   } }, "GitHub"))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "btn btn-ghost" }, "Sign in"), /* @__PURE__ */ React.createElement(
-    "button",
+    "a",
     {
+      href: "/docs.html",
       className: "btn btn-primary",
       onClick: () => {
-        scrollTo("install");
         if (window.posthog) posthog.capture("cta_clicked", { location: "nav", cta: "start_free" });
       }
     },
@@ -216,12 +216,13 @@ function Nav() {
     setOpen(false);
     if (window.posthog) posthog.capture("nav_clicked", { item: "github" });
   } }, "GitHub"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 24, display: "flex", flexDirection: "column", gap: 10 } }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "btn btn-ghost", style: { justifyContent: "center" }, onClick: () => setOpen(false) }, "Sign in"), /* @__PURE__ */ React.createElement(
-    "button",
+    "a",
     {
+      href: "/docs.html",
       className: "btn btn-primary",
       style: { justifyContent: "center" },
       onClick: () => {
-        scrollTo("install");
+        setOpen(false);
         if (window.posthog) posthog.capture("cta_clicked", { location: "nav_mobile", cta: "start_free" });
       }
     },
@@ -423,8 +424,8 @@ const TEAM_FEATURES = [
   "Budget enforcement and alerts",
   "Commitment analysis and RI recommendations",
   "No shared database required",
-  "Team dashboard at http://your-ip:8080 \u2014 no install for viewers",
-  "Tableau integration \u2014 connect Tableau Desktop via Web Data Connector"
+  "Team dashboard at http://your-ip:8080. No install required for viewers.",
+  "Tableau and Power BI integration: connect via Web Data Connector or OData feed"
 ];
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
@@ -446,7 +447,7 @@ function Pricing() {
       style: {
         width: 44,
         height: 24,
-        borderRadius: 12,
+        borderRadius: 6,
         border: "1px solid var(--line-2)",
         background: annual ? "var(--accent)" : "var(--bg-2)",
         position: "relative",
@@ -468,11 +469,11 @@ function Pricing() {
       display: "block"
     } })
   ), /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg)" : "var(--fg-3)", fontWeight: annual ? 500 : 400, transition: "color .15s" } }, "Annual"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 500, color: "var(--success)", background: "rgba(60,186,122,.12)", padding: "2px 7px", borderRadius: 2, letterSpacing: ".03em" } }, "SAVE 17%")))), /* @__PURE__ */ React.createElement("div", { className: "pricing-grid" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-card" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-top" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-name" }, "Solo"), /* @__PURE__ */ React.createElement("div", { className: "pricing-price" }, /* @__PURE__ */ React.createElement("span", { className: "pricing-amount" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pricing-per" }, "forever")), /* @__PURE__ */ React.createElement("p", { className: "pricing-desc" }, "Everything you need to query, investigate, and understand your cloud costs."), /* @__PURE__ */ React.createElement(
-    "button",
+    "a",
     {
+      href: "/docs.html",
       className: "btn btn-ghost pricing-cta",
       onClick: () => {
-        document.getElementById("install")?.scrollIntoView({ behavior: "smooth" });
         if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: "solo" });
       }
     },
@@ -496,11 +497,11 @@ function Pricing() {
 }
 function MidCta() {
   return /* @__PURE__ */ React.createElement("section", { id: "mid-cta", style: { borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { paddingTop: 72, paddingBottom: 72 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 24, textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { style: { marginBottom: 10 } }, "Ready to stop guessing?"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-2)", maxWidth: "46ch", margin: "0 auto", lineHeight: 1.6 } }, "Four minutes from install to your first real insight. Free forever for solo use.")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "center" } }, /* @__PURE__ */ React.createElement(
-    "button",
+    "a",
     {
+      href: "/docs.html",
       className: "btn btn-primary",
       onClick: () => {
-        document.getElementById("install")?.scrollIntoView({ behavior: "smooth" });
         if (window.posthog) posthog.capture("cta_clicked", { location: "mid_cta", cta: "start_free" });
       }
     },
@@ -520,12 +521,12 @@ function MidCta() {
 }
 function FootCta() {
   return /* @__PURE__ */ React.createElement("section", { className: "foot-cta", id: "cta" }, /* @__PURE__ */ React.createElement("div", { className: "foot-cta-grid" }), /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { position: "relative" } }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow", style: { marginBottom: 32, display: "inline-flex" } }, /* @__PURE__ */ React.createElement("span", { className: "d" }), " Free tier \xB7 no credit card"), /* @__PURE__ */ React.createElement("h2", { className: "display" }, "Stop staring at graphs.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Start closing tickets.")), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement(
-    "button",
+    "a",
     {
+      href: "/docs.html",
       className: "btn btn-primary",
       style: { padding: "14px 22px", fontSize: 14 },
       onClick: () => {
-        document.getElementById("install")?.scrollIntoView({ behavior: "smooth" });
         if (window.posthog) posthog.capture("cta_clicked", { location: "footer_cta", cta: "install" });
       }
     },

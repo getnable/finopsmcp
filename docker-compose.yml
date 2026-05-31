@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  nable:
+    build: .
+    image: nable/finops:latest
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      # Dashboard auth
+      FINOPS_DASHBOARD_PASSWORD: "${FINOPS_DASHBOARD_PASSWORD:-}"
+      # SSO: set all three to replace password login with your IdP
+      # Supported: Okta, Azure AD (Entra ID), Google Workspace, any OIDC provider
+      FINOPS_SSO_ISSUER: "${FINOPS_SSO_ISSUER:-}"
+      FINOPS_SSO_CLIENT_ID: "${FINOPS_SSO_CLIENT_ID:-}"
+      FINOPS_SSO_CLIENT_SECRET: "${FINOPS_SSO_CLIENT_SECRET:-}"
+      FINOPS_SSO_REDIRECT_URI: "${FINOPS_SSO_REDIRECT_URI:-http://localhost:8080/sso/callback}"
+      FINOPS_SSO_ALLOWED_DOMAINS: "${FINOPS_SSO_ALLOWED_DOMAINS:-}"
+      # Team mode with shared Postgres (set FINOPS_DATABASE_URL to enable)
+      FINOPS_DATABASE_URL: "${FINOPS_DATABASE_URL:-}"
+      FINOPS_REQUIRE_AUTH: "${FINOPS_REQUIRE_AUTH:-0}"
+      # AWS credentials (or mount ~/.aws as a read-only volume below)
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
+      # Azure
+      AZURE_SUBSCRIPTION_ID: "${AZURE_SUBSCRIPTION_ID:-}"
+      AZURE_TENANT_ID: "${AZURE_TENANT_ID:-}"
+      AZURE_CLIENT_ID: "${AZURE_CLIENT_ID:-}"
+      AZURE_CLIENT_SECRET: "${AZURE_CLIENT_SECRET:-}"
+      # GCP
+      GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+    volumes:
+      - nable-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Optional: Postgres for shared team mode.
+  # Remove this service (and depends_on above) if using SQLite or an external DB.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: nable
+      POSTGRES_USER: nable
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nable"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  nable-data:
+  pg-data:

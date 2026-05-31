@@ -189,13 +189,10 @@ function Nav(){
         </ul>
         <div className="right">
           <a href="/account.html" className="btn btn-ghost">Sign in</a>
-          <button className="btn btn-primary"
-             onClick={()=>{
-               scrollTo('install');
-               if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'});
-             }}>
+          <a href="/docs.html" className="btn btn-primary"
+             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'}); }}>
             Get started free <span className="arr">→</span>
-          </button>
+          </a>
         </div>
         <button
           className="nav-hamburger"
@@ -224,13 +221,10 @@ function Nav(){
           <a className="nav-mobile-item" href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a>
           <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:10}}>
             <a href="/account.html" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
-            <button className="btn btn-primary" style={{justifyContent:"center"}}
-              onClick={()=>{
-                scrollTo('install');
-                if(window.posthog) posthog.capture('cta_clicked',{location:'nav_mobile',cta:'start_free'});
-              }}>
+            <a href="/docs.html" className="btn btn-primary" style={{justifyContent:"center"}}
+              onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('cta_clicked',{location:'nav_mobile',cta:'start_free'}); }}>
               Get started free <span className="arr">→</span>
-            </button>
+            </a>
           </div>
         </div>
       )}
@@ -752,8 +746,8 @@ const TEAM_FEATURES = [
   "Budget enforcement and alerts",
   "Commitment analysis and RI recommendations",
   "No shared database required",
-  "Team dashboard at http://your-ip:8080 — no install for viewers",
-  "Tableau integration — connect Tableau Desktop via Web Data Connector",
+  "Team dashboard at http://your-ip:8080. No install required for viewers.",
+  "Tableau and Power BI integration: connect via Web Data Connector or OData feed",
 ];
 
 function CheckIcon(){
@@ -792,7 +786,7 @@ function Pricing(){
             <button
               onClick={()=>setAnnual(a=>!a)}
               style={{
-                width:44,height:24,borderRadius:12,border:"1px solid var(--line-2)",
+                width:44,height:24,borderRadius:6,border:"1px solid var(--line-2)",
                 background:annual?"var(--accent)":"var(--bg-2)",
                 position:"relative",cursor:"pointer",transition:"background .2s",flexShrink:0,
               }}
@@ -821,13 +815,10 @@ function Pricing(){
                 <span className="pricing-per">forever</span>
               </div>
               <p className="pricing-desc">Everything you need to query, investigate, and understand your cloud costs.</p>
-              <button className="btn btn-ghost pricing-cta"
-                onClick={()=>{
-                  document.getElementById('install')?.scrollIntoView({behavior:'smooth'});
-                  if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'});
-                }}>
+              <a href="/docs.html" className="btn btn-ghost pricing-cta"
+                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'}); }}>
                 Get started free <span className="arr">→</span>
-              </button>
+              </a>
             </div>
             <div className="pricing-features">
               {SOLO_FEATURES.map((f,i) => (
@@ -891,13 +882,10 @@ function MidCta(){
             </p>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"center"}}>
-            <button className="btn btn-primary"
-              onClick={()=>{
-                document.getElementById('install')?.scrollIntoView({behavior:'smooth'});
-                if(window.posthog) posthog.capture('cta_clicked',{location:'mid_cta',cta:'start_free'});
-              }}>
+            <a href="/docs.html" className="btn btn-primary"
+              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'mid_cta',cta:'start_free'}); }}>
               Get started free <span className="arr">→</span>
-            </button>
+            </a>
             <a href="/docs.html" className="btn btn-ghost"
               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'mid_cta',cta:'docs'}); }}>
               Read the docs
@@ -925,13 +913,10 @@ function FootCta(){
         </h2>
         <div style={{marginTop:48,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
           <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <button className="btn btn-primary" style={{padding:"14px 22px",fontSize:14}}
-               onClick={()=>{
-                 document.getElementById('install')?.scrollIntoView({behavior:'smooth'});
-                 if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'});
-               }}>
+            <a href="/docs.html" className="btn btn-primary" style={{padding:"14px 22px",fontSize:14}}
+               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'}); }}>
               Get started free <span className="arr">→</span>
-            </button>
+            </a>
             <a href="mailto:chandan@getnable.com?subject=nable - talk to founders"
                target="_blank" rel="noopener noreferrer"
                className="btn btn-ghost" style={{padding:"14px 22px",fontSize:14}}
