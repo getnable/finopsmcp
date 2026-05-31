@@ -1228,8 +1228,6 @@ function App(){
       <Pricing />
       <MidCta />
       <FAQ />
-      <FounderNote />
-      <FootCta />
       <Footer version={version} />
       <Tweaks />
     </>
