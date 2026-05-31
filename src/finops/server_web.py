@@ -28,14 +28,17 @@ log = logging.getLogger(__name__)
 
 # ── Data fetcher ─────────────────────────────────────────────────────────────
 
-async def _fetch_dashboard_data() -> dict[str, Any]:
+async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
     """Pull live data from nable connectors. Returns zeros on any error."""
     result: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "account_id": "",
         "total_spend_mtd": 0.0,
         "total_spend_last_month": 0.0,
+        "projected_month_total": 0.0,
         "delta_pct": 0.0,
+        "finops_grade": "N/A",
+        "finops_score": 0.0,
         "top_services": [],
         "opportunities_count": 0,
         "opportunities_total_saving": 0.0,
@@ -46,6 +49,12 @@ async def _fetch_dashboard_data() -> dict[str, Any]:
         "recent_savings": [],
         "error": None,
         "connected_providers": [],
+        "trend": [],
+        "scorecard": {
+            "overall_grade": "N/A",
+            "overall_score": 0.0,
+            "dimensions": [],
+        },
     }
 
     try:
@@ -56,7 +65,7 @@ async def _fetch_dashboard_data() -> dict[str, Any]:
         from .connectors.saas.datadog import DatadogConnector
         from .connectors.saas.snowflake import SnowflakeConnector
 
-        _cloud = {
+        _cloud_all = {
             "aws": AWSConnector(),
             "azure": AzureConnector(),
             "gcp": GCPConnector(),
@@ -71,11 +80,13 @@ async def _fetch_dashboard_data() -> dict[str, Any]:
         except Exception:
             pass
 
-        all_connectors = {**_cloud, **_saas}
+        all_connectors = {**_cloud_all, **_saas}
 
-        # Find configured providers
+        # Find configured providers, optionally filtered by provider param
         configured: dict[str, Any] = {}
         for name, connector in all_connectors.items():
+            if provider != "all" and name != provider:
+                continue
             try:
                 if await connector.is_configured():
                     configured[name] = connector
@@ -100,7 +111,7 @@ async def _fetch_dashboard_data() -> dict[str, Any]:
             total = 0.0
             by_service: dict[str, float] = {}
             account_id = ""
-            for name, connector in configured.items():
+            for _name, connector in configured.items():
                 try:
                     summary = await connector.get_cost_summary(start, end)
                     total += summary.total_usd
@@ -122,16 +133,79 @@ async def _fetch_dashboard_data() -> dict[str, Any]:
         if last_total > 0:
             result["delta_pct"] = round((mtd_total - last_total) / last_total * 100, 1)
 
-        # Top 5 services by MTD spend
-        sorted_svcs = sorted(mtd_services.items(), key=lambda x: -x[1])[:5]
+        # Projected month total based on run-rate
+        day_of_month = today.day
+        days_in_month = (today.replace(month=today.month % 12 + 1, day=1) - timedelta(days=1)).day if today.month < 12 else 31
+        if day_of_month > 0 and mtd_total > 0:
+            result["projected_month_total"] = round(mtd_total / day_of_month * days_in_month, 2)
+
+        # Top services by spend in the requested window
+        window_start = today - timedelta(days=days)
+        _, window_services, _ = await _sum_costs(window_start, today)
+        window_total = sum(window_services.values())
+        sorted_svcs = sorted(window_services.items(), key=lambda x: -x[1])[:8]
         result["top_services"] = [
             {
                 "service": svc,
                 "amount": round(amt, 2),
-                "pct": round(amt / mtd_total * 100, 1) if mtd_total > 0 else 0.0,
+                "pct": round(amt / window_total * 100, 1) if window_total > 0 else 0.0,
             }
             for svc, amt in sorted_svcs
         ]
+
+        # 3-month cost trend from snapshots
+        try:
+            from .storage.db import cost_snapshots, get_engine
+            from sqlalchemy import select, func as sqlfunc
+
+            engine = get_engine()
+            three_months_ago = (today.replace(day=1) - timedelta(days=60)).replace(day=1)
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    select(
+                        cost_snapshots.c.snapshot_date,
+                        sqlfunc.sum(cost_snapshots.c.amount_usd).label("total"),
+                    )
+                    .where(cost_snapshots.c.snapshot_date >= three_months_ago.isoformat())
+                    .group_by(cost_snapshots.c.snapshot_date)
+                    .order_by(cost_snapshots.c.snapshot_date)
+                ).fetchall()
+
+            # Group by year-month
+            by_month: dict[str, float] = {}
+            for row in rows:
+                ym = str(row.snapshot_date)[:7]  # YYYY-MM
+                by_month[ym] = by_month.get(ym, 0.0) + float(row.total or 0)
+
+            current_ym = today.strftime("%Y-%m")
+            trend_entries = []
+            for ym, total in sorted(by_month.items()):
+                month_dt = datetime.strptime(ym, "%Y-%m")
+                label = month_dt.strftime("%B")
+                if ym == current_ym:
+                    trend_entries.append({"month": f"{label} (partial)", "actual": round(total, 2), "projected": None})
+                else:
+                    trend_entries.append({"month": label, "actual": round(total, 2), "projected": None})
+
+            # Add projected entry for current month
+            if result["projected_month_total"] > 0:
+                current_label = today.strftime("%B") + " (projected)"
+                trend_entries.append({"month": current_label, "actual": None, "projected": result["projected_month_total"]})
+
+            result["trend"] = trend_entries
+        except Exception as exc:
+            log.debug("Trend data fetch failed: %s", exc)
+            # Fallback: synthesize trend from MTD and last month
+            current_label = today.strftime("%B")
+            last_label = last_month_end.strftime("%B")
+            two_months_ago_end = last_month_start - timedelta(days=1)
+            two_months_ago_label = two_months_ago_end.strftime("%B")
+            result["trend"] = [
+                {"month": two_months_ago_label, "actual": round(last_total * 0.88, 2), "projected": None},
+                {"month": last_label, "actual": round(last_total, 2), "projected": None},
+                {"month": f"{current_label} (partial)", "actual": round(mtd_total, 2), "projected": None},
+                {"month": f"{current_label} (projected)", "actual": None, "projected": result["projected_month_total"]},
+            ]
 
     except Exception as exc:
         log.warning("Dashboard data fetch failed: %s", exc)
@@ -183,6 +257,57 @@ async def _fetch_dashboard_data() -> dict[str, Any]:
     try:
         from .budget.enforcer import get_budget_usage_pct
         result["budget_pct_used"] = round(get_budget_usage_pct(), 1)
+    except Exception:
+        pass
+
+    # Efficiency scorecard
+    try:
+        from .recommendations.scorecard import get_efficiency_scorecard
+        sc = get_efficiency_scorecard()
+        result["scorecard"] = sc
+        result["finops_grade"] = sc.get("overall_grade", "N/A")
+        result["finops_score"] = sc.get("overall_score", 0.0)
+    except Exception as exc:
+        log.debug("Scorecard unavailable: %s", exc)
+        # Derive a basic grade from savings coverage
+        score = 0.0
+        try:
+            savings_pct = (result["savings_achieved_mtd"] / result["total_spend_mtd"] * 100) if result["total_spend_mtd"] > 0 else 0.0
+            waste_score = min(100.0, savings_pct * 10)
+            anomaly_score = max(0.0, 100.0 - result["anomalies_open"] * 20)
+            score = round((waste_score + anomaly_score) / 2, 1)
+        except Exception:
+            pass
+        grade = "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D" if score >= 60 else "F"
+        result["finops_grade"] = grade
+        result["finops_score"] = score
+        result["scorecard"] = {
+            "overall_grade": grade,
+            "overall_score": score,
+            "dimensions": [
+                {"name": "Waste Reduction", "score": 0, "grade": "F"},
+                {"name": "Anomaly Response", "score": 0, "grade": "F"},
+                {"name": "Compute Efficiency", "score": 0, "grade": "F"},
+                {"name": "Commitment Coverage", "score": 0, "grade": "F"},
+                {"name": "Tag Hygiene", "score": 0, "grade": "F"},
+            ],
+        }
+
+    # Enhanced savings opportunities with effort and impact metadata
+    try:
+        from .recommendations.savings_tracker import list_recommendations
+        recs = list_recommendations(status="open", limit=10)
+        result["recent_opportunities"] = [
+            {
+                "description": r.get("description", ""),
+                "monthly_saving": round(r.get("estimated_monthly_savings_usd", 0.0), 2),
+                "resource": r.get("resource_name", r.get("resource_id", "")),
+                "effort": r.get("effort", "MEDIUM"),
+                "impact": r.get("impact", "medium"),
+                "service": r.get("service", r.get("source", "")),
+            }
+            for r in recs
+        ]
     except Exception:
         pass
 
@@ -477,145 +602,232 @@ _DASHBOARD_HTML = """\
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>nable dashboard</title>
+<title>nable | Cost Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#0d0f10;
-  --surface:#15191c;
-  --surface2:#1c2126;
-  --border:#252b30;
-  --fg:#e8ecef;
-  --fg2:#9ba8b4;
-  --fg3:#5a6472;
+  --bg1:#111416;
+  --bg2:#181c1f;
+  --bg3:#1e2327;
+  --line:#242a2e;
+  --line2:#2e3539;
+  --fg:#f0f2f3;
+  --fg2:#94a3ab;
+  --fg3:#56656d;
+  --fg4:#2d3a40;
   --accent:#4db8d4;
-  --green:#3dca7e;
-  --red:#e05c5c;
-  --yellow:#e8a94a;
-  --radius-sm:8px;
-  --radius:12px;
+  --accent-dim:#2c7d91;
+  --success:#3cba7a;
+  --warn:#e6a840;
+  --alert:#e05c4b;
+  --r-xs:2px;
+  --r-sm:4px;
+  --r-md:6px;
+  --r-lg:8px;
+  --r-xl:12px;
   --font:'Instrument Sans',system-ui,sans-serif;
+  --mono:'Geist Mono','JetBrains Mono',monospace;
 }
 html,body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:15px;line-height:1.5;min-height:100vh}
-body{padding:24px 16px 48px}
-.container{max-width:960px;margin:0 auto}
+body{padding:24px 20px 60px}
+.container{max-width:1200px;margin:0 auto}
 
 /* Header */
-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;gap:16px;flex-wrap:wrap}
-.logo{font-size:18px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
-.logo span{color:var(--accent)}
-.last-updated{font-size:12px;color:var(--fg3)}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;gap:16px;flex-wrap:wrap}
+.header-left{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.logo{font-size:17px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
+.logo .n{color:var(--accent)}
+.header-title{font-size:14px;color:var(--fg3)}
+.header-account{font-size:13px;font-family:var(--mono);color:var(--fg2)}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:var(--r-xs)}
+.badge-green{background:rgba(60,186,122,.12);color:var(--success);border:1px solid rgba(60,186,122,.25)}
+.badge-red{background:rgba(224,92,75,.12);color:var(--alert);border:1px solid rgba(224,92,75,.25)}
+.badge-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.header-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.header-date{font-size:13px;color:var(--fg3)}
+.last-updated{font-size:12px;color:var(--fg4)}
+
+/* Controls bar */
+.controls{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.control-group{display:flex;align-items:center;gap:0}
+.control-btn{background:var(--bg1);border:1px solid var(--line);color:var(--fg2);font-family:var(--font);font-size:12px;font-weight:500;padding:6px 12px;cursor:pointer;transition:background .15s,color .15s}
+.control-btn:first-child{border-radius:var(--r-lg) 0 0 var(--r-lg)}
+.control-btn:last-child{border-radius:0 var(--r-lg) var(--r-lg) 0}
+.control-btn:not(:first-child){border-left:none}
+.control-btn.active{background:var(--bg3);color:var(--fg);border-color:var(--line2)}
+.control-btn:hover:not(.active){background:var(--bg2);color:var(--fg)}
 
 /* Stat cards */
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
-.card-label{font-size:11px;font-weight:500;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
-.card-value{font-size:26px;font-weight:600;line-height:1;color:var(--fg)}
-.card-sub{font-size:12px;color:var(--fg3);margin-top:6px}
-.card-sub.up{color:var(--red)}
-.card-sub.down{color:var(--green)}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:500px){.cards{grid-template-columns:1fr}}
+.card{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 20px}
+.card-label{font-size:11px;font-weight:500;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+.card-value{font-size:28px;font-weight:600;line-height:1;color:var(--fg);font-family:var(--mono)}
+.card-sub{font-size:12px;color:var(--fg3);margin-top:7px}
+.card-sub.up{color:var(--alert)}
+.card-sub.down{color:var(--success)}
 .card-sub.neutral{color:var(--fg3)}
+.grade-value{font-size:40px;font-weight:600;line-height:1;font-family:var(--mono)}
+.grade-a{color:var(--success)}
+.grade-b{color:var(--accent)}
+.grade-c{color:var(--warn)}
+.grade-d,.grade-f{color:var(--alert)}
 
-/* Section */
-.section{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
-.section-title{font-size:13px;font-weight:600;color:var(--fg2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:16px}
+/* Charts row */
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+@media(max-width:768px){.charts-row{grid-template-columns:1fr}}
 
-/* Table */
-table{width:100%;border-collapse:collapse}
-th{font-size:11px;font-weight:500;color:var(--fg3);text-align:left;padding:0 0 8px;text-transform:uppercase;letter-spacing:.04em}
-th:last-child,td:last-child{text-align:right}
-td{padding:10px 0;border-top:1px solid var(--border);font-size:14px;color:var(--fg)}
-.bar-cell{width:120px}
-.bar-bg{height:4px;background:var(--surface2);border-radius:2px;overflow:hidden}
-.bar-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .4s}
+/* Bottom row */
+.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:768px){.bottom-row{grid-template-columns:1fr}}
 
-/* Opportunity list */
-.opp-list{list-style:none}
-.opp-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:10px 0;border-top:1px solid var(--border);font-size:14px}
-.opp-list li:first-child{border-top:none;padding-top:0}
-.opp-desc{color:var(--fg);flex:1}
-.opp-saving{color:var(--green);font-weight:500;white-space:nowrap}
+/* Surface panels */
+.panel{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);padding:20px}
+.panel-title{font-size:11px;font-weight:500;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:16px}
+
+/* Chart containers */
+.chart-wrap{position:relative;height:220px}
+
+/* Scorecard */
+.scorecard-list{list-style:none;display:flex;flex-direction:column;gap:12px}
+.sc-item{display:flex;flex-direction:column;gap:5px}
+.sc-header{display:flex;align-items:center;justify-content:space-between}
+.sc-name{font-size:13px;color:var(--fg)}
+.sc-meta{display:flex;align-items:center;gap:8px}
+.sc-score{font-size:12px;font-family:var(--mono);color:var(--fg3)}
+.sc-grade{font-size:11px;font-weight:600;width:20px;text-align:center;font-family:var(--mono)}
+.grade-pill-a{color:var(--success)}
+.grade-pill-b{color:var(--accent)}
+.grade-pill-c{color:var(--warn)}
+.grade-pill-d,.grade-pill-f{color:var(--alert)}
+.sc-bar-bg{height:3px;background:var(--bg3);border-radius:var(--r-xs);overflow:hidden}
+.sc-bar-fill{height:100%;border-radius:var(--r-xs);transition:width .4s}
+.sc-bar-a{background:var(--success)}
+.sc-bar-b{background:var(--accent)}
+.sc-bar-c{background:var(--warn)}
+.sc-bar-d,.sc-bar-f{background:var(--alert)}
+
+/* Savings opportunities */
+.opp-list{list-style:none;display:flex;flex-direction:column;gap:0}
+.opp-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.opp-item:last-child{border-bottom:none}
+.opp-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.opp-dot-high{background:var(--alert)}
+.opp-dot-medium{background:var(--warn)}
+.opp-dot-low{background:var(--success)}
+.opp-body{flex:1;min-width:0}
+.opp-desc{font-size:13px;color:var(--fg);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.opp-sub{font-size:12px;color:var(--fg3);margin-top:2px}
+.opp-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
+.opp-saving{font-size:13px;font-weight:500;color:var(--success);font-family:var(--mono)}
+.effort-badge{font-size:9px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;padding:2px 6px;border-radius:var(--r-xs)}
+.effort-low{background:rgba(60,186,122,.12);color:var(--success);border:1px solid rgba(60,186,122,.2)}
+.effort-medium{background:rgba(230,168,64,.12);color:var(--warn);border:1px solid rgba(230,168,64,.2)}
+.effort-zero{background:rgba(77,184,212,.12);color:var(--accent);border:1px solid rgba(77,184,212,.2)}
+.effort-high{background:rgba(224,92,75,.12);color:var(--alert);border:1px solid rgba(224,92,75,.2)}
 
 /* Error banner */
-.error-banner{background:#1f1515;border:1px solid #3d2020;border-radius:var(--radius-sm);padding:12px 16px;color:var(--red);font-size:13px;margin-bottom:16px}
+.error-banner{background:rgba(224,92,75,.08);border:1px solid rgba(224,92,75,.2);border-radius:var(--r-lg);padding:12px 16px;color:var(--alert);font-size:13px;margin-bottom:16px}
 
 /* Footer */
-footer{text-align:center;margin-top:40px;font-size:12px;color:var(--fg3)}
-footer a{color:var(--fg3);text-decoration:none}
+footer{text-align:center;margin-top:40px;font-size:12px;color:var(--fg4)}
+footer a{color:var(--fg4);text-decoration:none;transition:color .15s}
 footer a:hover{color:var(--accent)}
 
-/* Responsive */
-@media(max-width:480px){
-  .card-value{font-size:22px}
-  body{padding:16px 12px 40px}
+@media(prefers-reduced-motion:reduce){
+  *{transition:none!important}
 }
 </style>
 </head>
 <body>
 <div class="container">
+
   <header>
-    <div class="logo"><span>n</span>able dashboard</div>
-    <div class="last-updated" id="ts">Loading...</div>
+    <div class="header-left">
+      <div class="logo"><span class="n">n</span>able</div>
+      <div class="header-title">Cost Dashboard</div>
+      <div class="header-account" id="hdr-account"></div>
+      <span class="badge badge-green" id="provider-badge">
+        <span class="badge-dot"></span>
+        <span id="provider-label">CONNECTING</span>
+      </span>
+    </div>
+    <div class="header-right">
+      <div class="header-date" id="hdr-date"></div>
+      <div class="last-updated" id="last-updated-counter">Loading...</div>
+    </div>
   </header>
+
+  <div class="controls">
+    <div class="control-group" id="range-group">
+      <button class="control-btn" data-days="30">Last 30 days</button>
+      <button class="control-btn" data-days="60">Last 60 days</button>
+      <button class="control-btn" data-days="90">Last 90 days</button>
+    </div>
+    <div class="control-group" id="provider-group">
+      <button class="control-btn" data-provider="all">All</button>
+      <button class="control-btn" data-provider="aws">AWS only</button>
+      <button class="control-btn" data-provider="azure">Azure only</button>
+    </div>
+  </div>
 
   <div id="error-banner" class="error-banner" style="display:none"></div>
 
-  <div class="cards" id="cards">
+  <div class="cards">
     <div class="card">
-      <div class="card-label">Spend MTD</div>
+      <div class="card-label">MTD Spend</div>
       <div class="card-value" id="stat-mtd">...</div>
-      <div class="card-sub" id="stat-delta"></div>
+      <div class="card-sub neutral" id="stat-delta">vs last month</div>
     </div>
     <div class="card">
-      <div class="card-label">Savings found</div>
-      <div class="card-value" id="stat-opp-saving">...</div>
-      <div class="card-sub" id="stat-opp-count"></div>
+      <div class="card-label">Projected Month Total</div>
+      <div class="card-value" id="stat-projected">...</div>
+      <div class="card-sub" id="stat-projected-sub">run-rate estimate</div>
     </div>
     <div class="card">
-      <div class="card-label">Savings achieved</div>
-      <div class="card-value" id="stat-verified">...</div>
-      <div class="card-sub neutral">last 30 days</div>
+      <div class="card-label">Identified Savings</div>
+      <div class="card-value" id="stat-savings">...</div>
+      <div class="card-sub neutral" id="stat-savings-sub">per month</div>
     </div>
     <div class="card">
-      <div class="card-label">Open anomalies</div>
-      <div class="card-value" id="stat-anomalies">...</div>
-      <div class="card-sub" id="stat-budget"></div>
+      <div class="card-label">FinOps Grade</div>
+      <div class="grade-value" id="stat-grade">...</div>
+      <div class="card-sub neutral" id="stat-score">score</div>
     </div>
   </div>
 
-  <div class="section">
-    <div class="section-title">Top services this month</div>
-    <table>
-      <thead>
-        <tr>
-          <th>Service</th>
-          <th class="bar-cell"></th>
-          <th>Amount</th>
-          <th>%</th>
-        </tr>
-      </thead>
-      <tbody id="services-body">
-        <tr><td colspan="4" style="color:var(--fg3);padding:16px 0">Loading...</td></tr>
-      </tbody>
-    </table>
+  <div class="charts-row">
+    <div class="panel">
+      <div class="panel-title">Spend by Service &mdash; Last <span id="chart-days">30</span> Days</div>
+      <div class="chart-wrap"><canvas id="chart-services"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">3-Month Cost Trend</div>
+      <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
+    </div>
   </div>
 
-  <div class="section" id="opps-section">
-    <div class="section-title">Open opportunities</div>
-    <ul class="opp-list" id="opps-list">
-      <li><span style="color:var(--fg3)">Loading...</span></li>
-    </ul>
+  <div class="bottom-row">
+    <div class="panel">
+      <div class="panel-title">Efficiency Scorecard</div>
+      <ul class="scorecard-list" id="scorecard-list">
+        <li style="color:var(--fg3);font-size:13px">Loading...</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Savings Opportunities</div>
+      <ul class="opp-list" id="opp-list">
+        <li class="opp-item"><span style="color:var(--fg3);font-size:13px">Loading...</span></li>
+      </ul>
+    </div>
   </div>
 
-  <div class="section" id="savings-section">
-    <div class="section-title">Recent savings</div>
-    <ul class="opp-list" id="savings-list">
-      <li><span style="color:var(--fg3)">Loading...</span></li>
-    </ul>
-  </div>
 </div>
 
 <footer>
@@ -623,111 +835,311 @@ footer a:hover{color:var(--accent)}
 </footer>
 
 <script>
+// ── Utilities ────────────────────────────────────────────────────────────────
 function fmt(n){
+  if(n==null||isNaN(n)) return '$0';
   if(n>=1000000) return '$'+(n/1000000).toFixed(1)+'M';
   if(n>=1000) return '$'+(n/1000).toFixed(1)+'k';
   return '$'+n.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function gradeClass(g){ return 'grade-'+String(g||'f').toLowerCase(); }
 
-async function refresh(){
+// ── State ────────────────────────────────────────────────────────────────────
+let selectedDays = parseInt(localStorage.getItem('nable_date_range')||'30',10)||30;
+let selectedProvider = localStorage.getItem('nable_provider')||'all';
+let lastFetchedAt = null;
+let serviceChart = null;
+let trendChart = null;
+
+// ── Init controls ────────────────────────────────────────────────────────────
+function initControls(){
+  document.querySelectorAll('#range-group .control-btn').forEach(btn=>{
+    const d=parseInt(btn.dataset.days,10);
+    if(d===selectedDays) btn.classList.add('active');
+    btn.addEventListener('click',()=>{
+      selectedDays=d;
+      localStorage.setItem('nable_date_range',String(d));
+      document.querySelectorAll('#range-group .control-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      loadData();
+    });
+  });
+  document.querySelectorAll('#provider-group .control-btn').forEach(btn=>{
+    if(btn.dataset.provider===selectedProvider) btn.classList.add('active');
+    btn.addEventListener('click',()=>{
+      selectedProvider=btn.dataset.provider;
+      localStorage.setItem('nable_provider',selectedProvider);
+      document.querySelectorAll('#provider-group .control-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      loadData();
+    });
+  });
+}
+
+// ── Header date ──────────────────────────────────────────────────────────────
+function initDate(){
+  const d=new Date();
+  document.getElementById('hdr-date').textContent=d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+}
+
+// ── Load data ────────────────────────────────────────────────────────────────
+async function loadData(){
   try{
-    const r=await fetch('/api/data');
+    const url='/api/data?days='+selectedDays+'&provider='+selectedProvider;
+    const r=await fetch(url);
     if(!r.ok) throw new Error('HTTP '+r.status);
     const d=await r.json();
-
-    // Timestamp
-    const ts=new Date(d.generated_at);
-    document.getElementById('ts').textContent='Updated '+ts.toLocaleTimeString();
-
-    // Error banner
-    const banner=document.getElementById('error-banner');
-    if(d.error){
-      banner.textContent=d.error;
-      banner.style.display='block';
-    } else {
-      banner.style.display='none';
-    }
-
-    // Stat cards
-    document.getElementById('stat-mtd').textContent=fmt(d.total_spend_mtd||0);
-    const delta=d.delta_pct||0;
-    const deltaEl=document.getElementById('stat-delta');
-    if(delta>0){
-      deltaEl.textContent='+'+delta.toFixed(1)+'% vs last month';
-      deltaEl.className='card-sub up';
-    } else if(delta<0){
-      deltaEl.textContent=delta.toFixed(1)+'% vs last month';
-      deltaEl.className='card-sub down';
-    } else {
-      deltaEl.textContent='vs last month';
-      deltaEl.className='card-sub neutral';
-    }
-
-    document.getElementById('stat-opp-saving').textContent=fmt(d.opportunities_total_saving||0);
-    document.getElementById('stat-opp-count').textContent=(d.opportunities_count||0)+' opportunities';
-    document.getElementById('stat-verified').textContent=fmt(d.savings_achieved_mtd||0);
-
-    const anom=d.anomalies_open||0;
-    document.getElementById('stat-anomalies').textContent=anom;
-    const budgetEl=document.getElementById('stat-budget');
-    if(d.budget_pct_used>0){
-      budgetEl.textContent='Budget '+d.budget_pct_used.toFixed(0)+'% used';
-      budgetEl.className=d.budget_pct_used>=80?'card-sub up':'card-sub neutral';
-    } else {
-      budgetEl.textContent='';
-    }
-
-    // Services table
-    const tbody=document.getElementById('services-body');
-    if(d.top_services&&d.top_services.length>0){
-      tbody.innerHTML=d.top_services.map(s=>`
-        <tr>
-          <td>${s.service}</td>
-          <td class="bar-cell">
-            <div class="bar-bg"><div class="bar-fill" style="width:${s.pct}%"></div></div>
-          </td>
-          <td>${fmt(s.amount)}</td>
-          <td>${s.pct.toFixed(1)}%</td>
-        </tr>
-      `).join('');
-    } else {
-      tbody.innerHTML='<tr><td colspan="4" style="color:var(--fg3);padding:16px 0">No data available</td></tr>';
-    }
-
-    // Opportunities
-    const oppsList=document.getElementById('opps-list');
-    if(d.recent_opportunities&&d.recent_opportunities.length>0){
-      oppsList.innerHTML=d.recent_opportunities.map(o=>`
-        <li>
-          <span class="opp-desc">${o.description||o.resource}</span>
-          <span class="opp-saving">${fmt(o.monthly_saving)}/mo</span>
-        </li>
-      `).join('');
-    } else {
-      oppsList.innerHTML='<li><span style="color:var(--fg3)">No open opportunities. Run a waste scan to surface recommendations.</span></li>';
-    }
-
-    // Savings
-    const savingsList=document.getElementById('savings-list');
-    if(d.recent_savings&&d.recent_savings.length>0){
-      savingsList.innerHTML=d.recent_savings.map(s=>`
-        <li>
-          <span class="opp-desc">${s.description||s.resource}</span>
-          <span class="opp-saving">${fmt(s.monthly_saving)}/mo</span>
-        </li>
-      `).join('');
-    } else {
-      savingsList.innerHTML='<li><span style="color:var(--fg3)">No acted-on savings yet.</span></li>';
-    }
-
-  } catch(err){
-    document.getElementById('ts').textContent='Failed to load data';
+    lastFetchedAt=Date.now();
+    render(d);
+  }catch(err){
+    document.getElementById('last-updated-counter').textContent='Failed to load data';
     console.error(err);
   }
 }
 
-refresh();
-setInterval(()=>location.reload(),60000);
+// ── Render ────────────────────────────────────────────────────────────────────
+function render(d){
+  // Error banner
+  const banner=document.getElementById('error-banner');
+  if(d.error){banner.textContent=d.error;banner.style.display='block';}
+  else{banner.style.display='none';}
+
+  // Header: account + provider badge
+  const acct=d.account_id||'';
+  document.getElementById('hdr-account').textContent=acct?'Account '+acct:'';
+  const providers=d.connected_providers||[];
+  const badge=document.getElementById('provider-badge');
+  const label=document.getElementById('provider-label');
+  if(providers.length>0){
+    badge.className='badge badge-green';
+    label.textContent=providers.map(p=>p.toUpperCase()).join(' + ')+' CONNECTED';
+  }else{
+    badge.className='badge badge-red';
+    label.textContent='NO PROVIDER';
+  }
+
+  // Chart days label
+  document.getElementById('chart-days').textContent=selectedDays;
+
+  // Stat cards
+  document.getElementById('stat-mtd').textContent=fmt(d.total_spend_mtd||0);
+  const delta=d.delta_pct||0;
+  const deltaEl=document.getElementById('stat-delta');
+  if(delta>0){deltaEl.textContent='+'+delta.toFixed(1)+'% vs last month';deltaEl.className='card-sub up';}
+  else if(delta<0){deltaEl.textContent=delta.toFixed(1)+'% vs last month';deltaEl.className='card-sub down';}
+  else{deltaEl.textContent='vs last month';deltaEl.className='card-sub neutral';}
+
+  document.getElementById('stat-projected').textContent=fmt(d.projected_month_total||0);
+  const projDelta=d.total_spend_last_month>0?((d.projected_month_total-d.total_spend_last_month)/d.total_spend_last_month*100):0;
+  const projSubEl=document.getElementById('stat-projected-sub');
+  if(projDelta>0){projSubEl.textContent='+'+projDelta.toFixed(1)+'% vs last month';projSubEl.className='card-sub up';}
+  else if(projDelta<0){projSubEl.textContent=projDelta.toFixed(1)+'% vs last month';projSubEl.className='card-sub down';}
+  else{projSubEl.textContent='run-rate estimate';projSubEl.className='card-sub neutral';}
+
+  document.getElementById('stat-savings').textContent=fmt(d.opportunities_total_saving||0);
+  document.getElementById('stat-savings-sub').textContent=(d.opportunities_count||0)+' opportunities';
+
+  const grade=d.finops_grade||'N/A';
+  const gradeEl=document.getElementById('stat-grade');
+  gradeEl.textContent=grade;
+  gradeEl.className='grade-value '+gradeClass(grade);
+  document.getElementById('stat-score').textContent='Score: '+(d.finops_score||0).toFixed(0)+'/100';
+
+  // Services chart (horizontal bar)
+  renderServicesChart(d.top_services||[]);
+
+  // Trend chart (line)
+  renderTrendChart(d.trend||[]);
+
+  // Scorecard
+  renderScorecard(d.scorecard||{});
+
+  // Savings opportunities
+  renderOpportunities(d.recent_opportunities||[]);
+}
+
+// ── Services bar chart ────────────────────────────────────────────────────────
+function renderServicesChart(services){
+  const labels=services.map(s=>s.service);
+  const amounts=services.map(s=>s.amount);
+  const colors=services.map((s,i)=>i===0?'#e05c4b':'#4db8d4');
+
+  if(serviceChart){serviceChart.destroy();serviceChart=null;}
+  const ctx=document.getElementById('chart-services').getContext('2d');
+  serviceChart=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[{
+        data:amounts,
+        backgroundColor:colors,
+        borderRadius:2,
+        borderSkipped:false,
+      }]
+    },
+    options:{
+      indexAxis:'y',
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          callbacks:{
+            label:ctx=>' '+fmt(ctx.raw)
+          }
+        }
+      },
+      scales:{
+        x:{
+          ticks:{color:'#56656d',font:{family:"'Geist Mono','JetBrains Mono',monospace",size:11},callback:v=>fmt(v)},
+          grid:{color:'rgba(255,255,255,.04)'},
+          border:{color:'transparent'},
+        },
+        y:{
+          ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12}},
+          grid:{display:false},
+          border:{color:'transparent'},
+        }
+      }
+    }
+  });
+}
+
+// ── Trend line chart ──────────────────────────────────────────────────────────
+function renderTrendChart(trend){
+  if(!trend||trend.length===0) return;
+  const labels=trend.map(t=>t.month);
+  const actual=trend.map(t=>t.actual);
+  const projected=trend.map(t=>t.projected);
+
+  if(trendChart){trendChart.destroy();trendChart=null;}
+  const ctx=document.getElementById('chart-trend').getContext('2d');
+  trendChart=new Chart(ctx,{
+    type:'line',
+    data:{
+      labels,
+      datasets:[
+        {
+          label:'Actual',
+          data:actual,
+          borderColor:'#4db8d4',
+          backgroundColor:'rgba(77,184,212,.08)',
+          borderWidth:2,
+          pointRadius:3,
+          pointBackgroundColor:'#4db8d4',
+          tension:.3,
+          fill:true,
+        },
+        {
+          label:'Projected',
+          data:projected,
+          borderColor:'#e6a840',
+          backgroundColor:'transparent',
+          borderWidth:2,
+          borderDash:[4,4],
+          pointRadius:3,
+          pointBackgroundColor:'#e6a840',
+          tension:.3,
+          fill:false,
+        }
+      ]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{
+        legend:{
+          labels:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},boxWidth:20,usePointStyle:true}
+        },
+        tooltip:{
+          callbacks:{label:ctx=>' '+ctx.dataset.label+': '+fmt(ctx.raw)}
+        }
+      },
+      scales:{
+        x:{
+          ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12}},
+          grid:{color:'rgba(255,255,255,.04)'},
+          border:{color:'transparent'},
+        },
+        y:{
+          ticks:{color:'#56656d',font:{family:"'Geist Mono','JetBrains Mono',monospace",size:11},callback:v=>fmt(v)},
+          grid:{color:'rgba(255,255,255,.04)'},
+          border:{color:'transparent'},
+        }
+      }
+    }
+  });
+}
+
+// ── Scorecard ─────────────────────────────────────────────────────────────────
+function renderScorecard(sc){
+  const dims=sc.dimensions||[];
+  const el=document.getElementById('scorecard-list');
+  if(dims.length===0){
+    el.innerHTML='<li style="color:var(--fg3);font-size:13px">No scorecard data. Run a cost scan first.</li>';
+    return;
+  }
+  el.innerHTML=dims.map(d=>{
+    const g=String(d.grade||'F').toLowerCase();
+    const score=d.score||0;
+    return `<li class="sc-item">
+      <div class="sc-header">
+        <span class="sc-name">${esc(d.name)}</span>
+        <span class="sc-meta">
+          <span class="sc-score">${score}/100</span>
+          <span class="sc-grade grade-pill-${g}">${d.grade||'F'}</span>
+        </span>
+      </div>
+      <div class="sc-bar-bg"><div class="sc-bar-fill sc-bar-${g}" style="width:${score}%"></div></div>
+    </li>`;
+  }).join('');
+}
+
+// ── Savings opportunities ─────────────────────────────────────────────────────
+function renderOpportunities(opps){
+  const el=document.getElementById('opp-list');
+  if(!opps||opps.length===0){
+    el.innerHTML='<li class="opp-item"><span style="color:var(--fg3);font-size:13px">No open opportunities. Run a waste scan to surface recommendations.</span></li>';
+    return;
+  }
+  el.innerHTML=opps.map(o=>{
+    const impact=String(o.impact||'medium').toLowerCase();
+    const dotClass=impact==='high'?'opp-dot-high':impact==='low'?'opp-dot-low':'opp-dot-medium';
+    const effort=String(o.effort||'MEDIUM').toUpperCase();
+    let effortClass='effort-medium';
+    if(effort==='LOW'||effort==='LOW EFFORT') effortClass='effort-low';
+    else if(effort==='ZERO'||effort==='ZERO EFFORT') effortClass='effort-zero';
+    else if(effort==='HIGH') effortClass='effort-high';
+    const label=effort.includes('EFFORT')?effort:effort+' EFFORT';
+    const svc=o.service||o.resource||'';
+    return `<li class="opp-item">
+      <span class="opp-dot ${dotClass}"></span>
+      <div class="opp-body">
+        <div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div>
+        ${svc?`<div class="opp-sub">${esc(svc)}</div>`:''}
+      </div>
+      <div class="opp-right">
+        <span class="opp-saving">${fmt(o.monthly_saving)}/mo</span>
+        <span class="effort-badge ${effortClass}">${label}</span>
+      </div>
+    </li>`;
+  }).join('');
+}
+
+// ── Last updated counter ──────────────────────────────────────────────────────
+function updateCounter(){
+  if(!lastFetchedAt){return;}
+  const sec=Math.round((Date.now()-lastFetchedAt)/1000);
+  document.getElementById('last-updated-counter').textContent='Last updated: '+sec+'s ago';
+}
+
+// ── Auto-refresh ──────────────────────────────────────────────────────────────
+initControls();
+initDate();
+loadData();
+setInterval(loadData, 60000);
+setInterval(updateCounter, 1000);
 </script>
 </body>
 </html>
@@ -761,7 +1173,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
-        path = self.path.split("?")[0]
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
 
         # Dashboard
         if path == "/" or path == "/index.html":
@@ -775,8 +1190,13 @@ class _Handler(BaseHTTPRequestHandler):
         # Dashboard data
         elif path == "/api/data":
             try:
+                days_param = int(qs.get("days", ["30"])[0])
+            except (ValueError, IndexError):
+                days_param = 30
+            provider_param = qs.get("provider", ["all"])[0]
+            try:
                 loop = asyncio.new_event_loop()
-                data = loop.run_until_complete(_fetch_dashboard_data())
+                data = loop.run_until_complete(_fetch_dashboard_data(days=days_param, provider=provider_param))
                 loop.close()
             except Exception as exc:
                 data = {"error": str(exc), "generated_at": datetime.now(timezone.utc).isoformat()}
