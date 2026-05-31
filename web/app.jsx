@@ -567,7 +567,7 @@ function Architecture({ version }){
         <div className="section-head">
           <div className="label">Architecture</div>
           <h2>Headless by design.<br/><em>Your data never moves.</em></h2>
-          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine. We never see your data.</p>
+          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine. We never see your data. Works out of the box in AWS GovCloud — no data leaves your environment.</p>
         </div>
         <div className="arch">
           <div className="arch-grid"></div>
@@ -1056,6 +1056,10 @@ const FAQ_ITEMS = [
   {
     q: "Do you support multiple AWS accounts or organizations?",
     a: "Yes. Run `finops setup aws --add` to connect additional accounts. You can query across all of them in a single conversation. Multi-account org rollups are on the roadmap for Q3."
+  },
+  {
+    q: "Does it work in AWS GovCloud?",
+    a: "Yes. nable runs entirely on your machine and queries your cloud provider APIs directly. There are no nable servers in the middle, no data lake, and no SaaS authorization required. It works with GovCloud regions (us-gov-west-1, us-gov-east-1) the same as commercial regions."
   },
 ];
 

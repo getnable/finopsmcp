@@ -431,13 +431,30 @@ Index("ix_srec_dedup",    savings_recommendations.c.dedup_key, unique=True)
 
 # ── Engine factory ────────────────────────────────────────────────────────────
 
+def _profile_name() -> str:
+    """Return the active profile name, or empty string for the default profile."""
+    return os.environ.get("FINOPS_PROFILE", "").strip()
+
+
+def _profile_data_dir(profile: str) -> Path:
+    """Return the data directory for a named profile, creating it if needed."""
+    d = Path.home() / ".finops" / "profiles" / profile
+    d.mkdir(parents=True, exist_ok=True)
+    d.chmod(stat.S_IRWXU)
+    return d
+
+
 def data_dir() -> Path:
     global _DATA_DIR
     if _DATA_DIR is None:
-        raw = os.environ.get("FINOPS_DATA_DIR", "")
-        _DATA_DIR = Path(raw).expanduser() if raw else Path.home() / ".finops"
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        _DATA_DIR.chmod(stat.S_IRWXU)
+        profile = _profile_name()
+        if profile:
+            _DATA_DIR = _profile_data_dir(profile)
+        else:
+            raw = os.environ.get("FINOPS_DATA_DIR", "")
+            _DATA_DIR = Path(raw).expanduser() if raw else Path.home() / ".finops"
+            _DATA_DIR.mkdir(parents=True, exist_ok=True)
+            _DATA_DIR.chmod(stat.S_IRWXU)
     return _DATA_DIR
 
 
@@ -479,8 +496,12 @@ def get_engine() -> Engine:
         _run_sqlite_migrations(_ENGINE)
     else:
         # Local SQLite mode (default)
+        # Priority: FINOPS_DB_PATH > FINOPS_PROFILE > default ~/.finops/finops.db
         db_path_env = os.environ.get("FINOPS_DB_PATH", "")
-        db_path = Path(db_path_env).expanduser() if db_path_env else data_dir() / "finops.db"
+        if db_path_env:
+            db_path = Path(db_path_env).expanduser()
+        else:
+            db_path = data_dir() / "finops.db"
         _ENGINE = create_engine(
             f"sqlite:///{db_path}",
             connect_args={

@@ -1,0 +1,222 @@
+{
+  "version": "1.0",
+  "generated": "2026-05-31",
+  "description": "All external endpoints nable may connect to. In air-gap mode (FINOPS_AIRGAP=1), only provider_api endpoints are used.",
+  "endpoints": [
+    {
+      "host": "ce.us-east-1.amazonaws.com",
+      "purpose": "AWS Cost Explorer API",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": "ce.us-gov-west-1.amazonaws.com"
+    },
+    {
+      "host": "ce.us-gov-west-1.amazonaws.com",
+      "purpose": "AWS Cost Explorer API (GovCloud West)",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": "ce.us-gov-west-1.amazonaws.com"
+    },
+    {
+      "host": "ce.us-gov-east-1.amazonaws.com",
+      "purpose": "AWS Cost Explorer API (GovCloud East)",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": "ce.us-gov-east-1.amazonaws.com"
+    },
+    {
+      "host": "sts.amazonaws.com",
+      "purpose": "AWS Security Token Service — caller identity and role assumption",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": "sts.us-gov-west-1.amazonaws.com"
+    },
+    {
+      "host": "organizations.us-east-1.amazonaws.com",
+      "purpose": "AWS Organizations — multi-account org rollups",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": "organizations.us-gov-west-1.amazonaws.com"
+    },
+    {
+      "host": "management.azure.com",
+      "purpose": "Azure Cost Management and Resource Manager API",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": "management.usgovcloudapi.net"
+    },
+    {
+      "host": "login.microsoftonline.com",
+      "purpose": "Azure Active Directory OAuth2 token endpoint",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": "login.microsoftonline.us"
+    },
+    {
+      "host": "cloudbilling.googleapis.com",
+      "purpose": "GCP Cloud Billing API",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "bigquery.googleapis.com",
+      "purpose": "GCP BigQuery — CUR-equivalent billing export queries",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.datadoghq.com",
+      "purpose": "Datadog API — usage and cost data",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.github.com",
+      "purpose": "GitHub API — Actions usage costs and PR comment posting",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.stripe.com",
+      "purpose": "Stripe API — billing and usage costs",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.twilio.com",
+      "purpose": "Twilio API — usage and spend data",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.vercel.com",
+      "purpose": "Vercel API — usage and billing data",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.cloudflare.com",
+      "purpose": "Cloudflare API — usage and billing data",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.pagerduty.com",
+      "purpose": "PagerDuty API — usage and billing data",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.newrelic.com",
+      "purpose": "New Relic GraphQL API — usage and cost data",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "cloud.mongodb.com",
+      "purpose": "MongoDB Atlas API — cluster cost data",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.linear.app",
+      "purpose": "Linear GraphQL API — ticket creation for cost findings",
+      "category": "integration",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.notion.com",
+      "purpose": "Notion API — report delivery",
+      "category": "integration",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "slack.com",
+      "purpose": "Slack API — cost alerts and weekly digests",
+      "category": "integration",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.anthropic.com",
+      "purpose": "Anthropic API — Slack bot AI responses (slack extra only)",
+      "category": "integration",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "api.openai.com",
+      "purpose": "OpenAI API — LLM cost tracking connector",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "cloud.langfuse.com",
+      "purpose": "Langfuse API — LLM observability cost data",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "accounts.azuredatabricks.net",
+      "purpose": "Azure Databricks account API — cluster cost data",
+      "category": "provider_api",
+      "required": false,
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "getnable.com",
+      "purpose": "nable API — license validation, SSO, and subscribe endpoint",
+      "category": "nable_service",
+      "required": false,
+      "disabled_by": "FINOPS_AIRGAP=1",
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "bench.nable.dev",
+      "purpose": "nable benchmark API — performance regression detection",
+      "category": "nable_service",
+      "required": false,
+      "disabled_by": "FINOPS_AIRGAP=1",
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "us.i.posthog.com",
+      "purpose": "Product analytics — anonymous install telemetry (opt-out)",
+      "category": "telemetry",
+      "required": false,
+      "disabled_by": "NABLE_NO_TELEMETRY=1 or FINOPS_AIRGAP=1",
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "pypi.org",
+      "purpose": "PyPI — version check for update notices (website only)",
+      "category": "optional",
+      "required": false,
+      "disabled_by": "FINOPS_AIRGAP=1",
+      "govcloud_equivalent": null
+    },
+    {
+      "host": "pypistats.org",
+      "purpose": "PyPI download stats — trust strip display on website only",
+      "category": "optional",
+      "required": false,
+      "disabled_by": "FINOPS_AIRGAP=1",
+      "govcloud_equivalent": null
+    }
+  ]
+}

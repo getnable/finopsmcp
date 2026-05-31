@@ -63,6 +63,9 @@ def _get_install_id() -> str:
 def _is_opted_out() -> bool:
     if not _POSTHOG_KEY:
         return True  # no key configured — silently skip all telemetry
+    _airgap = os.environ.get("FINOPS_AIRGAP", "").strip()
+    if _airgap not in ("", "0", "false", "no"):
+        return True  # air-gap mode: no non-provider outbound allowed
     return bool(os.environ.get(_OPT_OUT_ENV, "").strip())
 
 
