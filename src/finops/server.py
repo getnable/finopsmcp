@@ -9833,6 +9833,7 @@ async def what_can_nable_do() -> str:
         "",
         "### Share findings",
         '- **"Export to CSV"** — saves to ~/Downloads, opens clean in Excel or Sheets',
+        '- **"Start the team dashboard"** — browser-based dashboard your whole team can access, no Claude required',
     ]
 
     if has_notion:
@@ -9879,6 +9880,264 @@ async def what_can_nable_do() -> str:
     lines.append("*Ask about any of these in plain English. No commands to memorize.*")
 
     return "\n".join(lines)
+
+
+@mcp.tool()
+async def explain_recent_cost_drivers(
+    days: int = 30,
+    top_n: int = 10,
+) -> dict:
+    """
+    Explain what drove cost changes across all connected providers in the last N days.
+
+    Compares this period to the same-length period before it, finds the top drivers
+    of increase and decrease, and summarizes the net change. Works on the free tier
+    without requiring business metrics.
+
+    Use when:
+        - "Why did my bill go up?"
+        - "What changed in our costs this month?"
+        - "Show me the top cost drivers vs last month"
+        - "Which services had the biggest cost changes?"
+        - "What's driving our AWS spend increase?"
+
+    Args:
+        days:  Comparison window length in days (default 30)
+        top_n: Number of top drivers to return (default 10)
+    """
+    try:
+        today = date.today()
+        period_end = today
+        period_start = today - timedelta(days=days)
+        prev_end = period_start
+        prev_start = period_start - timedelta(days=days)
+
+        active = await _active()
+        if not active:
+            return {
+                "error": "No providers connected.",
+                "fix": "Run 'finops setup aws' (or azure/gcp/datadog) to connect a provider.",
+            }
+
+        cost_now, _, _ = await _gather_costs(active, period_start, period_end)
+        cost_prev, _, _ = await _gather_costs(active, prev_start, prev_end)
+
+        # Build per-provider + per-service breakdown
+        drivers: list[dict] = []
+        all_keys: set = set(cost_now.keys()) | set(cost_prev.keys())
+        for key in all_keys:
+            now_val = cost_now.get(key, 0.0)
+            prev_val = cost_prev.get(key, 0.0)
+            delta = now_val - prev_val
+            if abs(delta) < 1.0:
+                continue
+            pct = (delta / prev_val * 100) if prev_val > 0 else None
+            drivers.append({
+                "key": key,
+                "current": round(now_val, 2),
+                "previous": round(prev_val, 2),
+                "delta": round(delta, 2),
+                "delta_pct": round(pct, 1) if pct is not None else None,
+                "direction": "increase" if delta > 0 else "decrease",
+            })
+
+        drivers.sort(key=lambda x: abs(x["delta"]), reverse=True)
+        top = drivers[:top_n]
+
+        increases = [d for d in drivers if d["direction"] == "increase"]
+        decreases = [d for d in drivers if d["direction"] == "decrease"]
+        total_increase = sum(d["delta"] for d in increases)
+        total_decrease = sum(abs(d["delta"]) for d in decreases)
+        net_change = total_increase - total_decrease
+
+        total_now = sum(cost_now.values())
+        total_prev = sum(cost_prev.values())
+        net_pct = ((total_now - total_prev) / total_prev * 100) if total_prev > 0 else None
+
+        return {
+            "period": f"{period_start} to {period_end}",
+            "comparison_period": f"{prev_start} to {prev_end}",
+            "total_current_usd": round(total_now, 2),
+            "total_previous_usd": round(total_prev, 2),
+            "net_change_usd": round(net_change, 2),
+            "net_change_pct": round(net_pct, 1) if net_pct is not None else None,
+            "top_increases": [d for d in top if d["direction"] == "increase"][:5],
+            "top_decreases": [d for d in top if d["direction"] == "decrease"][:5],
+            "all_drivers": top,
+            "summary": (
+                f"Costs {'increased' if net_change >= 0 else 'decreased'} by "
+                f"${abs(net_change):,.0f} "
+                f"({'+' if net_change >= 0 else ''}{round(net_pct, 1) if net_pct is not None else 'N/A'}%) "
+                f"vs the prior {days}-day period. "
+                f"{len(increases)} services had cost increases, {len(decreases)} had decreases."
+            ),
+        }
+    except Exception as exc:
+        log.error("explain_recent_cost_drivers failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def get_nable_roi(
+    period_days: int = 90,
+) -> dict:
+    """
+    Shows the return on investment from using nable: savings found, acted on, and verified
+    versus the cost of the tool itself.
+
+    This report is unique to nable — no other FinOps tool can show this calculation
+    because they cost more per month than many teams' actual savings.
+
+    Use when:
+        - "Is nable worth it?"
+        - "How much has nable saved us?"
+        - "Show me the ROI on using nable"
+        - "What's the payback period on the Team plan?"
+        - "How do savings compare to the subscription cost?"
+
+    Args:
+        period_days: Lookback window for savings (default 90 days)
+    """
+    try:
+        from .storage.db import get_engine, savings_recommendations
+        from sqlalchemy import select
+        from datetime import datetime, timedelta, timezone
+
+        _TEAM_MONTHLY_USD = 40.0
+        _SOLO_MONTHLY_USD = 0.0
+
+        lic = get_status()
+        plan = lic.plan
+        monthly_cost = _TEAM_MONTHLY_USD if plan in ("pro", "enterprise") else _SOLO_MONTHLY_USD
+        period_cost = monthly_cost * (period_days / 30)
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=period_days)
+        sr = savings_recommendations
+        engine = get_engine()
+
+        with engine.connect() as conn:
+            rows = conn.execute(select(sr).where(sr.c.generated_at >= cutoff)).fetchall()
+
+        found_total = sum(r.estimated_monthly_savings_usd or 0 for r in rows if r.status not in ("dismissed", "expired"))
+        acted_total = sum(r.estimated_monthly_savings_usd or 0 for r in rows if r.status in ("acted_on", "verified"))
+        verified_total = sum(
+            r.verified_monthly_savings_usd or r.estimated_monthly_savings_usd or 0
+            for r in rows if r.status == "verified"
+        )
+
+        found_annualized = found_total * 12
+        acted_annualized = acted_total * 12
+        verified_annualized = verified_total * 12
+        annual_tool_cost = monthly_cost * 12
+
+        roi_on_verified = ((verified_total - monthly_cost) / monthly_cost * 100) if monthly_cost > 0 else None
+        payback_months = (monthly_cost / verified_total) if verified_total > 0 else None
+
+        lines = [
+            f"## nable ROI Report ({period_days}-day window)",
+            "",
+            f"**Tool cost:** ${period_cost:,.0f} over {period_days} days "
+            f"(${monthly_cost:.0f}/mo · {plan} plan)",
+            "",
+            "### Savings pipeline",
+            f"- Found: ${found_total:,.0f}/mo in opportunities ({len(rows)} recommendations)",
+            f"- Acted on: ${acted_total:,.0f}/mo estimated savings",
+            f"- Verified: ${verified_total:,.0f}/mo confirmed savings",
+            "",
+        ]
+
+        if monthly_cost == 0:
+            lines += [
+                "### ROI",
+                f"**Solo plan is free.** You're getting ${found_total:,.0f}/mo in recommendations at zero cost.",
+                f"Annualized opportunity: ${found_annualized:,.0f}.",
+                "",
+                f"Upgrade to Team ($40/mo) to unlock auto-remediation and verified savings tracking.",
+                f"At ${verified_total:,.0f}/mo verified savings, payback is "
+                f"{'less than 1 week' if verified_total > 0 else 'immediate once first savings are verified'}.",
+            ]
+        else:
+            roi_str = f"{roi_on_verified:.0f}%" if roi_on_verified is not None else "N/A"
+            payback_str = f"{payback_months:.1f} months" if payback_months and payback_months > 0 else "immediate"
+            lines += [
+                "### ROI",
+                f"- Monthly net savings (after tool cost): ${max(0, verified_total - monthly_cost):,.0f}",
+                f"- Annualized verified savings: ${verified_annualized:,.0f}",
+                f"- Annualized tool cost: ${annual_tool_cost:,.0f}",
+                f"- ROI on verified savings: {roi_str}",
+                f"- Payback period: {payback_str}",
+            ]
+            if verified_total > monthly_cost * 5:
+                lines.append(f"\n**nable is paying for itself {verified_total / monthly_cost:.0f}x over.**")
+            elif verified_total > 0:
+                lines.append(f"\n**Verified savings cover tool cost.** Act on remaining recommendations to grow ROI.")
+            else:
+                lines.append(f"\n**No verified savings yet.** Run verify_savings() after acting on recommendations.")
+
+        lines += [
+            "",
+            "### Competitor comparison",
+            "| Tool | Cost at your savings level | What you get |",
+            "|------|---------------------------|-------------|",
+            f"| nable (this) | ${annual_tool_cost:,.0f}/yr | Multi-cloud + SaaS + AI, local-first |",
+            f"| CloudHealth | ~${int(verified_annualized * 0.025):,}/yr (2.5% of managed spend) | Dashboard, enterprise only |",
+            f"| Cloudability | ~${int(verified_annualized * 0.015):,}/yr (1.5% of spend) | Dashboard, no AI |",
+            "| ProsperOps | 30-35% of RI savings | RI management only |",
+        ]
+
+        return {
+            "summary": "\n".join(lines),
+            "period_days": period_days,
+            "plan": plan,
+            "monthly_cost_usd": monthly_cost,
+            "found_monthly_usd": round(found_total, 2),
+            "acted_monthly_usd": round(acted_total, 2),
+            "verified_monthly_usd": round(verified_total, 2),
+            "found_annualized_usd": round(found_annualized, 2),
+            "verified_annualized_usd": round(verified_annualized, 2),
+            "annual_tool_cost_usd": round(annual_tool_cost, 2),
+            "roi_pct": round(roi_on_verified, 1) if roi_on_verified is not None else None,
+            "payback_months": round(payback_months, 1) if payback_months else None,
+        }
+    except Exception as exc:
+        log.error("get_nable_roi failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def start_dashboard_server(
+    port: int = 8080,
+    host: str = "0.0.0.0",
+) -> dict:
+    """
+    Starts a local web dashboard your whole team can access in a browser.
+    No installation needed for viewers — just share the URL.
+
+    Use when:
+        - "Start the dashboard"
+        - "Share the dashboard with my team"
+        - "Start the web server"
+        - "My team wants to see costs without installing nable"
+    """
+    try:
+        from .server_web import start_server_background, _local_ip
+        _, actual_port = start_server_background(host=host, port=port)
+        local_ip = _local_ip()
+        share_url = f"http://{local_ip}:{actual_port}"
+        local_url = f"http://127.0.0.1:{actual_port}"
+        return {
+            "status": "running",
+            "local_url": local_url,
+            "share_url": share_url,
+            "message": (
+                f"Dashboard running at {local_url}\n"
+                f"Share with your team: {share_url}\n"
+                "The server runs in the background. Stop it by closing this session."
+            ),
+        }
+    except Exception as exc:
+        log.error("start_dashboard_server failed: %s", exc)
+        return {"error": str(exc)}
 
 
 if __name__ == "__main__":

@@ -1104,6 +1104,11 @@ def main(args: list[str] | None = None) -> None:
     infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
 
+    serve_p = sub.add_parser("serve", help="Start a local web dashboard your whole team can view in a browser")
+    serve_p.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
+    serve_p.add_argument("--host", default="0.0.0.0", help="Host to bind (default: 0.0.0.0 for network access)")
+    serve_p.add_argument("--open", action="store_true", help="Open browser on start")
+
     sub.add_parser("welcome",      help="Guided onboarding: connect Claude + your first cloud account")
     sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
     iam_p = sub.add_parser("iam-template")
@@ -1281,6 +1286,14 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "license-status":
         _run_license_status()
+        return
+    elif parsed.cmd == "serve":
+        from .server_web import run_server
+        run_server(
+            host=getattr(parsed, "host", "0.0.0.0"),
+            port=getattr(parsed, "port", 8080),
+            open_browser=getattr(parsed, "open", False),
+        )
         return
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow

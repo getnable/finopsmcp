@@ -422,7 +422,8 @@ const TEAM_FEATURES = [
   "Scheduled cost digests via email",
   "Budget enforcement and alerts",
   "Commitment analysis and RI recommendations",
-  "No shared database required"
+  "No shared database required",
+  "Team dashboard at http://your-ip:8080 \u2014 no install for viewers"
 ];
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
