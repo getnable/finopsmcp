@@ -327,25 +327,55 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
     try:
         from .scoring.scorecard import build_scorecard
 
-        # idle_resources from savings tracker (local DB — fast, no network)
+        # idle_resources: only truly idle/stopped resources, NOT usage optimizations.
+        # Passing Textract or Bedrock savings here inflates waste % and tanks the score.
+        _IDLE_SOURCES = {"ec2", "ebs", "eip", "elastic", "idle", "stopped", "unused", "orphan"}
         _idle: list[dict] = []
         try:
             from .recommendations.savings_tracker import list_recommendations as _lr
             for r in _lr(status="open", limit=50):
-                sav = r.get("estimated_monthly_savings_usd", 0) or 0
-                if sav > 0:
-                    _idle.append({
-                        "resource_id": r.get("resource_id", ""),
-                        "monthly_cost_usd": sav,
-                        "resource_type": r.get("resource_type", ""),
-                    })
+                src = r.get("source", "").lower()
+                rt = r.get("resource_type", "").lower()
+                # Include only resources that are genuinely idle, not cost optimizations
+                if any(kw in src or kw in rt for kw in _IDLE_SOURCES):
+                    sav = r.get("estimated_monthly_savings_usd", 0) or 0
+                    if sav > 0:
+                        _idle.append({
+                            "resource_id": r.get("resource_id", ""),
+                            "monthly_cost_usd": sav,
+                            "resource_type": r.get("resource_type", ""),
+                        })
         except Exception:
             pass
 
-        # Commitment data — fetched once per hour with a 5s timeout, then cached.
-        # Passing a non-None dict prevents build_scorecard from making its own
-        # analyze_commitments call (which would add 5-10 s per request).
+        # Commitment data — 1-hour cache, 5s timeout.
         _commit_dict = await _get_commitment_data()
+
+        # Tag hygiene: estimate untagged spend using CE.
+        # Cached alongside commitment data (1-hour TTL).
+        _untagged_usd: float = 0.0
+        try:
+            _untagged_usd = _COMMIT_CACHE.get("_untagged_spend_usd", 0.0) if _COMMIT_CACHE else 0.0
+            if _untagged_usd == 0.0 and configured.get("aws"):
+                import boto3
+                ce = boto3.client("ce", region_name="us-east-1")
+                today_str = date.today().isoformat()
+                month_start_str = date.today().replace(day=1).isoformat()
+                resp = ce.get_cost_and_usage(
+                    TimePeriod={"Start": month_start_str, "End": today_str},
+                    Granularity="MONTHLY",
+                    Filter={"Not": {"Tags": {"Key": "team", "Values": [""]}}},
+                    Metrics=["UnblendedCost"],
+                )
+                tagged_spend = sum(
+                    float(r["Total"]["UnblendedCost"]["Amount"])
+                    for r in resp.get("ResultsByTime", [])
+                )
+                _untagged_usd = max(0.0, (result.get("total_spend_mtd", 0) or 0) - tagged_spend)
+                if _COMMIT_CACHE is not None:
+                    _COMMIT_CACHE["_untagged_spend_usd"] = _untagged_usd
+        except Exception:
+            pass
 
         def _run_scorecard():
             return build_scorecard(
@@ -353,6 +383,7 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
                 label="Overall",
                 idle_resources=_idle,
                 commitment_data=_commit_dict,
+                untagged_spend_usd=_untagged_usd,
                 total_monthly_spend=result.get("total_spend_mtd", 0.0),
             )
 
@@ -397,7 +428,11 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
                         resource_id=opp.get("resource", opp.get("service", "unknown")),
                         resource_type=opp.get("service", ""),
                         resource_name=opp.get("resource", ""),
-                        current_config={},
+                        # Store range in current_config so it doesn't affect the dedup key
+                        current_config={
+                            "monthly_saving_min": opp.get("monthly_saving_min"),
+                            "monthly_saving_max": opp.get("monthly_saving_max"),
+                        },
                         recommended_config={"action": opp.get("effort", "")},
                         description=opp.get("description", ""),
                         estimated_monthly_savings_usd=opp.get("monthly_saving", 0.0),
@@ -413,21 +448,47 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
     from .recommendations.savings_tracker import list_recommendations, get_summary
     try:
         open_recs = list_recommendations(status="open", limit=20)
-        result["recent_opportunities"] = [
-            {
+        def _build_opp(r: dict) -> dict:
+            import json as _json
+            saving = round(r["estimated_monthly_savings_usd"], 2)
+            opp: dict = {
                 "id": r["id"],
                 "description": r["description"],
-                "monthly_saving": round(r["estimated_monthly_savings_usd"], 2),
+                "monthly_saving": saving,
                 "resource": r["resource_name"] or r["resource_id"],
                 "service": r["source"],
                 "effort": _effort_from_source(r["source"]),
-                "impact": _impact_from_saving(r["estimated_monthly_savings_usd"]),
+                "impact": _impact_from_saving(saving),
             }
-            for r in open_recs
-        ]
-        result["opportunities_count"] = len(open_recs)
+            # Restore min/max range stored in current_config (doesn't affect dedup key)
+            for cfg_field in ("current_config", "recommended_config"):
+                try:
+                    cfg = _json.loads(r.get(cfg_field, "{}") or "{}")
+                    mn = cfg.get("monthly_saving_min")
+                    mx = cfg.get("monthly_saving_max")
+                    if mn is not None and mx is not None and float(mx) > float(mn):
+                        opp["monthly_saving_min"] = round(float(mn), 2)
+                        opp["monthly_saving_max"] = round(float(mx), 2)
+                        break
+                except Exception:
+                    pass
+            return opp
+
+        # Build and deduplicate by description (handles legacy duplicates in DB)
+        seen_desc: set[str] = set()
+        opps_deduped = []
+        for r in open_recs:
+            desc = r.get("description", "")
+            if desc in seen_desc:
+                continue
+            seen_desc.add(desc)
+            opps_deduped.append(_build_opp(r))
+        # Sort highest saving first, prefer entries with ranges
+        opps_deduped.sort(key=lambda o: o.get("monthly_saving", 0), reverse=True)
+        result["recent_opportunities"] = opps_deduped
+        result["opportunities_count"] = len(opps_deduped)
         result["opportunities_total_saving"] = round(
-            sum(r["estimated_monthly_savings_usd"] for r in open_recs), 2
+            sum(o["monthly_saving"] for o in opps_deduped), 2
         )
     except Exception as exc:
         log.debug("Could not read open recs: %s", exc)
@@ -617,9 +678,15 @@ async def _live_opportunities(aws: Any) -> list[dict]:
                 w = data.get("estimated_monthly_waste", 0) or 0
                 if w > 0:
                     callers = data.get("non_prod_callers", [])
+                    # Range: min = ~50% of savings (conservative: only some envs disabled),
+                    # max = full waste (all non-prod disabled). Anchored on env signals not raw callers.
+                    w_min = round(w * 0.5, 2)
+                    w_max = round(w, 2)
                     out.append({
                         "description": f"Disable Textract in non-production environments ({len(callers)} caller(s) detected)",
-                        "monthly_saving": round(w, 2),
+                        "monthly_saving": w_max,
+                        "monthly_saving_min": w_min,
+                        "monthly_saving_max": w_max,
                         "resource": "Amazon Textract", "effort": "LOW",
                         "impact": "high", "service": "Textract",
                     })

@@ -286,6 +286,8 @@ def list_recommendations(
             "description": r.description,
             "estimated_monthly_savings_usd": r.estimated_monthly_savings_usd,
             "verified_monthly_savings_usd": r.verified_monthly_savings_usd,
+            "recommended_config": r.recommended_config,
+            "current_config": r.current_config,
             "status": r.status,
             "generated_at": r.generated_at.isoformat() if r.generated_at else None,
             "acted_on_at": r.acted_on_at.isoformat() if r.acted_on_at else None,
