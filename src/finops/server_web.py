@@ -4,17 +4,22 @@ nable web dashboard server.
 Serves a self-contained HTML dashboard that auto-refreshes every 60 seconds.
 Any browser on the same network can access it -- no credentials or installation needed.
 
+Also serves a Tableau Web Data Connector at /tableau so analysts can connect
+Tableau Desktop directly to live nable cost data.
+
 Usage:
     finops serve [--port 8080] [--host 0.0.0.0] [--open]
 """
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import socket
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, date, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
@@ -182,6 +187,286 @@ async def _fetch_dashboard_data() -> dict[str, Any]:
         pass
 
     return result
+
+
+# ── Tableau data fetchers ────────────────────────────────────────────────────
+
+def _fetch_tableau_costs() -> list[dict]:
+    """Return cost_snapshots rows from the last 90 days as a list of dicts."""
+    try:
+        from .storage.db import cost_snapshots, get_engine
+        from sqlalchemy import select
+
+        cutoff = (date.today() - timedelta(days=90)).isoformat()
+        engine = get_engine()
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    cost_snapshots.c.service,
+                    cost_snapshots.c.provider,
+                    cost_snapshots.c.account_id,
+                    cost_snapshots.c.snapshot_date,
+                    cost_snapshots.c.amount_usd,
+                    cost_snapshots.c.region,
+                ).where(cost_snapshots.c.snapshot_date >= cutoff)
+                .order_by(cost_snapshots.c.snapshot_date.desc())
+            ).fetchall()
+        return [
+            {
+                "service": r.service,
+                "provider": r.provider,
+                "account_id": r.account_id,
+                "snapshot_date": r.snapshot_date,
+                "amount_usd": round(r.amount_usd, 4),
+                "region": r.region,
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        log.debug("Tableau costs fetch failed: %s", exc)
+        return []
+
+
+def _fetch_tableau_opportunities() -> list[dict]:
+    """Return all savings_recommendations rows as a list of dicts."""
+    try:
+        from .storage.db import savings_recommendations, get_engine
+        from sqlalchemy import select
+
+        engine = get_engine()
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    savings_recommendations.c.description,
+                    savings_recommendations.c.source,
+                    savings_recommendations.c.estimated_monthly_savings_usd,
+                    savings_recommendations.c.status,
+                    savings_recommendations.c.generated_at,
+                ).order_by(savings_recommendations.c.estimated_monthly_savings_usd.desc())
+            ).fetchall()
+        return [
+            {
+                "title": r.description or r.source,
+                "category": r.source.capitalize() if r.source else "",
+                "monthly_savings": round(r.estimated_monthly_savings_usd or 0.0, 2),
+                "annual_savings": round((r.estimated_monthly_savings_usd or 0.0) * 12, 2),
+                "status": r.status or "open",
+                "created_at": (
+                    r.generated_at.strftime("%Y-%m-%d")
+                    if isinstance(r.generated_at, datetime)
+                    else str(r.generated_at)[:10]
+                ),
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        log.debug("Tableau opportunities fetch failed: %s", exc)
+        return []
+
+
+def _fetch_tableau_anomalies() -> list[dict]:
+    """Return anomaly rows from the last 90 days as a list of dicts."""
+    try:
+        from .storage.db import anomalies, get_engine
+        from sqlalchemy import select
+
+        cutoff = (date.today() - timedelta(days=90)).isoformat()
+        engine = get_engine()
+        with engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    anomalies.c.service,
+                    anomalies.c.detected_at,
+                    anomalies.c.severity,
+                    anomalies.c.pct_change,
+                    anomalies.c.current_amount,
+                    anomalies.c.baseline_mean,
+                    anomalies.c.acknowledged,
+                ).where(anomalies.c.snapshot_date >= cutoff)
+                .order_by(anomalies.c.detected_at.desc())
+            ).fetchall()
+        return [
+            {
+                "service": r.service,
+                "detected_at": (
+                    r.detected_at.strftime("%Y-%m-%dT%H:%M:%S")
+                    if isinstance(r.detected_at, datetime)
+                    else str(r.detected_at)
+                ),
+                "severity": r.severity,
+                "pct_change": round(r.pct_change, 2),
+                "current_amount": round(r.current_amount, 4),
+                "baseline_mean": round(r.baseline_mean, 4),
+                "acknowledged": bool(r.acknowledged),
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        log.debug("Tableau anomalies fetch failed: %s", exc)
+        return []
+
+
+def _to_csv(rows: list[dict]) -> bytes:
+    """Serialize a list of dicts to CSV bytes."""
+    if not rows:
+        return b""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()), lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue().encode()
+
+
+# ── Tableau WDC HTML ─────────────────────────────────────────────────────────
+
+_TABLEAU_WDC_HTML = """\
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nable - Tableau Web Data Connector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://connectors.tableau.com/libs/tableauwdc-2.3.latest.js" type="text/javascript"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#0d0f10;color:#e8ecef;
+  font-family:'Instrument Sans',system-ui,sans-serif;
+  font-size:15px;line-height:1.5;
+  display:flex;align-items:center;justify-content:center;min-height:100vh;
+  padding:24px;
+}
+.card{
+  background:#15191c;border:1px solid #252b30;border-radius:12px;
+  padding:40px 36px;max-width:480px;width:100%;
+}
+.logo{font-size:18px;font-weight:600;margin-bottom:24px;letter-spacing:-.01em}
+.logo span{color:#4db8d4}
+h1{font-size:20px;font-weight:600;margin-bottom:8px}
+p{color:#9ba8b4;font-size:14px;margin-bottom:24px;line-height:1.6}
+.tables{display:flex;flex-direction:column;gap:8px;margin-bottom:28px}
+.table-item{
+  background:#1c2126;border:1px solid #252b30;border-radius:8px;
+  padding:12px 16px;display:flex;align-items:center;gap:12px;
+}
+.table-dot{width:8px;height:8px;border-radius:50%;background:#4db8d4;flex-shrink:0}
+.table-name{font-weight:500;font-size:14px}
+.table-desc{font-size:12px;color:#5a6472;margin-top:2px}
+button{
+  width:100%;padding:12px;border-radius:8px;border:none;
+  background:#4db8d4;color:#0d0f10;font-family:inherit;
+  font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s;
+}
+button:hover{opacity:.88}
+.note{font-size:12px;color:#5a6472;text-align:center;margin-top:16px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo"><span>n</span>able</div>
+  <h1>Tableau Web Data Connector</h1>
+  <p>Connect Tableau Desktop to live nable cost data. Click "Connect to nable" to load the three available tables.</p>
+  <div class="tables">
+    <div class="table-item">
+      <div class="table-dot"></div>
+      <div>
+        <div class="table-name">Cloud Costs by Service</div>
+        <div class="table-desc">Daily spend per service. Last 90 days.</div>
+      </div>
+    </div>
+    <div class="table-item">
+      <div class="table-dot"></div>
+      <div>
+        <div class="table-name">Savings Opportunities</div>
+        <div class="table-desc">All open and acted-on recommendations with estimated savings.</div>
+      </div>
+    </div>
+    <div class="table-item">
+      <div class="table-dot"></div>
+      <div>
+        <div class="table-name">Cost Anomalies</div>
+        <div class="table-desc">Detected anomalies with severity and delta. Last 90 days.</div>
+      </div>
+    </div>
+  </div>
+  <button id="connectBtn">Connect to nable</button>
+  <p class="note">Run <code>finops serve</code> to keep this connector active.</p>
+</div>
+<script>
+(function(){
+  var myConnector = tableau.makeConnector();
+
+  myConnector.getSchema = function(schemaCallback){
+    var costsSchema = {
+      id: "costs",
+      alias: "Cloud Costs by Service",
+      columns: [
+        {id:"service",     alias:"Service",          dataType:tableau.dataTypeEnum.string},
+        {id:"provider",    alias:"Provider",          dataType:tableau.dataTypeEnum.string},
+        {id:"account_id",  alias:"Account ID",        dataType:tableau.dataTypeEnum.string},
+        {id:"snapshot_date", alias:"Date",            dataType:tableau.dataTypeEnum.date},
+        {id:"amount_usd",  alias:"Amount (USD)",      dataType:tableau.dataTypeEnum.float},
+        {id:"region",      alias:"Region",            dataType:tableau.dataTypeEnum.string},
+      ]
+    };
+
+    var oppsSchema = {
+      id: "opportunities",
+      alias: "Savings Opportunities",
+      columns: [
+        {id:"title",           alias:"Opportunity",           dataType:tableau.dataTypeEnum.string},
+        {id:"category",        alias:"Category",              dataType:tableau.dataTypeEnum.string},
+        {id:"monthly_savings", alias:"Monthly Saving (USD)",  dataType:tableau.dataTypeEnum.float},
+        {id:"annual_savings",  alias:"Annual Saving (USD)",   dataType:tableau.dataTypeEnum.float},
+        {id:"status",          alias:"Status",                dataType:tableau.dataTypeEnum.string},
+        {id:"created_at",      alias:"Found On",              dataType:tableau.dataTypeEnum.date},
+      ]
+    };
+
+    var anomSchema = {
+      id: "anomalies",
+      alias: "Cost Anomalies",
+      columns: [
+        {id:"service",         alias:"Service",               dataType:tableau.dataTypeEnum.string},
+        {id:"detected_at",     alias:"Detected At",           dataType:tableau.dataTypeEnum.datetime},
+        {id:"severity",        alias:"Severity",              dataType:tableau.dataTypeEnum.string},
+        {id:"pct_change",      alias:"% Change",              dataType:tableau.dataTypeEnum.float},
+        {id:"current_amount",  alias:"Current Amount (USD)",  dataType:tableau.dataTypeEnum.float},
+        {id:"baseline_mean",   alias:"Baseline Mean (USD)",   dataType:tableau.dataTypeEnum.float},
+        {id:"acknowledged",    alias:"Acknowledged",          dataType:tableau.dataTypeEnum.bool},
+      ]
+    };
+
+    schemaCallback([costsSchema, oppsSchema, anomSchema]);
+  };
+
+  myConnector.getData = function(table, doneCallback){
+    var urlMap = {
+      costs:         "/api/tableau/costs",
+      opportunities: "/api/tableau/opportunities",
+      anomalies:     "/api/tableau/anomalies",
+    };
+    var url = urlMap[table.tableInfo.id];
+    if(!url){ doneCallback(); return; }
+
+    fetch(url)
+      .then(function(r){ return r.json(); })
+      .then(function(data){ table.appendRows(data); doneCallback(); })
+      .catch(function(err){ console.error("nable WDC error:", err); doneCallback(); });
+  };
+
+  tableau.registerConnector(myConnector);
+
+  document.getElementById("connectBtn").addEventListener("click", function(){
+    tableau.connectionName = "nable Cost Data";
+    tableau.submit();
+  });
+})();
+</script>
+</body>
+</html>
+"""
 
 
 # ── Dashboard HTML ────────────────────────────────────────────────────────────
@@ -464,13 +749,30 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_csv(self, rows: list[dict], filename: str) -> None:
+        body = _to_csv(rows)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?")[0]
+
+        # Dashboard
         if path == "/" or path == "/index.html":
             self._send(200, "text/html; charset=utf-8", _DASHBOARD_HTML.encode())
+
+        # Health
         elif path == "/health":
             body = json.dumps({"status": "ok"}).encode()
             self._send(200, "application/json", body)
+
+        # Dashboard data
         elif path == "/api/data":
             try:
                 loop = asyncio.new_event_loop()
@@ -480,6 +782,34 @@ class _Handler(BaseHTTPRequestHandler):
                 data = {"error": str(exc), "generated_at": datetime.now(timezone.utc).isoformat()}
             body = json.dumps(data).encode()
             self._send(200, "application/json", body)
+
+        # Tableau WDC connector page
+        elif path == "/tableau":
+            self._send(200, "text/html; charset=utf-8", _TABLEAU_WDC_HTML.encode())
+
+        # Tableau JSON API endpoints
+        elif path == "/api/tableau/costs":
+            body = json.dumps(_fetch_tableau_costs()).encode()
+            self._send(200, "application/json", body)
+
+        elif path == "/api/tableau/opportunities":
+            body = json.dumps(_fetch_tableau_opportunities()).encode()
+            self._send(200, "application/json", body)
+
+        elif path == "/api/tableau/anomalies":
+            body = json.dumps(_fetch_tableau_anomalies()).encode()
+            self._send(200, "application/json", body)
+
+        # Tableau CSV download endpoints
+        elif path == "/tableau/costs.csv":
+            self._send_csv(_fetch_tableau_costs(), "costs.csv")
+
+        elif path == "/tableau/opportunities.csv":
+            self._send_csv(_fetch_tableau_opportunities(), "opportunities.csv")
+
+        elif path == "/tableau/anomalies.csv":
+            self._send_csv(_fetch_tableau_anomalies(), "anomalies.csv")
+
         else:
             self._send(404, "text/plain", b"Not found")
 

@@ -10140,5 +10140,41 @@ async def start_dashboard_server(
         return {"error": str(exc)}
 
 
+@mcp.tool()
+async def get_tableau_connection_info(port: int = 8080) -> str:
+    """
+    Returns the Tableau Web Data Connector URL for connecting Tableau Desktop to nable.
+
+    Use when:
+        - "How do I connect Tableau?"
+        - "Tableau integration"
+        - "What's the Tableau URL?"
+        - "Connect Tableau to nable"
+    """
+    try:
+        from .server_web import _local_ip
+        ip = _local_ip()
+        base = f"http://{ip}:{port}"
+        return f"""## Connecting Tableau to nable
+
+1. Open Tableau Desktop
+2. Click "Connect" -> "To a Server" -> "Web Data Connector"
+3. Enter this URL: {base}/tableau
+4. Click "Connect" - Tableau will load the nable connector
+5. Select the tables you want (Costs, Opportunities, or Anomalies)
+6. Click "Update Now" to fetch data
+
+Or download CSVs directly:
+- Costs: {base}/tableau/costs.csv
+- Opportunities: {base}/tableau/opportunities.csv
+- Anomalies: {base}/tableau/anomalies.csv
+
+Run `finops serve` first if the server is not running.
+"""
+    except Exception as exc:
+        log.error("get_tableau_connection_info failed: %s", exc)
+        return f"Error: {exc}"
+
+
 if __name__ == "__main__":
     main()
