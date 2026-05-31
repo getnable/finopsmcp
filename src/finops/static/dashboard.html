@@ -1,503 +1,762 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>nable | Cost Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="/static/chart.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
 :root{
-  --bg:#0d0f10;
-  --bg1:#111416;
-  --bg2:#181c1f;
-  --bg3:#1e2327;
-  --line:#242a2e;
-  --line2:#2e3539;
-  --fg:#f0f2f3;
-  --fg2:#94a3ab;
-  --fg3:#56656d;
-  --fg4:#2d3a40;
-  --accent:#4db8d4;
-  --accent-dim:#2c7d91;
-  --success:#3cba7a;
-  --warn:#e6a840;
-  --alert:#e05c4b;
-  --r-xs:2px;
-  --r-sm:4px;
-  --r-md:6px;
-  --r-lg:8px;
-  --r-xl:12px;
-  --font:'Instrument Sans',system-ui,sans-serif;
-  --mono:'Geist Mono','JetBrains Mono',monospace;
+  /* Dark (default) */
+  --bg:        #0c0e10;
+  --bg1:       #111416;
+  --bg2:       #181c1f;
+  --bg3:       #1e2428;
+  --line:      #222831;
+  --line2:     #2a333a;
+  --fg:        #f0f2f4;
+  --fg2:       #8fa3ae;
+  --fg3:       #4e6470;
+  --fg4:       #2b3840;
+  --accent:    #4db8d4;
+  --accent2:   #38a8c4;
+  --success:   #3bba7a;
+  --warn:      #e6a840;
+  --alert:     #e05c4b;
+  --shadow:    0 1px 3px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.2);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
+  --r:         12px;
+  --font:      'Instrument Sans',system-ui,sans-serif;
+  --mono:      'Geist Mono','JetBrains Mono',monospace;
 }
-html,body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:15px;line-height:1.5;min-height:100vh}
-body{padding:0 0 60px}
-.container{max-width:1400px;margin:0 auto;padding:0 32px}
 
-/* Top nav bar */
-.topbar{background:var(--bg);border-bottom:1px solid var(--line);padding:14px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
-.topbar-left{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
-.logo{font-size:17px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
+[data-theme="light"]{
+  --bg:        #f4f5f7;
+  --bg1:       #ffffff;
+  --bg2:       #f0f1f3;
+  --bg3:       #e8eaed;
+  --line:      #e1e4e8;
+  --line2:     #d0d5db;
+  --fg:        #111827;
+  --fg2:       #4b5563;
+  --fg3:       #6b7280;
+  --fg4:       #9ca3af;
+  --shadow:    0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.06);
+}
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+html,body{
+  background:var(--bg);color:var(--fg);
+  font-family:var(--font);font-size:15px;line-height:1.5;
+  min-height:100vh;transition:background .2s,color .2s;
+}
+
+/* ── Top nav ───────────────────────────────────────────────────────────────── */
+.topbar{
+  background:var(--bg);border-bottom:1px solid var(--line);
+  padding:0 32px;height:52px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:40;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+}
+.topbar-left{display:flex;align-items:center;gap:20px}
+.logo{
+  font-size:18px;font-weight:700;letter-spacing:-.025em;
+  color:var(--fg);text-decoration:none;display:flex;align-items:center;
+}
 .logo .n{color:var(--accent)}
-.header-title{font-size:14px;color:var(--fg2);border-left:1px solid var(--line2);padding-left:20px}
-.topbar-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:var(--r-lg)}
-.badge-green{background:rgba(60,186,122,.12);color:var(--success);border:1px solid rgba(60,186,122,.3)}
-.badge-red{background:rgba(224,92,75,.12);color:var(--alert);border:1px solid rgba(224,92,75,.3)}
-.badge-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
-.header-date{font-size:13px;color:var(--fg2);font-weight:500;letter-spacing:.01em}
+.nav-sep{width:1px;height:18px;background:var(--line2)}
+.nav-title{font-size:13px;color:var(--fg2);font-weight:500;letter-spacing:.01em}
+.topbar-right{display:flex;align-items:center;gap:10px}
 
-/* Main content area */
-.main{padding:28px 0 0}
+/* Provider badge */
+.prov-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 10px;border-radius:6px;cursor:default;
+}
+.prov-badge-green{background:rgba(59,186,122,.1);color:var(--success);border:1px solid rgba(59,186,122,.25)}
+.prov-badge-red{background:rgba(224,92,75,.1);color:var(--alert);border:1px solid rgba(224,92,75,.25)}
+.prov-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
 
-/* Top bar: section label + provider filters */
-.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:12px}
-.section-label{font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.1em}
-.provider-filters{display:flex;align-items:center;gap:0}
-.pf-btn{background:var(--bg1);border:1px solid var(--line);color:var(--fg3);font-family:var(--font);font-size:11px;font-weight:500;padding:5px 12px;cursor:pointer;transition:background .15s,color .15s;letter-spacing:.02em}
-.pf-btn:first-child{border-radius:var(--r-lg) 0 0 var(--r-lg)}
-.pf-btn:last-child{border-radius:0 var(--r-lg) var(--r-lg) 0}
+/* Date */
+.nav-date{font-size:12px;font-weight:500;color:var(--fg2);letter-spacing:.02em}
+
+/* Theme toggle */
+.theme-btn{
+  width:32px;height:32px;border-radius:8px;border:1px solid var(--line2);
+  background:var(--bg2);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:background .15s,border-color .15s;
+}
+.theme-btn:hover{background:var(--bg3)}
+.theme-btn svg{width:15px;height:15px;fill:none;stroke:var(--fg2);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── Layout ───────────────────────────────────────────────────────────────── */
+.page{max-width:1440px;margin:0 auto;padding:28px 32px 60px}
+
+/* Section label */
+.section-label{
+  font-size:10px;font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--accent);margin-bottom:16px;
+}
+
+/* Top bar: label + controls */
+.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+
+/* Range controls */
+.range-group{display:flex;align-items:center;gap:1px}
+.range-btn{
+  padding:4px 11px;border:1px solid var(--line2);
+  background:var(--bg2);color:var(--fg3);
+  font-family:var(--font);font-size:11px;font-weight:500;letter-spacing:.02em;
+  cursor:pointer;transition:background .15s,color .15s,border-color .15s;
+}
+.range-btn:first-child{border-radius:6px 0 0 6px}
+.range-btn:last-child{border-radius:0 6px 6px 0}
+.range-btn:not(:first-child){border-left:none}
+.range-btn.active{background:var(--bg3);color:var(--fg);border-color:var(--line2)}
+.range-btn:hover:not(.active){background:var(--bg3);color:var(--fg2)}
+
+/* Provider filter */
+.pf-group{display:flex;align-items:center;gap:1px;margin-left:8px}
+.pf-btn{
+  padding:4px 11px;border:1px solid var(--line2);
+  background:var(--bg2);color:var(--fg3);
+  font-family:var(--font);font-size:11px;font-weight:500;
+  cursor:pointer;transition:background .15s,color .15s;
+}
+.pf-btn:first-child{border-radius:6px 0 0 6px}
+.pf-btn:last-child{border-radius:0 6px 6px 0}
 .pf-btn:not(:first-child){border-left:none}
-.pf-btn.active{background:var(--bg3);color:var(--fg);border-color:var(--line2)}
+.pf-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.controls-row{display:flex;align-items:center;gap:6px}
 
-/* Stat cards */
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
-@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:500px){.cards{grid-template-columns:1fr}}
-.card{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:22px 24px}
-.card-label{font-size:11px;font-weight:500;color:var(--fg3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
-.card-value{font-size:30px;font-weight:600;line-height:1;color:var(--fg);font-family:var(--mono)}
-.card-sub{font-size:12px;color:var(--fg3);margin-top:8px}
+/* ── Stat cards ────────────────────────────────────────────────────────────── */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+@media(max-width:960px){.cards{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.cards{grid-template-columns:1fr}}
+
+.card{
+  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);
+  padding:20px 22px;box-shadow:var(--shadow-sm);
+  transition:box-shadow .2s;
+}
+.card-label{
+  font-size:10px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--fg3);margin-bottom:12px;
+}
+.card-value{
+  font-size:32px;font-weight:600;line-height:1;
+  letter-spacing:-.03em;color:var(--fg);font-family:var(--mono);
+}
+.card-sub{font-size:12px;color:var(--fg3);margin-top:8px;line-height:1.4}
 .card-sub.up{color:var(--alert)}
 .card-sub.down{color:var(--success)}
-.card-sub.neutral{color:var(--fg3)}
-/* Score card */
-.score-big{font-size:44px;font-weight:600;font-family:var(--mono);line-height:1;margin-bottom:6px}
-.score-sub{font-size:12px;color:var(--fg3);margin-top:4px}
-.score-gaps{font-size:11px;color:var(--fg3);margin-top:4px}
 
-/* Panel */
-.panel{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:20px 22px}
-.panel-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-.panel-title{font-size:11px;font-weight:500;color:var(--fg3);text-transform:uppercase;letter-spacing:.08em}
-.panel-badge{display:inline-flex;align-items:center;font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:var(--r-xs);background:var(--bg3);color:var(--fg3);border:1px solid var(--line2)}
+/* Grade card */
+.grade-display{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.grade-letter{
+  font-size:48px;font-weight:700;font-family:var(--mono);line-height:1;letter-spacing:-.04em;
+}
+.grade-a{color:var(--success)}
+.grade-b{color:var(--accent)}
+.grade-c{color:var(--warn)}
+.grade-d,.grade-f{color:var(--alert)}
+.grade-score-text{font-size:14px;color:var(--fg3);font-family:var(--mono)}
+.grade-trend{font-size:11px;margin-top:4px}
+.grade-trend.up{color:var(--success)}
+.grade-trend.down{color:var(--alert)}
+.grade-trend.stable{color:var(--fg3)}
+.grade-gaps{font-size:11px;color:var(--fg3);margin-top:3px;line-height:1.4}
 
-/* Charts row */
-.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
-@media(max-width:768px){.charts-row{grid-template-columns:1fr}}
-
-/* Bottom row */
-.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:40px}
-.bottom-row .panel{min-height:320px}
-@media(max-width:768px){.bottom-row{grid-template-columns:1fr}}
-
-/* Chart containers */
-.chart-wrap{position:relative;height:260px}
-
-/* Efficiency scorecard */
-.scorecard-list{list-style:none;display:flex;flex-direction:column;gap:14px}
-.sc-item{display:flex;flex-direction:column;gap:6px}
-.sc-header{display:flex;align-items:center;justify-content:space-between}
-.sc-name{font-size:13px;color:var(--fg)}
-.sc-score{font-size:12px;font-family:var(--mono);color:var(--fg3)}
-.sc-bar-bg{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden}
-.sc-bar-fill{height:100%;border-radius:2px;transition:width .5s ease}
-
-/* Mini ledger in savings card */
-.ledger-mini{display:flex;flex-direction:column;gap:4px}
-.lm-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--fg3)}
+/* Ledger mini */
+.ledger-mini{display:none;flex-direction:column;gap:3px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.lm-row{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg3)}
 .lm-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 
-/* Savings pipeline ledger (full row) */
-.ledger-row{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:20px 28px;margin-bottom:14px;display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;gap:0}
-.ledger-stage{display:flex;flex-direction:column;gap:4px;padding:0 16px}
-.ledger-stage:first-child{padding-left:0}
-.ledger-stage:last-child{padding-right:0}
-.ls-label{font-size:10px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.08em}
-.ls-value{font-size:26px;font-weight:600;font-family:var(--mono);line-height:1}
-.ls-sub{font-size:11px;color:var(--fg3);margin-top:2px}
+/* ── Panels ────────────────────────────────────────────────────────────────── */
+.panel{
+  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);
+  padding:20px 22px;box-shadow:var(--shadow-sm);
+}
+.panel-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.panel-title{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3)}
+.panel-chip{
+  font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  padding:3px 8px;border-radius:4px;
+  background:var(--bg3);color:var(--fg3);border:1px solid var(--line2);
+}
+.panel-chip-accent{background:rgba(77,184,212,.1);color:var(--accent);border-color:rgba(77,184,212,.25)}
+
+/* ── Charts ───────────────────────────────────────────────────────────────── */
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+@media(max-width:800px){.charts-row{grid-template-columns:1fr}}
+.chart-wrap{position:relative;height:260px}
+
+/* ── Bottom row ───────────────────────────────────────────────────────────── */
+.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.bottom-row .panel{min-height:320px}
+@media(max-width:800px){.bottom-row{grid-template-columns:1fr}}
+
+/* ── Savings pipeline ledger ─────────────────────────────────────────────── */
+.ledger-row{
+  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);
+  padding:18px 28px;display:none;
+  grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;
+  box-shadow:var(--shadow-sm);margin-bottom:12px;
+}
+.ls-stage{padding:0 20px}
+.ls-stage:first-child{padding-left:0}
+.ls-stage:last-child{padding-right:0}
+.ls-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);margin-bottom:4px}
+.ls-value{font-size:24px;font-weight:600;font-family:var(--mono);letter-spacing:-.02em;line-height:1}
 .ls-identified{color:var(--fg)}
 .ls-acted{color:var(--warn)}
 .ls-verified{color:var(--success)}
-.ledger-arrow{font-size:18px;color:var(--line2);padding:0 8px;user-select:none}
+.ls-sub{font-size:11px;color:var(--fg3);margin-top:3px}
+.ledger-arrow{color:var(--line2);font-size:20px;padding:0 4px;flex-shrink:0}
 
-/* Savings opportunities */
+/* ── Efficiency scorecard ─────────────────────────────────────────────────── */
+.sc-list{list-style:none;display:flex;flex-direction:column;gap:12px}
+.sc-item{display:flex;flex-direction:column;gap:5px}
+.sc-hdr{display:flex;align-items:center;justify-content:space-between}
+.sc-name{font-size:13px;color:var(--fg);font-weight:400}
+.sc-right{display:flex;align-items:center;gap:10px}
+.sc-score-text{font-size:11px;font-family:var(--mono);color:var(--fg3)}
+.sc-grade-pill{
+  font-size:10px;font-weight:700;width:20px;text-align:center;
+  font-family:var(--mono);
+}
+.gp-a{color:var(--success)}
+.gp-b{color:var(--accent)}
+.gp-c{color:var(--warn)}
+.gp-d,.gp-f{color:var(--alert)}
+.sc-bar-bg{height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.sc-bar-fill{height:100%;border-radius:2px;transition:width .6s cubic-bezier(.4,0,.2,1)}
+
+/* ── Savings opportunities ───────────────────────────────────────────────── */
 .opp-list{list-style:none;display:flex;flex-direction:column}
-.opp-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+.opp-item{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 0;border-bottom:1px solid var(--line);
+}
 .opp-item:last-child{border-bottom:none}
-.opp-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.opp-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .opp-dot-high{background:var(--alert)}
-.opp-dot-medium{background:var(--warn)}
+.opp-dot-med{background:var(--warn)}
 .opp-dot-low{background:var(--success)}
 .opp-body{flex:1;min-width:0}
-.opp-desc{font-size:13px;color:var(--fg);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.opp-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.opp-saving{font-size:13px;font-weight:500;color:var(--success);font-family:var(--mono);white-space:nowrap}
-.effort-badge{font-size:9px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;border-radius:var(--r-xs);white-space:nowrap}
-.effort-low{background:rgba(60,186,122,.12);color:var(--success);border:1px solid rgba(60,186,122,.2)}
-.effort-medium{background:rgba(230,168,64,.12);color:var(--warn);border:1px solid rgba(230,168,64,.2)}
-.effort-zero{background:rgba(77,184,212,.12);color:var(--accent);border:1px solid rgba(77,184,212,.2)}
-.effort-high{background:rgba(224,92,75,.12);color:var(--alert);border:1px solid rgba(224,92,75,.2)}
-.done-btn{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:var(--r-xs);border:1px solid var(--line2);background:var(--bg3);color:var(--fg3);cursor:pointer;transition:background .15s,color .15s,border-color .15s;white-space:nowrap;flex-shrink:0}
-.done-btn:hover{background:rgba(60,186,122,.12);color:var(--success);border-color:rgba(60,186,122,.3)}
-.done-btn.marking{opacity:.5;pointer-events:none}
+.opp-desc{
+  font-size:13px;color:var(--fg);line-height:1.35;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.opp-right{display:flex;align-items:center;gap:7px;flex-shrink:0}
+.opp-saving{font-size:13px;font-weight:600;color:var(--success);font-family:var(--mono);white-space:nowrap}
+.effort-chip{
+  font-size:8px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  padding:2px 6px;border-radius:3px;white-space:nowrap;
+}
+.ec-zero{background:rgba(77,184,212,.1);color:var(--accent);border:1px solid rgba(77,184,212,.2)}
+.ec-low{background:rgba(59,186,122,.1);color:var(--success);border:1px solid rgba(59,186,122,.2)}
+.ec-medium{background:rgba(230,168,64,.1);color:var(--warn);border:1px solid rgba(230,168,64,.2)}
+.ec-high{background:rgba(224,92,75,.1);color:var(--alert);border:1px solid rgba(224,92,75,.2)}
 
-/* Error banner */
-.error-banner{background:rgba(224,92,75,.08);border:1px solid rgba(224,92,75,.2);border-radius:var(--r-lg);padding:12px 16px;color:var(--alert);font-size:13px;margin-bottom:16px}
+/* Done button */
+.done-btn{
+  font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  padding:3px 8px;border-radius:4px;border:1px solid var(--line2);
+  background:var(--bg3);color:var(--fg3);cursor:pointer;
+  transition:background .15s,color .15s,border-color .15s;white-space:nowrap;
+}
+.done-btn:hover{background:rgba(59,186,122,.1);color:var(--success);border-color:rgba(59,186,122,.25)}
+.done-btn.marking{opacity:.4;pointer-events:none}
 
-/* Footer */
-footer{text-align:center;padding:16px;font-size:12px;color:var(--fg3)}
+/* TOTAL POTENTIAL row */
+.opp-total{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 0 4px;border-top:1px solid var(--line);margin-top:4px;
+}
+.opp-total-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3)}
+.opp-total-value{font-size:15px;font-weight:700;font-family:var(--mono);color:var(--success)}
+
+/* ── Error banner ────────────────────────────────────────────────────────── */
+.err-banner{
+  background:rgba(224,92,75,.07);border:1px solid rgba(224,92,75,.18);
+  border-radius:var(--r);padding:11px 16px;color:var(--alert);
+  font-size:13px;margin-bottom:14px;display:none;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+footer{text-align:center;padding:20px 0;font-size:12px;color:var(--fg3)}
 footer a{color:var(--accent);text-decoration:none;font-weight:500}
-footer a:hover{filter:brightness(1.15)}
 
-@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+@media(prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+}
 </style>
 </head>
 <body>
 
+<!-- Top nav -->
 <nav class="topbar">
   <div class="topbar-left">
-    <div class="logo"><span class="n">n</span>able</div>
-    <div class="header-title" id="hdr-title">Cost Dashboard</div>
+    <a class="logo" href="/"><span class="n">n</span>able</a>
+    <div class="nav-sep"></div>
+    <div class="nav-title" id="hdr-title">Cost Dashboard</div>
   </div>
   <div class="topbar-right">
-    <span class="badge badge-green" id="provider-badge">
-      <span class="badge-dot"></span>
-      <span id="provider-label">CONNECTING</span>
+    <span class="prov-badge prov-badge-green" id="prov-badge">
+      <span class="prov-dot"></span>
+      <span id="prov-label">CONNECTING</span>
     </span>
-    <div class="header-date" id="hdr-date"></div>
+    <div class="nav-date" id="nav-date"></div>
+    <button class="theme-btn" id="theme-btn" aria-label="Toggle light/dark mode" title="Toggle theme">
+      <!-- sun icon (shown in dark mode) -->
+      <svg id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      <!-- moon icon (shown in light mode) -->
+      <svg id="icon-moon" viewBox="0 0 24 24" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
   </div>
 </nav>
 
-<div class="container">
-<div class="main">
+<div class="page">
+  <div id="err-banner" class="err-banner"></div>
 
-  <div id="error-banner" class="error-banner" style="display:none"></div>
-
+  <!-- Overview + controls -->
   <div class="top-bar">
     <div class="section-label">Overview</div>
-    <div class="provider-filters" id="provider-filters" style="display:none">
-      <button class="pf-btn active" data-provider="all">All</button>
+    <div class="controls-row">
+      <div class="range-group" id="range-group">
+        <button class="range-btn active" data-days="30">30d</button>
+        <button class="range-btn" data-days="60">60d</button>
+        <button class="range-btn" data-days="90">90d</button>
+      </div>
+      <div class="pf-group" id="pf-group" style="display:none"></div>
     </div>
   </div>
 
+  <!-- Stat cards -->
   <div class="cards">
+    <!-- MTD Spend -->
     <div class="card">
       <div class="card-label">MTD Spend</div>
-      <div class="card-value" id="stat-mtd">...</div>
-      <div class="card-sub neutral" id="stat-delta">loading...</div>
+      <div class="card-value" id="stat-mtd">--</div>
+      <div class="card-sub" id="stat-mtd-sub">loading...</div>
     </div>
+    <!-- Projected -->
     <div class="card">
-      <div class="card-label">Projected <span id="proj-month-label">Month</span> Total</div>
-      <div class="card-value" id="stat-projected">...</div>
-      <div class="card-sub" id="stat-projected-sub">run-rate estimate</div>
+      <div class="card-label">Projected <span id="proj-month">Month</span> Total</div>
+      <div class="card-value" id="stat-proj">--</div>
+      <div class="card-sub" id="stat-proj-sub">run-rate estimate</div>
     </div>
+    <!-- Identified savings -->
     <div class="card">
       <div class="card-label">Identified Savings</div>
-      <div class="card-value down" id="stat-savings">...</div>
-      <div class="card-sub neutral" id="stat-savings-sub">per month</div>
-      <div class="ledger-mini" id="ledger-mini" style="margin-top:10px;display:none">
-        <span class="lm-item"><span class="lm-dot" style="background:var(--warn)"></span><span id="lm-acted">$0</span> acted on</span>
-        <span class="lm-item"><span class="lm-dot" style="background:var(--success)"></span><span id="lm-verified">$0</span> verified</span>
+      <div class="card-value down" id="stat-savings">--</div>
+      <div class="card-sub" id="stat-savings-sub">per month</div>
+      <div class="ledger-mini" id="ledger-mini">
+        <div class="lm-row"><span class="lm-dot" style="background:var(--warn)"></span><span id="lm-acted">$0</span> acted on</div>
+        <div class="lm-row"><span class="lm-dot" style="background:var(--success)"></span><span id="lm-verified">$0</span> verified</div>
       </div>
     </div>
+    <!-- FinOps Grade -->
     <div class="card">
-      <div class="card-label">FinOps Score</div>
-      <div class="score-big" id="score-big" style="color:var(--fg3)">--%</div>
-      <div class="score-sub" id="score-sub">calculating...</div>
-      <div class="score-gaps" id="score-gaps"></div>
+      <div class="card-label">FinOps Grade</div>
+      <div class="grade-display">
+        <span class="grade-letter grade-f" id="grade-letter">--</span>
+        <span class="grade-score-text" id="grade-score">--/100</span>
+      </div>
+      <div class="grade-trend" id="grade-trend"></div>
+      <div class="grade-gaps" id="grade-gaps"></div>
     </div>
   </div>
 
   <!-- Savings pipeline ledger -->
-  <div class="ledger-row" id="ledger-row" style="display:none">
-    <div class="ledger-stage">
+  <div class="ledger-row" id="ledger-row">
+    <div class="ls-stage">
       <div class="ls-label">Identified</div>
-      <div class="ls-value ls-identified" id="ls-identified">$0</div>
-      <div class="ls-sub" id="ls-identified-sub">per month — 0 open</div>
+      <div class="ls-value ls-identified" id="ls-id">$0</div>
+      <div class="ls-sub" id="ls-id-sub">0 open</div>
     </div>
     <div class="ledger-arrow">›</div>
-    <div class="ledger-stage">
+    <div class="ls-stage">
       <div class="ls-label">Acted On</div>
       <div class="ls-value ls-acted" id="ls-acted">$0</div>
-      <div class="ls-sub" id="ls-acted-sub">estimated savings</div>
+      <div class="ls-sub" id="ls-acted-sub">no actions yet</div>
     </div>
     <div class="ledger-arrow">›</div>
-    <div class="ledger-stage">
+    <div class="ls-stage">
       <div class="ls-label">Verified Savings</div>
       <div class="ls-value ls-verified" id="ls-verified">$0</div>
-      <div class="ls-sub" id="ls-verified-sub">confirmed by spend drop</div>
+      <div class="ls-sub" id="ls-verified-sub">pending</div>
     </div>
   </div>
 
+  <!-- Charts -->
   <div class="charts-row">
     <div class="panel">
       <div class="panel-hdr">
-        <div class="panel-title">Spend by Service &mdash; Last <span id="chart-days">30</span> Days</div>
-        <span class="panel-badge" id="service-chart-badge">AWS ONLY</span>
+        <div class="panel-title">Spend by Service — Last <span id="chart-days">30</span> Days</div>
+        <span class="panel-chip" id="svc-badge">AWS ONLY</span>
       </div>
-      <div class="chart-wrap"><canvas id="chart-services"></canvas></div>
+      <div class="chart-wrap"><canvas id="chart-svc"></canvas></div>
     </div>
     <div class="panel">
       <div class="panel-hdr">
-        <div class="panel-title">3-Month Cost Trend</div>
-        <span class="panel-badge">MONTHLY</span>
+        <div class="panel-title">Cost Trend</div>
+        <span class="panel-chip">MONTHLY</span>
       </div>
       <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
     </div>
   </div>
 
+  <!-- Bottom row -->
   <div class="bottom-row">
+    <!-- Efficiency Scorecard -->
     <div class="panel">
       <div class="panel-hdr">
         <div class="panel-title">Efficiency Scorecard</div>
-        <span class="panel-badge" id="scorecard-badge">EFFICIENCY</span>
+        <span class="panel-chip" id="sc-badge">OVERALL --</span>
       </div>
-      <ul class="scorecard-list" id="scorecard-list">
+      <ul class="sc-list" id="sc-list">
         <li class="sc-item"><span style="color:var(--fg3);font-size:13px">Loading...</span></li>
       </ul>
     </div>
+    <!-- Savings Opportunities -->
     <div class="panel">
       <div class="panel-hdr">
         <div class="panel-title">Savings Opportunities</div>
-        <span class="panel-badge" id="opp-badge">-- OPEN</span>
+        <span class="panel-chip panel-chip-accent" id="opp-badge">-- OPEN</span>
       </div>
       <ul class="opp-list" id="opp-list">
         <li class="opp-item"><span style="color:var(--fg3);font-size:13px">Loading...</span></li>
       </ul>
+      <div class="opp-total" id="opp-total" style="display:none">
+        <span class="opp-total-label">Total Potential</span>
+        <span class="opp-total-value" id="opp-total-value">$0/mo</span>
+      </div>
     </div>
   </div>
 
 </div>
-</div>
 
-<footer>
-  Powered by <a href="https://getnable.com" target="_blank" rel="noopener">nable</a>
-</footer>
+<footer>Powered by <a href="https://getnable.com" target="_blank" rel="noopener">nable</a></footer>
 
 <script>
 // ── Utilities ────────────────────────────────────────────────────────────────
 function fmt(n){
   if(n==null||isNaN(n)) return '$0';
-  if(n>=1000000) return '$'+(n/1000000).toFixed(1)+'M';
-  if(n>=1000) return '$'+(n/1000).toFixed(1)+'k';
+  if(n>=1e6) return '$'+(n/1e6).toFixed(1)+'M';
+  if(n>=1e3) return '$'+(n/1e3).toFixed(1)+'k';
   return '$'+Math.round(n).toLocaleString('en-US');
 }
-function fmtDelta(n){
-  if(!n||isNaN(n)) return null;
-  const sign=n>0?'+':'';
-  return sign+fmt(Math.abs(n)).replace('$','')+' ';
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function gradeColor(g){
+  const l=String(g||'f').toLowerCase();
+  return l==='a'?'var(--success)':l==='b'?'var(--accent)':l==='c'?'var(--warn)':'var(--alert)';
 }
-function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
+function barColor(s){
+  if(s>=80) return 'var(--success)';
+  if(s>=60) return 'var(--accent)';
+  if(s>=40) return 'var(--warn)';
+  return 'rgba(224,92,75,.55)';
+}
+function gpClass(g){
+  const l=String(g||'f').toLowerCase();
+  return 'gp-'+l;
+}
 
 // ── State ────────────────────────────────────────────────────────────────────
-const selectedDays = 30;
-let selectedProvider = 'all';
-let serviceChart = null;
-let trendChart = null;
+let selectedDays=parseInt(localStorage.getItem('nable_days')||'30',10)||30;
+let selectedProvider=localStorage.getItem('nable_provider')||'all';
+let svcChart=null,trendChart=null;
+
+// ── Theme ────────────────────────────────────────────────────────────────────
+const html=document.documentElement;
+const sunIcon=document.getElementById('icon-sun');
+const moonIcon=document.getElementById('icon-moon');
+
+function applyTheme(theme){
+  html.setAttribute('data-theme',theme);
+  localStorage.setItem('nable_theme',theme);
+  sunIcon.style.display=theme==='dark'?'':'none';
+  moonIcon.style.display=theme==='light'?'':'none';
+  if(svcChart) updateChartTheme(svcChart);
+  if(trendChart) updateChartTheme(trendChart);
+}
+function toggleTheme(){
+  applyTheme(html.getAttribute('data-theme')==='dark'?'light':'dark');
+}
+function updateChartTheme(chart){
+  const isDark=html.getAttribute('data-theme')==='dark';
+  const gridColor=isDark?'rgba(255,255,255,.04)':'rgba(0,0,0,.06)';
+  const tickColor=isDark?'#4e6470':'#6b7280';
+  if(chart.options.scales){
+    Object.values(chart.options.scales).forEach(sc=>{
+      if(sc.ticks) sc.ticks.color=tickColor;
+      if(sc.grid) sc.grid.color=gridColor;
+    });
+    chart.update('none');
+  }
+}
+
+// Init theme from storage
+applyTheme(localStorage.getItem('nable_theme')||'dark');
+document.getElementById('theme-btn').addEventListener('click',toggleTheme);
 
 // ── Header date ──────────────────────────────────────────────────────────────
 function initDate(){
-  const now=new Date();
-  const monthName=now.toLocaleDateString('en-US',{month:'long'}).toUpperCase();
-  const year=now.getFullYear();
-  document.getElementById('hdr-date').textContent=monthName+' '+now.getDate()+', '+year;
-  document.getElementById('proj-month-label').textContent=now.toLocaleDateString('en-US',{month:'long'});
+  const d=new Date();
+  document.getElementById('nav-date').textContent=
+    d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}).toUpperCase();
+  document.getElementById('proj-month').textContent=
+    d.toLocaleDateString('en-US',{month:'long'});
 }
 
-// ── Load data ────────────────────────────────────────────────────────────────
+// ── Range controls ───────────────────────────────────────────────────────────
+function initRangeControls(){
+  document.querySelectorAll('#range-group .range-btn').forEach(btn=>{
+    const d=parseInt(btn.dataset.days,10);
+    if(d===selectedDays) btn.classList.add('active');
+    btn.addEventListener('click',()=>{
+      selectedDays=d;
+      localStorage.setItem('nable_days',String(d));
+      document.querySelectorAll('#range-group .range-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('chart-days').textContent=d;
+      loadData();
+    });
+  });
+}
+
+// ── Provider filter ──────────────────────────────────────────────────────────
+function initProviderFilters(providers){
+  const g=document.getElementById('pf-group');
+  if(!providers||providers.length<=1){g.style.display='none';return;}
+  g.style.display='flex';
+  const labels={aws:'AWS',azure:'Azure',gcp:'GCP',datadog:'Datadog',snowflake:'Snowflake'};
+  g.innerHTML=
+    ['all',...providers].map((p,i)=>{
+      const lbl=p==='all'?'All':labels[p]||p.toUpperCase();
+      const active=selectedProvider===p?' active':'';
+      return `<button class="pf-btn${active}" data-provider="${p}">${lbl}</button>`;
+    }).join('');
+  g.querySelectorAll('.pf-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      selectedProvider=btn.dataset.provider;
+      localStorage.setItem('nable_provider',selectedProvider);
+      g.querySelectorAll('.pf-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      loadData();
+    });
+  });
+}
+
+// ── Data load ────────────────────────────────────────────────────────────────
 async function loadData(){
   try{
     const r=await fetch('/api/data?days='+selectedDays+'&provider='+selectedProvider);
     if(!r.ok) throw new Error('HTTP '+r.status);
     render(await r.json());
-  }catch(err){
-    console.error('Dashboard load failed:',err);
-  }
+  }catch(e){console.error('Dashboard load failed:',e)}
 }
 
-// ── Render ────────────────────────────────────────────────────────────────────
+// ── Render ───────────────────────────────────────────────────────────────────
 function render(d){
-  // Error banner
-  const banner=document.getElementById('error-banner');
+  // Error
+  const banner=document.getElementById('err-banner');
   if(d.error){banner.textContent=d.error;banner.style.display='block';}
   else{banner.style.display='none';}
 
-  // Top nav: account in title, provider badge
+  // Nav
   const acct=d.account_id||'';
   document.getElementById('hdr-title').textContent='Cost Dashboard'+(acct?' — Account '+acct:'');
-  const providers=d.connected_providers||[];
-  const badge=document.getElementById('provider-badge');
-  const provLabel=document.getElementById('provider-label');
-  if(providers.length>0){
-    badge.className='badge badge-green';
-    provLabel.textContent=providers.map(p=>p.toUpperCase()).join('+ ')+' CONNECTED';
+  const provs=d.connected_providers||[];
+  const pb=document.getElementById('prov-badge');
+  const pl=document.getElementById('prov-label');
+  if(provs.length>0){
+    pb.className='prov-badge prov-badge-green';
+    pl.textContent=provs.map(p=>p.toUpperCase()).join('+')+' CONNECTED';
   }else{
-    badge.className='badge badge-red';
-    provLabel.textContent='NO PROVIDER';
+    pb.className='prov-badge prov-badge-red';
+    pl.textContent='NO PROVIDER';
   }
 
-  // Card 1: MTD Spend
+  // Card 1: MTD
   const now=new Date();
-  const dayOfMonth=now.getDate();
-  const daysInMonth=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+  const dom=now.getDate();
+  const dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
   document.getElementById('stat-mtd').textContent=fmt(d.total_spend_mtd||0);
-  const deltaEl=document.getElementById('stat-delta');
-  deltaEl.textContent=dayOfMonth+' of '+daysInMonth+' days elapsed';
-  deltaEl.className='card-sub neutral';
+  document.getElementById('stat-mtd-sub').textContent=dom+' of '+dim+' days elapsed';
 
-  // Card 2: Projected month total
-  document.getElementById('stat-projected').textContent=fmt(d.projected_month_total||0);
-  const projDollar=(d.projected_month_total||0)-(d.total_spend_last_month||0);
-  const projSubEl=document.getElementById('stat-projected-sub');
-  if(Math.abs(projDollar)>1){
-    const sign=projDollar>0?'+':'−';
-    projSubEl.textContent=sign+'$'+Math.round(Math.abs(projDollar)).toLocaleString('en-US')+' vs last month run rate';
-    projSubEl.className='card-sub '+(projDollar>0?'up':'down');
-  }else{
-    projSubEl.textContent='on track with last month';
-    projSubEl.className='card-sub neutral';
-  }
+  // Card 2: Projected
+  document.getElementById('stat-proj').textContent=fmt(d.projected_month_total||0);
+  const diff=(d.projected_month_total||0)-(d.total_spend_last_month||0);
+  const projSub=document.getElementById('stat-proj-sub');
+  if(Math.abs(diff)>1){
+    const sign=diff>0?'+':'−';
+    projSub.textContent=sign+'$'+Math.abs(Math.round(diff)).toLocaleString('en-US')+' vs last month run rate';
+    projSub.className='card-sub '+(diff>0?'up':'down');
+  }else{projSub.textContent='on pace with last month';projSub.className='card-sub';}
 
-  // Card 3: Identified savings + mini ledger
-  document.getElementById('stat-savings').textContent=fmt(d.opportunities_total_saving||0);
+  // Card 3: Savings
   const oppCount=d.opportunities_count||0;
-  document.getElementById('stat-savings-sub').textContent='per month — '+oppCount+' opportunit'+(oppCount===1?'y':'ies');
+  const oppTotal=d.opportunities_total_saving||0;
+  document.getElementById('stat-savings').textContent=fmt(oppTotal);
+  document.getElementById('stat-savings-sub').textContent=
+    'per month — '+oppCount+' opportunit'+(oppCount===1?'y':'ies');
   const ledger=d.savings_ledger||{};
   const actedOn=ledger.acted_on_monthly||0;
-  const verified=ledger.verified_monthly||0;
-  if(actedOn>0||verified>0){
+  const verifiedOn=ledger.verified_monthly||0;
+  if(actedOn>0||verifiedOn>0){
     document.getElementById('lm-acted').textContent=fmt(actedOn);
-    document.getElementById('lm-verified').textContent=fmt(verified);
+    document.getElementById('lm-verified').textContent=fmt(verifiedOn);
     document.getElementById('ledger-mini').style.display='flex';
   }
 
-
-  // Card 4: FinOps score (percentage only, no letter grade)
-  const scorePct=Math.round(d.finops_score||0);
-  const scoreBig=document.getElementById('score-big');
-  scoreBig.textContent=scorePct+'%';
-  let scoreColor,scoreLabel;
-  if(scorePct>=80){scoreColor='var(--success)';scoreLabel='Well optimized';}
-  else if(scorePct>=60){scoreColor='var(--accent)';scoreLabel='Room to improve';}
-  else if(scorePct>=40){scoreColor='var(--warn)';scoreLabel='Needs attention';}
-  else{scoreColor='var(--alert)';scoreLabel='Critical gaps';}
-  scoreBig.style.color=scoreColor;
-  document.getElementById('score-sub').textContent=scoreLabel;
-  document.getElementById('score-sub').style.color=scoreColor;
-  // List the weakest dimensions
+  // Card 4: FinOps Grade
+  const grade=d.finops_grade||'--';
+  const score=parseFloat(d.finops_score||0);
+  const gradeEl=document.getElementById('grade-letter');
+  gradeEl.textContent=grade;
+  gradeEl.className='grade-letter grade-'+(grade.toLowerCase()||'f');
+  document.getElementById('grade-score').textContent=score.toFixed(1)+' / 100';
+  // Trend
+  const trendEl=document.getElementById('grade-trend');
+  const trend=d.finops_trend||'no_history';
+  const delta=d.finops_trend_delta||0;
+  if(trend==='improving'){trendEl.textContent='↑ +'+Math.abs(delta).toFixed(0)+' pts vs last week';trendEl.className='grade-trend up';}
+  else if(trend==='declining'){trendEl.textContent='↓ −'+Math.abs(delta).toFixed(0)+' pts vs last week';trendEl.className='grade-trend down';}
+  else if(trend==='stable'){trendEl.textContent='→ stable vs last week';trendEl.className='grade-trend stable';}
+  else{trendEl.textContent='';trendEl.className='grade-trend';}
+  // Gaps
   const dims=(d.scorecard||{}).dimensions||[];
-  const weak=dims.filter(dim=>(dim.score||0)<50).map(dim=>dim.name.toLowerCase());
-  document.getElementById('score-gaps').textContent=weak.length?weak.length+' gap'+(weak.length>1?'s':'')+': '+weak.join(', '):'';
+  const weak=dims.filter(dim=>(dim.score||0)<40).map(dim=>dim.display_name||dim.name);
+  document.getElementById('grade-gaps').textContent=
+    weak.length?weak.length+' critical gap'+(weak.length>1?'s':'')+': '+weak.map(s=>s.toLowerCase()).join(', '):'';
 
-  // Provider filter bar (only if >1 provider connected)
-  initProviderFilters(providers);
+  // Provider filters
+  initProviderFilters(provs);
 
-  // Chart days label + service badge
-  document.getElementById('chart-days').textContent=selectedDays;
-  const svcBadge=document.getElementById('service-chart-badge');
-  if(providers.length===1){svcBadge.textContent=providers[0].toUpperCase()+' ONLY';}
-  else if(providers.length>1){svcBadge.textContent='ALL PROVIDERS';}
-  else{svcBadge.textContent='';}
+  // Service badge
+  const sb=document.getElementById('svc-badge');
+  if(provs.length===1){sb.textContent=provs[0].toUpperCase()+' ONLY';}
+  else if(provs.length>1){sb.textContent='ALL PROVIDERS';}
 
   // Charts
-  renderServicesChart(d.top_services||[]);
+  renderSvcChart(d.top_services||[]);
   renderTrendChart(d.trend||[]);
 
   // Scorecard
   renderScorecard(d.scorecard||{});
 
-  // Opportunities + ledger
-  renderOpportunities(d.recent_opportunities||[],oppCount);
-  renderLedger(d.savings_ledger||{},oppCount);
+  // Opportunities
+  renderOpps(d.recent_opportunities||[],oppCount,oppTotal);
+
+  // Ledger row
+  renderLedgerRow(ledger,oppCount);
 }
 
-// ── Services bar chart ────────────────────────────────────────────────────────
-function renderServicesChart(services){
-  const labels=services.map(s=>s.service);
-  const amounts=services.map(s=>s.amount);
-  // Top service red, second teal, rest muted gray
-  const colors=services.map((_,i)=>{
-    if(i===0) return '#e05c4b';
-    if(i===1) return '#4db8d4';
-    return 'rgba(94,107,115,.6)';
-  });
-
-  if(serviceChart){serviceChart.destroy();serviceChart=null;}
-  const ctx=document.getElementById('chart-services').getContext('2d');
-  serviceChart=new Chart(ctx,{
+// ── Service chart ─────────────────────────────────────────────────────────────
+function renderSvcChart(svcs){
+  const isDark=html.getAttribute('data-theme')==='dark';
+  const gridColor=isDark?'rgba(255,255,255,.04)':'rgba(0,0,0,.06)';
+  const tickColor=isDark?'#4e6470':'#6b7280';
+  const labels=svcs.map(s=>s.service);
+  const amounts=svcs.map(s=>s.amount);
+  const colors=svcs.map((_,i)=>i===0?'#e05c4b':i===1?'#4db8d4':'rgba(100,120,130,.5)');
+  if(svcChart){svcChart.destroy();svcChart=null;}
+  const ctx=document.getElementById('chart-svc').getContext('2d');
+  svcChart=new Chart(ctx,{
     type:'bar',
     data:{labels,datasets:[{data:amounts,backgroundColor:colors,borderRadius:3,borderSkipped:false}]},
     options:{
       indexAxis:'y',responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
       scales:{
-        x:{ticks:{color:'#56656d',font:{family:"'Geist Mono',monospace",size:11},callback:v=>fmt(v)},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}},
-        y:{ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},padding:4},grid:{display:false},border:{color:'transparent'}}
+        x:{ticks:{color:tickColor,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},
+           grid:{color:gridColor},border:{color:'transparent'}},
+        y:{ticks:{color:isDark?'#8fa3ae':'#4b5563',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},padding:4},
+           grid:{display:false},border:{color:'transparent'}}
       }
     }
   });
 }
 
-// ── Trend line chart ──────────────────────────────────────────────────────────
+// ── Trend chart ───────────────────────────────────────────────────────────────
 function renderTrendChart(trend){
   if(!trend||trend.length===0) return;
+  const isDark=html.getAttribute('data-theme')==='dark';
+  const gridColor=isDark?'rgba(255,255,255,.04)':'rgba(0,0,0,.06)';
+  const tickColor=isDark?'#4e6470':'#6b7280';
   const labels=trend.map(t=>t.month);
   const actual=trend.map(t=>t.actual);
   const projected=trend.map(t=>t.projected);
-
   if(trendChart){trendChart.destroy();trendChart=null;}
   const ctx=document.getElementById('chart-trend').getContext('2d');
   trendChart=new Chart(ctx,{
     type:'line',
-    data:{
-      labels,
-      datasets:[
-        {label:'Actual',data:actual,borderColor:'#4db8d4',backgroundColor:'rgba(77,184,212,.1)',borderWidth:2.5,pointRadius:4,pointBackgroundColor:'#4db8d4',tension:.3,fill:true},
-        {label:'Projected',data:projected,borderColor:'#e6a840',backgroundColor:'transparent',borderWidth:2,borderDash:[5,4],pointRadius:4,pointBackgroundColor:'#e6a840',tension:.3,fill:false}
-      ]
-    },
+    data:{labels,datasets:[
+      {label:'Actual',data:actual,borderColor:'#4db8d4',
+       backgroundColor:'rgba(77,184,212,.08)',borderWidth:2.5,
+       pointRadius:4,pointBackgroundColor:'#4db8d4',tension:.3,fill:true},
+      {label:'Projected',data:projected,borderColor:'#e6a840',
+       backgroundColor:'transparent',borderWidth:2,borderDash:[5,4],
+       pointRadius:4,pointBackgroundColor:'#e6a840',tension:.3,fill:false}
+    ]},
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{
-        legend:{labels:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},boxWidth:16,usePointStyle:true,pointStyle:'line'}},
+        legend:{labels:{color:isDark?'#8fa3ae':'#4b5563',
+          font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},
+          boxWidth:16,usePointStyle:true,pointStyle:'line'}},
         tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.raw)}}
       },
       scales:{
-        x:{ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12}},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}},
-        y:{ticks:{color:'#56656d',font:{family:"'Geist Mono',monospace",size:11},callback:v=>fmt(v)},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}}
+        x:{ticks:{color:isDark?'#8fa3ae':'#4b5563',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12}},
+           grid:{color:gridColor},border:{color:'transparent'}},
+        y:{ticks:{color:tickColor,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},
+           grid:{color:gridColor},border:{color:'transparent'}}
       }
     }
   });
 }
 
-// ── Efficiency scorecard ──────────────────────────────────────────────────────
-function scoreBarColor(s){
-  if(s>=80) return 'var(--success)';
-  if(s>=60) return 'var(--accent)';
-  if(s>=40) return 'var(--warn)';
-  return 'rgba(224,92,75,.6)';
-}
-
+// ── Scorecard ─────────────────────────────────────────────────────────────────
 function renderScorecard(sc){
+  const overall=sc.overall_grade||'--';
+  const badge=document.getElementById('sc-badge');
+  badge.textContent='OVERALL '+overall;
+  badge.style.color=gradeColor(overall);
+  badge.style.borderColor=gradeColor(overall)+'44';
+  badge.style.background=gradeColor(overall)+'11';
+
+  const el=document.getElementById('sc-list');
   const dims=sc.dimensions||[];
-  const el=document.getElementById('scorecard-list');
   if(!dims.length){
     el.innerHTML='<li class="sc-item"><span style="color:var(--fg3);font-size:13px">Run a cost audit to generate scorecard data.</span></li>';
     return;
   }
   el.innerHTML=dims.map(dim=>{
     const s=Math.round(dim.score||0);
-    const color=scoreBarColor(s);
+    const g=dim.grade||'F';
+    const gClass=gpClass(g);
+    const color=barColor(s);
+    const displayName=dim.display_name||dim.name;
     return `<li class="sc-item">
-      <div class="sc-header">
-        <span class="sc-name">${esc(dim.name)}</span>
-        <span class="sc-score">${s} / 100</span>
+      <div class="sc-hdr">
+        <span class="sc-name">${esc(displayName)}</span>
+        <div class="sc-right">
+          <span class="sc-score-text">${s} / 100</span>
+          <span class="sc-grade-pill ${gClass}">${g}</span>
+        </div>
       </div>
       <div class="sc-bar-bg">
         <div class="sc-bar-fill" style="width:${s}%;background:${color}"></div>
@@ -506,108 +765,92 @@ function renderScorecard(sc){
   }).join('');
 }
 
-// ── Savings pipeline ledger ───────────────────────────────────────────────────
-function renderLedger(ledger, oppCount){
-  const row=document.getElementById('ledger-row');
-  const identified=ledger.identified_monthly||0;
-  const actedOn=ledger.acted_on_monthly||0;
-  const verified=ledger.verified_monthly||0;
-  const counts=ledger.counts||{};
-
-  // Show ledger row once there is any data
-  if(identified>0||actedOn>0||verified>0){
-    row.style.display='grid';
-  }
-
-  document.getElementById('ls-identified').textContent=fmt(identified);
-  document.getElementById('ls-identified-sub').textContent='per month — '+(counts.open||oppCount||0)+' open';
-  document.getElementById('ls-acted').textContent=fmt(actedOn);
-  const actedCount=counts.acted_on||0;
-  document.getElementById('ls-acted-sub').textContent=actedCount>0?actedCount+' action'+(actedCount>1?'s':'')+' taken':'no actions yet';
-  document.getElementById('ls-verified').textContent=fmt(verified);
-  const verCount=counts.verified||0;
-  const annualized=ledger.verified_annual||0;
-  document.getElementById('ls-verified-sub').textContent=verCount>0?fmt(annualized)+'/yr confirmed':'pending verification';
-}
-
-// ── Savings opportunities ─────────────────────────────────────────────────────
-function renderOpportunities(opps, count){
+// ── Savings opportunities ──────────────────────────────────────────────────────
+function renderOpps(opps,count,totalSaving){
   document.getElementById('opp-badge').textContent=(count||opps.length)+' OPEN';
-
   const el=document.getElementById('opp-list');
   if(!opps||opps.length===0){
-    el.innerHTML='<li class="opp-item"><span style="color:var(--fg3);font-size:13px">No open opportunities found. Run a waste audit to surface savings.</span></li>';
+    el.innerHTML='<li class="opp-item"><span style="color:var(--fg3);font-size:13px">No open opportunities. Run a waste audit to surface savings.</span></li>';
+    document.getElementById('opp-total').style.display='none';
     return;
   }
   el.innerHTML=opps.map(o=>{
     const impact=String(o.impact||'medium').toLowerCase();
-    const dotClass=impact==='high'?'opp-dot-high':impact==='low'?'opp-dot-low':'opp-dot-medium';
+    const dotClass=impact==='high'?'opp-dot-high':impact==='low'?'opp-dot-low':'opp-dot-med';
     const effort=String(o.effort||'MEDIUM').toUpperCase().replace(' EFFORT','');
-    const effortLabel=effort+' EFFORT';
-    let effortClass='effort-medium';
-    if(effort==='LOW') effortClass='effort-low';
-    else if(effort==='ZERO') effortClass='effort-zero';
-    else if(effort==='HIGH') effortClass='effort-high';
-    const saving=fmt(o.monthly_saving||0)+'/mo';
+    let eClass='ec-medium';
+    if(effort==='ZERO') eClass='ec-zero';
+    else if(effort==='LOW') eClass='ec-low';
+    else if(effort==='HIGH') eClass='ec-high';
+    // Support ranges
+    let savingStr;
+    if(o.monthly_saving_min!=null&&o.monthly_saving_max!=null){
+      savingStr=fmt(o.monthly_saving_min)+'–'+fmt(o.monthly_saving_max)+'/mo';
+    }else{
+      savingStr=fmt(o.monthly_saving||0)+'/mo';
+    }
     const idAttr=o.id?`data-rec-id="${o.id}"`:'';
     return `<li class="opp-item" ${idAttr}>
       <span class="opp-dot ${dotClass}"></span>
-      <div class="opp-body">
-        <div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div>
-      </div>
+      <div class="opp-body"><div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div></div>
       <div class="opp-right">
-        <span class="opp-saving">${saving}</span>
-        <span class="effort-badge ${effortClass}">${effortLabel}</span>
-        ${o.id?`<button class="done-btn" onclick="markDone(${o.id},this)">&#10003; Done</button>`:''}
+        <span class="opp-saving">${savingStr}</span>
+        <span class="effort-chip ${eClass}">${effort} EFFORT</span>
+        ${o.id?`<button class="done-btn" onclick="markDone(${o.id},this)">Done</button>`:''}
       </div>
     </li>`;
   }).join('');
+
+  // Total potential
+  const totalEl=document.getElementById('opp-total');
+  const totalValEl=document.getElementById('opp-total-value');
+  if(totalSaving>0){
+    totalValEl.textContent=fmt(totalSaving)+'/mo';
+    totalEl.style.display='flex';
+  }else{
+    totalEl.style.display='none';
+  }
 }
 
-// ── Mark opportunity as done ──────────────────────────────────────────────────
-async function markDone(id, btn){
+// ── Ledger row ────────────────────────────────────────────────────────────────
+function renderLedgerRow(ledger,oppCount){
+  const row=document.getElementById('ledger-row');
+  const id=ledger.identified_monthly||0;
+  const ao=ledger.acted_on_monthly||0;
+  const ver=ledger.verified_monthly||0;
+  const counts=ledger.counts||{};
+  if(id>0||ao>0||ver>0){row.style.display='grid';}
+  document.getElementById('ls-id').textContent=fmt(id);
+  document.getElementById('ls-id-sub').textContent=(counts.open||oppCount||0)+' open';
+  document.getElementById('ls-acted').textContent=fmt(ao);
+  const ac=counts.acted_on||0;
+  document.getElementById('ls-acted-sub').textContent=ac>0?ac+' action'+(ac>1?'s':'')+' taken':'no actions yet';
+  document.getElementById('ls-verified').textContent=fmt(ver);
+  const vc=counts.verified||0;
+  const ann=ledger.verified_annual||0;
+  document.getElementById('ls-verified-sub').textContent=vc>0?fmt(ann)+'/yr confirmed':'pending verification';
+}
+
+// ── Mark done ─────────────────────────────────────────────────────────────────
+async function markDone(id,btn){
   btn.classList.add('marking');
-  btn.textContent='Saving…';
+  btn.textContent='…';
   try{
     const r=await fetch('/api/mark-done?id='+id,{method:'POST'});
     if(r.ok){
       const li=btn.closest('li');
-      li.style.transition='opacity .3s';
-      li.style.opacity='0';
+      li.style.transition='opacity .3s';li.style.opacity='0';
       setTimeout(()=>li.remove(),320);
-      loadData(); // refresh counts
-    }else{
-      btn.textContent='Error';
-      btn.classList.remove('marking');
-    }
-  }catch(e){
-    btn.textContent='Error';
-    btn.classList.remove('marking');
-  }
-}
-
-// ── Provider filters ─────────────────────────────────────────────────────────
-function initProviderFilters(providers){
-  const bar = document.getElementById('provider-filters');
-  if(!providers||providers.length<=1){bar.style.display='none';return;}
-  bar.style.display='flex';
-  const labels={'aws':'AWS','azure':'Azure','gcp':'GCP','datadog':'Datadog','snowflake':'Snowflake'};
-  bar.innerHTML='<button class="pf-btn'+(selectedProvider==='all'?' active':'')+'" data-provider="all">All</button>'
-    +providers.map(p=>`<button class="pf-btn${selectedProvider===p?' active':''}" data-provider="${p}">${labels[p]||p.toUpperCase()}</button>`).join('');
-  bar.querySelectorAll('.pf-btn').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      selectedProvider=btn.dataset.provider;
-      bar.querySelectorAll('.pf-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
       loadData();
-    });
-  });
+    }else{btn.textContent='Error';btn.classList.remove('marking');}
+  }catch{btn.textContent='Error';btn.classList.remove('marking');}
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 initDate();
+initRangeControls();
 loadData();
-setInterval(loadData, 60000);
+setInterval(loadData,60000);
 </script>
 </body>
 </html>
