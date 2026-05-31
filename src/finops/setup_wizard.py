@@ -96,7 +96,11 @@ _VALID_AWS_REGIONS = {
     "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1",
     "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
     "ap-south-1", "ca-central-1", "sa-east-1", "me-south-1", "af-south-1",
+    # GovCloud regions — supported out of the box
+    "us-gov-west-1", "us-gov-east-1",
 }
+
+_GOVCLOUD_REGIONS = {"us-gov-west-1", "us-gov-east-1"}
 
 
 def setup_aws() -> None:
@@ -189,8 +193,10 @@ def setup_aws() -> None:
         while True:
             region = _prompt("  AWS region (press Enter for us-east-1)", default="us-east-1")
             if region in _VALID_AWS_REGIONS:
+                if region in _GOVCLOUD_REGIONS:
+                    print(f"  GovCloud region detected. nable works with AWS GovCloud out of the box. All data stays on your machine.")
                 break
-            _warn(f"'{region}' is not a valid AWS region. Examples: us-east-1, us-west-2, eu-west-1")
+            _warn(f"'{region}' is not a valid AWS region. Examples: us-east-1, us-west-2, eu-west-1, us-gov-west-1")
 
         role_arns = _prompt("  Role ARNs for additional accounts (comma-separated, or blank)")
         vault.store("AWS_ACCESS_KEY_ID", access_key)
@@ -300,8 +306,10 @@ def setup_aws_account() -> None:
 
     region = _prompt("  AWS region", default="us-east-1")
     while region not in _VALID_AWS_REGIONS:
-        _warn(f"'{region}' is not a valid AWS region. Examples: us-east-1, us-west-2, eu-west-1")
+        _warn(f"'{region}' is not a valid AWS region. Examples: us-east-1, us-west-2, eu-west-1, us-gov-west-1")
         region = _prompt("  AWS region", default="us-east-1")
+    if region in _GOVCLOUD_REGIONS:
+        print("  GovCloud region detected. nable works with AWS GovCloud out of the box. All data stays on your machine.")
 
     print("\n  How should nable authenticate with this account?")
     print("  1) IAM access key  (most common)")
@@ -956,6 +964,69 @@ def _handle_config_cmd(parsed: object) -> None:
         print("\n  Change with: finops config --persona <role>\n")
 
 
+def _handle_profile_cmd(parsed: object) -> None:
+    """Handle: finops profile [list|create|use|current] [name]"""
+    from pathlib import Path
+
+    profiles_dir = Path.home() / ".finops" / "profiles"
+    action = getattr(parsed, "profile_action", "list") or "list"
+    name = getattr(parsed, "profile_name", "") or ""
+
+    if action == "current":
+        active = os.environ.get("FINOPS_PROFILE", "").strip()
+        if active:
+            print(f"\n  Active profile: {active}\n")
+        else:
+            print("\n  Active profile: default (no FINOPS_PROFILE set)\n")
+        return
+
+    if action == "list":
+        if not profiles_dir.exists() or not any(profiles_dir.iterdir()):
+            print("\n  No profiles found. Create one with: finops profile create <name>\n")
+            return
+        active = os.environ.get("FINOPS_PROFILE", "").strip()
+        print("\n  Configured profiles:\n")
+        for p in sorted(profiles_dir.iterdir()):
+            if p.is_dir():
+                marker = "*" if p.name == active else " "
+                db_exists = (p / "finops.db").exists()
+                db_note = "  (db exists)" if db_exists else ""
+                print(f"    {marker} {p.name}{db_note}")
+        if active:
+            print(f"\n  Active: {active} (set via FINOPS_PROFILE)")
+        else:
+            print("\n  No active profile. Set with: finops profile use <name>")
+        print()
+        return
+
+    if action == "create":
+        if not name:
+            _err("Specify a profile name: finops profile create <name>")
+            return
+        profile_dir = profiles_dir / name
+        if profile_dir.exists():
+            _warn(f"Profile '{name}' already exists at {profile_dir}")
+            return
+        import stat as _stat
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        profile_dir.chmod(_stat.S_IRWXU)
+        _ok(f"Profile '{name}' created at {profile_dir}")
+        print(f"\n  Activate with: finops profile use {name}")
+        print(f"  Or set: export FINOPS_PROFILE={name}\n")
+        return
+
+    if action == "use":
+        if not name:
+            _err("Specify a profile name: finops profile use <name>")
+            return
+        # Print the export command and write a hint
+        print(f"\n  To activate profile '{name}', run:\n")
+        print(f"    export FINOPS_PROFILE={name}\n")
+        print("  Add this to your shell config (~/.zshrc or ~/.bashrc) to make it permanent.")
+        print(f"  Or prefix any command:  FINOPS_PROFILE={name} finops-mcp\n")
+        return
+
+
 def main(args: list[str] | None = None) -> None:
     import sys as _sys
     if args is None:
@@ -1041,6 +1112,10 @@ def main(args: list[str] | None = None) -> None:
     vault_p = sub.add_parser("vault")
     vault_p.add_argument("action", choices=["list", "delete", "rotate"])
     vault_p.add_argument("key", nargs="?", default="")
+
+    profile_p = sub.add_parser("profile", help="Manage named profiles for multi-account use")
+    profile_p.add_argument("profile_action", choices=["list", "create", "use", "current"], nargs="?", default="list")
+    profile_p.add_argument("profile_name", nargs="?", default="")
 
     parsed = parser.parse_args(args)
     # Ensure optional attrs exist for all subparsers (only `vault` defines `action`/`key`)
@@ -1140,6 +1215,10 @@ def main(args: list[str] | None = None) -> None:
 
     if parsed.cmd == "config":
         _handle_config_cmd(parsed)
+        return
+
+    if parsed.cmd == "profile":
+        _handle_profile_cmd(parsed)
         return
 
     if parsed.cmd == "vault":

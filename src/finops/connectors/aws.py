@@ -45,9 +45,15 @@ class AWSConnector(BaseConnector):
     def _make_client(self, role_arn: str | None = None):
         import boto3
 
+        # GovCloud note: AWS Cost Explorer is available in GovCloud regions.
+        # Valid GovCloud CE endpoints: us-gov-west-1, us-gov-east-1.
+        # Set AWS_DEFAULT_REGION or pass region_name to target GovCloud.
+        # No code changes needed — boto3 respects the standard region resolution chain.
+        _region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+
         # If a session was injected (via account registry), use it directly
         if self._session and not role_arn:
-            return self._session.client("ce", region_name="us-east-1")
+            return self._session.client("ce", region_name=_region)
 
         if role_arn:
             sts = boto3.client("sts")
@@ -58,9 +64,9 @@ class AWSConnector(BaseConnector):
                 aws_access_key_id=creds["AccessKeyId"],
                 aws_secret_access_key=creds["SecretAccessKey"],
                 aws_session_token=creds["SessionToken"],
-                region_name="us-east-1",
+                region_name=_region,
             )
-        return boto3.client("ce", region_name="us-east-1")
+        return boto3.client("ce", region_name=_region)
 
     def _account_id(self, role_arn: str | None = None) -> str:
         import boto3

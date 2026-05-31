@@ -20,8 +20,21 @@ from typing import Any
 
 log = logging.getLogger("finops.vault")
 
-_KEYRING_SERVICE = "finops-mcp"
+_KEYRING_SERVICE_DEFAULT = "finops-mcp"
 _KEYRING_USER = "master-key"
+
+
+def _active_profile() -> str:
+    """Return the active profile name from FINOPS_PROFILE env var, or empty string."""
+    return os.environ.get("FINOPS_PROFILE", "").strip()
+
+
+def _keyring_service() -> str:
+    """Return the keyring service name, scoped to the active profile if set."""
+    profile = _active_profile()
+    if profile:
+        return f"nable-{profile}-mcp"
+    return _KEYRING_SERVICE_DEFAULT
 
 
 class VaultError(Exception):
@@ -245,7 +258,7 @@ class Vault:
     def _try_keyring(cls) -> bytes | None:
         try:
             import keyring  # type: ignore[import]
-            val = keyring.get_password(_KEYRING_SERVICE, _KEYRING_USER)
+            val = keyring.get_password(_keyring_service(), _KEYRING_USER)
             if val:
                 return base64.urlsafe_b64decode(val.encode())
         except Exception:
@@ -256,7 +269,7 @@ class Vault:
     def _save_keyring(cls, key: bytes) -> bool:
         try:
             import keyring  # type: ignore[import]
-            keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER, base64.urlsafe_b64encode(key).decode())
+            keyring.set_password(_keyring_service(), _KEYRING_USER, base64.urlsafe_b64encode(key).decode())
             return True
         except Exception:
             return False
@@ -265,11 +278,22 @@ class Vault:
     def default(cls) -> "Vault":
         """
         Open (or create) the default vault. Key priority:
-        1. OS keyring
+        1. OS keyring (scoped to active profile if FINOPS_PROFILE is set)
         2. FINOPS_VAULT_KEY env var (for CI/container deployments)
-        3. ~/.finops/vault.key file (chmod 600)
+        3. ~/.finops/vault.key file (chmod 600), or profile dir equivalent
+
+        When FINOPS_PROFILE is set, the vault DB lives in
+        ~/.finops/profiles/{profile}/vault.db and the keyring service is
+        prefixed with "nable-{profile}-".
         """
-        data = _data_dir()
+        profile = _active_profile()
+        if profile:
+            import stat as _stat
+            data = Path.home() / ".finops" / "profiles" / profile
+            data.mkdir(parents=True, exist_ok=True)
+            data.chmod(_stat.S_IRWXU)
+        else:
+            data = _data_dir()
         db_path = data / "vault.db"
 
         # 1. OS keyring

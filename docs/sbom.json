@@ -1,0 +1,100 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "version": 1,
+  "serialNumber": "urn:uuid:finops-mcp-sbom-2026-05-31",
+  "metadata": {
+    "timestamp": "2026-05-31T07:25:02Z",
+    "component": {
+      "type": "application",
+      "name": "finops-mcp",
+      "version": "0.8.36"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "mcp",
+      "version": "1.3.0",
+      "purl": "pkg:pypi/mcp@1.3.0"
+    },
+    {
+      "type": "library",
+      "name": "boto3",
+      "version": "1.34.0",
+      "purl": "pkg:pypi/boto3@1.34.0"
+    },
+    {
+      "type": "library",
+      "name": "azure-mgmt-costmanagement",
+      "version": "4.0.0",
+      "purl": "pkg:pypi/azure-mgmt-costmanagement@4.0.0"
+    },
+    {
+      "type": "library",
+      "name": "azure-identity",
+      "version": "1.15.0",
+      "purl": "pkg:pypi/azure-identity@1.15.0"
+    },
+    {
+      "type": "library",
+      "name": "google-cloud-billing",
+      "version": "1.13.0",
+      "purl": "pkg:pypi/google-cloud-billing@1.13.0"
+    },
+    {
+      "type": "library",
+      "name": "google-cloud-bigquery",
+      "version": "3.17.0",
+      "purl": "pkg:pypi/google-cloud-bigquery@3.17.0"
+    },
+    {
+      "type": "library",
+      "name": "sqlalchemy",
+      "version": "2.0.0",
+      "purl": "pkg:pypi/sqlalchemy@2.0.0"
+    },
+    {
+      "type": "library",
+      "name": "apscheduler",
+      "version": "3.10.0",
+      "purl": "pkg:pypi/apscheduler@3.10.0"
+    },
+    {
+      "type": "library",
+      "name": "cryptography",
+      "version": "42.0.0",
+      "purl": "pkg:pypi/cryptography@42.0.0"
+    },
+    {
+      "type": "library",
+      "name": "keyring",
+      "version": "25.0.0",
+      "purl": "pkg:pypi/keyring@25.0.0"
+    },
+    {
+      "type": "library",
+      "name": "python-dotenv",
+      "version": "1.0.0",
+      "purl": "pkg:pypi/python-dotenv@1.0.0"
+    },
+    {
+      "type": "library",
+      "name": "httpx",
+      "version": "0.27.0",
+      "purl": "pkg:pypi/httpx@0.27.0"
+    },
+    {
+      "type": "library",
+      "name": "pydantic",
+      "version": "2.0.0",
+      "purl": "pkg:pypi/pydantic@2.0.0"
+    },
+    {
+      "type": "library",
+      "name": "pyyaml",
+      "version": "6.0.0",
+      "purl": "pkg:pypi/pyyaml@6.0.0"
+    }
+  ]
+}
