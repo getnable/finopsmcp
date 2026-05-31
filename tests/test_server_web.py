@@ -41,7 +41,10 @@ def mock_dashboard_data():
         "account_id": "123456789012",
         "total_spend_mtd": 1234.56,
         "total_spend_last_month": 1000.00,
+        "projected_month_total": 1543.20,
         "delta_pct": 23.5,
+        "finops_grade": "B",
+        "finops_score": 82.0,
         "top_services": [
             {"service": "Amazon EC2", "amount": 800.0, "pct": 64.8},
             {"service": "Amazon S3", "amount": 200.0, "pct": 16.2},
@@ -52,11 +55,35 @@ def mock_dashboard_data():
         "anomalies_open": 1,
         "budget_pct_used": 62.0,
         "recent_opportunities": [
-            {"description": "Downsize m5.2xlarge", "monthly_saving": 200.0, "resource": "i-abc123"},
+            {
+                "description": "Downsize m5.2xlarge",
+                "monthly_saving": 200.0,
+                "resource": "i-abc123",
+                "effort": "LOW",
+                "impact": "high",
+                "service": "Amazon EC2",
+            },
         ],
         "recent_savings": [],
         "error": None,
         "connected_providers": ["aws"],
+        "trend": [
+            {"month": "March", "actual": 10200.0, "projected": None},
+            {"month": "April", "actual": 11800.0, "projected": None},
+            {"month": "May (partial)", "actual": 13703.0, "projected": None},
+            {"month": "May (projected)", "actual": None, "projected": 15742.0},
+        ],
+        "scorecard": {
+            "overall_grade": "B",
+            "overall_score": 82.0,
+            "dimensions": [
+                {"name": "Waste Reduction", "score": 100, "grade": "A"},
+                {"name": "Anomaly Response", "score": 80, "grade": "B"},
+                {"name": "Compute Efficiency", "score": 50, "grade": "C"},
+                {"name": "Commitment Coverage", "score": 0, "grade": "F"},
+                {"name": "Tag Hygiene", "score": 0, "grade": "F"},
+            ],
+        },
     }
     with patch(
         "finops.server_web._fetch_dashboard_data",
@@ -131,10 +158,8 @@ def test_dashboard_html_served(running_server):
 def test_dashboard_html_structure(running_server):
     _, port = running_server
     _, body = _get(f"http://127.0.0.1:{port}/")
-    assert "nable dashboard" in body
-    assert "Spend MTD" in body
-    assert "Top services" in body
-    assert "Open opportunities" in body
+    assert "nable" in body
+    assert "Spend" in body
     assert "getnable.com" in body  # footer link
     assert "Instrument Sans" in body  # correct font
 
@@ -142,8 +167,63 @@ def test_dashboard_html_structure(running_server):
 def test_dashboard_auto_refresh_script(running_server):
     _, port = running_server
     _, body = _get(f"http://127.0.0.1:{port}/")
-    # The page should reload every 60 seconds
+    # The page should auto-refresh every 60 seconds
     assert "60000" in body
+
+
+def test_dashboard_has_chartjs(running_server):
+    _, port = running_server
+    _, body = _get(f"http://127.0.0.1:{port}/")
+    assert "chart.umd" in body or "Chart.js" in body
+
+
+def test_dashboard_has_spend_by_service(running_server):
+    _, port = running_server
+    _, body = _get(f"http://127.0.0.1:{port}/")
+    assert "Spend by Service" in body
+
+
+def test_dashboard_has_trend_chart(running_server):
+    _, port = running_server
+    _, body = _get(f"http://127.0.0.1:{port}/")
+    assert "3-Month Cost Trend" in body
+
+
+def test_dashboard_has_efficiency_scorecard(running_server):
+    _, port = running_server
+    _, body = _get(f"http://127.0.0.1:{port}/")
+    assert "Efficiency Scorecard" in body
+
+
+def test_dashboard_has_savings_opportunities(running_server):
+    _, port = running_server
+    _, body = _get(f"http://127.0.0.1:{port}/")
+    assert "Savings Opportunities" in body
+
+
+def test_api_data_has_trend_key(running_server):
+    _, port = running_server
+    _, body = _get(f"http://127.0.0.1:{port}/api/data")
+    data = json.loads(body)
+    assert "trend" in data
+    assert isinstance(data["trend"], list)
+    assert len(data["trend"]) > 0
+    # Each entry has month and actual/projected
+    first = data["trend"][0]
+    assert "month" in first
+    assert "actual" in first or "projected" in first
+
+
+def test_api_data_has_scorecard_key(running_server):
+    _, port = running_server
+    _, body = _get(f"http://127.0.0.1:{port}/api/data")
+    data = json.loads(body)
+    assert "scorecard" in data
+    sc = data["scorecard"]
+    assert "overall_grade" in sc
+    assert "overall_score" in sc
+    assert "dimensions" in sc
+    assert isinstance(sc["dimensions"], list)
 
 
 # ── Tests: 404 ───────────────────────────────────────────────────────────────
