@@ -11,9 +11,30 @@
 
 import crypto from "node:crypto";
 
-// In-memory deduplication for events seen within the same Lambda warm instance.
-// TODO: replace with a persistent KV store (e.g. Vercel KV / Redis) for cross-instance deduplication.
+// Two-layer deduplication:
+// Layer 1 — in-memory Set: fast dedup within the same warm Lambda instance.
+// Layer 2 — Vercel KV (optional): cross-instance persistent dedup.
+//   Set VERCEL_KV_REST_API_URL + VERCEL_KV_REST_API_TOKEN in Vercel project settings
+//   to enable. Without KV, cold-start duplicates may re-send the same key email
+//   (harmless: same email+date produces the same key, so both emails are valid).
 const processedEvents = new Set();
+
+async function _kvMarkSeen(eventId) {
+  const url = process.env.VERCEL_KV_REST_API_URL;
+  const token = process.env.VERCEL_KV_REST_API_TOKEN;
+  if (!url || !token) return false; // KV not configured — fall back to in-memory
+  try {
+    const key = `stripe_dedup:${eventId}`;
+    // SET NX EX 86400 — set only if not exists, expire after 24h
+    const res = await fetch(`${url}/set/${encodeURIComponent(key)}/1/EX/86400/NX`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    return data.result === null; // null = key existed = duplicate
+  } catch {
+    return false; // on KV failure, allow processing (prefer duplicate to dropped event)
+  }
+}
 
 // Set FINOPS_LICENSE_SECRET in Vercel project environment variables.
 // Must match the FINOPS_LICENSE_SECRET env var on the MCP server side.
@@ -138,7 +159,7 @@ async function sendLicenseEmail(to, licenseKey) {
     },
     body: JSON.stringify({
       from: "nable <hello@getnable.com>",
-      reply_to: "chandanirving@gmail.com",
+      reply_to: "hello@getnable.com",
       to: [to],
       subject: "Your nable Team license key",
       html,
@@ -202,12 +223,17 @@ export default async function handler(req, res) {
     return res.status(200).json({ received: true, skipped: event.type });
   }
 
-  // Deduplicate within the same Lambda warm instance
+  // Deduplicate — check in-memory first (fast), then KV (cross-instance)
   if (processedEvents.has(event.id)) {
-    console.log(`Duplicate event ${event.id} - skipping`);
+    console.log(`Duplicate event ${event.id} (in-memory) - skipping`);
     return res.status(200).json({ received: true, deduplicated: true });
   }
   processedEvents.add(event.id);
+  const kvDuplicate = await _kvMarkSeen(event.id);
+  if (kvDuplicate) {
+    console.log(`Duplicate event ${event.id} (KV) - skipping`);
+    return res.status(200).json({ received: true, deduplicated: true });
+  }
 
   const session = event.data.object;
   const email =
