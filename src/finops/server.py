@@ -50,6 +50,8 @@ from .connectors.databricks import DatabricksConnector
 load_dotenv()
 
 from . import telemetry as _telemetry  # noqa: E402
+from .audit import get_audit_logger as _get_audit_logger
+from .config import check_airgap_and_warn as _check_airgap
 from .persona import get_persona, get_persona_mcp_context
 
 _persona = get_persona()
@@ -83,9 +85,39 @@ def _instrumented_tool(*dargs, **dkwargs):
 
         @functools.wraps(fn)
         async def _inner(*args, **kwargs):
+            import time as _time
             global _first_cost_query_fired
             _telemetry.record_tool_call(fn.__name__)
-            result = await fn(*args, **kwargs)
+            _t0 = _time.monotonic()
+            _audit = _get_audit_logger()
+            try:
+                result = await fn(*args, **kwargs)
+            except Exception as exc:
+                _duration = int((_time.monotonic() - _t0) * 1000)
+                _audit.log_tool_call(
+                    tool=fn.__name__,
+                    duration_ms=_duration,
+                    outcome="error",
+                    error=str(exc),
+                )
+                raise
+            _duration = int((_time.monotonic() - _t0) * 1000)
+            # Determine outcome: check for RBAC-denied results
+            _outcome = "success"
+            if isinstance(result, dict) and result.get("error", "").startswith("Access denied"):
+                _outcome = "denied"
+            elif isinstance(result, dict) and "error" in result:
+                _outcome = "error"
+            # Extract account if present in result
+            _account = None
+            if isinstance(result, dict):
+                _account = result.get("account_id") or result.get("account")
+            _audit.log_tool_call(
+                tool=fn.__name__,
+                duration_ms=_duration,
+                outcome=_outcome,
+                account=_account,
+            )
             # Fire first_cost_query event once per session — signals real value delivery
             if fn.__name__ in _COST_QUERY_TOOLS and not _first_cost_query_fired:
                 if isinstance(result, dict) and "error" not in result:
@@ -128,7 +160,9 @@ _SAAS_CONNECTORS: dict[str, Any] = {
 
 _ALL_CONNECTORS: dict[str, Any] = {**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS}
 
-# ── startup telemetry (anonymous, opt-out via NABLE_NO_TELEMETRY=1) ──────────
+# ── startup: air-gap notice + telemetry ──────────────────────────────────────
+_check_airgap()
+
 try:
     _lic = get_status()
     _plan = _lic.mode if hasattr(_lic, "mode") else (
@@ -1780,6 +1814,98 @@ async def get_savings_summary() -> dict:
 
 
 @mcp.tool()
+async def generate_account_dashboard(
+    account_id: str | None = None,
+    open_browser: bool = True,
+    push_to_notion: bool = False,
+) -> dict:
+    """
+    Generate a cost dashboard for the account and open it in your browser.
+
+    Shows total spend this month vs last month, projected spend, top cost
+    drivers by service, open optimization opportunities, realized savings,
+    and budget status. Outputs a self-contained HTML file.
+
+    Args:
+        account_id:     AWS account ID to scope the dashboard. Auto-detected
+                        from your configured credentials when omitted.
+        open_browser:   Open the HTML file in the default browser (default True).
+        push_to_notion: Also push a summary to your configured Notion page
+                        (requires NOTION_API_KEY and NOTION_PAGE_ID env vars).
+
+    Use when:
+        - "Show me a dashboard"
+        - "Give me a summary of my costs"
+        - "Generate the account dashboard"
+        - "What does my cost health look like?"
+    """
+    import subprocess
+    import sys
+
+    aws = _CLOUD_CONNECTORS.get("aws")
+    aws_configured = aws and await aws.is_configured()
+
+    try:
+        from .reporting.dashboard import generate_account_dashboard as _gen
+        result = await _gen(
+            aws_connector=aws if aws_configured else None,
+            account_id=account_id,
+        )
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    path = result["path"]
+
+    if open_browser:
+        try:
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", path])
+            elif sys.platform.startswith("linux"):
+                subprocess.Popen(["xdg-open", path])
+            elif sys.platform == "win32":
+                subprocess.Popen(["start", path], shell=True)
+        except Exception:
+            pass  # opening the browser is best-effort
+
+    if push_to_notion:
+        try:
+            from .connectors.saas.notion import NotionConnector
+            notion = NotionConnector()
+            if await notion.is_configured():
+                opp_total = result.get("opportunity_savings_usd", 0.0)
+                opps: list[dict] = []
+                try:
+                    from .recommendations.savings_tracker import list_recommendations
+                    opps = list_recommendations(status="open", limit=20)
+                except Exception:
+                    pass
+                notion_report = {
+                    "account": result.get("account_id", ""),
+                    "total_monthly_savings": opp_total,
+                    "total_annual_savings": opp_total * 12,
+                    "findings": [
+                        {
+                            "title": o.get("description", o.get("resource_name", "")),
+                            "category": o.get("source", ""),
+                            "monthly_savings": o.get("estimated_monthly_savings_usd", 0.0),
+                        }
+                        for o in opps
+                    ],
+                }
+                notion_url = await notion.write_cost_report(notion_report)
+                result["notion_url"] = notion_url
+            else:
+                result["notion_note"] = (
+                    "Notion is not configured. Set NOTION_API_KEY and NOTION_PAGE_ID "
+                    "to enable Notion push."
+                )
+        except Exception as exc:
+            result["notion_error"] = str(exc)
+
+    return result
+
+
+@mcp.tool()
 async def export_cost_report(
     title: str | None = None,
     sections: list[str] | None = None,
@@ -2037,6 +2163,162 @@ async def verify_savings() -> dict:
         "cumulative_verified_monthly_usd": summary["verified_monthly_usd"],
         "cumulative_verified_annual_usd": summary["verified_annual_usd"],
     }
+
+
+@mcp.tool()
+async def get_savings_ledger(
+    days: int = 30,
+    account_id: str | None = None,
+) -> str:
+    """
+    Shows a clean summary of savings found, acted on, and verified.
+
+    Use when:
+        - "Show me the savings ledger"
+        - "What savings have we achieved?"
+        - "How much money has nable saved us?"
+        - "Show me what opportunities were acted on"
+
+    Args:
+        days: Lookback window in days (default 30). Filters by generated_at.
+        account_id: Filter to a specific cloud account ID. None = all accounts.
+    """
+    from datetime import datetime, timedelta, timezone
+    from .storage.db import get_engine, savings_recommendations
+    from sqlalchemy import select
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    sr = savings_recommendations
+    engine = get_engine()
+
+    with engine.connect() as conn:
+        q = select(sr).where(sr.c.generated_at >= cutoff)
+        if account_id:
+            q = q.where(sr.c.account_id == account_id)
+        rows = conn.execute(q).fetchall()
+
+    if not rows:
+        period = f"last {days} day{'s' if days != 1 else ''}"
+        return (
+            f"No savings recommendations found in the {period}. "
+            "Run get_rightsizing_recommendations() or scan_waste_patterns() to surface opportunities."
+        )
+
+    found_rows = [r for r in rows if r.status not in ("dismissed", "expired")]
+    acted_rows = [r for r in rows if r.status in ("acted_on", "verified")]
+    verified_rows = [r for r in rows if r.status == "verified"]
+    open_rows = [r for r in rows if r.status == "open"]
+
+    found_total = sum(r.estimated_monthly_savings_usd or 0 for r in found_rows)
+    acted_total = sum(r.estimated_monthly_savings_usd or 0 for r in acted_rows)
+    verified_total = sum(
+        r.verified_monthly_savings_usd or r.estimated_monthly_savings_usd or 0
+        for r in verified_rows
+    )
+
+    period_label = f"Last {days} day{'s' if days != 1 else ''}"
+    lines = [
+        f"## Savings Ledger: {period_label}",
+        "",
+        f"FOUND:    ${found_total:,.0f}/mo across {len(found_rows)} opportunit{'ies' if len(found_rows) != 1 else 'y'}",
+        f"ACTED ON: ${acted_total:,.0f}/mo across {len(acted_rows)} opportunit{'ies' if len(acted_rows) != 1 else 'y'}",
+        f"VERIFIED: ${verified_total:,.0f}/mo in realized savings ({len(verified_rows)} confirmed)",
+    ]
+
+    if acted_rows:
+        lines += ["", "### Opportunities acted on"]
+        lines.append("| Date       | Opportunity                              | Est. Saving | Status   |")
+        lines.append("|------------|------------------------------------------|-------------|----------|")
+        for r in sorted(acted_rows, key=lambda x: (x.acted_on_at or x.generated_at), reverse=True)[:20]:
+            ts = r.acted_on_at or r.generated_at
+            date_str = ts.strftime("%Y-%m-%d") if ts else "unknown"
+            desc = (r.description or r.resource_name or "")[:40]
+            saving = f"${r.estimated_monthly_savings_usd:,.0f}/mo"
+            lines.append(f"| {date_str} | {desc:<40} | {saving:<11} | {r.status:<8} |")
+
+    if open_rows:
+        lines += ["", "### Still open (not yet acted on)"]
+        lines.append("| Date found | Opportunity                              | Est. Saving |")
+        lines.append("|------------|------------------------------------------|-------------|")
+        for r in sorted(open_rows, key=lambda x: x.estimated_monthly_savings_usd or 0, reverse=True)[:20]:
+            date_str = r.generated_at.strftime("%Y-%m-%d") if r.generated_at else "unknown"
+            desc = (r.description or r.resource_name or "")[:40]
+            saving = f"${r.estimated_monthly_savings_usd:,.0f}/mo"
+            lines.append(f"| {date_str} | {desc:<40} | {saving:<11} |")
+
+    lines += [
+        "",
+        "Run mark_recommendation_acted_on(id) to move an opportunity to acted_on.",
+        "Run verify_savings() to confirm realized savings from acted-on recommendations.",
+    ]
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def list_profiles() -> str:
+    """
+    List all configured nable profiles (for multi-account or multi-client setups).
+
+    Profiles allow engineers who manage multiple accounts to switch context
+    cleanly. Each profile has its own database and credential namespace.
+
+    Use when:
+        - "What profiles do I have configured?"
+        - "Show me my nable profiles"
+        - "Which profile is active?"
+    """
+    from pathlib import Path
+
+    profiles_dir = Path.home() / ".finops" / "profiles"
+    active = os.environ.get("FINOPS_PROFILE", "").strip()
+
+    if not profiles_dir.exists():
+        lines = [
+            "No profiles configured.",
+            "",
+            "Profiles let you manage separate contexts (e.g. different clients or AWS orgs).",
+            "Each profile has its own database and credential namespace.",
+            "",
+            "Create a profile:  finops profile create <name>",
+            "Activate:          export FINOPS_PROFILE=<name>",
+        ]
+        return "\n".join(lines)
+
+    profile_dirs = sorted(p for p in profiles_dir.iterdir() if p.is_dir())
+
+    if not profile_dirs:
+        lines = [
+            "No profiles found in ~/.finops/profiles/.",
+            "",
+            "Create one with: finops profile create <name>",
+        ]
+        return "\n".join(lines)
+
+    lines = ["## nable Profiles", ""]
+
+    for p in profile_dirs:
+        marker = "(active)" if p.name == active else ""
+        db_path = p / "finops.db"
+        vault_path = p / "vault.db"
+        db_note = "db exists" if db_path.exists() else "no db yet"
+        vault_note = ", vault exists" if vault_path.exists() else ""
+        lines.append(f"  {p.name:<20} {marker:<8} [{db_note}{vault_note}]")
+
+    lines.append("")
+    if active:
+        lines.append(f"Active profile: {active} (FINOPS_PROFILE env var)")
+    else:
+        lines.append("Active profile: default (no FINOPS_PROFILE set)")
+
+    lines += [
+        "",
+        "Switch profile:  export FINOPS_PROFILE=<name>",
+        "Create profile:  finops profile create <name>",
+        "List profiles:   finops profile list",
+    ]
+
+    return "\n".join(lines)
 
 
 @mcp.tool()
