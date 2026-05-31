@@ -754,6 +754,19 @@ button:hover{opacity:.88}
 
 # ── Dashboard HTML ────────────────────────────────────────────────────────────
 
+_DASHBOARD_HTML_PATH = Path(__file__).parent / "static" / "dashboard.html"
+
+
+def _load_dashboard_html() -> str:
+    """Read the dashboard HTML from disk each time so edits are reflected
+    on page reload without restarting the server."""
+    try:
+        return _DASHBOARD_HTML_PATH.read_text(encoding="utf-8")
+    except Exception as exc:
+        log.warning("Could not read dashboard.html: %s", exc)
+        return "<h1>Dashboard template missing. Reinstall nable.</h1>"
+
+
 _DASHBOARD_HTML = """\
 <!doctype html>
 <html lang="en">
@@ -1402,7 +1415,7 @@ button:hover{{filter:brightness(1.1)}}
 
         # Dashboard
         if path == "/" or path == "/index.html":
-            self._send(200, "text/html; charset=utf-8", _DASHBOARD_HTML.encode())
+            self._send(200, "text/html; charset=utf-8", _load_dashboard_html().encode())
 
         # Health
         elif path == "/health":
