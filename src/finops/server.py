@@ -10120,7 +10120,10 @@ async def start_dashboard_server(
         - "My team wants to see costs without installing nable"
     """
     try:
-        from .server_web import start_server_background, _local_ip
+        from .server_web import start_server_background, _local_ip, set_connectors
+        # Inject the MCP server's already-initialized connectors so the
+        # dashboard uses the correct vault/keyring credentials.
+        set_connectors({**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS})
         _, actual_port = start_server_background(host=host, port=port)
         local_ip = _local_ip()
         share_url = f"http://{local_ip}:{actual_port}"
