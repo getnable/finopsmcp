@@ -824,9 +824,9 @@ footer a:hover{color:var(--accent)}
       <div class="card-sub neutral" id="stat-savings-sub">per month</div>
     </div>
     <div class="card">
-      <div class="card-label">FinOps Grade</div>
-      <div class="grade-value" id="stat-grade">...</div>
-      <div class="card-sub neutral" id="stat-score">score</div>
+      <div class="card-label">Efficiency</div>
+      <div class="card-value" id="stat-eff-pct" style="font-size:42px;font-weight:300;letter-spacing:-.04em">--</div>
+      <div class="card-sub" id="stat-eff-label" style="color:var(--fg-3)">calculating...</div>
     </div>
   </div>
 
@@ -967,11 +967,20 @@ function render(d){
   document.getElementById('stat-savings').textContent=fmt(d.opportunities_total_saving||0);
   document.getElementById('stat-savings-sub').textContent=(d.opportunities_count||0)+' opportunities';
 
-  const grade=d.finops_grade||'N/A';
-  const gradeEl=document.getElementById('stat-grade');
-  gradeEl.textContent=grade;
-  gradeEl.className='grade-value '+gradeClass(grade);
-  document.getElementById('stat-score').textContent='Score: '+(d.finops_score||0).toFixed(0)+'/100';
+  // Efficiency % in top card
+  const score=Math.round(d.finops_score||0);
+  const effEl=document.getElementById('stat-eff-pct');
+  const effLbl=document.getElementById('stat-eff-label');
+  if(effEl){
+    effEl.textContent=score+'%';
+    let color,label;
+    if(score>=80){color='var(--success)';label='Well optimized';}
+    else if(score>=60){color='var(--accent)';label='Room to improve';}
+    else if(score>=40){color='var(--warn)';label='Needs attention';}
+    else{color='var(--alert)';label='Critical gaps';}
+    effEl.style.color=color;
+    if(effLbl){effLbl.textContent=label;effLbl.style.color=color;}
+  }
 
   // Services chart (horizontal bar)
   renderServicesChart(d.top_services||[]);
