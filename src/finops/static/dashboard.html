@@ -160,21 +160,13 @@ html,body{
 .card-sub.up{color:var(--alert)}
 .card-sub.down{color:var(--success)}
 
-/* Grade card */
-.grade-display{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
-.grade-letter{
-  font-size:48px;font-weight:700;font-family:var(--mono);line-height:1;letter-spacing:-.04em;
+/* Score card (percentage only — no letter grades) */
+.score-pct{
+  font-size:48px;font-weight:700;font-family:var(--mono);
+  line-height:1;letter-spacing:-.04em;margin-bottom:6px;
 }
-.grade-a{color:var(--success)}
-.grade-b{color:var(--accent)}
-.grade-c{color:var(--warn)}
-.grade-d,.grade-f{color:var(--alert)}
-.grade-score-text{font-size:14px;color:var(--fg3);font-family:var(--mono)}
-.grade-trend{font-size:11px;margin-top:4px}
-.grade-trend.up{color:var(--success)}
-.grade-trend.down{color:var(--alert)}
-.grade-trend.stable{color:var(--fg3)}
-.grade-gaps{font-size:11px;color:var(--fg3);margin-top:3px;line-height:1.4}
+.score-label{font-size:11px;font-weight:500;margin-top:4px;text-transform:uppercase;letter-spacing:.06em}
+.score-gaps{font-size:11px;color:var(--fg3);margin-top:3px;line-height:1.4}
 
 /* Ledger mini */
 .ledger-mini{display:none;flex-direction:column;gap:3px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
@@ -228,16 +220,7 @@ html,body{
 .sc-item{display:flex;flex-direction:column;gap:5px}
 .sc-hdr{display:flex;align-items:center;justify-content:space-between}
 .sc-name{font-size:13px;color:var(--fg);font-weight:400}
-.sc-right{display:flex;align-items:center;gap:10px}
 .sc-score-text{font-size:11px;font-family:var(--mono);color:var(--fg3)}
-.sc-grade-pill{
-  font-size:10px;font-weight:700;width:20px;text-align:center;
-  font-family:var(--mono);
-}
-.gp-a{color:var(--success)}
-.gp-b{color:var(--accent)}
-.gp-c{color:var(--warn)}
-.gp-d,.gp-f{color:var(--alert)}
 .sc-bar-bg{height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
 .sc-bar-fill{height:100%;border-radius:2px;transition:width .6s cubic-bezier(.4,0,.2,1)}
 
@@ -385,15 +368,12 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
         <div class="lm-row"><span class="lm-dot" style="background:var(--success)"></span><span id="lm-verified">$0</span> verified</div>
       </div>
     </div>
-    <!-- FinOps Grade -->
+    <!-- FinOps Score -->
     <div class="card">
-      <div class="card-label">FinOps Grade</div>
-      <div class="grade-display" id="grade-display">
-        <span class="skeleton" style="height:48px;width:36px;border-radius:4px"></span>
-        <span class="skeleton" style="height:16px;width:80px"></span>
-      </div>
-      <div class="grade-trend" id="grade-trend"></div>
-      <div class="grade-gaps" id="grade-gaps"></div>
+      <div class="card-label">FinOps Score</div>
+      <div class="score-pct" id="score-pct" style="color:var(--fg3)"><span class="skeleton" style="height:48px;width:72px;border-radius:4px;display:inline-block"></span></div>
+      <div class="score-label" id="score-label"></div>
+      <div class="score-gaps" id="score-gaps"></div>
     </div>
   </div>
 
@@ -449,7 +429,7 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
     <div class="panel">
       <div class="panel-hdr">
         <div class="panel-title">Efficiency Scorecard</div>
-        <span class="panel-chip" id="sc-badge">OVERALL --</span>
+        <span class="panel-chip" id="sc-badge">EFFICIENCY</span>
       </div>
       <ul class="sc-list" id="sc-list">
         <li class="sc-item"><span style="color:var(--fg3);font-size:13px">Loading...</span></li>
@@ -484,20 +464,13 @@ function fmt(n){
   return '$'+Math.round(n).toLocaleString('en-US');
 }
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function gradeColor(g){
-  const l=String(g||'f').toLowerCase();
-  return l==='a'?'var(--success)':l==='b'?'var(--accent)':l==='c'?'var(--warn)':'var(--alert)';
-}
 function barColor(s){
   if(s>=80) return 'var(--success)';
   if(s>=60) return 'var(--accent)';
   if(s>=40) return 'var(--warn)';
   return 'rgba(224,92,75,.55)';
 }
-function gpClass(g){
-  const l=String(g||'f').toLowerCase();
-  return 'gp-'+l;
-}
+
 
 // ── State ────────────────────────────────────────────────────────────────────
 let selectedDays=parseInt(localStorage.getItem('nable_days')||'30',10)||30;
@@ -647,27 +620,25 @@ function render(d){
     document.getElementById('ledger-mini').style.display='flex';
   }
 
-  // Card 4: FinOps Grade — replace skeleton with real content
-  const grade=d.finops_grade||'--';
-  const score=parseFloat(d.finops_score||0);
-  const gradeDisplay=document.getElementById('grade-display');
-  gradeDisplay.innerHTML=
-    `<span class="grade-letter grade-${(grade||'f').toLowerCase()}" id="grade-letter">${grade}</span>`+
-    `<span class="grade-score-text" id="grade-score">${score.toFixed(1)} / 100</span>`;
-  const gradeEl=document.getElementById('grade-letter');
-  // Trend
-  const trendEl=document.getElementById('grade-trend');
-  const trend=d.finops_trend||'no_history';
-  const delta=d.finops_trend_delta||0;
-  if(trend==='improving'){trendEl.textContent='↑ +'+Math.abs(delta).toFixed(0)+' pts vs last week';trendEl.className='grade-trend up';}
-  else if(trend==='declining'){trendEl.textContent='↓ −'+Math.abs(delta).toFixed(0)+' pts vs last week';trendEl.className='grade-trend down';}
-  else if(trend==='stable'){trendEl.textContent='→ stable vs last week';trendEl.className='grade-trend stable';}
-  else{trendEl.textContent='';trendEl.className='grade-trend';}
-  // Gaps
+  // Card 4: FinOps Score — percentage only, no letter grade
+  const score=Math.round(d.finops_score||0);
+  const scorePctEl=document.getElementById('score-pct');
+  scorePctEl.querySelectorAll('.skeleton').forEach(s=>s.remove());
+  scorePctEl.textContent=score+'%';
+  let scoreColor,scoreLabel;
+  if(score>=80){scoreColor='var(--success)';scoreLabel='Well optimized';}
+  else if(score>=60){scoreColor='var(--accent)';scoreLabel='Room to improve';}
+  else if(score>=40){scoreColor='var(--warn)';scoreLabel='Needs attention';}
+  else{scoreColor='var(--alert)';scoreLabel='Critical gaps';}
+  scorePctEl.style.color=scoreColor;
+  const scoreLabelEl=document.getElementById('score-label');
+  scoreLabelEl.textContent=scoreLabel;
+  scoreLabelEl.style.color=scoreColor;
+  // Weak dimensions
   const dims=(d.scorecard||{}).dimensions||[];
-  const weak=dims.filter(dim=>(dim.score||0)<40).map(dim=>dim.display_name||dim.name);
-  document.getElementById('grade-gaps').textContent=
-    weak.length?weak.length+' critical gap'+(weak.length>1?'s':'')+': '+weak.map(s=>s.toLowerCase()).join(', '):'';
+  const weak=dims.filter(dim=>(dim.score||0)<40).map(dim=>(dim.display_name||dim.name).toLowerCase());
+  document.getElementById('score-gaps').textContent=
+    weak.length?weak.length+' gap'+(weak.length>1?'s':'')+': '+weak.join(', '):'';
 
   // Provider filters
   initProviderFilters(provs);
@@ -776,12 +747,8 @@ function renderTrendChart(trend){
 
 // ── Scorecard ─────────────────────────────────────────────────────────────────
 function renderScorecard(sc){
-  const overall=sc.overall_grade||'--';
   const badge=document.getElementById('sc-badge');
-  badge.textContent='OVERALL '+overall;
-  badge.style.color=gradeColor(overall);
-  badge.style.borderColor=gradeColor(overall)+'44';
-  badge.style.background=gradeColor(overall)+'11';
+  badge.textContent='EFFICIENCY';
 
   const el=document.getElementById('sc-list');
   const dims=sc.dimensions||[];
@@ -791,17 +758,12 @@ function renderScorecard(sc){
   }
   el.innerHTML=dims.map(dim=>{
     const s=Math.round(dim.score||0);
-    const g=dim.grade||'F';
-    const gClass=gpClass(g);
     const color=barColor(s);
     const displayName=dim.display_name||dim.name;
     return `<li class="sc-item">
       <div class="sc-hdr">
         <span class="sc-name">${esc(displayName)}</span>
-        <div class="sc-right">
-          <span class="sc-score-text">${s} / 100</span>
-          <span class="sc-grade-pill ${gClass}">${g}</span>
-        </div>
+        <span class="sc-score-text">${s} / 100</span>
       </div>
       <div class="sc-bar-bg">
         <div class="sc-bar-fill" style="width:${s}%;background:${color}"></div>
