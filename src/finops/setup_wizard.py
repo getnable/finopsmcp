@@ -1352,7 +1352,13 @@ def main(args: list[str] | None = None) -> None:
     _configure_claude_desktop()
 
     print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'")
-    print("  To add more providers later: finops setup")
+    print()
+    print("  Want a visual dashboard?")
+    print("    finops serve")
+    print("    → Opens a web dashboard at http://localhost:8080")
+    print("    → Share the URL and password with your manager or exec team")
+    print()
+    print("  To add more providers: finops setup")
     print("  Full docs: https://getnable.com/docs\n")
     _offer_email_signup()
 

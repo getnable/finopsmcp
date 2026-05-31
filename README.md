@@ -67,6 +67,14 @@ What are my AWS costs this month?
 
 Once you see a real cost breakdown, you're live. Also works with Cursor, Windsurf, and VS Code.
 
+**Step 4 (optional): Open the visual dashboard**
+
+```bash
+finops serve
+```
+
+Opens a password-protected web dashboard at `http://localhost:8080` your whole team can view in a browser — no Claude required. Share the URL and password with your manager or exec team.
+
 **14-day free trial, all features unlocked. No credit card required.**
 
 ---
@@ -77,6 +85,7 @@ finops setup aws      # add another AWS account
 finops setup azure    # add Azure
 finops setup slack    # configure alerts
 finops setup license  # activate a Team plan key
+finops serve          # open the visual dashboard
 ```
 
 ---
@@ -93,6 +102,35 @@ finops setup license  # activate a Team plan key
 - "What will our AWS bill look like next month?"
 - "Show me RDS instances with low CPU that we could right-size"
 - "What's our effective discount rate from Savings Plans?"
+
+---
+
+## Visual dashboard
+
+```bash
+finops serve
+```
+
+Starts a local web dashboard your whole team can open in a browser — no Claude Desktop required. Share it with an exec, a FinOps analyst, or anyone who needs to see costs without using an AI interface.
+
+What it shows:
+- **MTD spend** and projected month total
+- **Cost trend** — 3-month historical with run-rate projection
+- **Efficiency score** — composite of waste, commitment coverage, anomaly response, and tag hygiene
+- **Savings opportunities** — ranked by dollar impact, each with a one-click "Mark done" to track actions taken
+- **Savings pipeline** — how much has been identified vs acted on vs verified
+
+The dashboard reads from your local provider connections. Your data stays on your machine.
+
+```bash
+# Secure with a password (recommended when sharing on a network)
+FINOPS_DASHBOARD_PASSWORD=yourpassword finops serve
+
+# Default: auto-generates a random password and prints it at startup
+finops serve
+```
+
+Light mode, dark mode, and 30/60/90-day lookback are built in.
 
 ---
 
