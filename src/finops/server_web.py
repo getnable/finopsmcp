@@ -792,99 +792,100 @@ _DASHBOARD_HTML = """\
   --mono:'Geist Mono','JetBrains Mono',monospace;
 }
 html,body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:15px;line-height:1.5;min-height:100vh}
-body{padding:24px 20px 60px}
-.container{max-width:1200px;margin:0 auto}
+body{padding:0 0 60px}
+.container{max-width:1400px;margin:0 auto;padding:0 32px}
 
-/* Header */
-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;gap:16px;flex-wrap:wrap}
-.header-left{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+/* Top nav bar */
+.topbar{background:var(--bg);border-bottom:1px solid var(--line);padding:14px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+.topbar-left{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
 .logo{font-size:17px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
 .logo .n{color:var(--accent)}
-.header-title{font-size:14px;color:var(--fg3)}
-.header-account{font-size:13px;font-family:var(--mono);color:var(--fg2)}
-.badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:var(--r-xs)}
-.badge-green{background:rgba(60,186,122,.12);color:var(--success);border:1px solid rgba(60,186,122,.25)}
-.badge-red{background:rgba(224,92,75,.12);color:var(--alert);border:1px solid rgba(224,92,75,.25)}
+.header-title{font-size:14px;color:var(--fg2);border-left:1px solid var(--line2);padding-left:20px}
+.topbar-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:var(--r-lg)}
+.badge-green{background:rgba(60,186,122,.12);color:var(--success);border:1px solid rgba(60,186,122,.3)}
+.badge-red{background:rgba(224,92,75,.12);color:var(--alert);border:1px solid rgba(224,92,75,.3)}
 .badge-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
-.header-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.header-date{font-size:13px;color:var(--fg3)}
-.last-updated{font-size:12px;color:var(--fg4)}
+.header-date{font-size:13px;color:var(--fg2);font-weight:500;letter-spacing:.01em}
 
-/* Controls bar */
-.controls{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap}
-.control-group{display:flex;align-items:center;gap:0}
-.control-btn{background:var(--bg1);border:1px solid var(--line);color:var(--fg2);font-family:var(--font);font-size:12px;font-weight:500;padding:6px 12px;cursor:pointer;transition:background .15s,color .15s}
-.control-btn:first-child{border-radius:var(--r-lg) 0 0 var(--r-lg)}
-.control-btn:last-child{border-radius:0 var(--r-lg) var(--r-lg) 0}
-.control-btn:not(:first-child){border-left:none}
-.control-btn.active{background:var(--bg3);color:var(--fg);border-color:var(--line2)}
-.control-btn:hover:not(.active){background:var(--bg2);color:var(--fg)}
+/* Main content area */
+.main{padding:28px 0 0}
+
+/* Section label */
+.section-label{font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px}
 
 /* Stat cards */
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
 @media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:500px){.cards{grid-template-columns:1fr}}
-.card{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px 20px}
-.card-label{font-size:11px;font-weight:500;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
-.card-value{font-size:28px;font-weight:600;line-height:1;color:var(--fg);font-family:var(--mono)}
-.card-sub{font-size:12px;color:var(--fg3);margin-top:7px}
+.card{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:22px 24px}
+.card-label{font-size:11px;font-weight:500;color:var(--fg3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+.card-value{font-size:30px;font-weight:600;line-height:1;color:var(--fg);font-family:var(--mono)}
+.card-sub{font-size:12px;color:var(--fg3);margin-top:8px}
 .card-sub.up{color:var(--alert)}
 .card-sub.down{color:var(--success)}
 .card-sub.neutral{color:var(--fg3)}
-.grade-value{font-size:40px;font-weight:600;line-height:1;font-family:var(--mono)}
+/* Grade card */
+.grade-row{display:flex;align-items:baseline;gap:10px;line-height:1;margin-bottom:6px}
+.grade-letter{font-size:44px;font-weight:600;font-family:var(--mono);line-height:1}
+.grade-score{font-size:15px;color:var(--fg3);font-family:var(--mono)}
 .grade-a{color:var(--success)}
 .grade-b{color:var(--accent)}
 .grade-c{color:var(--warn)}
 .grade-d,.grade-f{color:var(--alert)}
+.grade-delta{font-size:12px;color:var(--accent);margin-top:4px}
+.grade-gaps{font-size:11px;color:var(--fg3);margin-top:4px}
+
+/* Panel */
+.panel{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:20px 22px}
+.panel-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.panel-title{font-size:11px;font-weight:500;color:var(--fg3);text-transform:uppercase;letter-spacing:.08em}
+.panel-badge{display:inline-flex;align-items:center;font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:var(--r-xs);background:var(--bg3);color:var(--fg3);border:1px solid var(--line2)}
 
 /* Charts row */
-.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
 @media(max-width:768px){.charts-row{grid-template-columns:1fr}}
 
 /* Bottom row */
-.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:40px}
+.bottom-row .panel{min-height:320px}
 @media(max-width:768px){.bottom-row{grid-template-columns:1fr}}
 
-/* Surface panels */
-.panel{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);padding:20px}
-.panel-title{font-size:11px;font-weight:500;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:16px}
-
 /* Chart containers */
-.chart-wrap{position:relative;height:220px}
+.chart-wrap{position:relative;height:260px}
 
-/* Scorecard */
-.scorecard-list{list-style:none;display:flex;flex-direction:column;gap:12px}
-.sc-item{display:flex;flex-direction:column;gap:5px}
+/* Efficiency scorecard */
+.scorecard-list{list-style:none;display:flex;flex-direction:column;gap:14px}
+.sc-item{display:flex;flex-direction:column;gap:6px}
 .sc-header{display:flex;align-items:center;justify-content:space-between}
 .sc-name{font-size:13px;color:var(--fg)}
 .sc-meta{display:flex;align-items:center;gap:8px}
 .sc-score{font-size:12px;font-family:var(--mono);color:var(--fg3)}
-.sc-grade{font-size:11px;font-weight:600;width:20px;text-align:center;font-family:var(--mono)}
+.sc-grade{font-size:11px;font-weight:700;width:18px;text-align:center;font-family:var(--mono)}
 .grade-pill-a{color:var(--success)}
 .grade-pill-b{color:var(--accent)}
 .grade-pill-c{color:var(--warn)}
 .grade-pill-d,.grade-pill-f{color:var(--alert)}
-.sc-bar-bg{height:3px;background:var(--bg3);border-radius:var(--r-xs);overflow:hidden}
-.sc-bar-fill{height:100%;border-radius:var(--r-xs);transition:width .4s}
+.sc-bar-bg{height:4px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.sc-bar-fill{height:100%;border-radius:2px;transition:width .5s ease}
 .sc-bar-a{background:var(--success)}
 .sc-bar-b{background:var(--accent)}
 .sc-bar-c{background:var(--warn)}
-.sc-bar-d,.sc-bar-f{background:var(--alert)}
+.sc-bar-d,.sc-bar-f{background:rgba(224,92,75,.5)}
 
 /* Savings opportunities */
-.opp-list{list-style:none;display:flex;flex-direction:column;gap:0}
-.opp-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.opp-list{list-style:none;display:flex;flex-direction:column}
+.opp-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
 .opp-item:last-child{border-bottom:none}
-.opp-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.opp-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .opp-dot-high{background:var(--alert)}
 .opp-dot-medium{background:var(--warn)}
 .opp-dot-low{background:var(--success)}
 .opp-body{flex:1;min-width:0}
-.opp-desc{font-size:13px;color:var(--fg);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.opp-sub{font-size:12px;color:var(--fg3);margin-top:2px}
-.opp-right{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0}
-.opp-saving{font-size:13px;font-weight:500;color:var(--success);font-family:var(--mono)}
-.effort-badge{font-size:9px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;padding:2px 6px;border-radius:var(--r-xs)}
+.opp-desc{font-size:13px;color:var(--fg);line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.opp-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.opp-saving{font-size:13px;font-weight:500;color:var(--success);font-family:var(--mono);white-space:nowrap}
+.effort-badge{font-size:9px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;padding:2px 7px;border-radius:var(--r-xs);white-space:nowrap}
 .effort-low{background:rgba(60,186,122,.12);color:var(--success);border:1px solid rgba(60,186,122,.2)}
 .effort-medium{background:rgba(230,168,64,.12);color:var(--warn);border:1px solid rgba(230,168,64,.2)}
 .effort-zero{background:rgba(77,184,212,.12);color:var(--accent);border:1px solid rgba(77,184,212,.2)}
@@ -894,97 +895,102 @@ header{display:flex;align-items:center;justify-content:space-between;margin-bott
 .error-banner{background:rgba(224,92,75,.08);border:1px solid rgba(224,92,75,.2);border-radius:var(--r-lg);padding:12px 16px;color:var(--alert);font-size:13px;margin-bottom:16px}
 
 /* Footer */
-footer{text-align:center;margin-top:48px;padding-bottom:8px;font-size:12px;color:var(--fg-2)}
-footer a{color:var(--accent);text-decoration:none;transition:color .15s;font-weight:500}
+footer{text-align:center;padding:16px;font-size:12px;color:var(--fg3)}
+footer a{color:var(--accent);text-decoration:none;font-weight:500}
 footer a:hover{filter:brightness(1.15)}
 
-@media(prefers-reduced-motion:reduce){
-  *{transition:none!important}
-}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
-<div class="container">
 
-  <header>
-    <div class="header-left">
-      <div class="logo"><span class="n">n</span>able</div>
-      <div class="header-title">Cost Dashboard</div>
-      <div class="header-account" id="hdr-account"></div>
-      <span class="badge badge-green" id="provider-badge">
-        <span class="badge-dot"></span>
-        <span id="provider-label">CONNECTING</span>
-      </span>
-    </div>
-    <div class="header-right">
-      <div class="header-date" id="hdr-date"></div>
-      <div class="last-updated" id="last-updated-counter">Loading...</div>
-    </div>
-  </header>
-
-  <div class="controls">
-    <div class="control-group" id="range-group">
-      <button class="control-btn" data-days="30">Last 30 days</button>
-      <button class="control-btn" data-days="60">Last 60 days</button>
-      <button class="control-btn" data-days="90">Last 90 days</button>
-    </div>
-    <div class="control-group" id="provider-group">
-      <button class="control-btn" data-provider="all">All</button>
-      <button class="control-btn" data-provider="aws">AWS only</button>
-      <button class="control-btn" data-provider="azure">Azure only</button>
-    </div>
+<nav class="topbar">
+  <div class="topbar-left">
+    <div class="logo"><span class="n">n</span>able</div>
+    <div class="header-title" id="hdr-title">Cost Dashboard</div>
   </div>
+  <div class="topbar-right">
+    <span class="badge badge-green" id="provider-badge">
+      <span class="badge-dot"></span>
+      <span id="provider-label">CONNECTING</span>
+    </span>
+    <div class="header-date" id="hdr-date"></div>
+  </div>
+</nav>
+
+<div class="container">
+<div class="main">
 
   <div id="error-banner" class="error-banner" style="display:none"></div>
+
+  <div class="section-label">Overview</div>
 
   <div class="cards">
     <div class="card">
       <div class="card-label">MTD Spend</div>
       <div class="card-value" id="stat-mtd">...</div>
-      <div class="card-sub neutral" id="stat-delta">vs last month</div>
+      <div class="card-sub neutral" id="stat-delta">loading...</div>
     </div>
     <div class="card">
-      <div class="card-label">Projected Month Total</div>
+      <div class="card-label">Projected <span id="proj-month-label">Month</span> Total</div>
       <div class="card-value" id="stat-projected">...</div>
       <div class="card-sub" id="stat-projected-sub">run-rate estimate</div>
     </div>
     <div class="card">
       <div class="card-label">Identified Savings</div>
-      <div class="card-value" id="stat-savings">...</div>
+      <div class="card-value down" id="stat-savings">...</div>
       <div class="card-sub neutral" id="stat-savings-sub">per month</div>
     </div>
     <div class="card">
-      <div class="card-label">Efficiency</div>
-      <div class="card-value" id="stat-eff-pct" style="font-size:42px;font-weight:300;letter-spacing:-.04em">--</div>
-      <div class="card-sub" id="stat-eff-label" style="color:var(--fg-3)">calculating...</div>
+      <div class="card-label">FinOps Grade</div>
+      <div class="grade-row">
+        <span class="grade-letter grade-d" id="grade-letter">D</span>
+        <span class="grade-score" id="grade-score">-- / 100</span>
+      </div>
+      <div class="grade-delta" id="grade-delta"></div>
+      <div class="grade-gaps" id="grade-gaps"></div>
     </div>
   </div>
 
   <div class="charts-row">
     <div class="panel">
-      <div class="panel-title">Spend by Service &mdash; Last <span id="chart-days">30</span> Days</div>
+      <div class="panel-hdr">
+        <div class="panel-title">Spend by Service &mdash; Last <span id="chart-days">30</span> Days</div>
+        <span class="panel-badge" id="service-chart-badge">AWS ONLY</span>
+      </div>
       <div class="chart-wrap"><canvas id="chart-services"></canvas></div>
     </div>
     <div class="panel">
-      <div class="panel-title">3-Month Cost Trend</div>
+      <div class="panel-hdr">
+        <div class="panel-title">3-Month Cost Trend</div>
+        <span class="panel-badge">MONTHLY</span>
+      </div>
       <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
     </div>
   </div>
 
   <div class="bottom-row">
-    <div class="panel" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px">
-      <div class="panel-title" style="text-align:center">Efficiency Score</div>
-      <div id="efficiency-pct" style="font-size:72px;font-weight:300;letter-spacing:-.04em;color:var(--accent);font-family:'Instrument Sans',sans-serif;line-height:1">--</div>
-      <div id="efficiency-label" style="font-size:13px;color:var(--fg3);letter-spacing:.04em;text-transform:uppercase">calculating...</div>
+    <div class="panel">
+      <div class="panel-hdr">
+        <div class="panel-title">Efficiency Scorecard</div>
+        <span class="panel-badge" id="scorecard-badge">OVERALL --</span>
+      </div>
+      <ul class="scorecard-list" id="scorecard-list">
+        <li class="sc-item"><span style="color:var(--fg3);font-size:13px">Loading...</span></li>
+      </ul>
     </div>
     <div class="panel">
-      <div class="panel-title">Savings Opportunities</div>
+      <div class="panel-hdr">
+        <div class="panel-title">Savings Opportunities</div>
+        <span class="panel-badge" id="opp-badge">-- OPEN</span>
+      </div>
       <ul class="opp-list" id="opp-list">
         <li class="opp-item"><span style="color:var(--fg3);font-size:13px">Loading...</span></li>
       </ul>
     </div>
   </div>
 
+</div>
 </div>
 
 <footer>
@@ -997,61 +1003,56 @@ function fmt(n){
   if(n==null||isNaN(n)) return '$0';
   if(n>=1000000) return '$'+(n/1000000).toFixed(1)+'M';
   if(n>=1000) return '$'+(n/1000).toFixed(1)+'k';
-  return '$'+n.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  return '$'+Math.round(n).toLocaleString('en-US');
+}
+function fmtDelta(n){
+  if(!n||isNaN(n)) return null;
+  const sign=n>0?'+':'';
+  return sign+fmt(Math.abs(n)).replace('$','')+' ';
 }
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function gradeClass(g){ return 'grade-'+String(g||'f').toLowerCase(); }
+function gradeColor(g){
+  const gl=String(g||'f').toLowerCase();
+  if(gl==='a') return 'var(--success)';
+  if(gl==='b') return 'var(--accent)';
+  if(gl==='c') return 'var(--warn)';
+  return 'var(--alert)';
+}
+function gradeBarClass(g){
+  const gl=String(g||'f').toLowerCase();
+  if(gl==='a') return 'sc-bar-a';
+  if(gl==='b') return 'sc-bar-b';
+  if(gl==='c') return 'sc-bar-c';
+  return 'sc-bar-d';
+}
+function gradePillClass(g){
+  const gl=String(g||'f').toLowerCase();
+  return 'grade-pill-'+gl;
+}
 
 // ── State ────────────────────────────────────────────────────────────────────
-let selectedDays = parseInt(localStorage.getItem('nable_date_range')||'30',10)||30;
-let selectedProvider = localStorage.getItem('nable_provider')||'all';
-let lastFetchedAt = null;
+const selectedDays = 30;
+const selectedProvider = 'all';
 let serviceChart = null;
 let trendChart = null;
 
-// ── Init controls ────────────────────────────────────────────────────────────
-function initControls(){
-  document.querySelectorAll('#range-group .control-btn').forEach(btn=>{
-    const d=parseInt(btn.dataset.days,10);
-    if(d===selectedDays) btn.classList.add('active');
-    btn.addEventListener('click',()=>{
-      selectedDays=d;
-      localStorage.setItem('nable_date_range',String(d));
-      document.querySelectorAll('#range-group .control-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      loadData();
-    });
-  });
-  document.querySelectorAll('#provider-group .control-btn').forEach(btn=>{
-    if(btn.dataset.provider===selectedProvider) btn.classList.add('active');
-    btn.addEventListener('click',()=>{
-      selectedProvider=btn.dataset.provider;
-      localStorage.setItem('nable_provider',selectedProvider);
-      document.querySelectorAll('#provider-group .control-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      loadData();
-    });
-  });
-}
-
 // ── Header date ──────────────────────────────────────────────────────────────
 function initDate(){
-  const d=new Date();
-  document.getElementById('hdr-date').textContent=d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  const now=new Date();
+  const monthName=now.toLocaleDateString('en-US',{month:'long'}).toUpperCase();
+  const year=now.getFullYear();
+  document.getElementById('hdr-date').textContent=monthName+' '+now.getDate()+', '+year;
+  document.getElementById('proj-month-label').textContent=now.toLocaleDateString('en-US',{month:'long'});
 }
 
 // ── Load data ────────────────────────────────────────────────────────────────
 async function loadData(){
   try{
-    const url='/api/data?days='+selectedDays+'&provider='+selectedProvider;
-    const r=await fetch(url);
+    const r=await fetch('/api/data?days='+selectedDays+'&provider='+selectedProvider);
     if(!r.ok) throw new Error('HTTP '+r.status);
-    const d=await r.json();
-    lastFetchedAt=Date.now();
-    render(d);
+    render(await r.json());
   }catch(err){
-    document.getElementById('last-updated-counter').textContent='Failed to load data';
-    console.error(err);
+    console.error('Dashboard load failed:',err);
   }
 }
 
@@ -1062,111 +1063,99 @@ function render(d){
   if(d.error){banner.textContent=d.error;banner.style.display='block';}
   else{banner.style.display='none';}
 
-  // Header: account + provider badge
+  // Top nav: account in title, provider badge
   const acct=d.account_id||'';
-  document.getElementById('hdr-account').textContent=acct?'Account '+acct:'';
+  document.getElementById('hdr-title').textContent='Cost Dashboard'+(acct?' — Account '+acct:'');
   const providers=d.connected_providers||[];
   const badge=document.getElementById('provider-badge');
-  const label=document.getElementById('provider-label');
+  const provLabel=document.getElementById('provider-label');
   if(providers.length>0){
     badge.className='badge badge-green';
-    label.textContent=providers.map(p=>p.toUpperCase()).join(' + ')+' CONNECTED';
+    provLabel.textContent=providers.map(p=>p.toUpperCase()).join('+ ')+' CONNECTED';
   }else{
     badge.className='badge badge-red';
-    label.textContent='NO PROVIDER';
+    provLabel.textContent='NO PROVIDER';
   }
 
-  // Chart days label
-  document.getElementById('chart-days').textContent=selectedDays;
-
-  // Stat cards
+  // Card 1: MTD Spend
+  const now=new Date();
+  const dayOfMonth=now.getDate();
+  const daysInMonth=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
   document.getElementById('stat-mtd').textContent=fmt(d.total_spend_mtd||0);
-  const delta=d.delta_pct||0;
   const deltaEl=document.getElementById('stat-delta');
-  if(delta>0){deltaEl.textContent='+'+delta.toFixed(1)+'% vs last month';deltaEl.className='card-sub up';}
-  else if(delta<0){deltaEl.textContent=delta.toFixed(1)+'% vs last month';deltaEl.className='card-sub down';}
-  else{deltaEl.textContent='vs last month';deltaEl.className='card-sub neutral';}
+  deltaEl.textContent=dayOfMonth+' of '+daysInMonth+' days elapsed';
+  deltaEl.className='card-sub neutral';
 
+  // Card 2: Projected month total
   document.getElementById('stat-projected').textContent=fmt(d.projected_month_total||0);
-  const projDelta=d.total_spend_last_month>0?((d.projected_month_total-d.total_spend_last_month)/d.total_spend_last_month*100):0;
+  const projDollar=(d.projected_month_total||0)-(d.total_spend_last_month||0);
   const projSubEl=document.getElementById('stat-projected-sub');
-  if(projDelta>0){projSubEl.textContent='+'+projDelta.toFixed(1)+'% vs last month';projSubEl.className='card-sub up';}
-  else if(projDelta<0){projSubEl.textContent=projDelta.toFixed(1)+'% vs last month';projSubEl.className='card-sub down';}
-  else{projSubEl.textContent='run-rate estimate';projSubEl.className='card-sub neutral';}
-
-  document.getElementById('stat-savings').textContent=fmt(d.opportunities_total_saving||0);
-  document.getElementById('stat-savings-sub').textContent=(d.opportunities_count||0)+' opportunities';
-
-  // Efficiency % in top card
-  const score=Math.round(d.finops_score||0);
-  const effEl=document.getElementById('stat-eff-pct');
-  const effLbl=document.getElementById('stat-eff-label');
-  if(effEl){
-    effEl.textContent=score+'%';
-    let color,label;
-    if(score>=80){color='var(--success)';label='Well optimized';}
-    else if(score>=60){color='var(--accent)';label='Room to improve';}
-    else if(score>=40){color='var(--warn)';label='Needs attention';}
-    else{color='var(--alert)';label='Critical gaps';}
-    effEl.style.color=color;
-    if(effLbl){effLbl.textContent=label;effLbl.style.color=color;}
+  if(Math.abs(projDollar)>1){
+    const sign=projDollar>0?'+':'−';
+    projSubEl.textContent=sign+'$'+Math.round(Math.abs(projDollar)).toLocaleString('en-US')+' vs last month run rate';
+    projSubEl.className='card-sub '+(projDollar>0?'up':'down');
+  }else{
+    projSubEl.textContent='on track with last month';
+    projSubEl.className='card-sub neutral';
   }
 
-  // Services chart (horizontal bar)
-  renderServicesChart(d.top_services||[]);
+  // Card 3: Identified savings
+  document.getElementById('stat-savings').textContent=fmt(d.opportunities_total_saving||0);
+  const oppCount=d.opportunities_count||0;
+  document.getElementById('stat-savings-sub').textContent='per month — '+oppCount+' opportunit'+(oppCount===1?'y':'ies');
 
-  // Trend chart (line)
+  // Card 4: FinOps grade
+  const grade=d.finops_grade||'N/A';
+  const score=parseFloat(d.finops_score||0).toFixed(1);
+  const gradeLetterEl=document.getElementById('grade-letter');
+  gradeLetterEl.textContent=grade;
+  gradeLetterEl.className='grade-letter grade-'+grade.toLowerCase();
+  document.getElementById('grade-score').textContent=score+' / 100';
+  // Surface critical gaps from scorecard dimensions
+  const dims=(d.scorecard||{}).dimensions||[];
+  const failing=dims.filter(dim=>dim.grade==='F'||dim.grade==='D').map(dim=>dim.name.toLowerCase());
+  document.getElementById('grade-gaps').textContent=failing.length?failing.length+' critical gap'+(failing.length>1?'s':'')+': '+failing.join(', '):'';
+
+  // Chart days label + service badge
+  document.getElementById('chart-days').textContent=selectedDays;
+  const svcBadge=document.getElementById('service-chart-badge');
+  if(providers.length===1){svcBadge.textContent=providers[0].toUpperCase()+' ONLY';}
+  else if(providers.length>1){svcBadge.textContent='ALL PROVIDERS';}
+  else{svcBadge.textContent='';}
+
+  // Charts
+  renderServicesChart(d.top_services||[]);
   renderTrendChart(d.trend||[]);
 
-  // Efficiency percentage
-  renderEfficiency(d.finops_score||0);
+  // Scorecard
+  renderScorecard(d.scorecard||{});
 
-  // Savings opportunities
-  renderOpportunities(d.recent_opportunities||[]);
+  // Opportunities
+  renderOpportunities(d.recent_opportunities||[],oppCount);
 }
 
 // ── Services bar chart ────────────────────────────────────────────────────────
 function renderServicesChart(services){
   const labels=services.map(s=>s.service);
   const amounts=services.map(s=>s.amount);
-  const colors=services.map((s,i)=>i===0?'#e05c4b':'#4db8d4');
+  // Top service red, second teal, rest muted gray
+  const colors=services.map((_,i)=>{
+    if(i===0) return '#e05c4b';
+    if(i===1) return '#4db8d4';
+    return 'rgba(94,107,115,.6)';
+  });
 
   if(serviceChart){serviceChart.destroy();serviceChart=null;}
   const ctx=document.getElementById('chart-services').getContext('2d');
   serviceChart=new Chart(ctx,{
     type:'bar',
-    data:{
-      labels,
-      datasets:[{
-        data:amounts,
-        backgroundColor:colors,
-        borderRadius:2,
-        borderSkipped:false,
-      }]
-    },
+    data:{labels,datasets:[{data:amounts,backgroundColor:colors,borderRadius:3,borderSkipped:false}]},
     options:{
-      indexAxis:'y',
-      responsive:true,
-      maintainAspectRatio:false,
-      plugins:{
-        legend:{display:false},
-        tooltip:{
-          callbacks:{
-            label:ctx=>' '+fmt(ctx.raw)
-          }
-        }
-      },
+      indexAxis:'y',responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
       scales:{
-        x:{
-          ticks:{color:'#56656d',font:{family:"'Geist Mono','JetBrains Mono',monospace",size:11},callback:v=>fmt(v)},
-          grid:{color:'rgba(255,255,255,.04)'},
-          border:{color:'transparent'},
-        },
-        y:{
-          ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12}},
-          grid:{display:false},
-          border:{color:'transparent'},
-        }
+        x:{ticks:{color:'#56656d',font:{family:"'Geist Mono',monospace",size:11},callback:v=>fmt(v)},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}},
+        y:{ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},padding:4},grid:{display:false},border:{color:'transparent'}}
       }
     }
   });
@@ -1186,118 +1175,92 @@ function renderTrendChart(trend){
     data:{
       labels,
       datasets:[
-        {
-          label:'Actual',
-          data:actual,
-          borderColor:'#4db8d4',
-          backgroundColor:'rgba(77,184,212,.08)',
-          borderWidth:2,
-          pointRadius:3,
-          pointBackgroundColor:'#4db8d4',
-          tension:.3,
-          fill:true,
-        },
-        {
-          label:'Projected',
-          data:projected,
-          borderColor:'#e6a840',
-          backgroundColor:'transparent',
-          borderWidth:2,
-          borderDash:[4,4],
-          pointRadius:3,
-          pointBackgroundColor:'#e6a840',
-          tension:.3,
-          fill:false,
-        }
+        {label:'Actual',data:actual,borderColor:'#4db8d4',backgroundColor:'rgba(77,184,212,.1)',borderWidth:2.5,pointRadius:4,pointBackgroundColor:'#4db8d4',tension:.3,fill:true},
+        {label:'Projected',data:projected,borderColor:'#e6a840',backgroundColor:'transparent',borderWidth:2,borderDash:[5,4],pointRadius:4,pointBackgroundColor:'#e6a840',tension:.3,fill:false}
       ]
     },
     options:{
-      responsive:true,
-      maintainAspectRatio:false,
+      responsive:true,maintainAspectRatio:false,
       plugins:{
-        legend:{
-          labels:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},boxWidth:20,usePointStyle:true}
-        },
-        tooltip:{
-          callbacks:{label:ctx=>' '+ctx.dataset.label+': '+fmt(ctx.raw)}
-        }
+        legend:{labels:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},boxWidth:16,usePointStyle:true,pointStyle:'line'}},
+        tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.raw)}}
       },
       scales:{
-        x:{
-          ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12}},
-          grid:{color:'rgba(255,255,255,.04)'},
-          border:{color:'transparent'},
-        },
-        y:{
-          ticks:{color:'#56656d',font:{family:"'Geist Mono','JetBrains Mono',monospace",size:11},callback:v=>fmt(v)},
-          grid:{color:'rgba(255,255,255,.04)'},
-          border:{color:'transparent'},
-        }
+        x:{ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12}},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}},
+        y:{ticks:{color:'#56656d',font:{family:"'Geist Mono',monospace",size:11},callback:v=>fmt(v)},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}}
       }
     }
   });
 }
 
-// ── Efficiency percentage ─────────────────────────────────────────────────────
-function renderEfficiency(score){
-  const pct=document.getElementById('efficiency-pct');
-  const lbl=document.getElementById('efficiency-label');
-  if(!pct||!lbl) return;
-  const s=Math.round(score||0);
-  pct.textContent=s+'%';
-  let color, label;
-  if(s>=80){color='var(--success)';label='Well optimized';}
-  else if(s>=60){color='var(--accent)';label='Room to improve';}
-  else if(s>=40){color='var(--warn)';label='Needs attention';}
-  else{color='var(--alert)';label='Critical gaps';}
-  pct.style.color=color;
-  lbl.textContent=label;
-}
+// ── Efficiency scorecard ──────────────────────────────────────────────────────
+function renderScorecard(sc){
+  const overall=sc.overall_grade||'--';
+  const dims=sc.dimensions||[];
+  document.getElementById('scorecard-badge').textContent='OVERALL '+overall;
 
-// ── Savings opportunities ─────────────────────────────────────────────────────
-function renderOpportunities(opps){
-  const el=document.getElementById('opp-list');
-  if(!opps||opps.length===0){
-    el.innerHTML='<li class="opp-item"><span style="color:var(--fg3);font-size:13px">No open opportunities. Run a waste scan to surface recommendations.</span></li>';
+  const el=document.getElementById('scorecard-list');
+  if(!dims.length){
+    el.innerHTML='<li class="sc-item"><span style="color:var(--fg3);font-size:13px">Run a cost audit to generate scorecard data.</span></li>';
     return;
   }
-  el.innerHTML=opps.map(o=>{
-    const impact=String(o.impact||'medium').toLowerCase();
-    const dotClass=impact==='high'?'opp-dot-high':impact==='low'?'opp-dot-low':'opp-dot-medium';
-    const effort=String(o.effort||'MEDIUM').toUpperCase();
-    let effortClass='effort-medium';
-    if(effort==='LOW'||effort==='LOW EFFORT') effortClass='effort-low';
-    else if(effort==='ZERO'||effort==='ZERO EFFORT') effortClass='effort-zero';
-    else if(effort==='HIGH') effortClass='effort-high';
-    const label=effort.includes('EFFORT')?effort:effort+' EFFORT';
-    const svc=o.service||o.resource||'';
-    return `<li class="opp-item">
-      <span class="opp-dot ${dotClass}"></span>
-      <div class="opp-body">
-        <div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div>
-        ${svc?`<div class="opp-sub">${esc(svc)}</div>`:''}
+  el.innerHTML=dims.map(dim=>{
+    const g=dim.grade||'F';
+    const s=Math.round(dim.score||0);
+    const barClass=gradeBarClass(g);
+    const pillClass=gradePillClass(g);
+    return `<li class="sc-item">
+      <div class="sc-header">
+        <span class="sc-name">${esc(dim.name)}</span>
+        <div class="sc-meta">
+          <span class="sc-score">${s} / 100</span>
+          <span class="sc-grade ${pillClass}">${g}</span>
+        </div>
       </div>
-      <div class="opp-right">
-        <span class="opp-saving">${fmt(o.monthly_saving)}/mo</span>
-        <span class="effort-badge ${effortClass}">${label}</span>
+      <div class="sc-bar-bg">
+        <div class="sc-bar-fill ${barClass}" style="width:${s}%"></div>
       </div>
     </li>`;
   }).join('');
 }
 
-// ── Last updated counter ──────────────────────────────────────────────────────
-function updateCounter(){
-  if(!lastFetchedAt){return;}
-  const sec=Math.round((Date.now()-lastFetchedAt)/1000);
-  document.getElementById('last-updated-counter').textContent='Last updated: '+sec+'s ago';
+// ── Savings opportunities ─────────────────────────────────────────────────────
+function renderOpportunities(opps, count){
+  document.getElementById('opp-badge').textContent=(count||opps.length)+' OPEN';
+
+  const el=document.getElementById('opp-list');
+  if(!opps||opps.length===0){
+    el.innerHTML='<li class="opp-item"><span style="color:var(--fg3);font-size:13px">No open opportunities found. Run a waste audit to surface savings.</span></li>';
+    return;
+  }
+  el.innerHTML=opps.map(o=>{
+    const impact=String(o.impact||'medium').toLowerCase();
+    const dotClass=impact==='high'?'opp-dot-high':impact==='low'?'opp-dot-low':'opp-dot-medium';
+    const effort=String(o.effort||'MEDIUM').toUpperCase().replace(' EFFORT','');
+    const effortLabel=effort+' EFFORT';
+    let effortClass='effort-medium';
+    if(effort==='LOW') effortClass='effort-low';
+    else if(effort==='ZERO') effortClass='effort-zero';
+    else if(effort==='HIGH') effortClass='effort-high';
+    // Format saving: if there's a range in the description, keep it; otherwise show single value
+    const saving=fmt(o.monthly_saving||0)+'/mo';
+    return `<li class="opp-item">
+      <span class="opp-dot ${dotClass}"></span>
+      <div class="opp-body">
+        <div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div>
+      </div>
+      <div class="opp-right">
+        <span class="opp-saving">${saving}</span>
+        <span class="effort-badge ${effortClass}">${effortLabel}</span>
+      </div>
+    </li>`;
+  }).join('');
 }
 
-// ── Auto-refresh ──────────────────────────────────────────────────────────────
-initControls();
+// ── Boot ──────────────────────────────────────────────────────────────────────
 initDate();
 loadData();
 setInterval(loadData, 60000);
-setInterval(updateCounter, 1000);
 </script>
 </body>
 </html>
