@@ -321,25 +321,127 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
             ],
         }
 
-    # Enhanced savings opportunities with effort and impact metadata
+    # Savings opportunities: merge live high-value scanners with stored recs.
+    opportunities: list[dict] = []
+
+    # 1. Stored recommendations from the local DB (idle resources, etc.)
     try:
         from .recommendations.savings_tracker import list_recommendations
         recs = list_recommendations(status="open", limit=10)
-        result["recent_opportunities"] = [
-            {
+        for r in recs:
+            opportunities.append({
                 "description": r.get("description", ""),
                 "monthly_saving": round(r.get("estimated_monthly_savings_usd", 0.0), 2),
                 "resource": r.get("resource_name", r.get("resource_id", "")),
                 "effort": r.get("effort", "MEDIUM"),
                 "impact": r.get("impact", "medium"),
                 "service": r.get("service", r.get("source", "")),
-            }
-            for r in recs
-        ]
+            })
     except Exception:
         pass
 
+    # 2. Live high-value scanners (the ones that surface the big wins).
+    #    Only run for AWS-connected accounts. Each is best-effort.
+    aws = configured.get("aws")
+    if aws is not None:
+        try:
+            opportunities.extend(await _live_opportunities(aws))
+        except Exception as exc:
+            log.debug("Live opportunity scan failed: %s", exc)
+
+    # Sort by monthly saving descending, keep the top 8.
+    opportunities.sort(key=lambda o: o.get("monthly_saving", 0) or 0, reverse=True)
+    result["recent_opportunities"] = opportunities[:8]
+    result["opportunities_count"] = len(opportunities)
+    result["opportunities_total_saving"] = round(
+        sum(o.get("monthly_saving", 0) or 0 for o in opportunities), 2
+    )
+
     return result
+
+
+async def _live_opportunities(aws: Any) -> list[dict]:
+    """Run the high-value scanners live and normalize into dashboard opportunities."""
+    import asyncio
+    out: list[dict] = []
+
+    async def _safe(name: str, coro):
+        try:
+            return name, await coro
+        except Exception as exc:
+            log.debug("scanner %s failed: %s", name, exc)
+            return name, None
+
+    from .recommendations.textract_env import scan_textract_environment_waste as _tex
+    from .recommendations.bedrock_routing import recommend_bedrock_model_routing as _bed
+    from .recommendations.commitments import analyze_commitments as _commit
+    from .recommendations.public_ipv4 import audit_public_ipv4 as _ipv4
+    from .recommendations.graviton import scan_graviton_opportunities as _grav
+
+    results = await asyncio.gather(
+        _safe("textract", _tex(aws_client=aws)),
+        _safe("bedrock",  _bed(aws_client=aws)),
+        _safe("commit",   _commit(aws_client=aws)),
+        _safe("ipv4",     _ipv4(aws_client=aws)),
+        _safe("graviton", _grav(aws_client=aws)),
+    )
+
+    for name, data in results:
+        if not data:
+            continue
+        try:
+            if name == "textract" and isinstance(data, dict):
+                w = data.get("estimated_monthly_waste", 0) or 0
+                if w > 0:
+                    callers = data.get("non_prod_callers", [])
+                    out.append({
+                        "description": f"Disable Textract in non-production environments ({len(callers)} caller(s) detected)",
+                        "monthly_saving": round(w, 2),
+                        "resource": "Amazon Textract", "effort": "LOW",
+                        "impact": "high", "service": "Textract",
+                    })
+            elif name == "bedrock" and isinstance(data, dict):
+                s = data.get("total_monthly_savings", 0) or 0
+                if s > 0:
+                    out.append({
+                        "description": "Route short-context Bedrock calls from Sonnet to Haiku",
+                        "monthly_saving": round(s, 2),
+                        "resource": "Amazon Bedrock", "effort": "MEDIUM",
+                        "impact": "high", "service": "Bedrock",
+                    })
+            elif name == "commit" and isinstance(data, dict):
+                s = data.get("estimated_monthly_savings", 0) or 0
+                cov = data.get("current_coverage_pct", 100) or 100
+                if s > 0 and cov < 80:
+                    out.append({
+                        "description": f"Buy Reserved Instances / Savings Plans ({cov:.0f}% covered today)",
+                        "monthly_saving": round(s, 2),
+                        "resource": "RDS / DocumentDB / EC2", "effort": "ZERO",
+                        "impact": "high", "service": "Commitments",
+                    })
+            elif name == "ipv4" and isinstance(data, dict):
+                w = data.get("total_monthly_waste", 0) or 0
+                if w > 0:
+                    n = len(data.get("unattached_eips", []))
+                    out.append({
+                        "description": f"Release {n} unattached Elastic IP(s)",
+                        "monthly_saving": round(w, 2),
+                        "resource": "Elastic IPs", "effort": "ZERO",
+                        "impact": "low", "service": "EC2",
+                    })
+            elif name == "graviton" and isinstance(data, list):
+                total = sum(r.get("savings_estimate", 0) or 0 for r in data)
+                if total > 0:
+                    out.append({
+                        "description": f"Migrate {len(data)} instance(s) to Graviton (arm64)",
+                        "monthly_saving": round(total, 2),
+                        "resource": "EC2 / RDS", "effort": "MEDIUM",
+                        "impact": "high", "service": "Compute",
+                    })
+        except Exception as exc:
+            log.debug("normalize %s failed: %s", name, exc)
+
+    return out
 
 
 # ── Tableau data fetchers ────────────────────────────────────────────────────
@@ -764,9 +866,9 @@ header{display:flex;align-items:center;justify-content:space-between;margin-bott
 .error-banner{background:rgba(224,92,75,.08);border:1px solid rgba(224,92,75,.2);border-radius:var(--r-lg);padding:12px 16px;color:var(--alert);font-size:13px;margin-bottom:16px}
 
 /* Footer */
-footer{text-align:center;margin-top:40px;font-size:12px;color:var(--fg4)}
-footer a{color:var(--fg4);text-decoration:none;transition:color .15s}
-footer a:hover{color:var(--accent)}
+footer{text-align:center;margin-top:48px;padding-bottom:8px;font-size:12px;color:var(--fg-2)}
+footer a{color:var(--accent);text-decoration:none;transition:color .15s;font-weight:500}
+footer a:hover{filter:brightness(1.15)}
 
 @media(prefers-reduced-motion:reduce){
   *{transition:none!important}
