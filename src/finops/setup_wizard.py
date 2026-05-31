@@ -1288,7 +1288,17 @@ def main(args: list[str] | None = None) -> None:
         _run_license_status()
         return
     elif parsed.cmd == "serve":
-        from .server_web import run_server
+        from .server_web import run_server, set_connectors
+        from .connectors.aws import AWSConnector
+        from .connectors.azure import AzureConnector
+        from .connectors.gcp import GCPConnector
+        # Pre-initialize connectors using vault/keyring credentials so the
+        # dashboard shows real data from the correct accounts.
+        set_connectors({
+            "aws": AWSConnector(),
+            "azure": AzureConnector(),
+            "gcp": GCPConnector(),
+        })
         run_server(
             host=getattr(parsed, "host", "0.0.0.0"),
             port=getattr(parsed, "port", 8080),

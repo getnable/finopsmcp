@@ -37,6 +37,18 @@ _CHARTJS_PATH = _STATIC_DIR / "chart.min.js"
 log = logging.getLogger(__name__)
 
 
+# ── Shared connectors (set by run_server/start_server_background) ────────────
+# Using the MCP server's already-initialized connectors avoids credential
+# resolution issues (env var vs keyring precedence).
+_SHARED_CONNECTORS: dict[str, Any] = {}
+
+
+def set_connectors(connectors: dict[str, Any]) -> None:
+    """Inject the MCP server's initialized connectors into the dashboard."""
+    global _SHARED_CONNECTORS
+    _SHARED_CONNECTORS.update(connectors)
+
+
 # ── Data fetcher ─────────────────────────────────────────────────────────────
 
 async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
@@ -70,28 +82,33 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
 
     try:
         from datetime import date, timedelta
-        from .connectors.aws import AWSConnector
-        from .connectors.azure import AzureConnector
-        from .connectors.gcp import GCPConnector
-        from .connectors.saas.datadog import DatadogConnector
-        from .connectors.saas.snowflake import SnowflakeConnector
 
-        _cloud_all = {
-            "aws": AWSConnector(),
-            "azure": AzureConnector(),
-            "gcp": GCPConnector(),
-        }
-        _saas: dict[str, Any] = {}
-        try:
-            _saas["datadog"] = DatadogConnector()
-        except Exception:
-            pass
-        try:
-            _saas["snowflake"] = SnowflakeConnector()
-        except Exception:
-            pass
-
-        all_connectors = {**_cloud_all, **_saas}
+        # Prefer connectors injected from the MCP server (already initialized
+        # with the correct vault/keyring credentials). Fall back to fresh
+        # instances only if no shared connectors are available.
+        if _SHARED_CONNECTORS:
+            all_connectors = _SHARED_CONNECTORS
+        else:
+            from .connectors.aws import AWSConnector
+            from .connectors.azure import AzureConnector
+            from .connectors.gcp import GCPConnector
+            from .connectors.saas.datadog import DatadogConnector
+            from .connectors.saas.snowflake import SnowflakeConnector
+            _cloud_all = {
+                "aws": AWSConnector(),
+                "azure": AzureConnector(),
+                "gcp": GCPConnector(),
+            }
+            _saas: dict[str, Any] = {}
+            try:
+                _saas["datadog"] = DatadogConnector()
+            except Exception:
+                pass
+            try:
+                _saas["snowflake"] = SnowflakeConnector()
+            except Exception:
+                pass
+            all_connectors = {**_cloud_all, **_saas}
 
         # Find configured providers, optionally filtered by provider param
         configured: dict[str, Any] = {}
