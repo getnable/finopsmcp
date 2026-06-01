@@ -544,8 +544,18 @@ async def generate_account_dashboard(
             from ..ml.forecasting import Forecaster
             f = Forecaster.for_account(resolved_account, days=90, aws_connector=aws_connector)
             if f._series:
-                pred = f.predict_dict(30 - today.day + 1)
-                projected = pred.get("monthly_projection_usd")
+                # Project full month = month-to-date actual + forecast of the
+                # remaining days. The old code used the wrong dict key
+                # (monthly_projection_usd, which never exists, so it always
+                # rendered "n/a") and forecast only the remaining days without
+                # adding MTD, under-counting the month.
+                remaining_days = max(0, 30 - today.day)
+                remaining_forecast = 0.0
+                if remaining_days > 0:
+                    pred = f.predict_dict(remaining_days)
+                    remaining_forecast = pred.get("monthly_projection") or 0.0
+                if this_month_total or remaining_forecast:
+                    projected = round(this_month_total + remaining_forecast, 2)
         except Exception:
             pass
 

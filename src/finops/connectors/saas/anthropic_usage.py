@@ -22,6 +22,15 @@ log = logging.getLogger(__name__)
 
 # Per 1M tokens (USD)
 _MODEL_PRICING: dict[str, dict[str, float]] = {
+    # Claude 4 family (current generation)
+    "claude-opus-4-20250514":          {"input": 15.00, "output": 75.00},
+    "claude-opus-4-1-20250805":        {"input": 15.00, "output": 75.00},
+    "claude-sonnet-4-20250514":        {"input": 3.00,  "output": 15.00},
+    "claude-sonnet-4-5-20250929":      {"input": 3.00,  "output": 15.00},
+    "claude-haiku-4-5-20251001":       {"input": 1.00,  "output": 5.00},
+    "claude-opus-4-latest":            {"input": 15.00, "output": 75.00},
+    "claude-sonnet-4-latest":          {"input": 3.00,  "output": 15.00},
+    "claude-haiku-4-latest":           {"input": 1.00,  "output": 5.00},
     # Claude 3.7 / 3.5 family
     "claude-3-7-sonnet-20250219":      {"input": 3.00,  "output": 15.00},
     "claude-3-5-sonnet-20241022":      {"input": 3.00,  "output": 15.00},

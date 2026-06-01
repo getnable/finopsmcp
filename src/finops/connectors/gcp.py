@@ -56,7 +56,10 @@ class GCPConnector(BaseConnector):
             SELECT
                 service.description AS service,
                 location.region AS region,
-                SUM(cost) AS total_cost,
+                -- Net cost = gross cost + credits (credits are stored negative:
+                -- committed-use discounts, SUDs, promotions). Summing cost alone
+                -- overstates spend by 10-30% and won't match the GCP console.
+                SUM(cost + IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) c), 0)) AS total_cost,
                 currency
             FROM `{bq_table}`
             WHERE
