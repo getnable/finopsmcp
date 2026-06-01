@@ -246,7 +246,7 @@ function Hero({ layout, interaction }){
               <span className="accent">Waste found.<br/>Money saved.</span>
             </h1>
             <p className="lede">
-              Connect AWS, Azure, GCP, and 17 providers to Claude or Cursor. Ask about spend, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally. Your credentials and cost data never leave your machine.
+              Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Track LLM spend by model, catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally, or always-on. Your credentials and cost data never leave your machine.
             </p>
             <div className="hero-cta-row" id="install">
               <CopyInstall />
@@ -523,9 +523,9 @@ function Depth(){
     },
     {
       n: "04",
-      h: "It tells you who to call.",
-      p: "When spend spikes, you don't need another chart. You need to know which team owns it. nable attributes anomalies to the service, team, or environment that caused them, then alerts whoever owns it in Slack or Teams. Before finance notices.",
-      chips: ["team attribution","Slack / Teams","near-zero false positives","28-day baseline"],
+      h: "Always-on, or on demand.",
+      p: "Ask in your editor whenever you want, or run `finops serve` for always-on monitoring that catches spikes 24/7. When spend jumps, nable attributes the anomaly to the team or service that caused it and alerts whoever owns it in Slack or Teams. Before finance notices.",
+      chips: ["always-on or on-demand","team attribution","Slack / Teams","28-day baseline"],
     },
   ];
 
