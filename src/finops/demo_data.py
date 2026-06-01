@@ -273,6 +273,69 @@ def cost_summary_cur() -> dict[str, Any]:
 
 # ── Registry: maps tool name → demo response function ─────────────────────────
 
+def llm_costs() -> dict[str, Any]:
+    # AI/LLM spend, consistent with the acme-production story: ~$4,120/mo,
+    # which is ~32% of the $12,847 infra bill. gpt-4o dominates. The wedge:
+    # show the money answer AND the switch that recovers it, with zero creds.
+    daily = []
+    for i in range(13, -1, -1):
+        d = (_TODAY - timedelta(days=i)).isoformat()
+        # gentle upward drift, ~$135/day average
+        daily.append({"date": d, "total_usd": round(118 + (13 - i) * 2.6, 2)})
+    return {
+        "period": f"{_MONTH_START} to {_YESTERDAY}",
+        "total_usd": 4120.00,
+        "pct_of_total_cloud_spend": 32.1,
+        "by_provider": {
+            "openai":    2920.00,
+            "anthropic":  870.00,
+            "bedrock":    330.00,
+        },
+        "by_model": {
+            "gpt-4o":                       2080.00,
+            "claude-sonnet-4-5-20250929":    620.00,
+            "o1":                            430.00,
+            "gpt-4o-mini":                   410.00,
+            "bedrock/anthropic.claude":      330.00,
+            "claude-haiku-4-5-20251001":     250.00,
+        },
+        "model_count": 6,
+        "top_spenders": [
+            {"model": "gpt-4o",            "provider": "openai",    "cost_usd": 2080.00},
+            {"model": "claude-sonnet-4-5", "provider": "anthropic", "cost_usd":  620.00},
+            {"model": "o1",                "provider": "openai",    "cost_usd":  430.00},
+        ],
+        "daily": daily,
+        "recommendations": [
+            {
+                "title": "Route short-context requests off gpt-4o",
+                "detail": (
+                    "gpt-4o is 71% of AI spend ($2,920/mo). About 60% of those requests "
+                    "use under 4K context and don't need it. Routing them to gpt-4o-mini "
+                    "saves an estimated $1,640/mo."
+                ),
+                "estimated_savings_usd": 1640.00,
+                "effort": "medium",
+            },
+            {
+                "title": "Turn on prompt caching",
+                "detail": (
+                    "Prompt cache hit rate is 8%. Caching system prompts and few-shot "
+                    "examples could recover an estimated $740/mo at current volume."
+                ),
+                "estimated_savings_usd": 740.00,
+                "effort": "low",
+            },
+        ],
+        "sources": {"openai": "ok", "anthropic": "ok", "bedrock": "ok"},
+        "summary": (
+            "AI/LLM spend this month: $4,120 (32% of total cloud cost). gpt-4o drives "
+            "71% of it. Two changes recover ~$2,380/mo: route short-context calls to "
+            "gpt-4o-mini ($1,640) and enable prompt caching ($740)."
+        ),
+    }
+
+
 DEMO_RESPONSES: dict[str, Any] = {
     "get_cost_summary":             cost_summary,
     "get_anomalies":                anomalies,
@@ -280,6 +343,8 @@ DEMO_RESPONSES: dict[str, Any] = {
     "get_kubernetes_costs":         kubernetes_costs,
     "get_cluster_efficiency":       cluster_efficiency,
     "get_tag_cost_breakdown_cur":   cost_summary_cur,
+    "get_llm_costs":                llm_costs,
+    "get_llm_cost_by_model":        llm_costs,
 }
 
 
