@@ -16,6 +16,7 @@ import asyncio
 import base64
 import csv
 import io
+import html as _html
 import json
 import logging
 import os
@@ -1855,7 +1856,7 @@ class _Handler(BaseHTTPRequestHandler):
         if error:
             error_html = '<p style="color:#e05c4b;margin:0 0 16px;font-size:13px">Incorrect password. Try again.</p>'
         elif sso_error:
-            error_html = f'<p style="color:#e05c4b;margin:0 0 16px;font-size:13px">{sso_error}</p>'
+            error_html = f'<p style="color:#e05c4b;margin:0 0 16px;font-size:13px">{_html.escape(sso_error)}</p>'
 
         sso_block = ""
         if _sso.SSO_ENABLED:
@@ -2021,9 +2022,7 @@ button:hover{{filter:brightness(1.1)}}
                 # Token exchange: validate token → set read-only cookie → redirect to /view
                 if _ro_token_valid(token_param):
                     ro_session = _create_session()  # re-use same session TTL
-                    _RO_TOKENS.pop(token_param, None)  # consume the token (one-time exchange)
-                    # Regenerate a fresh token so the share URL stays alive
-                    _RO_TOKENS[token_param] = datetime.now(tz=timezone.utc) + _RO_TOKEN_TTL
+                    _RO_TOKENS.pop(token_param, None)  # one-time exchange: consumed here
                     # Audit log
                     client_ip = self.client_address[0]
                     log.info("Read-only share link accessed from %s", client_ip)
@@ -2089,7 +2088,7 @@ button:hover{{filter:brightness(1.1)}}
                 self.send_header("Location", "/")
                 self.send_header(
                     "Set-Cookie",
-                    f"nable_session={session_token}; Path=/; HttpOnly; SameSite=Lax",
+                    f"nable_session={session_token}; Path=/; HttpOnly; SameSite=Strict",
                 )
                 self.send_header("Content-Length", "0")
                 self.end_headers()
@@ -2100,9 +2099,15 @@ button:hover{{filter:brightness(1.1)}}
 
         # Auth check — skip for health, login, and SSO paths (handled above).
         # Use _any_auth_valid so read-only share-link sessions can reach /api/data.
+        # Machine clients (OData, Tableau, API) get a JSON 401 instead of the HTML login page.
+        _MACHINE_PREFIXES = ("/odata", "/api/", "/tableau/")
         if path not in ("/health", "/login", "/view") and not self._any_auth_valid():
             if _DASHBOARD_PASSWORD or _sso.SSO_ENABLED:
-                self._serve_login_page()
+                if any(path.startswith(p) for p in _MACHINE_PREFIXES):
+                    self._send(401, "application/json",
+                               json.dumps({"error": "Authentication required"}).encode())
+                else:
+                    self._serve_login_page()
                 return
 
         # Dashboard

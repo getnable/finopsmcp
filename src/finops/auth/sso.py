@@ -219,7 +219,7 @@ def exchange_code(code: str, state: str) -> dict[str, str]:
     claims = _verify_jwt(id_token)
 
     email: str = claims.get("email", "")
-    if claims.get("email_verified") is False:
+    if claims.get("email_verified") is not True:
         raise ValueError("Email address is not verified by the IdP")
 
     if SSO_ALLOWED_DOMAINS:
