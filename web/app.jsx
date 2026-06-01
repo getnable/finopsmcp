@@ -177,7 +177,7 @@ function Nav(){
       <div className="nav-inner">
         <a href="/" className="logo">
           <LogoMark />
-          <span>nable</span>
+          <span><span style={{color:'var(--accent)'}}>n</span>able</span>
         </a>
         <ul>
           <li><button className="nav-link" onClick={()=>scrollTo('connectors')}>Connectors</button></li>
