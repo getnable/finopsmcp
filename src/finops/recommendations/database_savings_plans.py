@@ -77,7 +77,8 @@ def _get_database_sp_coverage(ce_client: Any, start: str, end: str) -> float:
         totals = resp.get("Total", {}).get("CoverageHours", {})
         return float(totals.get("CoverageHoursPercentage", 0))
     except Exception as e:
-        log.warning("Database SP coverage fetch failed: %s", e)
+        from .._logutil import note_sp_error
+        note_sp_error(log, "Database SP coverage", e)
         return 0.0
 
 

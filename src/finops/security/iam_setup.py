@@ -43,6 +43,7 @@ _REQUIRED_ACTIONS: list[str] = [
     "ce:GetSavingsPlansPurchaseRecommendation",
     "ce:GetSavingsPlansUtilization",
     "ce:GetSavingsPlansUtilizationDetails",
+    "ce:GetSavingsPlansCoverage",
     "ce:GetRightsizingRecommendation",
     "ce:ListCostAllocationTags",
     "ce:DescribeCostCategoryDefinition",
