@@ -237,10 +237,18 @@ async def _active(subset: dict | None = None) -> dict[str, Any]:
     return result
 
 
+MAX_LOOKBACK_DAYS = int(os.getenv("FINOPS_MAX_LOOKBACK_DAYS", "365"))
+
 def _default_dates() -> tuple[date, date]:
     lookback = int(os.getenv("DEFAULT_LOOKBACK_DAYS", "30"))
     end = date.today()
-    return end - timedelta(days=lookback), end
+    return end - timedelta(days=min(lookback, MAX_LOOKBACK_DAYS)), end
+
+
+def _clamp_start_date(sd: date) -> date:
+    """Prevent runaway Cost Explorer queries by capping lookback to MAX_LOOKBACK_DAYS."""
+    earliest = date.today() - timedelta(days=MAX_LOOKBACK_DAYS)
+    return max(sd, earliest)
 
 
 def _resolve_safe_path(raw: str, must_exist: bool = False) -> "str | dict":
@@ -7558,7 +7566,6 @@ async def get_databricks_job_costs(
     }
 
 
-<<<<<<< Updated upstream
 @mcp.tool()
 async def get_focus_costs(
     start_date: str | None = None,
@@ -7594,6 +7601,7 @@ async def get_focus_costs(
             sd = date.fromisoformat(start_date)
         except ValueError:
             return {"error": f"Invalid start_date: {start_date!r}. Use YYYY-MM-DD."}
+    sd = _clamp_start_date(sd)
     if end_date:
         try:
             ed = date.fromisoformat(end_date)
@@ -7678,6 +7686,8 @@ async def get_focus_costs(
             **({"errors": errors} if errors else {}),
         }
 
+    RECORD_LIMIT = 500
+    truncated = len(serialized) > RECORD_LIMIT
     return {
         "focus_version": "2.0",
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
@@ -7685,7 +7695,8 @@ async def get_focus_costs(
         "total_billed_cost": round(sum(r.BilledCost for r in all_records), 4),
         "total_effective_cost": round(sum(r.EffectiveCost for r in all_records), 4),
         "record_count": len(serialized),
-        "records": serialized,
+        **({"records_truncated": True, "hint": f"Showing first {RECORD_LIMIT} of {len(serialized)} records. Use group_by= for aggregated results."} if truncated else {}),
+        "records": serialized[:RECORD_LIMIT],
         **({"errors": errors} if errors else {}),
     }
 
@@ -8970,17 +8981,14 @@ async def run_full_cost_audit(
     top_n: int = 10,
 ) -> str:
     """
-    ALWAYS call this tool first when a user asks anything about cloud costs,
-    savings, spend, waste, optimization, or their bill. Runs all 16 cost
-    optimization scanners in parallel and returns the highest-impact savings
-    opportunities ranked by estimated monthly savings.
+    Run a full cost optimization audit across all connected AWS resources.
+    Use this when the user explicitly asks for a full audit, cost scan, or
+    optimization sweep. For simple cost questions ("what did I spend last month?")
+    prefer get_cost_summary or get_costs_by_service — they are faster and cheaper.
 
-    Use for any variation of:
-        - "What are my cloud costs?" / "How much am I spending?"
-        - "How can I save money?" / "Where am I wasting money?"
-        - "What should I optimize?" / "Run a cost audit"
-        - "Help me reduce my cloud spend" / "Am I over-provisioned?"
-        - "What are quick wins on cloud cost?" / "What's eating my budget?"
+    Good triggers: "run a cost audit", "scan for savings", "find waste",
+    "full optimization report", "what should I optimize?".
+    Not needed for: point-in-time cost queries, single-service questions, forecasts.
 
     Covers: Graviton, public IPv4, Lambda concurrency, S3 Bucket Keys,
     non-prod scheduling, RDS snapshots, spot adoption, CloudWatch cardinality,
@@ -10180,7 +10188,5 @@ Run `finops serve` first if the server is not running.
         return f"Error: {exc}"
 
 
-=======
->>>>>>> Stashed changes
 if __name__ == "__main__":
     main()
