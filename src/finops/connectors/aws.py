@@ -149,6 +149,26 @@ class AWSConnector(BaseConnector):
         if start_date < _earliest:
             start_date = _earliest
 
+        # Read-through cache: Cost Explorer bills $0.01 per request, and an agentic
+        # session re-asks the same cost question repeatedly. Serve a 12h-fresh copy
+        # so repeat queries within a conversation cost nothing. CE data only
+        # refreshes a few times a day, so this never serves stale numbers.
+        import copy as _copy
+
+        from .. import cache as _cache
+        _ck = _cache.make_key(
+            "aws.get_costs",
+            ",".join(sorted(self._role_arns)) if self._role_arns else "default",
+            start_date.isoformat(), end_date.isoformat(),
+            granularity, ",".join(group_by),
+            repr(filters) if filters else "",
+        )
+        _hit = _cache.get(_ck)
+        if _hit is not None:
+            # Return an independent copy so a caller mutating the result cannot
+            # poison the cached entry for the next call.
+            return _copy.deepcopy(_hit)
+
         targets = self._role_arns if self._role_arns else [None]
         merged = CostSummary(
             provider="aws",
@@ -234,6 +254,8 @@ class AWSConnector(BaseConnector):
                 merged.by_region[k] = merged.by_region.get(k, 0.0) + v
             merged.entries.extend(summary.entries)
 
+        # Store a copy so later mutation of the returned object cannot reach the cache.
+        _cache.set(_ck, _copy.deepcopy(merged), _cache.COST_TTL)
         return merged
 
     async def get_costs_as_focus(
