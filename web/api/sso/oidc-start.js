@@ -44,7 +44,11 @@ export default async function handler(req) {
 
   const url = new URL(req.url);
   const tenant = url.searchParams.get("tenant") || "default";
-  const returnTo = url.searchParams.get("return_to") || "/";
+  // Only allow same-site relative return paths. A return_to of "//evil.com" or
+  // "https://evil.com" would otherwise let an attacker hijack the post-login
+  // redirect (open redirect → credential phishing).
+  let returnTo = url.searchParams.get("return_to") || "/";
+  if (!returnTo.startsWith("/") || returnTo.startsWith("//")) returnTo = "/";
 
   // Load OIDC config from env (single-tenant for now; extend to per-tenant KV later)
   const ISSUER = process.env.OIDC_ISSUER;

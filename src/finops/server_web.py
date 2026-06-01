@@ -1812,6 +1812,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")
+        # Defense-in-depth for the network-facing dashboard: block framing
+        # (clickjacking), MIME sniffing, and referrer leakage.
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Access-Control-Allow-Origin", self._localhost_origin())
         self.send_header("Vary", "Origin")
         self.end_headers()
