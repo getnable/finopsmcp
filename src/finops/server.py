@@ -6435,6 +6435,9 @@ async def get_llm_costs(
         - "Show AI cost breakdown by model for the last 7 days"
         - "Which AI models are we spending the most on?"
     """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_llm_costs") or {}
     try:
         from datetime import date as _date
         sd = _date.fromisoformat(start_date) if start_date else None
@@ -6511,6 +6514,9 @@ async def get_llm_cost_by_model(
         - "How much are we spending on GPT-4o vs GPT-4o-mini?"
         - "What would we save switching from Claude Opus to Sonnet?"
     """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_llm_cost_by_model") or {}
     try:
         from datetime import date as _date, timedelta
         ed = _date.today()
