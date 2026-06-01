@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>nable — session replay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link href="https://cdn.jsdelivr.net/npm/geist-mono@1/index.css" rel="stylesheet"/>
+<style>
+  :root{
+    --bg:#0d0f10; --bg-1:#111416; --bg-2:#181c1f; --bg-3:#1e2327;
+    --line:#242a2e; --line-2:#2e3539;
+    --fg:#f0f2f3; --fg-2:#94a3ab; --fg-3:#56656d; --fg-4:#2d3a40;
+    --accent:#4db8d4; --accent-dim:#2c7d91;
+    --success:#3cba7a; --warn:#e6a840; --alert:#e05c4b;
+    --mono:'Geist Mono',ui-monospace,'JetBrains Mono',monospace;
+    /* code syntax theme (local to this replay asset) */
+    --c-kw:#c08bd6; --c-str:#9bd97a; --c-com:#5b6b73; --c-fn:#5aa6df; --c-num:#e0a85c;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:'Instrument Sans',ui-sans-serif,system-ui,sans-serif;
+    font-size:15.5px;line-height:1.55;-webkit-font-smoothing:antialiased;
+    letter-spacing:-.005em;font-feature-settings:"ss01","cv11"}
+  ::selection{background:var(--accent);color:var(--bg)}
+
+  #chat{max-width:760px;margin:0 auto;padding:72px 28px 60vh}
+
+  .turn{margin:0 0 30px}
+  .turn.user{display:flex;justify-content:flex-end}
+  .bubble{background:var(--bg-2);border:1px solid var(--line);
+    border-radius:14px;padding:11px 16px;max-width:80%;color:var(--fg)}
+  .cursor{display:inline-block;width:8px;height:1.05em;vertical-align:-2px;
+    margin-left:1px;background:var(--accent);animation:blink .9s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  .nlabel{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;
+    letter-spacing:.06em;color:var(--accent);text-transform:uppercase;margin-bottom:14px}
+  .nlabel .dot{width:7px;height:7px;border-radius:50%;background:var(--success)}
+  .nbody>*{margin:0 0 16px}
+  .nbody>*:last-child{margin-bottom:0}
+
+  /* thinking */
+  .thinking{display:flex;gap:5px;align-items:center;height:14px}
+  .thinking span{width:6px;height:6px;border-radius:50%;background:var(--fg-3);
+    animation:tk 1s ease-in-out infinite}
+  .thinking span:nth-child(2){animation-delay:.15s}
+  .thinking span:nth-child(3){animation-delay:.3s}
+  @keyframes tk{0%,100%{opacity:.25}50%{opacity:.9}}
+
+  /* fade-up reveal */
+  .blk{opacity:0;transform:translateY(6px);transition:opacity .32s ease-out,transform .32s ease-out}
+  .blk.show{opacity:1;transform:none}
+
+  p{margin:0}
+  .nbody p{color:var(--fg-2)}
+  .nbody p strong{color:var(--fg);font-weight:600}
+  h3.step{font-size:18px;font-weight:600;color:var(--fg);letter-spacing:-.02em;margin-top:6px}
+
+  code.chip{font-family:var(--mono);font-size:.86em;color:var(--c-str);
+    background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:1px 5px}
+
+  /* big headline number */
+  .big{padding:4px 0}
+  .biglabel{font-size:12px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-3)}
+  .bigrow{display:flex;align-items:baseline;gap:8px;margin-top:4px}
+  .bignum{font-family:var(--mono);font-size:40px;font-weight:500;color:var(--fg);
+    font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .bigunit{font-size:16px;color:var(--fg-3)}
+  .bigsub{margin-top:8px;color:var(--fg-2);font-size:14.5px}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;font-size:14.5px}
+  thead th{text-align:left;background:var(--bg-2);color:var(--fg-3);font-weight:500;
+    font-size:12.5px;letter-spacing:.02em;padding:11px 14px}
+  thead th:first-child{border-top-left-radius:8px;border-bottom-left-radius:8px}
+  thead th:last-child{border-top-right-radius:8px;border-bottom-right-radius:8px}
+  tbody td{padding:13px 14px;border-bottom:1px solid var(--line);color:var(--fg)}
+  tbody tr:last-child td{border-bottom:none}
+  td.save{font-family:var(--mono);color:var(--accent);white-space:nowrap;font-variant-numeric:tabular-nums}
+  td.eff{color:var(--fg-2)}
+
+  /* key/value list (pricing) */
+  .kv{display:flex;flex-direction:column;gap:9px}
+  .kv .row{display:flex;align-items:baseline;gap:10px;font-size:14.5px}
+  .kv .row .v{color:var(--fg-2)}
+
+  /* bullet / numbered lists */
+  ul.b,ol.b{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:9px}
+  ul.b li,ol.b li{color:var(--fg-2);padding-left:22px;position:relative}
+  ul.b li::before{content:"";position:absolute;left:4px;top:.62em;width:4px;height:4px;border-radius:50%;background:var(--fg-4)}
+  ol.b{counter-reset:n}
+  ol.b li{counter-increment:n}
+  ol.b li::before{content:counter(n) ".";position:absolute;left:0;top:0;color:var(--fg-3);font-variant-numeric:tabular-nums}
+  ul.b li code,ol.b li code{font-family:var(--mono);font-size:.88em;color:var(--accent)}
+
+  /* code block */
+  pre{margin:0;background:#0a0c0d;border:1px solid var(--line);border-radius:12px;
+    padding:18px 20px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.65;
+    color:var(--fg);white-space:pre}
+  .c-kw{color:var(--c-kw)} .c-str{color:var(--c-str)} .c-com{color:var(--c-com)}
+  .c-fn{color:var(--c-fn)} .c-num{color:var(--c-num)}
+
+  /* callout strip */
+  .callout{border-left:3px solid var(--accent);background:var(--bg-1);
+    padding:13px 16px;border-radius:0 8px 8px 0;color:var(--fg)}
+  .callout strong{font-weight:600}
+
+  /* grade */
+  .grade{font-size:15.5px;color:var(--fg-2)}
+  .grade .g{font-family:var(--mono);font-size:30px;font-weight:600;color:var(--warn);vertical-align:-4px;margin:0 4px}
+  .grade .sc{color:var(--fg-3)}
+
+  /* end card */
+  #end{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;opacity:0;pointer-events:none;
+    transition:opacity .6s ease;z-index:20}
+  #end.show{opacity:1}
+  #end .logo{font-size:46px;font-weight:600;letter-spacing:-.03em}
+  #end .logo .n{color:var(--accent)}
+  #end .tag{color:var(--fg-2);font-size:18px}
+  #end .url{color:var(--fg-3);font-family:var(--mono);font-size:13px;margin-top:6px}
+
+  /* replay control (not part of the shot — bottom right, subtle) */
+  #replay{position:fixed;right:16px;bottom:14px;z-index:30;background:var(--bg-2);
+    color:var(--fg-2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;
+    font-family:inherit;font-size:12.5px;cursor:pointer;opacity:.5;transition:.15s}
+  #replay:hover{opacity:1;color:var(--fg);border-color:var(--line-2)}
+
+  @media (prefers-reduced-motion:reduce){.blk{transition:none}.cursor{animation:none}}
+</style>
+</head>
+<body>
+  <div id="chat"></div>
+  <div id="end">
+    <div class="logo"><span class="n">n</span>able</div>
+    <div class="tag">Your cloud bill, answerable in Claude.</div>
+    <div class="url">pip install finops-mcp</div>
+  </div>
+  <button id="replay" onclick="location.reload()">↺ Replay</button>
+
+<script>
+/* ── pacing (tune these for recording) ───────────────────────────────────── */
+const SPEED = 1;            // >1 faster, <1 slower
+const T = { char:26, think:650, block:520, afterQ:380, betweenTurns:1300, end:1100, first:600 };
+const wait = x => new Promise(r => setTimeout(r, x / SPEED));
+
+/* ── helpers ─────────────────────────────────────────────────────────────── */
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const md  = s => esc(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+                       .replace(/`([^`]+)`/g,'<code class="chip">$1</code>');
+
+const PY_KW = new Set(['def','class','import','from','as','return','if','elif','else','for',
+  'while','in','and','or','not','is','None','True','False','try','except','finally','raise',
+  'with','pass','lambda','yield','global','nonlocal','assert','break','continue']);
+
+function hlPy(src){
+  src = esc(src);
+  const re = /(#[^\n]*)|([rbfRBF]{0,2}"(?:[^"\\]|\\.)*"|[rbfRBF]{0,2}'(?:[^'\\]|\\.)*')|(\b\d+\.?\d*\b)|([A-Za-z_]\w*)/g;
+  return src.replace(re, (m,com,str,num,id,off,full)=>{
+    if(com) return `<span class="c-com">${com}</span>`;
+    if(str) return `<span class="c-str">${str}</span>`;
+    if(num) return `<span class="c-num">${num}</span>`;
+    if(id){
+      if(PY_KW.has(id)) return `<span class="c-kw">${id}</span>`;
+      if(/^\s*\(/.test(full.slice(off+id.length))) return `<span class="c-fn">${id}</span>`;
+      return id;
+    }
+    return m;
+  });
+}
+function hlBash(src){
+  src = esc(src);
+  const re = /(#[^\n]*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(\baws\b)/g;
+  return src.replace(re, (m,com,str,cmd)=>{
+    if(com) return `<span class="c-com">${com}</span>`;
+    if(str) return `<span class="c-str">${str}</span>`;
+    if(cmd) return `<span class="c-fn">${cmd}</span>`;
+    return m;
+  });
+}
+
+const el = (tag, cls, html) => { const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e; };
+const scrollDown = () => window.scrollTo({ top: document.body.scrollHeight, behavior:'smooth' });
+
+/* ── block builder ───────────────────────────────────────────────────────── */
+function buildBlock(b){
+  switch(b.t){
+    case 'p':    return el('p', null, md(b.html));
+    case 'step': return el('h3','step', esc(b.text));
+    case 'big': {
+      const e = el('div','big');
+      e.innerHTML = `<div class="biglabel">${esc(b.label)}</div>
+        <div class="bigrow"><span class="bignum" data-v="${b.value}">$0</span><span class="bigunit">${esc(b.unit||'')}</span></div>
+        <div class="bigsub">${md(b.sub)}</div>`;
+      return e;
+    }
+    case 'table': {
+      const e = el('div');
+      const thead = '<thead><tr>'+b.head.map(h=>`<th>${esc(h)}</th>`).join('')+'</tr></thead>';
+      const tbody = '<tbody>'+b.rows.map(r=>
+        `<tr><td>${esc(r[0])}</td><td class="save">${esc(r[1])}</td><td class="eff">${esc(r[2])}</td></tr>`).join('')+'</tbody>';
+      e.innerHTML = `<table>${thead}${tbody}</table>`;
+      return e;
+    }
+    case 'kv': {
+      const e = el('div','kv');
+      e.innerHTML = b.rows.map(r=>`<div class="row"><code class="chip">${esc(r[0])}</code><span class="v">${esc(r[1])}</span></div>`).join('');
+      return e;
+    }
+    case 'ul': return el('ul','b', b.items.map(i=>`<li>${md(i)}</li>`).join(''));
+    case 'ol': return el('ol','b', b.items.map(i=>`<li>${md(i)}</li>`).join(''));
+    case 'code': {
+      const e = el('pre');
+      e.innerHTML = b.lang==='bash' ? hlBash(b.src) : hlPy(b.src);
+      return e;
+    }
+    case 'callout': return el('div','callout', md(b.html));
+    case 'grade':   return el('div','grade',
+      `FinOps grade: <span class="g">${esc(b.letter)}</span> <span class="sc">(${esc(b.score)})</span> ${md(b.note)}`);
+  }
+  return el('div');
+}
+
+function animateCount(e){
+  const n = e.querySelector('.bignum'); if(!n) return;
+  const target = +n.dataset.v, dur = 850 / SPEED, st = performance.now();
+  (function tick(now){
+    let p = Math.min(1,(now-st)/dur); p = 1-Math.pow(1-p,3);
+    n.textContent = '$'+Math.round(target*p).toLocaleString('en-US');
+    if(p<1) requestAnimationFrame(tick);
+  })(st);
+}
+
+/* ── engine ──────────────────────────────────────────────────────────────── */
+async function typeQuestion(text){
+  const row = el('div','turn user'), b = el('div','bubble'), cur = el('span','cursor');
+  b.appendChild(cur); row.appendChild(b); chat.appendChild(row); scrollDown();
+  for(const ch of text){ cur.insertAdjacentText('beforebegin', ch); await wait(T.char); }
+  cur.remove();
+}
+async function startAnswer(){
+  const row = el('div','turn nable');
+  row.appendChild(el('div','nlabel','<span class="dot"></span>NABLE'));
+  const body = el('div','nbody'); row.appendChild(body); chat.appendChild(row);
+  const think = el('div','thinking','<span></span><span></span><span></span>');
+  body.appendChild(think); scrollDown(); await wait(T.think); think.remove();
+  return body;
+}
+async function reveal(body, node){
+  node.classList.add('blk'); body.appendChild(node);
+  requestAnimationFrame(()=>node.classList.add('show'));
+  scrollDown(); await wait(T.block);
+}
+async function play(){
+  for(let i=0;i<TURNS.length;i++){
+    await wait(i===0 ? T.first : T.betweenTurns);
+    await typeQuestion(TURNS[i].q);
+    await wait(T.afterQ);
+    const body = await startAnswer();
+    for(const blk of TURNS[i].blocks){
+      const node = buildBlock(blk);
+      await reveal(body, node);
+      if(blk.t==='big') animateCount(node);
+    }
+  }
+  await wait(T.end);
+  document.getElementById('end').classList.add('show');
+}
+
+const chat = document.getElementById('chat');
+
+/* ── script ──────────────────────────────────────────────────────────────── */
+const TURNS = [
+{
+  q: "hey just downloaded nable, what is my cloud spend and savings",
+  blocks: [
+    { t:'p', html:"Here's the summary across your connected accounts:" },
+    { t:'big', label:'Cloud spend · last 30 days', value:13703, unit:'/mo',
+      sub:"Only AWS is connected. Top drivers: Textract ($4,830), Bedrock ($3,817), DocumentDB ($1,906), RDS ($740)." },
+    { t:'p', html:"**Projected month-end:** ~$15,742  (day 27 of 31)" },
+    { t:'p', html:"**Identified savings:** $2,392 – $4,032/mo" },
+    { t:'table', head:['Action','Savings/mo','Effort'], rows:[
+      ['Disable Textract in QA/staging','$960 – $1,900','Low'],
+      ['Route classifier Lambda to Haiku','$500 – $1,200','Medium'],
+      ['Buy DocumentDB + RDS Reserved Instances','$925','Zero (AWS console)'],
+      ['Set CloudWatch log retention (166 groups)','$3','Low'],
+      ['Delete stopped Windows Server EC2','$4','Zero'],
+    ]},
+    { t:'callout', html:"**Biggest immediate win:** Buy the RIs today. Zero code changes, $925/mo back." },
+    { t:'grade', letter:'D', score:'49.5/100',
+      note:"Two F grades, tag hygiene and commitment coverage, are the main drags." },
+    { t:'p', html:"Want to dig into any of these specifically?" },
+  ]
+},
+{
+  q: "how do i remediate textract?",
+  blocks: [
+    { t:'p', html:"Based on what we found this session, here's the specific playbook:" },
+
+    { t:'step', text:"Step 1: Find out what you're actually calling (5 minutes)" },
+    { t:'p', html:"Run this for each operation to see where the volume is:" },
+    { t:'code', lang:'bash', src:
+`aws cloudwatch get-metric-statistics \\
+  --namespace AWS/Textract \\
+  --metric-name SuccessfulRequestCount \\
+  --dimensions Name=Operation,Value=AnalyzeDocument \\
+  --start-time 2026-04-27T00:00:00Z \\
+  --end-time 2026-05-27T00:00:00Z \\
+  --period 2592000 --statistics Sum
+
+# Run again for each:
+# Value=DetectDocumentText
+# Value=AnalyzeExpense
+# Value=AnalyzeID` },
+    { t:'p', html:"This tells you which API you're hammering and the exact volume. Everything else follows from this." },
+
+    { t:'step', text:"Step 2: Kill non-prod Textract (highest confidence fix)" },
+    { t:'p', html:"Your log groups show 4 environments running Textract Lambdas:" },
+    { t:'ul', items:[
+      "`company-textract-lambda-prd`",
+      "`company-textract-lambda-qa`",
+      "`company-textract-lambda-stg`",
+      "`company-textract-lambda-dev` (inferred)",
+    ]},
+    { t:'p', html:"In your Lambda code, add an environment gate:" },
+    { t:'code', lang:'py', src:
+`import os
+
+def process_document(document):
+    if os.environ.get("ENV") == "production":
+        return call_textract(document)
+    else:
+        return load_fixture_response(document)  # pre-saved Textract output` },
+    { t:'p', html:"Save a handful of real Textract responses as JSON fixtures for QA/staging. Non-prod never touches the API again." },
+
+    { t:'step', text:"Step 3: Check if you're using the right API tier" },
+    { t:'p', html:"Pricing per 1,000 pages:" },
+    { t:'kv', rows:[
+      ['DetectDocumentText','$1.50 (raw text only)'],
+      ['AnalyzeDocument','tables — $15'],
+      ['AnalyzeDocument','forms — $50'],
+      ['AnalyzeExpense','$10'],
+    ]},
+    { t:'p', html:"If your downstream code only needs raw text blocks, switch from `AnalyzeDocument` to `DetectDocumentText`. One line change, 10-33x cheaper." },
+    { t:'code', lang:'py', src:
+`# Before (expensive if you only need text)
+response = textract.analyze_document(
+    Document={"S3Object": {"Bucket": bucket, "Name": key}},
+    FeatureTypes=["TABLES", "FORMS"]
+)
+
+# After (if you only use Blocks of type LINE or WORD)
+response = textract.detect_document_text(
+    Document={"S3Object": {"Bucket": bucket, "Name": key}}
+)` },
+
+    { t:'step', text:"Step 4: Add a result cache" },
+    { t:'p', html:"If the same documents get reprocessed (retries, re-runs, duplicate uploads), cache the output:" },
+    { t:'code', lang:'py', src:
+`import hashlib, json, boto3
+
+def get_textract_result(bucket, key):
+    doc_hash = hashlib.md5(f"{bucket}/{key}".encode()).hexdigest()
+    cache_key = f"textract-cache/{doc_hash}.json"
+
+    s3 = boto3.client("s3")
+
+    # Check cache first
+    try:
+        cached = s3.get_object(Bucket=bucket, Key=cache_key)
+        return json.loads(cached["Body"].read())
+    except s3.exceptions.NoSuchKey:
+        pass
+
+    # Cache miss - call Textract
+    result = textract.detect_document_text(
+        Document={"S3Object": {"Bucket": bucket, "Name": key}}
+    )
+    s3.put_object(Bucket=bucket, Key=cache_key, Body=json.dumps(result))
+    return result` },
+    { t:'p', html:"S3 storage for cached results is essentially free compared to Textract API costs." },
+
+    { t:'step', text:"Order of operations" },
+    { t:'ol', items:[
+      "Run the CloudWatch query first, know your baseline",
+      "Ship the non-prod environment gate, fastest savings, lowest risk",
+      "Evaluate API tier, only if Step 1 shows you're using `AnalyzeDocument`",
+      "Add caching, if Step 1 shows repeated document processing",
+    ]},
+    { t:'callout', html:"**Step 2 alone** could save $960–$1,900/mo with a deploy. No accuracy risk, no behavioral change in prod." },
+  ]
+},
+];
+
+window.addEventListener('load', play);
+</script>
+</body>
+</html>
