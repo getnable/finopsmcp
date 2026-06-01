@@ -292,9 +292,7 @@ def setup_aws() -> None:
             _warn(f"Connection test failed: {e}")
         try:
             from . import telemetry as _tel
-            # Capture boto3 ClientError code (e.g. InvalidClientTokenId, AccessDenied)
-            # for plain exceptions just use the class name
-            error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "") if hasattr(e, "response") else ""
+            # error_code computed above; for plain exceptions fall back to class name
             _tel._send_event(_tel._get_install_id(), "provider_connect_failed", {
                 "provider": "aws",
                 "error_type": type(e).__name__,
