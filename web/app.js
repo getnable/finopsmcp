@@ -268,7 +268,7 @@ function TrustStrip() {
   const items = [
     { lab: "installs / mo", val: "4k+", sub: "via PyPI \xB7 live" },
     { lab: "providers", val: "17", sub: "AWS \xB7 Azure \xB7 GCP +" },
-    { lab: "cost data sent", val: "0 bytes", sub: "credentials and spend stay on your machine" }
+    { lab: "cost data sent", val: "0 bytes", sub: "stays on your machine" }
   ];
   return /* @__PURE__ */ React.createElement("div", { className: "trust", style: { gridTemplateColumns: "repeat(3,1fr)" } }, items.map((t, i) => /* @__PURE__ */ React.createElement("div", { className: "ti", key: i }, /* @__PURE__ */ React.createElement("span", { className: "lab" }, t.lab), /* @__PURE__ */ React.createElement("span", { className: "val mono" }, t.val, /* @__PURE__ */ React.createElement("span", { className: "sub" }, t.sub)))));
 }
