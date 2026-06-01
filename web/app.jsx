@@ -310,7 +310,7 @@ function TrustStrip(){
   const items = [
     {lab:"installs / mo", val: "4k+", sub:"via PyPI · live"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
-    {lab:"cost data sent", val:"0 bytes", sub:"credentials and spend stay on your machine"},
+    {lab:"cost data sent", val:"0 bytes", sub:"stays on your machine"},
   ];
   return (
     <div className="trust" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
