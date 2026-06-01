@@ -3850,11 +3850,20 @@ async def get_kubernetes_costs(
         ns_costs: dict[str, float] = {}
         for w in report.workloads:
             ns_costs[w.namespace] = ns_costs.get(w.namespace, 0) + w.monthly_cost
-        result["cost_by_namespace"] = dict(
-            sorted(ns_costs.items(), key=lambda x: x[1], reverse=True)[:50]
-        )
+        ns_sorted = sorted(ns_costs.items(), key=lambda x: x[1], reverse=True)
+        result["cost_by_namespace"] = dict(ns_sorted[:50])
+        if len(ns_sorted) > 50:
+            result["cost_by_namespace_truncated"] = (
+                f"Showing top 50 of {len(ns_sorted)} namespaces by spend; "
+                f"total_monthly_cost_usd covers all of them."
+            )
 
         # Top workloads
+        if len(workloads) > 20:
+            result["top_workloads_truncated"] = (
+                f"Showing top 20 of {len(workloads)} workloads by listing order; "
+                f"total_monthly_cost_usd and cost_by_namespace cover all of them."
+            )
         result["top_workloads"] = [
             {
                 "namespace": w.namespace,
@@ -3876,8 +3885,18 @@ async def get_kubernetes_costs(
                 sum(r["potential_savings_usd"] for r in report.rightsizing_opportunities), 2
             )
 
-        # Node utilization summary
-        result["node_utilization"] = report.node_utilization
+        # Node utilization summary (cap for large clusters; costliest first)
+        nodes_sorted = sorted(
+            report.node_utilization,
+            key=lambda n: n.get("monthly_cost", 0),
+            reverse=True,
+        )
+        result["node_utilization"] = nodes_sorted[:50]
+        if len(nodes_sorted) > 50:
+            result["node_utilization_truncated"] = (
+                f"Showing 50 costliest of {len(nodes_sorted)} nodes; "
+                f"node_count and total_monthly_cost_usd cover all of them."
+            )
 
         # Human-readable summary
         lines = [
@@ -7676,14 +7695,21 @@ async def get_databricks_costs(
     except Exception as e:
         return {"error": str(e)}
 
-    return {
+    svc_rows = sorted(summary.by_service.items(), key=lambda x: -x[1])
+    ws_rows = sorted(summary.by_account.items(), key=lambda x: -x[1])
+    result = {
         "provider": "databricks",
         "period": f"{sd} to {ed}",
         "total_usd": _fmt_usd(summary.total_usd),
-        "by_service": {k: _fmt_usd(v) for k, v in sorted(summary.by_service.items(), key=lambda x: -x[1])[:50]},
-        "by_workspace": {k: _fmt_usd(v) for k, v in sorted(summary.by_account.items(), key=lambda x: -x[1])[:50]},
+        "by_service": {k: _fmt_usd(v) for k, v in svc_rows[:50]},
+        "by_workspace": {k: _fmt_usd(v) for k, v in ws_rows[:50]},
         "note": "Costs are estimates based on DBU rates. Set DATABRICKS_ACCOUNT_ID for exact billing data.",
     }
+    if len(svc_rows) > 50:
+        result["by_service_truncated"] = f"Showing top 50 of {len(svc_rows)} services by spend; total_usd covers all of them."
+    if len(ws_rows) > 50:
+        result["by_workspace_truncated"] = f"Showing top 50 of {len(ws_rows)} workspaces by spend; total_usd covers all of them."
+    return result
 
 
 @mcp.tool()
