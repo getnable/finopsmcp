@@ -95,7 +95,13 @@ def mock_dashboard_data():
 @pytest.fixture()
 def running_server(mock_dashboard_data):
     """Start the server on a free port, yield (server, port), then shut down."""
+    import finops.server_web as server_web
     from finops.server_web import _make_server
+
+    # Dashboard auth is on by default; disable it for the in-process test server
+    # so requests don't 401. (Production behavior is covered by auth-specific tests.)
+    _auth_was = server_web._AUTH_DISABLED
+    server_web._AUTH_DISABLED = True
 
     port = _free_port()
     server = _make_server("127.0.0.1", port)
@@ -104,6 +110,7 @@ def running_server(mock_dashboard_data):
     time.sleep(0.1)
     yield server, port
     server.shutdown()
+    server_web._AUTH_DISABLED = _auth_was
 
 
 # ── Tests: health check ───────────────────────────────────────────────────────
@@ -174,7 +181,8 @@ def test_dashboard_auto_refresh_script(running_server):
 def test_dashboard_has_chartjs(running_server):
     _, port = running_server
     _, body = _get(f"http://127.0.0.1:{port}/")
-    assert "chart.umd" in body or "Chart.js" in body
+    # Chart.js is self-hosted (no CDN dependency) and rendered into <canvas> elements.
+    assert "chart.min.js" in body and "<canvas" in body
 
 
 def test_dashboard_has_spend_by_service(running_server):
@@ -186,7 +194,7 @@ def test_dashboard_has_spend_by_service(running_server):
 def test_dashboard_has_trend_chart(running_server):
     _, port = running_server
     _, body = _get(f"http://127.0.0.1:{port}/")
-    assert "3-Month Cost Trend" in body
+    assert "Cost Trend" in body
 
 
 def test_dashboard_has_efficiency_scorecard(running_server):

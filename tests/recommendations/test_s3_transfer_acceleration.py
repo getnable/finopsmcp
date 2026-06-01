@@ -22,7 +22,7 @@ from finops.recommendations.s3_transfer_acceleration import (
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _make_aws_client():

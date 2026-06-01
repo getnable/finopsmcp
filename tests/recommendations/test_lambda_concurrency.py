@@ -18,7 +18,7 @@ from finops.recommendations.lambda_concurrency import (
 
 def _run(coro):
     """Run a coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def _make_aws_client():

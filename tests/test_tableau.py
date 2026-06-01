@@ -61,9 +61,16 @@ MOCK_ANOMALIES = [
 @pytest.fixture(scope="module")
 def server_url():
     """Single server instance shared across all tests."""
+    import finops.server_web as server_web
+
+    # Dashboard auth is on by default; disable it for the in-process test server.
+    _auth_was = server_web._AUTH_DISABLED
+    server_web._AUTH_DISABLED = True
+
     server, base = _start_server()
     yield base
     server.shutdown()
+    server_web._AUTH_DISABLED = _auth_was
 
 
 # ── /tableau endpoint ─────────────────────────────────────────────────────────

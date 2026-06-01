@@ -15,7 +15,7 @@ from finops.connectors.saas.notion import NotionConnector
 
 def _run(coro):
     """Run a coroutine synchronously (works on Python 3.8 without pytest-asyncio)."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 def test_is_configured_false_when_both_missing(monkeypatch):
