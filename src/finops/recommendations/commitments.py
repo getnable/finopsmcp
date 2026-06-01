@@ -168,7 +168,8 @@ def _savings_plan_utilization(ce_client: Any, start: str, end: str) -> dict[str,
             "total_commitment": float(util.get("TotalCommitment", 0)),
         }
     except Exception as e:
-        log.debug("SP utilization fetch failed: %s", e)
+        from .._logutil import note_sp_error
+        note_sp_error(log, "SP utilization", e)
         return {"utilization_pct": 0.0, "unused_usd": 0.0, "total_commitment": 0.0}
 
 
@@ -202,7 +203,8 @@ def _savings_plan_coverage(
         totals = resp.get("Total", {}).get("CoverageHours", {})
         return float(totals.get("CoverageHoursPercentage", 0))
     except Exception as e:
-        log.debug("SP coverage fetch failed: %s", e)
+        from .._logutil import note_sp_error
+        note_sp_error(log, "SP coverage", e)
         return 0.0
 
 
