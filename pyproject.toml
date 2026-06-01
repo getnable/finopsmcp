@@ -115,5 +115,11 @@ artifacts = ["templates/*.yaml", "templates/*.json"]
 [tool.hatch.build]
 include = ["src/finops/**", "templates/**"]
 
+[tool.pytest.ini_options]
+# auto = async test functions run without an explicit @pytest.mark.asyncio marker.
+# Tests that drive coroutines via asyncio.run() are unaffected.
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 100

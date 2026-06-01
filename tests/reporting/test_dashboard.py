@@ -190,7 +190,7 @@ def test_generate_account_dashboard_custom_path():
     """generate_account_dashboard writes HTML to the specified path."""
     with tempfile.TemporaryDirectory() as tmpdir:
         out = Path(tmpdir) / "test-dashboard.html"
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             generate_account_dashboard(
                 aws_connector=None,
                 account_id="111222333444",
@@ -206,7 +206,7 @@ def test_generate_account_dashboard_custom_path():
 
 def test_generate_account_dashboard_default_path():
     """generate_account_dashboard uses ~/.finops/dashboards/ by default."""
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         generate_account_dashboard(
             aws_connector=None,
             account_id="test-acct",
@@ -224,7 +224,7 @@ def test_generate_account_dashboard_summary_keys():
     """Result dict has all expected keys."""
     with tempfile.TemporaryDirectory() as tmpdir:
         out = Path(tmpdir) / "dash.html"
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             generate_account_dashboard(
                 aws_connector=None,
                 account_id="999888777666",
@@ -250,7 +250,7 @@ def test_generate_account_dashboard_summary_text():
     """Summary text contains account id."""
     with tempfile.TemporaryDirectory() as tmpdir:
         out = Path(tmpdir) / "dash.html"
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             generate_account_dashboard(
                 aws_connector=None,
                 account_id="acc-001",
@@ -273,7 +273,7 @@ def test_generate_account_dashboard_with_mock_aws():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         out = Path(tmpdir) / "aws-dash.html"
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             generate_account_dashboard(
                 aws_connector=aws,
                 account_id="111000111",

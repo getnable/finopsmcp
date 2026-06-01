@@ -138,7 +138,7 @@ def _make_metric_data_response(instance_ids: list[str], cpu_values_per_instance:
 
 class TestIdentifyNonprodResources:
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_no_boto3_returns_error(self):
         with patch("finops.recommendations.nonprod_scheduler.boto3", None):
