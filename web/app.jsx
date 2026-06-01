@@ -146,7 +146,7 @@ function Ticker({ installs, version }){
         <span className="seg">
           <span className="dot"></span>
           <b>nable</b>
-          <span>{version ? `v${version}` : "v0.8.36"} · runtime healthy</span>
+          <span>runtime healthy</span>
         </span>
         <span className="sep">·</span>
         <span className="seg">{installs ? fmtNum(installs) : "4k+"} installs / mo via PyPI</span>
@@ -584,7 +584,7 @@ function Architecture({ version }){
               <span className="lab">runtime · local</span>
               <div className="arch-node center">
                 <h4>nable runtime</h4>
-                <span className="sub">nable / {version || "0.8.36"}</span>
+                <span className="sub">nable</span>
                 <div className="chips"><span>keyring</span><span>fernet</span><span>read-only</span><span>audit-log</span></div>
               </div>
             </div>
@@ -692,7 +692,7 @@ function Telemetry(){
         <div className="bento">
           <div className="bento-cell tall">
             <span className="lab">monthly installs · pypi</span>
-            <span className="big mono">4,127<span className="delta">+38% WoW</span></span>
+            <span className="big mono">4k+<span className="delta">via PyPI</span></span>
             <p>Trajectory consistent with bottom-up dev-tool growth. 67% of paid trials originate from a prior unpaid install.</p>
             <div className="sparkline">
               <svg viewBox="0 0 100 60" preserveAspectRatio="none">
@@ -1012,7 +1012,7 @@ function Footer({ version }){
         </div>
         <div className="foot-meta">
           <span>2026 nable · all rights reserved</span>
-          <span>nable / {version || "0.8.36"} · runtime healthy</span>
+          <span>nable · runtime healthy</span>
         </div>
       </div>
     </footer>
