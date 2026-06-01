@@ -582,16 +582,21 @@ async def get_cost_summary(
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed, granularity)
 
+    _ranked_services = sorted(grand_by_service.items(), key=lambda x: -x[1])
     result = {
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _fmt_usd(grand_total),
         "by_provider": by_provider,
-        "grand_by_service": {
-            k: round(v, 4)
-            for k, v in sorted(grand_by_service.items(), key=lambda x: -x[1])[:50]
-        },
+        "grand_by_service": {k: round(v, 4) for k, v in _ranked_services[:50]},
     }
+    if len(_ranked_services) > 50:
+        # grand_total_usd covers ALL services; the dict shows only the top 50.
+        # Flag it so the model doesn't read the parts as not summing to the whole.
+        result["grand_by_service_truncated"] = (
+            f"Showing top 50 of {len(_ranked_services)} services by cost. "
+            "grand_total_usd reflects all services."
+        )
 
     # Subtle nudge after the first real cost query -- mention anomaly alerts + ticket creation
     # Only fires for free users with real spend data (not $0 accounts)
