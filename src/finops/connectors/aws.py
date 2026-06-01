@@ -21,6 +21,14 @@ class AWSConnector(BaseConnector):
             for arn in os.getenv("AWS_ROLE_ARNS", "").split(",")
             if arn.strip()
         ]
+        _MAX_ROLES = int(os.getenv("FINOPS_MAX_ROLE_ARNS", "20"))
+        if len(self._role_arns) > _MAX_ROLES:
+            import logging as _log
+            _log.getLogger("finops.aws").warning(
+                "AWS_ROLE_ARNS has %d entries; capping at %d. Set FINOPS_MAX_ROLE_ARNS to override.",
+                len(self._role_arns), _MAX_ROLES,
+            )
+            self._role_arns = self._role_arns[:_MAX_ROLES]
 
     async def is_configured(self) -> bool:
         try:
@@ -135,6 +143,11 @@ class AWSConnector(BaseConnector):
     ) -> CostSummary:
         group_by = group_by or ["SERVICE"]
         ce_group_by = [{"Type": "DIMENSION", "Key": k} for k in group_by]
+
+        from datetime import timedelta
+        _earliest = end_date - timedelta(days=int(os.getenv("FINOPS_MAX_LOOKBACK_DAYS", "365")))
+        if start_date < _earliest:
+            start_date = _earliest
 
         targets = self._role_arns if self._role_arns else [None]
         merged = CostSummary(

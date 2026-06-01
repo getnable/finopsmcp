@@ -92,11 +92,22 @@ def _print_aws_accounts() -> None:
 # ── Provider wizards ──────────────────────────────────────────────────────────
 
 _VALID_AWS_REGIONS = {
+    # US
     "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-    "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1",
-    "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
-    "ap-south-1", "ca-central-1", "sa-east-1", "me-south-1", "af-south-1",
-    # GovCloud regions — supported out of the box
+    # Europe
+    "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-central-2",
+    "eu-north-1", "eu-south-1", "eu-south-2",
+    # Asia Pacific
+    "ap-southeast-1", "ap-southeast-2", "ap-southeast-3", "ap-southeast-4",
+    "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
+    "ap-south-1", "ap-south-2", "ap-east-1",
+    # Other
+    "ca-central-1", "ca-west-1",
+    "sa-east-1",
+    "me-south-1", "me-central-1",
+    "af-south-1",
+    "il-central-1",
+    # GovCloud
     "us-gov-west-1", "us-gov-east-1",
 }
 
@@ -213,6 +224,7 @@ def setup_aws() -> None:
         vault.load_to_env()
         region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
+        print("  Verifying credentials with AWS...", flush=True)
         sts = boto3.client("sts", region_name=region)
         identity = sts.get_caller_identity()
         _ok(f"Connection verified: account {identity['Account']}")
@@ -269,7 +281,15 @@ def setup_aws() -> None:
             pass
 
     except Exception as e:
-        _warn(f"Connection test failed: {e}")
+        error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "") if hasattr(e, "response") else ""
+        if error_code == "InvalidClientTokenId":
+            _err("The Access Key ID looks wrong. Double-check the key ID in IAM Console.")
+        elif error_code in ("AuthFailure", "SignatureDoesNotMatch"):
+            _err("Secret key mismatch. Re-generate the access key pair in IAM Console.")
+        elif error_code == "AccessDenied":
+            _err("Access denied. Ensure the IAM user has sts:GetCallerIdentity permission.")
+        else:
+            _warn(f"Connection test failed: {e}")
         try:
             from . import telemetry as _tel
             # Capture boto3 ClientError code (e.g. InvalidClientTokenId, AccessDenied)
@@ -704,8 +724,6 @@ def setup_sso() -> None:
         vault.store("OIDC_DEFAULT_ROLE", default_role)
     if role_map:
         vault.store("OIDC_ROLE_MAP", json.dumps(role_map))
-    vault.store("OIDC_PLAN", "pro")
-
     _ok("SSO configuration stored in vault")
     print(f"""
   Role map configured: {json.dumps(role_map, indent=4) if role_map else "(none: all SSO users → {default_role})"}
@@ -1336,7 +1354,7 @@ def main(args: list[str] | None = None) -> None:
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")
-        raw = _prompt("\n  Enter numbers (comma-separated) or 'all'", default="all")
+        raw = _prompt("\n  Enter numbers (comma-separated), 'all', or press Enter for aws only", default="1")
         if raw.lower() == "all":
             selected = providers
         else:
@@ -1413,17 +1431,13 @@ def _offer_email_signup() -> None:
             method="POST",
         )
         urllib.request.urlopen(req, timeout=5)
-        _ok(f"Guide sent. Check your inbox.")
+        _ok("Guide sent. Check your inbox.")
         sentinel.parent.mkdir(parents=True, exist_ok=True)
         sentinel.write_text(f"{email}\n")
     except Exception:
-        # Don't block setup if the request fails
-        _ok("Got it. We'll be in touch.")
-        try:
-            sentinel.parent.mkdir(parents=True, exist_ok=True)
-            sentinel.write_text(f"{email}\n")
-        except Exception:
-            pass
+        # Don't block setup if the request fails — but don't write the sentinel
+        # so the user is re-prompted next time (their email was never recorded)
+        _ok("Got it. We'll follow up soon.")
 
     print()
 
