@@ -15,11 +15,15 @@ pro          Full access. Unlocked by a signed license key.
              Adds: ticket auto-creation, scheduled email digests,
              commitment purchase recommendations, multi-team org reports.
 
-Key format:  FINOPS-1-{b64_payload}-{b64_hmac}
+Key format:  FINOPS-2-{b64_payload}-{b64_ed25519_sig}   (current)
+             FINOPS-1-{b64_payload}-{b64_hmac}           (legacy, still validated)
   payload:   base64url(json: {"e": email, "d": issued_YYYYMMDD, "p": "pro"})
-  hmac:      HMAC-SHA256(_SECRET, "1:" + b64_payload)
+  v2 sig:    Ed25519(private_key, "2:" + b64_payload). Clients verify with the
+             bundled public key — no shared secret, and keys cannot be forged.
+  v1 sig:    HMAC-SHA256(_SECRET, "1:" + b64_payload). Needs the secret on the
+             client to verify; kept only for backward compatibility.
 
-Generate a key (run once per customer):
+Generate a key (run server-side, with FINOPS_LICENSE_PRIVATE_KEY set):
   python -c "from finops.license import generate_key; print(generate_key('user@example.com'))"
 """
 from __future__ import annotations
@@ -48,6 +52,12 @@ if not _env_secret:
         "FINOPS_LICENSE_SECRET is not set. Pro license key validation is disabled. "
         "Set this env var to the secret used when keys were issued."
     )
+# Ed25519 PUBLIC key for verifying v2 license keys. Safe to ship: it can verify
+# keys but cannot create them. Keys are signed with the matching private key
+# (FINOPS_LICENSE_PRIVATE_KEY), held server-side only and never bundled — so
+# clients verify with no shared secret and nobody can forge keys from the package.
+_PUBLIC_KEY_B64 = "j3hqbpj9N-2EVtxgVgFgARm_5xAvPtg-yTofdQCugk0"
+
 _KEY_TTL_DAYS   = 366          # pro keys expire 1 year after issue date
 _VALID_PLANS    = {"pro", "trial", "enterprise"}
 _UPGRADE_URL    = "https://getnable.com/#pricing"
@@ -115,6 +125,17 @@ def _unb64(s: str) -> bytes:
 def _sign(version: str, payload_b64: str) -> str:
     msg = f"{version}:{payload_b64}".encode()
     return _b64(hmac.new(_SECRET, msg, hashlib.sha256).digest())
+
+
+def _verify_ed25519(payload_b64: str, sig_b64: str) -> bool:
+    """Verify a v2 key signature against the bundled public key. No secret needed."""
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        pub = Ed25519PublicKey.from_public_bytes(_unb64(_PUBLIC_KEY_B64))
+        pub.verify(_unb64(sig_b64), f"2:{payload_b64}".encode())
+        return True
+    except Exception:
+        return False
 
 
 # ── Machine fingerprint ───────────────────────────────────────────────────────
@@ -214,9 +235,25 @@ def _get_or_create_trial_start() -> date:
 
 # ── Key generation / validation ───────────────────────────────────────────────
 
-def generate_key(email: str, plan: str = "pro") -> str:
-    """Generate a signed license key for a customer. Run server-side."""
+def generate_key(email: str, plan: str = "pro", version: int = 2) -> str:
+    """Generate a signed license key. Run server-side, where the signing key lives.
+
+    version=2 (default): Ed25519, signed with FINOPS_LICENSE_PRIVATE_KEY. Clients
+        verify with the bundled public key and need no shared secret.
+    version=1: legacy HMAC, signed with FINOPS_LICENSE_SECRET. Kept for compatibility.
+    """
     payload = _b64(json.dumps({"e": email, "d": date.today().strftime("%Y%m%d"), "p": plan}).encode())
+    if version == 2:
+        priv_b64 = os.environ.get("FINOPS_LICENSE_PRIVATE_KEY", "")
+        if not priv_b64:
+            raise RuntimeError(
+                "FINOPS_LICENSE_PRIVATE_KEY is not set. It is required to sign v2 keys and "
+                "must only ever live on the issuing side, never in the shipped package."
+            )
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        priv = Ed25519PrivateKey.from_private_bytes(_unb64(priv_b64))
+        sig = _b64(priv.sign(f"2:{payload}".encode()))
+        return f"FINOPS-2-{payload}-{sig}"
     return f"FINOPS-1-{payload}-{_sign('1', payload)}"
 
 
@@ -248,14 +285,8 @@ def validate_key(key: str) -> LicenseStatus:
                 days_remaining=0,
             )
 
-    # If the signing secret is not configured, we cannot verify any key.
-    # Treat as free/trial rather than silently accepting forged keys.
-    if not _SECRET:
-        log.warning("Pro key presented but FINOPS_LICENSE_SECRET is not set; treating as unkeyed.")
-        return validate_key("")
-
     parts = key.strip().split("-", 3)
-    if len(parts) != 4 or parts[0] != "FINOPS" or parts[1] != "1":
+    if len(parts) != 4 or parts[0] != "FINOPS" or parts[1] not in ("1", "2"):
         return LicenseStatus(
             mode="invalid",
             email="",
@@ -264,7 +295,20 @@ def validate_key(key: str) -> LicenseStatus:
         )
 
     _, version, payload_b64, provided_sig = parts
-    if not hmac.compare_digest(_sign(version, payload_b64), provided_sig):
+
+    # Verify the signature by version.
+    #   v2 (Ed25519): verified with the bundled public key — no shared secret needed.
+    #   v1 (HMAC):    needs FINOPS_LICENSE_SECRET; without it we cannot verify, so
+    #                 fall through to free/trial rather than accept a forged key.
+    if version == "2":
+        sig_ok = _verify_ed25519(payload_b64, provided_sig)
+    else:
+        if not _SECRET:
+            log.warning("v1 key presented but FINOPS_LICENSE_SECRET is not set; treating as unkeyed.")
+            return validate_key("")
+        sig_ok = hmac.compare_digest(_sign("1", payload_b64), provided_sig)
+
+    if not sig_ok:
         return LicenseStatus(
             mode="invalid",
             email="",
