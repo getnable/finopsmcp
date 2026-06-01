@@ -673,62 +673,6 @@ function Connectors(){
   );
 }
 
-/* Telemetry bento */
-function Telemetry(){
-  const pts = [12,18,14,22,28,24,32,30,38,42,36,48,52,58];
-  const path = pts.map((p,i) => `${i===0?"M":"L"} ${i*(100/(pts.length-1))} ${60-p}`).join(" ");
-  return (
-    <section id="telemetry" className="tight">
-      <div className="wrap">
-        <div className="section-head">
-          <div className="label">By the numbers</div>
-          <h2>Adoption signal.<br/><em>Live.</em></h2>
-          <p>Pulled from PyPI, Stripe, and our telemetry endpoint, refreshed nightly. No marketing math.</p>
-        </div>
-        <div className="bento">
-          <div className="bento-cell tall">
-            <span className="lab">monthly installs · pypi</span>
-            <span className="big mono">4k+<span className="delta">via PyPI</span></span>
-            <p>Trajectory consistent with bottom-up dev-tool growth. 67% of paid trials originate from a prior unpaid install.</p>
-            <div className="sparkline">
-              <svg viewBox="0 0 100 60" preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--accent)" stopOpacity=".25"/>
-                    <stop offset="100%" stopColor="var(--accent)" stopOpacity="0"/>
-                  </linearGradient>
-                </defs>
-                <path d={path + ` L 100 60 L 0 60 Z`} fill="url(#g1)"/>
-                <path d={path} fill="none" stroke="var(--accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke"/>
-                {pts.map((p,i) => <circle key={i} cx={i*(100/(pts.length-1))} cy={60-p} r="1.2" fill="var(--accent)"/>)}
-              </svg>
-            </div>
-          </div>
-          <div className="bento-cell">
-            <span className="lab">paid conversion</span>
-            <span className="big mono">14.2%</span>
-            <p>Installs to Team plan within 30 days.</p>
-          </div>
-          <div className="bento-cell span-end">
-            <span className="lab">net retention</span>
-            <span className="big mono">132%<span className="delta">trailing 6mo</span></span>
-            <p>Driven by multi-account / multi-cloud expansion.</p>
-          </div>
-          <div className="bento-cell row-end">
-            <span className="lab">median savings · first 60 days</span>
-            <span className="big mono">$3,840<span className="delta">/ mo</span></span>
-            <p>Across teams who shipped at least one rightsizing recommendation.</p>
-          </div>
-          <div className="bento-cell row-end span-end">
-            <span className="lab">ttfa · time to first answer</span>
-            <span className="big mono">4 min<span className="delta">install to insight</span></span>
-            <p>Wizard auto-configures the MCP client. Median end-to-end.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 /* Pricing */
 const SOLO_FEATURES = [
