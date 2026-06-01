@@ -1011,7 +1011,7 @@ function Footer({ version }){
           </div>
         </div>
         <div className="foot-meta">
-          <span>2026 nable, inc. · all rights reserved</span>
+          <span>2026 nable · all rights reserved</span>
           <span>finops-mcp / {version || "0.8.36"} · runtime healthy</span>
         </div>
       </div>
