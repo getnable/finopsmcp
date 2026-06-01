@@ -180,6 +180,11 @@ def _file_set(d: date) -> None:
         _TRIAL_FILE.parent.mkdir(parents=True, exist_ok=True)
         iso = d.isoformat()
         _TRIAL_FILE.write_text(f"{iso}\n{_sign_date(iso)}\n")
+        # Owner-only: the signature shouldn't be world-readable (trial-forgery aid).
+        try:
+            _TRIAL_FILE.chmod(0o600)
+        except OSError:
+            pass
     except Exception:
         pass
 

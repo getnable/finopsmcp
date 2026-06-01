@@ -54,6 +54,10 @@ def _get_install_id() -> str:
                 return id_
         id_ = str(uuid.uuid4())
         _ID_FILE.write_text(id_)
+        try:
+            _ID_FILE.chmod(0o600)
+        except OSError:
+            pass
         return id_
     except Exception:
         # If we can't write (e.g. read-only FS), generate a session-only ID

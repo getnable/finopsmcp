@@ -67,6 +67,9 @@ async function fetchJwks(issuer) {
   );
   if (!discovery.ok) throw new Error(`Discovery failed: ${discovery.status}`);
   const meta = await discovery.json();
+  if (!meta.jwks_uri || !meta.jwks_uri.startsWith("https://")) {
+    throw new Error("OIDC jwks_uri must be HTTPS");
+  }
   const jwksRes = await fetch(meta.jwks_uri);
   if (!jwksRes.ok) throw new Error(`JWKS fetch failed: ${jwksRes.status}`);
   return jwksRes.json();
@@ -99,7 +102,7 @@ async function importEcKey(jwk) {
   );
 }
 
-async function verifyJwt(token, jwks) {
+async function verifyJwt(token, jwks, issuer, clientId) {
   const parts = token.split(".");
   if (parts.length !== 3) throw new Error("Malformed JWT");
 
@@ -107,8 +110,14 @@ async function verifyJwt(token, jwks) {
   const header = JSON.parse(base64UrlDecode(headerB64));
   const payload = JSON.parse(base64UrlDecode(payloadB64));
 
-  // Find the right key by kid
-  const jwk = jwks.keys.find((k) => k.kid === header.kid) || jwks.keys[0];
+  // Reject alg=none and only accept asymmetric signing algorithms.
+  if (!header.alg || header.alg === "none") throw new Error("Unsigned JWT rejected");
+
+  // Find the right key by kid. Only fall back to a lone key when the JWKS has
+  // exactly one — never silently pick the first of several (key-confusion risk).
+  const jwk =
+    jwks.keys.find((k) => k.kid === header.kid) ||
+    (jwks.keys.length === 1 ? jwks.keys[0] : null);
   if (!jwk) throw new Error("No matching JWK found");
 
   // Import the public key
@@ -143,6 +152,18 @@ async function verifyJwt(token, jwks) {
   const now = Math.floor(Date.now() / 1000);
   if (payload.exp && payload.exp < now) throw new Error("JWT expired");
   if (payload.nbf && payload.nbf > now + 60) throw new Error("JWT not yet valid");
+
+  // Validate issuer and audience. Without the audience check, a token your IdP
+  // minted for a different OAuth client would be accepted here (cross-client
+  // token replay → account takeover).
+  if (issuer && (payload.iss || "").replace(/\/$/, "") !== issuer.replace(/\/$/, "")) {
+    throw new Error("JWT issuer mismatch");
+  }
+  if (clientId) {
+    const aud = payload.aud;
+    const audOk = Array.isArray(aud) ? aud.includes(clientId) : aud === clientId;
+    if (!audOk) throw new Error("JWT audience mismatch");
+  }
 
   return payload;
 }
@@ -293,6 +314,13 @@ export default async function handler(req) {
     );
     const meta = await discovery.json();
 
+    // The token endpoint comes from the IdP discovery document. Require HTTPS so a
+    // tampered discovery response can't exfiltrate the auth code + client secret
+    // over cleartext (SSRF / downgrade).
+    if (!meta.token_endpoint || !meta.token_endpoint.startsWith("https://")) {
+      throw new Error("OIDC token_endpoint must be HTTPS");
+    }
+
     const tokenRes = await fetch(meta.token_endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -323,7 +351,7 @@ export default async function handler(req) {
   let claims;
   try {
     const jwks = await fetchJwks(ISSUER);
-    claims = await verifyJwt(idToken, jwks);
+    claims = await verifyJwt(idToken, jwks, ISSUER, CLIENT_ID);
   } catch (err) {
     console.error("JWT validation error:", err.message);
     return Response.redirect("https://getnable.com/?sso_error=jwt_invalid", 302);
