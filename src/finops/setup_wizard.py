@@ -1327,7 +1327,10 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main
-        _doctor_main()
+        # Pass empty args: doctor.main() defaults to parsing sys.argv, which still
+        # contains the consumed "doctor" token and would error. For flags
+        # (--json/--audit), use the standalone `finops-doctor` command.
+        _doctor_main([])
         return
     elif parsed.cmd == "infra":
         _run_infra_overview(getattr(parsed, "provider", ""))
