@@ -21,6 +21,7 @@ from mcp.server.fastmcp import FastMCP
 
 # Load vault credentials into os.environ before anything else reads env vars
 from .security.env import load_vault_to_env
+from .token_budget import cost_note, estimate_tokens, fit_to_budget
 load_vault_to_env()
 
 from .license import _UPGRADE_URL, get_status, require_pro
@@ -7686,8 +7687,11 @@ async def get_focus_costs(
             **({"errors": errors} if errors else {}),
         }
 
-    RECORD_LIMIT = 500
-    truncated = len(serialized) > RECORD_LIMIT
+    # Token-aware cap: keep records until we hit the response budget rather than a
+    # flat row count, so the model never receives a ledger that costs more to read
+    # than the answer is worth. Records carry no inherent priority, so this is a
+    # last resort; the cheap path is group_by, which aggregates server-side.
+    kept, omitted = fit_to_budget(serialized)
     return {
         "focus_version": "2.0",
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
@@ -7695,8 +7699,8 @@ async def get_focus_costs(
         "total_billed_cost": round(sum(r.BilledCost for r in all_records), 4),
         "total_effective_cost": round(sum(r.EffectiveCost for r in all_records), 4),
         "record_count": len(serialized),
-        **({"records_truncated": True, "hint": f"Showing first {RECORD_LIMIT} of {len(serialized)} records. Use group_by= for aggregated results."} if truncated else {}),
-        "records": serialized[:RECORD_LIMIT],
+        **({"records_truncated": True, "hint": f"Showing {len(kept)} of {len(serialized)} records to stay within token budget. Use group_by=ServiceName for a complete aggregated view at a fraction of the tokens."} if omitted else {}),
+        "records": kept,
         **({"errors": errors} if errors else {}),
     }
 
@@ -9205,6 +9209,11 @@ async def run_full_cost_audit(
     if errors:
         lines.append(f"\n*Scanners skipped (no data or not configured): {', '.join(errors)}*")
 
+    body = "\n".join(lines)
+    # Make the token cost visible against the savings found. Under our pricing,
+    # the customer pays for the tool, so this is the ROI made explicit: pennies
+    # of context against dollars of monthly waste.
+    lines.append(f"\n*{cost_note(body, savings_found_usd=total_monthly)}*")
     return "\n".join(lines)
 
 
