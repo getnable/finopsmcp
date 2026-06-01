@@ -36,12 +36,17 @@ async function _kvMarkSeen(eventId) {
   }
 }
 
-// Set FINOPS_LICENSE_SECRET in Vercel project environment variables.
-// Must match the FINOPS_LICENSE_SECRET env var on the MCP server side.
-const LICENSE_SECRET = process.env.FINOPS_LICENSE_SECRET;
+// Set FINOPS_LICENSE_PRIVATE_KEY in Vercel project environment variables.
+// Ed25519 private signing key (raw 32-byte seed, base64url). The matching public
+// key is bundled in the MCP server (license.py) and verifies keys with no shared
+// secret. This private key must never be exposed client-side.
+const LICENSE_PRIVATE_KEY = process.env.FINOPS_LICENSE_PRIVATE_KEY;
 
-// ─── License key generation ──────────────────────────────────────────────────
-// Mirrors generate_key() in license.py exactly so keys are valid in the MCP server.
+// PKCS8 DER prefix for an Ed25519 private key; the 32-byte raw seed follows it.
+const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
+
+// ─── License key generation (v2, Ed25519) ────────────────────────────────────
+// Mirrors generate_key() in license.py so keys validate in the MCP server.
 
 function b64url(buf) {
   return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -50,10 +55,14 @@ function b64url(buf) {
 function generateKey(email) {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const payload = b64url(Buffer.from(JSON.stringify({ e: email, d, p: "pro" })));
-  const sig = b64url(
-    crypto.createHmac("sha256", LICENSE_SECRET).update(`1:${payload}`).digest()
-  );
-  return `FINOPS-1-${payload}-${sig}`;
+  const seed = Buffer.from(LICENSE_PRIVATE_KEY, "base64url");
+  const keyObj = crypto.createPrivateKey({
+    key: Buffer.concat([ED25519_PKCS8_PREFIX, seed]),
+    format: "der",
+    type: "pkcs8",
+  });
+  const sig = b64url(crypto.sign(null, Buffer.from(`2:${payload}`), keyObj));
+  return `FINOPS-2-${payload}-${sig}`;
 }
 
 // ─── Stripe signature verification ───────────────────────────────────────────
@@ -200,8 +209,8 @@ export default async function handler(req, res) {
   const sig = req.headers["stripe-signature"];
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
 
-  if (!secret || !LICENSE_SECRET) {
-    console.error("Missing env vars:", { STRIPE_WEBHOOK_SECRET: !!secret, FINOPS_LICENSE_SECRET: !!LICENSE_SECRET });
+  if (!secret || !LICENSE_PRIVATE_KEY) {
+    console.error("Missing env vars:", { STRIPE_WEBHOOK_SECRET: !!secret, FINOPS_LICENSE_PRIVATE_KEY: !!LICENSE_PRIVATE_KEY });
     return res.status(500).json({ error: "webhook not configured" });
   }
 
