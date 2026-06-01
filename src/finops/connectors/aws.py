@@ -98,13 +98,18 @@ class AWSConnector(BaseConnector):
         by_service: dict[str, float] = {}
         by_region: dict[str, float] = {}
         total = 0.0
+        currencies: set[str] = set()
 
         for result in response.get("ResultsByTime", []):
             for group in result.get("Groups", []):
                 keys = group.get("Keys", [])
                 service = keys[0] if keys else "Unknown"
                 region = keys[1] if len(keys) > 1 else ""
-                amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                metric = group["Metrics"]["UnblendedCost"]
+                amount = float(metric["Amount"])
+                unit = metric.get("Unit")
+                if unit:
+                    currencies.add(unit)
                 total += amount
                 by_service[service] = by_service.get(service, 0.0) + amount
                 if region:
@@ -129,6 +134,7 @@ class AWSConnector(BaseConnector):
             by_account={account_id: total},
             by_region=by_region,
             entries=entries,
+            currency=(currencies.pop() if len(currencies) == 1 else ("MIXED" if currencies else "USD")),
         )
 
     # ── public API ──────────────────────────────────────────────────────────

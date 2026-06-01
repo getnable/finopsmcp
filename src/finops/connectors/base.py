@@ -29,6 +29,9 @@ class CostSummary:
     by_account: dict[str, float]   # account_id -> USD
     by_region: dict[str, float]    # region -> USD
     entries: list[CostEntry]
+    currency: str = "USD"          # billing currency reported by the provider;
+                                   # "MIXED" if rows span more than one currency.
+                                   # nable does not convert — non-USD is surfaced, not relabeled.
 
 
 class BaseConnector(ABC):
