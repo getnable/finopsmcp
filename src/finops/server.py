@@ -1447,6 +1447,10 @@ async def take_snapshot_now() -> dict:
     """
     from .scheduler.jobs import run_snapshot_now
     results = await run_snapshot_now()
+    # Explicit refresh: bust the read-through cache so the next query reflects
+    # the freshly taken snapshot rather than a pre-snapshot cached copy.
+    from . import cache as _cache
+    _cache.clear()
     return {"status": "complete", "results": results}
 
 
