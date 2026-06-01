@@ -691,7 +691,7 @@ const TEAM_FEATURES = [
   "Publish cost reports to Notion for the whole team",
   "Ticket creation (Jira, Linear, GitHub Issues)",
   "Scheduled cost digests via email",
-  "Budget enforcement and alerts",
+  "Budget alerts and soft checks",
   "Commitment analysis and RI recommendations",
   "No shared database required",
   "Team dashboard at http://your-ip:8080. No install required for viewers.",
@@ -726,7 +726,7 @@ function Pricing(){
         <div className="section-head">
           <div className="label">Pricing</div>
           <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
-          <p>Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget enforcement, and org rollups.</p>
+          <p>Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget alerts, and org rollups.</p>
 
           {/* Billing toggle */}
           <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center",marginTop:24}}>
@@ -826,7 +826,7 @@ function MidCta(){
           <div>
             <h2 style={{marginBottom:10}}>Ready to stop guessing?</h2>
             <p style={{color:"var(--fg-2)",maxWidth:"46ch",margin:"0 auto",lineHeight:1.6}}>
-              Four minutes from install to your first real insight. Free forever for solo use.
+              Minutes from install to your first real insight. Free forever for solo use.
             </p>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"center"}}>
@@ -975,7 +975,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How long does setup take?",
-    a: "About 4 minutes. Run `pip install finops-mcp && finops welcome`, follow the prompts, and you're done. The wizard handles the MCP config and credential storage."
+    a: "A few minutes. Run `pip install finops-mcp && finops welcome`, follow the prompts, and you're done. The wizard handles the MCP config and credential storage."
   },
   {
     q: "Is the free tier actually free?",
