@@ -589,7 +589,7 @@ async def get_cost_summary(
         "by_provider": by_provider,
         "grand_by_service": {
             k: round(v, 4)
-            for k, v in sorted(grand_by_service.items(), key=lambda x: -x[1])
+            for k, v in sorted(grand_by_service.items(), key=lambda x: -x[1])[:50]
         },
     }
 
@@ -686,12 +686,17 @@ async def get_costs_by_service(
         key=lambda x: -x["total_usd"],
     )
 
+    total_usd = round(sum(s["total_usd"] for s in ranked), 4)
+    kept, omitted = fit_to_budget(ranked)
     result: dict[str, Any] = {
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "filter": service_filter,
-        "services": ranked,
-        "total_usd": round(sum(s["total_usd"] for s in ranked), 4),
+        "services": kept,
+        "total_usd": total_usd,
     }
+    if omitted:
+        result["services_truncated"] = True
+        result["hint"] = f"Showing top {len(kept)} of {len(ranked)} services by cost to stay within token budget. total_usd reflects all services."
     if errors:
         result["errors"] = errors
     return result
@@ -3138,12 +3143,14 @@ async def get_rds_rightsizing_recommendations(
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
+        kept, omitted = fit_to_budget(all_findings)
         return {
             "count": len(all_findings),
             "total_monthly_savings": round(total_savings, 2),
             "total_annual_savings": round(total_savings * 12, 2),
             "regions_scanned": regions,
-            "findings": all_findings,
+            "findings": kept,
+            **({"findings_truncated": True, "hint": f"Showing {len(kept)} of {len(all_findings)} findings (highest savings first) to stay within token budget."} if omitted else {}),
             "tip": (
                 "Verify FreeStorageSpace and DatabaseConnections before resizing. "
                 "Take a snapshot before any instance class change."
@@ -3210,11 +3217,13 @@ async def get_idle_rds_instances(
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
+        kept, omitted = fit_to_budget(all_findings)
         return {
             "count": len(all_findings),
             "total_monthly_savings": round(total_savings, 2),
             "total_annual_savings": round(total_savings * 12, 2),
-            "findings": all_findings,
+            "findings": kept,
+            **({"findings_truncated": True, "hint": f"Showing {len(kept)} of {len(all_findings)} findings (highest savings first) to stay within token budget."} if omitted else {}),
             "tip": (
                 "Stopping an RDS instance pauses billing for compute (storage still billed). "
                 "AWS auto-starts stopped instances after 7 days unless stopped again."
@@ -3285,12 +3294,14 @@ async def get_idle_load_balancers(
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
+        kept, omitted = fit_to_budget(all_findings)
         return {
             "count": len(all_findings),
             "total_monthly_savings": round(total_savings, 2),
             "total_annual_savings": round(total_savings * 12, 2),
             "regions_scanned": regions,
-            "findings": all_findings,
+            "findings": kept,
+            **({"findings_truncated": True, "hint": f"Showing {len(kept)} of {len(all_findings)} findings (highest savings first) to stay within token budget."} if omitted else {}),
             "tip": "Verify target groups and DNS before deleting a load balancer.",
         }
     except Exception as e:
@@ -3325,11 +3336,13 @@ async def get_s3_incomplete_multipart_uploads(
         findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in findings)
 
+        kept, omitted = fit_to_budget(findings)
         return {
             "count": len(findings),
             "total_monthly_savings": round(total_savings, 2),
             "total_annual_savings": round(total_savings * 12, 2),
-            "findings": findings,
+            "findings": kept,
+            **({"findings_truncated": True, "hint": f"Showing {len(kept)} of {len(findings)} findings (highest savings first) to stay within token budget."} if omitted else {}),
             "tip": (
                 "Fix: add an S3 lifecycle rule with "
                 "AbortIncompleteMultipartUpload DaysAfterInitiation=7 to each flagged bucket."
@@ -3386,17 +3399,22 @@ async def get_ecr_cleanup_recommendations(
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
-        return {
+        kept, omitted = fit_to_budget(all_findings, max_tokens=6000)
+        result = {
             "count": len(all_findings),
             "total_monthly_savings": round(total_savings, 2),
             "total_annual_savings": round(total_savings * 12, 2),
             "regions_scanned": regions,
-            "findings": all_findings,
+            "findings": kept,
             "tip": (
                 "Fix: add an ECR lifecycle policy with rule "
                 "tagStatus=untagged, countType=sinceImagePushed, countNumber=14 to each repo."
             ),
         }
+        if omitted:
+            result["findings_truncated"] = omitted
+            result["hint"] = f"{omitted} smaller findings omitted to save tokens; total reflects all."
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -3451,18 +3469,23 @@ async def get_ecs_rightsizing_recommendations(
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
-        return {
+        kept, omitted = fit_to_budget(all_findings, max_tokens=6000)
+        result = {
             "count": len(all_findings),
             "total_monthly_savings": round(total_savings, 2),
             "total_annual_savings": round(total_savings * 12, 2),
             "regions_scanned": regions,
-            "findings": all_findings,
+            "findings": kept,
             "tip": (
                 "Enable Container Insights on your ECS clusters for CPU data: "
                 "aws ecs update-cluster-settings --cluster <name> "
                 "--settings name=containerInsights,value=enabled"
             ),
         }
+        if omitted:
+            result["findings_truncated"] = omitted
+            result["hint"] = f"{omitted} smaller findings omitted to save tokens; total reflects all."
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -3769,7 +3792,7 @@ async def get_kubernetes_costs(
         for w in report.workloads:
             ns_costs[w.namespace] = ns_costs.get(w.namespace, 0) + w.monthly_cost
         result["cost_by_namespace"] = dict(
-            sorted(ns_costs.items(), key=lambda x: x[1], reverse=True)
+            sorted(ns_costs.items(), key=lambda x: x[1], reverse=True)[:50]
         )
 
         # Top workloads
@@ -5724,13 +5747,18 @@ async def audit_terraform_tags(
 
     stored = persist_violations(tf_dir, violations)
 
-    return {
+    kept, omitted = fit_to_budget(violations, max_tokens=6000)
+    result = {
         "tf_dir": tf_dir,
         "required_tags": _required_tags(),
         "violations_found": len(violations),
         "stored_in_db": stored,
-        "violations": violations,
+        "violations": kept,
     }
+    if omitted:
+        result["violations_truncated"] = omitted
+        result["hint"] = f"{omitted} more violations omitted to save tokens; all {len(violations)} are stored in the DB."
+    return result
 
 
 @mcp.tool()
@@ -6209,7 +6237,7 @@ async def get_llm_cost_by_model(
             return {
                 "provider":    provider,
                 "total_usd":   prov_cost,
-                "by_model":    {k: v for k, v in result["by_model"].items()},
+                "by_model":    dict(sorted(result["by_model"].items(), key=lambda kv: kv[1], reverse=True)[:50]),
                 "period":      result["period"],
                 "recommendations": result.get("recommendations", []),
             }
@@ -7234,15 +7262,17 @@ async def get_view(
                 ),
             }
 
-        rows = [
+        all_rows = [
             {"tag_value": k, "spend": _fmt_usd(v)}
             for k, v in sorted(tag_totals.items(), key=lambda x: -x[1])
         ]
+        rows, omitted = fit_to_budget(all_rows)
         return {
             "view": meta["name"],
             "tag_key": tag_key,
             "period": f"{start} to {end}",
             "by_tag": rows,
+            **({"by_tag_truncated": True, "hint": f"Showing {len(rows)} of {len(all_rows)} tag values by spend to stay within token budget."} if omitted else {}),
             "total": _fmt_usd(sum(tag_totals.values())),
         }
 
@@ -7253,14 +7283,16 @@ async def get_view(
             from .attribution.engine import AttributionEngine
             engine = AttributionEngine()
             result = await engine.attribute(start, end)
-            rows = [
+            all_rows = [
                 {"team": t, "spend": _fmt_usd(v)}
                 for t, v in sorted(result.items(), key=lambda x: -x[1])
             ]
+            rows, omitted = fit_to_budget(all_rows)
             return {
                 "view": meta["name"],
                 "period": f"{start} to {end}",
                 "by_team": rows,
+                **({"by_team_truncated": True, "hint": f"Showing {len(rows)} of {len(all_rows)} teams by spend to stay within token budget."} if omitted else {}),
                 "total": _fmt_usd(sum(result.values())),
             }
         except Exception as e:
@@ -7366,8 +7398,8 @@ async def get_databricks_costs(
         "provider": "databricks",
         "period": f"{sd} to {ed}",
         "total_usd": _fmt_usd(summary.total_usd),
-        "by_service": {k: _fmt_usd(v) for k, v in sorted(summary.by_service.items(), key=lambda x: -x[1])},
-        "by_workspace": {k: _fmt_usd(v) for k, v in summary.by_account.items()},
+        "by_service": {k: _fmt_usd(v) for k, v in sorted(summary.by_service.items(), key=lambda x: -x[1])[:50]},
+        "by_workspace": {k: _fmt_usd(v) for k, v in sorted(summary.by_account.items(), key=lambda x: -x[1])[:50]},
         "note": "Costs are estimates based on DBU rates. Set DATABRICKS_ACCOUNT_ID for exact billing data.",
     }
 
@@ -8187,9 +8219,12 @@ async def scan_lambda_concurrency_waste(
         findings = await _scan(aws_client=aws, regions=regions)
 
         total_wasted = sum(f["wasted_monthly_cost"] for f in findings)
+        findings.sort(key=lambda f: f.get("wasted_monthly_cost", 0) or 0, reverse=True)
+        kept, omitted = fit_to_budget(findings)
         return {
-            "findings": findings,
+            "findings": kept,
             "total_findings": len(findings),
+            **({"findings_truncated": True, "hint": f"Showing top {len(kept)} of {len(findings)} by wasted cost to stay within token budget."} if omitted else {}),
             "total_wasted_monthly_cost": round(total_wasted, 4),
             "total_wasted_annual_cost": round(total_wasted * 12, 2),
             "note": (
@@ -8223,9 +8258,12 @@ async def scan_s3_bucket_key_opportunities() -> dict:
         findings = await _scan(aws_client=aws)
 
         total_savings = sum(f["estimated_savings"] for f in findings)
+        findings.sort(key=lambda f: f.get("estimated_savings", 0) or 0, reverse=True)
+        kept, omitted = fit_to_budget(findings)
         return {
-            "findings": findings,
+            "findings": kept,
             "total_findings": len(findings),
+            **({"findings_truncated": True, "hint": f"Showing top {len(kept)} of {len(findings)} by estimated savings to stay within token budget."} if omitted else {}),
             "total_estimated_monthly_savings": round(total_savings, 4),
             "total_estimated_annual_savings": round(total_savings * 12, 2),
             "note": (
@@ -8266,8 +8304,11 @@ async def recommend_lambda_snapstart(
         replaceable = [f for f in findings if f["has_provisioned_concurrency"]]
         total_replaceable_cost = sum(f["monthly_pc_cost"] for f in replaceable)
 
+        findings.sort(key=lambda f: (bool(f.get("has_provisioned_concurrency")), f.get("monthly_pc_cost", 0) or 0), reverse=True)
+        kept, omitted = fit_to_budget(findings)
         return {
-            "findings": findings,
+            "findings": kept,
+            **({"findings_truncated": True, "hint": f"Showing top {len(kept)} of {len(findings)} Java functions to stay within token budget."} if omitted else {}),
             "total_java_functions": len(findings),
             "functions_with_replaceable_pc": len(replaceable),
             "total_monthly_pc_cost_replaceable": round(total_replaceable_cost, 4),
@@ -8307,9 +8348,12 @@ async def audit_efs_cross_az_mounts(
         findings = await _scan(aws_client=aws, regions=regions)
 
         total_cost = sum(f["estimated_monthly_cost"] for f in findings)
+        findings.sort(key=lambda f: f.get("estimated_monthly_cost", 0) or 0, reverse=True)
+        kept, omitted = fit_to_budget(findings)
         return {
-            "findings": findings,
+            "findings": kept,
             "total_findings": len(findings),
+            **({"findings_truncated": True, "hint": f"Showing top {len(kept)} of {len(findings)} by estimated cost to stay within token budget."} if omitted else {}),
             "total_estimated_monthly_cost": round(total_cost, 4),
             "total_estimated_annual_cost": round(total_cost * 12, 2),
             "note": (
@@ -8352,8 +8396,11 @@ async def audit_nlb_cross_zone_costs(
         ]
         total_cost = sum(f["estimated_cross_az_cost"] for f in findings)
 
+        findings.sort(key=lambda f: f.get("estimated_cross_az_cost", 0) or 0, reverse=True)
+        kept, omitted = fit_to_budget(findings)
         return {
-            "findings": findings,
+            "findings": kept,
+            **({"findings_truncated": True, "hint": f"Showing top {len(kept)} of {len(findings)} by cross-AZ cost to stay within token budget."} if omitted else {}),
             "total_findings": len(findings),
             "actionable_findings": len(actionable),
             "total_estimated_monthly_cross_az_cost": round(total_cost, 4),
@@ -8488,6 +8535,8 @@ async def scan_graviton_migration_opportunities(
             "require only an instance type change and a reboot. Verify your AMI supports "
             "arm64 (Amazon Linux 2/2023 and Ubuntu 20.04+ are multi-arch). "
             "Test in staging before switching production.",
+            "",
+            cost_note("\n".join(lines), savings_found_usd=total_savings),
         ]
 
         nudge = _team_nudge(
@@ -8571,6 +8620,8 @@ async def recommend_spot_adoption(
             "Set OnDemandPercentageAboveBaseCapacity=0 to run fully on spot. "
             "Add capacity-optimized allocation strategy and 5+ instance types "
             "for interruption resilience. Always test in staging first.",
+            "",
+            cost_note("\n".join(lines), savings_found_usd=total_savings),
         ]
 
         nudge = _team_nudge(
