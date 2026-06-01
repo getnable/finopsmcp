@@ -2921,6 +2921,22 @@ async def audit_aws_waste(
             regions=regions,
             checks=checks,
         )
+        # Cap the detail findings list to a token budget. The list is already sorted
+        # by estimated_monthly_savings desc, so fit_to_budget keeps the highest-value
+        # findings. All totals/aggregates (total_findings, total_estimated_monthly_savings,
+        # by_category/by_severity/by_region) are computed over the WHOLE list upstream and
+        # are left untouched, so the model can still state the full picture.
+        all_findings = report.get("findings") or []
+        if all_findings:
+            kept, omitted = fit_to_budget(all_findings, max_tokens=6000)
+            report["findings"] = kept
+            if omitted > 0:
+                report["findings_truncated"] = (
+                    f"Showing top {len(kept)} of {len(all_findings)} findings by monthly "
+                    f"savings. {omitted} lower-value findings omitted. Use by_category, "
+                    f"by_region, and by_severity for the full breakdown, or pass checks/"
+                    f"regions to narrow the scan for full detail."
+                )
         # Add a human-readable summary at the top
         monthly = report.get("total_estimated_monthly_savings", 0)
         findings = report.get("total_findings", 0)
@@ -2978,16 +2994,27 @@ async def audit_public_ipv4_addresses(
 
         lines: list[str] = ["## Public IPv4 Audit", ""]
 
+        _TABLE_CAP = 30
+
         if unattached:
             lines.append(f"**Unattached Elastic IPs** (release immediately) -- {len(unattached)} found")
             lines.append("")
             lines.append("| IP | Allocation ID | Region | Monthly Cost |")
             lines.append("|---|---|---|---|")
-            for eip in sorted(unattached, key=lambda x: x["region"]):
+            unattached_sorted = sorted(unattached, key=lambda x: x["monthly_cost"], reverse=True)
+            for eip in unattached_sorted[:_TABLE_CAP]:
                 lines.append(
                     f"| {eip['public_ip']} | {eip['allocation_id']} "
                     f"| {eip['region']} | ${eip['monthly_cost']:.2f} |"
                 )
+            if len(unattached_sorted) > _TABLE_CAP:
+                rest = unattached_sorted[_TABLE_CAP:]
+                rest_cost = sum(e["monthly_cost"] for e in rest)
+                lines.append(
+                    f"| ... and {len(rest)} more | | | ${rest_cost:.2f} total |"
+                )
+                lines.append("")
+                lines.append(f"_Showing top {_TABLE_CAP} of {len(unattached_sorted)} unattached IPs by cost. Scan a single region for the full list._")
             lines.append("")
         else:
             lines.append("**Unattached Elastic IPs:** None found.")
@@ -2998,11 +3025,20 @@ async def audit_public_ipv4_addresses(
             lines.append("")
             lines.append("| IP | Instance ID | Region | Monthly Cost |")
             lines.append("|---|---|---|---|")
-            for eip in sorted(stopped, key=lambda x: x["region"]):
+            stopped_sorted = sorted(stopped, key=lambda x: x["monthly_cost"], reverse=True)
+            for eip in stopped_sorted[:_TABLE_CAP]:
                 lines.append(
                     f"| {eip['public_ip']} | {eip['instance_id']} "
                     f"| {eip['region']} | ${eip['monthly_cost']:.2f} |"
                 )
+            if len(stopped_sorted) > _TABLE_CAP:
+                rest = stopped_sorted[_TABLE_CAP:]
+                rest_cost = sum(e["monthly_cost"] for e in rest)
+                lines.append(
+                    f"| ... and {len(rest)} more | | | ${rest_cost:.2f} total |"
+                )
+                lines.append("")
+                lines.append(f"_Showing top {_TABLE_CAP} of {len(stopped_sorted)} stopped-instance IPs by cost. Scan a single region for the full list._")
             lines.append("")
         else:
             lines.append("**IPs on stopped instances:** None found.")
@@ -3077,7 +3113,21 @@ async def scan_cloudwatch_waste(
     """
     try:
         from .analyzers.optimizer import scan_cloudwatch_log_waste
-        return scan_cloudwatch_log_waste(regions=regions)
+        result = scan_cloudwatch_log_waste(regions=regions)
+        if isinstance(result, dict) and "error" not in result:
+            findings = result.get("findings", [])
+            if isinstance(findings, list) and findings:
+                # findings is pre-sorted desc by estimated_monthly_savings in the connector.
+                kept, omitted = fit_to_budget(findings)
+                result["findings"] = kept
+                if omitted:
+                    result["findings_truncated"] = True
+                    result["hint"] = (
+                        f"Showing top {len(kept)} of {len(findings)} log groups by estimated "
+                        "monthly cost. Totals and per-region counts above cover all of them; "
+                        "see by_region for the full breakdown or scan a single region for detail."
+                    )
+        return result
     except Exception as e:
         log.error("scan_cloudwatch_waste failed: %s", e, exc_info=True)
         return {"error": str(e)}
@@ -4248,36 +4298,56 @@ async def get_helm_release_costs(
         orphaned = [r for r in releases if r.is_orphaned]
         orphaned_cost = sum(r.monthly_cost for r in orphaned)
 
+        # Sort detail most-important-first (by cost desc) before capping.
+        releases = sorted(releases, key=lambda r: r.monthly_cost, reverse=True)
+        release_rows = [
+            {
+                "name": r.name,
+                "namespace": r.namespace,
+                "chart": r.chart,
+                "chart_name": r.chart_name,
+                "chart_version": r.chart_version,
+                "app_version": r.app_version,
+                "status": r.status,
+                "revision": r.revision,
+                "deployed_at": r.deployed_at,
+                "monthly_cost_usd": r.monthly_cost,
+                "wasted_usd": r.wasted_usd,
+                "pod_count": r.pod_count,
+                "cpu_efficiency_pct": r.cpu_efficiency_pct,
+                "workloads": r.workload_names,
+                "orphaned": r.is_orphaned,
+            }
+            for r in releases
+        ]
+        kept_releases, omitted_releases = fit_to_budget(release_rows, max_tokens=6000)
+
+        # cost_by_chart can be unbounded on noisy clusters: keep top 50 by cost,
+        # but always preserve the grand total over ALL charts.
+        sorted_charts = sorted(by_chart.items(), key=lambda x: x[1], reverse=True)
+
         result = {
             "release_count": len(releases),
             "total_managed_cost_usd": round(sum(r.monthly_cost for r in releases), 2),
             "unmanaged_workload_cost_usd": round(unmanaged_cost, 2),
             "orphaned_release_count": len(orphaned),
             "orphaned_cost_usd": round(orphaned_cost, 2),
-            "cost_by_chart": dict(sorted(by_chart.items(), key=lambda x: x[1], reverse=True)),
-            "releases": [
-                {
-                    "name": r.name,
-                    "namespace": r.namespace,
-                    "chart": r.chart,
-                    "chart_name": r.chart_name,
-                    "chart_version": r.chart_version,
-                    "app_version": r.app_version,
-                    "status": r.status,
-                    "revision": r.revision,
-                    "deployed_at": r.deployed_at,
-                    "monthly_cost_usd": r.monthly_cost,
-                    "wasted_usd": r.wasted_usd,
-                    "pod_count": r.pod_count,
-                    "cpu_efficiency_pct": r.cpu_efficiency_pct,
-                    "workloads": r.workload_names,
-                    "orphaned": r.is_orphaned,
-                }
-                for r in releases
-            ],
+            "chart_count": len(sorted_charts),
+            "total_chart_cost_usd": round(sum(by_chart.values()), 2),
+            "cost_by_chart": {k: round(v, 2) for k, v in sorted_charts[:50]},
+            "releases": kept_releases,
         }
+        if omitted_releases > 0:
+            result["releases_truncated"] = omitted_releases
+            result["releases_hint"] = (
+                f"showing top {len(kept_releases)} of {len(releases)} releases by cost; "
+                f"filter by namespace for full detail"
+            )
+        if len(sorted_charts) > 50:
+            result["cost_by_chart_truncated"] = len(sorted_charts) - 50
 
         if orphaned:
+            orphaned = sorted(orphaned, key=lambda r: r.monthly_cost, reverse=True)
             result["orphaned_releases"] = [
                 {
                     "name": r.name,
@@ -4287,8 +4357,10 @@ async def get_helm_release_costs(
                     "deployed_at": r.deployed_at,
                     "monthly_cost_usd": r.monthly_cost,
                 }
-                for r in orphaned
+                for r in orphaned[:50]
             ]
+            if len(orphaned) > 50:
+                result["orphaned_releases_truncated"] = len(orphaned) - 50
 
         lines = [f"{len(releases)} Helm releases: ${result['total_managed_cost_usd']:,.0f}/month managed"]
         if unmanaged_cost > 10:
@@ -4680,7 +4752,7 @@ async def get_kubernetes_cost_trends(
                     "workload_count": pt["workload_count"],
                 })
 
-        # Trend direction
+        # Trend direction (computed from the FULL series before any trimming)
         if len(trend_points) >= 2:
             first_cost = trend_points[0]["monthly_cost_usd"]
             last_cost  = trend_points[-1]["monthly_cost_usd"]
@@ -4695,14 +4767,40 @@ async def get_kubernetes_cost_trends(
 
         top_ns = sorted(ns_totals.items(), key=lambda x: x[1], reverse=True)[:5]
 
+        # Bound the detail series: a wide window (e.g. days=365 daily) can be
+        # hundreds of rows injected into context every turn. Keep summary stats
+        # over the FULL series plus the most recent points; never lose totals.
+        full_point_count = len(trend_points)
+        all_costs = [pt["monthly_cost_usd"] for pt in trend_points]
+        all_waste = [pt["wasted_usd"] for pt in trend_points]
+        period_summary = {
+            "point_count": full_point_count,
+            "total_wasted_usd": round(sum(all_waste), 2),
+            "min_monthly_cost_usd": round(min(all_costs), 2) if all_costs else 0.0,
+            "max_monthly_cost_usd": round(max(all_costs), 2) if all_costs else 0.0,
+            "avg_monthly_cost_usd": round(sum(all_costs) / len(all_costs), 2) if all_costs else 0.0,
+        }
+        trend_truncated = None
+        if full_point_count > 45:
+            recent_n = 14
+            trend_points = trend_points[-recent_n:]
+            trend_truncated = (
+                f"showing most recent {recent_n} of {full_point_count} "
+                f"{granularity} points; see period_summary for full-window stats. "
+                f"Use granularity='weekly' or a smaller days window for full detail."
+            )
+
         return {
             "clusters": sorted(clusters_seen),
             "namespaces_in_view": sorted(namespaces_seen) if namespace else None,
             "lookback_days": days,
             "granularity": granularity,
-            "data_points": len(trend_points),
+            "data_points": full_point_count,
+            "points_shown": len(trend_points),
             "trend_direction": trend_dir,
             "cost_change_pct": round(delta_pct, 1),
+            "period_summary": period_summary,
+            "trend_truncated": trend_truncated,
             "trend": trend_points,
             "top_namespaces_by_spend": [
                 {"namespace": ns, "total_monthly_cost_usd": round(cost, 2)}
@@ -5151,11 +5249,22 @@ async def list_org_accounts() -> dict:
             }
         mgmt = [a for a in accounts if a.get("is_management_account")]
         members = [a for a in accounts if not a.get("is_management_account")]
-        return {
+        members.sort(key=lambda a: (a.get("account_name") or "").lower())
+        kept, omitted = fit_to_budget(members, max_tokens=6000)
+        result = {
             "total_accounts": len(accounts),
+            "member_account_count": len(members),
             "management_account": mgmt[0] if mgmt else None,
-            "member_accounts": members,
+            "member_accounts": kept,
         }
+        if omitted > 0:
+            result["member_accounts_truncated"] = omitted
+            result["hint"] = (
+                f"Showing {len(kept)} of {len(members)} member accounts (sorted by name); "
+                f"{omitted} omitted to bound context. All {len(accounts)} accounts were "
+                "synced to the local DB and are queryable by account_id."
+            )
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -5180,7 +5289,20 @@ async def get_org_cost_summary(days_back: int = 30) -> dict:
         return err
     try:
         from .connectors.aws_org import org_cost_summary
-        return org_cost_summary(days_back=days_back)
+        result = org_cost_summary(days_back=days_back)
+        accounts = result.get("accounts") if isinstance(result, dict) else None
+        if accounts:
+            # accounts is pre-sorted by total_usd desc; cap detail, keep aggregates.
+            kept, omitted = fit_to_budget(accounts, max_tokens=6000)
+            result["accounts"] = kept
+            if omitted > 0:
+                result["accounts_truncated"] = omitted
+                result["hint"] = (
+                    f"showing top {len(kept)} of {result.get('account_count', len(accounts))} "
+                    f"accounts by spend; org_total_usd reflects all accounts. "
+                    f"Use get_top_spending_accounts or filter by account for more detail."
+                )
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -5232,12 +5354,30 @@ async def get_account_anomalies(days_back: int = 30) -> dict:
         anomalies = account_anomalies(days_back=days_back)
         spikes = [a for a in anomalies if a["direction"] == "spike"]
         drops  = [a for a in anomalies if a["direction"] == "drop"]
-        return {
+        total_current = round(sum(a.get("current_usd", 0) for a in anomalies), 2)
+        total_previous = round(sum(a.get("previous_usd", 0) for a in anomalies), 2)
+        # Sort by absolute dollar swing (real money moved), most-important-first, then cap.
+        ranked = sorted(
+            anomalies,
+            key=lambda a: abs(a.get("current_usd", 0) - a.get("previous_usd", 0)),
+            reverse=True,
+        )
+        kept, omitted = fit_to_budget(ranked, max_tokens=6000)
+        result = {
             "total_anomalies": len(anomalies),
             "spikes": len(spikes),
             "drops": len(drops),
-            "anomalies": anomalies,
+            "total_current_usd": total_current,
+            "total_previous_usd": total_previous,
+            "anomalies": kept,
         }
+        if omitted > 0:
+            result["anomalies_truncated"] = omitted
+            result["hint"] = (
+                f"showing top {len(kept)} of {len(anomalies)} account anomalies by dollar "
+                f"swing; query a specific account for full detail"
+            )
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -5312,7 +5452,7 @@ async def get_resource_cost_breakdown_aws(
 
     try:
         from .connectors.cur import get_resource_costs
-        return get_resource_costs(
+        result = get_resource_costs(
             start_date=sd,
             end_date=ed,
             service=service,
@@ -5320,6 +5460,23 @@ async def get_resource_cost_breakdown_aws(
             min_cost_usd=min_cost_usd,
             limit=limit,
         )
+
+        resources = result.get("resources")
+        if isinstance(resources, list) and resources:
+            resources.sort(key=lambda r: r.get("unblended_cost", 0), reverse=True)
+            kept, omitted = fit_to_budget(resources, max_tokens=6000)
+            if omitted > 0:
+                result["resources"] = kept
+                result["resources_truncated"] = omitted
+                result["hint"] = (
+                    f"showing top {len(kept)} of {len(resources)} resources by cost; "
+                    "narrow with service, account_id, or region, or raise min_cost_usd for detail. "
+                    "total_cost and total_resources reflect the full result set."
+                )
+            total_savings = sum(r.get("effective_savings", 0) for r in resources)
+            result["cost_note"] = cost_note(result, savings_found_usd=total_savings or None)
+
+        return result
     except Exception as exc:
         log.error("get_resource_cost_breakdown_aws failed: %s", exc)
         return {"error": str(exc)}
@@ -5358,7 +5515,23 @@ async def get_ri_waste_detail(
 
     try:
         from .connectors.cur import get_ri_waste
-        return get_ri_waste(start_date=sd, end_date=ed, min_waste_usd=min_waste_usd)
+        result = get_ri_waste(start_date=sd, end_date=ed, min_waste_usd=min_waste_usd)
+        if isinstance(result, dict) and isinstance(result.get("reservations"), list):
+            reservations = result["reservations"]
+            # Connector already sorts by wasted_usd desc; sort defensively.
+            reservations.sort(key=lambda r: r.get("wasted_usd", 0), reverse=True)
+            total_count = len(reservations)
+            kept, omitted = fit_to_budget(reservations, max_tokens=6000)
+            result["reservations"] = kept
+            result["total_reservations"] = total_count
+            if omitted > 0:
+                result["reservations_truncated"] = omitted
+                result["hint"] = (
+                    f"showing top {len(kept)} of {total_count} underutilized reservations "
+                    f"by wasted spend; total_wasted_usd covers all {total_count}. "
+                    "Raise min_waste_usd or narrow the date range for fewer rows."
+                )
+        return result
     except Exception as exc:
         log.error("get_ri_waste_detail failed: %s", exc)
         return {"error": str(exc)}
@@ -5513,7 +5686,7 @@ async def get_resource_cost_breakdown_azure(
 
     try:
         from .connectors.azure_detail import get_resource_costs
-        return get_resource_costs(
+        result = get_resource_costs(
             start_date=sd,
             end_date=ed,
             subscription_id=subscription_id,
@@ -5521,6 +5694,22 @@ async def get_resource_cost_breakdown_azure(
             min_cost_usd=min_cost_usd,
             limit=limit,
         )
+        resources = result.get("resources")
+        if isinstance(resources, list) and resources:
+            # Connector returns resources pre-sorted by cost desc. Bound the
+            # token cost of the detail rows without dropping any totals.
+            returned_count = len(resources)
+            kept, omitted = fit_to_budget(resources, max_tokens=6000)
+            if omitted > 0:
+                result["resources"] = kept
+                result["resources_truncated"] = omitted
+                result["resources_hint"] = (
+                    f"showing top {len(kept)} of {returned_count} resources by cost; "
+                    f"total_cost covers all {returned_count}. Filter by "
+                    f"resource_group or subscription_id, or raise min_cost_usd "
+                    f"for fewer, larger resources."
+                )
+        return result
     except Exception as exc:
         log.error("get_resource_cost_breakdown_azure failed: %s", exc)
         return {"error": str(exc)}
@@ -5822,11 +6011,37 @@ async def generate_terraform_tag_fixes(
     except Exception as exc:
         return {"error": str(exc)}
 
-    return {
+    total_files = len(diffs)
+    # diffs is a dict keyed by .tf path with a full unified diff string each.
+    # Cap the included diffs to the largest (most-changed) files within a token
+    # budget. Never drop the counts so the model can still state the full picture.
+    diff_items = sorted(diffs.items(), key=lambda kv: len(kv[1] or ""), reverse=True)
+    kept_diffs: dict = {}
+    used_tokens = 0
+    budget = 6000
+    for path, diff in diff_items:
+        cost = estimate_tokens(diff) + estimate_tokens(path)
+        if kept_diffs and used_tokens + cost > budget:
+            break
+        kept_diffs[path] = diff
+        used_tokens += cost
+
+    omitted = total_files - len(kept_diffs)
+    result = {
         "violations_count": len(violations),
-        "files_to_patch": len(diffs),
-        "diffs": diffs,
+        "files_to_patch": total_files,
+        "diffs": kept_diffs,
     }
+    if omitted > 0:
+        omitted_paths = [p for p, _ in diff_items[len(kept_diffs):]]
+        result["diffs_truncated"] = omitted
+        result["omitted_files"] = omitted_paths
+        result["hint"] = (
+            f"showing diffs for {len(kept_diffs)} of {total_files} files "
+            f"(largest first) to save tokens; run open_terraform_tag_pr to apply "
+            f"all fixes including the omitted files."
+        )
+    return result
 
 
 @mcp.tool()
@@ -6197,7 +6412,51 @@ async def get_llm_costs(
         sd = _date.fromisoformat(start_date) if start_date else None
         ed = _date.fromisoformat(end_date) if end_date else _date.today()
         from .connectors.llm_costs import get_all_llm_costs
-        return get_all_llm_costs(start_date=sd, end_date=ed, days=days)
+        result = get_all_llm_costs(start_date=sd, end_date=ed, days=days)
+
+        # Bound token cost: by_model can be unbounded (many models), daily can be
+        # a long window. Trim DETAIL only; keep every total and count intact.
+        by_model_full = result.get("by_model", {}) or {}
+        result["model_count"] = len(by_model_full)
+        if len(by_model_full) > 50:
+            # by_model is already sorted desc by cost in the connector
+            top_items = list(by_model_full.items())[:50]
+            kept_total = round(sum(v for _, v in top_items), 4)
+            result["by_model"] = dict(top_items)
+            result["by_model_truncated"] = (
+                f"showing top 50 of {len(by_model_full)} models by cost "
+                f"(${kept_total:,.2f} of ${result.get('total_usd', 0.0):,.2f} total); "
+                f"use get_llm_cost_by_model with a provider filter for the full list"
+            )
+
+        daily = result.get("daily", []) or []
+        result["daily_point_count"] = len(daily)
+        if len(daily) > 45:
+            period_total = round(sum(d.get("total_usd", 0.0) for d in daily), 4)
+            vals = [d.get("total_usd", 0.0) for d in daily]
+            # Weekly buckets preserve trend without one row per day.
+            weekly = []
+            for i in range(0, len(daily), 7):
+                chunk = daily[i:i + 7]
+                weekly.append({
+                    "week_start": chunk[0].get("date", ""),
+                    "week_end":   chunk[-1].get("date", ""),
+                    "total_usd":  round(sum(c.get("total_usd", 0.0) for c in chunk), 4),
+                })
+            result["daily"] = daily[-14:]            # most recent 14 days verbatim
+            result["weekly"] = weekly                # full window, bucketed
+            result["daily_summary"] = {
+                "period_total_usd": period_total,
+                "min_usd":          round(min(vals), 4),
+                "max_usd":          round(max(vals), 4),
+                "avg_usd":          round(period_total / len(vals), 4),
+            }
+            result["daily_truncated"] = (
+                f"{len(daily)} days bucketed to weekly; showing last 14 days verbatim. "
+                f"Use a shorter days window for full daily detail"
+            )
+
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -6363,7 +6622,21 @@ async def get_langfuse_model_costs(
             ed = date.today()
             sd = ed - timedelta(days=days)
 
-        return await connector.get_usage_by_model(start_date=sd, end_date=ed)
+        result = await connector.get_usage_by_model(start_date=sd, end_date=ed)
+
+        models = result.get("models", [])
+        # models is pre-sorted by total_cost_usd desc in the connector.
+        result["total_models"] = len(models)
+        kept, omitted = fit_to_budget(models, max_tokens=6000)
+        result["models"] = kept
+        if omitted > 0:
+            shown_cost = round(sum(m.get("total_cost_usd", 0) for m in kept), 4)
+            result["models_truncated"] = (
+                f"showing top {len(kept)} of {result['total_models']} models by cost "
+                f"(${shown_cost:,.2f} of ${result.get('total_cost_usd', 0):,.2f} total); "
+                f"{omitted} smaller-spend models omitted. Narrow the date window to see the tail."
+            )
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -7926,11 +8199,37 @@ async def list_active_services(
     end = date.fromisoformat(end_date) if end_date else date.today()
     start = date.fromisoformat(start_date) if start_date else end - timedelta(days=30)
 
-    return list_all_services(
+    result = list_all_services(
         provider=provider.lower() if provider else None,
         start_date=start,
         end_date=end,
     )
+
+    # Bound token cost: a noisy org can have 200+ services per cloud. Cap each
+    # provider's detail list to the top 50 by cost, but always keep the full
+    # service count and full spend total so totals are never lost.
+    TOP_N = 50
+    for prov in ("aws", "azure", "gcp"):
+        services = result.get(prov)
+        if not isinstance(services, list):
+            continue
+        services.sort(key=lambda r: r.get("cost_usd", 0) or 0, reverse=True)
+        total_count = len(services)
+        total_usd = round(sum((r.get("cost_usd", 0) or 0) for r in services), 2)
+        result[f"{prov}_service_count"] = total_count
+        result[f"{prov}_total_usd"] = total_usd
+        if total_count > TOP_N:
+            kept = services[:TOP_N]
+            omitted = total_count - TOP_N
+            shown_usd = round(sum((r.get("cost_usd", 0) or 0) for r in kept), 2)
+            result[prov] = kept
+            result[f"{prov}_truncated"] = (
+                f"showing top {TOP_N} of {total_count} {prov} services by cost "
+                f"(${shown_usd:,.2f} of ${total_usd:,.2f} shown); "
+                f"{omitted} smaller services omitted. Use get_service_cost for a specific one."
+            )
+
+    return result
 
 
 @mcp.tool()
@@ -8135,12 +8434,15 @@ async def audit_rds_manual_snapshots(
         )
         lines.append("")
 
+        _SNAP_TABLE_CAP = 30
+
         if orphaned:
+            orphaned = sorted(orphaned, key=lambda s: s.get("monthly_cost", 0.0), reverse=True)
             lines.append(f"### Orphaned Snapshots ({len(orphaned)}) - Source DB no longer exists")
             lines.append("")
             lines.append("| Snapshot ID | DB Identifier | Size (GB) | Age (days) | Monthly Cost |")
             lines.append("|-------------|---------------|-----------|------------|--------------|")
-            for snap in orphaned:
+            for snap in orphaned[:_SNAP_TABLE_CAP]:
                 lines.append(
                     f"| {snap['snapshot_id']} "
                     f"| {snap['db_identifier']} "
@@ -8148,22 +8450,37 @@ async def audit_rds_manual_snapshots(
                     f"| {snap['age_days']} "
                     f"| ${snap['monthly_cost']:,.4f} |"
                 )
+            if len(orphaned) > _SNAP_TABLE_CAP:
+                _rest = orphaned[_SNAP_TABLE_CAP:]
+                _rest_cost = sum(s.get("monthly_cost", 0.0) for s in _rest)
+                lines.append(
+                    f"_... and {len(_rest)} more orphaned snapshots, worth ${_rest_cost:,.2f}/mo total. "
+                    f"Showing top {_SNAP_TABLE_CAP} by monthly cost. Scan a single region for full detail._"
+                )
             lines.append("")
 
         if old:
+            old = sorted(old, key=lambda s: s.get("monthly_cost", 0.0), reverse=True)
             lines.append(
                 f"### Old Snapshots ({len(old)}) - Older than {age_threshold_days} days, source DB exists"
             )
             lines.append("")
             lines.append("| Snapshot ID | DB Identifier | Size (GB) | Age (days) | Monthly Cost |")
             lines.append("|-------------|---------------|-----------|------------|--------------|")
-            for snap in old:
+            for snap in old[:_SNAP_TABLE_CAP]:
                 lines.append(
                     f"| {snap['snapshot_id']} "
                     f"| {snap['db_identifier']} "
                     f"| {snap['size_gb']:.1f} "
                     f"| {snap['age_days']} "
                     f"| ${snap['monthly_cost']:,.4f} |"
+                )
+            if len(old) > _SNAP_TABLE_CAP:
+                _rest = old[_SNAP_TABLE_CAP:]
+                _rest_cost = sum(s.get("monthly_cost", 0.0) for s in _rest)
+                lines.append(
+                    f"_... and {len(_rest)} more old snapshots, worth ${_rest_cost:,.2f}/mo total. "
+                    f"Showing top {_SNAP_TABLE_CAP} by monthly cost. Scan a single region for full detail._"
                 )
             lines.append("")
 
@@ -8682,7 +8999,14 @@ async def audit_spot_diversification(
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
 
-        for r in results:
+        # Sort detail most-important-first (riskiest ASGs at top), then cap rows.
+        # Header counts above already reflect the FULL result set, so totals hold.
+        ordered = high + medium + ok
+        DETAIL_CAP = 30
+        shown = ordered[:DETAIL_CAP]
+        omitted = len(ordered) - len(shown)
+
+        for r in shown:
             types_str = ", ".join(r["instance_types"]) if r["instance_types"] else "-"
             lines.append(
                 f"| {r['asg_name']} "
@@ -8692,6 +9016,12 @@ async def audit_spot_diversification(
                 f"| {r['allocation_strategy']} "
                 f"| {r['spot_pct']:.1f}% "
                 f"| {r['risk_level']} |"
+            )
+
+        if omitted > 0:
+            lines.append(
+                f"| _... and {omitted} more lower-risk ASG(s)_ | | | | | | "
+                f"_filter by region for full detail_ |"
             )
 
         if high or medium:
@@ -8748,21 +9078,34 @@ async def audit_cloudwatch_metric_cardinality(
             lines.append("No high-cardinality namespaces found (all under 100 metrics).")
             return "\n".join(lines)
 
+        findings = sorted(findings, key=lambda f: f.get("estimated_monthly_cost", 0), reverse=True)
+        TOP_N = 30
+        shown = findings[:TOP_N]
+        omitted = findings[len(shown):]
+
         lines.append(f"**High-cardinality namespaces** ({len(findings)} found):")
         lines.append("")
         lines.append("| Namespace | Metrics | Est. Monthly Cost | Problem Dimensions |")
         lines.append("|---|---|---|---|")
-        for f in findings:
+        for f in shown:
             dims = ", ".join(f["high_cardinality_dimensions"]) if f["high_cardinality_dimensions"] else "unknown"
             lines.append(
                 f"| {f['namespace']} | {f['metric_count']:,} "
                 f"| ${f['estimated_monthly_cost']:,.2f} | {dims} |"
             )
+        if omitted:
+            omitted_cost = sum(f.get("estimated_monthly_cost", 0) for f in omitted)
+            lines.append(
+                f"| ... and {len(omitted)} more namespaces "
+                f"| | ${omitted_cost:,.2f} total | (sorted by cost; scan a single region for full detail) |"
+            )
         lines.append("")
         lines.append("**Recommendations:**")
         lines.append("")
-        for f in findings:
+        for f in shown:
             lines.append(f"- {f['recommendation']}")
+        if omitted:
+            lines.append(f"- ... {len(omitted)} more namespace(s) omitted; showing top {TOP_N} by cost.")
 
         return "\n".join(lines)
 
@@ -9023,7 +9366,23 @@ async def audit_s3_transfer_acceleration() -> dict:
         if aws is None or not await aws.is_configured():
             return {"error": "AWS is not configured. Run 'uvx finops-mcp setup' to connect."}
 
-        return await _audit(aws_client=aws)
+        result = await _audit(aws_client=aws)
+
+        # Cap detail rows to bound token cost. Findings are pre-sorted
+        # (likely_waste first, then monthly_ta_cost desc). Totals/counts are
+        # separate top-level fields and are never trimmed.
+        findings = result.get("findings")
+        if isinstance(findings, list) and findings:
+            kept, omitted = fit_to_budget(findings, max_tokens=6000)
+            if omitted > 0:
+                result["findings"] = kept
+                result["findings_truncated"] = (
+                    f"showing top {len(kept)} of {len(findings)} TA-enabled buckets "
+                    f"by likely waste then monthly cost; totals above reflect all "
+                    f"{len(findings)} buckets"
+                )
+
+        return result
 
     except Exception as e:
         log.error("audit_s3_transfer_acceleration failed: %s", e, exc_info=True)
