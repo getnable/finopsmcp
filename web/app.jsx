@@ -145,7 +145,7 @@ function Ticker({ installs, version }){
       <div className="ticker-inner">
         <span className="seg">
           <span className="dot"></span>
-          <b>finops-mcp</b>
+          <b>nable</b>
           <span>{version ? `v${version}` : "v0.8.36"} · runtime healthy</span>
         </span>
         <span className="sep">·</span>
@@ -584,7 +584,7 @@ function Architecture({ version }){
               <span className="lab">runtime · local</span>
               <div className="arch-node center">
                 <h4>nable runtime</h4>
-                <span className="sub">finops-mcp / {version || "0.8.36"}</span>
+                <span className="sub">nable / {version || "0.8.36"}</span>
                 <div className="chips"><span>keyring</span><span>fernet</span><span>read-only</span><span>audit-log</span></div>
               </div>
             </div>
@@ -1012,7 +1012,7 @@ function Footer({ version }){
         </div>
         <div className="foot-meta">
           <span>2026 nable · all rights reserved</span>
-          <span>finops-mcp / {version || "0.8.36"} · runtime healthy</span>
+          <span>nable / {version || "0.8.36"} · runtime healthy</span>
         </div>
       </div>
     </footer>
