@@ -47,8 +47,11 @@ export default async function handler(req) {
   // Only allow same-site relative return paths. A return_to of "//evil.com" or
   // "https://evil.com" would otherwise let an attacker hijack the post-login
   // redirect (open redirect → credential phishing).
+  // Allow only "/" or "/path" where the char after the leading slash is not "/"
+  // or "\" — browsers normalize "/\evil.com" to a protocol-relative "//evil.com",
+  // so a naive "startsWith('//')" check is bypassable with a backslash.
   let returnTo = url.searchParams.get("return_to") || "/";
-  if (!returnTo.startsWith("/") || returnTo.startsWith("//")) returnTo = "/";
+  if (!/^\/($|[^/\\])/.test(returnTo)) returnTo = "/";
 
   // Load OIDC config from env (single-tenant for now; extend to per-tenant KV later)
   const ISSUER = process.env.OIDC_ISSUER;

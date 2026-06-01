@@ -21,7 +21,7 @@ class AWSConnector(BaseConnector):
             for arn in os.getenv("AWS_ROLE_ARNS", "").split(",")
             if arn.strip()
         ]
-        _MAX_ROLES = int(os.getenv("FINOPS_MAX_ROLE_ARNS", "20"))
+        _MAX_ROLES = int(os.getenv("FINOPS_MAX_ROLE_ARNS", "50"))
         if len(self._role_arns) > _MAX_ROLES:
             import logging as _log
             _log.getLogger("finops.aws").warning(
