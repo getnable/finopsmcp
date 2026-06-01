@@ -289,6 +289,9 @@ function CopyInstall(){
           {copied ? "copied" : "copy"}
         </button>
       </div>
+      <p style={{fontSize:12,color:"var(--fg-3)",letterSpacing:".01em",margin:0}}>
+        Free forever for solo use · no credit card · runs on your machine
+      </p>
     </div>
   );
 }
@@ -328,6 +331,23 @@ function TrustStrip(){
 /* Console (interactive demo terminal) */
 const QUERIES = [
   {
+    q: "Where are we wasting money on EC2?",
+    response: (
+      <>
+        <p>Cross-referenced CloudWatch metrics with Compute Optimizer. 11 instances are sustained below 15% CPU over 14 days. Top four by savings:</p>
+        <div className="ttable">
+          <div className="r hd"><span>Instance / current</span><span>Recommended</span><span>Save / mo</span></div>
+          <div className="r"><span>i-0a3f · m5.4xlarge</span><span className="v num">m6i.xlarge</span><span className="d down num">$412</span></div>
+          <div className="r"><span>i-0c91 · r5.2xlarge</span><span className="v num">r6i.large</span><span className="d down num">$298</span></div>
+          <div className="r"><span>i-0e7d · m5.2xlarge</span><span className="v num">m6i.large</span><span className="d down num">$201</span></div>
+          <div className="r"><span>i-0b44 · c5.4xlarge</span><span className="v num">c6i.xlarge</span><span className="d down num">$184</span></div>
+          <div className="r total"><span>11 instances</span><span className="v num">-</span><span className="d down num">$1,840 / mo</span></div>
+        </div>
+        <p style={{marginTop:12}}>Net annualized savings: <span style={{color:"var(--accent)"}}>$22,080</span>. Generate PRs against your IaC repo?</p>
+      </>
+    )
+  },
+  {
     q: "Compute spend across all providers, April vs March.",
     response: (
       <>
@@ -359,23 +379,6 @@ const QUERIES = [
     )
   },
   {
-    q: "Which EC2 instances should we downsize?",
-    response: (
-      <>
-        <p>Cross-referenced CloudWatch metrics with Compute Optimizer. 11 instances are sustained below 15% CPU over 14 days. Top six by savings:</p>
-        <div className="ttable">
-          <div className="r hd"><span>Instance / current</span><span>Recommended</span><span>Save / mo</span></div>
-          <div className="r"><span>i-0a3f · m5.4xlarge</span><span className="v num">m6i.xlarge</span><span className="d down num">$412</span></div>
-          <div className="r"><span>i-0c91 · r5.2xlarge</span><span className="v num">r6i.large</span><span className="d down num">$298</span></div>
-          <div className="r"><span>i-0e7d · m5.2xlarge</span><span className="v num">m6i.large</span><span className="d down num">$201</span></div>
-          <div className="r"><span>i-0b44 · c5.4xlarge</span><span className="v num">c6i.xlarge</span><span className="d down num">$184</span></div>
-          <div className="r total"><span>11 instances</span><span className="v num">-</span><span className="d down num">$1,840 / mo</span></div>
-        </div>
-        <p style={{marginTop:12}}>Net annualized savings: <span style={{color:"var(--accent)"}}>$22,080</span>. Generate PRs against your IaC repo?</p>
-      </>
-    )
-  },
-  {
     q: "What's our effective discount rate this quarter?",
     response: (
       <>
@@ -395,11 +398,18 @@ const QUERIES = [
 
 function Console({ interaction }){
   const [idx, setIdx] = useState(0);
-  const [phase, setPhase] = useState("typing");
-  const [typed, setTyped] = useState("");
+  // Render the first answer immediately on mount, so the proof is on screen
+  // before any animation runs. Cycling queries animate normally after that.
+  const [phase, setPhase] = useState("answered");
+  const [typed, setTyped] = useState(QUERIES[0].q);
   const timers = useRef([]);
+  const firstRun = useRef(true);
 
   useEffect(() => {
+    if(firstRun.current){
+      firstRun.current = false;
+      return;
+    }
     timers.current.forEach(clearTimeout);
     timers.current = [];
     setTyped(""); setPhase("typing");
@@ -411,8 +421,8 @@ function Console({ interaction }){
         i++;
         timers.current.push(setTimeout(step, 18 + Math.random()*22));
       } else {
-        timers.current.push(setTimeout(() => setPhase("thinking"), 350));
-        timers.current.push(setTimeout(() => setPhase("answered"), 1500));
+        timers.current.push(setTimeout(() => setPhase("thinking"), 300));
+        timers.current.push(setTimeout(() => setPhase("answered"), 1050));
       }
     }
     step();
@@ -454,9 +464,7 @@ function Console({ interaction }){
         )}
       </div>
       <div className="q-pager">
-        <span>query {String(idx+1).padStart(2,"0")} / {String(QUERIES.length).padStart(2,"0")}</span>
-        <span style={{marginLeft:14,color:"var(--fg-4)"}}>·</span>
-        <span style={{marginLeft:14}}>{interaction === "cycling" ? "auto-advancing" : "manual"}</span>
+        <span style={{color:"var(--fg-4)"}}>live walkthrough · click to explore</span>
         <div className="dots" role="tablist">
           {QUERIES.map((_,i) => (
             <i key={i} className={i===idx?"on":""} onClick={()=>setIdx(i)} role="tab" aria-selected={i===idx} tabIndex={0}></i>
