@@ -304,6 +304,13 @@ def _summary_to_dict(summary: CostSummary) -> dict:
             k: round(v, 4) for k, v in sorted(summary.by_region.items(), key=lambda x: -x[1])
         },
     }
+    currency = getattr(summary, "currency", "USD") or "USD"
+    d["currency"] = currency
+    if currency != "USD":
+        d["currency_warning"] = (
+            f"Amounts are in {currency}, not USD. nable does not convert currencies; "
+            f"the figures and any '$' formatting reflect {currency} values."
+        )
     if getattr(summary, "_zero_spend_account", False):
         d["note"] = (
             "Cost Explorer is connected and returning data, but this account has $0.00 in "
@@ -590,6 +597,20 @@ async def get_cost_summary(
         "by_provider": by_provider,
         "grand_by_service": {k: round(v, 4) for k, v in _ranked_services[:50]},
     }
+    # If any provider reports a non-USD currency, the grand total mixes currencies
+    # and must not be presented as USD. nable does not convert — surface it loudly.
+    _currencies = {
+        p.get("currency", "USD") for p in by_provider.values()
+        if isinstance(p, dict) and "error" not in p
+    }
+    _non_usd = {c for c in _currencies if c and c != "USD"}
+    if _non_usd:
+        result["currency_warning"] = (
+            "Cost data spans more than one currency "
+            f"({', '.join(sorted(_currencies))}). nable does not convert currencies, so "
+            "grand_total_usd sums raw amounts across currencies and is NOT a true USD total. "
+            "Read each provider's own currency under by_provider.<provider>.currency."
+        )
     if len(_ranked_services) > 50:
         # grand_total_usd covers ALL services; the dict shows only the top 50.
         # Flag it so the model doesn't read the parts as not summing to the whole.

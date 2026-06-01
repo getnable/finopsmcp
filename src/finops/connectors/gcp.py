@@ -98,11 +98,15 @@ class GCPConnector(BaseConnector):
         by_service: dict[str, float] = {}
         by_region: dict[str, float] = {}
         total = 0.0
+        currencies: set[str] = set()
 
         for row in rows:
             service = row.get("service", "Unknown")
             region = row.get("region") or ""
             amount = float(row.get("total_cost", 0))
+            cur = row.get("currency")
+            if cur:
+                currencies.add(cur)
             total += amount
             by_service[service] = by_service.get(service, 0.0) + amount
             if region:
@@ -127,6 +131,7 @@ class GCPConnector(BaseConnector):
             by_account={billing_account_id: total},
             by_region=by_region,
             entries=entries,
+            currency=(currencies.pop() if len(currencies) == 1 else ("MIXED" if currencies else "USD")),
         )
 
     # ── public API ──────────────────────────────────────────────────────────

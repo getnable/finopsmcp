@@ -264,31 +264,48 @@ def _generate_recommendations(
 
     all_pricing = {**OAI_PRICING, **ANT_PRICING, **_BEDROCK_PRICING}
 
-    # Flag expensive models where a cheaper sibling exists
+    # Expensive model -> cheaper sibling for lower-complexity tasks. The savings
+    # percentage is NOT hardcoded; it's computed from the real pricing tables
+    # (blended input+output), so it tracks price changes and never asserts a
+    # made-up number. It's an estimate that assumes a balanced input/output token
+    # mix; the true figure depends on the workload's ratio.
     downgrades = {
-        "gpt-4o":              ("gpt-4o-mini",           "90%"),
-        "gpt-4-turbo":         ("gpt-4o",                "75%"),
-        "claude-3-opus-20240229": ("claude-3-5-sonnet-20241022", "80%"),
-        "claude-3-sonnet-20240229": ("claude-3-5-haiku-20241022", "90%"),
-        "o1":                  ("o3-mini",               "85%"),
+        "gpt-4o":                   "gpt-4o-mini",
+        "gpt-4-turbo":              "gpt-4o",
+        "claude-3-opus-20240229":   "claude-3-5-sonnet-20241022",
+        "claude-opus-4-20250514":   "claude-sonnet-4-5-20250929",
+        "claude-opus-4-1-20250805": "claude-sonnet-4-5-20250929",
+        "o1":                       "o3-mini",
     }
+
+    def _blended(price: dict) -> float:
+        return float(price.get("input", 0.0)) + float(price.get("output", 0.0))
 
     for model, spend in by_model.items():
         if spend < 5.0:  # ignore noise
             continue
-        clean = model.split(":")[-1] if ":" not in model else model
-        clean = clean.replace("anthropic.", "").replace("meta.", "").replace("amazon.", "")
-        for expensive, (cheaper, savings_pct) in downgrades.items():
-            if expensive in model and cheaper in all_pricing:
-                savings_est = spend * (int(savings_pct.strip("%")) / 100)
-                recs.append({
-                    "model":        model,
-                    "current_spend": round(spend, 2),
-                    "recommendation": f"Consider {cheaper} for lower-complexity tasks",
-                    "estimated_savings_pct": savings_pct,
-                    "estimated_savings_usd": round(savings_est, 2),
-                })
-                break
+        # Normalize bedrock/vendor-prefixed ids ("bedrock/anthropic.claude-...")
+        # so the match works regardless of provider routing prefix.
+        clean = model.split("/")[-1].replace("anthropic.", "").replace("meta.", "").replace("amazon.", "")
+        for expensive, cheaper in downgrades.items():
+            if expensive not in clean:
+                continue
+            cur_price, new_price = all_pricing.get(expensive), all_pricing.get(cheaper)
+            if not cur_price or not new_price:
+                continue
+            cur_blended, new_blended = _blended(cur_price), _blended(new_price)
+            if cur_blended <= 0:
+                continue
+            savings_frac = max(0.0, 1.0 - new_blended / cur_blended)
+            recs.append({
+                "model":        model,
+                "current_spend": round(spend, 2),
+                "recommendation": f"Consider {cheaper} for lower-complexity tasks",
+                "estimated_savings_pct": f"{savings_frac * 100:.0f}%",
+                "estimated_savings_usd": round(spend * savings_frac, 2),
+                "basis": "price-ratio estimate assuming a balanced input/output token mix; actual savings depend on your ratio",
+            })
+            break
 
     return sorted(recs, key=lambda r: r["estimated_savings_usd"], reverse=True)
 
