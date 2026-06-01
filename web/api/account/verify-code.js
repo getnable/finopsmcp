@@ -72,23 +72,39 @@ async function verifyOtp(secret, email, code) {
   return false;
 }
 
-// ── License key generation (mirrors stripe-webhook.js and license.py) ─────────
+// ── License key generation (v2, Ed25519 — mirrors license.py) ─────────────────
+// Signs with FINOPS_LICENSE_PRIVATE_KEY (raw 32-byte seed). The MCP server
+// verifies with the bundled public key, so no shared secret is needed anywhere.
 
-async function generateLicenseKey(email, licenseSecret) {
+const ED25519_PKCS8_PREFIX = Uint8Array.from([
+  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+]);
+
+function b64urlToBytes(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function bytesToB64url(bytes) {
+  let bin = "";
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function generateLicenseKey(email) {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const payloadJson = JSON.stringify({ e: email, d, p: "pro" });
-  const payload = b64url(payloadJson);
-  const sig = await hmacHex(licenseSecret, `1:${payload}`);
-  const sigB64 = b64url(
-    Array.from(
-      new Uint8Array(
-        sig.match(/.{2}/g).map((h) => parseInt(h, 16))
-      )
-    )
-      .map((c) => String.fromCharCode(c))
-      .join("")
-  );
-  return `FINOPS-1-${payload}-${sigB64}`;
+  const payload = b64url(JSON.stringify({ e: email, d, p: "pro" }));
+  const seed = b64urlToBytes(process.env.FINOPS_LICENSE_PRIVATE_KEY);
+  const pkcs8 = new Uint8Array(ED25519_PKCS8_PREFIX.length + seed.length);
+  pkcs8.set(ED25519_PKCS8_PREFIX);
+  pkcs8.set(seed, ED25519_PKCS8_PREFIX.length);
+  const key = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(`2:${payload}`));
+  return `FINOPS-2-${payload}-${bytesToB64url(new Uint8Array(sig))}`;
 }
 
 // ── Session token (signed payload, no library needed) ─────────────────────────
@@ -172,7 +188,7 @@ export default async function handler(req) {
 
   const ACCOUNT_SECRET = process.env.ACCOUNT_SECRET;
   const STRIPE_KEY = process.env.STRIPE_SECRET_KEY;
-  const LICENSE_SECRET = process.env.FINOPS_LICENSE_SECRET;
+  const LICENSE_PRIVATE_KEY = process.env.FINOPS_LICENSE_PRIVATE_KEY;
 
   if (!ACCOUNT_SECRET) {
     console.error("ACCOUNT_SECRET not configured");
@@ -206,9 +222,9 @@ export default async function handler(req) {
 
   // Generate license key for pro/trial users
   let license_key = null;
-  if ((plan === "pro" || plan === "trial") && LICENSE_SECRET) {
+  if ((plan === "pro" || plan === "trial") && LICENSE_PRIVATE_KEY) {
     try {
-      license_key = await generateLicenseKey(email, LICENSE_SECRET);
+      license_key = await generateLicenseKey(email);
     } catch (err) {
       console.error("License key generation error:", err.message);
     }
