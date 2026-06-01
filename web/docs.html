@@ -511,7 +511,7 @@
         </div>
       </div>
 
-      <div class="info-box mb-4">All permissions are read-only. nable never writes to your AWS account unless you explicitly enable cleanup mode with <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">FINOPS_CLEANUP_ENABLED=true</code>. Run <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">finops setup aws --iam-template</code> to generate a least-privilege CloudFormation policy for either tier.</div>
+      <div class="info-box mb-4">Permissions are read-only except one: <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">logs:PutRetentionPolicy</code>, included for optional auto-remediation of infinite-retention log groups. nable makes no other writes, and destructive cleanup (delete or terminate) requires explicitly setting <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">FINOPS_CLEANUP_ENABLED=true</code>. Run <code class="text-xs" style="background:var(--surface2);padding:1px 5px;border-radius:3px">finops setup aws --iam-template</code> to generate a least-privilege CloudFormation policy for either tier.</div>
 
       <div class="space-y-3 mb-4">
         <div class="flex items-start gap-3"><div class="step-num mt-0.5">1</div><div class="flex-1"><p class="text-sm" style="color:var(--text)">Create an IAM user with the permissions above, or use an existing SSO role.</p></div></div>

@@ -246,7 +246,7 @@ function Hero({ layout, interaction }){
               <span className="accent">Waste found.<br/>Money saved.</span>
             </h1>
             <p className="lede">
-              Connect AWS, Azure, GCP, and 17 providers to Claude or Cursor. Ask about spend, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally. Your credentials never leave your machine. We never see your data.
+              Connect AWS, Azure, GCP, and 17 providers to Claude or Cursor. Ask about spend, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally. Your credentials and cost data never leave your machine.
             </p>
             <div className="hero-cta-row" id="install">
               <CopyInstall />
@@ -310,7 +310,7 @@ function TrustStrip(){
   const items = [
     {lab:"installs / mo", val: "4k+", sub:"via PyPI · live"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
-    {lab:"sent to nable", val:"0 bytes", sub:"your data stays in your infrastructure"},
+    {lab:"cost data sent", val:"0 bytes", sub:"credentials and spend stay on your machine"},
   ];
   return (
     <div className="trust" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
@@ -562,7 +562,7 @@ function Architecture({ version }){
         <div className="section-head">
           <div className="label">Architecture</div>
           <h2>Headless by design.<br/><em>Your data never moves.</em></h2>
-          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine. We never see your data. Works out of the box in AWS GovCloud: no data leaves your environment.</p>
+          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials and cost data never leave your machine. Works out of the box in AWS GovCloud: no data leaves your environment.</p>
         </div>
         <div className="arch">
           <div className="arch-grid"></div>
@@ -642,7 +642,7 @@ const CONNECTORS = [
   {nm:"GitHub",     px:"Actions mins · Copilot seats",   tag:"live"},
   {nm:"Vercel",     px:"Invoice API · enterprise",       tag:"live"},
   {nm:"New Relic",  px:"Data ingest · user counts",      tag:"live"},
-  {nm:"Linear",     px:"Seat plan · usage rollup",       tag:"live"},
+  {nm:"Databricks", px:"DBU usage · job costs",          tag:"live"},
   {nm:"OpenAI",     px:"Usage API · per-model spend",    tag:"live"},
   {nm:"Anthropic",  px:"Org usage · per-model spend",    tag:"live"},
   {nm:"Stripe",     px:"Billing meter · platform fees",  tag:"beta"},
@@ -967,7 +967,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Where do my credentials and billing data go?",
-    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data stays in a local SQLite database on your machine. We never see your data. For teams, findings are shared via Slack alerts and Notion. No shared database required."
+    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data stays in a local SQLite database on your machine. We never see your cost data or credentials. We do collect anonymous, opt-out usage telemetry (which tools you call, your plan tier, and how many providers you connect) via PostHog, never cost figures, account IDs, or credentials. For teams, findings are shared via Slack alerts and Notion. No shared database required."
   },
   {
     q: "What editors does it work with?",
