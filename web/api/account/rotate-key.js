@@ -6,7 +6,7 @@
  *
  * Required env vars:
  *   ACCOUNT_SECRET        -- must match verify-code.js
- *   FINOPS_LICENSE_SECRET -- must match the MCP server
+ *   FINOPS_LICENSE_PRIVATE_KEY -- Ed25519 seed (base64url) for signing license keys
  *   RESEND_API_KEY        -- from resend.com
  */
 
