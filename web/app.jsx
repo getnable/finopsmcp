@@ -149,7 +149,7 @@ function Ticker({ installs, version }){
           <span>runtime healthy</span>
         </span>
         <span className="sep">·</span>
-        <span className="seg">{installs ? fmtNum(installs) : "4k+"} installs / mo via PyPI</span>
+        <span className="seg">4k+ installs / mo via PyPI</span>
         <span className="sep">·</span>
         <span className="seg">17 connectors · AWS · Azure · GCP +14</span>
         <span className="sep">·</span>
@@ -255,6 +255,7 @@ function Hero({ layout, interaction }){
                 Read the docs
               </a>
             </div>
+            <p className="install-note">Free forever for solo use · no credit card · runs on your machine</p>
             <div className="hero-mobile-cta">
               <p style={{fontSize:13, color:"var(--fg-3)", marginBottom:12, letterSpacing:".01em"}}>
                 Drop your email and we'll send the setup guide straight to you.
@@ -276,22 +277,17 @@ function CopyInstall(){
   const [copied, setCopied] = useState(false);
   const cmd = "pip install finops-mcp && finops welcome";
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:8}}>
-      <div className="install" role="group" aria-label="Install command">
-        <span className="prompt">$</span>
-        <span className="cmd">{cmd}</span>
-        <button onClick={() => {
-          navigator.clipboard?.writeText(cmd);
-          setCopied(true);
-          setTimeout(()=>setCopied(false),1600);
-          if(window.posthog) posthog.capture('install_copied');
-        }}>
-          {copied ? "copied" : "copy"}
-        </button>
-      </div>
-      <p style={{fontSize:12,color:"var(--fg-3)",letterSpacing:".01em",margin:0}}>
-        Free forever for solo use · no credit card · runs on your machine
-      </p>
+    <div className="install" role="group" aria-label="Install command">
+      <span className="prompt">$</span>
+      <span className="cmd">{cmd}</span>
+      <button onClick={() => {
+        navigator.clipboard?.writeText(cmd);
+        setCopied(true);
+        setTimeout(()=>setCopied(false),1600);
+        if(window.posthog) posthog.capture('install_copied');
+      }}>
+        {copied ? "copied" : "copy"}
+      </button>
     </div>
   );
 }
@@ -312,7 +308,7 @@ function TrustStrip(){
   }, []);
 
   const items = [
-    {lab:"installs / mo", val: installs ? fmtNum(installs) : "4k+", sub:"via PyPI · live"},
+    {lab:"installs / mo", val: "4k+", sub:"via PyPI · live"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
     {lab:"sent to nable", val:"0 bytes", sub:"your data stays in your infrastructure"},
   ];

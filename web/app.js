@@ -168,7 +168,7 @@ function LogoMark() {
   return /* @__PURE__ */ React.createElement("svg", { width: "26", height: "26", viewBox: "0 0 32 32", className: "mark-img", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("rect", { width: "32", height: "32", rx: "7", fill: "var(--accent)" }), /* @__PURE__ */ React.createElement("path", { d: "M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z", fill: "var(--bg)" }));
 }
 function Ticker({ installs, version }) {
-  return /* @__PURE__ */ React.createElement("div", { className: "ticker" }, /* @__PURE__ */ React.createElement("div", { className: "ticker-inner" }, /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("span", { className: "dot" }), /* @__PURE__ */ React.createElement("b", null, "nable"), /* @__PURE__ */ React.createElement("span", null, "runtime healthy")), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, installs ? fmtNum(installs) : "4k+", " installs / mo via PyPI"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, "17 connectors \xB7 AWS \xB7 Azure \xB7 GCP +14"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent)", textDecoration: "none", fontWeight: 500 } }, "About & investors \u2192"))));
+  return /* @__PURE__ */ React.createElement("div", { className: "ticker" }, /* @__PURE__ */ React.createElement("div", { className: "ticker-inner" }, /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("span", { className: "dot" }), /* @__PURE__ */ React.createElement("b", null, "nable"), /* @__PURE__ */ React.createElement("span", null, "runtime healthy")), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, "4k+ installs / mo via PyPI"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, "17 connectors \xB7 AWS \xB7 Azure \xB7 GCP +14"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent)", textDecoration: "none", fontWeight: 500 } }, "About & investors \u2192"))));
 }
 function Nav() {
   const [open, setOpen] = useState(false);
@@ -241,17 +241,17 @@ function Hero({ layout, interaction }) {
       }
     },
     "Read the docs"
-  )), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { style: { fontSize: 13, color: "var(--fg-3)", marginBottom: 12, letterSpacing: ".01em" } }, "Drop your email and we'll send the setup guide straight to you."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Send it" }))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction }))), /* @__PURE__ */ React.createElement(TrustStrip, null)));
+  )), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free forever for solo use \xB7 no credit card \xB7 runs on your machine"), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { style: { fontSize: 13, color: "var(--fg-3)", marginBottom: 12, letterSpacing: ".01em" } }, "Drop your email and we'll send the setup guide straight to you."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Send it" }))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction }))), /* @__PURE__ */ React.createElement(TrustStrip, null)));
 }
 function CopyInstall() {
   const [copied, setCopied] = useState(false);
   const cmd = "pip install finops-mcp && finops welcome";
-  return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, /* @__PURE__ */ React.createElement("div", { className: "install", role: "group", "aria-label": "Install command" }, /* @__PURE__ */ React.createElement("span", { className: "prompt" }, "$"), /* @__PURE__ */ React.createElement("span", { className: "cmd" }, cmd), /* @__PURE__ */ React.createElement("button", { onClick: () => {
+  return /* @__PURE__ */ React.createElement("div", { className: "install", role: "group", "aria-label": "Install command" }, /* @__PURE__ */ React.createElement("span", { className: "prompt" }, "$"), /* @__PURE__ */ React.createElement("span", { className: "cmd" }, cmd), /* @__PURE__ */ React.createElement("button", { onClick: () => {
     navigator.clipboard?.writeText(cmd);
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
     if (window.posthog) posthog.capture("install_copied");
-  } }, copied ? "copied" : "copy")), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 12, color: "var(--fg-3)", letterSpacing: ".01em", margin: 0 } }, "Free forever for solo use \xB7 no credit card \xB7 runs on your machine"));
+  } }, copied ? "copied" : "copy"));
 }
 function fmtNum(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
@@ -266,7 +266,7 @@ function TrustStrip() {
     });
   }, []);
   const items = [
-    { lab: "installs / mo", val: installs ? fmtNum(installs) : "4k+", sub: "via PyPI \xB7 live" },
+    { lab: "installs / mo", val: "4k+", sub: "via PyPI \xB7 live" },
     { lab: "providers", val: "17", sub: "AWS \xB7 Azure \xB7 GCP +" },
     { lab: "sent to nable", val: "0 bytes", sub: "your data stays in your infrastructure" }
   ];
