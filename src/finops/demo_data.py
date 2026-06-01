@@ -19,7 +19,13 @@ import os
 from datetime import date, timedelta
 from typing import Any
 
-DEMO_MODE = os.environ.get("FINOPS_DEMO_MODE", "").lower() in ("1", "true", "yes")
+_TRUTHY = ("1", "true", "yes")
+# Accept FINOPS_DEMO as an alias for FINOPS_DEMO_MODE (docs and the landing page
+# refer to FINOPS_DEMO; both now work so users don't hit a silently-ignored var).
+DEMO_MODE = (
+    os.environ.get("FINOPS_DEMO_MODE", "").lower() in _TRUTHY
+    or os.environ.get("FINOPS_DEMO", "").lower() in _TRUTHY
+)
 
 
 def is_demo() -> bool:

@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 # Source: https://openai.com/pricing
 _MODEL_PRICING: dict[str, dict[str, float]] = {
     # GPT-4o family
-    "gpt-4o":               {"input": 5.00,   "output": 15.00},
+    "gpt-4o":               {"input": 2.50,   "output": 10.00},
     "gpt-4o-2024-11-20":    {"input": 2.50,   "output": 10.00},
     "gpt-4o-mini":          {"input": 0.15,   "output": 0.60},
     "gpt-4o-mini-2024-07-18": {"input": 0.15, "output": 0.60},

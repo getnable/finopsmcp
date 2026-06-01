@@ -75,7 +75,7 @@ finops serve
 
 Opens a password-protected web dashboard at `http://localhost:8080` your whole team can view in a browser — no Claude required. Share the URL and password with your manager or exec team.
 
-**14-day free trial, all features unlocked. No credit card required.**
+**7-day free trial, all features unlocked. No credit card required.**
 
 ---
 
