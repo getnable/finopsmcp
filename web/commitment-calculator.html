@@ -356,11 +356,21 @@ function render(){
   $('verdictword').textContent = word;
   $('verdictsub').textContent = sub;
 
+  // Realized savings rate at the user's expected utilization. At 100% use this
+  // equals the effective discount; below break-even it goes negative (you pay more).
+  const savingsRate = onDemandAtU > 0 ? (netSavings / onDemandAtU) * 100 : 0;
+  const term = `${state.term} year${state.term === '3' ? 's' : ''}`;
   const hEl = $('headline');
   hEl.classList.remove('pos','neg');
-  if(netSavings >= 0){ hEl.classList.add('pos'); hEl.textContent = fmtUSD(netSavings) + ' saved'; }
-  else { hEl.classList.add('neg'); hEl.textContent = fmtUSD(-netSavings) + ' lost'; }
-  $('headlinesub').textContent = `over ${state.term} year${state.term==='3'?'s':''} at ${util}% utilization, vs paying on-demand`;
+  if(netSavings >= 0){
+    hEl.classList.add('pos');
+    hEl.textContent = `${fmtUSD(netSavings)} saved · ${savingsRate.toFixed(0)}%`;
+    $('headlinesub').textContent = `${savingsRate.toFixed(0)}% lower than on-demand, over ${term} at ${util}% utilization`;
+  } else {
+    hEl.classList.add('neg');
+    hEl.textContent = `${fmtUSD(-netSavings)} lost · ${Math.abs(savingsRate).toFixed(0)}%`;
+    $('headlinesub').textContent = `${Math.abs(savingsRate).toFixed(0)}% more than on-demand, over ${term} at ${util}% utilization`;
+  }
 
   $('mbreakeven').textContent = breakEvenPct.toFixed(0) + '%';
   $('mdiscount').textContent = d.toFixed(0) + '%';
