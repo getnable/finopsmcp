@@ -64,3 +64,6 @@ dashboard.html
 # Office temp files
 ~$*
 *.docx
+
+# Beta license keys — never commit
+beta-licenses.txt
