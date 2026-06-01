@@ -181,7 +181,7 @@ function Nav() {
     if (window.posthog) posthog.capture("nav_clicked", { item: "faq" });
   } }, "FAQ")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/docs.html", onClick: () => {
     if (window.posthog) posthog.capture("docs_clicked", { location: "nav" });
-  } }, "Docs")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/ri-calculator.html", onClick: () => {
+  } }, "Docs")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/commitment-calculator.html", onClick: () => {
     if (window.posthog) posthog.capture("nav_clicked", { item: "calculator" });
   } }, "Calculator"))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "btn btn-ghost" }, "Sign in"), /* @__PURE__ */ React.createElement(
     "a",
@@ -212,7 +212,7 @@ function Nav() {
   } }, "FAQ"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/docs.html", onClick: () => {
     setOpen(false);
     if (window.posthog) posthog.capture("docs_clicked", { location: "nav_mobile" });
-  } }, "Docs"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/about", onClick: () => setOpen(false) }, "About"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/ri-calculator.html", onClick: () => {
+  } }, "Docs"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/about", onClick: () => setOpen(false) }, "About"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/commitment-calculator.html", onClick: () => {
     setOpen(false);
     if (window.posthog) posthog.capture("nav_clicked", { item: "calculator" });
   } }, "Calculator"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 24, display: "flex", flexDirection: "column", gap: 10 } }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "btn btn-ghost", style: { justifyContent: "center" }, onClick: () => setOpen(false) }, "Sign in"), /* @__PURE__ */ React.createElement(
