@@ -435,8 +435,8 @@ const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/5kQ28q6XT8RgdZS8QW2Nq05";
 function Pricing() {
   const [annual, setAnnual] = useState(false);
   const teamPrice = annual ? "$400" : "$40";
-  const teamPer = annual ? "/ yr" : "/ mo";
-  const teamSub = annual ? "$33/mo \xB7 save $80" : null;
+  const teamPer = annual ? "/ seat / yr" : "/ seat / mo";
+  const teamSub = annual ? "$33 / seat / mo \xB7 save $80" : null;
   const teamSavings = annual ? "Save $80 \xB7 2 months free" : "7-day free trial";
   const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan = annual ? "team_annual" : "team_monthly";
