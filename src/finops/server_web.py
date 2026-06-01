@@ -199,11 +199,19 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
         if last_total > 0:
             result["delta_pct"] = round((mtd_total - last_total) / last_total * 100, 1)
 
-        # Projected month total based on run-rate
+        # Projected month total. A naive run-rate (mtd / day * days_in_month)
+        # craters in the first days of a month: month-to-date is tiny and Cost
+        # Explorer lags ~24h, so on the 1st it reads near zero. Blend the run-rate
+        # with last month's total, leaning on last month early and trusting the
+        # run-rate by ~day 7, so the projection stays sensible all month.
         day_of_month = today.day
         days_in_month = (today.replace(month=today.month % 12 + 1, day=1) - timedelta(days=1)).day if today.month < 12 else 31
-        if day_of_month > 0 and mtd_total > 0:
-            result["projected_month_total"] = round(mtd_total / day_of_month * days_in_month, 2)
+        run_rate = (mtd_total / day_of_month * days_in_month) if (day_of_month > 0 and mtd_total > 0) else 0.0
+        if last_total > 0:
+            w = min(1.0, day_of_month / 7.0)
+            result["projected_month_total"] = round(run_rate * w + last_total * (1 - w), 2)
+        elif run_rate > 0:
+            result["projected_month_total"] = round(run_rate, 2)
 
         # Top services by spend in the requested window
         window_start = today - timedelta(days=days)
@@ -225,51 +233,53 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
             current_label = today.strftime("%B")
             trend_entries: list[dict] = []
 
-            # Build 3-month windows: [two months ago, last month, this month MTD]
+            # Two COMPLETED calendar months only. The current month is shown as a
+            # projection, not a near-zero partial actual (which makes the line look
+            # like spend cratered on the 1st).
             month_windows = []
-            for months_back in (2, 1, 0):
-                if months_back == 0:
-                    m_start = mtd_start
-                    m_end = today
-                    label = f"{current_label} (partial)"
-                else:
-                    # Compute first and last day of the target month
-                    ref = today.replace(day=1)
-                    for _ in range(months_back):
-                        ref = (ref - timedelta(days=1)).replace(day=1)
-                    m_start = ref
-                    m_end = (ref.replace(month=ref.month % 12 + 1, day=1) - timedelta(days=1)) if ref.month < 12 else ref.replace(month=12, day=31)
-                    label = m_start.strftime("%B")
-                month_windows.append((label, m_start, m_end))
+            for months_back in (2, 1):
+                ref = today.replace(day=1)
+                for _ in range(months_back):
+                    ref = (ref - timedelta(days=1)).replace(day=1)
+                m_start = ref
+                m_end = (ref.replace(month=ref.month % 12 + 1, day=1) - timedelta(days=1)) if ref.month < 12 else ref.replace(month=12, day=31)
+                month_windows.append((m_start.strftime("%B"), m_start, m_end))
 
             month_totals = await asyncio.gather(*[
                 _sum_costs(s, e) for _, s, e in month_windows
             ], return_exceptions=True)
 
-            for (label, _, _), result_or_exc in zip(month_windows, month_totals):
-                if isinstance(result_or_exc, Exception):
-                    total = 0.0
-                else:
-                    total = result_or_exc[0]
-                trend_entries.append({"month": label, "actual": round(total, 2), "projected": None})
-
-            # Projected point
-            if result["projected_month_total"] > 0:
+            last_completed_total = 0.0
+            for i, ((label, _, _), result_or_exc) in enumerate(zip(month_windows, month_totals)):
+                total = 0.0 if isinstance(result_or_exc, Exception) else result_or_exc[0]
+                is_last = (i == len(month_windows) - 1)
                 trend_entries.append({
-                    "month": f"{current_label} (projected)",
-                    "actual": None,
-                    "projected": result["projected_month_total"],
+                    "month": label,
+                    "actual": round(total, 2),
+                    # anchor the dashed projected line to the last completed month
+                    "projected": round(total, 2) if is_last else None,
                 })
+                if is_last:
+                    last_completed_total = total
+
+            # Current month: projection only. Falls back to last month if the
+            # run-rate is not yet meaningful.
+            proj = result["projected_month_total"] or last_completed_total
+            trend_entries.append({
+                "month": f"{current_label} (projected)",
+                "actual": None,
+                "projected": round(proj, 2),
+            })
 
             result["trend"] = trend_entries
         except Exception as exc:
             log.debug("Trend CE fetch failed: %s", exc)
             # Last-resort fallback with only the data already in hand
             current_label = today.strftime("%B")
+            proj = result["projected_month_total"] or last_total
             result["trend"] = [
-                {"month": last_month_end.strftime("%B"), "actual": round(last_total, 2), "projected": None},
-                {"month": f"{current_label} (partial)", "actual": round(mtd_total, 2), "projected": None},
-                {"month": f"{current_label} (projected)", "actual": None, "projected": result["projected_month_total"]},
+                {"month": last_month_end.strftime("%B"), "actual": round(last_total, 2), "projected": round(last_total, 2)},
+                {"month": f"{current_label} (projected)", "actual": None, "projected": round(proj, 2)},
             ]
 
     except Exception as exc:
