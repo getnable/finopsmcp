@@ -11,7 +11,7 @@
  *   OIDC_CLIENT_SECRET     -- OAuth2 client secret
  *   OIDC_REDIRECT_URI      -- must match oidc-start.js
  *   ACCOUNT_SECRET         -- for session tokens + state CSRF check
- *   FINOPS_LICENSE_SECRET  -- for license key generation
+ *   FINOPS_LICENSE_PRIVATE_KEY -- Ed25519 seed (base64url) for license key generation
  *
  * Optional env vars:
  *   OIDC_GROUPS_CLAIM      -- JWT field that contains groups (default: "groups")
@@ -193,19 +193,39 @@ function mapGroupsToRole(groups, roleMapJson, defaultRole = "viewer") {
   return best;
 }
 
-// ── License key generation (mirrors stripe-webhook.js and license.py) ─────────
+// ── License key generation (v2, Ed25519 — mirrors verify-code.js and license.py) ──
+// Signs with FINOPS_LICENSE_PRIVATE_KEY (raw 32-byte seed). The MCP server
+// verifies with the bundled public key, so no shared secret is needed anywhere.
 
-async function generateLicenseKey(email, licenseSecret, plan = "pro") {
+const ED25519_PKCS8_PREFIX = Uint8Array.from([
+  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+]);
+
+function b64urlToBytes(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function bytesToB64url(bytes) {
+  let bin = "";
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function generateLicenseKey(email, privateKeyB64, plan = "pro") {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const payloadJson = JSON.stringify({ e: email, d, p: plan });
-  const payload = b64url(payloadJson);
-  const sig = await hmacHex(licenseSecret, `1:${payload}`);
-  const sigB64 = b64url(
-    Array.from(new Uint8Array(sig.match(/.{2}/g).map((h) => parseInt(h, 16))))
-      .map((c) => String.fromCharCode(c))
-      .join("")
-  );
-  return `FINOPS-1-${payload}-${sigB64}`;
+  const payload = b64url(JSON.stringify({ e: email, d, p: plan }));
+  const seed = b64urlToBytes(privateKeyB64);
+  const pkcs8 = new Uint8Array(ED25519_PKCS8_PREFIX.length + seed.length);
+  pkcs8.set(ED25519_PKCS8_PREFIX);
+  pkcs8.set(seed, ED25519_PKCS8_PREFIX.length);
+  const key = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(`2:${payload}`));
+  return `FINOPS-2-${payload}-${bytesToB64url(new Uint8Array(sig))}`;
 }
 
 // ── Session token ─────────────────────────────────────────────────────────────
@@ -278,7 +298,7 @@ export default async function handler(req) {
   const CLIENT_SECRET = process.env.OIDC_CLIENT_SECRET;
   const REDIRECT_URI = process.env.OIDC_REDIRECT_URI || "https://getnable.com/api/sso/oidc-callback";
   const ACCOUNT_SECRET = process.env.ACCOUNT_SECRET;
-  const LICENSE_SECRET = process.env.FINOPS_LICENSE_SECRET;
+  const LICENSE_PRIVATE_KEY = process.env.FINOPS_LICENSE_PRIVATE_KEY;
   const GROUPS_CLAIM = process.env.OIDC_GROUPS_CLAIM || "groups";
   const ROLE_MAP = process.env.OIDC_ROLE_MAP || "{}";
   const DEFAULT_ROLE = process.env.OIDC_DEFAULT_ROLE || "viewer";
@@ -371,9 +391,9 @@ export default async function handler(req) {
 
   // Generate license key (SSO users always get pro)
   let license_key = null;
-  if (LICENSE_SECRET) {
+  if (LICENSE_PRIVATE_KEY) {
     try {
-      license_key = await generateLicenseKey(email, LICENSE_SECRET, PLAN);
+      license_key = await generateLicenseKey(email, LICENSE_PRIVATE_KEY, PLAN);
     } catch (err) {
       console.error("License key generation error:", err.message);
     }

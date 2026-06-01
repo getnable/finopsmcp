@@ -8,7 +8,7 @@
  * Required env vars:
  *   ACCOUNT_SECRET        -- must match send-code.js
  *   STRIPE_SECRET_KEY     -- for subscription lookup
- *   FINOPS_LICENSE_SECRET -- must match the MCP server
+ *   FINOPS_LICENSE_PRIVATE_KEY -- Ed25519 seed (base64url) for signing license keys
  */
 
 export const config = { runtime: "edge" };
