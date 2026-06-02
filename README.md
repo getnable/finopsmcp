@@ -73,7 +73,7 @@ Once you see a real cost breakdown, you're live. Also works with Cursor, Windsur
 finops serve
 ```
 
-Opens a password-protected web dashboard at `http://localhost:8080` your whole team can view in a browser — no Claude required. Share the URL and password with your manager or exec team.
+Opens a password-protected web dashboard at `http://localhost:8080` your whole team can view in a browser, no Claude required. Share the URL and password with your manager or exec team.
 
 **7-day free trial, all features unlocked. No credit card required.**
 
@@ -111,14 +111,14 @@ finops serve          # open the visual dashboard
 finops serve
 ```
 
-Starts a local web dashboard your whole team can open in a browser — no Claude Desktop required. Share it with an exec, a FinOps analyst, or anyone who needs to see costs without using an AI interface.
+Starts a local web dashboard your whole team can open in a browser, no Claude Desktop required. Share it with an exec, a FinOps analyst, or anyone who needs to see costs without using an AI interface.
 
 What it shows:
 - **MTD spend** and projected month total
-- **Cost trend** — 3-month historical with run-rate projection
-- **Efficiency score** — composite of waste, commitment coverage, anomaly response, and tag hygiene
-- **Savings opportunities** — ranked by dollar impact, each with a one-click "Mark done" to track actions taken
-- **Savings pipeline** — how much has been identified vs acted on vs verified
+- **Cost trend**: 3-month historical with run-rate projection
+- **Efficiency score**: composite of waste, commitment coverage, anomaly response, and tag hygiene
+- **Savings opportunities**: ranked by dollar impact, each with a one-click "Mark done" to track actions taken
+- **Savings pipeline**: how much has been identified vs acted on vs verified
 
 The dashboard reads from your local provider connections. Your data stays on your machine.
 
@@ -224,7 +224,7 @@ nable is not just a connector that pipes billing data into Claude. It runs activ
 - Org-wide multi-account cost rollup
 - Invoice email parsing via IMAP for vendors without APIs
 
-**$39.99/mo. First month free, no credit card required.** Subscribe at [getnable.com](https://getnable.com).
+**$40/seat/mo. 7-day free trial, no credit card required.** Subscribe at [getnable.com](https://getnable.com).
 
 ---
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>nable — session replay</title>
+<title>nable: session replay</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
@@ -123,7 +123,7 @@
   #end .tag{color:var(--fg-2);font-size:18px}
   #end .url{color:var(--fg-3);font-family:var(--mono);font-size:13px;margin-top:6px}
 
-  /* replay control (not part of the shot — bottom right, subtle) */
+  /* replay control (not part of the shot, bottom right, subtle) */
   #replay{position:fixed;right:16px;bottom:14px;z-index:30;background:var(--bg-2);
     color:var(--fg-2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;
     font-family:inherit;font-size:12.5px;cursor:pointer;opacity:.5;transition:.15s}
@@ -219,7 +219,7 @@ function buildBlock(b){
     }
     case 'callout': return el('div','callout', md(b.html));
     case 'grade':   return el('div','grade',
-      `FinOps grade: <span class="g">${esc(b.letter)}</span> <span class="sc">(${esc(b.score)})</span> ${md(b.note)}`);
+      `Efficiency score: <span class="g">${esc(b.score)}</span> ${md(b.note)}`);
   }
   return el('div');
 }
@@ -290,8 +290,8 @@ const TURNS = [
       ['Delete stopped Windows Server EC2','$4','Zero'],
     ]},
     { t:'callout', html:"**Biggest immediate win:** Buy the RIs today. Zero code changes, $925/mo back." },
-    { t:'grade', letter:'D', score:'49.5/100',
-      note:"Two F grades, tag hygiene and commitment coverage, are the main drags." },
+    { t:'grade', score:'49.5 / 100',
+      note:"Biggest gaps are tag hygiene and commitment coverage." },
     { t:'p', html:"Want to dig into any of these specifically?" },
   ]
 },
@@ -340,8 +340,8 @@ def process_document(document):
     { t:'p', html:"Pricing per 1,000 pages:" },
     { t:'kv', rows:[
       ['DetectDocumentText','$1.50 (raw text only)'],
-      ['AnalyzeDocument','tables — $15'],
-      ['AnalyzeDocument','forms — $50'],
+      ['AnalyzeDocument','tables: $15'],
+      ['AnalyzeDocument','forms: $50'],
       ['AnalyzeExpense','$10'],
     ]},
     { t:'p', html:"If your downstream code only needs raw text blocks, switch from `AnalyzeDocument` to `DetectDocumentText`. One line change, 10-33x cheaper." },

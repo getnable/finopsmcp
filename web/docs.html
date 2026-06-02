@@ -348,7 +348,7 @@
 
       </div>
 
-      <div class="info-box mt-6">
+      <div id="security" class="info-box mt-6" style="scroll-margin-top:90px">
         <strong style="color:var(--fg)">Security note:</strong> Credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine.
       </div>
     </div>
@@ -448,6 +448,7 @@
     <p class="cat-label">Cloud Providers</p>
 
     <!-- AWS -->
+    <span id="iam" style="display:block;scroll-margin-top:90px"></span>
     <div id="aws" class="section-anchor">
       <h2 class="section-title">
         <span class="pbadge">aws</span>
@@ -860,7 +861,7 @@
           <span class="env-key">DATABRICKS_HOST</span>=<span class="env-val">https://adb-1234567890.1.azuredatabricks.net</span><br/>
           <span class="env-key">DATABRICKS_TOKEN</span>=<span class="env-val">dapi...</span><br/>
           <span class="env-key">DATABRICKS_ACCOUNT_ID</span>=<span class="env-val">your-account-id</span> &nbsp;<span style="color:var(--dim)"># optional: enables exact billing via the Usage Download API</span><br/>
-          <span class="env-key">DATABRICKS_DBU_PRICE</span>=<span class="env-val">0.40</span> &nbsp;<span style="color:var(--dim)"># optional — override with your contract rate (default $0.40/DBU)</span>
+          <span class="env-key">DATABRICKS_DBU_PRICE</span>=<span class="env-val">0.40</span> &nbsp;<span style="color:var(--dim)"># optional, override with your contract rate (default $0.40/DBU)</span>
         </div>
       </div>
       <div class="card p-4" style="border-left: 3px solid var(--yellow, #f59e0b);">

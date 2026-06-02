@@ -176,7 +176,7 @@
       <!-- INPUTS -->
       <section class="panel inputs">
         <div class="field primary">
-          <label>On-demand cost — what you pay now</label>
+          <label>On-demand cost (what you pay now)</label>
           <div class="inrow">
             <div class="money">
               <span class="cur">$</span>
@@ -277,7 +277,7 @@
   <footer><div class="wrap">nable, FinOps in your editor. Estimates are for planning only, verify rates with your provider before committing.</div></footer>
 
 <script>
-/* ── presets (best-effort, typical rates as of June 2026 — editable) ───────── */
+/* ── presets (best-effort, typical rates as of June 2026, editable) ───────── */
 const PRESETS = {
   aws: {
     ri: { label:'Reserved Instance', payment:true,
@@ -304,7 +304,7 @@ const HOURS_PER_MONTH = 730;            // 8760 / 12
 const state = { prov:'aws', commit:'ri', unit:'monthly', term:'1', pay:'noupfront', util:100, firstShown:false };
 
 const $ = id => document.getElementById(id);
-const parseNum = s => { const n = parseFloat(String(s).replace(/[^0-9.]/g,'')); return isFinite(n) ? n : NaN; };
+const parseNum = s => { const str = String(s); const neg = /^\s*-/.test(str); const n = parseFloat(str.replace(/[^0-9.]/g,'')); return (isFinite(n) && !neg) ? n : NaN; };
 const fmtUSD = n => '$' + Math.round(n).toLocaleString('en-US');
 
 /* ── build commitment-type control for current provider ────────────────────── */
