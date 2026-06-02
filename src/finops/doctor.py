@@ -141,19 +141,52 @@ def _check_aws_scope() -> dict:
         else:
             ce_ok = True  # got a real response error, not auth
 
+    # Extended Cost Explorer actions nable uses for commitments and forecasting.
+    # A credential can pass GetCostAndUsage but still miss these, which only
+    # surfaces as a mid-query error (e.g. "no identity-based policy allows the
+    # ce:GetSavingsPlansCoverage action"). Probe them up front so doctor catches
+    # the gap and hands back the exact fix. Each probe is a cheap 1-day call.
+    missing_ce: list[str] = []
+    if ce_ok:
+        from datetime import date, timedelta
+        _end = date.today()
+        _start = _end - timedelta(days=1)
+        _tp = {"Start": _start.isoformat(), "End": _end.isoformat()}
+        _probes = [
+            ("ce:GetSavingsPlansCoverage",
+             lambda: ce.get_savings_plans_coverage(TimePeriod=_tp, Granularity="DAILY")),
+            ("ce:GetReservationUtilization",
+             lambda: ce.get_reservation_utilization(TimePeriod=_tp, Granularity="DAILY")),
+        ]
+        for action, call in _probes:
+            try:
+                call()
+            except Exception as e:
+                # Only a real authorization denial counts as missing. Other
+                # errors (DataUnavailable, validation) mean the action is allowed.
+                if "AccessDenied" in str(e) or "not authorized" in str(e):
+                    missing_ce.append(action)
+
+    if not ce_ok:
+        ce_detail = " · Cost Explorer: ✗ (missing ce:GetCostAndUsage)"
+        rec = "Grant ce:GetCostAndUsage on this credential, or run: finops setup aws --iam-template"
+    elif missing_ce:
+        ce_detail = f" · Cost Explorer: ✓ core, missing {', '.join(missing_ce)}"
+        rec = ("Commitment and forecast queries will fail. Run: finops setup aws "
+               "--iam-template, then apply the updated policy to this credential.")
+    else:
+        ce_detail = " · Cost Explorer: ✓"
+        rec = None
+
+    if warnings:
+        rec = "Run `finops setup aws --iam-template` to generate a least-privilege IAM policy"
+
     return {
         "name": "AWS credential scope",
-        "ok": ce_ok and not warnings,
-        "detail": (
-            f"Account {account_id} · {identity_arn}"
-            + (" · Cost Explorer: ✓" if ce_ok else " · Cost Explorer: ✗ (missing ce:GetCostAndUsage)")
-        ),
+        "ok": ce_ok and not warnings and not missing_ce,
+        "detail": f"Account {account_id} · {identity_arn}{ce_detail}",
         "warnings": warnings,
-        "recommendation": (
-            "Run `finops setup aws --iam-template` to generate a least-privilege IAM policy"
-            if warnings else
-            ("Grant ce:GetCostAndUsage on this credential" if not ce_ok else None)
-        ),
+        "recommendation": rec,
     }
 
 
@@ -424,6 +457,8 @@ def run_doctor(as_json: bool = False) -> int:
         return 0
     else:
         print("  Status: all checks passed")
+        print("  Next:   restart Claude and ask \"What are my cloud costs this month?\"")
+        print("          or run `finops tools` for more example questions")
         print(f"  Docs:   https://getnable.com/docs")
         print()
         return 0
