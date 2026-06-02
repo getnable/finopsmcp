@@ -30,10 +30,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install package with all extras + dev tools
+      - name: Install package + dev tools
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[all,dev]"
+          # Unit tests mock every optional connector SDK, so they run on the
+          # core deps + dev tools. We intentionally do NOT install the heavy
+          # [all] extra here (snowflake-connector-python et al.): its fresh
+          # dependency resolution is slow and fragile on CI runners and is not
+          # needed to exercise the test suite.
+          pip install -e ".[dev]"
 
       - name: Run test suite
         run: pytest -q

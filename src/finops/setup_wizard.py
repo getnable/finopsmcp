@@ -1043,6 +1043,63 @@ def _handle_profile_cmd(parsed: object) -> None:
         return
 
 
+def _print_tools_cheatsheet() -> None:
+    """Print a concise 'what you can ask nable' cheat-sheet.
+
+    nable exposes 180+ MCP tools; a new user has no way to know what to ask.
+    This groups the most useful questions by intent so the first session is
+    productive without reading docs.
+    """
+    from .welcome import bold, cyan, dim
+
+    sections = [
+        ("Costs", [
+            "What's our cloud spend this month?",
+            "Why did our AWS bill go up 40% last month?",
+            "Compare our cloud spend vs SaaS spend",
+            "What will our bill look like next month?",
+        ]),
+        ("Waste & savings", [
+            "Find all our savings opportunities, ranked by dollar impact",
+            "Which EC2 instances should we downsize?",
+            "Audit our AWS account for waste",
+            "Which workloads are good candidates for Graviton or Spot?",
+        ]),
+        ("Network & traffic", [
+            "How much are we spending on network traffic and where is it going?",
+            "What's our internal vs external data transfer cost?",
+        ]),
+        ("Kubernetes", [
+            "Which Kubernetes namespace is over-provisioned?",
+            "Show our cluster cost by namespace",
+        ]),
+        ("AI / LLM", [
+            "What's our AI cost per model?",
+            "How can we cut our LLM spend without losing quality?",
+        ]),
+        ("Business context (Pro)", [
+            "What's our cost per customer and how is it trending?",
+            "What's our infra runway at the current burn?",
+        ]),
+        ("Anomalies & attribution", [
+            "Any unusual cost spikes this week?",
+            "Which team is spending the most on Datadog?",
+        ]),
+    ]
+    print()
+    print("  " + bold("Ask nable in Claude (or Cursor / Windsurf / VS Code)"))
+    print("  " + dim("Plain English. nable picks the right tool. A few to start:"))
+    print()
+    for title, qs in sections:
+        print("  " + cyan(title))
+        for q in qs:
+            print(f"    \"{q}\"")
+        print()
+    print("  " + dim("Not connected yet? Run: finops welcome"))
+    print("  " + dim("Docs: https://getnable.com/docs"))
+    print()
+
+
 def main(args: list[str] | None = None) -> None:
     import sys as _sys
     if args is None:
@@ -1075,8 +1132,23 @@ def main(args: list[str] | None = None) -> None:
     logging.getLogger("boto3").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
-    parser = argparse.ArgumentParser(prog="finops setup", description="FinOps MCP provider configuration wizard")
-    sub = parser.add_subparsers(dest="cmd")
+    parser = argparse.ArgumentParser(
+        prog="finops",
+        description="nable: connect your cloud + SaaS billing to Claude and ask cost questions in plain English.",
+        epilog=(
+            "quick start\n"
+            "  finops welcome          guided setup: connect Claude + your first cloud account\n"
+            "  finops setup aws        connect one provider now (also: azure, gcp, datadog, ...)\n"
+            "  finops doctor           check that everything is wired up\n"
+            "  finops serve            open the local visual dashboard\n"
+            "  finops tools            see example questions you can ask nable in Claude\n"
+            "\n"
+            "then restart Claude Desktop and ask: \"What are my AWS costs this month?\"\n"
+            "docs: https://getnable.com/docs\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="cmd", metavar="<command>")
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -1127,6 +1199,7 @@ def main(args: list[str] | None = None) -> None:
 
     sub.add_parser("welcome",      help="Guided onboarding: connect Claude + your first cloud account")
     sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
+    sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
     iam_p = sub.add_parser("iam-template")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
 
@@ -1324,6 +1397,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow()
+        return
+    elif parsed.cmd == "tools":
+        _print_tools_cheatsheet()
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main
