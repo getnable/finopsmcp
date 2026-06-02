@@ -21,7 +21,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 STANDARD_ALARM_COST = 0.10   # USD per alarm per month
-COMPOSITE_ALARM_COST = 0.30  # USD per composite alarm per month
+COMPOSITE_ALARM_COST = 0.50  # USD per composite alarm per month
 
 _INSUFFICIENT_DATA_THRESHOLD_DAYS = 7
 _EC2_NAMESPACE = "AWS/EC2"

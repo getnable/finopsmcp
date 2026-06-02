@@ -292,6 +292,14 @@ html,body{
   border-radius:var(--r);padding:11px 16px;color:var(--alert);
   font-size:13px;margin-bottom:14px;display:none;
 }
+.bizctx{border:1px solid var(--line2);border-radius:var(--r);padding:16px 18px;margin-bottom:16px;display:none}
+.bizctx .bc-row{display:flex;gap:32px;flex-wrap:wrap;align-items:baseline}
+.bizctx .bc-item{display:flex;flex-direction:column;gap:3px}
+.bizctx .bc-label{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--fg3)}
+.bizctx .bc-value{font-family:var(--mono,monospace);font-size:20px;font-variant-numeric:tabular-nums;color:var(--fg)}
+.bizctx .bc-note{font-size:12px;color:var(--fg3);margin-top:8px;line-height:1.5}
+.bizctx .bc-prompt{font-size:13px;color:var(--fg2);line-height:1.5}
+.bizctx .bc-prompt code{font-family:var(--mono,monospace);font-size:12px;color:var(--accent)}
 
 /* ── Footer ──────────────────────────────────────────────────────────────── */
 footer{text-align:center;padding:20px 0;font-size:12px;color:var(--fg3)}
@@ -328,6 +336,8 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
 
 <div class="page">
   <div id="err-banner" class="err-banner"></div>
+
+  <div id="bizctx" class="bizctx"></div>
 
   <!-- Overview + controls -->
   <div class="top-bar">
@@ -572,6 +582,33 @@ function render(d){
   if(d.error){banner.textContent=d.error;banner.style.display='block';}
   else{banner.style.display='none';}
 
+  // Business context headline: cost-per-customer + runway, or a cold-start prompt
+  const bc=d.business_context||{};
+  const bcEl=document.getElementById('bizctx');
+  if(bc.has_metrics){
+    const items=[];
+    if(bc.cost_per_customer_label){
+      items.push('<div class="bc-item"><span class="bc-label">Cost per customer</span><span class="bc-value">'+esc(bc.cost_per_customer_label)+'</span></div>');
+    }
+    if(bc.hosting_pct_mrr_label){
+      items.push('<div class="bc-item"><span class="bc-label">Hosting as % of MRR</span><span class="bc-value">'+esc(bc.hosting_pct_mrr_label)+'</span></div>');
+    }
+    const rw=bc.runway||{};
+    if(rw.available && rw.months!=null){
+      const lbl=(rw.mode==='company'?'Company runway':'Infra runway');
+      items.push('<div class="bc-item"><span class="bc-label">'+lbl+'</span><span class="bc-value">'+rw.months+' mo</span></div>');
+    }
+    if(items.length){
+      let html='<div class="bc-row">'+items.join('')+'</div>';
+      if(rw.note){html+='<div class="bc-note">'+esc(rw.note)+'</div>';}
+      else if(rw.reason){html+='<div class="bc-note">'+esc(rw.reason)+'</div>';}
+      bcEl.innerHTML=html;bcEl.style.display='block';
+    }else{bcEl.style.display='none';}
+  }else if(bc.has_metrics===false){
+    bcEl.innerHTML='<div class="bc-prompt">Connect your business to your spend. Set revenue, customers, and cash with <code>set_business_metrics()</code> in Claude to see cost per customer and runway here.</div>';
+    bcEl.style.display='block';
+  }else{bcEl.style.display='none';}
+
   // Nav
   const acct=d.account_id||'';
   document.getElementById('hdr-title').textContent='Cost Dashboard'+(acct?', Account '+acct:'');
@@ -801,7 +838,7 @@ function renderOpps(opps,count,totalSaving){
       <div class="opp-right">
         <span class="opp-saving">${savingStr}</span>
         <span class="effort-chip ${eClass}">${effort} EFFORT</span>
-        ${o.id?`<button class="done-btn" onclick="markDone(${o.id},this)">Done</button>`:''}
+        ${(o.id && !window._READONLY)?`<button class="done-btn" onclick="markDone(${o.id},this)">Done</button>`:''}
       </div>
     </li>`;
   }).join('');
@@ -860,14 +897,10 @@ if(window._READONLY){
   document.body.appendChild(banner);
 }
 
-// Hide action buttons in read-only mode
-const _origRenderOpps=renderOpportunities;
-function renderOpportunities(opps,count,totalSaving){
-  _origRenderOpps(opps,count,totalSaving);
-  if(window._READONLY){
-    document.querySelectorAll('.done-btn').forEach(b=>b.remove());
-    document.querySelectorAll('.theme-btn').forEach(b=>b.style.display='none');
-  }
+// In read-only mode the Done button is not rendered (gated in renderOpps), and
+// the theme toggle is hidden. No re-render wrapper needed.
+if(window._READONLY){
+  document.querySelectorAll('.theme-btn').forEach(b=>b.style.display='none');
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

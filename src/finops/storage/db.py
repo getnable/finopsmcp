@@ -126,6 +126,12 @@ business_metrics = Table(
     Column("employees", Integer, nullable=True),                # headcount
     Column("custom_metrics", Text, nullable=True),              # JSON: {"metric": value}
     Column("notes", Text, nullable=True),                       # optional free-text context
+    # Runway inputs (Phase 1 business-context layer). nable sees infra spend, not
+    # payroll, so company runway needs monthly_opex supplied by the user.
+    Column("cash_on_hand_usd", Float, nullable=True),           # cash in the bank
+    Column("last_raise_amount_usd", Float, nullable=True),      # size of last round
+    Column("last_raise_date", String(10), nullable=True),       # YYYY-MM-DD
+    Column("monthly_opex_usd", Float, nullable=True),           # total monthly burn incl payroll
     Column("captured_at", DateTime, nullable=False),
 )
 
@@ -540,6 +546,11 @@ def _run_sqlite_migrations(engine: Engine) -> None:
         ("anomalies",  "metadata",        "ALTER TABLE anomalies ADD COLUMN metadata TEXT"),
         ("budgets",    "critical_at_pct", "ALTER TABLE budgets ADD COLUMN critical_at_pct REAL NOT NULL DEFAULT 100.0"),
         ("budgets",    "alert_at_pct",    "ALTER TABLE budgets ADD COLUMN alert_at_pct REAL NOT NULL DEFAULT 80.0"),
+        # Runway inputs (Phase 1 business-context layer)
+        ("business_metrics", "cash_on_hand_usd",      "ALTER TABLE business_metrics ADD COLUMN cash_on_hand_usd REAL"),
+        ("business_metrics", "last_raise_amount_usd", "ALTER TABLE business_metrics ADD COLUMN last_raise_amount_usd REAL"),
+        ("business_metrics", "last_raise_date",       "ALTER TABLE business_metrics ADD COLUMN last_raise_date TEXT"),
+        ("business_metrics", "monthly_opex_usd",      "ALTER TABLE business_metrics ADD COLUMN monthly_opex_usd REAL"),
     ]
 
     with engine.connect() as conn:

@@ -77,7 +77,8 @@ def test_find_instances_returns_empty_when_all_same_az():
 def test_cross_az_cost_formula():
     transfer_gb = 100.0
     expected = transfer_gb * CROSS_AZ_COST_PER_GB
-    assert abs(expected - 2.0) < 0.001
+    # $0.01/GB per direction (EC2 inter-AZ transfer rate)
+    assert abs(expected - 1.0) < 0.001
 
 
 def test_bytes_per_gb_constant():

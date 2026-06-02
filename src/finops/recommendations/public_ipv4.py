@@ -17,9 +17,9 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# AWS pricing since Feb 1 2024
+# AWS pricing since Feb 1 2024. AWS bills a 730-hour average month (8760/12).
 IPV4_HOURLY_RATE: float = 0.005
-IPV4_MONTHLY_RATE: float = IPV4_HOURLY_RATE * 24 * 30  # $3.60/mo
+IPV4_MONTHLY_RATE: float = IPV4_HOURLY_RATE * 730  # $3.65/mo
 
 
 def _make_ec2(session_or_none, region: str):

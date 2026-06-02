@@ -16,7 +16,8 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-CROSS_AZ_COST_PER_GB: float = 0.02
+# EC2 inter-AZ data transfer is $0.01/GB per direction.
+CROSS_AZ_COST_PER_GB: float = 0.01
 BYTES_PER_GB: int = 1024 ** 3
 _LOOKBACK_DAYS = 30
 
@@ -191,9 +192,12 @@ async def audit_efs_cross_az_mounts(
                 if not other_az_instances:
                     continue
 
-                # Apportion I/O evenly across mount targets for per-MT cost estimate
+                # Apportion I/O evenly across mount targets for per-MT cost estimate.
+                # This is an UPPER BOUND: it assumes all filesystem I/O crosses an AZ
+                # boundary, which is rarely true. Real cost depends on the cross-AZ
+                # fraction, which CloudWatch I/O metrics alone cannot determine.
                 mt_io_gb = total_io_gb / max(len(mount_targets), 1)
-                estimated_monthly_cost = mt_io_gb * CROSS_AZ_COST_PER_GB
+                max_monthly_cost = mt_io_gb * CROSS_AZ_COST_PER_GB
 
                 findings.append({
                     "efs_id": filesystem_id,
@@ -203,7 +207,8 @@ async def audit_efs_cross_az_mounts(
                     "mount_target_az": mt_az,
                     "connected_instances_other_az": other_az_instances,
                     "estimated_monthly_transfer_gb": round(mt_io_gb, 2),
-                    "estimated_monthly_cost": round(estimated_monthly_cost, 4),
+                    "estimated_monthly_cost": round(max_monthly_cost, 4),
+                    "cost_basis": "upper bound: assumes 100% of I/O crosses AZ; verify mount AZ vs instance AZ",
                     "recommendation": (
                         "Create an EFS mount target in each instance AZ "
                         "and update mount configurations to use the local AZ endpoint."

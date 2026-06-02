@@ -16,9 +16,9 @@ from finops.recommendations.public_ipv4 import (
 # ── constants ─────────────────────────────────────────────────────────────────
 
 
-def test_monthly_rate_is_360():
-    """$0.005/hr * 24h * 30d = $3.60/mo."""
-    assert abs(IPV4_MONTHLY_RATE - 3.60) < 0.01
+def test_monthly_rate():
+    """$0.005/hr * 730 hr/mo = $3.65/mo (AWS bills a 730-hour average month)."""
+    assert abs(IPV4_MONTHLY_RATE - 3.65) < 0.01
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

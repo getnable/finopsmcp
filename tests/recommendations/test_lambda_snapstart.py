@@ -101,7 +101,7 @@ def test_pc_monthly_cost_formula():
     provisioned = 10
     memory_gb = 1.0
     expected = provisioned * memory_gb * SECONDS_PER_MONTH * PC_COST_PER_GB_SECOND
-    assert abs(expected - 252.0) < 1.0
+    assert abs(expected - 108.0) < 1.0
 
 
 # ── integration: non-Java runtimes skipped ────────────────────────────────────

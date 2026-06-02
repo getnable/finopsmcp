@@ -15,8 +15,9 @@ log = logging.getLogger(__name__)
 
 JAVA_RUNTIMES = {"java8", "java8.al2", "java11", "java17", "java21"}
 
-# Provisioned concurrency: $0.0000097222 per GB-second
-PC_COST_PER_GB_SECOND: float = 0.0000097222
+# Provisioned concurrency keep-warm rate: $0.0000041667 per GB-second
+# (not the $0.0000097222/GB-s duration rate for PC-enabled execution).
+PC_COST_PER_GB_SECOND: float = 0.0000041667
 SECONDS_PER_MONTH: int = 30 * 24 * 3600
 
 _DEFAULT_REGIONS = [

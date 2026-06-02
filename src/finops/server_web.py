@@ -528,6 +528,37 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
             "counts": {},
         }
 
+    # 4. Business context: cost-per-customer + runway (Phase 1 business-context
+    # layer). Empty when no metrics are on file so the dashboard shows a prompt.
+    try:
+        from .connectors.business_metrics import (
+            get_latest_metrics, compute_unit_economics, compute_runway,
+        )
+        latest = get_latest_metrics(n=1)
+        if latest:
+            m = latest[0]
+            monthly_burn = result.get("projected_month_total") or result.get("total_spend_mtd") or 0.0
+            econ = compute_unit_economics(monthly_burn, m)
+            runway = compute_runway(
+                cash_on_hand_usd=m.get("cash_on_hand_usd"),
+                infra_monthly_burn_usd=monthly_burn,
+                monthly_opex_usd=m.get("monthly_opex_usd"),
+                mrr_usd=m.get("mrr_usd") or (m.get("arr_usd", 0) / 12 if m.get("arr_usd") else None),
+            )
+            result["business_context"] = {
+                "has_metrics": True,
+                "cost_per_customer_label": econ.get("cost_per_customer_label"),
+                "hosting_pct_mrr_label": econ.get("hosting_pct_mrr_label"),
+                "hosting_pct_mrr_health": econ.get("hosting_pct_mrr_health"),
+                "runway": runway,
+                "metrics_as_of": m.get("metric_date"),
+            }
+        else:
+            result["business_context"] = {"has_metrics": False}
+    except Exception as exc:
+        log.debug("Could not build business context: %s", exc)
+        result["business_context"] = {"has_metrics": False}
+
     return result
 
 
@@ -1433,6 +1464,14 @@ body{padding:0 0 60px}
 
 /* Error banner */
 .error-banner{background:rgba(224,92,75,.08);border:1px solid rgba(224,92,75,.2);border-radius:var(--r-lg);padding:12px 16px;color:var(--alert);font-size:13px;margin-bottom:16px}
+.bizctx{border:1px solid var(--border);border-radius:var(--r-lg);padding:16px 18px;margin-bottom:16px;background:var(--surface,rgba(255,255,255,.02))}
+.bizctx .bc-row{display:flex;gap:32px;flex-wrap:wrap;align-items:baseline}
+.bizctx .bc-item{display:flex;flex-direction:column;gap:3px}
+.bizctx .bc-label{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--fg-3,#8a9199)}
+.bizctx .bc-value{font-family:var(--mono,monospace);font-size:20px;font-variant-numeric:tabular-nums;color:var(--fg,#e8eaed)}
+.bizctx .bc-note{font-size:12px;color:var(--fg-3,#8a9199);margin-top:8px;line-height:1.5}
+.bizctx .bc-prompt{font-size:13px;color:var(--fg-2,#b8bdc4);line-height:1.5}
+.bizctx .bc-prompt code{font-family:var(--mono,monospace);font-size:12px;color:var(--accent,#4db8d4)}
 
 /* Footer */
 footer{text-align:center;padding:16px;font-size:12px;color:var(--fg3)}
@@ -1462,6 +1501,8 @@ footer a:hover{filter:brightness(1.15)}
 <div class="main">
 
   <div id="error-banner" class="error-banner" style="display:none"></div>
+
+  <div id="bizctx" class="bizctx" style="display:none"></div>
 
   <div class="section-label">Overview</div>
 
@@ -1602,6 +1643,34 @@ function render(d){
   const banner=document.getElementById('error-banner');
   if(d.error){banner.textContent=d.error;banner.style.display='block';}
   else{banner.style.display='none';}
+
+  // Business context headline: cost-per-customer + runway, or a cold-start prompt
+  const bc=d.business_context||{};
+  const bcEl=document.getElementById('bizctx');
+  if(bc.has_metrics){
+    const items=[];
+    if(bc.cost_per_customer_label){
+      items.push('<div class="bc-item"><span class="bc-label">Cost per customer</span><span class="bc-value">'+esc(bc.cost_per_customer_label)+'</span></div>');
+    }
+    if(bc.hosting_pct_mrr_label){
+      items.push('<div class="bc-item"><span class="bc-label">Hosting as % of MRR</span><span class="bc-value">'+esc(bc.hosting_pct_mrr_label)+'</span></div>');
+    }
+    const rw=bc.runway||{};
+    if(rw.available && rw.months!=null){
+      const lbl=(rw.mode==='company'?'Company runway':'Infra runway');
+      items.push('<div class="bc-item"><span class="bc-label">'+lbl+'</span><span class="bc-value">'+rw.months+' mo</span></div>');
+    }
+    if(items.length){
+      let html='<div class="bc-row">'+items.join('')+'</div>';
+      if(rw.note){html+='<div class="bc-note">'+esc(rw.note)+'</div>';}
+      else if(rw.reason){html+='<div class="bc-note">'+esc(rw.reason)+'</div>';}
+      bcEl.innerHTML=html;
+      bcEl.style.display='block';
+    }else{bcEl.style.display='none';}
+  }else if(bc.has_metrics===false){
+    bcEl.innerHTML='<div class="bc-prompt">Connect your business to your spend. Set revenue, customers, and cash with <code>set_business_metrics()</code> in Claude to see cost per customer and runway here.</div>';
+    bcEl.style.display='block';
+  }else{bcEl.style.display='none';}
 
   // Top nav: account in title, provider badge
   const acct=d.account_id||'';

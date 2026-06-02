@@ -2495,24 +2495,38 @@ async def create_rightsizing_tickets(
     if err := require_pro("ticket_creation"):
         return err
 
+    if provider != "aws":
+        return {
+            "message": "Rightsizing analysis is AWS-only (Compute Optimizer + CloudWatch).",
+            "tickets_created": 0,
+        }
+
     try:
         from .integrations.ticketing import create_rightsizing_ticket
-        from .recommendations.rightsizing import get_rightsizing_recommendations
+        from .recommendations.rightsizing import analyze_rightsizing
 
-        recs = get_rightsizing_recommendations(provider=provider)
+        recs = analyze_rightsizing(min_monthly_savings=min_monthly_savings)
         if not recs:
             return {"message": "No rightsizing recommendations found", "tickets_created": 0}
 
         urls = []
         skipped = 0
-        for rec in recs:
-            savings = rec.get("monthly_savings_usd", 0)
+        for r in recs:
+            savings = r.monthly_savings
             if savings < min_monthly_savings:
                 skipped += 1
                 continue
+            # Map the engine's dataclass to the dict shape create_rightsizing_ticket expects.
+            rec = {
+                "resource_id": r.instance_id,
+                "resource_type": r.resource_type,
+                "current_type": r.instance_type,
+                "recommended_type": r.recommended_type,
+                "monthly_savings_usd": savings,
+            }
             url = create_rightsizing_ticket(rec)
             if url:
-                urls.append({"resource": rec.get("resource_id"), "savings": savings, "url": url})
+                urls.append({"resource": r.instance_id, "savings": savings, "url": url})
 
         return {
             "tickets_created": len(urls),
@@ -2990,6 +3004,52 @@ async def audit_aws_waste(
     except Exception as e:
         log.error("audit_aws_waste failed: %s", e, exc_info=True)
         return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_traffic_cost_breakdown(
+    days: int = 30,
+) -> dict:
+    """
+    Break down AWS network/data-transfer spend: how much, and where it goes.
+
+    Splits your traffic cost into INTERNAL (cross-AZ, cross-region, NAT, VPC
+    peering, private endpoints) vs EXTERNAL (internet egress, CDN), then a
+    per-scope breakdown and a ranked solve playbook (VPC endpoints,
+    topology-aware routing, CDN, peering). Pulls Cost Explorer grouped by usage
+    type; the classifier keeps only the network line items. AWS today; GCP and
+    Azure decomposition are on the roadmap.
+
+    Args:
+        days: Look-back window in days (default 30).
+
+    Examples:
+        - "How much are we spending on network traffic and where is it going?"
+        - "What's our internal vs external data transfer cost?"
+        - "Break down our cross-AZ and egress spend"
+    """
+    from datetime import date as _date, timedelta
+    from .analyzers.traffic import build_traffic_breakdown
+
+    aws = _CLOUD_CONNECTORS.get("aws")
+    if aws is None:
+        return {"error": "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."}
+
+    end = _date.today()
+    start = end - timedelta(days=days)
+    try:
+        rows = await aws.get_network_breakdown(start, end)
+    except Exception as e:
+        return {"error": f"Could not pull cost data: {e}"}
+
+    result = build_traffic_breakdown(rows, "aws")
+    result["period"] = f"{start} to {end} ({days} days)"
+    result["note"] = (
+        "AWS only. Internal = stays in your cloud (cross-AZ, cross-region, NAT, "
+        "peering); external = leaves it (internet egress, CDN). Ingress is free "
+        "and excluded from the split."
+    )
+    return result
 
 
 @mcp.tool()
@@ -7089,6 +7149,10 @@ async def set_business_metrics(
     custom_metrics: dict | None = None,
     notes: str | None = None,
     metric_date: str | None = None,
+    cash_on_hand_usd: float | None = None,
+    last_raise_amount_usd: float | None = None,
+    last_raise_date: str | None = None,
+    monthly_opex_usd: float | None = None,
 ) -> dict:
     """
     Store your business metrics so nable can connect cloud costs to business outcomes.
@@ -7107,14 +7171,38 @@ async def set_business_metrics(
         custom_metrics:     Any other metric as a dict, e.g. {"free_signups": 4200, "nps": 42}
         notes:              Free-text context, e.g. "Post Series A, hired 8 engineers"
         metric_date:        Date these metrics apply to (YYYY-MM-DD). Defaults to today.
+        cash_on_hand_usd:   Cash in the bank, in USD. Powers runway in get_unit_economics().
+        last_raise_amount_usd: Size of your last round, in USD.
+        last_raise_date:    Date of your last round (YYYY-MM-DD).
+        monthly_opex_usd:   Total monthly burn including payroll, in USD. Without this,
+                            runway is reported as "infra runway" (excludes payroll);
+                            with it, nable reports true company runway.
+
+    Calling this repeatedly for the same date MERGES: fields you omit keep their
+    prior value, so you can set revenue one call and cash the next.
 
     Examples:
         - "Set our MRR to $45,000 and MAU to 1,200"
         - "Update business metrics: ARR $2.4M, 340 paying customers, 8,200 MAU"
-        - "Record this month's metrics: MRR 38000, MAU 950, API calls 2400000"
+        - "Set cash on hand to $2.4M and monthly opex to $210k"
     """
     if err := require_pro("business_metrics"):
         return err
+
+    # Validation: reject nonsensical values loudly instead of storing them.
+    for name, val in (
+        ("cash_on_hand_usd", cash_on_hand_usd),
+        ("last_raise_amount_usd", last_raise_amount_usd),
+        ("monthly_opex_usd", monthly_opex_usd),
+    ):
+        if val is not None and val < 0:
+            return {"error": f"{name} cannot be negative (got {val})."}
+    for name, val in (("metric_date", metric_date), ("last_raise_date", last_raise_date)):
+        if val is not None:
+            try:
+                date.fromisoformat(val)
+            except ValueError:
+                return {"error": f"{name} must be YYYY-MM-DD (got {val!r})."}
 
     from .connectors.business_metrics import save_metrics
 
@@ -7130,12 +7218,18 @@ async def set_business_metrics(
         employees=employees,
         custom_metrics=custom_metrics,
         notes=notes,
+        cash_on_hand_usd=cash_on_hand_usd,
+        last_raise_amount_usd=last_raise_amount_usd,
+        last_raise_date=last_raise_date,
+        monthly_opex_usd=monthly_opex_usd,
     )
 
     stored = {k: v for k, v in {
         "arr_usd": arr_usd, "mrr_usd": mrr_usd, "mau": mau, "dau": dau,
         "paying_customers": paying_customers, "api_calls_monthly": api_calls_monthly,
         "employees": employees, "custom_metrics": custom_metrics,
+        "cash_on_hand_usd": cash_on_hand_usd, "last_raise_amount_usd": last_raise_amount_usd,
+        "last_raise_date": last_raise_date, "monthly_opex_usd": monthly_opex_usd,
     }.items() if v is not None}
 
     return {
@@ -7211,7 +7305,9 @@ async def get_unit_economics(period_days: int = 30) -> dict:
     if err := require_pro("business_metrics"):
         return err
 
-    from .connectors.business_metrics import get_latest_metrics, compute_unit_economics
+    from .connectors.business_metrics import (
+        get_latest_metrics, compute_unit_economics, compute_runway,
+    )
 
     latest = get_latest_metrics(n=1)
     if not latest:
@@ -7232,12 +7328,22 @@ async def get_unit_economics(period_days: int = 30) -> dict:
 
     econ = compute_unit_economics(total_cost, metrics)
 
+    # Normalize the period cost to a monthly burn for the runway calc.
+    infra_monthly_burn = total_cost * (30.0 / period_days) if period_days else total_cost
+    runway = compute_runway(
+        cash_on_hand_usd=metrics.get("cash_on_hand_usd"),
+        infra_monthly_burn_usd=infra_monthly_burn,
+        monthly_opex_usd=metrics.get("monthly_opex_usd"),
+        mrr_usd=metrics.get("mrr_usd") or (metrics.get("arr_usd", 0) / 12 if metrics.get("arr_usd") else None),
+    )
+
     top_services = sorted(by_service.items(), key=lambda x: -x[1])[:5]
 
     return {
         "period": f"{start} to {end} ({period_days} days)",
         "total_infrastructure_cost": _fmt_usd(total_cost),
         "unit_economics": econ,
+        "runway": runway,
         "by_provider": {k: _fmt_usd(v.get("total_usd", 0)) for k, v in by_provider.items()},
         "top_cost_drivers": [{"service": s, "cost": _fmt_usd(a)} for s, a in top_services],
         "metrics_as_of": metrics.get("metric_date"),
@@ -7296,12 +7402,13 @@ async def explain_cost_change(
     prev_start = prev_end - timedelta(days=compare_days)
 
     active = await _active()
-    cost_now, _, _ = await _gather_costs(active, period_start, period_end)
-    cost_before, _, _ = await _gather_costs(active, prev_start, prev_end)
+    cost_now, _, by_service_now = await _gather_costs(active, period_start, period_end)
+    cost_before, _, by_service_before = await _gather_costs(active, prev_start, prev_end)
 
     # Use latest metrics for "now" and the oldest available for "before"
     metrics_now = latest[0]
     metrics_before = history[0] if len(history) > 1 else latest[0]
+    enough_history = len(history) > 1
 
     explanation = _explain(
         cost_now=cost_now,
@@ -7311,7 +7418,129 @@ async def explain_cost_change(
         period_label=f"{period_start} to {period_end} vs {prev_start} to {prev_end}",
     )
 
+    # Cost-driver attribution: which services moved the bill, ranked by absolute
+    # change. This is the "what specifically changed" the unit-economics engine
+    # does not compute. Pure data, no LLM call.
+    services = set(by_service_now) | set(by_service_before)
+    deltas = []
+    for svc in services:
+        now_v = by_service_now.get(svc, 0.0)
+        prev_v = by_service_before.get(svc, 0.0)
+        change = now_v - prev_v
+        if abs(change) >= 0.01:
+            deltas.append({
+                "service": svc,
+                "before": round(prev_v, 2),
+                "now": round(now_v, 2),
+                "change_usd": round(change, 2),
+                "direction": "up" if change > 0 else "down",
+            })
+    deltas.sort(key=lambda d: -abs(d["change_usd"]))
+    top_drivers = deltas[:5]
+    explanation["cost_drivers"] = top_drivers
+
+    if not enough_history:
+        explanation["history_note"] = (
+            "Only one month of business metrics on file, so the business-metric "
+            "comparison reuses the latest values. Record another month with "
+            "set_business_metrics() for a true period-over-period read."
+        )
+
+    # context_blob: a compact, prompt-ready object the host model turns into prose.
+    # nable ships this structured context; it never calls an LLM itself.
+    explanation["context_blob"] = {
+        "cost_change": explanation.get("cost_change"),
+        "verdict": explanation.get("verdict"),
+        "signals": explanation.get("signals"),
+        "top_cost_drivers": top_drivers,
+        "cost_per_customer_now": explanation.get("unit_economics_now", {}).get("cost_per_customer_label"),
+        "cost_per_customer_before": explanation.get("unit_economics_before", {}).get("cost_per_customer_label"),
+        "instruction": (
+            "Write a 2-3 sentence plain-English summary for a founder. State the "
+            "cost change, the single biggest driver, and what it means for unit "
+            "economics. Do not invent causes beyond top_cost_drivers and signals."
+        ),
+    }
+
     return explanation
+
+
+@mcp.tool()
+async def export_board_summary(period_days: int = 30) -> dict:
+    """
+    Generate the cost section of a board / investor update as markdown.
+
+    Pulls your unit economics (cost per customer, hosting as % of revenue),
+    runway, and the latest cost-change narrative into a concise, board-ready
+    markdown block you can paste into an update. nable makes no external call;
+    the markdown is built locally from your own data.
+
+    Requires business metrics set with set_business_metrics().
+
+    Examples:
+        - "Generate our board update cost section"
+        - "Export a board-ready cost summary"
+        - "Give me the markdown for our investor update infra section"
+    """
+    if err := require_pro("business_metrics"):
+        return err
+
+    econ = await get_unit_economics(period_days=period_days)
+    if econ.get("error"):
+        return econ
+    change = await explain_cost_change(compare_days=period_days)
+
+    ue = econ.get("unit_economics", {})
+    runway = econ.get("runway", {})
+    drivers = change.get("cost_drivers", []) if isinstance(change, dict) else []
+
+    lines: list[str] = []
+    lines.append("## Infrastructure & AI Spend")
+    lines.append("")
+    lines.append(f"- **Total infra + AI cost ({period_days}d):** {econ.get('total_infrastructure_cost', 'n/a')}")
+    if ue.get("cost_per_customer_label"):
+        lines.append(f"- **Cost per customer:** {ue['cost_per_customer_label']}")
+    if ue.get("hosting_pct_mrr_label"):
+        health = ue.get("hosting_pct_mrr_health")
+        suffix = f" ({health})" if health else ""
+        lines.append(f"- **Hosting as % of MRR:** {ue['hosting_pct_mrr_label']}{suffix}")
+    if runway.get("available") and runway.get("label"):
+        lines.append(f"- **Runway:** {runway['label']}")
+    elif runway.get("reason"):
+        lines.append(f"- **Runway:** not available ({runway['reason']})")
+
+    if isinstance(change, dict) and change.get("findings"):
+        lines.append("")
+        lines.append("**What changed:**")
+        for f in change["findings"][:2]:
+            lines.append(f"- {f}")
+
+    if drivers:
+        lines.append("")
+        lines.append("**Top cost movers:**")
+        for d in drivers[:3]:
+            arrow = "up" if d["direction"] == "up" else "down"
+            lines.append(f"- {d['service']}: {arrow} ${abs(d['change_usd']):,.0f}/period")
+
+    markdown = "\n".join(lines)
+
+    # Write to the exports dir so it can be opened without Claude.
+    from pathlib import Path
+    out_dir = Path.home() / ".finops" / "exports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"board-summary-{date.today().isoformat()}.md"
+    try:
+        out_path.write_text(markdown, encoding="utf-8")
+        saved = str(out_path)
+    except Exception:
+        saved = None
+
+    return {
+        "markdown": markdown,
+        "saved_to": saved,
+        "period_days": period_days,
+        "note": "Built locally from your own data, no external calls.",
+    }
 
 
 # ── Shared views ─────────────────────────────────────────────────────────────
@@ -9530,10 +9759,10 @@ async def run_full_cost_audit(
         run("s3_it",          _s3it(aws_client=aws)),
         run("s3_ta",          _s3ta(aws_client=aws)),
         run("ebs_rep",        _ebs_rep(aws_client=aws, regions=regions)),
-        run("db_sp",          _dbsp(aws_client=aws)),
+        run("db_sp",          asyncio.to_thread(_dbsp)),
         run("textract",       _textract(aws_client=aws)),
         run("bedrock",        _bedrock(aws_client=aws)),
-        run("commitments",    _commitments(aws_client=aws)),
+        run("commitments",    asyncio.to_thread(_commitments)),
     ]
 
     results = await asyncio.gather(*tasks)
@@ -9775,10 +10004,10 @@ async def export_cost_report_csv(
         run("s3_it",          _s3it(aws_client=aws)),
         run("s3_ta",          _s3ta(aws_client=aws)),
         run("ebs_rep",        _ebs_rep(aws_client=aws, regions=regions)),
-        run("db_sp",          _dbsp(aws_client=aws)),
+        run("db_sp",          asyncio.to_thread(_dbsp)),
         run("textract",       _textract(aws_client=aws)),
         run("bedrock",        _bedrock(aws_client=aws)),
-        run("commitments",    _commitments(aws_client=aws)),
+        run("commitments",    asyncio.to_thread(_commitments)),
     ]
 
     results = await asyncio.gather(*tasks)
@@ -10101,10 +10330,10 @@ async def publish_cost_report_to_notion(
         _run("s3_it",          _s3it(aws_client=aws)),
         _run("s3_ta",          _s3ta(aws_client=aws)),
         _run("ebs_rep",        _ebs_rep(aws_client=aws, regions=regions)),
-        _run("db_sp",          _dbsp(aws_client=aws)),
+        _run("db_sp",          asyncio.to_thread(_dbsp)),
         _run("textract",       _textract(aws_client=aws)),
         _run("bedrock",        _bedrock(aws_client=aws)),
-        _run("commitments",    _commitments(aws_client=aws)),
+        _run("commitments",    asyncio.to_thread(_commitments)),
     ]
 
     results = await asyncio.gather(*tasks)

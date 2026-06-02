@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # ── Pricing constants (on-demand approximations) ──────────────────────────────
 
 _EIP_MONTHLY = 3.60                   # unassociated EIP / month
-_NAT_GW_BASE_MONTHLY = 32.40          # NAT GW fixed hourly cost / month ($0.045/hr)
+_NAT_GW_BASE_MONTHLY = 32.85          # NAT GW fixed cost / month ($0.045/hr * 730hr)
 _NAT_GW_DATA_PER_GB = 0.045           # per GB processed
 _EBS_GP2_PER_GB_MONTH = 0.10          # gp2 price / GB / month (us-east-1)
 _EBS_GP3_PER_GB_MONTH = 0.08          # gp3 price / GB / month (us-east-1)
