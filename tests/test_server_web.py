@@ -251,11 +251,14 @@ def test_port_conflict_uses_next_port():
     """If the requested port is taken, _make_server should bind to the next one."""
     from finops.server_web import _make_server
 
-    # Occupy a port
+    # Occupy a port by actively LISTENING on it. A bound-but-not-listening
+    # socket with SO_REUSEADDR does NOT block a second bind on Linux (it does
+    # on macOS), which made this test pass locally but fail in CI. An active
+    # listener reliably triggers EADDRINUSE on the next bind on both platforms.
     blocker = socket.socket()
-    blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     blocker.bind(("127.0.0.1", 0))
     blocked_port = blocker.getsockname()[1]
+    blocker.listen(1)
 
     try:
         server = _make_server("127.0.0.1", blocked_port)
