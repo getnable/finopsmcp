@@ -264,6 +264,48 @@ class AWSConnector(BaseConnector):
         _cache.set(_ck, _copy.deepcopy(merged), _cache.COST_TTL)
         return merged
 
+    async def get_network_breakdown(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        """
+        Return per-usage-type cost rows for the period, grouped by USAGE_TYPE.
+
+        Used by the traffic-cost tools: the classifier keeps only the network
+        line items (DataTransfer, NatGateway, NetworkFirewall, etc.) so callers
+        can pass the full grouped result. Returns [{usage_type, cost_usd, account_id}].
+        """
+        targets = self._role_arns if self._role_arns else [None]
+        rows: list[dict[str, Any]] = []
+        for role_arn in targets:
+            ce = self._make_client(role_arn)
+            account_id = self._account_id(role_arn)
+            kwargs: dict[str, Any] = dict(
+                TimePeriod={"Start": start_date.isoformat(), "End": end_date.isoformat()},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
+            )
+            try:
+                while True:
+                    resp = ce.get_cost_and_usage(**kwargs)
+                    for period in resp.get("ResultsByTime", []):
+                        for grp in period.get("Groups", []):
+                            usage_type = grp.get("Keys", [""])[0]
+                            amount = float(grp.get("Metrics", {}).get("UnblendedCost", {}).get("Amount", 0.0) or 0.0)
+                            if amount <= 0:
+                                continue
+                            rows.append({
+                                "usage_type": usage_type,
+                                "cost_usd": amount,
+                                "account_id": account_id,
+                            })
+                    token = resp.get("NextPageToken")
+                    if not token:
+                        break
+                    kwargs["NextPageToken"] = token
+            except Exception as exc:
+                log = __import__("logging").getLogger(__name__)
+                log.warning("get_network_breakdown failed (role=%s): %s", role_arn, exc)
+        return rows
+
     async def get_costs_as_focus(
         self,
         start_date: date,

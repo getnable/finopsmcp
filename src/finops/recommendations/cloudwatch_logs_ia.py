@@ -24,9 +24,10 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-STANDARD_INGESTION_COST_PER_GB = 0.075
-IA_INGESTION_COST_PER_GB = 0.0375
-SAVINGS_PER_GB = STANDARD_INGESTION_COST_PER_GB - IA_INGESTION_COST_PER_GB  # 0.0375
+# us-east-1 CloudWatch Logs ingestion: $0.50/GB Standard, $0.25/GB Infrequent Access.
+STANDARD_INGESTION_COST_PER_GB = 0.50
+IA_INGESTION_COST_PER_GB = 0.25
+SAVINGS_PER_GB = STANDARD_INGESTION_COST_PER_GB - IA_INGESTION_COST_PER_GB  # 0.25
 
 _BYTES_PER_GB = 1024 ** 3
 _LOOKBACK_DAYS = 30
@@ -118,11 +119,12 @@ def _group_age_days(log_group: dict, now: datetime) -> int:
 
 def _build_recommendation(log_group_name: str, monthly_savings: float) -> str:
     return (
-        f"Migrate '{log_group_name}' to Infrequent Access storage class to save "
-        f"${monthly_savings:.2f}/month. Confirm the log group has no metric filters "
-        f"or subscription filters before migrating. Use the AWS console or: "
-        f"aws logs put-log-group --log-group-name '{log_group_name}' "
-        f"--log-group-class INFREQUENT_ACCESS"
+        f"Move '{log_group_name}' to the Infrequent Access log class to save "
+        f"${monthly_savings:.2f}/month. Confirm it has no metric filters or "
+        f"subscription filters first. The log class is set at creation and cannot "
+        f"be changed in place: create a replacement and repoint producers, e.g. "
+        f"aws logs create-log-group --log-group-name '{log_group_name}-ia' "
+        f"--log-group-class INFREQUENT_ACCESS, then delete the old group."
     )
 
 

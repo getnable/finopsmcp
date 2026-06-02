@@ -74,7 +74,7 @@ def test_standard_alarm_cost():
 
 
 def test_composite_alarm_cost():
-    assert COMPOSITE_ALARM_COST == 0.30
+    assert COMPOSITE_ALARM_COST == 0.50
 
 
 # ── unit tests: days_in_state ──────────────────────────────────────────────────

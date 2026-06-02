@@ -49,8 +49,8 @@ def test_monthly_cost_calculation():
         * SECONDS_PER_MONTH
         * PROVISIONED_CONCURRENCY_PER_GB_SECOND
     )
-    # 10 * 1.0 GB * 2592000 s * 0.0000097222 = ~252.00
-    assert abs(expected - 252.00) < 0.50
+    # 10 * 1.0 GB * 2592000 s * 0.0000041667 = ~108.00 (PC keep-warm rate)
+    assert abs(expected - 108.00) < 0.50
 
 
 def test_wasted_cost_at_zero_utilization():
@@ -198,8 +198,8 @@ def test_flags_low_utilization_function():
     assert finding["memory_mb"] == 1024
     assert finding["region"] == "us-east-1"
     assert finding["recommendation"] == "reduce_provisioned_concurrency"
-    # Monthly cost: 10 * 1.0 GB * 2592000 * 0.0000097222 = ~252.00
-    assert finding["monthly_cost"] > 200
+    # Monthly cost: 10 * 1.0 GB * 2592000 * 0.0000041667 = ~108.00
+    assert finding["monthly_cost"] > 100
     # Wasted: 80% of monthly cost
     assert abs(finding["wasted_monthly_cost"] - finding["monthly_cost"] * 0.80) < 0.01
 

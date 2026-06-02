@@ -46,10 +46,18 @@ def save_metrics(
     employees: int | None = None,
     custom_metrics: dict | None = None,
     notes: str | None = None,
+    cash_on_hand_usd: float | None = None,
+    last_raise_amount_usd: float | None = None,
+    last_raise_date: str | None = None,
+    monthly_opex_usd: float | None = None,
 ) -> dict:
     """
     Upsert business metrics for a given date.
     If a row already exists for that date, it is replaced.
+
+    Runway inputs (cash_on_hand_usd, last_raise_amount_usd, last_raise_date,
+    monthly_opex_usd) power compute_runway(). nable sees infra spend, not payroll,
+    so monthly_opex_usd is needed for true company runway.
     """
     from ..storage.db import business_metrics as bm_table, get_engine
     from sqlalchemy import select, delete
@@ -58,23 +66,56 @@ def save_metrics(
     now = datetime.now(timezone.utc)
 
     row = {
-        "metric_date":       metric_date,
-        "arr_usd":           arr_usd,
-        "mrr_usd":           mrr_usd,
-        "mau":               mau,
-        "dau":               dau,
-        "paying_customers":  paying_customers,
-        "api_calls_monthly": api_calls_monthly,
-        "employees":         employees,
-        "custom_metrics":    json.dumps(custom_metrics) if custom_metrics else None,
-        "notes":             notes,
-        "captured_at":       now,
+        "metric_date":           metric_date,
+        "arr_usd":               arr_usd,
+        "mrr_usd":               mrr_usd,
+        "mau":                   mau,
+        "dau":                   dau,
+        "paying_customers":      paying_customers,
+        "api_calls_monthly":     api_calls_monthly,
+        "employees":             employees,
+        "custom_metrics":        json.dumps(custom_metrics) if custom_metrics else None,
+        "notes":                 notes,
+        "cash_on_hand_usd":      cash_on_hand_usd,
+        "last_raise_amount_usd": last_raise_amount_usd,
+        "last_raise_date":       last_raise_date,
+        "monthly_opex_usd":      monthly_opex_usd,
+        "captured_at":           now,
     }
 
     with engine.begin() as conn:
-        # Delete existing row for this date (upsert behaviour)
-        conn.execute(delete(bm_table).where(bm_table.c.metric_date == metric_date))
-        conn.execute(bm_table.insert().values(**row))
+        # Merge-upsert: a user often sets revenue/customers in one call and the
+        # runway inputs (cash, opex) in a separate call on the same date. A plain
+        # delete-then-insert would clobber the first call. So we overlay only the
+        # fields explicitly provided this call (non-None) onto any existing row,
+        # preserving everything else. custom_metrics dicts are shallow-merged.
+        existing = conn.execute(
+            bm_table.select().where(bm_table.c.metric_date == metric_date)
+        ).fetchone()
+
+        if existing is not None:
+            merged = dict(existing._mapping)
+            merged.pop("id", None)
+            for key, value in row.items():
+                if key == "custom_metrics":
+                    if custom_metrics:
+                        prior = merged.get("custom_metrics")
+                        prior_dict = {}
+                        if prior:
+                            try:
+                                prior_dict = json.loads(prior)
+                            except Exception:
+                                prior_dict = {}
+                        prior_dict.update(custom_metrics)
+                        merged["custom_metrics"] = json.dumps(prior_dict)
+                    # if no new custom_metrics this call, keep the prior value
+                elif value is not None:
+                    merged[key] = value
+            merged["captured_at"] = now
+            conn.execute(delete(bm_table).where(bm_table.c.metric_date == metric_date))
+            conn.execute(bm_table.insert().values(**merged))
+        else:
+            conn.execute(bm_table.insert().values(**row))
 
     return {"saved": True, "metric_date": metric_date}
 
@@ -202,6 +243,89 @@ def compute_unit_economics(total_cost_usd: float, metrics: dict) -> dict:
             pass
 
     return result
+
+
+# ── Runway engine ─────────────────────────────────────────────────────────────
+
+def compute_runway(
+    cash_on_hand_usd: float | None,
+    infra_monthly_burn_usd: float,
+    monthly_opex_usd: float | None = None,
+    mrr_usd: float | None = None,
+) -> dict:
+    """
+    Compute runway from cash and burn.
+
+    nable sees infra + inference spend, not payroll. So:
+      - If monthly_opex_usd is supplied, we compute true COMPANY runway:
+        net burn = total opex - monthly revenue, runway = cash / net burn.
+      - If not, we compute INFRA runway: cash / infra spend. This is a ceiling,
+        not real runway (it ignores payroll), and is labelled as such so a
+        founder is never shown an infra-only number as if it were company runway.
+
+    Returns {"available": False, "reason": ...} when inputs are missing, and
+    guards burn == 0 (no ZeroDivisionError, returns months=None with a note).
+    """
+    if not cash_on_hand_usd or cash_on_hand_usd <= 0:
+        return {
+            "available": False,
+            "reason": "Set cash_on_hand_usd with set_business_metrics() to see runway.",
+        }
+
+    mrr = mrr_usd or 0.0
+
+    if monthly_opex_usd and monthly_opex_usd > 0:
+        net_burn = monthly_opex_usd - mrr
+        mode = "company"
+        burn_label = "total net burn (opex minus revenue)"
+        if net_burn <= 0:
+            return {
+                "available": True,
+                "mode": "company",
+                "months": None,
+                "cash_on_hand_usd": round(cash_on_hand_usd, 2),
+                "net_burn_usd": round(net_burn, 2),
+                "label": "Cash-flow positive: revenue covers total opex, no runway limit at current burn.",
+                "note": "Monthly revenue meets or exceeds total monthly opex.",
+            }
+        burn = net_burn
+    else:
+        mode = "infra"
+        burn_label = "infra + inference spend (excludes payroll)"
+        if infra_monthly_burn_usd <= 0:
+            return {
+                "available": False,
+                "reason": "No infra spend recorded yet, so infra runway cannot be computed.",
+            }
+        burn = infra_monthly_burn_usd
+
+    months = cash_on_hand_usd / burn
+
+    # Project the runway-out date. Use 30.44 days/month (365.25 / 12).
+    runway_end = date.today() + timedelta(days=int(round(months * 30.44)))
+
+    if mode == "company":
+        label = f"Company runway: {months:.1f} months at ${burn:,.0f}/mo net burn."
+        note = "True runway: cash divided by total opex minus revenue."
+    else:
+        label = (
+            f"Infra runway: {months:.1f} months if cash only had to cover "
+            f"infra + inference spend. Real runway is shorter once payroll is "
+            f"included. Set monthly_opex_usd for company runway."
+        )
+        note = "Infra-only ceiling, excludes payroll. Not true company runway."
+
+    return {
+        "available": True,
+        "mode": mode,
+        "months": round(months, 1),
+        "cash_on_hand_usd": round(cash_on_hand_usd, 2),
+        "monthly_burn_usd": round(burn, 2),
+        "burn_basis": burn_label,
+        "runway_end_date": runway_end.isoformat(),
+        "label": label,
+        "note": note,
+    }
 
 
 # ── "So what?" analyzer ───────────────────────────────────────────────────────

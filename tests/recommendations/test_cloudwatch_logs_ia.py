@@ -76,15 +76,15 @@ def _make_cw_mock(incoming_bytes_sum: float = 0.0) -> MagicMock:
 # ── unit tests: pricing constants ─────────────────────────────────────────────
 
 def test_standard_ingestion_cost():
-    assert STANDARD_INGESTION_COST_PER_GB == 0.075
+    assert STANDARD_INGESTION_COST_PER_GB == 0.50
 
 
 def test_ia_ingestion_cost():
-    assert IA_INGESTION_COST_PER_GB == 0.0375
+    assert IA_INGESTION_COST_PER_GB == 0.25
 
 
 def test_savings_per_gb():
-    assert abs(SAVINGS_PER_GB - 0.0375) < 1e-9
+    assert abs(SAVINGS_PER_GB - 0.25) < 1e-9
 
 
 # ── unit tests: group_age_days ─────────────────────────────────────────────────
@@ -198,9 +198,9 @@ def test_savings_math():
     expected_std = round(gb * STANDARD_INGESTION_COST_PER_GB, 4)
     expected_ia = round(gb * IA_INGESTION_COST_PER_GB, 4)
     expected_savings = round(gb * SAVINGS_PER_GB, 4)
-    assert abs(expected_std - 0.75) < 0.001
-    assert abs(expected_ia - 0.375) < 0.001
-    assert abs(expected_savings - 0.375) < 0.001
+    assert abs(expected_std - 5.0) < 0.001
+    assert abs(expected_ia - 2.5) < 0.001
+    assert abs(expected_savings - 2.5) < 0.001
 
 
 def test_by_region_populated():

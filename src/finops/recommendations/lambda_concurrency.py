@@ -1,7 +1,9 @@
 """
 Lambda provisioned concurrency waste scanner.
 
-Provisioned concurrency costs $0.0000097222/GB-second even when idle.
+Provisioned concurrency keep-warm costs $0.0000041667/GB-second even when idle
+(this is the PC allocation rate, not the $0.0000097222/GB-s duration rate that
+applies while a PC-enabled function is actually executing).
 This scanner flags functions where average utilization over the last 14 days
 is below a configurable threshold and calculates wasted monthly spend.
 """
@@ -13,7 +15,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-PROVISIONED_CONCURRENCY_PER_GB_SECOND: float = 0.0000097222
+PROVISIONED_CONCURRENCY_PER_GB_SECOND: float = 0.0000041667
 SECONDS_PER_MONTH: int = 30 * 24 * 3600
 
 _LOOKBACK_DAYS = 14
