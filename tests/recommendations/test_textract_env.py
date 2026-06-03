@@ -102,9 +102,11 @@ def test_signal_must_be_whole_token_not_substring():
     ]:
         is_np, signal = _is_nonprod_name(healthy)
         assert is_np is False, f"{healthy} should not be flagged (matched {signal!r})"
-    # Real non-prod, including camelCase, still matches.
+    # Real non-prod, including camelCase AND all-caps acronyms, still matches.
     assert _is_nonprod_name("qaHandler")[0] is True
     assert _is_nonprod_name("invoice-test")[0] is True
+    assert _is_nonprod_name("QA-doc-processor")[0] is True   # delimiter-separated acronym
+    assert _is_nonprod_name("UATPipeline")[0] is True         # acronym + CamelWord
 
 
 def test_is_nonprod_test():

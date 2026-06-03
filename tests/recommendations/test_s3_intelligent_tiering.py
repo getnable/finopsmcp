@@ -155,7 +155,10 @@ def test_small_object_bucket_flagged_as_likely_waste():
     assert finding["bucket_name"] == "tiny-objects-bucket"
     assert finding["it_enabled"] is True
     assert finding["avg_object_size_kb"] < IT_BREAKEVEN_SIZE_KB
-    assert finding["recommendation"] == "LIKELY_WASTE_switch_to_s3_standard_or_standard_ia"
+    # Monitoring ($2.50/mo on 1M objects) dwarfs the ~$0.11/mo storage savings,
+    # so the ROI verdict is waste.
+    assert finding["recommendation"] == "LIKELY_WASTE_monitoring_exceeds_savings"
+    assert finding["monitoring_pct_of_savings"] >= 100
     assert finding["monthly_monitoring_cost"] is not None
     assert finding["monthly_monitoring_cost"] > 0
 
@@ -185,7 +188,9 @@ def test_large_object_bucket_not_flagged_as_waste():
         result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
 
     assert len(result) == 1
-    assert result[0]["recommendation"] == "IT_beneficial_objects_large_enough_to_justify_monitoring"
+    # Tiny monitoring fee vs storage savings -> under the 8% threshold -> worth it.
+    assert result[0]["recommendation"] == "IT_beneficial_monitoring_under_8pct_of_savings"
+    assert result[0]["monitoring_pct_of_savings"] < result[0]["roi_threshold_pct"]
 
 
 # ── integration: no CloudWatch data returns unknown recommendation ─────────────
@@ -283,4 +288,41 @@ def test_it_bucket_size_read_from_intelligent_tiering_storage_not_falsely_flagge
     finding = result[0]
     # ~10 MB avg object: large, so NOT flagged as waste (the FP we fixed)
     assert finding["avg_object_size_kb"] is not None
-    assert finding["recommendation"] == "IT_beneficial_objects_large_enough_to_justify_monitoring"
+    assert finding["recommendation"] == "IT_beneficial_monitoring_under_8pct_of_savings"
+
+
+# ── regression: ROI framing classifies the marginal band ──────────────────────
+
+def test_roi_marginal_band_when_monitoring_is_large_share_of_savings():
+    """When the monitoring fee is between 8% and 100% of the storage savings,
+    Intelligent-Tiering is neither clearly worth it nor clearly waste: it should
+    be surfaced as MARGINAL with the ROI math attached so the user can decide."""
+    aws_client = _make_aws_client()
+
+    # Tune object count + size so monitoring_pct lands in the 8-100% band.
+    # 4,000,000 objects -> monitoring = 4000/1000... = $10.00/mo.
+    # Total 2 GB -> savings = 2 * 0.0105 = $0.021/mo would be tiny; we want the
+    # fee to be ~20-40% of savings, so pick a larger volume.
+    # 200,000 objects -> monitoring = $0.50/mo. 200 GB -> savings = $2.10/mo.
+    # 0.50 / 2.10 = 23.8% -> MARGINAL.
+    with patch("boto3.Session") as mock_cls:
+        session = MagicMock()
+        mock_cls.return_value = session
+        s3_client = MagicMock()
+        cw_client = MagicMock()
+        session.client.side_effect = lambda svc, **kw: s3_client if svc == "s3" else cw_client
+        s3_client.list_buckets.return_value = {"Buckets": [_make_bucket("marginal-bucket")]}
+        s3_client.list_bucket_intelligent_tiering_configurations.return_value = {
+            "IntelligentTieringConfigurationList": [{"Id": "default"}]
+        }
+        cw_client.get_metric_statistics.side_effect = [
+            {"Datapoints": [{"Average": 200_000}]},          # objects
+            {"Datapoints": [{"Average": 200 * 1024 ** 3}]},   # 200 GB
+        ]
+
+        result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
+
+    finding = result[0]
+    assert finding["recommendation"] == "MARGINAL_monitoring_is_a_large_share_of_savings"
+    assert finding["roi_threshold_pct"] <= finding["monitoring_pct_of_savings"] < 100
+    assert "marginal" in finding["roi_summary"].lower()
