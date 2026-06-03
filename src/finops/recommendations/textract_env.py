@@ -266,12 +266,17 @@ def _is_nonprod_name(name: str) -> tuple[bool, str]:
     Returns (is_nonprod, signal) where signal is the matched keyword.
     """
     import re
-    # Split on delimiters and camelCase boundaries, lowercase the tokens.
+    # Split on delimiters, then tokenize each part so acronym runs survive:
+    #   [A-Z]+(?![a-z]) -> all-caps acronym ("QA", "UAT", "DEV", "UAT" in "UATPipeline")
+    #   [A-Z][a-z]+     -> capitalized word ("Handler", "Pipeline")
+    #   [a-z]+          -> lowercase word ("qa", "staging", "latest")
+    #   [0-9]+          -> digits
+    # This keeps 'QA-doc' / 'UATPipeline' / 'qaHandler' matching while still NOT
+    # matching 'test' inside 'latest' or 'dev' inside 'developer'.
     parts = re.split(r"[-_./ ]+", name)
     tokens: list[str] = []
     for p in parts:
-        # break camelCase / digit boundaries: "qaHandler" -> ["qa","Handler"]
-        tokens.extend(re.findall(r"[A-Za-z][a-z]*|[0-9]+", p))
+        tokens.extend(re.findall(r"[A-Z]+(?![a-z])|[A-Z][a-z]+|[a-z]+|[0-9]+", p))
     token_set = {t.lower() for t in tokens}
     for signal in _NONPROD_NAME_SIGNALS:
         if signal in token_set:

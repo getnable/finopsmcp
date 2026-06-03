@@ -2,6 +2,45 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.40
+
+False-positive correctness pass: nine optimization engines were flagging healthy
+resources as waste. Each fix shipped with a regression test, and the full set was
+adversarially re-verified (FP removed, no new bug, no over-suppression of real waste).
+
+### Fixed
+- **S3 Intelligent-Tiering**: read bucket size across the IntelligentTiering* storage
+  classes, not StandardStorage alone. On a real IT bucket the bytes live under
+  `IntelligentTieringFAStorage`, so the old query read ~0 and flagged every IT bucket
+  as tiny-object waste.
+- **S3 bucket keys**: stop fabricating a 100,000 KMS-calls fallback. When bucket
+  metrics are absent, the bucket is still surfaced but savings are reported as
+  unknown (0.0) instead of an invented number.
+- **Textract environment**: match non-prod name signals (`qa`, `dev`, `test`, `uat`,
+  `staging`) on token boundaries, not raw substrings, so `latest-invoice-handler` and
+  `developer-portal` are no longer flagged. Acronym runs (`QA-doc-processor`,
+  `UATPipeline`) are preserved so real non-prod callers still match.
+- **Database Savings Plans**: size commitments off instance-hour usage only, excluding
+  storage, IOPS, and backup line items that a Database SP does not discount.
+- **NLB cross-zone**: single-AZ load balancers have no cross-AZ charge to remove;
+  multi-AZ recommendations now carry an availability caveat instead of a blind
+  "disable" action.
+- **Spot diversification**: attribute-based instance selection and the
+  `price-capacity-optimized` allocation strategy are no longer flagged as
+  under-diversified.
+- **Idle EC2**: skip instances with sustained network egress, and size vCPU from a
+  real instance-type map instead of a broken string parse.
+- **Rightsizing dedup**: collapse a resource flagged by both the heuristic and Compute
+  Optimizer into one recommendation so savings are not double-counted.
+- **EBS snapshot replication**: mark cross-region snapshot costs as an upper bound
+  (snapshots are incremental, so real storage is a fraction of the provisioned size).
+
+### Changed
+- **S3 Intelligent-Tiering** is now framed as an ROI decision: the recommendation
+  reports the monitoring fee as a percentage of the storage savings it unlocks. Under
+  8% it is worth keeping, 8-100% is marginal, at or above 100% it is waste, with the
+  math surfaced in `roi_summary`.
+
 ## 0.8.38
 
 Faster, clearer terminal experience and proactive trust checks.

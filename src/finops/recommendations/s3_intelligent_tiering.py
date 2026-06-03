@@ -18,6 +18,10 @@ log = logging.getLogger(__name__)
 
 IT_MONITORING_COST_PER_1K_OBJECTS: float = 0.0025
 IT_BREAKEVEN_SIZE_KB: float = 128.0
+# Intelligent-Tiering is worth its monitoring fee when that fee is a small slice
+# of the storage savings it unlocks. If monitoring costs <8% of the savings, keep
+# it; if it eats more, it is marginal; if it exceeds the savings, it is waste.
+IT_ROI_THRESHOLD_PCT: float = 8.0
 _LOOKBACK_DAYS = 30
 
 # CloudWatch Storage Lens metrics namespace
@@ -210,12 +214,37 @@ async def audit_s3_intelligent_tiering(
             else None
         )
 
-        if avg_size_kb is not None and avg_size_kb < IT_BREAKEVEN_SIZE_KB:
-            recommendation = "LIKELY_WASTE_switch_to_s3_standard_or_standard_ia"
-        elif avg_size_kb is None:
+        # ROI framing: is the monitoring fee a small slice of the savings it
+        # unlocks? monitoring_pct_of_savings = monitoring_cost / storage_savings.
+        # < 8%  -> clearly worth it. 8-100% -> marginal (review). >= 100% (or no
+        # savings) -> the fee meets/exceeds the benefit, IT is waste here.
+        monitoring_pct_of_savings: float | None = None
+        if monthly_monitoring_cost is None:
             recommendation = "UNKNOWN_enable_bucket_metrics_for_analysis"
+            roi_summary = "Enable S3 bucket-level metrics to assess Intelligent-Tiering ROI."
+        elif estimated_storage_savings <= 0:
+            recommendation = "LIKELY_WASTE_no_tiering_savings_to_justify_monitoring"
+            roi_summary = (
+                f"Monitoring costs ${monthly_monitoring_cost:.2f}/mo but tiering yields no "
+                f"estimated storage savings, so the fee is pure overhead. Consider S3 Standard / Standard-IA."
+            )
         else:
-            recommendation = "IT_beneficial_objects_large_enough_to_justify_monitoring"
+            monitoring_pct_of_savings = round(
+                monthly_monitoring_cost / estimated_storage_savings * 100, 1)
+            if monitoring_pct_of_savings < IT_ROI_THRESHOLD_PCT:
+                recommendation = "IT_beneficial_monitoring_under_8pct_of_savings"
+                verdict = "worth it"
+            elif monitoring_pct_of_savings < 100:
+                recommendation = "MARGINAL_monitoring_is_a_large_share_of_savings"
+                verdict = "marginal"
+            else:
+                recommendation = "LIKELY_WASTE_monitoring_exceeds_savings"
+                verdict = "not worth it"
+            roi_summary = (
+                f"Monitoring ${monthly_monitoring_cost:.2f}/mo is {monitoring_pct_of_savings}% of the "
+                f"~${estimated_storage_savings:.2f}/mo storage savings Intelligent-Tiering unlocks "
+                f"(upper bound). Under {IT_ROI_THRESHOLD_PCT:.0f}% is worth it: this is {verdict}."
+            )
 
         findings.append({
             "bucket_name": bucket_name,
@@ -224,8 +253,12 @@ async def audit_s3_intelligent_tiering(
             "object_count": object_count,
             "monthly_monitoring_cost": round(monthly_monitoring_cost, 4) if monthly_monitoring_cost is not None else None,
             "estimated_storage_savings": round(estimated_storage_savings, 4),
+            "estimated_storage_savings_is_upper_bound": True,
+            "monitoring_pct_of_savings": monitoring_pct_of_savings,
+            "roi_threshold_pct": IT_ROI_THRESHOLD_PCT,
             "net_monthly_cost": round(net_monthly_cost, 4) if net_monthly_cost is not None else None,
             "recommendation": recommendation,
+            "roi_summary": roi_summary,
         })
 
     # Sort by net_monthly_cost descending (None values last)
