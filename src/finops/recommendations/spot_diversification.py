@@ -57,6 +57,19 @@ def _extract_instance_types(policy: dict | None, launch_template: dict | None) -
     return []
 
 
+def _uses_attribute_based_selection(policy: dict | None) -> bool:
+    """
+    True if the ASG selects instances by attributes (InstanceRequirements) rather
+    than an explicit type list. Attribute-based selection (ABS) can span hundreds
+    of instance types, so it is inherently diversified and must NOT be scored as
+    0-types / HIGH_RISK (the false positive this guards against).
+    """
+    if not policy:
+        return False
+    overrides = policy.get("LaunchTemplate", {}).get("Overrides", [])
+    return any("InstanceRequirements" in o for o in overrides)
+
+
 def _extract_allocation_strategy(policy: dict | None) -> str:
     """Return the spot allocation strategy, or 'unknown' if not set."""
     if not policy:
@@ -113,10 +126,12 @@ def _make_recommendation(risk: str, type_count: int, strategy: str) -> str:
     else:
         parts.append(f"{type_count} instance types configured. Diversification looks healthy.")
 
-    if strategy not in {"capacity-optimized", "capacity-optimized-prioritized"}:
+    # price-capacity-optimized is AWS's current recommended default and is a
+    # healthy strategy; only nudge when none of the recommended strategies is set.
+    if strategy not in {"capacity-optimized", "capacity-optimized-prioritized", "price-capacity-optimized"}:
         parts.append(
-            "Consider switching to capacity-optimized allocation strategy "
-            "for better interruption resilience."
+            "Consider switching to price-capacity-optimized allocation strategy "
+            "for the best balance of cost and interruption resilience."
         )
 
     return " ".join(parts)
@@ -139,15 +154,31 @@ def _audit_asg(asg: dict, region: str) -> dict[str, Any] | None:
 
     instance_types = _extract_instance_types(policy, asg.get("LaunchTemplate"))
     strategy       = _extract_allocation_strategy(policy)
+    abs_selection  = _uses_attribute_based_selection(policy)
     type_count     = len(instance_types)
-    risk           = _classify_risk(type_count)
-    recommendation = _make_recommendation(risk, type_count, strategy)
+
+    if abs_selection:
+        # ABS spans many instance types by attributes: inherently diversified.
+        risk = _RISK_OK
+        recommendation = (
+            "Uses attribute-based instance selection, which spans many instance "
+            "types and is inherently diversified."
+        )
+        if strategy not in {"capacity-optimized", "capacity-optimized-prioritized", "price-capacity-optimized"}:
+            recommendation += (
+                " Consider price-capacity-optimized allocation for the best balance "
+                "of cost and interruption resilience."
+            )
+    else:
+        risk = _classify_risk(type_count)
+        recommendation = _make_recommendation(risk, type_count, strategy)
 
     return {
         "asg_name":             name,
         "region":               region,
         "instance_types_count": type_count,
         "instance_types":       instance_types,
+        "attribute_based_selection": abs_selection,
         "allocation_strategy":  strategy,
         "spot_pct":             round(spot_pct * 100, 1),
         "recommendation":       recommendation,

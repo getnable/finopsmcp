@@ -148,23 +148,41 @@ async def audit_nlb_cross_zone_costs(
             if not cross_zone:
                 continue
 
+            az_count = len(lb.get("AvailabilityZones", []))
+
             total_bytes = _get_processed_bytes(cw_client, nlb_arn, start_time, end_time)
             total_gb = total_bytes / (1024 ** 3)
             estimated_cross_az_cost = total_gb * CROSS_AZ_TRAFFIC_FRACTION * CROSS_AZ_COST_PER_GB
 
-            if estimated_cross_az_cost < _MIN_MONTHLY_COST_THRESHOLD:
+            # A single-AZ NLB has no cross-AZ traffic to charge for, so cross-zone
+            # is moot. Only flag multi-AZ NLBs above the cost threshold, and never
+            # assert a blind "disable": disabling cross-zone with unevenly
+            # distributed targets drops traffic to under-provisioned AZs. We can't
+            # confirm per-AZ target balance from describe_load_balancers, so the
+            # recommendation is "review", with the availability caveat attached.
+            caveat = None
+            if az_count < 2:
+                recommendation = "monitor_single_az_no_cross_zone_charges"
+            elif estimated_cross_az_cost < _MIN_MONTHLY_COST_THRESHOLD:
                 recommendation = "monitor_no_action_needed"
             else:
-                recommendation = "disable_cross_zone_lb_to_eliminate_cross_az_charges"
+                recommendation = "review_disabling_cross_zone"
+                caveat = ("Disabling cross-zone is only safe when targets are balanced "
+                          "across all enabled AZs. Verify per-AZ target counts first; "
+                          "disabling with uneven targets drops traffic to AZs that then "
+                          "have no local targets.")
 
             findings.append({
                 "nlb_name": nlb_name,
                 "nlb_arn": nlb_arn,
                 "region": region,
                 "cross_zone_enabled": True,
+                "enabled_az_count": az_count,
                 "monthly_processed_gb": round(total_gb, 2),
                 "estimated_cross_az_cost": round(estimated_cross_az_cost, 4),
+                "cost_is_estimate": True,
                 "recommendation": recommendation,
+                "availability_caveat": caveat,
                 "disable_command": _build_disable_command(nlb_arn),
             })
 
