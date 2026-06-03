@@ -250,3 +250,6 @@ finops setup claude    # re-run Claude Desktop configuration only
 ## Docs
 
 Full setup guide: [getnable.com/docs](https://getnable.com/docs)
+
+---
+<sub>mcp-name: io.github.chaandannn/finops-mcp</sub>
