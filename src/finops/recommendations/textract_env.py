@@ -256,13 +256,25 @@ def _get_cloudtrail_callers(ct, start, end) -> dict:
 
 def _is_nonprod_name(name: str) -> tuple[bool, str]:
     """
-    Check if a function/service name contains non-prod signals.
+    Check if a function/service name contains a non-prod signal as a whole token.
+
+    Matches on token boundaries, not raw substrings, so 'latest-invoice-handler'
+    does NOT match 'test', 'developer-api' does NOT match 'dev', and
+    'metadata-service' does NOT match 'uat'. A name is split on common delimiters
+    (-, _, ., /, space) and camelCase, then each token is compared exactly.
 
     Returns (is_nonprod, signal) where signal is the matched keyword.
     """
-    lower = name.lower()
+    import re
+    # Split on delimiters and camelCase boundaries, lowercase the tokens.
+    parts = re.split(r"[-_./ ]+", name)
+    tokens: list[str] = []
+    for p in parts:
+        # break camelCase / digit boundaries: "qaHandler" -> ["qa","Handler"]
+        tokens.extend(re.findall(r"[A-Za-z][a-z]*|[0-9]+", p))
+    token_set = {t.lower() for t in tokens}
     for signal in _NONPROD_NAME_SIGNALS:
-        if signal in lower:
+        if signal in token_set:
             return True, signal
     return False, ""
 

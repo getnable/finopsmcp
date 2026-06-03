@@ -25,7 +25,6 @@ _LOOKBACK_DAYS = 30
 # Estimated KMS calls per S3 PUT/GET when bucket key is disabled
 # Each PUT and each GET triggers a GenerateDataKey / Decrypt call respectively
 _ASSUMED_PUT_GET_RATIO = 0.5  # rough split — we count both as KMS calls
-_FALLBACK_MONTHLY_KMS_CALLS = 100_000  # conservative fallback when no CW data
 
 
 def _make_boto_session(aws_client: Any):
@@ -70,13 +69,16 @@ def _get_bucket_request_count(
         return None
 
 
-def _estimate_kms_calls(total_requests: int | None) -> int:
+def _estimate_kms_calls(total_requests: int | None) -> int | None:
     """
     Estimate monthly KMS API call count from S3 request volume.
     Each S3 request with SSE-KMS triggers one KMS call when bucket key is off.
+
+    Returns None when request volume is unknown. Bucket-level request metrics are
+    off by default, so most buckets have no data; fabricating a fallback count
+    invented a dollar figure on every KMS bucket. None is honest and the caller
+    reports the bucket without a fake savings number.
     """
-    if total_requests is None:
-        return _FALLBACK_MONTHLY_KMS_CALLS
     return total_requests
 
 
@@ -173,20 +175,30 @@ async def scan_s3_bucket_key_opportunities(aws_client: Any) -> list[dict]:
             )
             estimated_monthly_kms_calls = _estimate_kms_calls(total_requests)
 
-            # Cost: $0.03 per 10,000 requests
-            estimated_monthly_kms_cost = (
-                estimated_monthly_kms_calls / 10_000
-            ) * KMS_COST_PER_10K_REQUESTS
-
-            estimated_savings = estimated_monthly_kms_cost * BUCKET_KEY_REDUCTION_FACTOR
+            if estimated_monthly_kms_calls is None:
+                # No request metrics. Enabling a bucket key is still a low-risk
+                # best practice, but do NOT invent a dollar figure.
+                estimated_monthly_kms_cost = None
+                estimated_savings = 0.0
+                note = ("S3 request metrics not enabled, so savings cannot be "
+                        "quantified. Enabling a bucket key is a low-risk best "
+                        "practice; turn on bucket-level request metrics to estimate.")
+            else:
+                # Cost: $0.03 per 10,000 requests
+                estimated_monthly_kms_cost = round(
+                    (estimated_monthly_kms_calls / 10_000) * KMS_COST_PER_10K_REQUESTS, 4)
+                estimated_savings = round(
+                    estimated_monthly_kms_cost * BUCKET_KEY_REDUCTION_FACTOR, 4)
+                note = None
 
             findings.append({
                 "bucket_name": bucket_name,
                 "kms_key_id": kms_key_id,
                 "bucket_key_enabled": False,
                 "estimated_monthly_kms_calls": estimated_monthly_kms_calls,
-                "estimated_monthly_kms_cost": round(estimated_monthly_kms_cost, 4),
-                "estimated_savings": round(estimated_savings, 4),
+                "estimated_monthly_kms_cost": estimated_monthly_kms_cost,
+                "estimated_savings": estimated_savings,
+                "note": note,
                 "fix_command": _build_fix_command(bucket_name, kms_key_id),
             })
             break  # one finding per bucket is enough

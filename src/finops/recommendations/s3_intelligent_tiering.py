@@ -58,32 +58,59 @@ def _get_bucket_storage_stats(
     object_count: int | None = None
     total_size_bytes: float | None = None
 
-    for metric, storage_type in [
-        ("NumberOfObjects", "AllStorageTypes"),
-        ("BucketSizeBytes", "StandardStorage"),
-    ]:
+    def _latest(resp) -> float | None:
+        dps = resp.get("Datapoints", [])
+        if not dps:
+            return None
+        return max(dps, key=lambda d: d.get("Timestamp") or 0)["Average"]
+
+    def _query(metric: str, storage_type: str):
+        return cw_client.get_metric_statistics(
+            Namespace="AWS/S3",
+            MetricName=metric,
+            Dimensions=[
+                {"Name": "BucketName", "Value": bucket_name},
+                {"Name": "StorageType", "Value": storage_type},
+            ],
+            StartTime=start,
+            EndTime=end,
+            Period=period,
+            Statistics=["Average"],
+        )
+
+    # Object count: AllStorageTypes covers every class in one query.
+    try:
+        v = _latest(_query("NumberOfObjects", "AllStorageTypes"))
+        if v is not None:
+            object_count = int(v)
+    except Exception as exc:
+        log.debug("CW NumberOfObjects failed for %s: %s", bucket_name, exc)
+
+    # Size: BucketSizeBytes has NO AllStorageTypes aggregate, so it must be summed
+    # per storage class. On an Intelligent-Tiering bucket the bytes live under the
+    # IntelligentTiering* classes, not StandardStorage. Querying StandardStorage
+    # alone read ~0 and made avg-object-size tiny, which falsely flagged EVERY
+    # IT bucket as waste. Sum the classes an IT bucket actually uses.
+    _SIZE_STORAGE_TYPES = [
+        "StandardStorage",
+        "IntelligentTieringFAStorage",   # frequent access
+        "IntelligentTieringIAStorage",   # infrequent access
+        "IntelligentTieringAAStorage",   # archive instant access
+        "IntelligentTieringAIAStorage",  # archive access
+        "IntelligentTieringDAAStorage",  # deep archive access
+    ]
+    size_sum = 0.0
+    found_size = False
+    for st in _SIZE_STORAGE_TYPES:
         try:
-            resp = cw_client.get_metric_statistics(
-                Namespace="AWS/S3",
-                MetricName=metric,
-                Dimensions=[
-                    {"Name": "BucketName", "Value": bucket_name},
-                    {"Name": "StorageType", "Value": storage_type},
-                ],
-                StartTime=start,
-                EndTime=end,
-                Period=period,
-                Statistics=["Average"],
-            )
-            datapoints = resp.get("Datapoints", [])
-            if datapoints:
-                value = datapoints[-1]["Average"]
-                if metric == "NumberOfObjects":
-                    object_count = int(value)
-                else:
-                    total_size_bytes = value
+            v = _latest(_query("BucketSizeBytes", st))
+            if v is not None:
+                size_sum += v
+                found_size = True
         except Exception as exc:
-            log.debug("CW metric %s failed for %s: %s", metric, bucket_name, exc)
+            log.debug("CW BucketSizeBytes[%s] failed for %s: %s", st, bucket_name, exc)
+    if found_size:
+        total_size_bytes = size_sum
 
     return object_count, total_size_bytes
 

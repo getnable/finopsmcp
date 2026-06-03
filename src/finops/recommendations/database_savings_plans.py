@@ -44,20 +44,32 @@ def _date_range_30d() -> tuple[str, str]:
 
 
 def _get_rds_spend(ce_client: Any, start: str, end: str) -> float:
-    """Total RDS + Aurora spend over the window."""
+    """
+    RDS + Aurora COMPUTE (instance-hours) spend over the window.
+
+    Database Savings Plans only discount instance running hours. They do NOT
+    cover storage, provisioned IOPS, backups, snapshots, or data transfer.
+    Summing total RDS spend oversizes the recommended commitment, so we group
+    by usage type and keep only the instance-usage line items.
+    """
     try:
         resp = ce_client.get_cost_and_usage(
             TimePeriod={"Start": start, "End": end},
             Granularity="MONTHLY",
             Filter={"Dimensions": {"Key": "SERVICE", "Values": _RDS_SERVICES}},
             Metrics=["UnblendedCost"],
+            GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
         )
-        return sum(
-            float(p["Total"]["UnblendedCost"]["Amount"])
-            for p in resp.get("ResultsByTime", [])
-        )
+        total = 0.0
+        for period in resp.get("ResultsByTime", []):
+            for grp in period.get("Groups", []):
+                ut = (grp.get("Keys", [""])[0] or "").lower()
+                # Instance hours: "...-InstanceUsage:db.r5.large", "...-Multi-AZUsage:db..."
+                if "instanceusage" in ut or "multi-azusage" in ut:
+                    total += float(grp["Metrics"]["UnblendedCost"]["Amount"])
+        return total
     except Exception as e:
-        log.warning("RDS spend fetch failed: %s", e)
+        log.warning("RDS compute spend fetch failed: %s", e)
         return 0.0
 
 
