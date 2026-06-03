@@ -1192,7 +1192,22 @@ def main(args: list[str] | None = None) -> None:
     infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
 
-    serve_p = sub.add_parser("serve", help="Start a local web dashboard your whole team can view in a browser")
+    serve_p = sub.add_parser(
+        "serve",
+        help="Start a local web dashboard your whole team can view in a browser",
+        description=(
+            "Start the team dashboard. On an always-on host this also runs the "
+            "finance interfaces non-engineers consume:\n"
+            "  - Scheduler (pushed snapshots, anomaly alerts, daily + weekly digests) "
+            "when FINOPS_ENABLE_SCHEDULER=1.\n"
+            "  - Slack bot (two-way cost Q&A) when SLACK_BOT_TOKEN and SLACK_APP_TOKEN "
+            "are both set.\n"
+            "Both stay off on a plain laptop run. The dashboard requires a password by "
+            "default (auto-generated and printed once; set FINOPS_DASHBOARD_PASSWORD to "
+            "pin one, or =off to disable). See DEPLOY.md."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     serve_p.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     serve_p.add_argument("--host", default="0.0.0.0", help="Host to bind (default: 0.0.0.0 for network access)")
     serve_p.add_argument("--open", action="store_true", help="Open browser on start")

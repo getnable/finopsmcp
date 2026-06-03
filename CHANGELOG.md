@@ -2,6 +2,22 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.42
+
+DX polish on the team-host deploy, found in review.
+
+### Changed
+- `finops serve --help` now discloses that the command also hosts the scheduler
+  and the Slack bot, when each turns on, and how dashboard auth works. The help
+  text used to describe only the dashboard, so an operator did not know `serve`
+  was the finance host.
+
+### Fixed
+- The startup banner no longer reports `Slack bot: ON` when `slack_bolt` is not
+  installed. `slack_bolt` imports lazily inside the bot thread, so a missing
+  dependency failed in-thread after the banner already claimed ON. The banner
+  now prechecks the dependency and reports `OFF` with the reason.
+
 ## 0.8.41
 
 Give non-engineers access without an install. The engineer sets nable up; finance

@@ -2378,6 +2378,13 @@ def _start_finance_services() -> list[str]:
 
     if os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APP_TOKEN"):
         try:
+            # slack_bolt is imported lazily inside slack_bot.app.main(), which runs
+            # in the daemon thread below. Without this precheck a missing dependency
+            # would only fail in-thread, after the banner already claimed ON. Check
+            # up front so the status line tells the truth.
+            import importlib.util
+            if importlib.util.find_spec("slack_bolt") is None:
+                raise RuntimeError("slack_bolt not installed (pip install finops-mcp[slack])")
             from .slack_bot.app import main as _slack_main
             threading.Thread(target=_slack_main, name="nable-slack-bot", daemon=True).start()
             status.append("Slack bot:  ON  (finance asks in Slack, no install needed)")
