@@ -318,25 +318,68 @@ def _severity_from_savings_co(monthly_savings: float) -> str:
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
 
+# Waste types that all describe the SAME underlying action on one resource:
+# "this compute is over-provisioned / idle, right-size or stop it". A heuristic
+# CPU check and Compute Optimizer can both flag the same instance with different
+# waste_type strings; collapsing them to one resource-level key stops the same
+# instance's savings being counted twice in the audit total.
+_RIGHTSIZING_FAMILY: dict[str, str] = {
+    "idle_ec2_low_cpu": "ec2-rightsize",
+    "compute_optimizer_overprovisioned_ec2": "ec2-rightsize",
+    "idle_rds": "rds-rightsize",
+    "compute_optimizer_overprovisioned_rds": "rds-rightsize",
+    "compute_optimizer_overprovisioned_lambda": "lambda-rightsize",
+    "lambda_over_provisioned_memory": "lambda-rightsize",
+}
+
+
 def _dedup_findings(findings: list[dict]) -> list[dict]:
     """
-    Deduplicate findings by (resource_id, waste_type) — same resource can be
-    flagged by both our checks and Compute Optimizer. Keep the entry with the
-    higher estimated_monthly_savings.
+    Deduplicate findings so a resource is never counted twice.
+
+    Two levels:
+      1. Exact dup: same (resource_id, waste_type) -> keep higher savings.
+      2. Same-resource cross-source dup: when one resource is flagged by both a
+         heuristic and Compute Optimizer for the same intent (e.g. idle_ec2_low_cpu
+         AND compute_optimizer_overprovisioned_ec2), collapse to ONE finding,
+         preferring the Compute Optimizer source (it weighs CPU + memory + network
+         + disk), else the higher-savings one. Without this the audit total was
+         inflated by double-counting the same instance.
     """
-    seen: dict[str, dict] = {}
+    # Level 1: exact (resource_id, waste_type)
+    by_exact: dict[str, dict] = {}
     for finding in findings:
         key = hashlib.sha256(
             f"{finding.get('resource_id','')}{finding.get('waste_type','')}".encode()
         ).hexdigest()[:16]
-        existing = seen.get(key)
-        if existing is None:
-            seen[key] = finding
+        existing = by_exact.get(key)
+        if existing is None or finding.get("estimated_monthly_savings", 0) > existing.get("estimated_monthly_savings", 0):
+            by_exact[key] = finding
+
+    # Level 2: collapse rightsizing-family findings per resource
+    family_winner: dict[str, dict] = {}
+    result: list[dict] = []
+    for finding in by_exact.values():
+        family = _RIGHTSIZING_FAMILY.get(finding.get("waste_type", ""))
+        if family is None:
+            result.append(finding)
+            continue
+        fam_key = f"{finding.get('resource_id','')}|{family}"
+        current = family_winner.get(fam_key)
+        if current is None:
+            family_winner[fam_key] = finding
         else:
-            # Keep the one with higher savings
-            if finding.get("estimated_monthly_savings", 0) > existing.get("estimated_monthly_savings", 0):
-                seen[key] = finding
-    return list(seen.values())
+            # Prefer Compute Optimizer; otherwise the higher-savings finding.
+            cur_co = current.get("source") == "compute_optimizer"
+            new_co = finding.get("source") == "compute_optimizer"
+            if (new_co and not cur_co) or (
+                new_co == cur_co
+                and finding.get("estimated_monthly_savings", 0) > current.get("estimated_monthly_savings", 0)
+            ):
+                family_winner[fam_key] = finding
+
+    result.extend(family_winner.values())
+    return result
 
 
 # ── Main orchestrator ─────────────────────────────────────────────────────────

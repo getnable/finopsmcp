@@ -31,7 +31,11 @@ _DEFAULT_REGIONS = ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"]
 
 
 def _snapshot_monthly_cost(size_gb: float, num_regions: int) -> float:
-    """Total monthly cost across all regions the snapshot lives in."""
+    """Upper-bound monthly cost across all regions the snapshot lives in.
+
+    Uses the full provisioned volume size. Snapshots are incremental, so real
+    storage is typically a fraction of this; treat the result as a ceiling.
+    """
     return round(size_gb * _SNAPSHOT_STORAGE_COST_PER_GB * num_regions, 4)
 
 
@@ -190,6 +194,11 @@ def _build_cross_region_findings(
             "copy_regions": copy_regions,
             "total_size_gb": total_size_gb,
             "total_monthly_cost": total_monthly_cost,
+            # Cost uses the full provisioned VolumeSize. EBS snapshots are
+            # incremental (you pay for changed blocks, often a fraction of the
+            # volume), so this is an UPPER BOUND, not the exact bill. It is the
+            # ceiling on what deleting the extra copies could save.
+            "cost_is_upper_bound": True,
             "excess_copies": excess_copies,
             "orphaned": orphaned,
             "has_old_copies": has_old_copies,
