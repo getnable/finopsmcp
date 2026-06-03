@@ -2343,6 +2343,53 @@ def start_server_background(host: str = "0.0.0.0", port: int = 8080) -> tuple[HT
     return server, actual_port
 
 
+def _start_finance_services() -> list[str]:
+    """Start the always-on finance interfaces alongside the dashboard.
+
+    This is what turns `finops serve` (and the Docker deploy that runs it) into a
+    team finance host: non-engineers never install anything, they consume nable
+    through the Slack bot and scheduled digests started here.
+
+    Two services, each gated so a solo laptop dashboard stays quiet:
+      - Scheduler (snapshots, anomaly alerts, daily + weekly digests). Opt-in via
+        FINOPS_ENABLE_SCHEDULER=1 so it does not double-send against a separately
+        running MCP server on the same machine. The Docker deploy sets it.
+      - Slack bot (two-way cost Q&A). Auto-starts when SLACK_BOT_TOKEN and
+        SLACK_APP_TOKEN are both present, since that is itself an explicit signal.
+
+    Returns human-readable status lines for the startup banner. Never raises: a
+    failed service degrades to an OFF line so the dashboard still serves.
+    """
+    status: list[str] = []
+
+    def _truthy(v: str | None) -> bool:
+        return (v or "").strip().lower() in ("1", "true", "yes", "on")
+
+    if _truthy(os.getenv("FINOPS_ENABLE_SCHEDULER")):
+        try:
+            from .scheduler.jobs import start_scheduler
+            start_scheduler()
+            status.append("Scheduler:  ON  (snapshots, anomaly alerts, daily + weekly digests)")
+        except Exception as exc:  # noqa: BLE001 - never block the dashboard
+            log.warning("Scheduler did not start: %s", exc)
+            status.append(f"Scheduler:  OFF ({exc})")
+    else:
+        status.append("Scheduler:  off (set FINOPS_ENABLE_SCHEDULER=1 to push digests + alerts)")
+
+    if os.getenv("SLACK_BOT_TOKEN") and os.getenv("SLACK_APP_TOKEN"):
+        try:
+            from .slack_bot.app import main as _slack_main
+            threading.Thread(target=_slack_main, name="nable-slack-bot", daemon=True).start()
+            status.append("Slack bot:  ON  (finance asks in Slack, no install needed)")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Slack bot did not start: %s", exc)
+            status.append(f"Slack bot:  OFF ({exc})")
+    else:
+        status.append("Slack bot:  off (set SLACK_BOT_TOKEN + SLACK_APP_TOKEN to enable)")
+
+    return status
+
+
 def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = False) -> None:
     """Run the dashboard server in the foreground (blocking)."""
     server = _make_server(host, port)
@@ -2373,7 +2420,13 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = Fal
         print(f"    Password: {masked}  (set via FINOPS_DASHBOARD_PASSWORD)")
         print(f"\n  To disable auth: FINOPS_DASHBOARD_PASSWORD=off finops serve")
     print(f"\n  Integrations: /tableau  /powerbi  /odata")
-    print("  Press Ctrl+C to stop.\n")
+
+    finance_status = _start_finance_services()
+    print("\n  Finance interfaces (non-engineers consume nable here):")
+    for line in finance_status:
+        print(f"    {line}")
+
+    print("\n  Press Ctrl+C to stop.\n")
 
     if open_browser:
         import webbrowser
