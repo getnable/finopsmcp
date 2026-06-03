@@ -2,6 +2,25 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.41
+
+Give non-engineers access without an install. The engineer sets nable up; finance
+consumes it through Slack, email, and the dashboard, and credentials stay inside
+your own infrastructure.
+
+### Added
+- `finops serve` is now an always-on team host. It starts the scheduler (pushed
+  snapshots, anomaly alerts, daily and weekly digests) when
+  `FINOPS_ENABLE_SCHEDULER=1`, and the Slack bot (two-way cost Q&A) when
+  `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are set. A startup banner shows which
+  finance interfaces are live. A failed service degrades to OFF; the dashboard
+  still serves.
+- `DEPLOY.md`: a one-command team deploy guide (`docker compose up -d`).
+
+### Changed
+- `docker-compose.yml` and `.env.example` now pass the Slack, scheduler, and SMTP
+  settings, so the existing compose file is the finance deploy.
+
 ## 0.8.40
 
 False-positive correctness pass: nine optimization engines were flagging healthy

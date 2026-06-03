@@ -19,6 +19,22 @@ services:
       # Team mode with shared Postgres (set FINOPS_DATABASE_URL to enable)
       FINOPS_DATABASE_URL: "${FINOPS_DATABASE_URL:-}"
       FINOPS_REQUIRE_AUTH: "${FINOPS_REQUIRE_AUTH:-0}"
+      # --- Finance interfaces (so non-engineers consume nable without installing) ---
+      # Scheduler pushes snapshots, anomaly alerts, and daily/weekly digests.
+      # On by default in the deploy: this is the always-on host, not a laptop.
+      FINOPS_ENABLE_SCHEDULER: "${FINOPS_ENABLE_SCHEDULER:-1}"
+      # Slack bot: finance asks cost questions in Slack. Both tokens required.
+      SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN:-}"            # xoxb-... (OAuth & Permissions)
+      SLACK_APP_TOKEN: "${SLACK_APP_TOKEN:-}"            # xapp-... (App-Level Tokens, Socket Mode)
+      SLACK_ALERT_CHANNEL: "${SLACK_ALERT_CHANNEL:-}"    # e.g. #finops-alerts
+      SLACK_REPORT_CHANNEL: "${SLACK_REPORT_CHANNEL:-}"  # e.g. #finops-reports
+      # Email digests (SMTP). Recipients set in the dashboard or via the
+      # subscribe_to_report tool in Claude.
+      FINOPS_SMTP_HOST: "${FINOPS_SMTP_HOST:-}"
+      FINOPS_SMTP_PORT: "${FINOPS_SMTP_PORT:-587}"
+      FINOPS_SMTP_USER: "${FINOPS_SMTP_USER:-}"
+      FINOPS_SMTP_PASSWORD: "${FINOPS_SMTP_PASSWORD:-}"
+      FINOPS_SMTP_FROM: "${FINOPS_SMTP_FROM:-}"
       # AWS credentials (or mount ~/.aws as a read-only volume below)
       AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
       AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"

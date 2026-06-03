@@ -316,3 +316,72 @@ def test_local_ip_returns_string():
     assert isinstance(ip, str)
     parts = ip.split(".")
     assert len(parts) == 4
+
+
+# ── Tests: finance services (scheduler + Slack bot) gating ────────────────────
+
+def test_finance_services_off_by_default(monkeypatch):
+    """With no env set, neither the scheduler nor the Slack bot starts, and the
+    status lines say so. A solo `finops serve` must stay a quiet dashboard."""
+    for var in ("FINOPS_ENABLE_SCHEDULER", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+
+    with patch("finops.scheduler.jobs.start_scheduler") as start_sched, \
+         patch("finops.slack_bot.app.main") as slack_main:
+        from finops.server_web import _start_finance_services
+        status = _start_finance_services()
+
+    start_sched.assert_not_called()
+    slack_main.assert_not_called()
+    joined = " ".join(status).lower()
+    assert "scheduler:  off" in joined
+    assert "slack bot:  off" in joined
+
+
+def test_finance_services_scheduler_opt_in(monkeypatch):
+    """FINOPS_ENABLE_SCHEDULER=1 starts the digest/alert scheduler."""
+    monkeypatch.setenv("FINOPS_ENABLE_SCHEDULER", "1")
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("SLACK_APP_TOKEN", raising=False)
+
+    with patch("finops.scheduler.jobs.start_scheduler") as start_sched:
+        from finops.server_web import _start_finance_services
+        status = _start_finance_services()
+
+    start_sched.assert_called_once()
+    assert any("scheduler:  on" in s.lower() for s in status)
+
+
+def test_finance_services_slack_starts_only_with_both_tokens(monkeypatch):
+    """The Slack bot needs both tokens. One alone must not launch the thread."""
+    monkeypatch.delenv("FINOPS_ENABLE_SCHEDULER", raising=False)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.delenv("SLACK_APP_TOKEN", raising=False)
+
+    with patch("threading.Thread") as thread_cls:
+        from finops.server_web import _start_finance_services
+        status = _start_finance_services()
+    thread_cls.assert_not_called()
+    assert any("slack bot:  off" in s.lower() for s in status)
+
+    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-test")
+    with patch("threading.Thread") as thread_cls:
+        from finops.server_web import _start_finance_services
+        status = _start_finance_services()
+    thread_cls.assert_called_once()
+    started = thread_cls.return_value
+    started.start.assert_called_once()
+    assert any("slack bot:  on" in s.lower() for s in status)
+
+
+def test_finance_services_never_raises_when_scheduler_broken(monkeypatch):
+    """A broken scheduler degrades to an OFF line; the dashboard must still serve."""
+    monkeypatch.setenv("FINOPS_ENABLE_SCHEDULER", "1")
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("SLACK_APP_TOKEN", raising=False)
+
+    with patch("finops.scheduler.jobs.start_scheduler", side_effect=RuntimeError("boom")):
+        from finops.server_web import _start_finance_services
+        status = _start_finance_services()  # must not raise
+
+    assert any("scheduler:  off" in s.lower() for s in status)
