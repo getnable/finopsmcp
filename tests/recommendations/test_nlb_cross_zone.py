@@ -28,11 +28,12 @@ def _make_aws_client():
     return client
 
 
-def _make_nlb(name: str, arn: str, lb_type: str = "network") -> dict:
+def _make_nlb(name: str, arn: str, lb_type: str = "network", az_count: int = 2) -> dict:
     return {
         "LoadBalancerName": name,
         "LoadBalancerArn": arn,
         "Type": lb_type,
+        "AvailabilityZones": [{"ZoneName": f"us-east-1{c}"} for c in "abcd"[:az_count]],
     }
 
 
@@ -165,7 +166,9 @@ def test_high_traffic_nlb_flagged():
     assert finding["nlb_name"] == "big-nlb"
     assert finding["cross_zone_enabled"] is True
     assert finding["estimated_cross_az_cost"] > _MIN_MONTHLY_COST_THRESHOLD
-    assert finding["recommendation"] == "disable_cross_zone_lb_to_eliminate_cross_az_charges"
+    assert finding["recommendation"] == "review_disabling_cross_zone"
+    assert finding["availability_caveat"] is not None
+    assert finding["enabled_az_count"] == 2
     assert nlb_arn in finding["disable_command"]
 
 

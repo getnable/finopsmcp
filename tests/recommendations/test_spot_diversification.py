@@ -13,8 +13,44 @@ from finops.recommendations.spot_diversification import (
     _extract_spot_pct,
     _make_recommendation,
     _scan_region,
+    _uses_attribute_based_selection,
     audit_spot_diversification,
 )
+
+
+def test_abs_asg_not_flagged_high_risk():
+    """Regression: an ASG using attribute-based instance selection
+    (InstanceRequirements, no explicit type list) must NOT be scored as
+    0-types/HIGH_RISK. ABS spans many types and is inherently diversified."""
+    asg = {
+        "AutoScalingGroupName": "abs-asg",
+        "DesiredCapacity": 10,
+        "MixedInstancesPolicy": {
+            "LaunchTemplate": {
+                "Overrides": [
+                    {"InstanceRequirements": {"VCpuCount": {"Min": 2, "Max": 8},
+                                              "MemoryMiB": {"Min": 4096}}}
+                ]
+            },
+            "InstancesDistribution": {
+                "OnDemandBaseCapacity": 0,
+                "OnDemandPercentageAboveBaseCapacity": 0,
+                "SpotAllocationStrategy": "price-capacity-optimized",
+            },
+        },
+    }
+    assert _uses_attribute_based_selection(asg["MixedInstancesPolicy"]) is True
+    rec = _audit_asg(asg, "us-east-1")
+    assert rec is not None
+    assert rec["risk_level"] != "HIGH_RISK"
+    assert rec["attribute_based_selection"] is True
+
+
+def test_price_capacity_optimized_not_nudged():
+    # price-capacity-optimized is a healthy strategy; the recommendation must not
+    # tell the user to switch away from it.
+    rec = _make_recommendation("OK", 6, "price-capacity-optimized")
+    assert "switching" not in rec.lower()
 
 
 # ── _classify_risk ────────────────────────────────────────────────────────────
