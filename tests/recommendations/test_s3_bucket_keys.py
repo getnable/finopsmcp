@@ -10,7 +10,6 @@ import pytest
 from finops.recommendations.s3_bucket_keys import (
     BUCKET_KEY_REDUCTION_FACTOR,
     KMS_COST_PER_10K_REQUESTS,
-    _FALLBACK_MONTHLY_KMS_CALLS,
     _build_fix_command,
     _estimate_kms_calls,
     scan_s3_bucket_key_opportunities,
@@ -51,9 +50,9 @@ def _aes_enc_rule():
 
 # ── unit tests: cost math ─────────────────────────────────────────────────────
 
-def test_cost_at_fallback_call_volume():
-    """Verify cost calculation with the fallback call count."""
-    calls = _FALLBACK_MONTHLY_KMS_CALLS  # 100,000
+def test_cost_math_at_100k_calls():
+    """Verify cost math at a known call volume (100,000 requests)."""
+    calls = 100_000
     expected_cost = (calls / 10_000) * KMS_COST_PER_10K_REQUESTS  # $0.30
     expected_savings = expected_cost * BUCKET_KEY_REDUCTION_FACTOR
     assert abs(expected_cost - 0.30) < 0.001
@@ -69,8 +68,10 @@ def test_cost_at_high_call_volume():
     assert abs(savings - 2.97) < 0.001
 
 
-def test_estimate_kms_calls_with_none_returns_fallback():
-    assert _estimate_kms_calls(None) == _FALLBACK_MONTHLY_KMS_CALLS
+def test_estimate_kms_calls_with_none_returns_none():
+    # No request metrics must NOT fabricate a count (that invented savings on
+    # every KMS bucket). It returns None and the caller reports zero savings.
+    assert _estimate_kms_calls(None) is None
 
 
 def test_estimate_kms_calls_with_data():
@@ -199,8 +200,11 @@ def test_flags_kms_bucket_without_bucket_key():
     assert finding["bucket_name"] == "needs-bucket-key"
     assert finding["kms_key_id"] == key_id
     assert finding["bucket_key_enabled"] is False
-    assert finding["estimated_monthly_kms_calls"] == _FALLBACK_MONTHLY_KMS_CALLS
-    assert finding["estimated_savings"] > 0
+    # No request metrics in this mock: surface the bucket (bucket keys are a
+    # low-risk best practice) but with no fabricated savings.
+    assert finding["estimated_monthly_kms_calls"] is None
+    assert finding["estimated_savings"] == 0.0
+    assert finding["note"] is not None
     assert "needs-bucket-key" in finding["fix_command"]
     assert "BucketKeyEnabled" in finding["fix_command"]
 

@@ -91,6 +91,22 @@ def test_is_prod_not_flagged():
     assert signal == ""
 
 
+def test_signal_must_be_whole_token_not_substring():
+    # Regression: signals like 'test'/'dev'/'uat' were matched as raw substrings,
+    # falsely flagging healthy prod functions. They must match on token boundaries.
+    for healthy in [
+        "latest-invoice-handler",   # 'latest' contains 'test'
+        "developer-portal-api",     # 'developer' contains 'dev'
+        "metadata-service",         # 'metadata' contains 'uat'? no, but 'data'... ensure no false signal
+        "evaluate-documents",       # 'evaluate' contains no whole signal
+    ]:
+        is_np, signal = _is_nonprod_name(healthy)
+        assert is_np is False, f"{healthy} should not be flagged (matched {signal!r})"
+    # Real non-prod, including camelCase, still matches.
+    assert _is_nonprod_name("qaHandler")[0] is True
+    assert _is_nonprod_name("invoice-test")[0] is True
+
+
 def test_is_nonprod_test():
     is_np, signal = _is_nonprod_name("test-pipeline-textract")
     assert is_np is True

@@ -244,3 +244,43 @@ def test_net_cost_negative_means_it_is_saving_money():
     # net = monitoring_cost - savings; should be negative (IT is beneficial)
     assert finding["net_monthly_cost"] is not None
     assert finding["net_monthly_cost"] < 0
+
+
+# ── regression: IT bucket bytes live under IntelligentTiering* storage types ──
+
+def test_it_bucket_size_read_from_intelligent_tiering_storage_not_falsely_flagged():
+    """On a real IT bucket, BucketSizeBytes has ~0 under StandardStorage; the bytes
+    live under IntelligentTieringFAStorage. The old code queried StandardStorage
+    only, read ~0, and falsely flagged EVERY IT bucket as tiny-object waste.
+    Now the size is summed across IT classes, so a large-object bucket is not flagged."""
+    aws_client = _make_aws_client()
+
+    def _cw(**kwargs):
+        metric = kwargs.get("MetricName")
+        st = next((d["Value"] for d in kwargs.get("Dimensions", [])
+                   if d["Name"] == "StorageType"), None)
+        if metric == "NumberOfObjects":
+            return {"Datapoints": [{"Average": 1000}]}          # 1000 objects
+        if metric == "BucketSizeBytes" and st == "IntelligentTieringFAStorage":
+            return {"Datapoints": [{"Average": 10 * 1024 ** 3}]}  # 10 GB -> 10 MB/obj
+        return {"Datapoints": []}  # StandardStorage etc: empty, like a real IT bucket
+
+    with patch("boto3.Session") as mock_cls:
+        session = MagicMock()
+        mock_cls.return_value = session
+        s3_client = MagicMock()
+        cw_client = MagicMock()
+        session.client.side_effect = lambda svc, **kw: s3_client if svc == "s3" else cw_client
+        s3_client.list_buckets.return_value = {"Buckets": [_make_bucket("it-fa-bucket")]}
+        s3_client.list_bucket_intelligent_tiering_configurations.return_value = {
+            "IntelligentTieringConfigurationList": [{"Id": "default"}]
+        }
+        cw_client.get_metric_statistics.side_effect = _cw
+
+        result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
+
+    assert len(result) == 1
+    finding = result[0]
+    # ~10 MB avg object: large, so NOT flagged as waste (the FP we fixed)
+    assert finding["avg_object_size_kb"] is not None
+    assert finding["recommendation"] == "IT_beneficial_objects_large_enough_to_justify_monitoring"

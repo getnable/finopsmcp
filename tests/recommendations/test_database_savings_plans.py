@@ -18,9 +18,14 @@ from finops.recommendations.database_savings_plans import (
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _ce_cost_response(monthly_amount: float) -> dict:
+    # Grouped by usage type: the engine only counts instance-usage (compute) hours,
+    # which Database Savings Plans actually discount.
     return {
         "ResultsByTime": [
-            {"Total": {"UnblendedCost": {"Amount": str(monthly_amount)}}}
+            {"Groups": [
+                {"Keys": ["USE1-InstanceUsage:db.r5.large"],
+                 "Metrics": {"UnblendedCost": {"Amount": str(monthly_amount)}}},
+            ]}
         ]
     }
 
@@ -56,15 +61,28 @@ class TestDiscountConstants:
 # ── unit: _get_rds_spend ──────────────────────────────────────────────────────
 
 class TestGetRdsSpend:
-    def test_sums_monthly_amounts(self):
+    def test_sums_instance_usage_only(self):
+        # Compute (instance hours) is summed; storage/IOPS/backup are excluded
+        # because Database Savings Plans don't discount them.
         ce = MagicMock()
         ce.get_cost_and_usage.return_value = {
             "ResultsByTime": [
-                {"Total": {"UnblendedCost": {"Amount": "1200.50"}}},
-                {"Total": {"UnblendedCost": {"Amount": "800.00"}}},
+                {"Groups": [
+                    {"Keys": ["USE1-InstanceUsage:db.r5.large"],
+                     "Metrics": {"UnblendedCost": {"Amount": "1200.50"}}},
+                    {"Keys": ["USE1-RDS:StorageUsage"],
+                     "Metrics": {"UnblendedCost": {"Amount": "500.00"}}},  # excluded
+                    {"Keys": ["USE1-RDS:ChargedBackupUsage"],
+                     "Metrics": {"UnblendedCost": {"Amount": "300.00"}}},  # excluded
+                ]},
+                {"Groups": [
+                    {"Keys": ["USE1-Multi-AZUsage:db.r5.large"],
+                     "Metrics": {"UnblendedCost": {"Amount": "800.00"}}},
+                ]},
             ]
         }
         result = _get_rds_spend(ce, "2026-04-01", "2026-05-01")
+        # 1200.50 + 800.00 compute; storage + backup ($800) excluded
         assert abs(result - 2000.50) < 0.01
 
     def test_returns_zero_on_exception(self):
