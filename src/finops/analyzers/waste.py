@@ -929,6 +929,30 @@ def _next_lambda_memory_size(target_mb: int) -> int:
 
 # ── Idle EC2 instances ────────────────────────────────────────────────────────
 
+# vCPU per instance-size suffix. Used to size idle-EC2 savings. The old parser
+# did int(inst_type.split(".")[1][0]) which threw on "m5.large" (int("l")) and
+# silently fell back to 2 vCPU for everything, making savings noise.
+_SIZE_VCPU: dict[str, int] = {
+    "nano": 1, "micro": 1, "small": 1, "medium": 1, "large": 2,
+    "xlarge": 4, "2xlarge": 8, "3xlarge": 12, "4xlarge": 16, "6xlarge": 24,
+    "8xlarge": 32, "9xlarge": 36, "12xlarge": 48, "16xlarge": 64,
+    "18xlarge": 72, "24xlarge": 96, "32xlarge": 128, "48xlarge": 192, "metal": 96,
+}
+
+# Average hourly NetworkOut above which an instance is treated as doing real work
+# (network/disk-bound or warm-standby), so a low CPU reading is NOT "idle".
+_IDLE_NET_BYTES_PER_HR: float = 100 * 1024 ** 2  # ~100 MB/hr
+
+
+def _vcpus_from_type(inst_type: str) -> int:
+    """Best-effort vCPU count from an EC2 instance type (e.g. m5.4xlarge -> 16)."""
+    try:
+        size = inst_type.split(".", 1)[1]
+        return _SIZE_VCPU.get(size, 2)
+    except Exception:
+        return 2
+
+
 def check_idle_ec2(
     ec2_client: Any,
     cw_client: Any,
@@ -1002,12 +1026,33 @@ def check_idle_ec2(
                 if avg_cpu >= cpu_threshold_pct:
                     continue
 
-                # Estimate vCPUs from instance type (rough heuristic)
+                # Low CPU alone does not mean idle. Batch, network- or disk-bound
+                # workloads and warm-standby DR boxes run with low CPU but real
+                # I/O. Skip flagging when network shows sustained activity, so a
+                # working instance is not falsely called idle.
                 try:
-                    vcpus = int(inst_type.split(".")[1][0]) if "." in inst_type else 1
-                    vcpus = max(vcpus, 1)
-                except Exception:
-                    vcpus = 2
+                    net_resp = cw_client.get_metric_statistics(
+                        Namespace="AWS/EC2",
+                        MetricName="NetworkOut",
+                        Dimensions=[{"Name": "InstanceId", "Value": inst_id}],
+                        StartTime=start,
+                        EndTime=now,
+                        Period=3600,
+                        Statistics=["Average"],
+                    )
+                    net_dps = net_resp.get("Datapoints", [])
+                    avg_net_per_hr = (
+                        sum(dp.get("Average", 0) for dp in net_dps) / len(net_dps)
+                        if net_dps else 0.0
+                    )
+                except Exception as exc:
+                    log.debug("CW NetworkOut failed for %s: %s", inst_id, exc)
+                    avg_net_per_hr = 0.0
+
+                if avg_net_per_hr > _IDLE_NET_BYTES_PER_HR:
+                    continue  # network-active: treat as in-use, not idle
+
+                vcpus = _vcpus_from_type(inst_type)
                 monthly_savings = vcpus * _APPROX_MONTHLY_PER_VCPU
 
                 findings.append({
