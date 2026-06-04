@@ -37,31 +37,35 @@ def white(t: str) -> str:  return _c("97", t)
 
 # ── Telemetry ──────────────────────────────────────────────────────────────────
 
-_POSTHOG_TOKEN = "phc_zcaQqoAXrSghjtbE6VB83p4RjfmcpqezKWV9GdZy4dPv"
-_POSTHOG_ENDPOINT = "https://us.i.posthog.com/capture/"
-_VERSION = "0.8.36"
+def _app_version() -> str:
+    """Live package version, not a hardcoded constant that drifts stale."""
+    try:
+        from importlib.metadata import version
+        return version("finops-mcp")
+    except Exception:
+        return "unknown"
 
 
 def _fire_telemetry(event: str, properties: dict) -> None:
-    """Send a PostHog event. Fire-and-forget: never raises."""
-    if os.environ.get("NABLE_NO_TELEMETRY", "") == "1":
-        return
+    """Send a PostHog event via the shared telemetry module.
 
-    def _send() -> None:
-        try:
-            import httpx
-            payload = {
-                "api_key": _POSTHOG_TOKEN,
-                "event": event,
-                "distinct_id": "install",
-                "properties": properties,
-            }
-            httpx.post(_POSTHOG_ENDPOINT, json=payload, timeout=5)
-        except Exception:
-            pass
-
-    t = threading.Thread(target=_send, daemon=True)
-    t.start()
+    Delegates so the event uses the per-install anonymous UUID. The old path here
+    hardcoded distinct_id="install" (a constant), which collapsed every install
+    into a single PostHog person and made install counts uncountable.
+    """
+    try:
+        from . import telemetry as _tel
+        if _tel._is_opted_out():
+            return
+        props = {"version": _app_version(), **properties}
+        t = threading.Thread(
+            target=_tel._send_event,
+            args=(_tel._get_install_id(), event, props),
+            daemon=True,
+        )
+        t.start()
+    except Exception:
+        pass
 
 
 # ── Sentinel ───────────────────────────────────────────────────────────────────
@@ -117,7 +121,7 @@ def show_welcome() -> None:
         return
 
     _mark_welcomed()
-    _fire_telemetry("install_completed", {"source": "finops_welcome", "version": _VERSION})
+    _fire_telemetry("install_completed", {"source": "finops_welcome"})
     _print_header()
 
     _line(bold("Ask your AI about cloud costs in plain English:"))
@@ -152,7 +156,8 @@ def show_welcome() -> None:
     _line(_rule())
     _blank()
     _line(bold("Getting started:") + "  connect your first provider below.")
-    _line(dim("   Credentials stay on your machine — never sent anywhere."))
+    _line(dim("   Credentials and cost data stay on your machine — never sent anywhere."))
+    _line(dim("   nable sends anonymous usage pings (no cost data). Opt out: NABLE_NO_TELEMETRY=1"))
     _blank()
 
 

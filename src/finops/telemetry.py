@@ -131,9 +131,16 @@ def _send(install_id: str, properties: dict) -> None:
 
 
 def _send_event(install_id: str, event: str, properties: dict) -> None:
-    """Send a single named event to PostHog."""
-    import urllib.request
-    payload = json.dumps({
+    """Send a single named event to PostHog.
+
+    Prefer httpx because it ships certifi's CA bundle. urllib relies on the
+    platform OpenSSL trust store, which on python.org macOS builds is empty until
+    the user runs "Install Certificates.command", so urllib silently fails cert
+    verification and drops every event. That silent loss skews active-install
+    counts downward for exactly the macOS-on-python.org segment. httpx avoids it;
+    urllib is only a fallback when httpx is not installed.
+    """
+    body = {
         "api_key": _POSTHOG_KEY,
         "event": event,
         "distinct_id": install_id,
@@ -143,11 +150,18 @@ def _send_event(install_id: str, event: str, properties: dict) -> None:
             "$ip": "0.0.0.0",
         },
         "timestamp": date.today().isoformat(),
-    }).encode()
+    }
     try:
+        import httpx
+        httpx.post(f"{_POSTHOG_HOST}/capture/", json=body, timeout=5)
+        return
+    except Exception:
+        pass
+    try:
+        import urllib.request
         req = urllib.request.Request(
             f"{_POSTHOG_HOST}/capture/",
-            data=payload,
+            data=json.dumps(body).encode(),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
