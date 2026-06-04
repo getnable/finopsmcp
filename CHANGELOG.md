@@ -2,6 +2,30 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.45
+
+Azure gets the same depth nable already had for AWS. Built clean-room from the
+Azure REST APIs (no heavy SDKs), so teams on Azure can ask the same questions AWS
+teams ask and get real answers.
+
+### Added
+- **`get_azure_vm_rightsizing`**: finds idle and oversized VMs from Azure Monitor
+  CPU, with real per-VM cost joined from Cost Management. Idle VMs are
+  deallocate/delete candidates, underutilized VMs are downsize candidates, and
+  bursty VMs are left alone, the Azure parallel of nable's idle-EC2 and
+  rightsizing engines. Just ask "vm rightsizing".
+- **`get_azure_advisor_recommendations`**: Azure Advisor cost recommendations with
+  Microsoft-computed annual savings (the Azure parallel of Compute Optimizer).
+- **`get_azure_budgets`**: reads the budgets you already set in the Azure Portal
+  (Consumption Budgets API) and reports consumption and warning/exceeded status.
+- **`forecast_azure_costs`**: uses Azure Cost Management's own forecast model,
+  blending actual billed days with Microsoft's forecast for the rest of the month.
+- **`get_azure_cost_by_dimension`**: break spend down by service, resource group,
+  location, or meter.
+
+All five are free (matching the AWS optimization tools) and degrade to a clean
+error when Azure is not configured.
+
 ## 0.8.44
 
 Fix the usage signal. The telemetry was wired but three bugs were corrupting or
