@@ -81,6 +81,63 @@ def test_vm_rightsizing_classifies_idle_underutilized_and_skips_bursty(monkeypat
     assert out["total_estimated_monthly_savings_usd"] == 450.0
 
 
+def test_vm_rightsizing_caps_scan_to_costliest(monkeypatch):
+    # The N+1 guard: with many VMs, only the costliest max_vms_scanned get a CPU
+    # metrics call, so a large estate cannot hang on hundreds of serial requests.
+    _force_auth(monkeypatch)
+    vms = [_vm(n) for n in ["vmA", "vmB", "vmC", "vmD", "vmE"]]
+    monkeypatch.setattr(ao, "_list_vms", lambda tok, sub: vms)
+    costs = {"vmA": 500.0, "vmB": 400.0, "vmC": 300.0, "vmD": 200.0, "vmE": 100.0}
+
+    def fake_costs(start, end, subscription_id=None, min_cost_usd=0.0, limit=0):
+        return {"resources": [{"resource_id": v["id"], "cost_usd": costs[v["id"].rsplit("/", 1)[-1]]} for v in vms]}
+    monkeypatch.setattr("finops.connectors.azure_detail.get_resource_costs", fake_costs)
+
+    scanned: list[str] = []
+
+    def rec(tok, vm_id, days):
+        scanned.append(vm_id.rsplit("/", 1)[-1])
+        return (1.0, 5.0)  # idle
+    monkeypatch.setattr(ao, "_vm_cpu_stats", rec)
+
+    out = ao.get_vm_rightsizing(subscription_id="s1", lookback_days=30, max_vms_scanned=2)
+    assert out["vms_listed"] == 5
+    assert out["vms_scanned"] == 2
+    assert out["scan_truncated"] == 3
+    # only the two costliest VMs got a metrics call
+    assert set(scanned) == {"vmA", "vmB"}
+    assert {v["vm_name"] for v in out["vms"]} == {"vmA", "vmB"}
+
+
+def test_vm_rightsizing_hints_monitoring_reader_when_no_metrics(monkeypatch):
+    _force_auth(monkeypatch)
+    monkeypatch.setattr(ao, "_list_vms", lambda tok, sub: [_vm("vm1"), _vm("vm2")])
+    monkeypatch.setattr(ao, "_vm_cpu_stats", lambda tok, vid, days: (None, None))  # no metrics
+    monkeypatch.setattr("finops.connectors.azure_detail.get_resource_costs",
+                        lambda *a, **k: {"resources": []})
+    out = ao.get_vm_rightsizing(subscription_id="s1")
+    assert out["total_flagged"] == 0
+    assert "Monitoring Reader" in out["permission_hint"]
+
+
+def test_vm_rightsizing_hints_reader_when_no_vms(monkeypatch):
+    _force_auth(monkeypatch)
+    monkeypatch.setattr(ao, "_list_vms", lambda tok, sub: [])
+    monkeypatch.setattr("finops.connectors.azure_detail.get_resource_costs",
+                        lambda *a, **k: {"resources": []})
+    out = ao.get_vm_rightsizing(subscription_id="s1")
+    assert out["vms_listed"] == 0
+    assert "Reader" in out["permission_hint"]
+
+
+def test_advisor_hints_reader_when_empty(monkeypatch):
+    _force_auth(monkeypatch)
+    monkeypatch.setattr(ao, "_arm_get_all", lambda url, tok: [])
+    out = ao.get_advisor_cost_recommendations(subscription_id="s1")
+    assert out["total_recommendations"] == 0
+    assert "Reader" in out["permission_hint"]
+
+
 def test_vm_rightsizing_handles_missing_cost_join(monkeypatch):
     _force_auth(monkeypatch)
     monkeypatch.setattr(ao, "_list_vms", lambda tok, sub: [_vm("vmIdle")])

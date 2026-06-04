@@ -137,7 +137,7 @@ def get_advisor_cost_recommendations(
             })
 
     recs.sort(key=lambda r: r["annual_savings_usd"], reverse=True)
-    return {
+    out = {
         "recommendations": recs[:limit],
         "total_recommendations": len(recs),
         "total_annual_savings_usd": round(total_annual_savings, 2),
@@ -145,6 +145,14 @@ def get_advisor_cost_recommendations(
         "subscription_id": subscription_id or ",".join(subs),
         "source": "azure_advisor",
     }
+    if not recs:
+        out["permission_hint"] = (
+            "No Advisor cost recommendations returned. This is normal if Azure has "
+            "nothing to suggest, but if you expect recommendations the service principal "
+            "may lack the 'Reader' role. Grant it: az role assignment create "
+            "--assignee <client-id> --role Reader --scope /subscriptions/<sub-id>."
+        )
+    return out
 
 
 # ── 2. VM rightsizing via Azure Monitor ───────────────────────────────────────
@@ -203,6 +211,7 @@ def get_vm_rightsizing(
     subscription_id: str | None = None,
     lookback_days: int = 14,
     limit: int = 100,
+    max_vms_scanned: int = 200,
 ) -> dict[str, Any]:
     """Flag idle and oversized Azure VMs from Azure Monitor CPU, with real cost.
 
@@ -240,56 +249,71 @@ def get_vm_rightsizing(
     total_monthly_savings = 0.0
     days = max(1, lookback_days)
 
+    # List every VM first, then scan the COSTLIEST ones for CPU metrics. Each VM
+    # needs its own Azure Monitor call, so scanning an entire large estate would be
+    # a slow N+1 (hundreds of serial calls). Prioritizing by cost focuses the
+    # expensive metric reads on the VMs where rightsizing actually saves money.
+    all_vms: list[tuple[str, dict, str, float]] = []
     for sub in subs:
         for vm in _list_vms(token, sub):
             vm_id = _str(vm.get("id"))
             if not vm_id:
                 continue
-            avg_cpu, max_cpu = _vm_cpu_stats(token, vm_id, lookback_days)
-            if avg_cpu is None:
-                continue  # stopped/deallocated or no metrics; do not flag
-            size = _str((vm.get("properties", {}).get("hardwareProfile", {}) or {}).get("vmSize"))
-            # window cost -> monthly
             window_cost = cost_by_resource.get(vm_id.lower(), 0.0)
-            monthly_cost = round(window_cost / days * 30, 2)
+            all_vms.append((sub, vm, vm_id, window_cost))
+    all_vms.sort(key=lambda t: t[3], reverse=True)
 
-            classification = None
-            saving_fraction = 0.0
-            action = ""
-            if avg_cpu < _IDLE_AVG_CPU_PCT and (max_cpu is None or max_cpu < _IDLE_MAX_CPU_PCT):
-                classification = "idle"
-                saving_fraction = 1.0
-                action = "Deallocate or delete (idle). Disks may persist, so savings are an upper bound."
-            elif avg_cpu < _UNDERUTIL_AVG_CPU_PCT and (max_cpu is None or max_cpu < _UNDERUTIL_MAX_CPU_PCT):
-                classification = "underutilized"
-                saving_fraction = _DOWNSIZE_SAVINGS_FRACTION
-                action = "Downsize one VM tier."
-            if classification is None:
-                continue
+    vms_listed = len(all_vms)
+    to_scan = all_vms[:max_vms_scanned]
+    metrics_seen = 0
 
-            est_savings = round(monthly_cost * saving_fraction, 2)
-            total_monthly_savings += est_savings
-            findings.append({
-                "vm_name": vm_id.rsplit("/", 1)[-1],
-                "resource_id": vm_id,
-                "vm_size": size,
-                "location": _str(vm.get("location")),
-                "avg_cpu_pct": round(avg_cpu, 1),
-                "max_cpu_pct": round(max_cpu, 1) if max_cpu is not None else None,
-                "classification": classification,
-                "current_monthly_cost_usd": monthly_cost,
-                "estimated_monthly_savings_usd": est_savings,
-                "estimated_monthly_savings_is_upper_bound": classification == "idle",
-                "recommendation": action,
-                "subscription_id": sub,
-            })
+    for sub, vm, vm_id, window_cost in to_scan:
+        avg_cpu, max_cpu = _vm_cpu_stats(token, vm_id, lookback_days)
+        if avg_cpu is None:
+            continue  # stopped/deallocated, or no metrics access; do not flag
+        metrics_seen += 1
+        size = _str((vm.get("properties", {}).get("hardwareProfile", {}) or {}).get("vmSize"))
+        monthly_cost = round(window_cost / days * 30, 2)
+
+        classification = None
+        saving_fraction = 0.0
+        action = ""
+        if avg_cpu < _IDLE_AVG_CPU_PCT and (max_cpu is None or max_cpu < _IDLE_MAX_CPU_PCT):
+            classification = "idle"
+            saving_fraction = 1.0
+            action = "Deallocate or delete (idle). Disks may persist, so savings are an upper bound."
+        elif avg_cpu < _UNDERUTIL_AVG_CPU_PCT and (max_cpu is None or max_cpu < _UNDERUTIL_MAX_CPU_PCT):
+            classification = "underutilized"
+            saving_fraction = _DOWNSIZE_SAVINGS_FRACTION
+            action = "Downsize one VM tier."
+        if classification is None:
+            continue
+
+        est_savings = round(monthly_cost * saving_fraction, 2)
+        total_monthly_savings += est_savings
+        findings.append({
+            "vm_name": vm_id.rsplit("/", 1)[-1],
+            "resource_id": vm_id,
+            "vm_size": size,
+            "location": _str(vm.get("location")),
+            "avg_cpu_pct": round(avg_cpu, 1),
+            "max_cpu_pct": round(max_cpu, 1) if max_cpu is not None else None,
+            "classification": classification,
+            "current_monthly_cost_usd": monthly_cost,
+            "estimated_monthly_savings_usd": est_savings,
+            "estimated_monthly_savings_is_upper_bound": classification == "idle",
+            "recommendation": action,
+            "subscription_id": sub,
+        })
 
     findings.sort(key=lambda f: f["estimated_monthly_savings_usd"], reverse=True)
-    return {
+    out: dict[str, Any] = {
         "vms": findings[:limit],
         "total_flagged": len(findings),
         "total_estimated_monthly_savings_usd": round(total_monthly_savings, 2),
         "total_estimated_annual_savings_usd": round(total_monthly_savings * 12, 2),
+        "vms_listed": vms_listed,
+        "vms_scanned": len(to_scan),
         "lookback_days": lookback_days,
         "subscription_id": subscription_id or ",".join(subs),
         "note": (
@@ -299,6 +323,32 @@ def get_vm_rightsizing(
         ),
         "source": "azure_monitor",
     }
+    if vms_listed > len(to_scan):
+        out["scan_truncated"] = vms_listed - len(to_scan)
+        out["scan_hint"] = (
+            f"Scanned the {len(to_scan)} costliest of {vms_listed} VMs to bound the "
+            f"number of Azure Monitor calls. Raise max_vms_scanned or scope to a "
+            f"subscription for the rest."
+        )
+    # Listed VMs but Azure Monitor returned no CPU for any of them. The most common
+    # cause is a missing role, so tell the user how to fix it rather than silently
+    # reporting "nothing found".
+    if len(to_scan) > 0 and metrics_seen == 0:
+        out["permission_hint"] = (
+            "Listed VMs but got no CPU data from Azure Monitor for any of them. This "
+            "usually means the service principal is missing the 'Monitoring Reader' role. "
+            "Grant it on each subscription: "
+            "az role assignment create --assignee <client-id> --role 'Monitoring Reader' "
+            "--scope /subscriptions/<sub-id>. (If every VM is deallocated, an empty "
+            "result is expected.)"
+        )
+    if vms_listed == 0:
+        out["permission_hint"] = (
+            "No VMs were listed. If you have VMs, the service principal likely lacks the "
+            "'Reader' role. Grant it: az role assignment create --assignee <client-id> "
+            "--role Reader --scope /subscriptions/<sub-id>."
+        )
+    return out
 
 
 # ── 3. Native budgets (Consumption Budgets API) ───────────────────────────────

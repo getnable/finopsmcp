@@ -26,6 +26,18 @@ teams ask and get real answers.
 All five are free (matching the AWS optimization tools) and degrade to a clean
 error when Azure is not configured.
 
+### Ready-to-use hardening (from a pre-publish security + DX review)
+- **RBAC is now surfaced, not silent.** The Azure tools span three roles per
+  subscription (Cost Management Reader, Reader, Monitoring Reader). `finops doctor`
+  now probes them and names any missing role with the exact `az role assignment`
+  fix, `finops setup azure` prints the roles, and the README documents them. A
+  missing role no longer shows up as a confusing empty result.
+- **VM rightsizing scans the costliest VMs first and caps the scan**
+  (`max_vms_scanned`, default 200), so a large estate cannot hang on hundreds of
+  serial Azure Monitor calls.
+- VM rightsizing and Advisor now return an actionable `permission_hint` when they
+  list resources but get no data (the usual sign of a missing role).
+
 ## 0.8.44
 
 Fix the usage signal. The telemetry was wired but three bugs were corrupting or

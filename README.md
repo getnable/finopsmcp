@@ -185,7 +185,7 @@ Config file locations:
 | Provider | What it pulls |
 |---|---|
 | AWS | Cost Explorer (free tier) · CUR via S3 (Team: line-item granularity, savings plans, reservations) |
-| Azure | Cost Management API |
+| Azure | Cost Management API · Advisor cost recs · VM rightsizing (Azure Monitor) · native budgets · forecast |
 | GCP | Cloud Billing API + BigQuery export |
 | Datadog | Usage Metering API v2: real dollar amounts |
 | Snowflake | ACCOUNT_USAGE.METERING_HISTORY |
@@ -197,6 +197,23 @@ Config file locations:
 | Vercel | Invoice API (Enterprise) |
 | PagerDuty | Seat count |
 | New Relic | Data ingest + user counts |
+
+**Azure roles.** The Azure tools span three RBAC roles, granted to the service
+principal on each subscription. Without them, the affected tools return empty
+results (run `finops doctor` to check):
+
+| Role | Unlocks |
+|---|---|
+| Cost Management Reader | cost queries, budgets, forecast, cost-by-dimension |
+| Reader | Azure Advisor recommendations + VM list (rightsizing) |
+| Monitoring Reader | VM CPU metrics (rightsizing) |
+
+```bash
+# repeat per subscription
+az role assignment create --assignee <client-id> --role 'Cost Management Reader' --scope /subscriptions/<sub-id>
+az role assignment create --assignee <client-id> --role Reader --scope /subscriptions/<sub-id>
+az role assignment create --assignee <client-id> --role 'Monitoring Reader' --scope /subscriptions/<sub-id>
+```
 
 ---
 
