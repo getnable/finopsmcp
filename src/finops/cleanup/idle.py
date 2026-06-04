@@ -402,22 +402,38 @@ def idle_resources_summary(resources: list[IdleResource]) -> dict[str, Any]:
     for r in resources:
         by_type[r.resource_type] = by_type.get(r.resource_type, 0) + 1
 
-    return {
+    # Build the detail rows costliest-first, then cap to a token budget. The
+    # totals above are computed over ALL resources, so the summary stays accurate;
+    # only the per-resource detail list is bounded so a large account does not dump
+    # hundreds of rows into the model context (every row is re-read each turn).
+    rows = [
+        {
+            "resource_type": r.resource_type,
+            "resource_id": r.resource_id,
+            "name": r.name,
+            "region": r.region,
+            "idle_days": r.idle_days,
+            "monthly_cost_usd": r.monthly_cost_usd,
+            "reason": r.reason,
+            "protected": r.protected,
+        }
+        for r in sorted(resources, key=lambda r: r.monthly_cost_usd, reverse=True)
+    ]
+    from ..token_budget import fit_to_budget
+    kept, omitted = fit_to_budget(rows)
+
+    out: dict[str, Any] = {
         "total_resources_found": len(resources),
         "total_monthly_waste_usd": round(total_monthly, 2),
         "total_annual_waste_usd": round(total_monthly * 12, 2),
         "by_type": by_type,
-        "resources": [
-            {
-                "resource_type": r.resource_type,
-                "resource_id": r.resource_id,
-                "name": r.name,
-                "region": r.region,
-                "idle_days": r.idle_days,
-                "monthly_cost_usd": r.monthly_cost_usd,
-                "reason": r.reason,
-                "protected": r.protected,
-            }
-            for r in resources
-        ],
+        "resources": kept,
     }
+    if omitted:
+        out["resources_truncated"] = True
+        out["resources_omitted"] = omitted
+        out["hint"] = (
+            f"Showing the {len(kept)} costliest of {len(resources)} idle resources "
+            f"to bound token cost. Narrow with resource_types or regions for the rest."
+        )
+    return out

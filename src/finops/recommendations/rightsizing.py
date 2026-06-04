@@ -391,7 +391,34 @@ def rightsizing_summary(recommendations: list[RightsizingRecommendation]) -> dic
     for r in recommendations:
         by_type[r.resource_type] = by_type.get(r.resource_type, 0) + r.monthly_savings
 
-    return {
+    # Build detail rows highest-savings-first, then cap to a token budget. Each row
+    # has 15 fields, so a large fleet would otherwise dump a heavy payload into the
+    # model context (re-read each turn). Totals above cover the full set; only this
+    # detail list is bounded.
+    rows = [
+        {
+            "instance_id":    r.instance_id,
+            "name":           r.name,
+            "region":         r.region,
+            "resource_type":  r.resource_type,
+            "source":         r.source,
+            "current_type":   r.instance_type,
+            "recommended_type": r.recommended_type,
+            "avg_cpu_pct":    r.avg_cpu_pct,
+            "avg_mem_pct":    r.avg_mem_pct,
+            "avg_net_mbps":   r.avg_net_mbps,
+            "monthly_savings": r.monthly_savings,
+            "confidence":     r.confidence,
+            "finding":        r.finding,
+            "title":          r.title,
+            "description":    r.description,
+        }
+        for r in sorted(recommendations, key=lambda r: r.monthly_savings, reverse=True)
+    ]
+    from ..token_budget import fit_to_budget
+    kept, omitted = fit_to_budget(rows)
+
+    out: dict[str, Any] = {
         "total_instances_flagged": len(recommendations),
         "total_monthly_savings":   round(total_savings, 2),
         "total_annual_savings":    round(total_savings * 12, 2),
@@ -406,24 +433,14 @@ def rightsizing_summary(recommendations: list[RightsizingRecommendation]) -> dic
             ),
         },
         "savings_by_resource_type": {k: round(v, 2) for k, v in by_type.items()},
-        "recommendations": [
-            {
-                "instance_id":    r.instance_id,
-                "name":           r.name,
-                "region":         r.region,
-                "resource_type":  r.resource_type,
-                "source":         r.source,
-                "current_type":   r.instance_type,
-                "recommended_type": r.recommended_type,
-                "avg_cpu_pct":    r.avg_cpu_pct,
-                "avg_mem_pct":    r.avg_mem_pct,
-                "avg_net_mbps":   r.avg_net_mbps,
-                "monthly_savings": r.monthly_savings,
-                "confidence":     r.confidence,
-                "finding":        r.finding,
-                "title":          r.title,
-                "description":    r.description,
-            }
-            for r in recommendations
-        ],
+        "recommendations": kept,
     }
+    if omitted:
+        out["recommendations_truncated"] = True
+        out["recommendations_omitted"] = omitted
+        out["hint"] = (
+            f"Showing the {len(kept)} highest-savings of {len(recommendations)} "
+            f"recommendations to bound token cost. Raise avg_cpu_threshold or scope "
+            f"to fewer accounts to see the rest."
+        )
+    return out
