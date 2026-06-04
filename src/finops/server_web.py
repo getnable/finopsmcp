@@ -56,27 +56,35 @@ _SESSIONS: dict[str, float] = {}        # full access (password / SSO login)
 _RO_SESSIONS: dict[str, float] = {}     # read-only share links (/view)
 _SESSION_TTL_SECONDS: int = 8 * 3600  # 8 hours
 _RO_SESSION_TTL_SECONDS: int = 24 * 3600  # 24 hours for share links
+# The dashboard runs on ThreadingHTTPServer, so two requests can mint or prune a
+# session at the same instant. Without this lock, _prune iterating store.items()
+# while another thread inserts a token raises "dictionary changed size during
+# iteration" and 500s the request. RLock so a mint can call _prune while holding it.
+_SESSION_LOCK = threading.RLock()
 
 
 def _prune(store: dict[str, float]) -> None:
     now = _time_module.time()
-    for t in [t for t, exp in store.items() if now > exp]:
-        store.pop(t, None)
+    with _SESSION_LOCK:
+        for t in [t for t, exp in store.items() if now > exp]:
+            store.pop(t, None)
 
 
 def _create_session() -> str:
     """Mint a FULL-access session token."""
     token = secrets.token_urlsafe(32)
-    _SESSIONS[token] = _time_module.time() + _SESSION_TTL_SECONDS
-    _prune(_SESSIONS)
+    with _SESSION_LOCK:
+        _SESSIONS[token] = _time_module.time() + _SESSION_TTL_SECONDS
+        _prune(_SESSIONS)
     return token
 
 
 def _create_ro_session() -> str:
     """Mint a READ-ONLY session token (separate store, never full access)."""
     token = secrets.token_urlsafe(32)
-    _RO_SESSIONS[token] = _time_module.time() + _RO_SESSION_TTL_SECONDS
-    _prune(_RO_SESSIONS)
+    with _SESSION_LOCK:
+        _RO_SESSIONS[token] = _time_module.time() + _RO_SESSION_TTL_SECONDS
+        _prune(_RO_SESSIONS)
     return token
 
 

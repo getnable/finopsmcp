@@ -317,7 +317,7 @@ def _start_slack_scheduler(app: Any) -> None:
             try:
                 from ..notifications.reports import list_subscriptions, run_subscription, _is_report_due
                 for sub in list_subscriptions():
-                    if _is_report_due(sub["cron"], sub.get("last_sent_at")):
+                    if _is_report_due(sub["cron"], sub.get("last_sent_at"), sub.get("created_at")):
                         try:
                             asyncio.run(run_subscription(sub["id"]))
                         except Exception as e:

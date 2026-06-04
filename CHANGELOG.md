@@ -2,6 +2,35 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.46
+
+Bug-fix pass from a multi-agent troubleshooting run (13 confirmed defects,
+adversarially verified). Several were in the 0.8.45 Azure code.
+
+### Fixed
+- **VM rightsizing was broken on every real Azure subscription.** The CPU metrics
+  query used `isoformat()` ("+00:00"), and Azure Resource Manager decodes the `+`
+  to a space, returning HTTP 400. So every VM read as "no CPU data", rightsizing
+  found nothing, and it falsely blamed a missing Monitoring Reader role. Now uses
+  a `Z` suffix. The same fix was applied to the doctor probe.
+- **Azure forecast** no longer crashes on a short/empty response row, no longer
+  sums the wrong column when a `Cost` column is absent (it skips the subscription
+  instead of reporting nonsense dollars), and splits actual vs forecast by date
+  when the `CostStatus` column is missing instead of labeling everything forecast.
+- **The 5 Azure tools** now run their blocking REST calls off the event loop
+  (`asyncio.to_thread`), so a large VM scan no longer freezes other tool calls,
+  the Slack bot, and the scheduler.
+- **Dashboard session store** is now lock-guarded. Under the threaded server, two
+  concurrent logins could race the prune and 500 with "dictionary changed size
+  during iteration".
+- **Scheduled reports no longer blast on subscribe.** A new subscription was
+  treated as "never sent" and sent a full report within ~5 minutes. It now waits
+  for the first scheduled time after creation.
+- **Scheduler shutdown** releases its cross-process single-owner lock, so another
+  host can take over (Postgres mode) and the connection/file handle is not leaked.
+- A malformed `FINOPS_SNAPSHOT_CRON` no longer aborts MCP server startup (removed
+  a dead parse line).
+
 ## 0.8.45
 
 Azure gets the same depth nable already had for AWS. Built clean-room from the

@@ -219,3 +219,64 @@ def test_cost_by_dimension_groups_and_sorts(monkeypatch):
 def test_cost_by_dimension_rejects_unknown():
     out = ao.get_cost_by_dimension("nonsense", date(2026, 5, 1), date(2026, 6, 1))
     assert "Unknown dimension" in out["error"]
+
+
+def test_vm_cpu_stats_timespan_uses_z_not_plus0000(monkeypatch):
+    # Regression: isoformat()'s '+00:00' is decoded to a space by Azure Resource
+    # Manager and returns HTTP 400, so every VM read as "no CPU" and rightsizing
+    # silently found nothing. The timespan must use a 'Z' suffix.
+    captured = {}
+
+    class _R:
+        def raise_for_status(self): pass
+        def json(self): return {"value": []}
+    fake = types.ModuleType("httpx")
+    fake.get = lambda url, headers, timeout: (captured.update(url=url) or _R())
+    monkeypatch.setitem(sys.modules, "httpx", fake)
+
+    ao._vm_cpu_stats("tok", "/subscriptions/s1/providers/.../vm1", 14)
+    assert "+00:00" not in captured["url"]
+    assert "Z/" in captured["url"]  # start ends in Z right before the range slash
+
+
+def _forecast_resp(columns, rows):
+    class _R:
+        def raise_for_status(self): pass
+        def json(self): return {"properties": {"columns": columns, "rows": rows}}
+    fake = types.ModuleType("httpx")
+    fake.post = lambda url, json, headers, timeout: _R()
+    return fake
+
+
+def test_forecast_date_split_when_no_coststatus(monkeypatch):
+    # No CostStatus column: split actual vs forecast by UsageDate, not blanket-forecast.
+    _force_auth(monkeypatch)
+    monkeypatch.setattr(ao, "_subscription_ids", lambda: ["s1"])
+    monkeypatch.setitem(sys.modules, "httpx",
+                        _forecast_resp([{"name": "Cost"}, {"name": "UsageDate"}],
+                                       [[100.0, 20200101], [40.0, 20990101]]))
+    out = ao.forecast_costs(subscription_id="s1", end_date=date(2026, 6, 30))
+    assert out["actual_to_date_usd"] == 100.0   # 20200101 is in the past
+    assert out["forecast_remaining_usd"] == 40.0  # 20990101 is the future
+
+
+def test_forecast_skips_short_rows_without_crashing(monkeypatch):
+    _force_auth(monkeypatch)
+    monkeypatch.setattr(ao, "_subscription_ids", lambda: ["s1"])
+    monkeypatch.setitem(sys.modules, "httpx",
+                        _forecast_resp([{"name": "Cost"}, {"name": "CostStatus"}],
+                                       [[100.0, "Actual"], []]))  # empty row must not crash
+    out = ao.forecast_costs(subscription_id="s1", end_date=date(2026, 6, 30))
+    assert out["actual_to_date_usd"] == 100.0
+
+
+def test_forecast_skips_sub_with_no_cost_column(monkeypatch):
+    # Missing Cost column must NOT default to column 0 and sum dates as dollars.
+    _force_auth(monkeypatch)
+    monkeypatch.setattr(ao, "_subscription_ids", lambda: ["s1"])
+    monkeypatch.setitem(sys.modules, "httpx",
+                        _forecast_resp([{"name": "UsageDate"}, {"name": "CostStatus"}],
+                                       [[20200101, "Actual"]]))
+    out = ao.forecast_costs(subscription_id="s1", end_date=date(2026, 6, 30))
+    assert out["projected_total_usd"] == 0.0
+    assert out["by_subscription"] == []  # sub skipped, no nonsense numbers

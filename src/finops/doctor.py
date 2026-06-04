@@ -246,10 +246,14 @@ def _check_azure_permissions() -> dict:
             from datetime import datetime, timedelta, timezone
             end = datetime.now(timezone.utc)
             start = end - timedelta(hours=6)
+            # Use a 'Z' suffix, not isoformat()'s '+00:00'. A literal '+' in the
+            # query string is decoded to a space by ARM, breaking the timespan and
+            # returning 400 (a false 'missing Monitoring Reader' signal).
+            ts = f"{start.strftime('%Y-%m-%dT%H:%M:%SZ')}/{end.strftime('%Y-%m-%dT%H:%M:%SZ')}"
             mr = httpx.get(
                 f"{_MGMT_BASE}{vm_id}/providers/Microsoft.Insights/metrics"
                 f"?api-version=2023-10-01&metricnames=Percentage CPU"
-                f"&timespan={start.isoformat()}/{end.isoformat()}&interval=PT1H&aggregation=Average",
+                f"&timespan={ts}&interval=PT1H&aggregation=Average",
                 headers=headers, timeout=15,
             )
             monitoring_ok = mr.status_code == 200
