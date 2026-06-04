@@ -1,0 +1,9 @@
+# Minimal image for Glama (and any stdio MCP host) to run nable's MCP server and
+# pass introspection. Glama only needs the server to start and answer a tools/list
+# request, which it does with no cloud credentials configured (it just lists the
+# 164 tools). This is intentionally NOT the team web-dashboard image (that is the
+# root Dockerfile); this one runs the stdio MCP server.
+FROM python:3.12-slim
+RUN pip install --no-cache-dir finops-mcp
+ENV NABLE_NO_TELEMETRY=1
+ENTRYPOINT ["finops-mcp"]
