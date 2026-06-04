@@ -5865,6 +5865,194 @@ async def get_azure_reservation_utilization(
         return {"error": str(exc)}
 
 
+@mcp.tool()
+async def get_azure_advisor_recommendations(
+    subscription_id: str | None = None,
+    limit: int = 100,
+) -> dict:
+    """
+    Azure Advisor cost recommendations, with Microsoft-computed annual savings.
+
+    Advisor is Azure's native optimization engine: VM rightsizing, idle resource
+    cleanup, and reservation / savings-plan purchase recommendations, each with a
+    savings figure Microsoft already calculated. This is the Azure parallel of AWS
+    Compute Optimizer.
+
+    Args:
+        subscription_id: A single Azure subscription. None = all configured subs.
+        limit: Max recommendations to return, highest savings first (default 100).
+
+    Examples:
+        - "What does Azure Advisor recommend to cut our costs?"
+        - "Show Azure cost recommendations with the biggest savings"
+        - "Any idle or oversized Azure resources Advisor flagged?"
+    """
+    try:
+        from .connectors.azure_optimize import get_advisor_cost_recommendations
+        result = get_advisor_cost_recommendations(subscription_id=subscription_id, limit=limit)
+        recs = result.get("recommendations")
+        if isinstance(recs, list) and recs:
+            kept, omitted = fit_to_budget(recs, max_tokens=6000)
+            if omitted:
+                result["recommendations"] = kept
+                result["recommendations_truncated"] = omitted
+                result["recommendations_hint"] = (
+                    f"showing top {len(kept)} of {len(recs)} by savings; totals cover all."
+                )
+        return result
+    except Exception as exc:
+        log.error("get_azure_advisor_recommendations failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def get_azure_vm_rightsizing(
+    subscription_id: str | None = None,
+    lookback_days: int = 14,
+    limit: int = 100,
+) -> dict:
+    """
+    Find idle and oversized Azure VMs from Azure Monitor CPU, with real dollar cost.
+
+    Idle VMs (very low average CPU and a low peak) are deallocate/delete candidates.
+    Underutilized VMs (low average but some real peak) are downsize candidates.
+    Bursty VMs (high peak) are left alone. Per-VM monthly cost is joined from Cost
+    Management so the savings are real, not a guess. This is the Azure parallel of
+    nable's idle-EC2 and rightsizing engines.
+
+    Args:
+        subscription_id: A single Azure subscription. None = all configured subs.
+        lookback_days: CPU history window for the analysis (default 14).
+        limit: Max VMs to return, highest savings first (default 100).
+
+    Examples:
+        - "vm rightsizing"
+        - "Show me oversized Azure VMs we can downsize"
+        - "Which Azure VMs are idle and wasting money?"
+        - "Azure rightsizing opportunities for the last two weeks"
+    """
+    try:
+        from .connectors.azure_optimize import get_vm_rightsizing
+        result = get_vm_rightsizing(
+            subscription_id=subscription_id, lookback_days=lookback_days, limit=limit
+        )
+        vms = result.get("vms")
+        if isinstance(vms, list) and vms:
+            kept, omitted = fit_to_budget(vms, max_tokens=6000)
+            if omitted:
+                result["vms"] = kept
+                result["vms_truncated"] = omitted
+                result["vms_hint"] = (
+                    f"showing top {len(kept)} of {len(vms)} by savings; totals cover all."
+                )
+        return result
+    except Exception as exc:
+        log.error("get_azure_vm_rightsizing failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def get_azure_budgets(subscription_id: str | None = None) -> dict:
+    """
+    Read the budgets you already set in Azure and report consumption against each.
+
+    Pulls native Azure Consumption Budgets (the ones configured in the Azure
+    Portal), with amount, current spend, percent consumed, and a warning/exceeded
+    status. Use this to see budget health without leaving Claude.
+
+    Args:
+        subscription_id: A single Azure subscription. None = all configured subs.
+
+    Examples:
+        - "Are we over any Azure budgets?"
+        - "Show our Azure budget status"
+        - "Which Azure budgets are close to their limit?"
+    """
+    try:
+        from .connectors.azure_optimize import get_native_budgets
+        return get_native_budgets(subscription_id=subscription_id)
+    except Exception as exc:
+        log.error("get_azure_budgets failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def forecast_azure_costs(
+    subscription_id: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """
+    Forecast Azure spend using Azure Cost Management's own forecast model.
+
+    Calls Microsoft's forecast endpoint, which blends actual billed days with a
+    forecast for the rest of the window. Defaults to projecting the current month
+    to month-end. More accurate for Azure than a generic statistical forecast.
+
+    Args:
+        subscription_id: A single Azure subscription. None = all configured subs.
+        end_date: ISO date to forecast to (YYYY-MM-DD). Defaults to end of month.
+
+    Examples:
+        - "What will our Azure bill be at the end of the month?"
+        - "Forecast Azure spend to month-end"
+        - "Projected Azure costs for this subscription"
+    """
+    try:
+        from .connectors.azure_optimize import forecast_costs
+        ed = date.fromisoformat(end_date) if end_date else None
+        return forecast_costs(subscription_id=subscription_id, end_date=ed)
+    except ValueError:
+        return {"error": "end_date must be ISO format YYYY-MM-DD."}
+    except Exception as exc:
+        log.error("forecast_azure_costs failed: %s", exc)
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def get_azure_cost_by_dimension(
+    dimension: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    subscription_id: str | None = None,
+    limit: int = 50,
+) -> dict:
+    """
+    Break Azure spend down by any dimension: service, resource group, location, or meter.
+
+    Args:
+        dimension: One of service, resource_group, location, meter, meter_subcategory.
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date. Defaults to today.
+        subscription_id: A single Azure subscription. None = all configured subs.
+        limit: Max values to return, highest cost first (default 50).
+
+    Examples:
+        - "Break down Azure costs by resource group"
+        - "Azure spend by location this month"
+        - "Which Azure meters cost the most?"
+    """
+    sd, ed = _default_dates()
+    if start_date:
+        try:
+            sd = date.fromisoformat(start_date)
+        except ValueError:
+            return {"error": "start_date must be ISO format YYYY-MM-DD."}
+    if end_date:
+        try:
+            ed = date.fromisoformat(end_date)
+        except ValueError:
+            return {"error": "end_date must be ISO format YYYY-MM-DD."}
+    try:
+        from .connectors.azure_optimize import get_cost_by_dimension
+        return get_cost_by_dimension(
+            dimension=dimension, start_date=sd, end_date=ed,
+            subscription_id=subscription_id, limit=limit,
+        )
+    except Exception as exc:
+        log.error("get_azure_cost_by_dimension failed: %s", exc)
+        return {"error": str(exc)}
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # STORAGE MODE
 # ═══════════════════════════════════════════════════════════════════════════════
