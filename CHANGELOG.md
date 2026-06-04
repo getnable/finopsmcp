@@ -2,6 +2,27 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.44
+
+Fix the usage signal. The telemetry was wired but three bugs were corrupting or
+silently dropping it, so active-install counts were unreliable.
+
+### Fixed
+- The first-run `install_completed` event was sent with a constant
+  `distinct_id="install"`, so every install collapsed into one analytics person
+  and installs could not be counted. It now uses the per-install anonymous ID.
+- Telemetry was delivered over `urllib`, which fails certificate verification on
+  python.org macOS builds (empty trust store until the user runs Install
+  Certificates), silently dropping every event for that segment. It now sends via
+  httpx (bundled CA store), with a urllib fallback.
+- `finops doctor` reported "No usage telemetry active" when telemetry is on by
+  default. It now reports the real posture and how to opt out.
+
+### Changed
+- First-run output now discloses the anonymous usage ping next to the
+  credentials-stay-local line, with the `NABLE_NO_TELEMETRY=1` opt-out. Telemetry
+  still never includes cost data, account IDs, or credentials.
+
 ## 0.8.43
 
 A multi-agent code review and debugging pass (10 reviewers, every finding

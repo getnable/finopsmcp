@@ -5,7 +5,7 @@ Checks and reports on:
   ✓ Credential storage (keyring vs plain env vars)
   ✓ AWS credential scope (read-only vs over-provisioned)
   ✓ Database encryption and permissions
-  ✓ Telemetry (none — confirmed)
+  ✓ Telemetry posture (on by default, anonymous; how to opt out)
   ✓ Network path (direct to cloud APIs, no proxy)
   ✓ Recent audit log entries
 
@@ -235,18 +235,28 @@ def _check_telemetry() -> dict:
     # and are not Sentry SDK configuration — skip them to avoid false positives.
     _ANALYTICS_SDK_VARS = {"SENTRY_DSN", "SENTRY_AUTH_TOKEN", "SENTRY_ORG", "AMPLITUDE_API_KEY", "SEGMENT_WRITE_KEY", "MIXPANEL_TOKEN"}
     analytics_vars = [v for v in os.environ if v.upper() in _ANALYTICS_SDK_VARS]
-    posthog_key = os.environ.get("NABLE_POSTHOG_KEY", "")
     warnings = [f"External analytics env var detected: {v}" for v in analytics_vars]
-    if posthog_key:
+    # Ask the telemetry module for ground truth instead of guessing from an env
+    # var. Telemetry ships with a default PostHog key, so it is ON unless the user
+    # opted out (NABLE_NO_TELEMETRY=1, FINOPS_AIRGAP, or an empty key). Reporting
+    # "off" here when it is actually on would be a trust violation for a tool whose
+    # whole pitch is local-first.
+    try:
+        from . import telemetry as _tel
+        telemetry_on = not _tel._is_opted_out()
+    except Exception:
+        telemetry_on = False
+    if telemetry_on:
         detail = (
-            "Anonymous usage events are sent to PostHog (tool names + plan tier, no cost data). "
-            "Disable by unsetting NABLE_POSTHOG_KEY. "
-            "Queries go directly from your machine to your cloud provider APIs — no cost data leaves your machine."
+            "Anonymous usage telemetry is ON (default). It sends a random install ID, "
+            "tool names, provider count, and plan tier to PostHog. It never sends cost "
+            "figures, account IDs, or credentials. Opt out any time: export NABLE_NO_TELEMETRY=1. "
+            "Cost queries always go straight from your machine to your cloud APIs."
         )
     else:
         detail = (
-            "No usage telemetry active. "
-            "Queries go directly from your machine to your cloud provider APIs."
+            "Usage telemetry is OFF. "
+            "Cost queries go directly from your machine to your cloud provider APIs."
         )
     return {
         "name": "Telemetry",
