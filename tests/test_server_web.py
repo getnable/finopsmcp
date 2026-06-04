@@ -385,3 +385,22 @@ def test_finance_services_never_raises_when_scheduler_broken(monkeypatch):
         status = _start_finance_services()  # must not raise
 
     assert any("scheduler:  off" in s.lower() for s in status)
+
+
+def test_readonly_and_full_sessions_use_separate_stores():
+    """Regression: a read-only share token must never validate as a full-access
+    session. The two live in separate stores, so a nable_view value copied into
+    nable_session cannot pass the full-access check (privilege escalation)."""
+    import finops.server_web as sw
+
+    full = sw._create_session()
+    ro = sw._create_ro_session()
+
+    # Each token is valid only in its own store.
+    assert sw._session_valid(full) is True
+    assert sw._ro_session_valid(full) is False      # full token is not a RO token
+    assert sw._ro_session_valid(ro) is True
+    assert sw._session_valid(ro) is False            # RO token is NOT full access
+
+    # The escalation attempt: replaying the RO token as a full session fails.
+    assert sw._session_valid(ro) is False

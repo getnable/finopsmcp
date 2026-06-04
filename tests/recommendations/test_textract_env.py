@@ -109,6 +109,17 @@ def test_signal_must_be_whole_token_not_substring():
     assert _is_nonprod_name("UATPipeline")[0] is True         # acronym + CamelWord
 
 
+def test_hyphenated_nonprod_still_matches():
+    # Regression: the whole-token split breaks 'non-prod' into {'non','prod'} and
+    # misses the 'nonprod' signal. The de-delimited check must still catch it,
+    # without re-introducing substring false positives for short signals.
+    for name in ["non-prod-textract", "nonprod-handler", "non_prod_api", "my-NonProd-fn"]:
+        assert _is_nonprod_name(name)[0] is True, f"{name} should be flagged non-prod"
+    # 'production' must NOT match (it contains 'prod' but is not non-prod)
+    assert _is_nonprod_name("production-textract")[0] is False
+    assert _is_nonprod_name("reproduce-handler")[0] is False
+
+
 def test_is_nonprod_test():
     is_np, signal = _is_nonprod_name("test-pipeline-textract")
     assert is_np is True

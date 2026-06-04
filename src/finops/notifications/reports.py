@@ -515,6 +515,45 @@ def tz_utc():
     return timezone.utc
 
 
+def _is_report_due(cron: str, last_sent_at: Any) -> bool:
+    """Return True if a subscription with this cron is due to run now.
+
+    Due means the most recent scheduled fire time at or before now is strictly
+    later than the last time the report was sent. A never-sent subscription
+    (last_sent_at is None) is due once its first scheduled time has passed. This
+    is called every ~5 minutes by the Slack scheduler, so the strict-after check
+    is what prevents a report from being re-sent on every tick after it fires.
+
+    Requires croniter (the `croniter` extra). Without it we cannot evaluate the
+    schedule, so we return False rather than risk spamming.
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        from croniter import croniter
+    except ImportError:
+        log.warning("croniter not installed; scheduled reports are paused. "
+                    "Install with: pip install finops-mcp[croniter]")
+        return False
+    try:
+        prev_fire = croniter(cron, now).get_prev(datetime)
+    except Exception as exc:  # malformed cron expression
+        log.error("Invalid cron '%s' on a report subscription: %s", cron, exc)
+        return False
+    if prev_fire.tzinfo is None:
+        prev_fire = prev_fire.replace(tzinfo=timezone.utc)
+    if last_sent_at is None:
+        return True
+    lsa = last_sent_at
+    if isinstance(lsa, str):
+        try:
+            lsa = datetime.fromisoformat(lsa)
+        except ValueError:
+            return True  # unparseable timestamp: treat as never sent
+    if lsa.tzinfo is None:
+        lsa = lsa.replace(tzinfo=timezone.utc)
+    return prev_fire > lsa
+
+
 async def run_subscription(sub_id: int) -> dict[str, Any]:
     """
     Run a single report subscription immediately (used by scheduler + MCP on-demand).

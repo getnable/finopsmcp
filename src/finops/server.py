@@ -1977,8 +1977,11 @@ async def export_cost_report(
         - "Make a weekly cost report for the team"
     """
     from datetime import date as _date, timedelta
-    sd = _date.fromisoformat(start_date) if start_date else _date.today() - timedelta(days=30)
-    ed = _date.fromisoformat(end_date) if end_date else _date.today()
+    try:
+        sd = _date.fromisoformat(start_date) if start_date else _date.today() - timedelta(days=30)
+        ed = _date.fromisoformat(end_date) if end_date else _date.today()
+    except ValueError:
+        return {"error": "start_date and end_date must be ISO format YYYY-MM-DD."}
     period_start = sd.isoformat()
     period_end = ed.isoformat()
 
@@ -8875,9 +8878,10 @@ async def scan_s3_bucket_key_opportunities() -> dict:
             "total_estimated_monthly_savings": round(total_savings, 4),
             "total_estimated_annual_savings": round(total_savings * 12, 2),
             "note": (
-                "KMS call estimates use CloudWatch AllRequests metrics when available, "
-                "otherwise a conservative fallback of 100,000 calls/month per bucket. "
-                "Enable S3 request metrics in CloudWatch for more accurate estimates."
+                "KMS call estimates use CloudWatch AllRequests metrics when available. "
+                "When request metrics are absent the bucket is still listed but its "
+                "savings are reported as unquantified (0) rather than an invented number. "
+                "Enable S3 request metrics in CloudWatch for accurate estimates."
             ),
         }
     except Exception as exc:
@@ -9833,8 +9837,8 @@ async def run_full_cost_audit(
                     if s > 10:
                         out.append({"title": f"Disable cross-zone on NLB {r.get('nlb_name','?')}", "monthly_savings": s, "category": "Network", "detail": f"${s:.2f}/mo cross-AZ charges"})
             elif name == "s3_it" and isinstance(data, list):
-                waste = [r for r in data if r.get("recommendation") == "DISABLE_INTELLIGENT_TIERING"]
-                total = sum(r.get("net_monthly_cost", 0) for r in waste)
+                waste = [r for r in data if isinstance(r.get("recommendation"), str) and r["recommendation"].startswith("LIKELY_WASTE")]
+                total = sum((r.get("net_monthly_cost") or 0) for r in waste)
                 if total > 0:
                     out.append({"title": f"Disable S3 Intelligent-Tiering on {len(waste)} bucket(s) with small objects", "monthly_savings": total, "category": "Storage", "detail": "Monitoring fee exceeds tiering savings"})
             elif name == "s3_ta":
@@ -10078,8 +10082,8 @@ async def export_cost_report_csv(
                     if s > 10:
                         out.append({"title": f"Disable cross-zone on NLB {r.get('nlb_name','?')}", "monthly_savings": s, "category": "Network", "detail": f"${s:.2f}/mo cross-AZ charges"})
             elif name == "s3_it" and isinstance(data, list):
-                waste = [r for r in data if r.get("recommendation") == "DISABLE_INTELLIGENT_TIERING"]
-                total = sum(r.get("net_monthly_cost", 0) for r in waste)
+                waste = [r for r in data if isinstance(r.get("recommendation"), str) and r["recommendation"].startswith("LIKELY_WASTE")]
+                total = sum((r.get("net_monthly_cost") or 0) for r in waste)
                 if total > 0:
                     out.append({"title": f"Disable S3 Intelligent-Tiering on {len(waste)} bucket(s) with small objects", "monthly_savings": total, "category": "Storage", "detail": "Monitoring fee exceeds tiering savings"})
             elif name == "s3_ta":
@@ -10404,8 +10408,8 @@ async def publish_cost_report_to_notion(
                     if s > 10:
                         out.append({"title": f"Disable cross-zone on NLB {r.get('nlb_name','?')}", "monthly_savings": s, "category": "Network"})
             elif name == "s3_it" and isinstance(data, list):
-                waste = [r for r in data if r.get("recommendation") == "DISABLE_INTELLIGENT_TIERING"]
-                total = sum(r.get("net_monthly_cost", 0) for r in waste)
+                waste = [r for r in data if isinstance(r.get("recommendation"), str) and r["recommendation"].startswith("LIKELY_WASTE")]
+                total = sum((r.get("net_monthly_cost") or 0) for r in waste)
                 if total > 0:
                     out.append({"title": f"Disable S3 Intelligent-Tiering on {len(waste)} bucket(s)", "monthly_savings": total, "category": "Storage"})
             elif name == "s3_ta":

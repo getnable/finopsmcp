@@ -10,6 +10,7 @@ Outputs to: ~/.finops/exports/
 from __future__ import annotations
 
 import csv
+import html as _html
 import io
 import json
 import os
@@ -226,6 +227,10 @@ def build_html_report(
     budgets: dict | None = None,
     generated_by: str = "nable",
 ) -> str:
+    # Caller-supplied (MCP tool args). Escape before interpolating into HTML so a
+    # title like "<script>..." cannot inject markup into the generated report.
+    title = _html.escape(title or "")
+    generated_by = _html.escape(generated_by or "")
     generated_at = datetime.now().strftime("%B %d, %Y at %H:%M UTC")
     sections_html = ""
 

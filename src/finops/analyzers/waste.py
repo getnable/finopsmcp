@@ -935,8 +935,12 @@ def _next_lambda_memory_size(target_mb: int) -> int:
 _SIZE_VCPU: dict[str, int] = {
     "nano": 1, "micro": 1, "small": 1, "medium": 1, "large": 2,
     "xlarge": 4, "2xlarge": 8, "3xlarge": 12, "4xlarge": 16, "6xlarge": 24,
-    "8xlarge": 32, "9xlarge": 36, "12xlarge": 48, "16xlarge": 64,
-    "18xlarge": 72, "24xlarge": 96, "32xlarge": 128, "48xlarge": 192, "metal": 96,
+    "8xlarge": 32, "9xlarge": 36, "10xlarge": 40, "12xlarge": 48, "16xlarge": 64,
+    "18xlarge": 72, "24xlarge": 96, "32xlarge": 128, "48xlarge": 192,
+    # 'metal' is intentionally omitted: metal vCPU counts vary widely by family
+    # (mac1.metal=12, z1d.metal=48, i3.metal=72, m5.metal=96). Mapping all of them
+    # to 96 over-estimated idle savings, the exact failure this table was added to
+    # fix. An unknown suffix falls through to the conservative default below.
 }
 
 # Average hourly NetworkOut above which an instance is treated as doing real work
@@ -1031,6 +1035,10 @@ def check_idle_ec2(
                 # I/O. Skip flagging when network shows sustained activity, so a
                 # working instance is not falsely called idle.
                 try:
+                    # Sum over a 1-hour Period gives total bytes per hour. Averaging
+                    # the per-collection-interval samples (Statistics=Average) would
+                    # return mean bytes-per-sample, ~12x too low against a per-hour
+                    # threshold, so the guard would never fire. Use Sum.
                     net_resp = cw_client.get_metric_statistics(
                         Namespace="AWS/EC2",
                         MetricName="NetworkOut",
@@ -1038,11 +1046,11 @@ def check_idle_ec2(
                         StartTime=start,
                         EndTime=now,
                         Period=3600,
-                        Statistics=["Average"],
+                        Statistics=["Sum"],
                     )
                     net_dps = net_resp.get("Datapoints", [])
                     avg_net_per_hr = (
-                        sum(dp.get("Average", 0) for dp in net_dps) / len(net_dps)
+                        sum(dp.get("Sum", 0) for dp in net_dps) / len(net_dps)
                         if net_dps else 0.0
                     )
                 except Exception as exc:
