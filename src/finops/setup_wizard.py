@@ -591,6 +591,16 @@ def setup_azure() -> None:
             return
 
     _ok("Azure credentials stored")
+    print()
+    print("  Grant these roles to the service principal on each subscription so all")
+    print("  the Azure tools work (cost, Advisor, and VM rightsizing):")
+    print("    - Cost Management Reader   (cost queries, budgets, forecast)")
+    print("    - Reader                   (Azure Advisor recs + VM list)")
+    print("    - Monitoring Reader        (VM CPU for rightsizing)")
+    print("  Example (repeat per subscription):")
+    print("    az role assignment create --assignee <client-id> \\")
+    print("      --role 'Monitoring Reader' --scope /subscriptions/<sub-id>")
+    print("  Run `finops doctor` to verify the roles are in place.")
     try:
         from . import telemetry as _tel
         _tel._send_event(_tel._get_install_id(), "provider_connected", {

@@ -190,6 +190,104 @@ def _check_aws_scope() -> dict:
     }
 
 
+def _check_azure_permissions() -> dict:
+    """Probe the Azure RBAC roles nable's Azure tools need.
+
+    nable's Azure tools span three roles per subscription: Cost Management Reader
+    (cost queries), Reader (Advisor + VM list), and Monitoring Reader (VM CPU for
+    rightsizing). A missing role surfaces at query time as an empty result, which
+    is confusing, so catch it here up front. Skips cleanly when Azure is not set up.
+    """
+    name = "Azure permissions"
+    try:
+        from .connectors.azure_detail import (
+            _MGMT_BASE, _auth_headers, _get_access_token, _subscription_ids, is_configured,
+        )
+    except Exception:
+        return {"name": name, "ok": None, "detail": "Azure helpers unavailable."}
+    if not is_configured():
+        return {"name": name, "ok": None, "detail": "Azure not configured — skipped."}
+    try:
+        import httpx
+    except ImportError:
+        return {"name": name, "ok": None, "detail": "httpx not installed — Azure checks skipped."}
+    try:
+        token = _get_access_token()
+    except Exception as e:
+        return {"name": name, "ok": None, "detail": f"Azure auth failed: {e}"}
+
+    subs = _subscription_ids()
+    if not subs:
+        return {"name": name, "ok": None, "detail": "No Azure subscriptions configured."}
+    sub = subs[0]
+    headers = _auth_headers(token)
+    warnings: list[str] = []
+
+    # Reader probe: list VMs.
+    reader_ok = None
+    vms: list = []
+    try:
+        r = httpx.get(
+            f"{_MGMT_BASE}/subscriptions/{sub}/providers/Microsoft.Compute/virtualMachines"
+            f"?api-version=2023-09-01", headers=headers, timeout=15,
+        )
+        if r.status_code == 200:
+            reader_ok, vms = True, r.json().get("value", [])
+        elif r.status_code == 403:
+            reader_ok = False
+    except Exception:
+        pass
+
+    # Monitoring Reader probe: read a CPU metric on the first VM, if any.
+    monitoring_ok = None
+    if vms:
+        vm_id = vms[0].get("id", "")
+        try:
+            from datetime import datetime, timedelta, timezone
+            end = datetime.now(timezone.utc)
+            start = end - timedelta(hours=6)
+            mr = httpx.get(
+                f"{_MGMT_BASE}{vm_id}/providers/Microsoft.Insights/metrics"
+                f"?api-version=2023-10-01&metricnames=Percentage CPU"
+                f"&timespan={start.isoformat()}/{end.isoformat()}&interval=PT1H&aggregation=Average",
+                headers=headers, timeout=15,
+            )
+            monitoring_ok = mr.status_code == 200
+        except Exception:
+            monitoring_ok = None
+
+    if reader_ok is False:
+        warnings.append(
+            f"Missing 'Reader' role: VM rightsizing and Advisor return nothing. Grant: "
+            f"az role assignment create --assignee <client-id> --role Reader "
+            f"--scope /subscriptions/{sub}"
+        )
+    if monitoring_ok is False:
+        warnings.append(
+            f"Missing 'Monitoring Reader' role: VM CPU is unavailable, so rightsizing "
+            f"cannot flag idle VMs. Grant: az role assignment create --assignee <client-id> "
+            f"--role 'Monitoring Reader' --scope /subscriptions/{sub}"
+        )
+
+    if reader_ok and (monitoring_ok or not vms):
+        detail = "Azure roles look good for cost, Advisor, and VM rightsizing."
+        if not vms:
+            detail += " (No VMs found, so Monitoring Reader was not fully verified.)"
+        ok: bool | None = True
+    elif reader_ok is None:
+        detail = "Could not probe Azure roles (non-403 error)."
+        ok = None
+    else:
+        detail = (
+            "nable's Azure tools need three roles per subscription: Cost Management "
+            "Reader (cost), Reader (Advisor + VM list), Monitoring Reader (VM CPU). "
+            "See warnings for the missing ones."
+        )
+        ok = False
+
+    return {"name": name, "ok": ok, "detail": detail, "warnings": warnings}
+
+
 def _check_database() -> dict:
     """Verify the database exists, is readable, and has correct file permissions."""
     from .storage.db import data_dir
@@ -411,6 +509,7 @@ def run_doctor(as_json: bool = False) -> int:
         _check_path_and_install(),
         _check_keyring_storage(),
         _check_aws_scope(),
+        _check_azure_permissions(),
         _check_database(),
         _check_telemetry(),
         _check_network(),

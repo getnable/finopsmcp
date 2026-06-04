@@ -5910,6 +5910,7 @@ async def get_azure_vm_rightsizing(
     subscription_id: str | None = None,
     lookback_days: int = 14,
     limit: int = 100,
+    max_vms_scanned: int = 200,
 ) -> dict:
     """
     Find idle and oversized Azure VMs from Azure Monitor CPU, with real dollar cost.
@@ -5924,6 +5925,9 @@ async def get_azure_vm_rightsizing(
         subscription_id: A single Azure subscription. None = all configured subs.
         lookback_days: CPU history window for the analysis (default 14).
         limit: Max VMs to return, highest savings first (default 100).
+        max_vms_scanned: Cap on how many VMs (costliest first) get a CPU-metrics
+            call, so a large estate does not hang on hundreds of serial requests
+            (default 200).
 
     Examples:
         - "vm rightsizing"
@@ -5934,7 +5938,8 @@ async def get_azure_vm_rightsizing(
     try:
         from .connectors.azure_optimize import get_vm_rightsizing
         result = get_vm_rightsizing(
-            subscription_id=subscription_id, lookback_days=lookback_days, limit=limit
+            subscription_id=subscription_id, lookback_days=lookback_days,
+            limit=limit, max_vms_scanned=max_vms_scanned,
         )
         vms = result.get("vms")
         if isinstance(vms, list) and vms:
