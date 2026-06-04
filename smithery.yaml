@@ -1,0 +1,37 @@
+# Smithery configuration for nable (finops-mcp)
+# Docs: https://smithery.ai/docs/build/project-config
+#
+# nable is a local-first stdio MCP server. It runs on the user's own machine and
+# reads cloud credentials from the local environment or OS keyring, so cost data
+# and credentials never leave the machine. The fields below are optional: leave
+# them blank to use your existing local AWS credentials.
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      awsAccessKeyId:
+        type: string
+        title: AWS Access Key ID
+        description: Optional. Leave blank to use your local AWS credentials or keyring.
+      awsSecretAccessKey:
+        type: string
+        title: AWS Secret Access Key
+        description: Optional. Leave blank to use your local AWS credentials or keyring.
+      awsDefaultRegion:
+        type: string
+        title: AWS Region
+        description: Optional AWS region. Defaults to us-east-1.
+        default: us-east-1
+    required: []
+  commandFunction: |
+    (config) => ({
+      command: 'uvx',
+      args: ['finops-mcp'],
+      env: {
+        ...(config.awsAccessKeyId ? { AWS_ACCESS_KEY_ID: config.awsAccessKeyId } : {}),
+        ...(config.awsSecretAccessKey ? { AWS_SECRET_ACCESS_KEY: config.awsSecretAccessKey } : {}),
+        ...(config.awsDefaultRegion ? { AWS_DEFAULT_REGION: config.awsDefaultRegion } : {})
+      }
+    })
