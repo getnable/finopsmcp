@@ -18,6 +18,7 @@ Lambda list/tag APIs, and IAM — all free, read-only calls.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, timedelta
 
 log = logging.getLogger(__name__)
@@ -265,7 +266,6 @@ def _is_nonprod_name(name: str) -> tuple[bool, str]:
 
     Returns (is_nonprod, signal) where signal is the matched keyword.
     """
-    import re
     # Split on delimiters, then tokenize each part so acronym runs survive:
     #   [A-Z]+(?![a-z]) -> all-caps acronym ("QA", "UAT", "DEV", "UAT" in "UATPipeline")
     #   [A-Z][a-z]+     -> capitalized word ("Handler", "Pipeline")
@@ -278,6 +278,13 @@ def _is_nonprod_name(name: str) -> tuple[bool, str]:
     for p in parts:
         tokens.extend(re.findall(r"[A-Z]+(?![a-z])|[A-Z][a-z]+|[a-z]+|[0-9]+", p))
     token_set = {t.lower() for t in tokens}
+    # 'non-prod' / 'non_prod' split into {'non','prod'} and miss the 'nonprod'
+    # signal. 'nonprod' is long and distinctive, so a substring test on the
+    # de-delimited name is safe for it (unlike short signals like 'dev'/'test',
+    # which would re-introduce the 'developer'/'latest' false positives).
+    joined = re.sub(r"[-_./ ]+", "", name).lower()
+    if "nonprod" in joined:
+        return True, "nonprod"
     for signal in _NONPROD_NAME_SIGNALS:
         if signal in token_set:
             return True, signal

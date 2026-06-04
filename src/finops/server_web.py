@@ -26,7 +26,7 @@ import socket
 import threading
 import time as _time_module
 from datetime import datetime, date, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -48,25 +48,46 @@ elif not _DASHBOARD_PASSWORD:
     _DASHBOARD_PASSWORD = secrets.token_urlsafe(14)
     _PASSWORD_AUTO_GENERATED = True
 
-# Server-side session store: token → expiry (unix timestamp).
-# Tokens are 32-byte URL-safe random strings — never derived from the password.
-_SESSIONS: dict[str, float] = {}
+# Server-side session stores: token → expiry (unix timestamp). Full-access and
+# read-only sessions live in SEPARATE stores so a read-only share token can never
+# be replayed as a full-access session cookie (privilege escalation). Tokens are
+# 32-byte URL-safe random strings — never derived from the password.
+_SESSIONS: dict[str, float] = {}        # full access (password / SSO login)
+_RO_SESSIONS: dict[str, float] = {}     # read-only share links (/view)
 _SESSION_TTL_SECONDS: int = 8 * 3600  # 8 hours
+_RO_SESSION_TTL_SECONDS: int = 24 * 3600  # 24 hours for share links
+
+
+def _prune(store: dict[str, float]) -> None:
+    now = _time_module.time()
+    for t in [t for t, exp in store.items() if now > exp]:
+        store.pop(t, None)
 
 
 def _create_session() -> str:
+    """Mint a FULL-access session token."""
     token = secrets.token_urlsafe(32)
     _SESSIONS[token] = _time_module.time() + _SESSION_TTL_SECONDS
-    # Prune expired sessions (keep dict bounded)
-    expired = [t for t, exp in _SESSIONS.items() if _time_module.time() > exp]
-    for t in expired:
-        _SESSIONS.pop(t, None)
+    _prune(_SESSIONS)
+    return token
+
+
+def _create_ro_session() -> str:
+    """Mint a READ-ONLY session token (separate store, never full access)."""
+    token = secrets.token_urlsafe(32)
+    _RO_SESSIONS[token] = _time_module.time() + _RO_SESSION_TTL_SECONDS
+    _prune(_RO_SESSIONS)
     return token
 
 
 def _session_valid(token: str) -> bool:
-    expiry = _SESSIONS.get(token, 0)
-    return _time_module.time() < expiry
+    """True only for a live FULL-access token."""
+    return _time_module.time() < _SESSIONS.get(token, 0)
+
+
+def _ro_session_valid(token: str) -> bool:
+    """True only for a live READ-ONLY token."""
+    return _time_module.time() < _RO_SESSIONS.get(token, 0)
 
 # Path to bundled Chart.js (served locally so dashboard works offline / GovCloud)
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -1924,16 +1945,30 @@ class _Handler(BaseHTTPRequestHandler):
         return _session_valid(m.group(1))
 
     def _ro_cookie_valid(self) -> bool:
-        """Validate a read-only share session cookie."""
+        """Validate a read-only share session cookie against the read-only store.
+
+        Read-only tokens live in their own store, so a nable_view value can never
+        satisfy _cookie_valid() (full access) even if copied into nable_session.
+        """
         cookie_header = self.headers.get("Cookie", "")
         m = re.search(r"nable_view=([A-Za-z0-9_=-]+)", cookie_header)
         if not m:
             return False
-        return _session_valid(m.group(1))
+        return _ro_session_valid(m.group(1))
 
     def _any_auth_valid(self) -> bool:
         """Return True if the request has either full or read-only access."""
         return self._cookie_valid() or self._ro_cookie_valid()
+
+    def _cookie_attrs(self) -> str:
+        """Common Set-Cookie attributes. Adds Secure when the request reached us
+        over HTTPS (directly or via a TLS-terminating proxy that sets
+        X-Forwarded-Proto), so the session token is not sent in cleartext."""
+        attrs = "Path=/; HttpOnly; SameSite=Strict"
+        xfp = (self.headers.get("X-Forwarded-Proto", "") or "").split(",")[0].strip().lower()
+        if xfp == "https":
+            attrs += "; Secure"
+        return attrs
 
     def _serve_login_page(self, error: bool = False, sso_error: str = "") -> None:
         error_html = ""
@@ -2062,7 +2097,7 @@ button:hover{{filter:brightness(1.1)}}
             self.send_header("Location", "/")
             self.send_header(
                 "Set-Cookie",
-                f"nable_session={session_token}; Path=/; HttpOnly; SameSite=Strict",
+                f"nable_session={session_token}; {self._cookie_attrs()}",
             )
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -2086,7 +2121,15 @@ button:hover{{filter:brightness(1.1)}}
 
         if path.startswith("/static/fonts/"):
             fname = path.removeprefix("/static/fonts/")
-            fpath = _STATIC_DIR / "fonts" / fname
+            # Confine to the fonts dir: this route runs BEFORE auth and the server
+            # binds 0.0.0.0, so an unresolved '..' would be an unauthenticated file
+            # read (e.g. GET /static/fonts/../../etc/foo.css via a raw HTTP client
+            # that does not normalize the path). Resolve and verify containment.
+            fonts_dir = (_STATIC_DIR / "fonts").resolve()
+            fpath = (fonts_dir / fname).resolve()
+            if not str(fpath).startswith(str(fonts_dir) + os.sep):
+                self._send(404, "text/plain", b"Font not found")
+                return
             if fpath.exists() and fpath.suffix in (".woff2", ".woff", ".css"):
                 if fpath.suffix == ".css":
                     mime = "text/css"
@@ -2105,7 +2148,7 @@ button:hover{{filter:brightness(1.1)}}
             if token_param:
                 # Token exchange: validate token → set read-only cookie → redirect to /view
                 if _ro_token_valid(token_param):
-                    ro_session = _create_session()  # re-use same session TTL
+                    ro_session = _create_ro_session()  # read-only store, not full access
                     _RO_TOKENS.pop(token_param, None)  # one-time exchange: consumed here
                     # Audit log
                     client_ip = self.client_address[0]
@@ -2114,7 +2157,7 @@ button:hover{{filter:brightness(1.1)}}
                     self.send_header("Location", "/view")
                     self.send_header(
                         "Set-Cookie",
-                        f"nable_view={ro_session}; Path=/; HttpOnly; SameSite=Strict",
+                        f"nable_view={ro_session}; {self._cookie_attrs()}",
                     )
                     self.send_header("Content-Length", "0")
                     self.end_headers()
@@ -2172,7 +2215,7 @@ button:hover{{filter:brightness(1.1)}}
                 self.send_header("Location", "/")
                 self.send_header(
                     "Set-Cookie",
-                    f"nable_session={session_token}; Path=/; HttpOnly; SameSite=Strict",
+                    f"nable_session={session_token}; {self._cookie_attrs()}",
                 )
                 self.send_header("Content-Length", "0")
                 self.end_headers()
@@ -2322,10 +2365,17 @@ def _local_ip() -> str:
 # ── Server start helpers ──────────────────────────────────────────────────────
 
 def _make_server(host: str, port: int) -> HTTPServer:
-    """Create an HTTPServer, incrementing port on conflict."""
+    """Create a threaded HTTPServer, incrementing port on conflict.
+
+    ThreadingHTTPServer (not plain HTTPServer) so a slow /api/data cost fetch on
+    a cache miss (up to 30s) does not serialize every other request. The finance
+    deploy targets several concurrent non-engineer users, so one slow fetch must
+    not stall the dashboard HTML, static assets, /health, or other users.
+    """
     for attempt in range(10):
         try:
-            server = HTTPServer((host, port + attempt), _Handler)
+            server = ThreadingHTTPServer((host, port + attempt), _Handler)
+            server.daemon_threads = True  # do not block process exit on in-flight requests
             if attempt > 0:
                 log.info("Port %d in use, using %d instead.", port, port + attempt)
             return server
@@ -2341,6 +2391,11 @@ def start_server_background(host: str = "0.0.0.0", port: int = 8080) -> tuple[HT
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, actual_port
+
+
+# Tracks which finance services this process started, so run_server can shut
+# them down cleanly on Ctrl+C.
+_FINANCE_STATE: dict[str, bool] = {"scheduler_started": False}
 
 
 def _start_finance_services() -> list[str]:
@@ -2369,6 +2424,7 @@ def _start_finance_services() -> list[str]:
         try:
             from .scheduler.jobs import start_scheduler
             start_scheduler()
+            _FINANCE_STATE["scheduler_started"] = True
             status.append("Scheduler:  ON  (snapshots, anomaly alerts, daily + weekly digests)")
         except Exception as exc:  # noqa: BLE001 - never block the dashboard
             log.warning("Scheduler did not start: %s", exc)
@@ -2406,6 +2462,13 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = Fal
     print(f"\n  nable dashboard running at http://{host}:{actual_port}")
     if host == "0.0.0.0":
         print(f"  Share this URL with your team: http://{local_ip}:{actual_port}")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "\n  Note: this is plain HTTP. The password and session cookie travel "
+            "in cleartext on the network.\n"
+            "  Front the finance host with TLS (a reverse proxy that sets "
+            "X-Forwarded-Proto: https) so cookies are marked Secure. See DEPLOY.md."
+        )
     if _AUTH_DISABLED:
         print(f"\n  Auth disabled (FINOPS_DASHBOARD_PASSWORD=off).")
         print(f"  Anyone on your network can access this dashboard.")
@@ -2442,5 +2505,12 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = Fal
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n  Stopped.")
+        print("\n  Stopping...")
+        if _FINANCE_STATE.get("scheduler_started"):
+            try:
+                from .scheduler.jobs import stop_scheduler
+                stop_scheduler()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("Scheduler shutdown failed: %s", exc)
         server.shutdown()
+        print("  Stopped.")

@@ -43,9 +43,11 @@ def _date_range_30d() -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
-def _get_rds_spend(ce_client: Any, start: str, end: str) -> float:
+def _get_rds_spend(ce_client: Any, start: str, end: str) -> float | None:
     """
-    RDS + Aurora COMPUTE (instance-hours) spend over the window.
+    RDS + Aurora COMPUTE (instance-hours) spend over the window. Returns None when
+    the Cost Explorer query fails, so the caller can distinguish a real $0 from a
+    failed fetch instead of emitting a confident "no Savings Plan needed".
 
     Database Savings Plans only discount instance running hours. They do NOT
     cover storage, provisioned IOPS, backups, snapshots, or data transfer.
@@ -70,7 +72,7 @@ def _get_rds_spend(ce_client: Any, start: str, end: str) -> float:
         return total
     except Exception as e:
         log.warning("RDS compute spend fetch failed: %s", e)
-        return 0.0
+        return None
 
 
 def _get_database_sp_coverage(ce_client: Any, start: str, end: str) -> float:
@@ -118,15 +120,28 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
         start, end = _date_range_30d()
 
         monthly_rds_spend = _get_rds_spend(ce, start, end)
+        if monthly_rds_spend is None:
+            # CE query failed. Do not emit a confident $0 "no SP needed" result
+            # that is indistinguishable from a genuine zero.
+            return {
+                "data_incomplete": True,
+                "error": "Could not read RDS compute spend from Cost Explorer "
+                         "(throttle, permissions, or outage). No recommendation made.",
+                "recommendation_type": "database_savings_plan_1yr_no_upfront",
+            }
         sp_coverage_pct = _get_database_sp_coverage(ce, start, end)
 
         uncovered_fraction = max(0.0, 1.0 - sp_coverage_pct / 100)
         uncovered_monthly = monthly_rds_spend * uncovered_fraction
 
-        # Size the SP to cover the uncovered baseline at on-demand rates.
-        # Hourly commitment = monthly uncovered / (hours in a month).
+        # Size the SP at the DISCOUNTED hourly rate you commit to, not on-demand
+        # dollars. uncovered_monthly is on-demand spend; committing on-demand/730
+        # per hour over-buys by 1/(1-discount). The commitment is the post-SP rate.
         hours_per_month = 730.0
-        recommended_hourly = uncovered_monthly / hours_per_month if uncovered_monthly > 0 else 0.0
+        recommended_hourly = (
+            uncovered_monthly * (1.0 - DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT) / hours_per_month
+            if uncovered_monthly > 0 else 0.0
+        )
 
         estimated_monthly_savings = uncovered_monthly * DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT
         estimated_annual_savings = estimated_monthly_savings * 12

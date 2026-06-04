@@ -66,7 +66,14 @@ def _get_bucket_storage_stats(
         dps = resp.get("Datapoints", [])
         if not dps:
             return None
-        return max(dps, key=lambda d: d.get("Timestamp") or 0)["Average"]
+        # Sentinel must be a datetime, not int 0: boto Timestamps are tz-aware
+        # datetimes and `datetime > 0` raises TypeError. Skip datapoints with no
+        # usable Average rather than KeyError-ing the whole storage class.
+        _floor = datetime.min.replace(tzinfo=timezone.utc)
+        usable = [d for d in dps if d.get("Average") is not None]
+        if not usable:
+            return None
+        return max(usable, key=lambda d: d.get("Timestamp") or _floor)["Average"]
 
     def _query(metric: str, storage_type: str):
         return cw_client.get_metric_statistics(

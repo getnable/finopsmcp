@@ -398,7 +398,15 @@ def handle_interaction(payload: dict) -> list[dict]:
 # ── Request verification ───────────────────────────────────────────────────────
 
 def verify_slack_request(body: bytes, timestamp: str, signature: str, secret: str) -> bool:
-    if abs(time.time() - float(timestamp)) > 300:
+    # Fail closed: an empty signing secret would HMAC with an empty key, letting
+    # anyone who knows the body forge a matching signature.
+    if not secret:
+        return False
+    try:
+        ts = float(timestamp)
+    except (TypeError, ValueError):
+        return False  # attacker-controlled non-numeric timestamp
+    if abs(time.time() - ts) > 300:
         return False
     basestring = f"v0:{timestamp}:{body.decode()}"
     expected   = "v0=" + hmac.new(

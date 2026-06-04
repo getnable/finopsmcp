@@ -161,6 +161,12 @@ def test_small_object_bucket_flagged_as_likely_waste():
     assert finding["monitoring_pct_of_savings"] >= 100
     assert finding["monthly_monitoring_cost"] is not None
     assert finding["monthly_monitoring_cost"] > 0
+    # Contract guard: the three consolidated reports in server.py
+    # (run_full_cost_audit, export_cost_report_csv, publish_cost_report_to_notion)
+    # filter S3 IT waste with recommendation.startswith("LIKELY_WASTE"). If the
+    # waste prefix ever changes, those aggregators silently drop S3 IT savings,
+    # so pin the prefix here.
+    assert finding["recommendation"].startswith("LIKELY_WASTE")
 
 
 # ── integration: large-object bucket not flagged ──────────────────────────────

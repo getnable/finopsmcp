@@ -85,11 +85,13 @@ class TestGetRdsSpend:
         # 1200.50 + 800.00 compute; storage + backup ($800) excluded
         assert abs(result - 2000.50) < 0.01
 
-    def test_returns_zero_on_exception(self):
+    def test_returns_none_on_exception(self):
+        # A CE failure must be distinguishable from a real $0, so the caller does
+        # not emit a confident "no Savings Plan needed". None signals data_incomplete.
         ce = MagicMock()
         ce.get_cost_and_usage.side_effect = Exception("access denied")
         result = _get_rds_spend(ce, "2026-04-01", "2026-05-01")
-        assert result == 0.0
+        assert result is None
 
     def test_returns_zero_for_empty_response(self):
         ce = MagicMock()
@@ -214,8 +216,13 @@ class TestRecommendDatabaseSavingsPlans:
         assert result is not None
         assert result["payback_days"] == 0
 
-    def test_hourly_commitment_calculation(self):
-        # Uncovered spend = 7300 / month, hourly = 7300 / 730
+    def test_hourly_commitment_is_sized_at_discounted_rate(self):
+        # Uncovered on-demand spend = 7300/month. The SP commitment is the
+        # DISCOUNTED hourly rate, not on-demand/730: 7300 * (1-0.30) / 730 = 7.0.
+        # Committing on-demand/730 (=10.0) would over-buy by 1/(1-discount).
+        from finops.recommendations.database_savings_plans import (
+            DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT as _disc,
+        )
         ce = _make_ce_client(spend=7_300.0, coverage_pct=0.0)
         mock_boto3 = MagicMock()
         mock_boto3.client.return_value = ce
@@ -224,7 +231,24 @@ class TestRecommendDatabaseSavingsPlans:
             result = recommend_database_savings_plans()
 
         assert result is not None
-        assert abs(result["recommended_sp_hourly_commitment"] - 10.0) < 0.01
+        expected = 7_300.0 * (1.0 - _disc) / 730.0
+        assert abs(result["recommended_sp_hourly_commitment"] - expected) < 0.01
+        # And it is strictly below the naive on-demand sizing.
+        assert result["recommended_sp_hourly_commitment"] < 10.0
+
+    def test_data_incomplete_when_ce_fails(self):
+        # CE error -> data_incomplete, not a confident $0 recommendation.
+        ce = _make_ce_client(spend=7_300.0, coverage_pct=0.0)
+        ce.get_cost_and_usage.side_effect = Exception("throttled")
+        mock_boto3 = MagicMock()
+        mock_boto3.client.return_value = ce
+
+        with patch("finops.recommendations.database_savings_plans.boto3", mock_boto3):
+            result = recommend_database_savings_plans()
+
+        assert result is not None
+        assert result.get("data_incomplete") is True
+        assert "current_monthly_rds_spend" not in result
 
     def test_returns_none_on_exception(self):
         mock_boto3 = MagicMock()

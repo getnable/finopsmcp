@@ -18,6 +18,54 @@ log = logging.getLogger("finops.scheduler")
 
 _scheduler: BackgroundScheduler | None = None
 
+# Holds the single-owner lock (a DB connection or a file handle) for the life of
+# the process so two processes pointing at the same database do not both run the
+# digest/anomaly jobs and double-send. Fixed 64-bit key for the PG advisory lock.
+_scheduler_lock_handle = None
+_SCHED_LOCK_KEY = 0x6E61626C  # 'nabl'
+
+
+def _acquire_scheduler_lock() -> bool:
+    """Best-effort single-owner guard across processes sharing one database.
+
+    Postgres (shared team mode): a session-level advisory lock, so only one of
+    several hosts pointing at the same Postgres owns the schedule. SQLite / local:
+    a non-blocking file lock keyed on the DB path, so `finops serve` and a separate
+    `finops-mcp` on the same host do not both fire. Fails OPEN (returns True) on any
+    error or unsupported platform: better to run than to silently never send.
+    """
+    global _scheduler_lock_handle
+    try:
+        from ..storage.db import get_engine, _is_postgres
+        url = os.environ.get("DATABASE_URL", "")
+        if url and _is_postgres(url):
+            conn = get_engine().raw_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT pg_try_advisory_lock(%s)", (_SCHED_LOCK_KEY,))
+            if cur.fetchone()[0]:
+                _scheduler_lock_handle = (conn, cur)  # hold for process lifetime
+                return True
+            cur.close()
+            conn.close()
+            return False
+        import fcntl  # unix-only; Windows raises ImportError -> fail open below
+        import hashlib
+        import tempfile
+        ident = url or os.environ.get("FINOPS_DB_PATH", "default")
+        key = hashlib.sha256(ident.encode()).hexdigest()[:16]
+        path = os.path.join(tempfile.gettempdir(), f"nable-sched-{key}.lock")
+        fh = open(path, "w")
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fh.close()
+            return False
+        _scheduler_lock_handle = fh  # keep fd open so the lock is held
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Scheduler single-owner lock unavailable (%s); proceeding.", exc)
+        return True
+
 
 # ── Core job functions ────────────────────────────────────────────────────────
 
@@ -348,10 +396,17 @@ def job_weekly_email_digest() -> None:
 
 # ── Scheduler lifecycle ───────────────────────────────────────────────────────
 
-def start_scheduler() -> BackgroundScheduler:
+def start_scheduler() -> BackgroundScheduler | None:
     global _scheduler
     if _scheduler and _scheduler.running:
         return _scheduler
+
+    if not _acquire_scheduler_lock():
+        log.info(
+            "Another process already owns the nable scheduler for this database; "
+            "not starting digest/anomaly jobs here (prevents double-sends)."
+        )
+        return None
 
     _scheduler = BackgroundScheduler(timezone="UTC")
 
