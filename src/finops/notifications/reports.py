@@ -470,7 +470,10 @@ def create_subscription(
             filters=json.dumps(filters or {}),
             lookback_days=lookback_days,
             created_at=now,
-            last_sent_at=None,
+            # Baseline to creation time, NOT None. Otherwise the scheduler's
+            # due-check treats the subscription as "never sent" and blasts a full
+            # report within ~5 minutes of creation instead of on its schedule.
+            last_sent_at=now,
             is_active=True,
             created_by="mcp",
         ))
@@ -515,14 +518,15 @@ def tz_utc():
     return timezone.utc
 
 
-def _is_report_due(cron: str, last_sent_at: Any) -> bool:
+def _is_report_due(cron: str, last_sent_at: Any, created_at: Any = None) -> bool:
     """Return True if a subscription with this cron is due to run now.
 
     Due means the most recent scheduled fire time at or before now is strictly
-    later than the last time the report was sent. A never-sent subscription
-    (last_sent_at is None) is due once its first scheduled time has passed. This
-    is called every ~5 minutes by the Slack scheduler, so the strict-after check
-    is what prevents a report from being re-sent on every tick after it fires.
+    later than the baseline. The baseline is the last time the report was sent;
+    if it was never sent, the baseline is when the subscription was created, so a
+    brand-new subscription does NOT blast a report on the next 5-minute tick, it
+    waits for its first scheduled time after creation. If neither timestamp is
+    available we return False (wait) rather than risk an unscheduled blast.
 
     Requires croniter (the `croniter` extra). Without it we cannot evaluate the
     schedule, so we return False rather than risk spamming.
@@ -541,17 +545,18 @@ def _is_report_due(cron: str, last_sent_at: Any) -> bool:
         return False
     if prev_fire.tzinfo is None:
         prev_fire = prev_fire.replace(tzinfo=timezone.utc)
-    if last_sent_at is None:
-        return True
-    lsa = last_sent_at
-    if isinstance(lsa, str):
+
+    baseline = last_sent_at if last_sent_at is not None else created_at
+    if baseline is None:
+        return False  # no baseline: do not blast, wait for a real send/created time
+    if isinstance(baseline, str):
         try:
-            lsa = datetime.fromisoformat(lsa)
+            baseline = datetime.fromisoformat(baseline)
         except ValueError:
-            return True  # unparseable timestamp: treat as never sent
-    if lsa.tzinfo is None:
-        lsa = lsa.replace(tzinfo=timezone.utc)
-    return prev_fire > lsa
+            return False
+    if baseline.tzinfo is None:
+        baseline = baseline.replace(tzinfo=timezone.utc)
+    return prev_fire > baseline
 
 
 async def run_subscription(sub_id: int) -> dict[str, Any]:

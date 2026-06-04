@@ -25,7 +25,12 @@ def test_due_logic_when_croniter_present():
         assert _is_report_due("0 9 * * *", None) is False
         return
     now = datetime.now(timezone.utc)
-    assert _is_report_due("0 9 * * *", None) is True                      # never sent
+    # never sent and no created_at -> NOT due (do not blast on the next tick)
+    assert _is_report_due("0 9 * * *", None) is False
+    # never sent but created just now -> NOT due yet (wait for next scheduled fire)
+    assert _is_report_due("0 9 * * *", None, created_at=now) is False
+    # never sent, created 2 days ago -> due (a scheduled time has passed since)
+    assert _is_report_due("0 9 * * *", None, created_at=now - timedelta(days=2)) is True
     assert _is_report_due("0 9 * * *", now) is False                      # just sent
     assert _is_report_due("0 9 * * *", now - timedelta(days=2)) is True   # stale
-    assert _is_report_due("not a cron", None) is False                    # malformed
+    assert _is_report_due("not a cron", None, created_at=now - timedelta(days=2)) is False  # malformed

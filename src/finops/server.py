@@ -5889,7 +5889,7 @@ async def get_azure_advisor_recommendations(
     """
     try:
         from .connectors.azure_optimize import get_advisor_cost_recommendations
-        result = get_advisor_cost_recommendations(subscription_id=subscription_id, limit=limit)
+        result = await asyncio.to_thread(get_advisor_cost_recommendations, subscription_id=subscription_id, limit=limit)
         recs = result.get("recommendations")
         if isinstance(recs, list) and recs:
             kept, omitted = fit_to_budget(recs, max_tokens=6000)
@@ -5937,7 +5937,10 @@ async def get_azure_vm_rightsizing(
     """
     try:
         from .connectors.azure_optimize import get_vm_rightsizing
-        result = get_vm_rightsizing(
+        # Offload the blocking Azure REST calls so they do not freeze the asyncio
+        # event loop (and the in-process Slack bot / scheduler) for the whole query.
+        result = await asyncio.to_thread(
+            get_vm_rightsizing,
             subscription_id=subscription_id, lookback_days=lookback_days,
             limit=limit, max_vms_scanned=max_vms_scanned,
         )
@@ -5975,7 +5978,7 @@ async def get_azure_budgets(subscription_id: str | None = None) -> dict:
     """
     try:
         from .connectors.azure_optimize import get_native_budgets
-        return get_native_budgets(subscription_id=subscription_id)
+        return await asyncio.to_thread(get_native_budgets, subscription_id=subscription_id)
     except Exception as exc:
         log.error("get_azure_budgets failed: %s", exc)
         return {"error": str(exc)}
@@ -6005,7 +6008,7 @@ async def forecast_azure_costs(
     try:
         from .connectors.azure_optimize import forecast_costs
         ed = date.fromisoformat(end_date) if end_date else None
-        return forecast_costs(subscription_id=subscription_id, end_date=ed)
+        return await asyncio.to_thread(forecast_costs, subscription_id=subscription_id, end_date=ed)
     except ValueError:
         return {"error": "end_date must be ISO format YYYY-MM-DD."}
     except Exception as exc:
@@ -6049,7 +6052,8 @@ async def get_azure_cost_by_dimension(
             return {"error": "end_date must be ISO format YYYY-MM-DD."}
     try:
         from .connectors.azure_optimize import get_cost_by_dimension
-        return get_cost_by_dimension(
+        return await asyncio.to_thread(
+            get_cost_by_dimension,
             dimension=dimension, start_date=sd, end_date=ed,
             subscription_id=subscription_id, limit=limit,
         )

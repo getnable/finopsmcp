@@ -412,7 +412,6 @@ def start_scheduler() -> BackgroundScheduler | None:
 
     # Daily snapshot at 01:00 UTC
     snapshot_cron = os.environ.get("FINOPS_SNAPSHOT_CRON", "0 1 * * *")
-    h, m = snapshot_cron.split()[1], snapshot_cron.split()[0]
     _scheduler.add_job(job_snapshot, CronTrigger.from_crontab(snapshot_cron), id="snapshot", replace_existing=True)
 
     # Anomaly check at 02:00 UTC (after snapshot)
@@ -440,11 +439,40 @@ def start_scheduler() -> BackgroundScheduler | None:
     return _scheduler
 
 
+def _release_scheduler_lock() -> None:
+    """Release the cross-process single-owner lock so another host can take over
+    and we do not leak the DB connection / file descriptor."""
+    global _scheduler_lock_handle
+    h = _scheduler_lock_handle
+    _scheduler_lock_handle = None
+    if h is None:
+        return
+    try:
+        if isinstance(h, tuple):  # (conn, cur) for the Postgres advisory lock
+            conn, cur = h
+            try:
+                cur.execute("SELECT pg_advisory_unlock(%s)", (_SCHED_LOCK_KEY,))
+            except Exception:
+                pass
+            cur.close()
+            conn.close()
+        else:  # a file handle holding an fcntl flock
+            import fcntl
+            try:
+                fcntl.flock(h.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            h.close()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("Scheduler lock release failed: %s", exc)
+
+
 def stop_scheduler() -> None:
     global _scheduler
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
-        _scheduler = None
+    _scheduler = None
+    _release_scheduler_lock()
 
 
 # ── Manual triggers (used by MCP tools) ──────────────────────────────────────

@@ -426,3 +426,28 @@ def test_readonly_and_full_sessions_use_separate_stores():
 
     # The escalation attempt: replaying the RO token as a full session fails.
     assert sw._session_valid(ro) is False
+
+
+def test_session_mint_is_thread_safe():
+    """Regression: under ThreadingHTTPServer, _prune iterating the session dict
+    while another thread minted a token raised 'dictionary changed size during
+    iteration'. Hammer concurrent mints and assert no exception escapes."""
+    import threading
+    import finops.server_web as sw
+
+    errors = []
+
+    def worker():
+        try:
+            for _ in range(200):
+                sw._create_session()
+                sw._create_ro_session()
+        except Exception as e:  # the race surfaced as RuntimeError here
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, f"session mint raced: {errors[:2]}"

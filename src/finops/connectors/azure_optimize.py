@@ -178,11 +178,16 @@ def _vm_cpu_stats(token: str, vm_id: str, lookback_days: int) -> tuple[float | N
         return None, None
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=lookback_days)
+    # Use a 'Z' suffix, not isoformat()'s '+00:00'. A literal '+' in the query
+    # string is decoded to a space by Azure Resource Manager, which breaks the
+    # timespan and returns HTTP 400. That 400 made every VM read as "no CPU data",
+    # so rightsizing silently found nothing and falsely blamed a missing role.
+    _ts = f"{start.strftime('%Y-%m-%dT%H:%M:%SZ')}/{end.strftime('%Y-%m-%dT%H:%M:%SZ')}"
     url = (
         f"{_MGMT_BASE}{vm_id}/providers/Microsoft.Insights/metrics"
         f"?api-version={_METRICS_API_VER}"
         f"&metricnames=Percentage CPU"
-        f"&timespan={start.isoformat()}/{end.isoformat()}"
+        f"&timespan={_ts}"
         f"&interval=PT1H&aggregation=Average,Maximum"
     )
     try:
@@ -468,13 +473,28 @@ def forecast_costs(
             continue
         props = data.get("properties", data)
         cols = {c.get("name"): i for i, c in enumerate(props.get("columns", []))}
-        ci = cols.get("Cost", 0)
+        ci = cols.get("Cost", cols.get("PreTaxCost"))
+        if ci is None:
+            # No cost column to sum. Do NOT default to column 0 (that is the date
+            # or a grouping value), which would report nonsense dollars.
+            log.warning("Azure forecast for sub %s has no Cost column; skipping.", sub)
+            continue
         si = cols.get("CostStatus")
+        di = cols.get("UsageDate")  # int yyyymmdd, used when CostStatus is absent
+        today_int = int(date.today().strftime("%Y%m%d"))
         actual = forecast = 0.0
         for row in props.get("rows", []):
+            if ci >= len(row):
+                continue  # malformed/short row; skip rather than crash
             amt = _float(row[ci])
-            statuses = _str(row[si]).lower() if si is not None and si < len(row) else "forecast"
-            if statuses == "actual":
+            if si is not None and si < len(row):
+                is_actual = _str(row[si]).lower() == "actual"
+            elif di is not None and di < len(row):
+                # No status column: a row is actual if its date is at or before today.
+                is_actual = _float(row[di]) <= today_int
+            else:
+                is_actual = False  # cannot tell; count as forecast (projected_total stays correct)
+            if is_actual:
                 actual += amt
             else:
                 forecast += amt
