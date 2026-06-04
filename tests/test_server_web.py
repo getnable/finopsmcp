@@ -364,14 +364,36 @@ def test_finance_services_slack_starts_only_with_both_tokens(monkeypatch):
     thread_cls.assert_not_called()
     assert any("slack bot:  off" in s.lower() for s in status)
 
+    # Both tokens set. The bot thread starts only if slack_bolt is importable.
+    # CI does not install the [slack] extra, so pin find_spec to a present spec
+    # to test the token-gating + thread-start path deterministically.
     monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-test")
-    with patch("threading.Thread") as thread_cls:
+    with patch("importlib.util.find_spec", return_value=object()), \
+         patch("threading.Thread") as thread_cls:
         from finops.server_web import _start_finance_services
         status = _start_finance_services()
     thread_cls.assert_called_once()
     started = thread_cls.return_value
     started.start.assert_called_once()
     assert any("slack bot:  on" in s.lower() for s in status)
+
+
+def test_finance_services_slack_off_when_dependency_missing(monkeypatch):
+    """Both tokens set but slack_bolt not installed: the banner reports OFF with a
+    reason and does not start the thread (the 0.8.42 honest-banner behavior). This
+    is the exact case CI hits, since it does not install the [slack] extra."""
+    monkeypatch.delenv("FINOPS_ENABLE_SCHEDULER", raising=False)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-test")
+
+    with patch("importlib.util.find_spec", return_value=None), \
+         patch("threading.Thread") as thread_cls:
+        from finops.server_web import _start_finance_services
+        status = _start_finance_services()
+
+    thread_cls.assert_not_called()
+    assert any("slack bot:  off" in s.lower() for s in status)
+    assert any("slack_bolt" in s.lower() for s in status)
 
 
 def test_finance_services_never_raises_when_scheduler_broken(monkeypatch):
