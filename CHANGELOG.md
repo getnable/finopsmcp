@@ -2,6 +2,51 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.43
+
+A multi-agent code review and debugging pass (10 reviewers, every finding
+adversarially verified) plus a token-cost reduction for users. 18 confirmed
+findings fixed, including three cost-correctness regressions from the 0.8.40
+pass and two pre-auth holes in the team-host deploy.
+
+### Fixed
+- **S3 Intelligent-Tiering savings were silently dropped** from the three
+  consolidated reports (full audit, CSV export, Notion publish). They filtered on
+  a recommendation string the engine stopped emitting in 0.8.40, so S3 IT waste
+  never reached the consolidated totals. Now matched correctly, with a contract
+  test pinning the string.
+- **Idle-EC2 network guard read ~12x too low.** It averaged the NetworkOut metric
+  instead of summing it, so a busy instance still looked idle. Uses Sum now.
+- **Idle-EC2 metal sizing** assumed 96 vCPU for every `*.metal`, over-estimating
+  savings on smaller metal types. Falls back to a conservative default.
+- **Textract non-prod detection** missed hyphenated `non-prod` names. Restored
+  without re-introducing substring false positives.
+- **Read-only dashboard share links could escalate to full access.** Read-only and
+  full sessions shared one token store, so a share token replayed as a login
+  cookie passed the full-access check. They now use separate stores.
+- **Pre-auth path traversal** in the dashboard font route let an unauthenticated
+  client on the network read arbitrary `.css`/`.woff` files. Paths are now
+  confined to the fonts directory.
+- **Slack scheduled reports never sent**: the job imported a function that did not
+  exist, failing silently every five minutes. Implemented it (`_is_report_due`).
+- **Double digests/alerts**: the MCP server and `finops serve` could both run the
+  scheduler against one database. Added a single-owner lock (Postgres advisory
+  lock, file lock locally).
+- Database Savings Plan recommendations now report `data_incomplete` on a Cost
+  Explorer failure instead of a confident $0, and size the commitment at the
+  discounted rate rather than on-demand.
+- Smaller hardening: `Secure` cookies behind TLS, a plaintext-bind warning,
+  clean scheduler shutdown on Ctrl+C, HTML-escaped report titles, a guarded
+  Slack request verifier, and a date-parse guard on `export_cost_report`.
+
+### Changed
+- **Dashboard serves concurrently.** Switched to a threaded HTTP server so one
+  slow cost fetch no longer stalls every other finance user.
+- **Lower token cost on large results.** `list_idle_resources` and
+  `get_rightsizing_recommendations` capped their detail lists to a token budget
+  (costliest first), with the omitted count surfaced. On an 800-resource account
+  the idle response drops from ~44k to ~6k tokens, and the totals stay exact.
+
 ## 0.8.42
 
 DX polish on the team-host deploy, found in review.
