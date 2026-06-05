@@ -948,6 +948,7 @@ function Footer({ version }){
             <a href="/about#investors">Investors</a>
             <a href="mailto:hello@getnable.com" target="_blank" rel="noopener noreferrer">Contact</a>
             <a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="https://www.linkedin.com/company/getnable/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
           </div>
         </div>
         <div className="foot-meta">
