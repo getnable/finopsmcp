@@ -100,8 +100,6 @@ finops-slack      = "finops.slack_bot.app:main"
 finops-pr-webhook = "finops.pr_comments.webhook:main"
 finops-doctor     = "finops.doctor:main"
 finops-estimate   = "finops.connectors.terraform_estimate:main"
-finops-infra      = "finops.setup_wizard:main"
-finops-license    = "finops.setup_wizard:main"
 
 [project.urls]
 Homepage      = "https://getnable.com"

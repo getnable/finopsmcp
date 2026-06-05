@@ -1940,7 +1940,9 @@ def _configure_claude_desktop_inner() -> None:
     if vault_env:
         mcp_entry["env"] = {**vault_env, **mcp_entry.get("env", {})}
 
-    existing = config["mcpServers"].get("finops", {})
+    # Standardize on "nable" (the product name). Read either key so we can
+    # migrate a legacy "finops" entry without leaving both registered.
+    existing = config["mcpServers"].get("nable") or config["mcpServers"].get("finops", {})
     # Already up-to-date? (compare command/args only, env may differ)
     existing_base = {k: v for k, v in existing.items() if k != "env"}
     new_base = {k: v for k, v in mcp_entry.items() if k != "env"}
@@ -1978,7 +1980,8 @@ def _configure_claude_desktop_inner() -> None:
         if merged_env:
             mcp_entry["env"] = merged_env
 
-    config["mcpServers"]["finops"] = mcp_entry
+    config["mcpServers"].pop("finops", None)  # drop legacy key so we never double-register
+    config["mcpServers"]["nable"] = mcp_entry
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w") as f:
@@ -1992,7 +1995,7 @@ def _configure_claude_desktop_inner() -> None:
 
 def _print_manual_config(mcp_entry: dict) -> None:
     import json
-    snippet = json.dumps({"mcpServers": {"finops": mcp_entry}}, indent=2)
+    snippet = json.dumps({"mcpServers": {"nable": mcp_entry}}, indent=2)
     print(f"\n  Add to your claude_desktop_config.json:\n")
     for line in snippet.splitlines():
         print(f"    {line}")
