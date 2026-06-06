@@ -231,37 +231,74 @@ function Nav() {
   ))));
 }
 function Hero({ layout, interaction }) {
-  return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud bill,", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "strike" }, "in a dashboard."), /* @__PURE__ */ React.createElement("span", { className: "accent" }, "Waste found.", /* @__PURE__ */ React.createElement("br", null), "Money saved.")), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Track LLM spend by model, catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally, or always-on. Your credentials never leave your machine, and nable has no backend that holds your data."), /* @__PURE__ */ React.createElement("div", { className: "hero-cta-row", id: "install" }, /* @__PURE__ */ React.createElement(CopyInstall, null), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud bill,", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "strike" }, "in a dashboard."), /* @__PURE__ */ React.createElement("span", { className: "accent" }, "Waste found.", /* @__PURE__ */ React.createElement("br", null), "Money saved.")), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Track LLM spend by model, catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally, or always-on. Your credentials never leave your machine, and nable has no backend that holds your data."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free forever for solo use \xB7 no credit card \xB7 runs on your machine"), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { style: { fontSize: 13, color: "var(--fg-3)", marginBottom: 12, letterSpacing: ".01em" } }, "Drop your email and we'll send the setup guide straight to you."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Send it" }))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction }))), /* @__PURE__ */ React.createElement(TrustStrip, null)));
+}
+const CURSOR_DEEPLINK = "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19";
+const INSTALL_POPUPS = {
+  claude: {
+    title: "Install in Claude Desktop",
+    steps: [
+      /* @__PURE__ */ React.createElement(React.Fragment, null, "Run the command below. ", /* @__PURE__ */ React.createElement("code", null, "finops welcome"), " writes your Claude Desktop config and stores credentials in your OS keychain."),
+      /* @__PURE__ */ React.createElement(React.Fragment, null, "Restart Claude Desktop. nable connects as a local MCP server.")
+    ],
+    cmd: "pip install finops-mcp && finops welcome",
+    note: "Runs on your machine. No nable backend holds your data."
+  },
+  openai: {
+    title: "Install in OpenAI Codex",
+    steps: [
+      /* @__PURE__ */ React.createElement(React.Fragment, null, "Install nable and store credentials in your OS keychain:"),
+      /* @__PURE__ */ React.createElement(React.Fragment, null, "Add nable to your Codex MCP config below, then restart Codex.")
+    ],
+    cmd: "pip install finops-mcp && finops welcome",
+    toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
+    tomlPath: "~/.codex/config.toml",
+    note: "Codex CLI runs nable locally. The ChatGPT app needs a hosted connector, which is on the roadmap."
+  }
+};
+function CopyCmd({ cmd }) {
+  const [copied, setCopied] = useState(false);
+  return /* @__PURE__ */ React.createElement("button", { className: "copycmd", onClick: () => {
+    navigator.clipboard?.writeText(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+    if (window.posthog) posthog.capture("install_copied");
+  } }, /* @__PURE__ */ React.createElement("span", { className: "prompt" }, "$"), /* @__PURE__ */ React.createElement("span", { className: "cmd" }, cmd), /* @__PURE__ */ React.createElement("span", { className: "copylab" }, copied ? "copied" : "copy"));
+}
+function InstallPopup({ id, onClose }) {
+  const p = INSTALL_POPUPS[id];
+  if (!p) return null;
+  return /* @__PURE__ */ React.createElement("div", { className: "install-pop", role: "dialog", "aria-label": p.title }, /* @__PURE__ */ React.createElement("div", { className: "install-pop-head" }, /* @__PURE__ */ React.createElement("span", { className: "ipt" }, p.title), /* @__PURE__ */ React.createElement("button", { className: "ipx", onClick: onClose, "aria-label": "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("ol", { className: "install-steps" }, p.steps.map((s, i) => /* @__PURE__ */ React.createElement("li", { key: i }, s))), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: p.cmd }), p.toml && /* @__PURE__ */ React.createElement("div", { className: "install-toml" }, /* @__PURE__ */ React.createElement("span", { className: "tomlpath" }, "Add to ", /* @__PURE__ */ React.createElement("code", null, p.tomlPath)), /* @__PURE__ */ React.createElement("pre", null, p.toml)), /* @__PURE__ */ React.createElement("p", { className: "install-pop-note" }, p.note));
+}
+const _CHEV = /* @__PURE__ */ React.createElement("svg", { className: "chev", width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.6", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M3 4.5l3 3 3-3", strokeLinecap: "round", strokeLinejoin: "round" }));
+function InstallRow() {
+  const [open, setOpen] = useState(null);
+  const toggle = (id) => {
+    setOpen((o) => o === id ? null : id);
+    if (window.posthog) posthog.capture("install_opened", { client: id });
+  };
+  return /* @__PURE__ */ React.createElement("div", { className: "installer", id: "install" }, /* @__PURE__ */ React.createElement("div", { className: "install-row" }, /* @__PURE__ */ React.createElement("span", { className: "setup-badge" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "currentColor", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M6 0l1 5 5 1-5 1-1 5-1-5-5-1 5-1z" })), "1 min setup"), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19",
-      className: "btn btn-ghost",
+      className: "iclient is-primary",
+      href: CURSOR_DEEPLINK,
       onClick: () => {
         if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "add_to_cursor" });
       }
     },
-    "Add to Cursor"
-  ), /* @__PURE__ */ React.createElement(
+    /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "Cursor")),
+    /* @__PURE__ */ React.createElement("svg", { className: "ic", width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.6", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M4 8l4-4m0 0H4.5M8 4v3.5", strokeLinecap: "round", strokeLinejoin: "round" }))
+  ), /* @__PURE__ */ React.createElement("button", { className: "iclient" + (open === "claude" ? " is-open" : ""), "aria-expanded": open === "claude", onClick: () => toggle("claude") }, /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "Claude")), _CHEV), /* @__PURE__ */ React.createElement("button", { className: "iclient" + (open === "openai" ? " is-open" : ""), "aria-expanded": open === "openai", onClick: () => toggle("openai") }, /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "OpenAI")), _CHEV)), open && /* @__PURE__ */ React.createElement(InstallPopup, { id: open, onClose: () => setOpen(null) }), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "/docs.html",
-      className: "btn btn-ghost",
+      className: "install-more",
+      href: "/docs.html#install",
       onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs" });
+        if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs_install" });
       }
     },
-    "Read the docs"
-  )), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free forever for solo use \xB7 no credit card \xB7 runs on your machine"), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { style: { fontSize: 13, color: "var(--fg-3)", marginBottom: 12, letterSpacing: ".01em" } }, "Drop your email and we'll send the setup guide straight to you."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Send it" }))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction }))), /* @__PURE__ */ React.createElement(TrustStrip, null)));
-}
-function CopyInstall() {
-  const [copied, setCopied] = useState(false);
-  const cmd = "pip install finops-mcp && finops welcome";
-  return /* @__PURE__ */ React.createElement("div", { className: "install", role: "group", "aria-label": "Install command" }, /* @__PURE__ */ React.createElement("span", { className: "prompt" }, "$"), /* @__PURE__ */ React.createElement("span", { className: "cmd" }, cmd), /* @__PURE__ */ React.createElement("button", { onClick: () => {
-    navigator.clipboard?.writeText(cmd);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
-    if (window.posthog) posthog.capture("install_copied");
-  } }, copied ? "copied" : "copy"));
+    "VS Code, Windsurf, Zed and more \u2192 docs"
+  ));
 }
 function fmtNum(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";

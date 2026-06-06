@@ -19,8 +19,8 @@
 <script defer src="/_vercel/insights/script.js"></script>
 <script defer src="/_vercel/speed-insights/script.js"></script>
 
-<!-- Reddit Pixel -->
-<script>!function(w,d){if(!w.rdt){var p=w.rdt=function(){p.sendEvent?p.sendEvent.apply(p,arguments):p.callQueue.push(arguments)};p.callQueue=[];var t=d.createElement("script");t.src="https://www.redditstatic.com/ads/pixel.js?pixel_id=a2_j2alwdqkuaih",t.async=!0;var s=d.getElementsByTagName("script")[0];s.parentNode.insertBefore(t,s)}}(window,document);rdt('init','a2_j2alwdqkuaih');rdt('track','PageVisit');</script>
+<!-- Reddit ads pixel removed: corporate/healthcare web filters flag ad pixels and can
+     block the whole domain. Re-add from git history if retargeting is needed later. -->
 
 <!-- PostHog -->
 <script>
@@ -71,8 +71,9 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.0/dist/fonts/geist-mono/style.css" />
 
-<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<!-- React vendored on our own origin so a corporate CDN block can never blank the page -->
+<script src="/vendor/react.production.min.js"></script>
+<script src="/vendor/react-dom.production.min.js"></script>
 
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -179,6 +180,45 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .install .cmd{padding:0 14px;color:var(--fg);display:flex;align-items:center;white-space:nowrap}
 .install button{padding:0 14px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11px;color:var(--fg-3);border-left:1px solid var(--line);letter-spacing:.06em;text-transform:uppercase;transition:.15s;background:var(--bg-1)}
 .install button:hover{color:var(--accent);background:var(--bg-2)}
+.installer{margin-top:36px;max-width:560px}
+.install-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.setup-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-3);letter-spacing:.01em;white-space:nowrap;margin-right:2px}
+.setup-badge svg{color:var(--accent)}
+.iclient{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:var(--r-lg);font-size:13.5px;font-weight:500;border:1px solid var(--line-2);background:var(--bg-1);color:var(--fg-2);min-height:38px;letter-spacing:-.005em;transition:filter .18s,box-shadow .18s,background-color .18s,border-color .18s,color .18s;cursor:pointer}
+.iclient b{font-weight:600;color:var(--fg)}
+.iclient:hover{border-color:var(--fg-3);background:var(--bg-2);color:var(--fg)}
+.iclient .ic,.iclient .chev{opacity:.8;flex:none}
+.iclient .chev{transition:transform .2s}
+.iclient.is-open{border-color:var(--accent-dim);background:var(--bg-2);color:var(--fg)}
+.iclient.is-open .chev{transform:rotate(180deg)}
+.iclient.is-primary{border-color:var(--accent)}
+.iclient.is-primary .ic{color:var(--accent);opacity:1}
+.iclient.is-primary:hover{box-shadow:0 0 24px -6px var(--accent);background:var(--bg-1);border-color:var(--accent)}
+.install-pop{margin-top:14px;border:1px solid var(--line-2);border-radius:var(--r-xl);background:var(--bg-1);padding:16px 18px 14px;max-width:520px;animation:popin .18s ease}
+@keyframes popin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.install-pop-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.install-pop-head .ipt{font-size:13px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
+.install-pop-head .ipx{font-size:18px;line-height:1;color:var(--fg-3);width:24px;height:24px;border-radius:var(--r-xs);transition:.15s}
+.install-pop-head .ipx:hover{color:var(--fg);background:var(--bg-2)}
+.install-steps{margin:0 0 12px;padding-left:0;list-style:none;counter-reset:step;display:flex;flex-direction:column;gap:9px}
+.install-steps li{position:relative;padding-left:27px;font-size:13px;line-height:1.5;color:var(--fg-2)}
+.install-steps li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:1px;width:18px;height:18px;border-radius:50%;border:1px solid var(--line-2);font-family:'Geist Mono','JetBrains Mono',monospace;font-size:10px;color:var(--fg-3);display:flex;align-items:center;justify-content:center}
+.install-steps code{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11.5px;color:var(--accent);background:var(--bg-2);padding:1px 5px;border-radius:var(--r-xs)}
+.copycmd{display:flex;align-items:stretch;width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r-md);font-family:'Geist Mono','JetBrains Mono',monospace;font-size:12.5px;overflow:hidden;height:40px;text-align:left}
+.copycmd .prompt{padding:0 12px;color:var(--fg-3);border-right:1px solid var(--line);display:flex;align-items:center}
+.copycmd .cmd{padding:0 12px;color:var(--fg);white-space:nowrap;overflow-x:auto;flex:1;display:flex;align-items:center}
+.copycmd .copylab{padding:0 14px;color:var(--fg-3);border-left:1px solid var(--line);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;transition:.15s;display:flex;align-items:center;white-space:nowrap}
+.copycmd:hover .copylab{color:var(--accent);background:var(--bg-1)}
+.install-toml{margin-top:10px}
+.install-toml .tomlpath{display:block;font-size:11.5px;color:var(--fg-3);margin-bottom:5px;letter-spacing:.01em}
+.install-toml .tomlpath code{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11px;color:var(--fg-2)}
+.install-toml pre{margin:0;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11.5px;color:var(--fg-2);overflow-x:auto;line-height:1.55}
+.install-pop-note{margin-top:12px;font-size:11.5px;color:var(--fg-3);line-height:1.45}
+.install-more{display:inline-block;margin-top:13px;font-size:12px;color:var(--fg-3);border-bottom:1px solid transparent;transition:.15s}
+.install-more:hover{color:var(--fg-2);border-bottom-color:var(--line-2)}
+.hero.editorial .installer{margin-left:auto;margin-right:auto}
+.hero.editorial .install-row{justify-content:center}
+@media(max-width:880px){.installer{display:none}}
 
 /* email capture form */
 .email-capture{display:flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:var(--r-md);overflow:hidden;height:42px;max-width:380px;width:100%;position:relative}
@@ -393,7 +433,19 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 </style>
 </head>
 <body>
-<div id="app"></div>
+<div id="app"><!-- Static fallback: renders if JS or React is blocked (strict corporate networks).
+     React createRoot() replaces this entirely on a successful mount. -->
+<div class="wrap" style="max-width:680px;margin:0 auto;padding:72px 24px;text-align:center;font-family:'Instrument Sans',system-ui,sans-serif">
+  <div style="font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-dim);margin-bottom:22px">nable</div>
+  <h1 style="font-weight:600;font-size:clamp(30px,5vw,50px);line-height:1.06;letter-spacing:-.02em;color:var(--fg);margin:0 0 18px">Your cloud and AI bill,<br/>answered in your editor.</h1>
+  <p style="font-size:16px;line-height:1.55;color:var(--fg-2);max-width:54ch;margin:0 auto 26px">Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs on your machine. nable has no backend that holds your data.</p>
+  <div style="display:inline-flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:8px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;color:var(--fg);overflow:hidden;margin-bottom:22px;max-width:100%">
+    <span style="padding:11px 12px;color:var(--fg-3);border-right:1px solid var(--line)">$</span>
+    <span style="padding:11px 14px;white-space:nowrap;overflow-x:auto">pip install finops-mcp &amp;&amp; finops welcome</span>
+  </div>
+  <div><a href="/docs.html" style="color:var(--accent);font-size:14px;font-weight:500">Read the docs &rarr;</a></div>
+  <noscript><p style="color:var(--fg-3);font-size:13px;margin-top:22px">Enable JavaScript for the full interactive demo. Everything above works without it.</p></noscript>
+</div></div>
 <script src="tweaks-panel.js"></script>
 <script src="app.js"></script>
 </body>
