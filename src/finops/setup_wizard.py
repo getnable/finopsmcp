@@ -302,151 +302,91 @@ def setup_aws() -> None:
             pass
 
 
-def setup_aws_account() -> None:
-    """
-    Add a named AWS account to ~/.finops-mcp/accounts.yaml and store
-    credentials so the user never has to run aws configure or edit JSON.
-    Called by: finops setup aws
-    """
-    from .accounts import AccountConfig, add_account, list_accounts, set_default_account
-    from .security.vault import Vault
-
-    _section("AWS: Add Account")
-
-    existing = list_accounts()
-    if existing:
-        print(f"  Currently configured accounts: {', '.join(a.name for a in existing)}\n")
-
-    name = _prompt("  Account name (e.g. production, staging, easystreet)")
-    if not name:
-        _warn("No name entered. Run 'finops setup aws' to try again.")
-        return
-
-    region = _prompt("  AWS region", default="us-east-1")
-    while region not in _VALID_AWS_REGIONS:
-        _warn(f"'{region}' is not a valid AWS region. Examples: us-east-1, us-west-2, eu-west-1, us-gov-west-1")
-        region = _prompt("  AWS region", default="us-east-1")
-    if region in _GOVCLOUD_REGIONS:
-        print("  GovCloud region detected. nable works with AWS GovCloud out of the box. All data stays on your machine.")
-
-    print("\n  How should nable authenticate with this account?")
-    print("  1) IAM access key  (most common)")
-    print("  2) Cross-account IAM role ARN")
-    print("  3) AWS CLI profile  (~/.aws/config)")
-    cred_choice = _prompt("  Choice", default="1")
-
-    access_key = ""
-    secret_key = ""
-    role_arn = ""
-    profile = ""
-    auth_method = "access_key"
-
-    if cred_choice == "2":
-        role_arn = _prompt("  Role ARN (arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME)")
-        auth_method = "role_arn"
-
-    elif cred_choice == "3":
-        profile = _prompt("  AWS CLI profile name (from ~/.aws/config)")
-        auth_method = "profile"
-
-    else:
-        # IAM access key — collect and store here so the user never has to
-        # run aws configure or manually edit claude_desktop_config.json.
-        print("""
-  Create an AWS access key (takes ~90 seconds):
-
-  1. Open this URL in your browser:
-     https://console.aws.amazon.com/iam/home#/users
-
-  2. Click your username → Security credentials → Access keys
-     → Create access key → choose "Other" → Create
-
-  3. Copy both values below. The secret is only shown once.
-""")
-        access_key = _prompt("  AWS Access Key ID (starts with AKIA...)")
-        while not access_key.startswith("AK") or len(access_key) < 16:
-            if not access_key:
-                _warn("No Access Key ID entered. Run 'finops setup aws' to try again.")
-                return
-            _warn("That doesn't look like a valid Access Key ID (should start with AKIA, 20 chars)")
-            access_key = _prompt("  AWS Access Key ID")
-
-        secret_key = _prompt("  AWS Secret Access Key", secret=True)
-        while len(secret_key) < 20:
-            if not secret_key:
-                _warn("No Secret Access Key entered. Run 'finops setup aws' to try again.")
-                return
-            _warn("That doesn't look like a valid Secret Access Key")
-            secret_key = _prompt("  AWS Secret Access Key", secret=True)
-
-        # All inputs collected and validated. Store only now so a Ctrl-C mid-prompt
-        # never leaves partial credentials in the vault.
-        vault = Vault.default()
-        vault.store("AWS_ACCESS_KEY_ID", access_key)
-        vault.store("AWS_SECRET_ACCESS_KEY", secret_key)
-        vault.store("AWS_DEFAULT_REGION", region)
-        os.environ["AWS_ACCESS_KEY_ID"] = access_key
-        os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
-        os.environ["AWS_DEFAULT_REGION"] = region
-        _ok("AWS credentials stored in vault")
-
-    account_cfg = AccountConfig(
-        name=name,
-        region=region,
-        role_arn=role_arn,
-        profile=profile,
-    )
-
-    # Verify connectivity and resolve account ID
+def _aws_account_alias(session) -> str:
+    """Best-effort account alias for auto-naming. Empty if no iam permission."""
     try:
-        from .accounts import get_boto3_session
-        session = get_boto3_session(account_cfg)
-        sts = session.client("sts")
-        identity = sts.get_caller_identity()
-        account_cfg.account_id = identity["Account"]
-        _ok(f"Connected: account {account_cfg.account_id}")
+        aliases = session.client("iam").list_account_aliases().get("AccountAliases", [])
+        return aliases[0] if aliases else ""
+    except Exception:
+        return ""
 
-        # Check Cost Explorer while we have valid creds
+
+def _detect_aws_candidates() -> list:
+    """Probe the machine for working AWS credentials. No prompts, no writes.
+
+    Returns dicts {label, profile, account_id, alias, region}, each already
+    verified via STS get_caller_identity. Named profiles are preferred over the
+    ambient default chain because the MCP server can reproduce a profile but may
+    not inherit shell env vars when Claude Desktop spawns it.
+    """
+    import boto3
+
+    def _probe(profile):
         try:
-            from datetime import date, timedelta
-            ce = session.client("ce", region_name="us-east-1")
-            end = date.today()
-            ce.get_cost_and_usage(
-                TimePeriod={"Start": (end - timedelta(days=1)).isoformat(), "End": end.isoformat()},
-                Granularity="DAILY",
-                Metrics=["UnblendedCost"],
-            )
-            _ok("Cost Explorer access confirmed")
-        except Exception as ce_err:
-            err_str = str(ce_err)
-            if "AccessDenied" in err_str or "AuthFailure" in err_str:
-                _warn("Missing ce:GetCostAndUsage. Run 'finops setup aws --iam-template' for the policy.")
-            elif "DataUnavailableException" in err_str:
-                _warn("Cost Explorer enabled but AWS hasn't backfilled data yet (up to 24 h). Try again tomorrow.")
+            session = boto3.Session(profile_name=profile) if profile else boto3.Session()
+            ident = session.client("sts").get_caller_identity()
+            return {
+                "profile": profile or "",
+                "account_id": ident["Account"],
+                "alias": _aws_account_alias(session),
+                "region": session.region_name or "us-east-1",
+            }
+        except Exception:
+            return None  # no creds / expired SSO token / no permission — just skip
 
-    except Exception as e:
-        _warn(f"Could not verify credentials: {e}")
-        account_id_input = _prompt("  AWS Account ID (12 digits, or leave blank)")
-        account_cfg.account_id = account_id_input.strip()
+    candidates, seen = [], set()
+    try:
+        profiles = boto3.Session().available_profiles
+    except Exception:
+        profiles = []
+    for p in profiles:
+        c = _probe(p)
+        if c and c["account_id"] not in seen:
+            c["label"] = f"profile '{p}'"
+            candidates.append(c)
+            seen.add(c["account_id"])
+    if not candidates:
+        c = _probe(None)
+        if c:
+            c["label"] = "default credentials"
+            candidates.append(c)
+    return candidates
 
-    add_account(account_cfg)
-    _ok(f"Account '{name}' saved to ~/.finops-mcp/accounts.yaml")
 
-    existing_after = list_accounts()
-    if len(existing_after) == 1:
-        set_default_account(name)
-        _ok(f"'{name}' set as default account")
-    else:
-        make_default = _prompt(f"  Set '{name}' as the default account? (y/N)", default="n").lower()
-        if make_default in ("y", "yes"):
-            set_default_account(name)
-            _ok(f"'{name}' set as default account")
+def _auto_aws_name(candidate: dict, taken: set) -> str:
+    """Derive an account name from the alias or account id, kept unique."""
+    base = candidate.get("alias") or f"aws-{candidate['account_id']}"
+    name, i = base, 2
+    while name in taken:
+        name = f"{base}-{i}"
+        i += 1
+    return name
 
-    # Write credentials directly into Claude Desktop config so the user
-    # never has to touch the JSON manually.
-    if access_key:
-        _inject_aws_into_claude_config(access_key, secret_key, region)
 
+def _confirm_cost_explorer(session) -> None:
+    """Best-effort Cost Explorer check. Never blocks; names cause + fix on failure."""
+    try:
+        from datetime import date, timedelta
+        ce = session.client("ce", region_name="us-east-1")
+        end = date.today()
+        ce.get_cost_and_usage(
+            TimePeriod={"Start": (end - timedelta(days=1)).isoformat(), "End": end.isoformat()},
+            Granularity="DAILY",
+            Metrics=["UnblendedCost"],
+        )
+        _ok("Cost Explorer access confirmed")
+    except Exception as ce_err:
+        s = str(ce_err)
+        if "AccessDenied" in s or "AuthFailure" in s:
+            _warn("Connected, but this role lacks ce:GetCostAndUsage.")
+            _warn("Run 'finops setup aws --iam-template' for a read-only policy to hand your platform team.")
+        elif "DataUnavailableException" in s:
+            _warn("Cost Explorer enabled but AWS has not backfilled data yet (up to 24h).")
+        else:
+            _warn(f"Connected, but could not confirm Cost Explorer: {ce_err}")
+
+
+def _emit_provider_connected(auth_method: str) -> None:
     try:
         from . import telemetry as _tel
         _tel._send_event(_tel._get_install_id(), "provider_connected", {
@@ -457,18 +397,221 @@ def setup_aws_account() -> None:
     except Exception:
         pass
 
-    # Print a summary of all accounts so far
+
+def _finalize_aws_account(name: str) -> None:
+    """Set default (auto if first), print the summary, offer to add another."""
+    from .accounts import list_accounts, set_default_account
+
     all_accounts = list_accounts()
+    if len(all_accounts) == 1:
+        set_default_account(name)
+        _ok(f"'{name}' set as default account")
+    else:
+        if _prompt(f"  Set '{name}' as the default account? (y/N)", default="n").lower() in ("y", "yes"):
+            set_default_account(name)
+            _ok(f"'{name}' set as default account")
+
     print(f"\n  Accounts configured ({len(all_accounts)}):")
     for acct in all_accounts:
         marker = " *" if acct.name == name else "  "
         acct_id = f"  [{acct.account_id}]" if acct.account_id else ""
         print(f"   {marker} {acct.name}{acct_id}")
 
-    # Offer to add another account without re-running the command
-    another = _prompt("\n  Add another AWS account? (y/N)", default="n").lower()
-    if another in ("y", "yes"):
+    if _prompt("\n  Add another AWS account? (y/N)", default="n").lower() in ("y", "yes"):
         setup_aws_account()
+
+
+def setup_aws_account() -> None:
+    """
+    Add an AWS account to ~/.finops-mcp/accounts.yaml.
+
+    Detect-then-confirm: probe the machine for working credentials and connect
+    the one the user confirms in a single keystroke. Region is not asked (Cost
+    Explorer is global and scanners auto-discover regions). Falls back to manual
+    entry only when nothing usable is found. Called by: finops setup aws
+    """
+    from .accounts import AccountConfig, add_account, get_boto3_session, list_accounts
+
+    _section("AWS: Add Account")
+
+    existing = list_accounts()
+    taken = {a.name for a in existing}
+    have_ids = {a.account_id for a in existing if a.account_id}
+    if existing:
+        print(f"  Currently configured accounts: {', '.join(a.name for a in existing)}\n")
+
+    print("  Checking for AWS credentials on this machine...")
+    candidates = [c for c in _detect_aws_candidates() if c["account_id"] not in have_ids]
+
+    chosen = None
+    if candidates:
+        if len(candidates) == 1:
+            c = candidates[0]
+            extra = f" ({c['alias']})" if c["alias"] else ""
+            _ok(f"Found working credentials: {c['label']} -> account {c['account_id']}{extra}")
+            ans = _prompt("  Connect this account? [Y/n]  (or 'm' to enter manually)", default="y").lower()
+            if ans in ("y", "yes", ""):
+                chosen = c
+            elif ans != "m":
+                print("  Skipped.")
+                return
+        else:
+            print("\n  Found working credentials for multiple accounts:")
+            for i, c in enumerate(candidates, 1):
+                extra = f" ({c['alias']})" if c["alias"] else ""
+                print(f"   {i}) {c['label']} -> account {c['account_id']}{extra}")
+            print("   m) Enter credentials manually")
+            pick = _prompt("  Which one?", default="1").lower()
+            if pick.isdigit() and 1 <= int(pick) <= len(candidates):
+                chosen = candidates[int(pick) - 1]
+            elif pick != "m":
+                _warn("Invalid choice. Run 'finops setup aws' to try again.")
+                return
+    else:
+        print("  No working AWS credentials found on this machine.\n")
+
+    if chosen:
+        name = _auto_aws_name(chosen, taken)
+        cfg = AccountConfig(
+            name=name,
+            account_id=chosen["account_id"],
+            region=chosen["region"],
+            profile=chosen["profile"],
+        )
+        _ok(f"Connected: account {chosen['account_id']} (saved as '{name}')")
+        try:
+            _confirm_cost_explorer(get_boto3_session(cfg))
+        except Exception:
+            pass
+        add_account(cfg)
+        _emit_provider_connected("profile" if chosen["profile"] else "default_chain")
+        print("\n  Next: run 'finops setup claude' to connect nable to your editor.")
+        _finalize_aws_account(name)
+        return
+
+    _setup_aws_manual(taken)
+
+
+def _setup_aws_manual(taken: set) -> None:
+    """Manual credential entry. Reached only when auto-detect finds nothing, or
+    the user explicitly chooses to enter credentials by hand. Verifies before
+    saving so a bad input never persists a broken account."""
+    from .accounts import AccountConfig, add_account, get_boto3_session
+    from .security.vault import Vault
+    import boto3
+
+    region = "us-east-1"  # CE is global; scanners auto-discover regions. No prompt.
+
+    print("\n  How should nable authenticate?")
+    print("  1) IAM access key  (most common)")
+    print("  2) Cross-account IAM role ARN")
+    print("  3) AWS CLI profile  (~/.aws/config)")
+    cred_choice = _prompt("  Choice", default="1")
+
+    access_key = secret_key = role_arn = profile = ""
+    auth_method = "access_key"
+
+    if cred_choice == "2":
+        role_arn = _prompt("  Role ARN (arn:aws:iam::ACCOUNT_ID:role/ROLE_NAME)")
+        if not role_arn:
+            _warn("No role ARN entered. Run 'finops setup aws' to try again.")
+            return
+        auth_method = "role_arn"
+
+    elif cred_choice == "3":
+        try:
+            avail = boto3.Session().available_profiles
+        except Exception:
+            avail = []
+        if not avail:
+            _warn("No AWS CLI profiles found in ~/.aws/config.")
+            _warn("Create one with 'aws configure' or 'aws configure sso', then re-run.")
+            return
+        print("\n  Profiles found in ~/.aws/config:")
+        for i, p in enumerate(avail, 1):
+            print(f"   {i}) {p}")
+        pick = _prompt("  Pick a profile (number or name)", default="1")
+        if pick.isdigit() and 1 <= int(pick) <= len(avail):
+            profile = avail[int(pick) - 1]
+        elif pick in avail:
+            profile = pick
+        else:
+            _warn(f"'{pick}' is not one of your profiles. Run 'finops setup aws' to try again.")
+            return
+        auth_method = "profile"
+
+    else:
+        print("""
+  Create an AWS access key (takes ~90 seconds):
+
+  1. Open this URL in your browser:
+     https://console.aws.amazon.com/iam/home#/users
+
+  2. Click your username -> Security credentials -> Access keys
+     -> Create access key -> choose "Other" -> Create
+
+  3. Copy both values below. The secret is only shown once.
+""")
+        access_key = _prompt("  AWS Access Key ID (starts with AKIA...)")
+        while not access_key.startswith("AK") or len(access_key) < 16:
+            if not access_key:
+                _warn("No Access Key ID entered. Run 'finops setup aws' to try again.")
+                return
+            _warn("That doesn't look like a valid Access Key ID (should start with AKIA, 20 chars)")
+            access_key = _prompt("  AWS Access Key ID")
+        secret_key = _prompt("  AWS Secret Access Key", secret=True)
+        while len(secret_key) < 20:
+            if not secret_key:
+                _warn("No Secret Access Key entered. Run 'finops setup aws' to try again.")
+                return
+            _warn("That doesn't look like a valid Secret Access Key")
+            secret_key = _prompt("  AWS Secret Access Key", secret=True)
+
+    cfg = AccountConfig(name="__pending__", region=region, role_arn=role_arn, profile=profile)
+    if access_key:
+        # Stage in env so the verify below can use them. Persist to the vault
+        # only after verification succeeds.
+        os.environ["AWS_ACCESS_KEY_ID"] = access_key
+        os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
+        os.environ["AWS_DEFAULT_REGION"] = region
+
+    # Verify BEFORE saving. Never persist a broken config.
+    try:
+        session = get_boto3_session(cfg)
+        account_id = session.client("sts").get_caller_identity()["Account"]
+    except Exception as e:
+        _warn(f"Could not verify credentials: {e}")
+        if profile:
+            _warn("That profile did not authenticate. If it is an SSO profile, run 'aws sso login' first.")
+        elif role_arn:
+            _warn("Check the role ARN and that your base credentials can assume it.")
+        else:
+            _warn("Check the access key and secret, then re-run 'finops setup aws'.")
+        if access_key:
+            os.environ.pop("AWS_ACCESS_KEY_ID", None)
+            os.environ.pop("AWS_SECRET_ACCESS_KEY", None)
+        return
+
+    name = _auto_aws_name({"alias": _aws_account_alias(session), "account_id": account_id}, taken)
+    cfg.name = name
+    cfg.account_id = account_id
+
+    if access_key:
+        vault = Vault.default()
+        vault.store("AWS_ACCESS_KEY_ID", access_key)
+        vault.store("AWS_SECRET_ACCESS_KEY", secret_key)
+        vault.store("AWS_DEFAULT_REGION", region)
+        _ok("AWS credentials stored in vault")
+
+    _ok(f"Connected: account {account_id} (saved as '{name}')")
+    _confirm_cost_explorer(session)
+    add_account(cfg)
+    if access_key:
+        _inject_aws_into_claude_config(access_key, secret_key, region)
+    else:
+        print("\n  Next: run 'finops setup claude' to connect nable to your editor.")
+    _emit_provider_connected(auth_method)
+    _finalize_aws_account(name)
 
 
 def setup_aws_org() -> None:
