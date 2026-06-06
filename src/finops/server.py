@@ -198,13 +198,13 @@ async def connection_status() -> str:
     if lic.mode == "trial":
         plan_line = (
             f"Plan: Team trial: {lic.days_remaining} day{'s' if lic.days_remaining != 1 else ''} remaining. "
-            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Team features ($19.99/mo)."
+            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Team features ($40/mo)."
         )
     elif lic.mode == "free":
         plan_line = (
             f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
             f"PR comments, budgets, K8s analysis, and all connectors included. "
-            f"Team plan ($19.99/mo) adds: Slack anomaly alerts, ticket auto-creation, "
+            f"Team plan ($40/mo) adds: Slack anomaly alerts, ticket auto-creation, "
             f"email digests, commitment recommendations, and org rollup. "
             f"Upgrade at {_UPGRADE_URL}."
         )
@@ -397,7 +397,7 @@ async def list_connected_providers() -> dict:
             "note": (
                 f"Free tier: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
                 f"PR comments, budgets, K8s analysis, Helm visibility, and all connectors included. "
-                f"Team plan ($19.99/mo) adds: Slack anomaly alerts, ticket auto-creation "
+                f"Team plan ($40/mo) adds: Slack anomaly alerts, ticket auto-creation "
                 f"(Jira/Linear/GitHub), email reports, commitment recommendations, "
                 f"and org rollup. Upgrade at {_UPGRADE_URL}."
             ),
@@ -2441,7 +2441,7 @@ async def get_commitment_analysis() -> dict:
                 r for r in result.get("recommendations", []) if r.get("type") == "warning"
             ]
             result["recommendations_note"] = (
-                f"This is a Team feature ($19.99/mo). Upgrade at {_UPGRADE_URL} to unlock purchase recommendations with ROI projections."
+                f"This is a Team feature ($40/mo). Upgrade at {_UPGRADE_URL} to unlock purchase recommendations with ROI projections."
             )
         return result
     except Exception as e:
@@ -5047,7 +5047,7 @@ async def subscribe_to_report(
         email_note = None
         if email_addresses and require_pro("scheduled_email_digests") is not None:
             email_note = (
-                f"This is a Team feature ($19.99/mo). Upgrade at {_UPGRADE_URL} to unlock email delivery. "
+                f"This is a Team feature ($40/mo). Upgrade at {_UPGRADE_URL} to unlock email delivery. "
                 f"The subscription will be created with Slack delivery only."
             )
             email_addresses = []  # clear emails on free tier

@@ -235,11 +235,13 @@ def run_welcome_flow() -> None:
     # Finish
     _line(_rule())
     _blank()
-    _line(bold(green("You're set up.")) + "  Open Claude and try:")
+    _line(bold(green("You're set up.")) + "  Restart Claude, then ask:")
     _blank()
     q = '"What did we spend on AWS last month?"'
     _line(f"  {cyan(q)}")
     _blank()
+    _line(dim("  Not seeing nable in Claude? Run 'finops doctor' to check the connection."))
+    _blank()
     _line(f"  Docs    →  {cyan('https://getnable.com/docs')}")
-    _line(f"  Support →  {cyan('chandanirving@gmail.com')}")
+    _line(f"  Support →  {cyan('hello@getnable.com')}")
     _blank()
