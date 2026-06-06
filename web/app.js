@@ -231,7 +231,7 @@ function Nav() {
   ))));
 }
 function Hero({ layout, interaction }) {
-  return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud bill,", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "strike" }, "in a dashboard."), /* @__PURE__ */ React.createElement("span", { className: "accent" }, "Waste found.", /* @__PURE__ */ React.createElement("br", null), "Money saved.")), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Track LLM spend by model, catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally, or always-on. Your credentials never leave your machine, and nable has no backend that holds your data."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free forever for solo use \xB7 no credit card \xB7 runs on your machine"), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud bill,", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "strike" }, "in a dashboard."), /* @__PURE__ */ React.createElement("span", { className: "accent" }, "Waste found.", /* @__PURE__ */ React.createElement("br", null), "Money saved.")), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Track LLM spend by model, catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally, or always-on. Your credentials never leave your machine, and nable has no backend that holds your data."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free forever for solo use \xB7 no credit card \xB7 runs on your machine"), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement("div", { className: "hmc-links" }, /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "#pricing",
@@ -242,7 +242,20 @@ function Hero({ layout, interaction }) {
     },
     "See Pro \xB7 $40/mo ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  ))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction }))), /* @__PURE__ */ React.createElement(TrustStrip, null)));
+  ), /* @__PURE__ */ React.createElement(
+    "a",
+    {
+      href: "https://calendar.app.google/gMwYK6WWB7fKpz2B6",
+      target: "_blank",
+      rel: "noopener noreferrer",
+      className: "hmc-book",
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "book_call" });
+      }
+    },
+    "Book a 30-min call ",
+    /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
+  )))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction }))), /* @__PURE__ */ React.createElement(TrustStrip, null)));
 }
 const CURSOR_DEEPLINK = "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19";
 const INSTALL_POPUPS = {
@@ -608,16 +621,16 @@ function FootCta() {
   ), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "mailto:chandan@getnable.com?subject=nable - talk to founders",
+      href: "https://calendar.app.google/gMwYK6WWB7fKpz2B6",
       target: "_blank",
       rel: "noopener noreferrer",
       className: "btn btn-ghost",
       style: { padding: "14px 22px", fontSize: 14 },
       onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "footer_cta", cta: "talk_to_founders" });
+        if (window.posthog) posthog.capture("cta_clicked", { location: "footer_cta", cta: "book_call" });
       }
     },
-    "Talk to founders"
+    "Book a 30-min call"
   )), /* @__PURE__ */ React.createElement(EmailCapture, { source: "footer", placeholder: "drop your email, we'll send the setup guide", btnLabel: "Send it", center: true })), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { marginTop: 32, fontSize: 12, color: "var(--fg-3)", letterSpacing: ".04em" } }, "$ uv tool install finops-mcp && finops welcome"), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 24, fontSize: 13, color: "var(--fg-3)" } }, "Building something? ", /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent-dim)" } }, "Read the founder note and investor thesis \u2192"))));
 }
 function FounderNote() {

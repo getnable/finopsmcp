@@ -253,10 +253,16 @@ function Hero({ layout, interaction }){
             <div className="hero-mobile-cta">
               <p className="hmc-lead">nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide.</p>
               <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Get the guide" />
-              <a href="#pricing" className="hmc-pro"
-                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing_40'}); }}>
-                See Pro · $40/mo <span className="arr">→</span>
-              </a>
+              <div className="hmc-links">
+                <a href="#pricing" className="hmc-pro"
+                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing_40'}); }}>
+                  See Pro · $40/mo <span className="arr">→</span>
+                </a>
+                <a href="https://calendar.app.google/gMwYK6WWB7fKpz2B6" target="_blank" rel="noopener noreferrer" className="hmc-book"
+                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'book_call'}); }}>
+                  Book a 30-min call <span className="arr">→</span>
+                </a>
+              </div>
             </div>
           </div>
           <div className="hero-right">
@@ -960,11 +966,11 @@ function FootCta(){
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'}); }}>
               Get started free <span className="arr">→</span>
             </a>
-            <a href="mailto:chandan@getnable.com?subject=nable - talk to founders"
+            <a href="https://calendar.app.google/gMwYK6WWB7fKpz2B6"
                target="_blank" rel="noopener noreferrer"
                className="btn btn-ghost" style={{padding:"14px 22px",fontSize:14}}
-               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'talk_to_founders'}); }}>
-              Talk to founders
+               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'book_call'}); }}>
+              Book a 30-min call
             </a>
           </div>
           <EmailCapture source="footer" placeholder="drop your email, we'll send the setup guide" btnLabel="Send it" center={true} />
