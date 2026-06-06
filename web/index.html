@@ -231,11 +231,12 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .conn-legend span{display:inline-flex;align-items:center;gap:7px}
 .conn-legend .cc-soon-note{color:var(--fg-3);opacity:.8}
 @media(max-width:880px){.conn-cloud{gap:12px 24px}.cc-item{font-size:17px}}
-.logo-band{margin-top:8px;background:#f5f7f9;border:1px solid #e6eaed;border-radius:16px;padding:32px 40px;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:26px 50px}
-.logo-img{height:25px;width:auto;flex:none}
-.logo-img.is-icon{height:30px}
-.logo-band-note{margin-top:16px;font-size:13px;color:var(--fg-3)}
-@media(max-width:880px){.logo-band{padding:24px 22px;gap:20px 30px}.logo-img{height:21px}.logo-img.is-icon{height:25px}}
+.logo-band{margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;gap:30px 52px;max-width:1000px}
+.logo-img{height:23px;width:auto;flex:none;opacity:.7;transition:opacity .18s}
+.logo-img:hover{opacity:1}
+.logo-img.is-icon{height:27px}
+.logo-band-note{margin-top:24px;font-size:13px;color:var(--fg-3)}
+@media(max-width:880px){.logo-band{gap:22px 34px}.logo-img{height:19px}.logo-img.is-icon{height:23px}}
 .faq-q:hover{color:var(--fg)!important}
 .faq-q:hover .faq-plus{border-color:var(--accent-dim)!important;color:var(--accent)!important}
 
