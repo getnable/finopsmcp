@@ -256,7 +256,7 @@ function Hero({ layout, interaction }){
               <div className="hmc-links">
                 <a href="#pricing" className="hmc-pro"
                   onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing_40'}); }}>
-                  See Pro · $100/mo <span className="arr">→</span>
+                  See Pro · $100/seat/mo <span className="arr">→</span>
                 </a>
                 <a href="https://calendar.app.google/gMwYK6WWB7fKpz2B6" target="_blank" rel="noopener noreferrer" className="hmc-book"
                   onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'book_call'}); }}>
@@ -815,8 +815,8 @@ function Pricing(){
   const [annual, setAnnual] = useState(false);
 
   const teamPrice    = annual ? "$1,000" : "$100";
-  const teamPer      = annual ? "/ yr" : "/ mo";
-  const teamSub      = annual ? "$83 / mo · save $200" : null;
+  const teamPer      = annual ? "/ seat / yr" : "/ seat / mo";
+  const teamSub      = annual ? "$83 / seat / mo · save $200" : null;
   const teamSavings  = annual ? "Save $200 · 2 months free" : "7-day free trial";
   const teamLink     = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan     = annual ? "team_annual" : "team_monthly";

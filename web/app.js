@@ -240,7 +240,7 @@ function Hero({ layout, interaction }) {
         if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "pricing_40" });
       }
     },
-    "See Pro \xB7 $100/mo ",
+    "See Pro \xB7 $100/seat/mo ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   ), /* @__PURE__ */ React.createElement(
     "a",
@@ -521,8 +521,8 @@ const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
 function Pricing() {
   const [annual, setAnnual] = useState(false);
   const teamPrice = annual ? "$1,000" : "$100";
-  const teamPer = annual ? "/ yr" : "/ mo";
-  const teamSub = annual ? "$83 / mo \xB7 save $200" : null;
+  const teamPer = annual ? "/ seat / yr" : "/ seat / mo";
+  const teamSub = annual ? "$83 / seat / mo \xB7 save $200" : null;
   const teamSavings = annual ? "Save $200 \xB7 2 months free" : "7-day free trial";
   const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan = annual ? "team_annual" : "team_monthly";
