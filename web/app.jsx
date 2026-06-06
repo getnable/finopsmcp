@@ -246,7 +246,7 @@ function Hero({ layout, interaction }){
               <span className="accent">Waste found.<br/>Money saved.</span>
             </h1>
             <p className="lede">
-              Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Track LLM spend by model, catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally, or always-on. Your credentials and cost data never leave your machine.
+              Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Track LLM spend by model, catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally, or always-on. Your credentials never leave your machine, and nable has no backend that holds your data.
             </p>
             <div className="hero-cta-row" id="install">
               <CopyInstall />
@@ -315,7 +315,7 @@ function TrustStrip(){
   const items = [
     {lab:"installs / mo", val: "4k+", sub:"via PyPI · live"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
-    {lab:"cost data sent", val:"0 bytes", sub:"stays on your machine"},
+    {lab:"data on our servers", val:"0 bytes", sub:"nable has no backend"},
   ];
   return (
     <div className="trust" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
@@ -566,8 +566,8 @@ function Architecture({ version }){
       <div className="wrap">
         <div className="section-head">
           <div className="label">Architecture</div>
-          <h2>Headless by design.<br/><em>Your data never moves.</em></h2>
-          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials and cost data never leave your machine. Works out of the box in AWS GovCloud: no data leaves your environment.</p>
+          <h2>Headless by design.<br/><em>No vendor backend.</em></h2>
+          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine, and your cost data never touches a nable server, there is no backend or data lake to breach. The figures you ask about go to your editor's own AI to answer the question, the same as any prompt, and nowhere else.</p>
         </div>
         <div className="arch">
           <div className="arch-grid"></div>
@@ -973,7 +973,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Where do my credentials and billing data go?",
-    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data stays in a local SQLite database on your machine. We never see your cost data or credentials. We do collect anonymous, opt-out usage telemetry (which tools you call, your plan tier, and how many providers you connect) via PostHog, never cost figures, account IDs, or credentials. For teams, findings are shared via Slack alerts and Notion. No shared database required."
+    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data is cached in a local SQLite database on your machine. nable has no backend, so we never see your cost data or credentials, and there is no vendor data lake to breach. One honest caveat: when you ask a question in your AI editor, the cost figures nable returns are sent to your editor's own AI model to answer the question, the same as anything else you put in that chat. That is the editor's model, not a nable server, and if your org needs zero AI exposure you can use the local dashboard (finops serve) or CLI, which never touch a model. We also collect anonymous, opt-out usage telemetry (which tools you call, your plan tier, and how many providers you connect) via PostHog, never cost figures, account IDs, or credentials."
   },
   {
     q: "What editors does it work with?",

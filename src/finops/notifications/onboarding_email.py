@@ -171,7 +171,7 @@ def welcome_html() -> str:
 
         + _cta("Start free — takes 10 minutes", "https://getnable.com/docs")
 
-        + _p("No credit card. No cloud access on our end. Your billing data never leaves your machine.", muted=True)
+        + _p("No credit card. No cloud access on our end. nable has no backend, so your billing data never touches our servers.", muted=True)
     )
     return _base(content, preheader="Setup takes 10 minutes. Here's exactly what it looks like.")
 
@@ -204,7 +204,7 @@ all 17 cloud + SaaS connectors, PR cost comments.
 
 Start free: https://getnable.com/docs
 
-No credit card. Your billing data never leaves your machine.
+No credit card. nable has no backend, so your billing data never touches our servers.
 
 ---
 getnable.com · Unsubscribe: https://getnable.com/unsubscribe"""
