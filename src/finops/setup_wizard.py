@@ -485,7 +485,8 @@ def setup_aws_account() -> None:
             pass
         add_account(cfg)
         _emit_provider_connected("profile" if chosen["profile"] else "default_chain")
-        print("\n  Next: run 'finops setup claude' to connect nable to your editor.")
+        # Wire the MCP server in the same flow so there is no second command.
+        _configure_claude_desktop()
         _finalize_aws_account(name)
         return
 
@@ -606,10 +607,11 @@ def _setup_aws_manual(taken: set) -> None:
     _ok(f"Connected: account {account_id} (saved as '{name}')")
     _confirm_cost_explorer(session)
     add_account(cfg)
+    # Register the MCP server first so the entry exists, then inject region for
+    # the key path. One continuous flow; no separate 'finops setup claude' step.
+    _configure_claude_desktop()
     if access_key:
         _inject_aws_into_claude_config(access_key, secret_key, region)
-    else:
-        print("\n  Next: run 'finops setup claude' to connect nable to your editor.")
     _emit_provider_connected(auth_method)
     _finalize_aws_account(name)
 
