@@ -735,8 +735,9 @@ const CONNECTORS = [
 ];
 
 const LOGOS = [
-  {n:"AWS",f:"aws"},{n:"Azure",f:"azure"},{n:"GCP",f:"gcp"},{n:"OpenAI",f:"openai"},
-  {n:"Anthropic",f:"anthropic"},{n:"Stripe",f:"stripe"},{n:"Datadog",f:"datadog"},
+  {n:"AWS",f:"aws"},{n:"Azure",f:"azure"},{n:"GCP",f:"gcp"},
+  {n:"OpenAI",f:"openai",icon:true},{n:"Anthropic",f:"anthropic",icon:true},
+  {n:"Stripe",f:"stripe"},{n:"Datadog",f:"datadog",icon:true},
   {n:"Snowflake",f:"snowflake"},{n:"GitHub",f:"github"},
 ];
 
@@ -749,15 +750,12 @@ function Connectors(){
           <h2>17 sources.<br/><em>One conversation.</em></h2>
           <p>Every connector is a real API integration, not a CSV export. New providers ship monthly.</p>
         </div>
-        <div className="logo-strip">
+        <div className="logo-band">
           {LOGOS.map((l,i) => (
-            <span className="logo-item" key={i}>
-              <img className="logo-mark" src={"/vendor/logos/" + l.f + ".svg"} alt="" loading="lazy" />
-              <span className="logo-name">{l.n}</span>
-            </span>
+            <img className={"logo-img" + (l.icon ? " is-icon" : "")} key={i} src={"/vendor/logos/" + l.f + ".svg"} alt={l.n} title={l.n} loading="lazy" />
           ))}
-          <span className="logo-more">+ 8 more · new providers monthly</span>
         </div>
+        <p className="logo-band-note">+ 8 more connectors · new providers ship monthly</p>
       </div>
     </section>
   );
