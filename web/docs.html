@@ -227,10 +227,10 @@
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">pip install finops-mcp</span></div>
+              <div class="code-block p-4"><span class="cmd">uv tool install finops-mcp</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">On Anaconda or without pip? Use <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp</code> instead.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">uv pulls a matching Python for you, so this works on any setup. Already on Python 3.10+? <code class="text-xs px-1 rounded" style="background:var(--surface2)">pip install -U finops-mcp</code>. No uv? <code class="text-xs px-1 rounded" style="background:var(--surface2)">brew install uv</code>.</p>
           </div>
         </div>
 
@@ -287,10 +287,10 @@
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install and run the welcome wizard</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">pip install</span> finops-mcp &amp;&amp; <span class="cmd">finops welcome</span></div>
+              <div class="code-block p-4"><span class="cmd">uv tool install</span> finops-mcp &amp;&amp; <span class="cmd">finops welcome</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">The welcome command walks you through connecting Claude and your first cloud account. Takes about 5 minutes (including IAM setup). On Anaconda? Use: <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx finops-mcp</code> then <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops welcome</code>.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">The welcome command walks you through connecting Claude and your first cloud account. Takes about 5 minutes (including IAM setup). uv pulls a matching Python automatically. Already on Python 3.10+? <code class="text-xs px-1 rounded" style="background:var(--surface2)">pip install -U finops-mcp</code> works too.</p>
           </div>
         </div>
 

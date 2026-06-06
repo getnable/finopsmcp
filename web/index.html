@@ -221,6 +221,8 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 @media(max-width:880px){.installer{display:none}}
 .install-cmdlabel{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);margin-bottom:8px}
 .install-cmdlabel svg{color:var(--accent-dim)}
+.install-alt{margin-top:9px;font-size:12px;color:var(--fg-3);line-height:1.5}
+.install-alt code{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11px;color:var(--fg-2);background:var(--bg-2);padding:1px 6px;border-radius:var(--r-xs)}
 .conn-cloud{display:flex;flex-wrap:wrap;gap:16px 36px;align-items:center;max-width:980px}
 .cc-item{display:inline-flex;align-items:center;gap:9px;font-family:'Instrument Sans',system-ui,sans-serif;font-size:21px;font-weight:600;color:var(--fg-2);letter-spacing:-.012em;opacity:.74;transition:color .18s,opacity .18s;cursor:default}
 .cc-item:hover{color:var(--fg);opacity:1}
@@ -461,7 +463,7 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
   <p style="font-size:16px;line-height:1.55;color:var(--fg-2);max-width:54ch;margin:0 auto 26px">Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs on your machine. nable has no backend that holds your data.</p>
   <div style="display:inline-flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:8px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;color:var(--fg);overflow:hidden;margin-bottom:22px;max-width:100%">
     <span style="padding:11px 12px;color:var(--fg-3);border-right:1px solid var(--line)">$</span>
-    <span style="padding:11px 14px;white-space:nowrap;overflow-x:auto">pip install -U finops-mcp &amp;&amp; finops welcome</span>
+    <span style="padding:11px 14px;white-space:nowrap;overflow-x:auto">uv tool install finops-mcp &amp;&amp; finops welcome</span>
   </div>
   <div><a href="/docs.html" style="color:var(--accent);font-size:14px;font-weight:500">Read the docs &rarr;</a></div>
   <noscript><p style="color:var(--fg-3);font-size:13px;margin-top:22px">Enable JavaScript for the full interactive demo. Everything above works without it.</p></noscript>
