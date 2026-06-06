@@ -219,15 +219,18 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .hero.editorial .installer{margin-left:auto;margin-right:auto}
 .hero.editorial .install-row{justify-content:center}
 @media(max-width:880px){.installer{display:none}}
-.logostrip{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg-1)}
-.logostrip-inner{display:flex;align-items:center;gap:36px;padding:20px 0;flex-wrap:wrap}
-.logostrip-lead{font-size:12px;color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;flex:none;font-weight:500}
-.logostrip-marks{display:flex;align-items:center;gap:26px;flex-wrap:wrap}
-.lmark{font-family:'Instrument Sans',system-ui,sans-serif;font-size:15px;font-weight:600;color:var(--fg-2);letter-spacing:-.01em;opacity:.62;transition:opacity .18s,color .18s}
-.lmark:hover{opacity:1;color:var(--fg)}
-.lmark-more{font-weight:500;font-size:13px;color:var(--accent-dim);opacity:1}
-.lmark-more:hover{color:var(--accent)}
-@media(max-width:880px){.logostrip-inner{gap:14px;padding:18px 0}.logostrip-marks{gap:16px 20px}.lmark{font-size:14px}}
+.install-cmdlabel{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);margin-bottom:8px}
+.install-cmdlabel svg{color:var(--accent-dim)}
+.conn-cloud{display:flex;flex-wrap:wrap;gap:16px 36px;align-items:center;max-width:980px}
+.cc-item{display:inline-flex;align-items:center;gap:9px;font-family:'Instrument Sans',system-ui,sans-serif;font-size:21px;font-weight:600;color:var(--fg-2);letter-spacing:-.012em;opacity:.74;transition:color .18s,opacity .18s;cursor:default}
+.cc-item:hover{color:var(--fg);opacity:1}
+.cc-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+.cc-dot.beta{background:#e6a840}
+.cc-dot.soon{background:var(--fg-3)}
+.conn-legend{display:flex;align-items:center;gap:22px;margin-top:34px;font-size:12px;color:var(--fg-3);letter-spacing:.02em}
+.conn-legend span{display:inline-flex;align-items:center;gap:7px}
+.conn-legend .cc-soon-note{color:var(--fg-3);opacity:.8}
+@media(max-width:880px){.conn-cloud{gap:12px 24px}.cc-item{font-size:17px}}
 
 /* email capture form */
 .email-capture{display:flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:var(--r-md);overflow:hidden;height:42px;max-width:380px;width:100%;position:relative}
@@ -450,7 +453,7 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
   <p style="font-size:16px;line-height:1.55;color:var(--fg-2);max-width:54ch;margin:0 auto 26px">Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs on your machine. nable has no backend that holds your data.</p>
   <div style="display:inline-flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:8px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;color:var(--fg);overflow:hidden;margin-bottom:22px;max-width:100%">
     <span style="padding:11px 12px;color:var(--fg-3);border-right:1px solid var(--line)">$</span>
-    <span style="padding:11px 14px;white-space:nowrap;overflow-x:auto">pip install finops-mcp &amp;&amp; finops welcome</span>
+    <span style="padding:11px 14px;white-space:nowrap;overflow-x:auto">pip install -U finops-mcp &amp;&amp; finops welcome</span>
   </div>
   <div><a href="/docs.html" style="color:var(--accent);font-size:14px;font-weight:500">Read the docs &rarr;</a></div>
   <noscript><p style="color:var(--fg-3);font-size:13px;margin-top:22px">Enable JavaScript for the full interactive demo. Everything above works without it.</p></noscript>

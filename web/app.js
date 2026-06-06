@@ -238,19 +238,21 @@ const INSTALL_POPUPS = {
   claude: {
     title: "Install in Claude Desktop",
     steps: [
-      /* @__PURE__ */ React.createElement(React.Fragment, null, "Run the command below. ", /* @__PURE__ */ React.createElement("code", null, "finops welcome"), " writes your Claude Desktop config and stores credentials in your OS keychain."),
+      /* @__PURE__ */ React.createElement(React.Fragment, null, "In your terminal, run the command below. ", /* @__PURE__ */ React.createElement("code", null, "finops welcome"), " writes your Claude Desktop config and stores credentials in your OS keychain."),
       /* @__PURE__ */ React.createElement(React.Fragment, null, "Restart Claude Desktop. nable connects as a local MCP server.")
     ],
-    cmd: "pip install finops-mcp && finops welcome",
+    cmdLabel: "In your terminal",
+    cmd: "pip install -U finops-mcp && finops welcome",
     note: "Runs on your machine. No nable backend holds your data."
   },
   openai: {
     title: "Install in OpenAI Codex",
     steps: [
-      /* @__PURE__ */ React.createElement(React.Fragment, null, "Install nable and store credentials in your OS keychain:"),
+      /* @__PURE__ */ React.createElement(React.Fragment, null, "In your terminal, install nable and store credentials in your OS keychain:"),
       /* @__PURE__ */ React.createElement(React.Fragment, null, "Add nable to your Codex MCP config below, then restart Codex.")
     ],
-    cmd: "pip install finops-mcp && finops welcome",
+    cmdLabel: "In your terminal",
+    cmd: "pip install -U finops-mcp && finops welcome",
     toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
     note: "Codex CLI runs nable locally. The ChatGPT app needs a hosted connector, which is on the roadmap."
@@ -268,7 +270,7 @@ function CopyCmd({ cmd }) {
 function InstallPopup({ id, onClose }) {
   const p = INSTALL_POPUPS[id];
   if (!p) return null;
-  return /* @__PURE__ */ React.createElement("div", { className: "install-pop", role: "dialog", "aria-label": p.title }, /* @__PURE__ */ React.createElement("div", { className: "install-pop-head" }, /* @__PURE__ */ React.createElement("span", { className: "ipt" }, p.title), /* @__PURE__ */ React.createElement("button", { className: "ipx", onClick: onClose, "aria-label": "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("ol", { className: "install-steps" }, p.steps.map((s, i) => /* @__PURE__ */ React.createElement("li", { key: i }, s))), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: p.cmd }), p.toml && /* @__PURE__ */ React.createElement("div", { className: "install-toml" }, /* @__PURE__ */ React.createElement("span", { className: "tomlpath" }, "Add to ", /* @__PURE__ */ React.createElement("code", null, p.tomlPath)), /* @__PURE__ */ React.createElement("pre", null, p.toml)), /* @__PURE__ */ React.createElement("p", { className: "install-pop-note" }, p.note));
+  return /* @__PURE__ */ React.createElement("div", { className: "install-pop", role: "dialog", "aria-label": p.title }, /* @__PURE__ */ React.createElement("div", { className: "install-pop-head" }, /* @__PURE__ */ React.createElement("span", { className: "ipt" }, p.title), /* @__PURE__ */ React.createElement("button", { className: "ipx", onClick: onClose, "aria-label": "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("ol", { className: "install-steps" }, p.steps.map((s, i) => /* @__PURE__ */ React.createElement("li", { key: i }, s))), p.cmdLabel && /* @__PURE__ */ React.createElement("span", { className: "install-cmdlabel" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3", strokeLinecap: "round", strokeLinejoin: "round" })), p.cmdLabel), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: p.cmd }), p.toml && /* @__PURE__ */ React.createElement("div", { className: "install-toml" }, /* @__PURE__ */ React.createElement("span", { className: "tomlpath" }, "Add to ", /* @__PURE__ */ React.createElement("code", null, p.tomlPath)), /* @__PURE__ */ React.createElement("pre", null, p.toml)), /* @__PURE__ */ React.createElement("p", { className: "install-pop-note" }, p.note));
 }
 const _CHEV = /* @__PURE__ */ React.createElement("svg", { className: "chev", width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.6", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M3 4.5l3 3 3-3", strokeLinecap: "round", strokeLinejoin: "round" }));
 function InstallRow() {
@@ -451,7 +453,7 @@ const CONNECTORS = [
   { nm: "Coming soon", px: "Vote on the next connector", tag: "soon" }
 ];
 function Connectors() {
-  return /* @__PURE__ */ React.createElement("section", { id: "connectors", className: "alt" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Connectors"), /* @__PURE__ */ React.createElement("h2", null, "17 sources.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "One conversation.")), /* @__PURE__ */ React.createElement("p", null, "Every connector is a real API integration, not a CSV export. New providers ship monthly.")), /* @__PURE__ */ React.createElement("div", { className: "conn-grid" }, CONNECTORS.map((c, i) => /* @__PURE__ */ React.createElement("div", { className: "conn", key: i }, /* @__PURE__ */ React.createElement("span", { className: "nm" }, c.nm), /* @__PURE__ */ React.createElement("span", { className: "px" }, c.px), /* @__PURE__ */ React.createElement("span", { className: "tag " + (c.tag === "beta" ? "beta" : c.tag === "soon" ? "soon" : "") }, c.tag))))));
+  return /* @__PURE__ */ React.createElement("section", { id: "connectors", className: "alt" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Connectors"), /* @__PURE__ */ React.createElement("h2", null, "17 sources.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "One conversation.")), /* @__PURE__ */ React.createElement("p", null, "Every connector is a real API integration, not a CSV export. New providers ship monthly.")), /* @__PURE__ */ React.createElement("div", { className: "conn-cloud" }, CONNECTORS.filter((c) => c.tag !== "soon").map((c, i) => /* @__PURE__ */ React.createElement("span", { className: "cc-item", key: i, title: c.px }, /* @__PURE__ */ React.createElement("i", { className: "cc-dot " + c.tag }), c.nm))), /* @__PURE__ */ React.createElement("div", { className: "conn-legend" }, /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "cc-dot live" }), "live"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("i", { className: "cc-dot beta" }), "beta"), /* @__PURE__ */ React.createElement("span", { className: "cc-soon-note" }, "+ more shipping monthly"))));
 }
 const SOLO_FEATURES = [
   "Cost queries across all providers",
@@ -758,10 +760,6 @@ function Tweaks() {
     }
   )));
 }
-const STRIP_PROVIDERS = ["AWS", "Azure", "GCP", "OpenAI", "Anthropic", "Stripe", "Datadog", "Snowflake", "Databricks", "GitHub"];
-function LogoStrip() {
-  return /* @__PURE__ */ React.createElement("div", { className: "logostrip" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "logostrip-inner" }, /* @__PURE__ */ React.createElement("span", { className: "logostrip-lead" }, "Reads your spend across"), /* @__PURE__ */ React.createElement("div", { className: "logostrip-marks" }, STRIP_PROVIDERS.map((n, i) => /* @__PURE__ */ React.createElement("span", { className: "lmark", key: i }, n)), /* @__PURE__ */ React.createElement("span", { className: "lmark lmark-more" }, "+7 more")))));
-}
 function App() {
   const [t, setT] = useState(TWEAK_DEFAULTS);
   const [version, setVersion] = useState(null);
@@ -780,6 +778,6 @@ function App() {
     }).catch(() => {
     });
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(LogoStrip, null), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
 }
 ReactDOM.createRoot(document.getElementById("app")).render(/* @__PURE__ */ React.createElement(App, null));
