@@ -240,7 +240,7 @@ function Hero({ layout, interaction }) {
         if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "pricing_40" });
       }
     },
-    "See Pro \xB7 $40/mo ",
+    "See Pro \xB7 $100/mo ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   ), /* @__PURE__ */ React.createElement(
     "a",
@@ -516,14 +516,14 @@ const TEAM_FEATURES = [
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
-const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/aFa28q1DzffEdZS2sy2Nq03";
-const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/5kQ28q6XT8RgdZS8QW2Nq05";
+const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
+const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
 function Pricing() {
   const [annual, setAnnual] = useState(false);
-  const teamPrice = annual ? "$400" : "$40";
-  const teamPer = annual ? "/ seat / yr" : "/ seat / mo";
-  const teamSub = annual ? "$33 / seat / mo \xB7 save $80" : null;
-  const teamSavings = annual ? "Save $80 \xB7 2 months free" : "7-day free trial";
+  const teamPrice = annual ? "$1,000" : "$100";
+  const teamPer = annual ? "/ yr" : "/ mo";
+  const teamSub = annual ? "$83 / mo \xB7 save $200" : null;
+  const teamSavings = annual ? "Save $200 \xB7 2 months free" : "7-day free trial";
   const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan = annual ? "team_annual" : "team_monthly";
   return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget alerts, and org rollups."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
