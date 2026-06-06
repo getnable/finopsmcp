@@ -36,7 +36,7 @@ class _FakeSession:
     def available_profiles(self):
         return list(type(self)._profiles)
 
-    def client(self, name, region_name=None):
+    def client(self, name, region_name=None, **kwargs):
         spec = type(self)._map.get(self._profile)
         if spec is None:
             return _FakeClient(fail=True)
