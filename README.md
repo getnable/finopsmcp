@@ -45,6 +45,12 @@ pip install finops-mcp && finops setup
 
 The wizard walks through connecting your providers and auto-configures Claude Desktop at the end. No config file editing, no manual env vars.
 
+**Using Cursor?** One-click install (opens Cursor and adds nable):
+
+[`cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19`](cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19)
+
+Then run `finops setup` once to connect a cloud account.
+
 **On Anaconda?** Use uvx (isolated, won't touch your Anaconda environment):
 ```bash
 brew install uv && uvx finops-mcp setup

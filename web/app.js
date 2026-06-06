@@ -234,6 +234,16 @@ function Hero({ layout, interaction }) {
   return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud bill,", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("span", { className: "strike" }, "in a dashboard."), /* @__PURE__ */ React.createElement("span", { className: "accent" }, "Waste found.", /* @__PURE__ */ React.createElement("br", null), "Money saved.")), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Track LLM spend by model, catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally, or always-on. Your credentials and cost data never leave your machine."), /* @__PURE__ */ React.createElement("div", { className: "hero-cta-row", id: "install" }, /* @__PURE__ */ React.createElement(CopyInstall, null), /* @__PURE__ */ React.createElement(
     "a",
     {
+      href: "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19",
+      className: "btn btn-ghost",
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "add_to_cursor" });
+      }
+    },
+    "Add to Cursor"
+  ), /* @__PURE__ */ React.createElement(
+    "a",
+    {
       href: "/docs.html",
       className: "btn btn-ghost",
       onClick: () => {
