@@ -65,5 +65,12 @@ dashboard.html
 ~$*
 *.docx
 
-# Beta license keys — never commit
+# Beta license keys: never commit
 beta-licenses.txt
+
+# Internal GTM, strategy, and fundraising docs: never commit to the public repo
+docs/gtm/
+docs/strategy/
+docs/reviews/
+vc-brief-*.pdf
+competitive-analysis-*.pdf
