@@ -288,7 +288,7 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .q-pager .dots i:hover{background:var(--fg-3)}
 
 /* trust strip */
-.trust{margin-top:56px;display:grid;gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.trust{margin-top:56px;display:grid;gap:0}
 .trust .ti{padding:22px 24px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
 .trust .ti:last-child{border-right:0}
 .trust .ti .lab{font-family:'Instrument Sans',system-ui,sans-serif;font-size:10.5px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase}
@@ -297,7 +297,7 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 @media(max-width:880px){.trust{grid-template-columns:repeat(2,1fr)!important}.trust .ti:nth-child(2){border-right:0}.trust .ti:nth-child(-n+2){border-bottom:1px solid var(--line)}}
 
 /* sections */
-section{padding:80px 0;border-top:1px solid var(--line);position:relative}
+section{padding:80px 0;position:relative}
 section.tight{padding:56px 0}
 section.alt{background:var(--bg-1)}
 section.alt+section:not(.alt){border-top-color:transparent;background:var(--bg)}
@@ -310,7 +310,7 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .section-head p{margin-top:20px;color:var(--fg-2);font-size:16px;line-height:1.65;max-width:60ch}
 
 /* thesis */
-.thesis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-top:1px solid var(--line)}
+.thesis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0}
 .thesis-card{padding:36px 32px 36px 0;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:14px}
 .thesis-card:nth-child(2){padding-left:32px}
 .thesis-card:last-child{border-right:0;padding-left:32px;padding-right:0}
@@ -336,7 +336,7 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 @media(max-width:880px){.arch-row{grid-template-columns:1fr;gap:12px}.arch-arrow{transform:rotate(90deg);padding:0;min-height:32px}.arch-arrow .line{min-width:40px;width:40px}.arch-col{padding:8px 18px}}
 
 /* question marquee */
-.qmarq{margin-top:24px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:32px 0;overflow:hidden;position:relative;mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+.qmarq{margin-top:24px;padding:32px 0;overflow:hidden;position:relative;mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
 .qmarq .track{display:flex;gap:18px;animation:scroll 80s linear infinite;width:max-content}
 .qmarq:hover .track{animation-play-state:paused}
 .qmarq .q{font-family:'Instrument Sans',system-ui,sans-serif;font-size:22px;font-weight:300;color:var(--fg-2);letter-spacing:-.015em;white-space:nowrap;display:inline-flex;align-items:center;gap:18px}
@@ -399,7 +399,7 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 #mid-cta h2{font-size:clamp(24px,3vw,36px);font-weight:400;letter-spacing:-.025em;line-height:1.15}
 
 /* foot cta */
-.foot-cta{padding:80px 0;border-top:1px solid var(--line);text-align:center;position:relative;overflow:hidden}
+.foot-cta{padding:80px 0;text-align:center;position:relative;overflow:hidden}
 .foot-cta-grid{display:none}
 .foot-cta h2{font-size:clamp(48px,6vw,84px);line-height:.98;letter-spacing:-.04em;font-weight:300}
 .foot-cta h2 em{font-style:italic;color:var(--accent);font-weight:400}
