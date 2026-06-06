@@ -248,18 +248,7 @@ function Hero({ layout, interaction }){
             <p className="lede">
               Connect AWS, Azure, GCP, and your AI bill to Claude or Cursor. Track LLM spend by model, catch cost anomalies, get rightsizing recommendations, patch your Terraform, open the PR. Runs locally, or always-on. Your credentials never leave your machine, and nable has no backend that holds your data.
             </p>
-            <div className="hero-cta-row" id="install">
-              <CopyInstall />
-              <a href="cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19"
-                className="btn btn-ghost"
-                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero',cta:'add_to_cursor'}); }}>
-                Add to Cursor
-              </a>
-              <a href="/docs.html" className="btn btn-ghost"
-                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero',cta:'docs'}); }}>
-                Read the docs
-              </a>
-            </div>
+            <InstallRow />
             <p className="install-note">Free forever for solo use · no credit card · runs on your machine</p>
             <div className="hero-mobile-cta">
               <p style={{fontSize:13, color:"var(--fg-3)", marginBottom:12, letterSpacing:".01em"}}>
@@ -278,21 +267,103 @@ function Hero({ layout, interaction }){
   );
 }
 
-function CopyInstall(){
+const CURSOR_DEEPLINK = "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19";
+
+const INSTALL_POPUPS = {
+  claude: {
+    title: "Install in Claude Desktop",
+    steps: [
+      <>Run the command below. <code>finops welcome</code> writes your Claude Desktop config and stores credentials in your OS keychain.</>,
+      <>Restart Claude Desktop. nable connects as a local MCP server.</>,
+    ],
+    cmd: "pip install finops-mcp && finops welcome",
+    note: "Runs on your machine. No nable backend holds your data.",
+  },
+  openai: {
+    title: "Install in OpenAI Codex",
+    steps: [
+      <>Install nable and store credentials in your OS keychain:</>,
+      <>Add nable to your Codex MCP config below, then restart Codex.</>,
+    ],
+    cmd: "pip install finops-mcp && finops welcome",
+    toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
+    tomlPath: "~/.codex/config.toml",
+    note: "Codex CLI runs nable locally. The ChatGPT app needs a hosted connector, which is on the roadmap.",
+  },
+};
+
+function CopyCmd({ cmd }){
   const [copied, setCopied] = useState(false);
-  const cmd = "pip install finops-mcp && finops welcome";
   return (
-    <div className="install" role="group" aria-label="Install command">
+    <button className="copycmd" onClick={() => {
+      navigator.clipboard?.writeText(cmd);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      if(window.posthog) posthog.capture('install_copied');
+    }}>
       <span className="prompt">$</span>
       <span className="cmd">{cmd}</span>
-      <button onClick={() => {
-        navigator.clipboard?.writeText(cmd);
-        setCopied(true);
-        setTimeout(()=>setCopied(false),1600);
-        if(window.posthog) posthog.capture('install_copied');
-      }}>
-        {copied ? "copied" : "copy"}
-      </button>
+      <span className="copylab">{copied ? "copied" : "copy"}</span>
+    </button>
+  );
+}
+
+function InstallPopup({ id, onClose }){
+  const p = INSTALL_POPUPS[id];
+  if(!p) return null;
+  return (
+    <div className="install-pop" role="dialog" aria-label={p.title}>
+      <div className="install-pop-head">
+        <span className="ipt">{p.title}</span>
+        <button className="ipx" onClick={onClose} aria-label="Close">×</button>
+      </div>
+      <ol className="install-steps">
+        {p.steps.map((s, i) => <li key={i}>{s}</li>)}
+      </ol>
+      <CopyCmd cmd={p.cmd} />
+      {p.toml && (
+        <div className="install-toml">
+          <span className="tomlpath">Add to <code>{p.tomlPath}</code></span>
+          <pre>{p.toml}</pre>
+        </div>
+      )}
+      <p className="install-pop-note">{p.note}</p>
+    </div>
+  );
+}
+
+const _CHEV = <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M3 4.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+
+function InstallRow(){
+  const [open, setOpen] = useState(null);
+  const toggle = (id) => {
+    setOpen(o => o === id ? null : id);
+    if(window.posthog) posthog.capture('install_opened', { client: id });
+  };
+  return (
+    <div className="installer" id="install">
+      <div className="install-row">
+        <span className="setup-badge">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M6 0l1 5 5 1-5 1-1 5-1-5-5-1 5-1z"/></svg>
+          1 min setup
+        </span>
+        <a className="iclient is-primary" href={CURSOR_DEEPLINK}
+          onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'add_to_cursor' }); }}>
+          <span>Install in <b>Cursor</b></span>
+          <svg className="ic" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M4 8l4-4m0 0H4.5M8 4v3.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </a>
+        <button className={"iclient" + (open === 'claude' ? " is-open" : "")} aria-expanded={open === 'claude'} onClick={() => toggle('claude')}>
+          <span>Install in <b>Claude</b></span>{_CHEV}
+        </button>
+        <button className={"iclient" + (open === 'openai' ? " is-open" : "")} aria-expanded={open === 'openai'} onClick={() => toggle('openai')}>
+          <span>Install in <b>OpenAI</b></span>{_CHEV}
+        </button>
+      </div>
+      {open && <InstallPopup id={open} onClose={() => setOpen(null)} />}
+      <a className="install-more" href="/docs.html#install"
+        onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>
+        VS Code, Windsurf, Zed and more → docs
+      </a>
     </div>
   );
 }
