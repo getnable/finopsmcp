@@ -646,7 +646,7 @@ function Architecture({ version }){
         <div className="section-head">
           <div className="label">Architecture</div>
           <h2>Headless by design.<br/><em>No vendor backend.</em></h2>
-          <p>nable is not SaaS. It runs on the engineer's machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine, and your cost data never touches a nable server, there is no backend or data lake to breach. The figures you ask about go to your editor's own AI to answer the question, the same as any prompt, and nowhere else.</p>
+          <p>nable is not SaaS. It runs on your own machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine, and your cost data never touches a nable server, there is no backend or data lake to breach. The figures you ask about go to your editor's own AI to answer the question, the same as any prompt, and nowhere else.</p>
         </div>
         <div className="arch">
           <div className="arch-grid"></div>
@@ -734,6 +734,12 @@ const CONNECTORS = [
   {nm:"Coming soon",px:"Vote on the next connector",     tag:"soon"},
 ];
 
+const LOGOS = [
+  {n:"AWS",f:"aws"},{n:"Azure",f:"azure"},{n:"GCP",f:"gcp"},{n:"OpenAI",f:"openai"},
+  {n:"Anthropic",f:"anthropic"},{n:"Stripe",f:"stripe"},{n:"Datadog",f:"datadog"},
+  {n:"Snowflake",f:"snowflake"},{n:"GitHub",f:"github"},
+];
+
 function Connectors(){
   return (
     <section id="connectors" className="alt">
@@ -743,17 +749,11 @@ function Connectors(){
           <h2>17 sources.<br/><em>One conversation.</em></h2>
           <p>Every connector is a real API integration, not a CSV export. New providers ship monthly.</p>
         </div>
-        <div className="conn-cloud">
-          {CONNECTORS.filter(c => c.tag !== "soon").map((c,i) => (
-            <span className="cc-item" key={i} title={c.px}>
-              <i className={"cc-dot " + c.tag}></i>{c.nm}
-            </span>
+        <div className="logo-strip">
+          {LOGOS.map((l,i) => (
+            <img className="logo-mark" key={i} src={"/vendor/logos/" + l.f + ".svg"} alt={l.n} title={l.n} loading="lazy" />
           ))}
-        </div>
-        <div className="conn-legend">
-          <span><i className="cc-dot live"></i>live</span>
-          <span><i className="cc-dot beta"></i>beta</span>
-          <span className="cc-soon-note">+ more shipping monthly</span>
+          <span className="logo-more">+ 8 more · new providers monthly</span>
         </div>
       </div>
     </section>
