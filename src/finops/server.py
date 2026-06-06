@@ -276,18 +276,49 @@ def _fmt_usd(amount: float) -> str:
     return f"${amount:,.2f}"
 
 
+_TEAM_MONTHLY_USD = 40.0  # single source of truth for the Team price in code
+
+
+def _savings_found_monthly() -> float:
+    """Cheap local read: total monthly savings nable has already identified for
+    this user (active recommendations only). Lets upgrade nudges cite a real
+    number instead of an abstract pitch. Returns 0.0 on any error, never raises.
+    """
+    try:
+        from .storage.db import get_engine, savings_recommendations
+        from sqlalchemy import select
+        sr = savings_recommendations
+        with get_engine().connect() as conn:
+            rows = conn.execute(
+                select(sr.c.estimated_monthly_savings_usd, sr.c.status)
+            ).fetchall()
+        return float(sum((r[0] or 0) for r in rows if r[1] not in ("dismissed", "expired")))
+    except Exception:
+        return 0.0
+
+
 def _team_nudge(message: str) -> str | None:
     """
     Return a contextual upgrade nudge for free-tier users only.
     Returns None for trial and pro users so the message never appears for paying customers.
-    Phrased as a helpful next step, not an ad.
+
+    When nable has already identified enough savings to dwarf the $40/mo plan, lead
+    with that real number. The ROI is the most honest upgrade argument there is, and
+    it only appears when the multiple is genuinely compelling (>= 1x the plan price).
     """
     try:
-        if get_status().mode == "free":
-            return f"{message} {_UPGRADE_URL}"
+        if get_status().mode != "free":
+            return None
+        found = _savings_found_monthly()
+        if found >= _TEAM_MONTHLY_USD:
+            return (
+                f"nable has already found ${found:,.0f}/mo in savings here, "
+                f"{found / _TEAM_MONTHLY_USD:.0f}x the ${_TEAM_MONTHLY_USD:.0f}/mo Team plan. "
+                f"{message} {_UPGRADE_URL}"
+            )
+        return f"{message} {_UPGRADE_URL}"
     except Exception:
-        pass
-    return None
+        return None
 
 
 def _summary_to_dict(summary: CostSummary) -> dict:
@@ -10923,7 +10954,6 @@ async def get_nable_roi(
         from sqlalchemy import select
         from datetime import datetime, timedelta, timezone
 
-        _TEAM_MONTHLY_USD = 40.0
         _SOLO_MONTHLY_USD = 0.0
 
         lic = get_status()
