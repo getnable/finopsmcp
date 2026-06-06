@@ -219,6 +219,15 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .hero.editorial .installer{margin-left:auto;margin-right:auto}
 .hero.editorial .install-row{justify-content:center}
 @media(max-width:880px){.installer{display:none}}
+.logostrip{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg-1)}
+.logostrip-inner{display:flex;align-items:center;gap:36px;padding:20px 0;flex-wrap:wrap}
+.logostrip-lead{font-size:12px;color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;flex:none;font-weight:500}
+.logostrip-marks{display:flex;align-items:center;gap:26px;flex-wrap:wrap}
+.lmark{font-family:'Instrument Sans',system-ui,sans-serif;font-size:15px;font-weight:600;color:var(--fg-2);letter-spacing:-.01em;opacity:.62;transition:opacity .18s,color .18s}
+.lmark:hover{opacity:1;color:var(--fg)}
+.lmark-more{font-weight:500;font-size:13px;color:var(--accent-dim);opacity:1}
+.lmark-more:hover{color:var(--accent)}
+@media(max-width:880px){.logostrip-inner{gap:14px;padding:18px 0}.logostrip-marks{gap:16px 20px}.lmark{font-size:14px}}
 
 /* email capture form */
 .email-capture{display:flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:var(--r-md);overflow:hidden;height:42px;max-width:380px;width:100%;position:relative}
