@@ -456,15 +456,15 @@ const LOGOS = [
   { n: "AWS", f: "aws" },
   { n: "Azure", f: "azure" },
   { n: "GCP", f: "gcp" },
-  { n: "OpenAI", f: "openai" },
-  { n: "Anthropic", f: "anthropic" },
+  { n: "OpenAI", f: "openai", icon: true },
+  { n: "Anthropic", f: "anthropic", icon: true },
   { n: "Stripe", f: "stripe" },
-  { n: "Datadog", f: "datadog" },
+  { n: "Datadog", f: "datadog", icon: true },
   { n: "Snowflake", f: "snowflake" },
   { n: "GitHub", f: "github" }
 ];
 function Connectors() {
-  return /* @__PURE__ */ React.createElement("section", { id: "connectors", className: "alt" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Connectors"), /* @__PURE__ */ React.createElement("h2", null, "17 sources.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "One conversation.")), /* @__PURE__ */ React.createElement("p", null, "Every connector is a real API integration, not a CSV export. New providers ship monthly.")), /* @__PURE__ */ React.createElement("div", { className: "logo-strip" }, LOGOS.map((l, i) => /* @__PURE__ */ React.createElement("span", { className: "logo-item", key: i }, /* @__PURE__ */ React.createElement("img", { className: "logo-mark", src: "/vendor/logos/" + l.f + ".svg", alt: "", loading: "lazy" }), /* @__PURE__ */ React.createElement("span", { className: "logo-name" }, l.n))), /* @__PURE__ */ React.createElement("span", { className: "logo-more" }, "+ 8 more \xB7 new providers monthly"))));
+  return /* @__PURE__ */ React.createElement("section", { id: "connectors", className: "alt" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Connectors"), /* @__PURE__ */ React.createElement("h2", null, "17 sources.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "One conversation.")), /* @__PURE__ */ React.createElement("p", null, "Every connector is a real API integration, not a CSV export. New providers ship monthly.")), /* @__PURE__ */ React.createElement("div", { className: "logo-band" }, LOGOS.map((l, i) => /* @__PURE__ */ React.createElement("img", { className: "logo-img" + (l.icon ? " is-icon" : ""), key: i, src: "/vendor/logos/" + l.f + ".svg", alt: l.n, title: l.n, loading: "lazy" }))), /* @__PURE__ */ React.createElement("p", { className: "logo-band-note" }, "+ 8 more connectors \xB7 new providers ship monthly")));
 }
 const SOLO_FEATURES = [
   "Cost queries across all providers",
