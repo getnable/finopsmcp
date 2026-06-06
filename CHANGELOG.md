@@ -2,6 +2,26 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.52
+
+### Fixed
+- **Sync tools no longer error under MCP dispatch.** `whoami`, `create_api_key`,
+  `list_api_keys`, and `revoke_api_key` are synchronous, but the instrumentation
+  wrapper awaited every tool result unconditionally, so they failed with "object
+  dict can't be used in 'await' expression" when called through the server. The
+  wrapper now only awaits coroutines.
+- **`explain_recent_cost_drivers` works again.** It unpacked the float grand
+  total from `_gather_costs` and called `.keys()` on it ("'float' object has no
+  attribute 'keys'"). It now diffs the per-service breakdown as intended.
+- **`get_llm_costs` now sees Bedrock spend.** Cost Explorer labels model spend
+  under SKU service names like "Claude Sonnet 4.5 (Amazon Bedrock Edition)", which
+  the hardcoded `SERVICE == "Amazon Bedrock"` filter missed, reporting $0. nable
+  now discovers the actual Bedrock service names via `GetCostAndUsage` (the same
+  permission cost queries already use, no extra IAM grant) and attributes spend
+  by model.
+- Added dispatch-level regression tests so sync-tool breakage and these data
+  bugs cannot ship silently again.
+
 ## 0.8.51
 
 ### Changed

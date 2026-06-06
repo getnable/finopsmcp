@@ -105,12 +105,17 @@ def _instrumented_tool(*dargs, **dkwargs):
         @functools.wraps(fn)
         async def _inner(*args, **kwargs):
             import time as _time
+            import inspect as _inspect
             global _first_cost_query_fired
             _telemetry.record_tool_call(fn.__name__)
             _t0 = _time.monotonic()
             _audit = _get_audit_logger()
             try:
-                result = await fn(*args, **kwargs)
+                # Tools may be sync or async. Only await coroutines/awaitables,
+                # otherwise sync tools (whoami, *_api_key) raise
+                # "object dict can't be used in 'await' expression".
+                _ret = fn(*args, **kwargs)
+                result = await _ret if _inspect.isawaitable(_ret) else _ret
             except Exception as exc:
                 _duration = int((_time.monotonic() - _t0) * 1000)
                 _audit.log_tool_call(
@@ -11112,8 +11117,11 @@ async def explain_recent_cost_drivers(
                 "fix": "Run 'finops setup aws' (or azure/gcp/datadog) to connect a provider.",
             }
 
-        cost_now, _, _ = await _gather_costs(active, period_start, period_end)
-        cost_prev, _, _ = await _gather_costs(active, prev_start, prev_end)
+        # _gather_costs returns (grand_total, by_provider, grand_by_service).
+        # We diff the per-service breakdown, so take the third element, not the
+        # float total (taking [0] caused "'float' object has no attribute 'keys'").
+        _, _, cost_now = await _gather_costs(active, period_start, period_end)
+        _, _, cost_prev = await _gather_costs(active, prev_start, prev_end)
 
         # Build per-provider + per-service breakdown
         drivers: list[dict] = []

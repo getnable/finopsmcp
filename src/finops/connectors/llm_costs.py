@@ -55,19 +55,36 @@ def get_bedrock_costs(start_date: date, end_date: date) -> dict[str, Any]:
 
     try:
         ce = boto3.client("ce", region_name="us-east-1")
+        period = {"Start": start_date.isoformat(), "End": end_date.isoformat()}
+        # AWS labels Bedrock spend under service names that vary and change over
+        # time: plain "Amazon Bedrock" plus per-model SKUs like
+        # "Claude Sonnet 4.5 (Amazon Bedrock Edition)". Cost Explorer's SERVICE
+        # filter is exact-match only (no contains), and ce:GetDimensionValues is
+        # not in nable's minimum read-only policy. So discover the names with a
+        # SERVICE-grouped GetCostAndUsage (the same permission cost queries use),
+        # then pull daily model detail filtered to just those services.
+        discover = ce.get_cost_and_usage(
+            TimePeriod=period,
+            Granularity="MONTHLY",
+            GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+            Metrics=["UnblendedCost"],
+        )
+        bedrock_services = sorted({
+            g["Keys"][0]
+            for r in discover.get("ResultsByTime", [])
+            for g in r.get("Groups", [])
+            if "bedrock" in g["Keys"][0].lower()
+        })
+        if not bedrock_services:
+            return _empty("no_bedrock_services")
         resp = ce.get_cost_and_usage(
-            TimePeriod={
-                "Start": start_date.isoformat(),
-                "End":   end_date.isoformat(),
-            },
+            TimePeriod=period,
             Granularity="DAILY",
-            Filter={
-                "Dimensions": {
-                    "Key":    "SERVICE",
-                    "Values": ["Amazon Bedrock"],
-                }
-            },
-            GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
+            Filter={"Dimensions": {"Key": "SERVICE", "Values": bedrock_services}},
+            GroupBy=[
+                {"Type": "DIMENSION", "Key": "SERVICE"},
+                {"Type": "DIMENSION", "Key": "USAGE_TYPE"},
+            ],
             Metrics=["UnblendedCost"],
         )
     except Exception as e:
@@ -75,7 +92,7 @@ def get_bedrock_costs(start_date: date, end_date: date) -> dict[str, Any]:
         return _empty("ce_error")
 
     total = 0.0
-    by_usage_type: dict[str, float] = {}
+    by_model: dict[str, float] = {}
     daily: list[dict] = []
 
     for result in resp.get("ResultsByTime", []):
@@ -84,25 +101,25 @@ def get_bedrock_costs(start_date: date, end_date: date) -> dict[str, Any]:
         day_by_model: dict[str, float] = {}
 
         for group in result.get("Groups", []):
-            usage_type = group["Keys"][0]
+            service, usage_type = group["Keys"][0], group["Keys"][1]
+            if "bedrock" not in service.lower():
+                continue  # belt-and-suspenders; filter should already exclude these
             amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
-            by_usage_type[usage_type] = by_usage_type.get(usage_type, 0.0) + amount
             day_total += amount
-            # Extract model ID from usage type (e.g. "USE1-anthropic.claude-3-5-sonnet...")
+            # Prefer the model id encoded in the usage type
+            # (e.g. "USE1-anthropic.claude-3-5-sonnet..."). Real Bedrock model
+            # ids always contain a vendor dot ("anthropic.", "meta.", "amazon.").
+            # When AWS bills the model as its own service SKU, the usage type is
+            # generic, so fall back to the service name (suffix stripped).
             model_id = _extract_model_from_usage_type(usage_type)
-            if model_id:
-                day_by_model[model_id] = day_by_model.get(model_id, 0.0) + amount
+            if "." not in model_id:
+                model_id = service.replace(" (Amazon Bedrock Edition)", "").strip() or service
+            day_by_model[model_id] = day_by_model.get(model_id, 0.0) + amount
+            by_model[model_id] = by_model.get(model_id, 0.0) + amount
 
         total += day_total
         daily.append({"date": day, "total_usd": round(day_total, 4),
                       "by_model": {k: round(v, 4) for k, v in day_by_model.items()}})
-
-    # Normalise by_usage_type into by_model
-    by_model: dict[str, float] = {}
-    for usage_type, amount in by_usage_type.items():
-        model_id = _extract_model_from_usage_type(usage_type)
-        key = model_id or usage_type
-        by_model[key] = by_model.get(key, 0.0) + amount
 
     return {
         "total_usd": round(total, 4),
