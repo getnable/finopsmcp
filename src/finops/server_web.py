@@ -998,6 +998,17 @@ def _fetch_tableau_anomalies() -> list[dict]:
         return []
 
 
+def _csv_safe(v):
+    """Neutralize spreadsheet formula injection (CWE-1236): a cell starting with
+    '=', '+', '-', '@', tab, or CR is treated as a formula by Excel/Sheets. Prefix
+    with an apostrophe to force text. Values come from resource/tag names."""
+    if not isinstance(v, str):
+        return v
+    if v and v[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
 def _to_csv(rows: list[dict]) -> bytes:
     """Serialize a list of dicts to CSV bytes."""
     if not rows:
@@ -1005,7 +1016,7 @@ def _to_csv(rows: list[dict]) -> bytes:
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()), lineterminator="\n")
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows([{k: _csv_safe(val) for k, val in row.items()} for row in rows])
     return buf.getvalue().encode()
 
 

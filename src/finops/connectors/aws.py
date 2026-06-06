@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import date, datetime, timezone
 from typing import Any
@@ -207,7 +208,7 @@ class AWSConnector(BaseConnector):
             results: list[dict] = []
             try:
                 while True:
-                    resp = ce.get_cost_and_usage(**kwargs)
+                    resp = await asyncio.to_thread(ce.get_cost_and_usage, **kwargs)
                     results.extend(resp.get("ResultsByTime", []))
                     token = resp.get("NextPageToken")
                     if not token:
@@ -285,7 +286,7 @@ class AWSConnector(BaseConnector):
             )
             try:
                 while True:
-                    resp = ce.get_cost_and_usage(**kwargs)
+                    resp = await asyncio.to_thread(ce.get_cost_and_usage, **kwargs)
                     for period in resp.get("ResultsByTime", []):
                         for grp in period.get("Groups", []):
                             usage_type = grp.get("Keys", [""])[0]

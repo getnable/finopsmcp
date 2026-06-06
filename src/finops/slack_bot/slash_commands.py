@@ -313,15 +313,19 @@ def cmd_budget(account_id: str) -> list[dict]:
 
         blocks = [_header_block("💰 Budget Status")]
 
+        # Month-start cutoff, computed in Python: date('now', ...) is SQLite-only and
+        # raises on Postgres (the shared-team mode this Slack path runs in).
+        from datetime import date as _date_cls
+        _month_start = _date_cls.today().replace(day=1).isoformat()
         for b in budgets:
             name, limit, threshold, _ = b
             # Fetch current month spend
             with engine.connect() as conn:
                 row = conn.execute(sql_text("""
                     SELECT SUM(amount_usd) FROM cost_snapshots
-                    WHERE snapshot_date >= date('now', 'start of month')
+                    WHERE snapshot_date >= :month_start
                       AND account_id = :aid
-                """), {"aid": account_id}).fetchone()
+                """), {"aid": account_id, "month_start": _month_start}).fetchone()
             spent = float(row[0] or 0)
             pct   = spent / limit * 100 if limit else 0
             bar_fill = int(pct / 10)

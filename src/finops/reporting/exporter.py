@@ -41,11 +41,24 @@ def _ts() -> str:
 
 # ── CSV helpers ───────────────────────────────────────────────────────────────
 
+def _csv_safe(v: Any) -> Any:
+    """Neutralize spreadsheet formula injection (CWE-1236). Cell values come from
+    resource/tag/service names a lower-privileged user can set, and these CSVs are
+    opened in Excel/Sheets by finance. A leading '=', '+', '-', '@', tab, or CR is
+    treated as a formula; prefix it with an apostrophe (the OWASP fix) to force text.
+    Non-strings pass through unchanged."""
+    if not isinstance(v, str):
+        return v
+    if v and v[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
 def _csv_str(rows: list[list[Any]], headers: list[str]) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(headers)
-    w.writerows(rows)
+    w.writerows([[_csv_safe(c) for c in row] for row in rows])
     return buf.getvalue()
 
 

@@ -241,6 +241,14 @@ def submit_metrics(account_id: str, vertical: str = "default") -> bool:
         log.debug("Benchmarking not enabled (NABLE_BENCHMARKING_ENABLED != true)")
         return False
 
+    from ..config import is_airgap
+    if is_airgap():
+        # Air-gap mode promises provider-only traffic. Benchmarking POSTs cost
+        # ratios to bench.nable.dev, so it must be suppressed here regardless of
+        # the opt-in flag, or the air-gap guarantee is false.
+        log.debug("Air-gap mode (FINOPS_AIRGAP): benchmarking egress disabled")
+        return False
+
     metrics = _extract_metrics(account_id)
     if not metrics:
         return False
@@ -310,8 +318,10 @@ def compare(
     pool_size  = 0
     data_source = "static"
 
-    # Try to fetch live pool medians if enabled
-    if ENABLED:
+    # Try to fetch live pool medians if enabled. Air-gap mode falls back to the
+    # static medians rather than reaching bench.nable.dev (non-provider egress).
+    from ..config import is_airgap
+    if ENABLED and not is_airgap():
         try:
             import httpx
             resp = httpx.get(

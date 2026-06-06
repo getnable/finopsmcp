@@ -2,6 +2,36 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.49
+
+Bug-fix pass from a multi-agent debug + security audit (adversarially verified).
+
+### Fixed
+- **Cost queries and waste scans no longer freeze the server.** The AWS cost
+  connector and the rightsizing / deep-audit / idle scanners ran blocking SDK
+  calls directly on the MCP event loop, so every query stalled the editor for
+  seconds to minutes. They now run off the loop via `asyncio.to_thread`.
+- **The Team tier works on Postgres.** Three queries used SQLite-only
+  `date('now', ...)` / `datetime('now')` syntax that raises on Postgres, the
+  shared-team mode the Team tier sells (waste-pattern scan, the Slack budget
+  command, forecast-model persistence). Dates are now computed in Python and bound.
+- **No more duplicate anomaly alerts or tickets.** Anomaly detection now dedups on
+  (provider, service, account, date, direction), so a cron retry or the
+  `run_anomaly_check_now` tool cannot re-alert or re-create a ticket for the same
+  spend event. Also fixed the anomaly id returned wrong on Postgres.
+
+### Security
+- **CSV formula injection neutralized** (CWE-1236). Exported reports prefix a
+  leading `=`, `+`, `-`, `@`, tab, or CR with an apostrophe, so a resource named
+  `=HYPERLINK(...)` can't run as a formula when finance opens the file in Excel.
+- **`start_dashboard_server` defaults to localhost** instead of all interfaces, and
+  now surfaces the auto-generated password in the result so you can actually log in.
+  Pass `expose=true` to bind the network, with a cleartext-HTTP warning.
+- **Air-gap mode honors its promise.** Benchmarking egress (to bench.nable.dev) and
+  external report delivery (Slack/Teams/email) are now suppressed when
+  `FINOPS_AIRGAP` is set, instead of egressing anyway.
+- The README data-handling claim is now precise (matches the rest of the docs).
+
 ## 0.8.48
 
 Dogfooding fixes: precise errors, cleaner prompts, honest security wording.

@@ -152,7 +152,12 @@ async def _detect_and_alert() -> list[dict]:
         )
         if anomaly is None:
             continue
-        anomaly_id = persist_anomaly(anomaly)
+        anomaly_id, is_new = persist_anomaly(anomaly)
+        if not is_new:
+            # Already detected and alerted for this spend event (cron retry, the
+            # run_anomaly_check_now tool, or a second process). Do not re-alert or
+            # re-create the ticket, that is what makes a team mute the integration.
+            continue
         anomaly_dict = {
             "id": anomaly_id,
             "provider": anomaly.provider,

@@ -149,7 +149,7 @@ Light mode, dark mode, and 30/60/90-day lookback are built in.
 
 ## How it works
 
-Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine. Cost data is stored in a local SQLite database. We never see your data. Teams share findings via Slack alerts, Notion publishing, and CSV exports. No shared database required.
+Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine. Cost data is cached in a local SQLite database, and nable has no backend, so we never see your cost data or credentials. One honest caveat: when you ask a question in your AI editor, the figures nable returns go to your editor's own AI to answer it, the same as any prompt, never to a nable server. If you need zero AI exposure, use the local dashboard (`finops serve`) or CLI, which never touch a model. Teams share findings via Slack alerts, Notion publishing, and CSV exports. No shared database required.
 
 nable is read-only by default. It never writes to your AWS account unless you explicitly enable cleanup mode. Run `finops setup aws --iam-template` to generate a least-privilege IAM policy with exactly the permissions nable needs.
 
