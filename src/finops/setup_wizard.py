@@ -26,7 +26,12 @@ from pathlib import Path
 
 
 def _prompt(msg: str, secret: bool = False, default: str = "") -> str:
-    if default:
+    # Avoid a doubled default marker. Some callers embed a yes/no hint like
+    # "[Y/n]" or "(y/N)" in the message themselves; only append "[default]"
+    # when there is not already a choice hint there, so prompts never read
+    # "Write config? [Y/n] [y]:".
+    _has_hint = any(h in msg for h in ("[Y/n]", "[y/N]", "[y/n]", "(y/N)", "(Y/n)", "(y/n)"))
+    if default and not _has_hint:
         msg = f"{msg} [{default}]"
     msg += ": "
     try:
@@ -1093,20 +1098,34 @@ def _wizard_select_persona() -> None:
     print(f"\n  (You can change this later with: finops config --persona <role>)")
 
     raw = _prompt("\n  Choice", default="1")
-    try:
-        idx = int(raw.strip()) - 1
-        if 0 <= idx < len(persona_keys):
-            chosen = persona_keys[idx]
-        else:
-            chosen = current
-    except (ValueError, IndexError):
-        chosen = current
+    chosen, matched = _resolve_persona_choice(raw, persona_keys, current)
+    if not matched:
+        _warn(f"'{raw.strip()}' is not a role. Keeping {PERSONAS[current]['label']}. "
+              f"Change anytime with: finops config --persona <role>")
 
     try:
         set_persona(chosen)
         _ok(f"Persona set to: {PERSONAS[chosen]['label']}")
     except Exception as e:
         _warn(f"Could not save persona: {e}")
+
+
+def _resolve_persona_choice(raw: str, persona_keys: list, current: str) -> tuple:
+    """Map a role-prompt answer to a persona key. Accepts a number ("2"), the
+    role key itself ("finops"), or a keyword found in the key or label ("ops").
+    Returns (chosen_key, matched). matched is False when nothing matched, so the
+    caller can warn instead of silently falling back, the bug where a FinOps
+    analyst typed "finops" and got silently set to Engineer."""
+    from .persona import PERSONAS
+    s = (raw or "").strip().lower()
+    if s.isdigit() and 1 <= int(s) <= len(persona_keys):
+        return persona_keys[int(s) - 1], True
+    if s in persona_keys:
+        return s, True
+    for k in persona_keys:
+        if s and (s in k or s in PERSONAS[k]["label"].lower()):
+            return k, True
+    return current, False
 
 
 def _handle_config_cmd(parsed: object) -> None:
