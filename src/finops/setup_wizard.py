@@ -323,8 +323,10 @@ def _detect_aws_candidates() -> list:
 
     def _probe(profile):
         try:
+            from botocore.config import Config as _BotoConfig
+            _cfg = _BotoConfig(connect_timeout=3, read_timeout=5, retries={"max_attempts": 1})
             session = boto3.Session(profile_name=profile) if profile else boto3.Session()
-            ident = session.client("sts").get_caller_identity()
+            ident = session.client("sts", config=_cfg).get_caller_identity()
             return {
                 "profile": profile or "",
                 "account_id": ident["Account"],
@@ -2091,7 +2093,10 @@ def _configure_claude_desktop_inner() -> None:
     # Already up-to-date? (compare command/args only, env may differ)
     existing_base = {k: v for k, v in existing.items() if k != "env"}
     new_base = {k: v for k, v in mcp_entry.items() if k != "env"}
-    if existing_base == new_base and not vault_env:
+    # Only short-circuit when the entry is ALREADY under the new "nable" key. If it
+    # exists only under the legacy "finops" key, fall through to the migration below
+    # (pop "finops", register "nable") even when the command is otherwise identical.
+    if existing_base == new_base and not vault_env and "nable" in config["mcpServers"]:
         _ok(f"Claude Desktop already configured: {display_cmd}")
         return
 
