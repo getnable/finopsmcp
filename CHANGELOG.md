@@ -2,6 +2,22 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.50
+
+### Added
+- **Unit economics populate themselves from Stripe.** Cost per customer and
+  AI-as-percent-of-MRR used to require manually entering MRR and paying customers
+  with `set_business_metrics`. If Stripe is connected (`STRIPE_SECRET_KEY`), nable
+  now pulls MRR and active paying-customer count from your live subscriptions and
+  fills those in automatically, so `get_llm_unit_economics_full`,
+  `get_unit_economics`, and `get_business_metrics` answer on the first question
+  with no data entry. Manual entry always wins; the Stripe pull only fills gaps,
+  and the snapshot is persisted once a day so it trends over time. MRR normalizes
+  every billing interval (month, year, week, day, and `interval_count`) to a
+  monthly figure and skips metered/usage-based items, so it is a conservative
+  floor, never an overstatement. Mixed-currency and truncated-line-item cases are
+  surfaced as caveats rather than hidden.
+
 ## 0.8.49
 
 Bug-fix pass from a multi-agent debug + security audit (adversarially verified).
