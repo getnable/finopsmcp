@@ -250,6 +250,11 @@ function Hero({ layout, interaction }){
             </p>
             <div className="hero-cta-row" id="install">
               <CopyInstall />
+              <a href="cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19"
+                className="btn btn-ghost"
+                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero',cta:'add_to_cursor'}); }}>
+                Add to Cursor
+              </a>
               <a href="/docs.html" className="btn btn-ghost"
                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero',cta:'docs'}); }}>
                 Read the docs
