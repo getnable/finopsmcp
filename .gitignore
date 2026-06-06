@@ -68,9 +68,15 @@ dashboard.html
 # Beta license keys: never commit
 beta-licenses.txt
 
-# Internal GTM, strategy, and fundraising docs: never commit to the public repo
+# Internal GTM, strategy, fundraising, and competitive docs: never commit to the public repo
 docs/gtm/
 docs/strategy/
 docs/reviews/
-vc-brief-*.pdf
-competitive-analysis-*.pdf
+docs/telemetry-queries.md
+docs/linkedin-copy.md
+docs/PRICING.md
+docs/video/claude-demo-script.md
+docs/video/demo-runbook.md
+ONBOARDING_AUDIT.md
+vc-brief*
+competitive-analysis*
