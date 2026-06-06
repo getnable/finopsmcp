@@ -163,6 +163,81 @@ def _row_to_dict(row) -> dict:
     return d
 
 
+# ── Auto-population from billing connectors ───────────────────────────────────
+
+async def _stripe_snapshot() -> dict:
+    """Best-effort Stripe MRR + paying-customer pull. Returns {} on any failure."""
+    try:
+        from .saas.stripe import StripeConnector
+
+        sc = StripeConnector()
+        if not await sc.is_configured():
+            return {}
+        return await sc.fetch_business_snapshot()
+    except Exception as e:  # network, auth, schema drift: never block the caller
+        log.debug("Stripe snapshot unavailable: %s", e)
+        return {}
+
+
+async def resolve_business_metrics(allow_stripe: bool = True) -> dict:
+    """
+    Return the best available business metrics for unit-economics math.
+
+    Precedence:
+      1. Stored metrics that already carry a revenue signal (mrr/arr/customers).
+         Manual entry always wins, so a founder who set numbers is never
+         overwritten by an estimate.
+      2. A live Stripe snapshot (active subscriptions -> MRR + paying customers),
+         persisted as today's row so it trends over time. This is what makes
+         cost-per-customer and AI-as-%-of-MRR work the first time someone asks,
+         with zero manual data entry.
+      3. Whatever partial stored metrics exist (e.g. headcount only), else {}.
+
+    The returned dict may carry non-metric keys used only for display:
+      _source        "stored" | "stripe" | "stored+stripe" | "none"
+      _stripe_as_of  ISO timestamp of the Stripe pull, when one happened
+      _stripe_caveats list of accuracy notes from the Stripe pull
+    """
+    latest_rows = get_latest_metrics(n=1)
+    base: dict[str, Any] = dict(latest_rows[0]) if latest_rows else {}
+
+    def _has_revenue(d: dict) -> bool:
+        return bool(d.get("mrr_usd") or d.get("arr_usd") or d.get("paying_customers"))
+
+    if _has_revenue(base):
+        base["_source"] = "stored"
+        return base
+
+    if allow_stripe:
+        snap = await _stripe_snapshot()
+        if snap and (snap.get("mrr_usd") or snap.get("paying_customers")):
+            today = date.today().isoformat()
+            note = "Auto-populated from Stripe active subscriptions."
+            if snap.get("caveats"):
+                note += " " + " ".join(snap["caveats"])
+            try:
+                save_metrics(
+                    metric_date=today,
+                    mrr_usd=snap.get("mrr_usd") or None,
+                    paying_customers=snap.get("paying_customers") or None,
+                    notes=note,
+                )
+            except Exception as e:
+                log.debug("failed to persist Stripe snapshot: %s", e)
+            if snap.get("mrr_usd"):
+                base["mrr_usd"] = snap["mrr_usd"]
+            if snap.get("paying_customers"):
+                base["paying_customers"] = snap["paying_customers"]
+            base["metric_date"] = today
+            base["_source"] = "stored+stripe" if latest_rows else "stripe"
+            base["_stripe_as_of"] = snap.get("as_of")
+            base["_stripe_caveats"] = snap.get("caveats") or []
+            return base
+
+    base["_source"] = "stored" if latest_rows else "none"
+    return base
+
+
 # ── Unit economics engine ─────────────────────────────────────────────────────
 
 def compute_unit_economics(total_cost_usd: float, metrics: dict) -> dict:

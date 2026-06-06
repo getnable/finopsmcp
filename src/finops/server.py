@@ -7423,22 +7423,56 @@ async def get_llm_unit_economics_full(
         if mrr:          metrics["mrr"]          = mrr
         if api_requests: metrics["api_requests"] = api_requests
 
+        # Nobody passed metrics. Resolve from the stored business-metrics row,
+        # and if none carries revenue, pull MRR + paying customers live from
+        # Stripe. This is what makes cost-per-customer fire the first time
+        # someone asks, instead of dead-ending on "pass business metrics".
+        metrics_source = None
+        stripe_as_of = None
+        stripe_caveats: list = []
+        if not metrics:
+            from .connectors.business_metrics import resolve_business_metrics
+            resolved = await resolve_business_metrics()
+            mrr_v = resolved.get("mrr_usd") or (
+                resolved.get("arr_usd") / 12 if resolved.get("arr_usd") else None
+            )
+            if resolved.get("paying_customers"):
+                metrics["customers"] = resolved["paying_customers"]
+            if resolved.get("mau"):
+                metrics["mau"] = resolved["mau"]
+            if mrr_v:
+                metrics["mrr"] = mrr_v
+            if resolved.get("api_calls_monthly"):
+                metrics["api_requests"] = resolved["api_calls_monthly"]
+            metrics_source = resolved.get("_source")
+            stripe_as_of = resolved.get("_stripe_as_of")
+            stripe_caveats = resolved.get("_stripe_caveats") or []
+
         unit_econ    = compute_unit_economics(total_ai_usd, metrics) if metrics else {}
         proj_costs   = get_cost_per_project(openai_data, anthropic_data)
 
-        return {
+        result = {
             "period":         llm_result.get("period"),
             "total_ai_usd":   total_ai_usd,
             "by_provider":    llm_result.get("by_provider", {}),
             "by_project":     proj_costs,
             "unit_economics": unit_econ if unit_econ else {
                 "note": (
-                    "Pass business metrics (customers, mau, mrr, api_requests) to compute "
-                    "cost-per-unit breakdowns."
+                    "Pass business metrics (customers, mau, mrr, api_requests), or "
+                    "connect Stripe (STRIPE_SECRET_KEY) so nable pulls MRR and paying "
+                    "customers automatically, to compute cost-per-unit breakdowns."
                 )
             },
             "recommendations": llm_result.get("recommendations", []),
         }
+        if unit_econ and metrics_source in ("stripe", "stored+stripe"):
+            result["metrics_source"] = (
+                f"Business metrics pulled live from Stripe (as of {stripe_as_of}). "
+                f"Override anytime with set_business_metrics()."
+            )
+            if stripe_caveats:
+                result["metrics_caveats"] = stripe_caveats
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -7567,27 +7601,35 @@ async def get_business_metrics(history_days: int = 90) -> dict:
     if err := require_pro("business_metrics"):
         return err
 
-    from .connectors.business_metrics import get_latest_metrics, get_metrics_history
+    from .connectors.business_metrics import resolve_business_metrics, get_metrics_history
 
-    latest = get_latest_metrics(n=1)
+    latest = await resolve_business_metrics()
     history = get_metrics_history(days=history_days)
 
-    if not latest:
+    if not latest or latest.get("_source") == "none":
         return {
             "metrics": None,
             "message": (
                 "No business metrics stored yet. "
-                "Use set_business_metrics() to record MRR, MAU, paying customers, etc. "
-                "Once set, nable connects your cloud costs to business outcomes automatically."
+                "Use set_business_metrics() to record MRR, MAU, paying customers, etc., "
+                "or connect Stripe (STRIPE_SECRET_KEY) and nable pulls MRR and paying "
+                "customers automatically. Once set, nable connects your cloud costs to "
+                "business outcomes."
             ),
         }
 
-    return {
-        "latest": latest[0],
+    out = {
+        "latest": latest,
         "history": history,
         "history_days": history_days,
         "tip": "Call get_unit_economics() to see cost per customer, hosting as % of MRR, and more.",
     }
+    if latest.get("_source") in ("stripe", "stored+stripe"):
+        out["metrics_source"] = (
+            f"MRR and paying customers pulled live from Stripe "
+            f"(as of {latest.get('_stripe_as_of')})."
+        )
+    return out
 
 
 @mcp.tool()
@@ -7614,20 +7656,24 @@ async def get_unit_economics(period_days: int = 30) -> dict:
         return err
 
     from .connectors.business_metrics import (
-        get_latest_metrics, compute_unit_economics, compute_runway,
+        resolve_business_metrics, compute_unit_economics, compute_runway,
     )
 
-    latest = get_latest_metrics(n=1)
-    if not latest:
+    metrics = await resolve_business_metrics()
+    if not (
+        metrics.get("mrr_usd") or metrics.get("arr_usd")
+        or metrics.get("paying_customers") or metrics.get("mau")
+        or metrics.get("employees")
+    ):
         return {
             "error": "No business metrics on file.",
             "fix": (
-                "Run set_business_metrics(mrr_usd=..., mau=..., paying_customers=...) "
-                "to store your business metrics. nable will then connect cost to business outcomes."
+                "Run set_business_metrics(mrr_usd=..., mau=..., paying_customers=...), "
+                "or connect Stripe (STRIPE_SECRET_KEY) and nable will pull MRR and "
+                "paying customers automatically. Then it connects cost to business outcomes."
             ),
         }
 
-    metrics = latest[0]
     start = date.today() - timedelta(days=period_days)
     end = date.today()
 
@@ -7647,7 +7693,7 @@ async def get_unit_economics(period_days: int = 30) -> dict:
 
     top_services = sorted(by_service.items(), key=lambda x: -x[1])[:5]
 
-    return {
+    out = {
         "period": f"{start} to {end} ({period_days} days)",
         "total_infrastructure_cost": _fmt_usd(total_cost),
         "unit_economics": econ,
@@ -7660,6 +7706,15 @@ async def get_unit_economics(period_days: int = 30) -> dict:
             "mean for the business in plain English."
         ),
     }
+    if metrics.get("_source") in ("stripe", "stored+stripe"):
+        out["metrics_source"] = (
+            f"MRR and paying customers pulled live from Stripe "
+            f"(as of {metrics.get('_stripe_as_of')}). "
+            f"Override anytime with set_business_metrics()."
+        )
+        if metrics.get("_stripe_caveats"):
+            out["metrics_caveats"] = metrics["_stripe_caveats"]
+    return out
 
 
 @mcp.tool()
