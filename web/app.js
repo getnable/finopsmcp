@@ -758,6 +758,10 @@ function Tweaks() {
     }
   )));
 }
+const STRIP_PROVIDERS = ["AWS", "Azure", "GCP", "OpenAI", "Anthropic", "Stripe", "Datadog", "Snowflake", "Databricks", "GitHub"];
+function LogoStrip() {
+  return /* @__PURE__ */ React.createElement("div", { className: "logostrip" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "logostrip-inner" }, /* @__PURE__ */ React.createElement("span", { className: "logostrip-lead" }, "Reads your spend across"), /* @__PURE__ */ React.createElement("div", { className: "logostrip-marks" }, STRIP_PROVIDERS.map((n, i) => /* @__PURE__ */ React.createElement("span", { className: "lmark", key: i }, n)), /* @__PURE__ */ React.createElement("span", { className: "lmark lmark-more" }, "+7 more")))));
+}
 function App() {
   const [t, setT] = useState(TWEAK_DEFAULTS);
   const [version, setVersion] = useState(null);
@@ -776,6 +780,6 @@ function App() {
     }).catch(() => {
     });
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(LogoStrip, null), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
 }
 ReactDOM.createRoot(document.getElementById("app")).render(/* @__PURE__ */ React.createElement(App, null));

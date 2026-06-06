@@ -1210,6 +1210,23 @@ function Tweaks(){
 }
 
 /* App */
+const STRIP_PROVIDERS = ["AWS","Azure","GCP","OpenAI","Anthropic","Stripe","Datadog","Snowflake","Databricks","GitHub"];
+function LogoStrip(){
+  return (
+    <div className="logostrip">
+      <div className="wrap">
+        <div className="logostrip-inner">
+          <span className="logostrip-lead">Reads your spend across</span>
+          <div className="logostrip-marks">
+            {STRIP_PROVIDERS.map((n,i) => <span className="lmark" key={i}>{n}</span>)}
+            <span className="lmark lmark-more">+7 more</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const [t, setT] = useState(TWEAK_DEFAULTS);
   const [version, setVersion] = useState(null);
@@ -1231,6 +1248,7 @@ function App(){
     <>
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
+      <LogoStrip />
       <Depth />
       <Connectors />
       <Architecture version={version} />
