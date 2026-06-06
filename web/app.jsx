@@ -751,7 +751,10 @@ function Connectors(){
         </div>
         <div className="logo-strip">
           {LOGOS.map((l,i) => (
-            <img className="logo-mark" key={i} src={"/vendor/logos/" + l.f + ".svg"} alt={l.n} title={l.n} loading="lazy" />
+            <span className="logo-item" key={i}>
+              <img className="logo-mark" src={"/vendor/logos/" + l.f + ".svg"} alt="" loading="lazy" />
+              <span className="logo-name">{l.n}</span>
+            </span>
           ))}
           <span className="logo-more">+ 8 more · new providers monthly</span>
         </div>
@@ -1086,7 +1089,7 @@ const FAQ_ITEMS = [
 function FAQ(){
   const [open, setOpen] = useState(null);
   return (
-    <section id="faq" className="alt" style={{borderTop:"1px solid var(--line)"}}>
+    <section id="faq" className="alt">
       <div className="wrap" style={{maxWidth:720,paddingTop:80,paddingBottom:80}}>
         <div style={{fontFamily:"'Instrument Sans',system-ui,sans-serif",fontWeight:500,fontSize:11,color:"var(--accent-dim)",letterSpacing:".08em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
           <span style={{width:24,height:1,background:"var(--accent-dim)",display:"inline-block"}}></span>
@@ -1101,27 +1104,29 @@ function FAQ(){
                 borderBottom:"1px solid var(--line)",
               }}>
                 <button
+                  className="faq-q"
                   onClick={()=>setOpen(isOpen ? null : i)}
                   style={{
                     width:"100%",
                     display:"flex",
                     justifyContent:"space-between",
                     alignItems:"center",
-                    padding:"20px 0",
+                    padding:"22px 0",
                     background:"none",
                     border:"none",
-                    color:"var(--fg)",
+                    color: isOpen ? "var(--fg)" : "var(--fg-2)",
                     fontFamily:"'Instrument Sans',system-ui,sans-serif",
                     fontSize:16,
                     fontWeight:500,
                     textAlign:"left",
                     cursor:"pointer",
                     gap:16,
+                    transition:"color .15s",
                   }}
                   aria-expanded={isOpen}
                 >
                   <span>{item.q}</span>
-                  <span style={{
+                  <span className="faq-plus" style={{
                     flexShrink:0,
                     width:22,
                     height:22,
