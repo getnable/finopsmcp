@@ -10,7 +10,12 @@
 <meta property="og:url" content="https://getnable.com" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="nable" />
-<meta name="twitter:card" content="summary" />
+<meta property="og:image" content="https://getnable.com/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="nable: ask your cloud and AI bill in plain English" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://getnable.com/og.png" />
 <meta name="twitter:title" content="nable · FinOps for the AI-native team" />
 <meta name="twitter:description" content="The FinOps runtime that lives inside Claude, Cursor, and your editor. Ask in plain English. Your data stays on your machine." />
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
@@ -175,7 +180,11 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .install{display:inline-flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:var(--r-md);font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;color:var(--fg-2);overflow:hidden;height:42px;max-width:100%}
 @media(max-width:640px){.install{overflow-x:auto;width:100%}.install .cmd{font-size:11px;padding:0 10px}}
 @media(max-width:880px){.hero-inner{grid-template-columns:1fr;gap:40px}.hero-right{display:none}.hero-left{display:flex;flex-direction:column;align-items:center;text-align:center}.lede{max-width:52ch}.hero-cta-row{display:none}.hero-mobile-cta{display:block;width:100%;max-width:420px}.install-note{text-align:center}}
-.hero-mobile-cta{display:none}
+@media(min-width:881px){.hero-mobile-cta{display:none}}
+.hmc-lead{font-size:13.5px;color:var(--fg-3);margin-bottom:12px;letter-spacing:.01em;line-height:1.5}
+.hmc-pro{display:inline-flex;align-items:center;gap:6px;margin-top:16px;font-size:14px;font-weight:500;color:var(--accent);letter-spacing:-.005em}
+.hmc-pro .arr{transition:transform .18s}
+.hmc-pro:hover .arr,.hmc-pro:active .arr{transform:translateX(2px)}
 .install .prompt{padding:0 12px;color:var(--fg-3);display:flex;align-items:center;border-right:1px solid var(--line)}
 .install .cmd{padding:0 14px;color:var(--fg);display:flex;align-items:center;white-space:nowrap}
 .install button{padding:0 14px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11px;color:var(--fg-3);border-left:1px solid var(--line);letter-spacing:.06em;text-transform:uppercase;transition:.15s;background:var(--bg-1)}
