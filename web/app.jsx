@@ -276,9 +276,10 @@ const INSTALL_POPUPS = {
       <>In your terminal, run the command below. <code>finops welcome</code> writes your Claude Desktop config and stores credentials in your OS keychain.</>,
       <>Restart Claude Desktop. nable connects as a local MCP server.</>,
     ],
-    cmdLabel: "In your terminal · needs Python 3.10+",
-    cmd: "pip install -U finops-mcp && finops welcome",
-    note: "Runs on your machine. No nable backend holds your data.",
+    cmdLabel: "In your terminal",
+    cmd: "uv tool install finops-mcp && finops welcome",
+    altCmd: "pip install -U finops-mcp && finops welcome",
+    note: "uv installs a matching Python for you, so this works on any setup. No uv? brew install uv. Runs on your machine, no nable backend.",
   },
   openai: {
     title: "Install in OpenAI Codex",
@@ -286,11 +287,12 @@ const INSTALL_POPUPS = {
       <>In your terminal, install nable and store credentials in your OS keychain:</>,
       <>Add nable to your Codex MCP config below, then restart Codex.</>,
     ],
-    cmdLabel: "In your terminal · needs Python 3.10+",
-    cmd: "pip install -U finops-mcp && finops welcome",
+    cmdLabel: "In your terminal",
+    cmd: "uv tool install finops-mcp && finops welcome",
+    altCmd: "pip install -U finops-mcp && finops welcome",
     toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
-    note: "Codex CLI runs nable locally. The ChatGPT app needs a hosted connector, which is on the roadmap.",
+    note: "uv installs a matching Python automatically. The ChatGPT app needs a hosted connector, on the roadmap.",
   },
 };
 
@@ -329,6 +331,9 @@ function InstallPopup({ id, onClose }){
         </span>
       )}
       <CopyCmd cmd={p.cmd} />
+      {p.altCmd && (
+        <p className="install-alt">Already on Python 3.10+? <code>{p.altCmd}</code></p>
+      )}
       {p.toml && (
         <div className="install-toml">
           <span className="tomlpath">Add to <code>{p.tomlPath}</code></span>
@@ -928,7 +933,7 @@ function MidCta(){
             </a>
           </div>
           <p className="mono" style={{fontSize:11,color:"var(--fg-4)",letterSpacing:".05em"}}>
-            pip install finops-mcp &amp;&amp; finops welcome
+            uv tool install finops-mcp &amp;&amp; finops welcome
           </p>
         </div>
       </div>
@@ -963,7 +968,7 @@ function FootCta(){
           <EmailCapture source="footer" placeholder="drop your email, we'll send the setup guide" btnLabel="Send it" center={true} />
         </div>
         <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-3)",letterSpacing:".04em"}}>
-          $ pip install finops-mcp &amp;&amp; finops welcome
+          $ uv tool install finops-mcp &amp;&amp; finops welcome
         </p>
         <p style={{marginTop:24,fontSize:13,color:"var(--fg-3)"}}>
           Building something? <a href="/about" style={{color:"var(--accent-dim)"}}>Read the founder note and investor thesis →</a>
@@ -1064,7 +1069,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How long does setup take?",
-    a: "A few minutes. Run `pip install finops-mcp && finops welcome`, follow the prompts, and you're done. The wizard handles the MCP config and credential storage."
+    a: "A few minutes. Run `uv tool install finops-mcp && finops welcome` (uv pulls a matching Python for you), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. Follow the prompts and you're done. The wizard handles the MCP config and credential storage."
   },
   {
     q: "Is the free tier actually free?",

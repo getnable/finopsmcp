@@ -241,9 +241,10 @@ const INSTALL_POPUPS = {
       /* @__PURE__ */ React.createElement(React.Fragment, null, "In your terminal, run the command below. ", /* @__PURE__ */ React.createElement("code", null, "finops welcome"), " writes your Claude Desktop config and stores credentials in your OS keychain."),
       /* @__PURE__ */ React.createElement(React.Fragment, null, "Restart Claude Desktop. nable connects as a local MCP server.")
     ],
-    cmdLabel: "In your terminal \xB7 needs Python 3.10+",
-    cmd: "pip install -U finops-mcp && finops welcome",
-    note: "Runs on your machine. No nable backend holds your data."
+    cmdLabel: "In your terminal",
+    cmd: "uv tool install finops-mcp && finops welcome",
+    altCmd: "pip install -U finops-mcp && finops welcome",
+    note: "uv installs a matching Python for you, so this works on any setup. No uv? brew install uv. Runs on your machine, no nable backend."
   },
   openai: {
     title: "Install in OpenAI Codex",
@@ -251,11 +252,12 @@ const INSTALL_POPUPS = {
       /* @__PURE__ */ React.createElement(React.Fragment, null, "In your terminal, install nable and store credentials in your OS keychain:"),
       /* @__PURE__ */ React.createElement(React.Fragment, null, "Add nable to your Codex MCP config below, then restart Codex.")
     ],
-    cmdLabel: "In your terminal \xB7 needs Python 3.10+",
-    cmd: "pip install -U finops-mcp && finops welcome",
+    cmdLabel: "In your terminal",
+    cmd: "uv tool install finops-mcp && finops welcome",
+    altCmd: "pip install -U finops-mcp && finops welcome",
     toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
-    note: "Codex CLI runs nable locally. The ChatGPT app needs a hosted connector, which is on the roadmap."
+    note: "uv installs a matching Python automatically. The ChatGPT app needs a hosted connector, on the roadmap."
   }
 };
 function CopyCmd({ cmd }) {
@@ -270,7 +272,7 @@ function CopyCmd({ cmd }) {
 function InstallPopup({ id, onClose }) {
   const p = INSTALL_POPUPS[id];
   if (!p) return null;
-  return /* @__PURE__ */ React.createElement("div", { className: "install-pop", role: "dialog", "aria-label": p.title }, /* @__PURE__ */ React.createElement("div", { className: "install-pop-head" }, /* @__PURE__ */ React.createElement("span", { className: "ipt" }, p.title), /* @__PURE__ */ React.createElement("button", { className: "ipx", onClick: onClose, "aria-label": "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("ol", { className: "install-steps" }, p.steps.map((s, i) => /* @__PURE__ */ React.createElement("li", { key: i }, s))), p.cmdLabel && /* @__PURE__ */ React.createElement("span", { className: "install-cmdlabel" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3", strokeLinecap: "round", strokeLinejoin: "round" })), p.cmdLabel), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: p.cmd }), p.toml && /* @__PURE__ */ React.createElement("div", { className: "install-toml" }, /* @__PURE__ */ React.createElement("span", { className: "tomlpath" }, "Add to ", /* @__PURE__ */ React.createElement("code", null, p.tomlPath)), /* @__PURE__ */ React.createElement("pre", null, p.toml)), /* @__PURE__ */ React.createElement("p", { className: "install-pop-note" }, p.note));
+  return /* @__PURE__ */ React.createElement("div", { className: "install-pop", role: "dialog", "aria-label": p.title }, /* @__PURE__ */ React.createElement("div", { className: "install-pop-head" }, /* @__PURE__ */ React.createElement("span", { className: "ipt" }, p.title), /* @__PURE__ */ React.createElement("button", { className: "ipx", onClick: onClose, "aria-label": "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("ol", { className: "install-steps" }, p.steps.map((s, i) => /* @__PURE__ */ React.createElement("li", { key: i }, s))), p.cmdLabel && /* @__PURE__ */ React.createElement("span", { className: "install-cmdlabel" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3", strokeLinecap: "round", strokeLinejoin: "round" })), p.cmdLabel), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: p.cmd }), p.altCmd && /* @__PURE__ */ React.createElement("p", { className: "install-alt" }, "Already on Python 3.10+? ", /* @__PURE__ */ React.createElement("code", null, p.altCmd)), p.toml && /* @__PURE__ */ React.createElement("div", { className: "install-toml" }, /* @__PURE__ */ React.createElement("span", { className: "tomlpath" }, "Add to ", /* @__PURE__ */ React.createElement("code", null, p.tomlPath)), /* @__PURE__ */ React.createElement("pre", null, p.toml)), /* @__PURE__ */ React.createElement("p", { className: "install-pop-note" }, p.note));
 }
 const _CHEV = /* @__PURE__ */ React.createElement("svg", { className: "chev", width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.6", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M3 4.5l3 3 3-3", strokeLinecap: "round", strokeLinejoin: "round" }));
 function InstallRow() {
@@ -577,7 +579,7 @@ function MidCta() {
       }
     },
     "Read the docs"
-  )), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { fontSize: 11, color: "var(--fg-4)", letterSpacing: ".05em" } }, "pip install finops-mcp && finops welcome"))));
+  )), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { fontSize: 11, color: "var(--fg-4)", letterSpacing: ".05em" } }, "uv tool install finops-mcp && finops welcome"))));
 }
 function FootCta() {
   return /* @__PURE__ */ React.createElement("section", { className: "foot-cta", id: "cta" }, /* @__PURE__ */ React.createElement("div", { className: "foot-cta-grid" }), /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { position: "relative" } }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow", style: { marginBottom: 32, display: "inline-flex" } }, /* @__PURE__ */ React.createElement("span", { className: "d" }), " Free tier \xB7 no credit card"), /* @__PURE__ */ React.createElement("h2", { className: "display" }, "Stop staring at graphs.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Start closing tickets.")), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement(
@@ -605,7 +607,7 @@ function FootCta() {
       }
     },
     "Talk to founders"
-  )), /* @__PURE__ */ React.createElement(EmailCapture, { source: "footer", placeholder: "drop your email, we'll send the setup guide", btnLabel: "Send it", center: true })), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { marginTop: 32, fontSize: 12, color: "var(--fg-3)", letterSpacing: ".04em" } }, "$ pip install finops-mcp && finops welcome"), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 24, fontSize: 13, color: "var(--fg-3)" } }, "Building something? ", /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent-dim)" } }, "Read the founder note and investor thesis \u2192"))));
+  )), /* @__PURE__ */ React.createElement(EmailCapture, { source: "footer", placeholder: "drop your email, we'll send the setup guide", btnLabel: "Send it", center: true })), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { marginTop: 32, fontSize: 12, color: "var(--fg-3)", letterSpacing: ".04em" } }, "$ uv tool install finops-mcp && finops welcome"), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 24, fontSize: 13, color: "var(--fg-3)" } }, "Building something? ", /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent-dim)" } }, "Read the founder note and investor thesis \u2192"))));
 }
 function FounderNote() {
   return /* @__PURE__ */ React.createElement("section", { id: "founder", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { maxWidth: 680, paddingTop: 80, paddingBottom: 80 } }, /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Instrument Sans',system-ui,sans-serif", fontWeight: 500, fontSize: 11, color: "var(--accent-dim)", letterSpacing: ".08em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 10, marginBottom: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 24, height: 1, background: "var(--accent-dim)", display: "inline-block" } }), "Why I built this"), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 28 } }, "I built this because I spent most of my day bouncing between dashboards that barely showed what I actually needed, the AWS console, and Claude. I'd ask Claude a question, manually paste in numbers, get an answer, then go back and repeat the whole thing."), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 28 } }, "A lot of FinOps tools are shipping MCP integrations now. But they're all built for enterprise, priced for enterprise, and none of them fit the way I actually work. They give you visibility. They don't help you think."), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 36 } }, "nable solves the problems I actually had. The recommendations go deeper than anything I've seen out of the box, and for the first time I can actually reason through my own optimization opportunities instead of just staring at a graph."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 40, height: 40, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: "var(--bg)" } }, "CB")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 500, color: "var(--fg)" } }, "Chandan Bukkapatnam"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: "var(--fg-3)" } }, "Founder \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "mailto:chandan@getnable.com", target: "_blank", rel: "noopener noreferrer", style: { color: "var(--accent)" } }, "chandan@getnable.com"))))));
@@ -628,7 +630,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How long does setup take?",
-    a: "A few minutes. Run `pip install finops-mcp && finops welcome`, follow the prompts, and you're done. The wizard handles the MCP config and credential storage."
+    a: "A few minutes. Run `uv tool install finops-mcp && finops welcome` (uv pulls a matching Python for you), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. Follow the prompts and you're done. The wizard handles the MCP config and credential storage."
   },
   {
     q: "Is the free tier actually free?",
