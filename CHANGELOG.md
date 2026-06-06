@@ -2,6 +2,40 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.47
+
+Onboarding and activation pass. The goal: get a new user from install to a real,
+dollar-quantified insight with the fewest possible steps.
+
+### Changed
+- **`finops setup aws` is now detect-then-confirm.** It probes the machine for
+  credentials you already have (SSO login, AWS CLI profile, or default chain),
+  shows the account it found, and connects it on one keystroke. If you use `aws`
+  already, you type nothing. The old flow asked for an account name, a region,
+  and an auth method up front. Manual entry is now the fallback, and it lists
+  your actual profiles instead of asking you to type one blind.
+- **No more region prompt.** Cost Explorer is global and the scanners already
+  auto-discover regions, so the prompt was asking for something that changed
+  nothing. Defaults silently to us-east-1.
+- **The editor is wired in the same flow.** Connecting an account now registers
+  the MCP server too, so there is no separate `finops setup claude` step.
+- **The MCP server standardizes on the name `nable`.** A legacy `finops`
+  registration is migrated in place so you are never double-registered.
+- **Team price is $40/mo everywhere.** The product had been quoting $19.99 in
+  upgrade nudges and trial emails while the site said $40.
+
+### Added
+- **First cost answer surfaces real waste.** Your first query now proactively
+  reports the idle resources nable found, in plain dollars, instead of only
+  answering the literal question.
+- **Upgrade prompts cite your actual ROI.** When nable has already found savings
+  that dwarf the $40 plan, the nudge says so ("found $X/mo, Nx the Team plan").
+
+### Fixed
+- Setup never persists a broken account: credentials are verified before saving.
+- Credential detection cannot hang (bounded connect/read timeouts).
+- Removed dead `finops-infra` and `finops-license` console aliases.
+
 ## 0.8.46
 
 Bug-fix pass from a multi-agent troubleshooting run (13 confirmed defects,
