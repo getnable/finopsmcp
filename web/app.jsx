@@ -251,10 +251,12 @@ function Hero({ layout, interaction }){
             <InstallRow />
             <p className="install-note">Free forever for solo use · no credit card · runs on your machine</p>
             <div className="hero-mobile-cta">
-              <p style={{fontSize:13, color:"var(--fg-3)", marginBottom:12, letterSpacing:".01em"}}>
-                Drop your email and we'll send the setup guide straight to you.
-              </p>
-              <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Send it" />
+              <p className="hmc-lead">nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide.</p>
+              <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Get the guide" />
+              <a href="#pricing" className="hmc-pro"
+                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing_40'}); }}>
+                See Pro · $40/mo <span className="arr">→</span>
+              </a>
             </div>
           </div>
           <div className="hero-right">
