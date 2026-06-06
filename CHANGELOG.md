@@ -2,6 +2,28 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.48
+
+Dogfooding fixes: precise errors, cleaner prompts, honest security wording.
+
+### Fixed
+- **Rightsizing now names the exact missing permission.** When the IAM identity
+  lacks an action like `rds:DescribeDBInstances`, the tool used to return an empty
+  result and the model would guess ("maybe CloudWatch, maybe a region"). It now
+  reports the precise missing IAM action and how to add it.
+- **The role prompt accepts the role name.** Typing `finops` at the persona prompt
+  used to silently fall back to the default (Engineer). It now matches the role by
+  number, name, or keyword, and warns on an unrecognized answer instead of guessing.
+- **No more doubled yes/no markers.** Prompts read `Write config? [Y/n]:` instead
+  of `Write config? [Y/n] [y]:`.
+
+### Changed
+- **Security wording is precise.** The old "your data never leaves your machine"
+  overstated it. Credentials never leave your machine and nable has no backend that
+  holds your data, but the figures you ask about go to your editor's own AI to
+  answer the question, the same as any prompt. The docs, site, and emails now say
+  this plainly, and note the local dashboard / CLI path for zero AI exposure.
+
 ## 0.8.47
 
 Onboarding and activation pass. The goal: get a new user from install to a real,
