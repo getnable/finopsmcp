@@ -464,7 +464,7 @@ const LOGOS = [
   { n: "GitHub", f: "github" }
 ];
 function Connectors() {
-  return /* @__PURE__ */ React.createElement("section", { id: "connectors", className: "alt" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Connectors"), /* @__PURE__ */ React.createElement("h2", null, "17 sources.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "One conversation.")), /* @__PURE__ */ React.createElement("p", null, "Every connector is a real API integration, not a CSV export. New providers ship monthly.")), /* @__PURE__ */ React.createElement("div", { className: "logo-strip" }, LOGOS.map((l, i) => /* @__PURE__ */ React.createElement("img", { className: "logo-mark", key: i, src: "/vendor/logos/" + l.f + ".svg", alt: l.n, title: l.n, loading: "lazy" })), /* @__PURE__ */ React.createElement("span", { className: "logo-more" }, "+ 8 more \xB7 new providers monthly"))));
+  return /* @__PURE__ */ React.createElement("section", { id: "connectors", className: "alt" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Connectors"), /* @__PURE__ */ React.createElement("h2", null, "17 sources.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "One conversation.")), /* @__PURE__ */ React.createElement("p", null, "Every connector is a real API integration, not a CSV export. New providers ship monthly.")), /* @__PURE__ */ React.createElement("div", { className: "logo-strip" }, LOGOS.map((l, i) => /* @__PURE__ */ React.createElement("span", { className: "logo-item", key: i }, /* @__PURE__ */ React.createElement("img", { className: "logo-mark", src: "/vendor/logos/" + l.f + ".svg", alt: "", loading: "lazy" }), /* @__PURE__ */ React.createElement("span", { className: "logo-name" }, l.n))), /* @__PURE__ */ React.createElement("span", { className: "logo-more" }, "+ 8 more \xB7 new providers monthly"))));
 }
 const SOLO_FEATURES = [
   "Cost queries across all providers",
@@ -649,34 +649,36 @@ const FAQ_ITEMS = [
 ];
 function FAQ() {
   const [open, setOpen] = useState(null);
-  return /* @__PURE__ */ React.createElement("section", { id: "faq", className: "alt", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { maxWidth: 720, paddingTop: 80, paddingBottom: 80 } }, /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Instrument Sans',system-ui,sans-serif", fontWeight: 500, fontSize: 11, color: "var(--accent-dim)", letterSpacing: ".08em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 10, marginBottom: 18 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 24, height: 1, background: "var(--accent-dim)", display: "inline-block" } }), "FAQ"), /* @__PURE__ */ React.createElement("h2", { style: { marginBottom: 48 } }, "Questions we actually get."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column" } }, FAQ_ITEMS.map((item, i) => {
+  return /* @__PURE__ */ React.createElement("section", { id: "faq", className: "alt" }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { maxWidth: 720, paddingTop: 80, paddingBottom: 80 } }, /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Instrument Sans',system-ui,sans-serif", fontWeight: 500, fontSize: 11, color: "var(--accent-dim)", letterSpacing: ".08em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 10, marginBottom: 18 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 24, height: 1, background: "var(--accent-dim)", display: "inline-block" } }), "FAQ"), /* @__PURE__ */ React.createElement("h2", { style: { marginBottom: 48 } }, "Questions we actually get."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column" } }, FAQ_ITEMS.map((item, i) => {
     const isOpen = open === i;
     return /* @__PURE__ */ React.createElement("div", { key: i, style: {
       borderBottom: "1px solid var(--line)"
     } }, /* @__PURE__ */ React.createElement(
       "button",
       {
+        className: "faq-q",
         onClick: () => setOpen(isOpen ? null : i),
         style: {
           width: "100%",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: "20px 0",
+          padding: "22px 0",
           background: "none",
           border: "none",
-          color: "var(--fg)",
+          color: isOpen ? "var(--fg)" : "var(--fg-2)",
           fontFamily: "'Instrument Sans',system-ui,sans-serif",
           fontSize: 16,
           fontWeight: 500,
           textAlign: "left",
           cursor: "pointer",
-          gap: 16
+          gap: 16,
+          transition: "color .15s"
         },
         "aria-expanded": isOpen
       },
       /* @__PURE__ */ React.createElement("span", null, item.q),
-      /* @__PURE__ */ React.createElement("span", { style: {
+      /* @__PURE__ */ React.createElement("span", { className: "faq-plus", style: {
         flexShrink: 0,
         width: 22,
         height: 22,
