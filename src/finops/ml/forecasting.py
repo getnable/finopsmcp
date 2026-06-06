@@ -186,16 +186,19 @@ def _save_model(account_id: str, service: str | None, params: dict) -> None:
     try:
         from ..storage.db import get_engine
         from sqlalchemy import text
+        from datetime import datetime as _dt, timezone as _tz
         engine = get_engine()
         key = f"{account_id}:{service or '__total__'}"
+        # Bind updated_at from Python: datetime('now') is SQLite-only and raises on
+        # Postgres, so the model never persists there and re-fits every forecast.
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO forecast_models (model_key, params_json, updated_at)
-                VALUES (:key, :params, datetime('now'))
+                VALUES (:key, :params, :updated_at)
                 ON CONFLICT(model_key) DO UPDATE
                   SET params_json = excluded.params_json,
                       updated_at  = excluded.updated_at
-            """), {"key": key, "params": json.dumps(params)})
+            """), {"key": key, "params": json.dumps(params), "updated_at": _dt.now(_tz.utc).isoformat()})
     except Exception as e:
         log.debug("model save skipped: %s", e)
 

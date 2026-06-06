@@ -247,9 +247,31 @@ def detect_from_snapshot(
     return result
 
 
-def persist_anomaly(result: AnomalyResult) -> int:
+def persist_anomaly(result: AnomalyResult) -> tuple[int, bool]:
+    """Persist an anomaly idempotently. Returns (id, is_new).
+
+    Dedups on (provider, service, account_id, snapshot_date, direction) so a cron
+    retry, the run_anomaly_check_now tool, or a fail-open second scheduler process
+    cannot re-insert the same spend event or re-fire its alerts and tickets. Uses
+    inserted_primary_key (not the SQLite-only lastrowid, which returns None on
+    Postgres, the shared-team mode the Team tier sells).
+    """
     engine = get_engine()
     with engine.begin() as conn:
+        existing = conn.execute(
+            select(anomalies.c.id).where(
+                and_(
+                    anomalies.c.provider == result.provider,
+                    anomalies.c.service == result.service,
+                    anomalies.c.account_id == result.account_id,
+                    anomalies.c.snapshot_date == result.snapshot_date.isoformat(),
+                    anomalies.c.direction == result.direction,
+                )
+            ).limit(1)
+        ).first()
+        if existing is not None:
+            return int(existing[0]), False
+
         r = conn.execute(
             anomalies.insert().values(
                 provider=result.provider,
@@ -267,7 +289,7 @@ def persist_anomaly(result: AnomalyResult) -> int:
                 notified=False,
             )
         )
-        return r.lastrowid  # type: ignore[return-value]
+        return int(r.inserted_primary_key[0]), True
 
 
 def get_active_anomalies(

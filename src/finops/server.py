@@ -1814,7 +1814,10 @@ async def get_rightsizing_recommendations(
 
     try:
         from .recommendations.rightsizing import analyze_rightsizing, rightsizing_summary
-        recs = analyze_rightsizing(
+        # Offload the blocking CloudWatch/EC2 scan so it does not freeze the MCP
+        # event loop (and the editor) for the tens of seconds it can take.
+        recs = await asyncio.to_thread(
+            analyze_rightsizing,
             avg_cpu_threshold=avg_cpu_threshold,
             max_cpu_threshold=max_cpu_threshold,
         )
@@ -2562,7 +2565,7 @@ async def create_rightsizing_tickets(
         from .integrations.ticketing import create_rightsizing_ticket
         from .recommendations.rightsizing import analyze_rightsizing
 
-        recs = analyze_rightsizing(min_monthly_savings=min_monthly_savings)
+        recs = await asyncio.to_thread(analyze_rightsizing, min_monthly_savings=min_monthly_savings)
         if not recs:
             return {"message": "No rightsizing recommendations found", "tickets_created": 0}
 
@@ -3017,7 +3020,10 @@ async def audit_aws_waste(
     """
     try:
         from .analyzers.optimizer import run_deep_audit
-        report = run_deep_audit(
+        # Offload the blocking multi-region waste scan off the event loop; this is
+        # the heaviest scan and would otherwise freeze the server for minutes.
+        report = await asyncio.to_thread(
+            run_deep_audit,
             account_id=account_id,
             regions=regions,
             checks=checks,
@@ -3809,7 +3815,8 @@ async def list_idle_resources(
     """
     try:
         from .cleanup.idle import scan_idle_resources, idle_resources_summary
-        resources = scan_idle_resources(
+        resources = await asyncio.to_thread(
+            scan_idle_resources,
             resource_types=resource_types,
             regions=regions,
             min_idle_days=min_idle_days,
@@ -7196,16 +7203,20 @@ async def scan_waste_patterns(
         engine = get_engine()
         cat_list = [c.strip() for c in categories.split(",")] if categories else None
 
-        # Pull daily cost series per service (last 90 days)
+        # Pull daily cost series per service (last 90 days). Compute the cutoff in
+        # Python and bind it: date('now', ...) is SQLite-only and raises on Postgres,
+        # which is the shared-team mode the Team tier sells.
+        from datetime import date as _date_cls, timedelta as _td
+        _cutoff = (_date_cls.today() - _td(days=90)).isoformat()
         with engine.connect() as conn:
             rows = conn.execute(sql_text("""
                 SELECT service, snapshot_date, SUM(amount_usd) as total
                 FROM cost_snapshots
                 WHERE account_id = :aid
-                  AND snapshot_date >= date('now', '-90 days')
+                  AND snapshot_date >= :cutoff
                 GROUP BY service, snapshot_date
                 ORDER BY service, snapshot_date
-            """), {"aid": account_id}).fetchall()
+            """), {"aid": account_id, "cutoff": _cutoff}).fetchall()
 
         daily_costs: dict[str, list[float]] = {}
         for service, _date, total in rows:
@@ -10448,10 +10459,17 @@ async def export_cost_report_csv(
         # Column headers
         writer.writerow(["Rank", "Opportunity", "Category", "Monthly Saving ($)", "Annual Saving ($)", "Detail"])
 
+        # Neutralize spreadsheet formula injection (CWE-1236): title/category/detail
+        # come from resource names a lower-privileged user can set, and this CSV is
+        # opened in Excel by finance. Prefix a leading formula trigger with an apostrophe.
+        def _csv_safe(v):
+            s = "" if v is None else str(v)
+            return "'" + s if s and s[0] in ("=", "+", "-", "@", "\t", "\r") else s
+
         for i, f in enumerate(top, 1):
             mo = round(f["monthly_savings"], 2)
             yr = round(mo * 12, 2)
-            writer.writerow([i, f["title"], f["category"], mo, yr, f.get("detail", "")])
+            writer.writerow([i, _csv_safe(f["title"]), _csv_safe(f["category"]), mo, yr, _csv_safe(f.get("detail", ""))])
 
     return (
         f"Exported {len(top)} opportunities to {dest}. "
@@ -11123,37 +11141,59 @@ async def get_nable_roi(
 @mcp.tool()
 async def start_dashboard_server(
     port: int = 8080,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
+    expose: bool = False,
 ) -> dict:
     """
-    Starts a local web dashboard your whole team can access in a browser.
-    No installation needed for viewers — just share the URL.
+    Starts a local web dashboard you can open in a browser. Binds to localhost by
+    default. Pass expose=true to bind all interfaces so others on your network can
+    reach it (plain HTTP, so only do this on a trusted network or behind a TLS proxy).
 
     Use when:
         - "Start the dashboard"
-        - "Share the dashboard with my team"
+        - "Share the dashboard with my team" (use expose=true)
         - "Start the web server"
         - "My team wants to see costs without installing nable"
     """
     try:
         from .server_web import start_server_background, _local_ip, set_connectors
+        from . import server_web as _sw
         # Inject the MCP server's already-initialized connectors so the
         # dashboard uses the correct vault/keyring credentials.
         set_connectors({**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS})
-        _, actual_port = start_server_background(host=host, port=port)
-        local_ip = _local_ip()
-        share_url = f"http://{local_ip}:{actual_port}"
+        # Default to loopback. Only bind all interfaces on explicit opt-in, so a
+        # casual "start the dashboard" never exposes a listener on the whole LAN.
+        bind_host = "0.0.0.0" if expose else host
+        _, actual_port = start_server_background(host=bind_host, port=port)
         local_url = f"http://127.0.0.1:{actual_port}"
-        return {
+        result = {
             "status": "running",
             "local_url": local_url,
-            "share_url": share_url,
-            "message": (
-                f"Dashboard running at {local_url}\n"
-                f"Share with your team: {share_url}\n"
-                "The server runs in the background. Stop it by closing this session."
-            ),
         }
+        # Surface the password so the user can actually log in. The background path
+        # never printed it, which previously left users locked out and nudged toward
+        # disabling auth.
+        if getattr(_sw, "_AUTH_DISABLED", False):
+            result["auth"] = "DISABLED (FINOPS_DASHBOARD_PASSWORD=off). Anyone who can reach the port has full access."
+        else:
+            result["password"] = getattr(_sw, "_DASHBOARD_PASSWORD", "")
+            result["auth"] = (
+                "Auto-generated password for this session (set FINOPS_DASHBOARD_PASSWORD to choose your own)."
+                if getattr(_sw, "_PASSWORD_AUTO_GENERATED", False)
+                else "Password from FINOPS_DASHBOARD_PASSWORD."
+            )
+        if bind_host == "0.0.0.0":
+            result["share_url"] = f"http://{_local_ip()}:{actual_port}"
+            result["exposure_warning"] = (
+                "Bound to all interfaces. The dashboard is reachable across your LAN/VPN over plain "
+                "HTTP, so the password and session cookie travel in cleartext. Only do this on a trusted "
+                "network, or put it behind a TLS-terminating proxy."
+            )
+        result["message"] = (
+            f"Dashboard running at {local_url}. "
+            + ("Auth is OFF." if getattr(_sw, "_AUTH_DISABLED", False) else "Log in with the password above.")
+        )
+        return result
     except Exception as exc:
         log.error("start_dashboard_server failed: %s", exc)
         return {"error": str(exc)}

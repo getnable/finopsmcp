@@ -368,8 +368,16 @@ async def deliver_report(
     """Send a report to all configured delivery channels for this subscription."""
     from . import slack as slack_mod
     from .email_digest import send_custom_digest
+    from ..config import is_airgap
 
     results: dict[str, Any] = {"slack": [], "email": [], "teams": []}
+
+    # Air-gap mode promises provider-only traffic. Report delivery posts cost data to
+    # Slack/Teams/email (non-provider endpoints), so fail closed: skip delivery and
+    # say so, rather than silently egressing cost data from an air-gapped environment.
+    if is_airgap():
+        results["skipped"] = "FINOPS_AIRGAP is set; external report delivery is disabled."
+        return results
 
     # Slack
     slack_channels = json.loads(sub.get("slack_channels") or "[]")
