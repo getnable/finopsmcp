@@ -273,19 +273,21 @@ const INSTALL_POPUPS = {
   claude: {
     title: "Install in Claude Desktop",
     steps: [
-      <>Run the command below. <code>finops welcome</code> writes your Claude Desktop config and stores credentials in your OS keychain.</>,
+      <>In your terminal, run the command below. <code>finops welcome</code> writes your Claude Desktop config and stores credentials in your OS keychain.</>,
       <>Restart Claude Desktop. nable connects as a local MCP server.</>,
     ],
-    cmd: "pip install finops-mcp && finops welcome",
+    cmdLabel: "In your terminal",
+    cmd: "pip install -U finops-mcp && finops welcome",
     note: "Runs on your machine. No nable backend holds your data.",
   },
   openai: {
     title: "Install in OpenAI Codex",
     steps: [
-      <>Install nable and store credentials in your OS keychain:</>,
+      <>In your terminal, install nable and store credentials in your OS keychain:</>,
       <>Add nable to your Codex MCP config below, then restart Codex.</>,
     ],
-    cmd: "pip install finops-mcp && finops welcome",
+    cmdLabel: "In your terminal",
+    cmd: "pip install -U finops-mcp && finops welcome",
     toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
     note: "Codex CLI runs nable locally. The ChatGPT app needs a hosted connector, which is on the roadmap.",
@@ -320,6 +322,12 @@ function InstallPopup({ id, onClose }){
       <ol className="install-steps">
         {p.steps.map((s, i) => <li key={i}>{s}</li>)}
       </ol>
+      {p.cmdLabel && (
+        <span className="install-cmdlabel">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          {p.cmdLabel}
+        </span>
+      )}
       <CopyCmd cmd={p.cmd} />
       {p.toml && (
         <div className="install-toml">
@@ -735,14 +743,17 @@ function Connectors(){
           <h2>17 sources.<br/><em>One conversation.</em></h2>
           <p>Every connector is a real API integration, not a CSV export. New providers ship monthly.</p>
         </div>
-        <div className="conn-grid">
-          {CONNECTORS.map((c,i) => (
-            <div className="conn" key={i}>
-              <span className="nm">{c.nm}</span>
-              <span className="px">{c.px}</span>
-              <span className={"tag " + (c.tag === "beta" ? "beta" : c.tag === "soon" ? "soon" : "")}>{c.tag}</span>
-            </div>
+        <div className="conn-cloud">
+          {CONNECTORS.filter(c => c.tag !== "soon").map((c,i) => (
+            <span className="cc-item" key={i} title={c.px}>
+              <i className={"cc-dot " + c.tag}></i>{c.nm}
+            </span>
           ))}
+        </div>
+        <div className="conn-legend">
+          <span><i className="cc-dot live"></i>live</span>
+          <span><i className="cc-dot beta"></i>beta</span>
+          <span className="cc-soon-note">+ more shipping monthly</span>
         </div>
       </div>
     </section>
@@ -1210,23 +1221,6 @@ function Tweaks(){
 }
 
 /* App */
-const STRIP_PROVIDERS = ["AWS","Azure","GCP","OpenAI","Anthropic","Stripe","Datadog","Snowflake","Databricks","GitHub"];
-function LogoStrip(){
-  return (
-    <div className="logostrip">
-      <div className="wrap">
-        <div className="logostrip-inner">
-          <span className="logostrip-lead">Reads your spend across</span>
-          <div className="logostrip-marks">
-            {STRIP_PROVIDERS.map((n,i) => <span className="lmark" key={i}>{n}</span>)}
-            <span className="lmark lmark-more">+7 more</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function App(){
   const [t, setT] = useState(TWEAK_DEFAULTS);
   const [version, setVersion] = useState(null);
@@ -1248,7 +1242,6 @@ function App(){
     <>
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
-      <LogoStrip />
       <Depth />
       <Connectors />
       <Architecture version={version} />
