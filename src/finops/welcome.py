@@ -156,7 +156,7 @@ def show_welcome() -> None:
     _line(_rule())
     _blank()
     _line(bold("Getting started:") + "  connect your first provider below.")
-    _line(dim("   Credentials and cost data stay on your machine — never sent anywhere."))
+    _line(dim("   Credentials stay on your machine. nable has no backend, so your data never touches our servers."))
     _line(dim("   nable sends anonymous usage pings (no cost data). Opt out: NABLE_NO_TELEMETRY=1"))
     _blank()
 

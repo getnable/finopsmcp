@@ -3280,6 +3280,22 @@ async def scan_cloudwatch_waste(
         return {"error": str(e)}
 
 
+def _denied_action(msg: str) -> str:
+    """Pull the specific IAM action out of an AWS AccessDenied message, e.g.
+    'rds:DescribeDBInstances'. Returns '' when the message is not a permission
+    error, so callers can tell 'you lack a permission' apart from 'no data' and
+    report the exact missing action instead of guessing."""
+    if not any(t in msg for t in ("AccessDenied", "not authorized", "UnauthorizedOperation")):
+        return ""
+    marker = "to perform: "
+    if marker in msg:
+        tail = msg.split(marker, 1)[1].strip().split()
+        action = tail[0].rstrip(".,") if tail else ""
+        if ":" in action:
+            return action
+    return "an AWS read action"
+
+
 @mcp.tool()
 async def get_rds_rightsizing_recommendations(
     cpu_threshold: float = 20.0,
@@ -3320,6 +3336,8 @@ async def get_rds_rightsizing_recommendations(
             except Exception:
                 regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
+        denied_actions: set = set()
+
         async def _scan_region_rds_rs(region: str) -> list[dict]:
             try:
                 return await loop.run_in_executor(
@@ -3332,11 +3350,36 @@ async def get_rds_rightsizing_recommendations(
                     ),
                 )
             except Exception as exc:
-                log.warning("RDS rightsizing scan failed for region %s: %s", region, exc)
+                action = _denied_action(str(exc))
+                if action:
+                    denied_actions.add(action)
+                else:
+                    log.warning("RDS rightsizing scan failed for region %s: %s", region, exc)
                 return []
 
         region_results = await asyncio.gather(*[_scan_region_rds_rs(r) for r in regions])
         all_findings: list[dict] = [f for findings in region_results for f in findings]
+
+        # A permission gap is a precise, fixable cause, not "no data". Surface the
+        # exact missing IAM action so the model leads with the real fix instead of
+        # guessing about CloudWatch or regions.
+        if not all_findings and denied_actions:
+            actions = sorted(denied_actions)
+            return {
+                "count": 0,
+                "permission_error": True,
+                "missing_permissions": actions,
+                "error": (
+                    "Could not read your RDS/DocumentDB instances: the IAM identity nable uses "
+                    f"is missing {', '.join(actions)}. This is a permissions gap, not missing "
+                    "utilization data."
+                ),
+                "fix": (
+                    "Add these read-only actions to nable's IAM policy, or run "
+                    "'finops setup aws --iam-template' for the full least-privilege policy, then re-run."
+                ),
+            }
+
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
