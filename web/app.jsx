@@ -276,7 +276,7 @@ const INSTALL_POPUPS = {
       <>In your terminal, run the command below. <code>finops welcome</code> writes your Claude Desktop config and stores credentials in your OS keychain.</>,
       <>Restart Claude Desktop. nable connects as a local MCP server.</>,
     ],
-    cmdLabel: "In your terminal",
+    cmdLabel: "In your terminal · needs Python 3.10+",
     cmd: "pip install -U finops-mcp && finops welcome",
     note: "Runs on your machine. No nable backend holds your data.",
   },
@@ -286,7 +286,7 @@ const INSTALL_POPUPS = {
       <>In your terminal, install nable and store credentials in your OS keychain:</>,
       <>Add nable to your Codex MCP config below, then restart Codex.</>,
     ],
-    cmdLabel: "In your terminal",
+    cmdLabel: "In your terminal · needs Python 3.10+",
     cmd: "pip install -U finops-mcp && finops welcome",
     toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
@@ -401,7 +401,7 @@ function TrustStrip(){
       {items.map((t,i) => (
         <div className="ti" key={i}>
           <span className="lab">{t.lab}</span>
-          <span className="val mono">{t.val}<span className="sub">{t.sub}</span></span>
+          <span className="val mono">{t.val}</span>
         </div>
       ))}
     </div>

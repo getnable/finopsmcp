@@ -241,7 +241,7 @@ const INSTALL_POPUPS = {
       /* @__PURE__ */ React.createElement(React.Fragment, null, "In your terminal, run the command below. ", /* @__PURE__ */ React.createElement("code", null, "finops welcome"), " writes your Claude Desktop config and stores credentials in your OS keychain."),
       /* @__PURE__ */ React.createElement(React.Fragment, null, "Restart Claude Desktop. nable connects as a local MCP server.")
     ],
-    cmdLabel: "In your terminal",
+    cmdLabel: "In your terminal \xB7 needs Python 3.10+",
     cmd: "pip install -U finops-mcp && finops welcome",
     note: "Runs on your machine. No nable backend holds your data."
   },
@@ -251,7 +251,7 @@ const INSTALL_POPUPS = {
       /* @__PURE__ */ React.createElement(React.Fragment, null, "In your terminal, install nable and store credentials in your OS keychain:"),
       /* @__PURE__ */ React.createElement(React.Fragment, null, "Add nable to your Codex MCP config below, then restart Codex.")
     ],
-    cmdLabel: "In your terminal",
+    cmdLabel: "In your terminal \xB7 needs Python 3.10+",
     cmd: "pip install -U finops-mcp && finops welcome",
     toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
@@ -319,7 +319,7 @@ function TrustStrip() {
     { lab: "providers", val: "17", sub: "AWS \xB7 Azure \xB7 GCP +" },
     { lab: "data on our servers", val: "0 bytes", sub: "nable has no backend" }
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "trust", style: { gridTemplateColumns: "repeat(3,1fr)" } }, items.map((t, i) => /* @__PURE__ */ React.createElement("div", { className: "ti", key: i }, /* @__PURE__ */ React.createElement("span", { className: "lab" }, t.lab), /* @__PURE__ */ React.createElement("span", { className: "val mono" }, t.val, /* @__PURE__ */ React.createElement("span", { className: "sub" }, t.sub)))));
+  return /* @__PURE__ */ React.createElement("div", { className: "trust", style: { gridTemplateColumns: "repeat(3,1fr)" } }, items.map((t, i) => /* @__PURE__ */ React.createElement("div", { className: "ti", key: i }, /* @__PURE__ */ React.createElement("span", { className: "lab" }, t.lab), /* @__PURE__ */ React.createElement("span", { className: "val mono" }, t.val))));
 }
 const QUERIES = [
   {
