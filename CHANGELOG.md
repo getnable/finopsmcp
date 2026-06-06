@@ -2,6 +2,25 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.51
+
+### Changed
+- **Team pricing is now $100/seat/mo ($1,000/seat/yr).** The in-tool upgrade
+  nudges, feature-gate messages, onboarding email, and checkout link all
+  reflect the new price, so the product matches the site.
+
+### Added
+- **Contextual Team upsells.** Free users now get a one-time, topic-specific
+  nudge keyed to what they just asked: anomalies surface auto-ticketing and
+  Slack/Teams alerts, rightsizing surfaces the auto-PR, attribution surfaces
+  scheduled digests, commitments surface coverage-gap modeling, and so on.
+  Shown at most once per topic per session, helpful, not spammy, and never to
+  paying users.
+- **Board-ready export upgrades.** `export_board_summary` now includes AI spend
+  as a share of MRR and AI cost per customer, pulling MRR and paying customers
+  from Stripe when connected (the cost-per-customer bridge), with a precise
+  "built on your machine, no nable backend holds it" note.
+
 ## 0.8.50
 
 ### Added
