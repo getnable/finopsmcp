@@ -50,14 +50,21 @@ The wizard walks through connecting your providers and auto-configures Claude De
 brew install uv && uvx finops-mcp setup
 ```
 
-**Step 2: Create an AWS access key (takes ~90 seconds)**
+**Step 2: Connect AWS (usually one keystroke)**
 
-When the wizard asks for your key:
-1. Open: [console.aws.amazon.com/iam/home#/users](https://console.aws.amazon.com/iam/home#/users)
-2. Click your username → Security credentials → Access keys → Create access key → "Other" → Create
-3. Paste both values into the wizard. It stores them and writes them to your editor config automatically.
+```bash
+finops setup aws
+```
 
-Need a read-only IAM policy first? Run `finops setup aws --iam-template` and it generates one.
+The wizard checks for AWS credentials you already have (an SSO login, an AWS CLI profile, or default credentials), shows you the account it found, and connects it when you confirm. If you use `aws` on this machine already, you will not type a single key.
+
+```
+Checking for AWS credentials on this machine...
+✓ Found working credentials: profile 'default' -> account 1234
+  Connect this account? [Y/n]
+```
+
+Only if no working credentials are found does it walk you through creating a read-only access key. Want the IAM policy to hand your platform team first? Run `finops setup aws --iam-template`.
 
 **Step 3: Restart Claude Desktop and ask**
 
