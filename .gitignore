@@ -80,3 +80,9 @@ docs/video/demo-runbook.md
 ONBOARDING_AUDIT.md
 vc-brief*
 competitive-analysis*
+
+# Internal agent + design config: kept local (still loads for the agent), not for the public repo
+CLAUDE.md
+DESIGN.md
+# Internal go-to-market doc generator
+nable-gtm.js
