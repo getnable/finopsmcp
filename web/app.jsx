@@ -248,6 +248,7 @@ function Hero({ layout, interaction }){
             </p>
             <InstallRow />
             <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a></p>
+            <TrustStrip />
             <div className="hero-mobile-cta">
               <p className="hmc-lead">nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide.</p>
               <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Get the guide" />
@@ -267,7 +268,6 @@ function Hero({ layout, interaction }){
             <Console interaction={interaction} />
           </div>
         </div>
-        <TrustStrip />
       </div>
     </header>
   );
@@ -397,10 +397,10 @@ function TrustStrip(){
   const items = [
     {lab:"installs / mo", val: "4k+", sub:"via PyPI · live"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
-    {lab:"data on our servers", val:"0 bytes", sub:"nable has no backend"},
+    {lab:"on our servers", val:"0 bytes", sub:"nable has no backend"},
   ];
   return (
-    <div className="trust" style={{gridTemplateColumns:"repeat(3,1fr)"}}>
+    <div className="trust">
       {items.map((t,i) => (
         <div className="ti" key={i}>
           <span className="lab">{t.lab}</span>
