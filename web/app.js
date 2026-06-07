@@ -233,7 +233,7 @@ function Nav() {
 function Hero({ layout, interaction }) {
   return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud and AI bill, answered."), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. nable tracks LLM cost by model, catches anomalies and opens the PR to fix waste. Your token bill keeps climbing even as prices drop. See exactly why. It all runs on your machine, with no vendor holding your data."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free for solo use, no credit card \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/docs.html#install", onClick: () => {
     if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs_install" });
-  } }, "VS Code, Windsurf, Zed and more")), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement("div", { className: "hmc-links" }, /* @__PURE__ */ React.createElement(
+  } }, "VS Code, Windsurf, Zed and more")), /* @__PURE__ */ React.createElement(TrustStrip, null), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement("div", { className: "hmc-links" }, /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "#pricing",
@@ -257,7 +257,7 @@ function Hero({ layout, interaction }) {
     },
     "Book a 30-min call ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  )))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction }))), /* @__PURE__ */ React.createElement(TrustStrip, null)));
+  )))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction })))));
 }
 const CURSOR_DEEPLINK = "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19";
 const INSTALL_POPUPS = {
@@ -335,9 +335,9 @@ function TrustStrip() {
   const items = [
     { lab: "installs / mo", val: "4k+", sub: "via PyPI \xB7 live" },
     { lab: "providers", val: "17", sub: "AWS \xB7 Azure \xB7 GCP +" },
-    { lab: "data on our servers", val: "0 bytes", sub: "nable has no backend" }
+    { lab: "on our servers", val: "0 bytes", sub: "nable has no backend" }
   ];
-  return /* @__PURE__ */ React.createElement("div", { className: "trust", style: { gridTemplateColumns: "repeat(3,1fr)" } }, items.map((t, i) => /* @__PURE__ */ React.createElement("div", { className: "ti", key: i }, /* @__PURE__ */ React.createElement("span", { className: "lab" }, t.lab), /* @__PURE__ */ React.createElement("span", { className: "val mono" }, t.val))));
+  return /* @__PURE__ */ React.createElement("div", { className: "trust" }, items.map((t, i) => /* @__PURE__ */ React.createElement("div", { className: "ti", key: i }, /* @__PURE__ */ React.createElement("span", { className: "lab" }, t.lab), /* @__PURE__ */ React.createElement("span", { className: "val mono" }, t.val))));
 }
 const QUERIES = [
   {
