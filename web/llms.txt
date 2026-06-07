@@ -1,0 +1,34 @@
+# nable
+
+> Local-first, AI-native FinOps. Ask your whole cloud and AI bill anything in plain English, right inside Claude, Cursor, or any MCP editor. nable runs on your own machine, connects to AWS, Azure, GCP and 10+ SaaS and AI providers, and your credentials never leave your laptop.
+
+nable is an MCP server you install locally. It answers cost questions, detects anomalies, recommends rightsizing, tracks AI and LLM spend by model (Amazon Bedrock, OpenAI, Anthropic, Azure OpenAI), and can patch your Terraform and open the PR to fix waste. There is no SaaS account to create and no nable backend that holds your data. The differentiator is the intersection: genuinely multi-cloud, plus cross-provider AI spend, plus true local-first, in one plain-English answer.
+
+## What nable does
+- Ask cloud and AI cost questions in plain English across AWS, Azure, GCP, OpenAI, Anthropic, Bedrock and more
+- Detect cost anomalies against a rolling baseline and alert in Slack or Teams
+- Generate rightsizing recommendations, then patch the Terraform and open the PR
+- Track LLM spend by model and provider, with cost per token and per customer
+- Attribute spend to teams and services
+
+## Why it is different
+- Token prices keep falling, but agents use 5 to 30 times more tokens, so AI bills keep climbing. nable shows exactly why.
+- It runs on your machine. Credentials stay in your OS keyring, cost data caches in a local SQLite database, nothing is shipped to a vendor backend.
+
+## Key pages
+- [Home](https://getnable.com/): what nable is, how it works, live demo
+- [Docs](https://getnable.com/docs): install and setup, every tool, connector guides
+- [Pricing](https://getnable.com/pricing.md): plans and prices, machine-readable
+- [About](https://getnable.com/about): who builds nable and why
+
+## Install
+uv tool install finops-mcp && finops welcome
+
+## Pricing summary
+- Free: $0, no credit card, no expiry. Cost queries, anomaly detection, rightsizing, LLM spend tracking, every connector.
+- Team: $100 per seat per month, or $1,000 per seat per year. Adds ticket auto-creation, scheduled email digests, and commitment recommendations.
+
+## Contact
+- Site: https://getnable.com
+- Book a 30-minute call: https://calendar.app.google/gMwYK6WWB7fKpz2B6
+- LinkedIn: https://www.linkedin.com/company/getnable/

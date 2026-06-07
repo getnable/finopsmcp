@@ -241,9 +241,8 @@ function Hero({ layout, interaction }){
         <div className="hero-inner">
           <div className="hero-left">
             <h1 className="display">
-              Your cloud and AI bill,<br/>
-              <span className="strike">in a dashboard.</span>
-              <span className="accent">Waste found.<br/>Money saved.</span>
+              Your cloud and AI bill.<br/>
+              Waste found. Money saved.
             </h1>
             <p className="lede">
               Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. nable tracks LLM cost by model, catches anomalies and opens the PR to fix waste. Your token bill keeps climbing even as prices drop. See exactly why. It all runs on your machine, with no vendor holding your data.
