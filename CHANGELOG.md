@@ -2,6 +2,28 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.53
+
+### Changed
+- **One-command onboarding: `uvx --from finops-mcp finops welcome`.** This fetches
+  a matching Python, installs nable, and runs the setup wizard in a single step
+  with no PATH setup. Replaces `uv tool install finops-mcp && finops welcome`,
+  which silently failed on any machine where `~/.local/bin` was not on PATH (the
+  `finops` command was "not found" right after a successful install). Site, docs,
+  and install widgets updated.
+
+### Added
+- **The welcome wizard now pays off in the terminal.** After connecting a cloud
+  account it scans and prints a real number right there: total spend, the top
+  driver, your AI/ML share of the bill, and any idle waste, before you ever open
+  your editor. Onboarding used to hand you a config wizard and send you off with
+  nothing to show; now it finds money first. Fully guarded, so a slow or failing
+  scan never blocks setup.
+- **`finops welcome --demo`** runs the entire flow on realistic sample data with
+  no account or credentials, so anyone evaluating nable sees the value moment first.
+- The wizard now auto-configures Claude/Cursor (prefers `uvx finops-mcp`, no PATH
+  dependency) instead of asking you to run a second command and press Enter.
+
 ## 0.8.52
 
 ### Fixed

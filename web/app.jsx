@@ -283,7 +283,7 @@ const INSTALL_POPUPS = {
       <>Restart Claude Desktop. nable connects as a local MCP server.</>,
     ],
     cmdLabel: "In your terminal",
-    cmd: "uv tool install finops-mcp && finops welcome",
+    cmd: "uvx --from finops-mcp finops welcome",
     altCmd: "pip install -U finops-mcp && finops welcome",
     note: "uv installs a matching Python for you, so this works on any setup. No uv? brew install uv. Runs on your machine, no nable backend.",
   },
@@ -294,7 +294,7 @@ const INSTALL_POPUPS = {
       <>Add nable to your Codex MCP config below, then restart Codex.</>,
     ],
     cmdLabel: "In your terminal",
-    cmd: "uv tool install finops-mcp && finops welcome",
+    cmd: "uvx --from finops-mcp finops welcome",
     altCmd: "pip install -U finops-mcp && finops welcome",
     toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
@@ -931,7 +931,7 @@ function MidCta(){
             </a>
           </div>
           <p className="mono" style={{fontSize:11,color:"var(--fg-4)",letterSpacing:".05em"}}>
-            uv tool install finops-mcp &amp;&amp; finops welcome
+            uvx --from finops-mcp finops welcome
           </p>
         </div>
       </div>
@@ -966,7 +966,7 @@ function FootCta(){
           <EmailCapture source="footer" placeholder="drop your email, we'll send the setup guide" btnLabel="Send it" center={true} />
         </div>
         <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-3)",letterSpacing:".04em"}}>
-          $ uv tool install finops-mcp &amp;&amp; finops welcome
+          $ uvx --from finops-mcp finops welcome
         </p>
         <p style={{marginTop:24,fontSize:13,color:"var(--fg-3)"}}>
           Building something? <a href="/about" style={{color:"var(--accent-dim)"}}>Read the founder note and investor thesis →</a>
@@ -1067,7 +1067,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How long does setup take?",
-    a: "A few minutes. Run `uv tool install finops-mcp && finops welcome` (uv pulls a matching Python for you), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. Follow the prompts and you're done. The wizard handles the MCP config and credential storage."
+    a: "A few minutes. Run `uvx --from finops-mcp finops welcome` (uv fetches a matching Python and runs the setup wizard, no PATH setup needed), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. The wizard connects Claude, connects your cloud, and shows your first cost number right in the terminal. Want to see it first? `uvx --from finops-mcp finops welcome --demo` runs it on sample data."
   },
   {
     q: "Is the free tier actually free?",

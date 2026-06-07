@@ -268,7 +268,7 @@ const INSTALL_POPUPS = {
       /* @__PURE__ */ React.createElement(React.Fragment, null, "Restart Claude Desktop. nable connects as a local MCP server.")
     ],
     cmdLabel: "In your terminal",
-    cmd: "uv tool install finops-mcp && finops welcome",
+    cmd: "uvx --from finops-mcp finops welcome",
     altCmd: "pip install -U finops-mcp && finops welcome",
     note: "uv installs a matching Python for you, so this works on any setup. No uv? brew install uv. Runs on your machine, no nable backend."
   },
@@ -279,7 +279,7 @@ const INSTALL_POPUPS = {
       /* @__PURE__ */ React.createElement(React.Fragment, null, "Add nable to your Codex MCP config below, then restart Codex.")
     ],
     cmdLabel: "In your terminal",
-    cmd: "uv tool install finops-mcp && finops welcome",
+    cmd: "uvx --from finops-mcp finops welcome",
     altCmd: "pip install -U finops-mcp && finops welcome",
     toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
@@ -595,7 +595,7 @@ function MidCta() {
       }
     },
     "Read the docs"
-  )), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { fontSize: 11, color: "var(--fg-4)", letterSpacing: ".05em" } }, "uv tool install finops-mcp && finops welcome"))));
+  )), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { fontSize: 11, color: "var(--fg-4)", letterSpacing: ".05em" } }, "uvx --from finops-mcp finops welcome"))));
 }
 function FootCta() {
   return /* @__PURE__ */ React.createElement("section", { className: "foot-cta", id: "cta" }, /* @__PURE__ */ React.createElement("div", { className: "foot-cta-grid" }), /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { position: "relative" } }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow", style: { marginBottom: 32, display: "inline-flex" } }, /* @__PURE__ */ React.createElement("span", { className: "d" }), " Free tier \xB7 no credit card"), /* @__PURE__ */ React.createElement("h2", { className: "display" }, "Stop staring at graphs.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Start closing tickets.")), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement(
@@ -623,7 +623,7 @@ function FootCta() {
       }
     },
     "Book a 30-min call"
-  )), /* @__PURE__ */ React.createElement(EmailCapture, { source: "footer", placeholder: "drop your email, we'll send the setup guide", btnLabel: "Send it", center: true })), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { marginTop: 32, fontSize: 12, color: "var(--fg-3)", letterSpacing: ".04em" } }, "$ uv tool install finops-mcp && finops welcome"), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 24, fontSize: 13, color: "var(--fg-3)" } }, "Building something? ", /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent-dim)" } }, "Read the founder note and investor thesis \u2192"))));
+  )), /* @__PURE__ */ React.createElement(EmailCapture, { source: "footer", placeholder: "drop your email, we'll send the setup guide", btnLabel: "Send it", center: true })), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { marginTop: 32, fontSize: 12, color: "var(--fg-3)", letterSpacing: ".04em" } }, "$ uvx --from finops-mcp finops welcome"), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 24, fontSize: 13, color: "var(--fg-3)" } }, "Building something? ", /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent-dim)" } }, "Read the founder note and investor thesis \u2192"))));
 }
 function FounderNote() {
   return /* @__PURE__ */ React.createElement("section", { id: "founder", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { maxWidth: 680, paddingTop: 80, paddingBottom: 80 } }, /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Instrument Sans',system-ui,sans-serif", fontWeight: 500, fontSize: 11, color: "var(--accent-dim)", letterSpacing: ".08em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 10, marginBottom: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 24, height: 1, background: "var(--accent-dim)", display: "inline-block" } }), "Why I built this"), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 28 } }, "I built this because I spent most of my day bouncing between dashboards that barely showed what I actually needed, the AWS console, and Claude. I'd ask Claude a question, manually paste in numbers, get an answer, then go back and repeat the whole thing."), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 28 } }, "A lot of FinOps tools are shipping MCP integrations now. But they're all built for enterprise, priced for enterprise, and none of them fit the way I actually work. They give you visibility. They don't help you think."), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 36 } }, "nable solves the problems I actually had. The recommendations go deeper than anything I've seen out of the box, and for the first time I can actually reason through my own optimization opportunities instead of just staring at a graph."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 40, height: 40, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: "var(--bg)" } }, "CB")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 500, color: "var(--fg)" } }, "Chandan Bukkapatnam"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: "var(--fg-3)" } }, "Founder \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "mailto:chandan@getnable.com", target: "_blank", rel: "noopener noreferrer", style: { color: "var(--accent)" } }, "chandan@getnable.com"))))));
@@ -646,7 +646,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How long does setup take?",
-    a: "A few minutes. Run `uv tool install finops-mcp && finops welcome` (uv pulls a matching Python for you), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. Follow the prompts and you're done. The wizard handles the MCP config and credential storage."
+    a: "A few minutes. Run `uvx --from finops-mcp finops welcome` (uv fetches a matching Python and runs the setup wizard, no PATH setup needed), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. The wizard connects Claude, connects your cloud, and shows your first cost number right in the terminal. Want to see it first? `uvx --from finops-mcp finops welcome --demo` runs it on sample data."
   },
   {
     q: "Is the free tier actually free?",
