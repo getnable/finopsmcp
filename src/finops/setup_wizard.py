@@ -1388,7 +1388,8 @@ def main(args: list[str] | None = None) -> None:
     serve_p.add_argument("--host", default="0.0.0.0", help="Host to bind (default: 0.0.0.0 for network access)")
     serve_p.add_argument("--open", action="store_true", help="Open browser on start")
 
-    sub.add_parser("welcome",      help="Guided onboarding: connect Claude + your first cloud account")
+    welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect Claude + your first cloud account")
+    welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
     sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
     iam_p = sub.add_parser("iam-template")
@@ -1587,7 +1588,7 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
-        run_welcome_flow()
+        run_welcome_flow(demo=getattr(parsed, "demo", False))
         return
     elif parsed.cmd == "tools":
         _print_tools_cheatsheet()

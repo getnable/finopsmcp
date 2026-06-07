@@ -225,12 +225,12 @@
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">1</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install and connect, one command</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">uv tool install finops-mcp</span></div>
+              <div class="code-block p-4"><span class="cmd">uvx --from finops-mcp finops welcome</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">uv pulls a matching Python for you, so this works on any setup. Already on Python 3.10+? <code class="text-xs px-1 rounded" style="background:var(--surface2)">pip install -U finops-mcp</code>. No uv? <code class="text-xs px-1 rounded" style="background:var(--surface2)">brew install uv</code>.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">uv fetches a matching Python and runs the setup wizard. No PATH setup, no separate install step. Want a look first? <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx --from finops-mcp finops welcome --demo</code> runs it on sample data. Already on Python 3.10+? <code class="text-xs px-1 rounded" style="background:var(--surface2)">pip install -U finops-mcp &amp;&amp; finops welcome</code>. No uv? <code class="text-xs px-1 rounded" style="background:var(--surface2)">brew install uv</code>.</p>
           </div>
         </div>
 
@@ -238,13 +238,13 @@
         <div class="flex items-start gap-3">
           <div class="step-num mt-0.5">2</div>
           <div class="flex-1">
-            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Configure your editor and connect a provider</p>
+            <p class="text-sm font-semibold mb-2" style="color:var(--text)">Prefer a permanent install? (optional)</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">finops welcome</span></div>
+              <div class="code-block p-4"><span class="cmd">uv tool install finops-mcp</span> &amp;&amp; <span class="cmd">uv tool update-shell</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">The wizard writes your MCP config and walks through connecting your first account. Takes about two minutes. Then fully quit and reopen your editor.</p>
-            <p class="text-xs mt-2" style="color:var(--muted)">Prefer manual setup? Add this to your editor's MCP config:</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">Installs the <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops</code> commands on your PATH so you can run <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops welcome</code>, <code class="text-xs px-1 rounded" style="background:var(--surface2)">finops doctor</code>, and the rest directly. Open a new terminal after <code class="text-xs px-1 rounded" style="background:var(--surface2)">update-shell</code>. Then fully quit and reopen your editor.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">Prefer manual MCP setup? Add this to your editor's config:</p>
             <div class="code-wrap mt-2">
               <div class="code-block p-4"><span class="cm">// Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json</span><br/><span class="cm">// Cursor: ~/.cursor/mcp.json</span><br/>{<br/>&nbsp;&nbsp;<span class="str">"mcpServers"</span>: {<br/>&nbsp;&nbsp;&nbsp;&nbsp;<span class="str">"finops"</span>: { <span class="str">"command"</span>: <span class="str">"finops-mcp"</span> }<br/>&nbsp;&nbsp;}<br/>}</div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
@@ -287,10 +287,10 @@
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install and run the welcome wizard</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">uv tool install</span> finops-mcp &amp;&amp; <span class="cmd">finops welcome</span></div>
+              <div class="code-block p-4"><span class="cmd">uvx --from finops-mcp finops welcome</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">The welcome command walks you through connecting Claude and your first cloud account. Takes about 5 minutes (including IAM setup). uv pulls a matching Python automatically. Already on Python 3.10+? <code class="text-xs px-1 rounded" style="background:var(--surface2)">pip install -U finops-mcp</code> works too.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">The welcome command walks you through connecting Claude and your first cloud account, then shows your first cost number in the terminal. Takes about 5 minutes (including IAM setup). uv fetches a matching Python automatically and needs no PATH setup. Already on Python 3.10+? <code class="text-xs px-1 rounded" style="background:var(--surface2)">pip install -U finops-mcp &amp;&amp; finops welcome</code> works too.</p>
           </div>
         </div>
 

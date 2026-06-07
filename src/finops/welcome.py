@@ -161,43 +161,129 @@ def show_welcome() -> None:
     _blank()
 
 
+# ── The payoff: surface a real number right after connecting ───────────────────
+
+_MAGIC_Q = '"What is driving my AWS bill this month?"'
+
+# AWS service names that are AI/ML spend (Cost Explorer labels them many ways).
+_AI_KEYWORDS = (
+    "bedrock", "textract", "sagemaker", "comprehend", "rekognition", "kendra",
+    "claude", "openai", "anthropic", "transcribe", "translate", "polly", "lex",
+)
+
+
+def _quiet_logs() -> None:
+    """Silence the import-time and network INFO chatter so the value moment
+    reads clean. Our output uses print(), never logging, so this is safe."""
+    import logging
+    logging.getLogger().setLevel(logging.ERROR)
+    for name in ("botocore", "boto3", "urllib3", "httpx", "httpcore",
+                 "posthog", "apscheduler", "finops"):
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+
+def _show_value_moment(demo: bool = False) -> None:
+    """After connecting (or in --demo), scan the account and print a real dollar
+    figure in the terminal, so setup pays off before the user opens Claude.
+
+    Fully guarded: every failure or slowness is swallowed. This can never block
+    or break onboarding."""
+    if demo:
+        os.environ["FINOPS_DEMO"] = "1"
+        os.environ["FINOPS_DEMO_MODE"] = "1"
+
+    try:
+        _quiet_logs()
+        import asyncio
+        from . import server  # heavy import, only at the value-moment step
+
+        async def _run():
+            summary = await server.get_cost_summary()
+            idle = None
+            try:
+                idle = await asyncio.wait_for(server.list_idle_resources(), timeout=12)
+            except Exception:
+                idle = None
+            return summary, idle
+
+        summary, idle = asyncio.run(asyncio.wait_for(_run(), timeout=30))
+    except Exception:
+        return  # never block setup
+
+    if not isinstance(summary, dict) or summary.get("error"):
+        return
+    # Real tool returns grand_total_usd / grand_by_service; demo data returns
+    # total_usd / by_service. Accept either.
+    total = summary.get("grand_total_usd") or summary.get("total_usd") or 0.0
+    by_svc = summary.get("grand_by_service") or summary.get("by_service") or {}
+    if total <= 0 or not isinstance(by_svc, dict) or not by_svc:
+        return
+
+    top = sorted(by_svc.items(), key=lambda kv: kv[1], reverse=True)
+    top_name, top_val = top[0]
+    ai_total = sum(v for k, v in by_svc.items()
+                   if any(w in k.lower() for w in _AI_KEYWORDS))
+    ai_share = round(ai_total / total * 100) if total else 0
+
+    _blank()
+    _line(_rule())
+    _blank()
+    _line(green("✓") + bold("  nable scanned your account — last 30 days"))
+    _blank()
+    _line(f"  {dim('Total spend')}      {bold('$' + format(total, ',.0f'))}")
+    _line(f"  {dim('Top driver')}       {top_name}  {cyan('$' + format(top_val, ',.0f'))}")
+    if ai_share >= 5:
+        _line(f"  {dim('AI / ML share')}    {bold(str(ai_share) + '%')}  {dim('of your cloud bill')}")
+    if isinstance(idle, dict):
+        waste = idle.get("total_monthly_waste_usd") or 0
+        if waste and waste >= 1:
+            _line(f"  {dim('Idle / wasted')}    {amber('$' + format(waste, ',.0f') + '/mo')}  {dim('doing nothing')}")
+    _blank()
+
+
 # ── Full onboarding flow (finops welcome) ──────────────────────────────────────
 
-def run_welcome_flow() -> None:
+def run_welcome_flow(demo: bool = False) -> None:
     """
     Interactive onboarding shown when the user runs `finops welcome`.
-    Walks through the 3-step getting-started flow and then launches
-    the account setup wizard.
+    Auto-connects Claude, connects a cloud account, then pays off with a real
+    cost number. `--demo` runs the whole thing on sample data, no account needed.
     """
     _print_header()
+
+    if demo:
+        _line(bold("Demo mode") + dim("  ·  nable on sample data, no account needed"))
+        _show_value_moment(demo=True)
+        _line(_rule())
+        _blank()
+        _line(bold(green("That is nable.")) + "  Run it on your own account:")
+        _blank()
+        _line(f"  {bold(cyan('uvx --from finops-mcp finops welcome'))}")
+        _blank()
+        _line(f"  Docs  →  {cyan('https://getnable.com/docs')}")
+        _blank()
+        return
 
     # Step indicators
     _line(bold("3 steps to your first cost insight:"))
     _blank()
-    _line(f"  {green('1')}  {bold('Install')}          {dim('pip install finops-mcp')}  {green('done')}")
-    _line(f"  {amber('2')}  {bold('Connect Claude')}   add nable to your MCP client")
-    _line(f"  {dim('3')}  {dim('Connect a cloud')}  {dim('your AWS, Azure, or GCP account')}")
+    _line(f"  {green('1')}  {bold('Install')}          {green('done')}")
+    _line(f"  {amber('2')}  {bold('Connect Claude')}   {dim('writing your MCP config')}")
+    _line(f"  {dim('3')}  {dim('Connect a cloud')}  {dim('AWS, Azure, or GCP')}")
     _blank()
     _line(_rule())
     _blank()
 
-    # Step 2: Claude Desktop / Cursor config
-    _line(bold("Step 2 — Connect to Claude, Cursor, or Windsurf"))
+    # Step 2: auto-configure Claude / Cursor (no manual command, no Enter)
+    _line(bold("Step 2 — Connecting nable to Claude"))
     _blank()
-    _line("  Run this in your terminal:")
-    _blank()
-    _line(f"  {bold(cyan('finops setup claude'))}")
-    _blank()
-    _line(dim("  This writes the MCP server config for you. Restart Claude after."))
-    _blank()
-
     try:
-        input(f"  {dim('Press Enter once Claude is set up, or Ctrl-C to skip...')}  ")
+        from .setup_wizard import _configure_claude_desktop
+        _configure_claude_desktop()
     except (KeyboardInterrupt, EOFError):
-        _blank()
         _line(dim("  Skipped. Run 'finops setup claude' later."))
-        _blank()
-
+    except Exception:
+        _line(dim("  Could not auto-configure. Run 'finops setup claude' later."))
     _blank()
     _line(_rule())
     _blank()
@@ -205,42 +291,48 @@ def run_welcome_flow() -> None:
     # Step 3: cloud account
     _line(bold("Step 3 — Connect your first cloud account"))
     _blank()
-    _line(f"  {dim('1)')} AWS          {dim('finops setup aws')}")
-    _line(f"  {dim('2)')} Azure        {dim('finops setup azure')}")
-    _line(f"  {dim('3)')} GCP          {dim('finops setup gcp')}")
+    _line(f"  {dim('1)')} AWS          {dim('reads your existing AWS profile')}")
+    _line(f"  {dim('2)')} Azure")
+    _line(f"  {dim('3)')} GCP")
     _line(f"  {dim('4)')} Skip for now")
     _blank()
 
-    choice = ""
+    choice = "4"
     try:
         choice = input("  Choice [1]: ").strip() or "1"
     except (KeyboardInterrupt, EOFError):
-        _blank()
-
+        choice = "4"
     _blank()
 
+    connected = False
     if choice == "1":
         from .setup_wizard import setup_aws_account
         setup_aws_account()
+        connected = True
     elif choice == "2":
         from .setup_wizard import setup_azure
         setup_azure()
+        connected = True
     elif choice == "3":
         from .setup_wizard import setup_gcp
         setup_gcp()
+        connected = True
     else:
         _line(dim("  No problem. Run 'finops setup aws' whenever you're ready."))
         _blank()
 
-    # Finish
+    # The payoff: a real number in the terminal before they ever open Claude.
+    if connected:
+        _show_value_moment(demo=False)
+
+    # Finish — one unambiguous next action
     _line(_rule())
     _blank()
-    _line(bold(green("You're set up.")) + "  Restart Claude, then ask:")
+    _line(bold(green("You're set up.")) + "  Open Claude (or Cursor) and ask:")
     _blank()
-    q = '"What did we spend on AWS last month?"'
-    _line(f"  {cyan(q)}")
+    _line(f"  {cyan(_MAGIC_Q)}")
     _blank()
-    _line(dim("  Not seeing nable in Claude? Run 'finops doctor' to check the connection."))
+    _line(dim("  Not seeing nable? Run 'finops doctor' to check the connection."))
     _blank()
     _line(f"  Docs    →  {cyan('https://getnable.com/docs')}")
     _line(f"  Support →  {cyan('hello@getnable.com')}")
