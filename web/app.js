@@ -231,7 +231,9 @@ function Nav() {
   ))));
 }
 function Hero({ layout, interaction }) {
-  return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud and AI bill.", /* @__PURE__ */ React.createElement("br", null), "Waste found. Money saved."), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. nable tracks LLM cost by model, catches anomalies and opens the PR to fix waste. Your token bill keeps climbing even as prices drop. See exactly why. It all runs on your machine, with no vendor holding your data."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free forever for solo use \xB7 no credit card \xB7 runs on your machine"), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement("div", { className: "hmc-links" }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud and AI bill, answered."), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. nable tracks LLM cost by model, catches anomalies and opens the PR to fix waste. Your token bill keeps climbing even as prices drop. See exactly why. It all runs on your machine, with no vendor holding your data."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free for solo use, no credit card \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/docs.html#install", onClick: () => {
+    if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs_install" });
+  } }, "VS Code, Windsurf, Zed and more")), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement("div", { className: "hmc-links" }, /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "#pricing",
@@ -305,7 +307,7 @@ function InstallRow() {
     setOpen((o) => o === id ? null : id);
     if (window.posthog) posthog.capture("install_opened", { client: id });
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "installer", id: "install" }, /* @__PURE__ */ React.createElement("div", { className: "install-row" }, /* @__PURE__ */ React.createElement("span", { className: "setup-badge" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "currentColor", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M6 0l1 5 5 1-5 1-1 5-1-5-5-1 5-1z" })), "1 min setup"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "installer", id: "install" }, /* @__PURE__ */ React.createElement("div", { className: "install-row" }, /* @__PURE__ */ React.createElement(
     "a",
     {
       className: "iclient is-primary",
@@ -316,17 +318,7 @@ function InstallRow() {
     },
     /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "Cursor")),
     /* @__PURE__ */ React.createElement("svg", { className: "ic", width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.6", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M4 8l4-4m0 0H4.5M8 4v3.5", strokeLinecap: "round", strokeLinejoin: "round" }))
-  ), /* @__PURE__ */ React.createElement("button", { className: "iclient" + (open === "claude" ? " is-open" : ""), "aria-expanded": open === "claude", onClick: () => toggle("claude") }, /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "Claude")), _CHEV), /* @__PURE__ */ React.createElement("button", { className: "iclient" + (open === "openai" ? " is-open" : ""), "aria-expanded": open === "openai", onClick: () => toggle("openai") }, /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "OpenAI")), _CHEV)), open && /* @__PURE__ */ React.createElement(InstallPopup, { id: open, onClose: () => setOpen(null) }), /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      className: "install-more",
-      href: "/docs.html#install",
-      onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs_install" });
-      }
-    },
-    "VS Code, Windsurf, Zed and more \u2192 docs"
-  ));
+  ), /* @__PURE__ */ React.createElement("button", { className: "iclient" + (open === "claude" ? " is-open" : ""), "aria-expanded": open === "claude", onClick: () => toggle("claude") }, /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "Claude")), _CHEV), /* @__PURE__ */ React.createElement("button", { className: "iclient" + (open === "openai" ? " is-open" : ""), "aria-expanded": open === "openai", onClick: () => toggle("openai") }, /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "OpenAI")), _CHEV)), open && /* @__PURE__ */ React.createElement(InstallPopup, { id: open, onClose: () => setOpen(null) }));
 }
 function fmtNum(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";

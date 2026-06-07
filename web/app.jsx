@@ -241,14 +241,13 @@ function Hero({ layout, interaction }){
         <div className="hero-inner">
           <div className="hero-left">
             <h1 className="display">
-              Your cloud and AI bill.<br/>
-              Waste found. Money saved.
+              Your cloud and AI bill, answered.
             </h1>
             <p className="lede">
               Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. nable tracks LLM cost by model, catches anomalies and opens the PR to fix waste. Your token bill keeps climbing even as prices drop. See exactly why. It all runs on your machine, with no vendor holding your data.
             </p>
             <InstallRow />
-            <p className="install-note">Free forever for solo use · no credit card · runs on your machine</p>
+            <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a></p>
             <div className="hero-mobile-cta">
               <p className="hmc-lead">nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide.</p>
               <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Get the guide" />
@@ -363,10 +362,6 @@ function InstallRow(){
   return (
     <div className="installer" id="install">
       <div className="install-row">
-        <span className="setup-badge">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M6 0l1 5 5 1-5 1-1 5-1-5-5-1 5-1z"/></svg>
-          1 min setup
-        </span>
         <a className="iclient is-primary" href={CURSOR_DEEPLINK}
           onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'add_to_cursor' }); }}>
           <span>Install in <b>Cursor</b></span>
@@ -380,10 +375,6 @@ function InstallRow(){
         </button>
       </div>
       {open && <InstallPopup id={open} onClose={() => setOpen(null)} />}
-      <a className="install-more" href="/docs.html#install"
-        onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>
-        VS Code, Windsurf, Zed and more → docs
-      </a>
     </div>
   );
 }
