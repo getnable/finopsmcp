@@ -510,15 +510,36 @@ function CheckIcon() {
 }
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
 const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
+const BOOK_CALL_LINK = "https://calendar.app.google/gMwYK6WWB7fKpz2B6";
+const PRICE_ROWS = [
+  { label: "Seats", solo: "1", team: "per seat", ent: "unlimited" },
+  { label: "Connectors \u2014 AWS, Azure, GCP, 17 sources", solo: true, team: true, ent: true },
+  { label: "Ask your cloud + AI bill in plain English", solo: true, team: true, ent: true },
+  { label: "Anomaly detection", solo: true, team: true, ent: true },
+  { label: "Rightsizing recommendations", solo: true, team: true, ent: true },
+  { label: "AI / LLM spend tracking by model", solo: true, team: true, ent: true },
+  { label: "Local-first \u2014 keys never leave your machine", solo: true, team: true, ent: true },
+  { label: "Terraform remediation: patch + open the PR", solo: false, team: true, ent: true },
+  { label: "Slack / Teams alerts + weekly digest", solo: false, team: true, ent: true },
+  { label: "Ticket creation (Jira, Linear, GitHub)", solo: false, team: true, ent: true },
+  { label: "Budget alerts + commitment analysis", solo: false, team: true, ent: true },
+  { label: "Team dashboard + Tableau / Power BI", solo: false, team: true, ent: true },
+  { label: "SSO + audit logs", solo: false, team: false, ent: true },
+  { label: "Support", solo: "Community", team: "Email", ent: "Slack + SLA" }
+];
+function PCell({ v }) {
+  if (v === true) return /* @__PURE__ */ React.createElement("span", { className: "pcheck" }, /* @__PURE__ */ React.createElement(CheckIcon, null));
+  if (v === false) return /* @__PURE__ */ React.createElement("span", { className: "pdash" }, "\u2013");
+  return /* @__PURE__ */ React.createElement("span", { className: "pval" }, v);
+}
 function Pricing() {
   const [annual, setAnnual] = useState(false);
   const teamPrice = annual ? "$1,000" : "$100";
   const teamPer = annual ? "/ seat / yr" : "/ seat / mo";
-  const teamSub = annual ? "$83 / seat / mo \xB7 save $200" : null;
-  const teamSavings = annual ? "Save $200 \xB7 2 months free" : "7-day free trial";
+  const teamSub = annual ? "$83 / seat / mo \xB7 save $200" : "7-day free trial";
   const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan = annual ? "team_annual" : "team_monthly";
-  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget alerts, and org rollups."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the remediation layer. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => setAnnual((a) => !a),
@@ -546,32 +567,41 @@ function Pricing() {
       transition: "left .2s, background .2s",
       display: "block"
     } })
-  ), /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg)" : "var(--fg-3)", fontWeight: annual ? 500 : 400, transition: "color .15s" } }, "Annual"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 500, color: "var(--success)", background: "rgba(60,186,122,.12)", padding: "2px 7px", borderRadius: 2, letterSpacing: ".03em" } }, "SAVE 17%")))), /* @__PURE__ */ React.createElement("div", { className: "pricing-grid" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-card" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-top" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-name" }, "Solo"), /* @__PURE__ */ React.createElement("div", { className: "pricing-price" }, /* @__PURE__ */ React.createElement("span", { className: "pricing-amount" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pricing-per" }, "forever")), /* @__PURE__ */ React.createElement("p", { className: "pricing-desc" }, "Everything you need to query, investigate, and understand your cloud costs."), /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg)" : "var(--fg-3)", fontWeight: annual ? 500 : 400, transition: "color .15s" } }, "Annual"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 500, color: "var(--success)", background: "rgba(60,186,122,.12)", padding: "2px 7px", borderRadius: 2, letterSpacing: ".03em" } }, "SAVE 17%")))), /* @__PURE__ */ React.createElement("div", { className: "ptable-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ptable" }, /* @__PURE__ */ React.createElement("div", { className: "ph ph-corner" }), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Solo"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "forever")), /* @__PURE__ */ React.createElement(
     "a",
     {
+      className: "btn btn-ghost pt-cta",
       href: "/docs.html",
-      className: "btn btn-ghost pricing-cta",
       onClick: () => {
         if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: "solo" });
       }
     },
-    "Get started free ",
-    /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  )), /* @__PURE__ */ React.createElement("div", { className: "pricing-features" }, SOLO_FEATURES.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "pricing-feature" }, /* @__PURE__ */ React.createElement(CheckIcon, null), /* @__PURE__ */ React.createElement("span", null, f))))), /* @__PURE__ */ React.createElement("div", { className: "pricing-card featured" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-badge" }, teamSavings), /* @__PURE__ */ React.createElement("div", { className: "pricing-top" }, /* @__PURE__ */ React.createElement("div", { className: "pricing-name" }, "Team"), /* @__PURE__ */ React.createElement("div", { className: "pricing-price" }, /* @__PURE__ */ React.createElement("span", { className: "pricing-amount" }, teamPrice), /* @__PURE__ */ React.createElement("span", { className: "pricing-per" }, teamPer)), teamSub && /* @__PURE__ */ React.createElement("p", { style: { fontSize: 12, color: "var(--fg-3)", marginTop: 4, letterSpacing: ".01em" } }, teamSub), /* @__PURE__ */ React.createElement("p", { className: "pricing-desc" }, "The remediation layer. Finds the waste, writes the fix, opens the PR, tracks whether it actually shipped."), /* @__PURE__ */ React.createElement(
+    "Get started"
+  )), /* @__PURE__ */ React.createElement("div", { className: "ph pcol-team" }, /* @__PURE__ */ React.createElement("div", { className: "pt-rec" }, "Recommended"), /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Team"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, teamPrice), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, teamPer)), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, teamSub), /* @__PURE__ */ React.createElement(
     "a",
     {
+      className: "btn btn-primary pt-cta",
       href: teamLink,
       target: "_blank",
       rel: "noopener noreferrer",
-      className: "btn btn-primary pricing-cta",
       onClick: () => {
         if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: teamPlan, billing: annual ? "annual" : "monthly" });
       }
     },
-    annual ? "Get annual plan" : "Start free trial",
-    " ",
-    /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  )), /* @__PURE__ */ React.createElement("div", { className: "pricing-features" }, TEAM_FEATURES.map((f, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "pricing-feature" }, /* @__PURE__ */ React.createElement(CheckIcon, null), /* @__PURE__ */ React.createElement("span", null, f)))))), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 32, fontSize: 12, color: "var(--fg-4)", textAlign: "center", fontFamily: "'Instrument Sans',system-ui,sans-serif" } }, "No credit card for Solo. Team trial requires a card, cancel any time.")));
+    annual ? "Get annual" : "Start free trial"
+  )), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Enterprise"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Custom")), /* @__PURE__ */ React.createElement(
+    "a",
+    {
+      className: "btn btn-ghost pt-cta",
+      href: BOOK_CALL_LINK,
+      target: "_blank",
+      rel: "noopener noreferrer",
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: "enterprise" });
+      }
+    },
+    "Contact us"
+  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.solo })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.team })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Solo. Team trial requires a card, cancel any time.")));
 }
 function MidCta() {
   return /* @__PURE__ */ React.createElement("section", { id: "mid-cta", style: { borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { paddingTop: 72, paddingBottom: 72 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 24, textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { style: { marginBottom: 10 } }, "Ready to stop guessing?"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-2)", maxWidth: "46ch", margin: "0 auto", lineHeight: 1.6 } }, "Minutes from install to your first real insight. Free forever for solo use.")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "center" } }, /* @__PURE__ */ React.createElement(

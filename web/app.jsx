@@ -801,15 +801,40 @@ function CheckIcon(){
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
 const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
 
+const BOOK_CALL_LINK = "https://calendar.app.google/gMwYK6WWB7fKpz2B6";
+
+// Comparison rows. value true -> check, false -> dash, string -> mono text.
+const PRICE_ROWS = [
+  { label: "Seats",                                          solo: "1",         team: "per seat", ent: "unlimited" },
+  { label: "Connectors — AWS, Azure, GCP, 17 sources",       solo: true,        team: true,       ent: true },
+  { label: "Ask your cloud + AI bill in plain English",      solo: true,        team: true,       ent: true },
+  { label: "Anomaly detection",                              solo: true,        team: true,       ent: true },
+  { label: "Rightsizing recommendations",                    solo: true,        team: true,       ent: true },
+  { label: "AI / LLM spend tracking by model",               solo: true,        team: true,       ent: true },
+  { label: "Local-first — keys never leave your machine",    solo: true,        team: true,       ent: true },
+  { label: "Terraform remediation: patch + open the PR",     solo: false,       team: true,       ent: true },
+  { label: "Slack / Teams alerts + weekly digest",           solo: false,       team: true,       ent: true },
+  { label: "Ticket creation (Jira, Linear, GitHub)",         solo: false,       team: true,       ent: true },
+  { label: "Budget alerts + commitment analysis",            solo: false,       team: true,       ent: true },
+  { label: "Team dashboard + Tableau / Power BI",            solo: false,       team: true,       ent: true },
+  { label: "SSO + audit logs",                               solo: false,       team: false,      ent: true },
+  { label: "Support",                                        solo: "Community", team: "Email",     ent: "Slack + SLA" },
+];
+
+function PCell({ v }){
+  if (v === true)  return <span className="pcheck"><CheckIcon /></span>;
+  if (v === false) return <span className="pdash">–</span>;
+  return <span className="pval">{v}</span>;
+}
+
 function Pricing(){
   const [annual, setAnnual] = useState(false);
 
-  const teamPrice    = annual ? "$1,000" : "$100";
-  const teamPer      = annual ? "/ seat / yr" : "/ seat / mo";
-  const teamSub      = annual ? "$83 / seat / mo · save $200" : null;
-  const teamSavings  = annual ? "Save $200 · 2 months free" : "7-day free trial";
-  const teamLink     = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
-  const teamPlan     = annual ? "team_annual" : "team_monthly";
+  const teamPrice = annual ? "$1,000" : "$100";
+  const teamPer   = annual ? "/ seat / yr" : "/ seat / mo";
+  const teamSub   = annual ? "$83 / seat / mo · save $200" : "7-day free trial";
+  const teamLink  = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
+  const teamPlan  = annual ? "team_annual" : "team_monthly";
 
   return (
     <section id="pricing">
@@ -817,7 +842,7 @@ function Pricing(){
         <div className="section-head">
           <div className="label">Pricing</div>
           <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
-          <p>Solo is free forever. Team adds the remediation layer: Terraform PRs, digests, budget alerts, and org rollups.</p>
+          <p>Solo is free forever. Team adds the remediation layer. Enterprise adds SSO, audit logs, and an SLA.</p>
 
           {/* Billing toggle */}
           <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center",marginTop:24}}>
@@ -843,66 +868,46 @@ function Pricing(){
             </span>
           </div>
         </div>
-        <div className="pricing-grid">
 
-          {/* Solo */}
-          <div className="pricing-card">
-            <div className="pricing-top">
-              <div className="pricing-name">Solo</div>
-              <div className="pricing-price">
-                <span className="pricing-amount">Free</span>
-                <span className="pricing-per">forever</span>
-              </div>
-              <p className="pricing-desc">Everything you need to query, investigate, and understand your cloud costs.</p>
-              <a href="/docs.html" className="btn btn-ghost pricing-cta"
-                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'}); }}>
-                Get started free <span className="arr">→</span>
-              </a>
+        <div className="ptable-wrap">
+          <div className="ptable">
+            {/* header row */}
+            <div className="ph ph-corner"></div>
+            <div className="ph">
+              <div className="pt-name">Solo</div>
+              <div className="pt-price"><span className="pt-amt">Free</span><span className="pt-per">forever</span></div>
+              <a className="btn btn-ghost pt-cta" href="/docs.html"
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'}); }}>Get started</a>
             </div>
-            <div className="pricing-features">
-              {SOLO_FEATURES.map((f,i) => (
-                <div key={i} className="pricing-feature">
-                  <CheckIcon />
-                  <span>{f}</span>
-                </div>
-              ))}
+            <div className="ph pcol-team">
+              <div className="pt-rec">Recommended</div>
+              <div className="pt-name">Team</div>
+              <div className="pt-price"><span className="pt-amt">{teamPrice}</span><span className="pt-per">{teamPer}</span></div>
+              <div className="pt-sub">{teamSub}</div>
+              <a className="btn btn-primary pt-cta" href={teamLink} target="_blank" rel="noopener noreferrer"
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:teamPlan,billing:annual?'annual':'monthly'}); }}>
+                {annual ? "Get annual" : "Start free trial"}</a>
             </div>
+            <div className="ph">
+              <div className="pt-name">Enterprise</div>
+              <div className="pt-price"><span className="pt-amt">Custom</span></div>
+              <a className="btn btn-ghost pt-cta" href={BOOK_CALL_LINK} target="_blank" rel="noopener noreferrer"
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'enterprise'}); }}>Contact us</a>
+            </div>
+
+            {/* feature rows */}
+            {PRICE_ROWS.map((r,i) => (
+              <React.Fragment key={i}>
+                <div className="pr pr-label">{r.label}</div>
+                <div className="pr pr-cell"><PCell v={r.solo} /></div>
+                <div className="pr pr-cell pcol-team"><PCell v={r.team} /></div>
+                <div className="pr pr-cell"><PCell v={r.ent} /></div>
+              </React.Fragment>
+            ))}
           </div>
-
-          {/* Team */}
-          <div className="pricing-card featured">
-            <div className="pricing-badge">{teamSavings}</div>
-            <div className="pricing-top">
-              <div className="pricing-name">Team</div>
-              <div className="pricing-price">
-                <span className="pricing-amount">{teamPrice}</span>
-                <span className="pricing-per">{teamPer}</span>
-              </div>
-              {teamSub && <p style={{fontSize:12,color:"var(--fg-3)",marginTop:4,letterSpacing:".01em"}}>{teamSub}</p>}
-              <p className="pricing-desc">The remediation layer. Finds the waste, writes the fix, opens the PR, tracks whether it actually shipped.</p>
-              <a
-                href={teamLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-primary pricing-cta"
-                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:teamPlan,billing:annual?'annual':'monthly'}); }}>
-                {annual ? "Get annual plan" : "Start free trial"} <span className="arr">→</span>
-              </a>
-            </div>
-            <div className="pricing-features">
-              {TEAM_FEATURES.map((f,i) => (
-                <div key={i} className="pricing-feature">
-                  <CheckIcon />
-                  <span>{f}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
         </div>
-        <p style={{marginTop:32,fontSize:12,color:"var(--fg-4)",textAlign:"center",fontFamily:"'Instrument Sans',system-ui,sans-serif"}}>
-          No credit card for Solo. Team trial requires a card, cancel any time.
-        </p>
+
+        <p className="pfoot">No credit card for Solo. Team trial requires a card, cancel any time.</p>
       </div>
     </section>
   );
