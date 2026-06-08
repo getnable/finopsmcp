@@ -533,6 +533,61 @@ function PCell({ v }) {
   if (v === false) return /* @__PURE__ */ React.createElement("span", { className: "pdash" }, "\u2013");
   return /* @__PURE__ */ React.createElement("span", { className: "pval" }, v);
 }
+function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }) {
+  const tiers = [
+    {
+      key: "solo",
+      name: "Solo",
+      price: "Free",
+      per: "forever",
+      sub: null,
+      rec: false,
+      primary: false,
+      cta: "Get started",
+      href: "/docs.html",
+      plan: "solo",
+      ext: false
+    },
+    {
+      key: "team",
+      name: "Team",
+      price: teamPrice,
+      per: teamPer,
+      sub: teamSub,
+      rec: true,
+      primary: true,
+      cta: annual ? "Get annual" : "Start free trial",
+      href: teamLink,
+      plan: teamPlan,
+      ext: true
+    },
+    {
+      key: "ent",
+      name: "Enterprise",
+      price: "Custom",
+      per: "",
+      sub: null,
+      rec: false,
+      primary: false,
+      cta: "Contact us",
+      href: BOOK_CALL_LINK,
+      plan: "enterprise",
+      ext: true
+    }
+  ];
+  return /* @__PURE__ */ React.createElement("div", { className: "pcards" }, tiers.map((t) => /* @__PURE__ */ React.createElement("div", { className: "pcard" + (t.rec ? " pcard-rec" : ""), key: t.key }, t.rec && /* @__PURE__ */ React.createElement("div", { className: "pcard-badge" }, "Recommended"), /* @__PURE__ */ React.createElement("div", { className: "pcard-name" }, t.name), /* @__PURE__ */ React.createElement("div", { className: "pcard-price" }, /* @__PURE__ */ React.createElement("span", { className: "pcard-amt" }, t.price), t.per && /* @__PURE__ */ React.createElement("span", { className: "pcard-per" }, t.per)), t.sub && /* @__PURE__ */ React.createElement("div", { className: "pcard-sub" }, t.sub), /* @__PURE__ */ React.createElement(
+    "a",
+    {
+      className: "btn " + (t.primary ? "btn-primary" : "btn-ghost") + " pcard-cta",
+      href: t.href,
+      ...t.ext ? { target: "_blank", rel: "noopener noreferrer" } : {},
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing_mobile", plan: t.plan, billing: annual ? "annual" : "monthly" });
+      }
+    },
+    t.cta
+  ), /* @__PURE__ */ React.createElement("ul", { className: "pcard-feats" }, PRICE_ROWS.filter((r) => r[t.key] !== false).map((r, i) => /* @__PURE__ */ React.createElement("li", { key: i }, /* @__PURE__ */ React.createElement(CheckIcon, null), /* @__PURE__ */ React.createElement("span", null, r.label, typeof r[t.key] === "string" ? /* @__PURE__ */ React.createElement("em", { className: "pcard-val" }, " \xB7 ", r[t.key]) : null)))))));
+}
 function Pricing() {
   const [annual, setAnnual] = useState(false);
   const teamPrice = annual ? "$1,000" : "$100";
@@ -602,7 +657,7 @@ function Pricing() {
       }
     },
     "Contact us"
-  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.solo })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.team })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Solo. Team trial requires a card, cancel any time.")));
+  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.solo })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.team })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement(PricingCards, { annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Solo. Team trial requires a card, cancel any time.")));
 }
 function MidCta() {
   return /* @__PURE__ */ React.createElement("section", { id: "mid-cta", style: { borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { paddingTop: 72, paddingBottom: 72 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 24, textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { style: { marginBottom: 10 } }, "Ready to stop guessing?"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-2)", maxWidth: "46ch", margin: "0 auto", lineHeight: 1.6 } }, "Minutes from install to your first real insight. Free forever for solo use.")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "center" } }, /* @__PURE__ */ React.createElement(

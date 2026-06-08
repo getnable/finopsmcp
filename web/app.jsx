@@ -832,6 +832,39 @@ function PCell({ v }){
   return <span className="pval">{v}</span>;
 }
 
+// Mobile-only: stack the tiers into cards (the comparison table is unreadable on a phone).
+function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }){
+  const tiers = [
+    { key:"solo", name:"Solo", price:"Free", per:"forever", sub:null, rec:false, primary:false,
+      cta:"Get started", href:"/docs.html", plan:"solo", ext:false },
+    { key:"team", name:"Team", price:teamPrice, per:teamPer, sub:teamSub, rec:true, primary:true,
+      cta:annual?"Get annual":"Start free trial", href:teamLink, plan:teamPlan, ext:true },
+    { key:"ent", name:"Enterprise", price:"Custom", per:"", sub:null, rec:false, primary:false,
+      cta:"Contact us", href:BOOK_CALL_LINK, plan:"enterprise", ext:true },
+  ];
+  return (
+    <div className="pcards">
+      {tiers.map(t => (
+        <div className={"pcard" + (t.rec ? " pcard-rec" : "")} key={t.key}>
+          {t.rec && <div className="pcard-badge">Recommended</div>}
+          <div className="pcard-name">{t.name}</div>
+          <div className="pcard-price"><span className="pcard-amt">{t.price}</span>{t.per && <span className="pcard-per">{t.per}</span>}</div>
+          {t.sub && <div className="pcard-sub">{t.sub}</div>}
+          <a className={"btn " + (t.primary ? "btn-primary" : "btn-ghost") + " pcard-cta"}
+             href={t.href} {...(t.ext ? {target:"_blank", rel:"noopener noreferrer"} : {})}
+             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing_mobile',plan:t.plan,billing:annual?'annual':'monthly'}); }}>
+            {t.cta}</a>
+          <ul className="pcard-feats">
+            {PRICE_ROWS.filter(r => r[t.key] !== false).map((r,i) => (
+              <li key={i}><CheckIcon /><span>{r.label}{typeof r[t.key] === "string" ? <em className="pcard-val"> · {r[t.key]}</em> : null}</span></li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Pricing(){
   const [annual, setAnnual] = useState(false);
 
@@ -911,6 +944,8 @@ function Pricing(){
             ))}
           </div>
         </div>
+
+        <PricingCards annual={annual} teamPrice={teamPrice} teamPer={teamPer} teamSub={teamSub} teamLink={teamLink} teamPlan={teamPlan} />
 
         <p className="pfoot">No credit card for Solo. Team trial requires a card, cancel any time.</p>
       </div>
