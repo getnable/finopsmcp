@@ -687,6 +687,108 @@ function Architecture({ version }){
   );
 }
 
+/* How it works — Connect / Ask / Act */
+const STEPS = [
+  { n:"01", h:"Connect", p:"Point nable at AWS, Azure, GCP and 14 more sources. Credentials land in your OS keyring, never on our servers.", ex:"finops setup aws" },
+  { n:"02", h:"Ask",     p:"Open Claude, Cursor, or any MCP editor and ask in plain English. nable turns the question into live, read-only API calls.", ex:'"What drove our bill up last week?"' },
+  { n:"03", h:"Act",     p:"Approve a rightsizing PR, open a ticket, post to Slack. Answers become actions, every one written to an audit log.", ex:'"Open a PR to downsize the idle instances."' },
+];
+
+function HowItWorks(){
+  return (
+    <section id="how" style={{borderTop:"1px solid var(--line)"}}>
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">How it works</div>
+          <h2>Connect, ask, act.<br/><em>Live in four minutes.</em></h2>
+          <p>No data pipeline. No dashboard to build. A single MCP entry turns any AI editor into a FinOps console.</p>
+        </div>
+        <div className="steps">
+          {STEPS.map((s,i) => (
+            <div className="step" key={i}>
+              <div className="step-n">{s.n}</div>
+              <h3 className="step-h">{s.h}</h3>
+              <p className="step-p">{s.p}</p>
+              <div className="step-ex">{s.ex}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* One entry. Every editor. — tabbed runtime config */
+const EDITOR_TABS = [
+  { id:"terminal", label:"Terminal", bar:"bash", lines:[
+    { k:"cmd", t:"$ uvx --from finops-mcp finops welcome" },
+    { k:"dim", t:"  fetching finops-mcp + a matching python…" },
+    { k:"ok",  t:"✓ runtime registered · ask nable in your editor" },
+  ]},
+  { id:"claude", label:"Claude Desktop", bar:"claude_desktop_config.json", lines:[
+    { k:"p", t:"{" },
+    { k:"p", t:'  "mcpServers": {' },
+    { k:"p", t:'    "nable": {' },
+    { k:"p", t:'      "command": "uvx",' },
+    { k:"p", t:'      "args": ["finops-mcp"]' },
+    { k:"p", t:"    }" },
+    { k:"p", t:"  }" },
+    { k:"p", t:"}" },
+  ]},
+  { id:"cursor", label:"Cursor", bar:"~/.cursor/mcp.json", lines:[
+    { k:"p", t:"{" },
+    { k:"p", t:'  "mcpServers": {' },
+    { k:"p", t:'    "nable": { "command": "uvx", "args": ["finops-mcp"] }' },
+    { k:"p", t:"  }" },
+    { k:"p", t:"}" },
+  ]},
+];
+
+function EveryEditor(){
+  const [tab, setTab] = useState("terminal");
+  const active = EDITOR_TABS.find(t => t.id === tab) || EDITOR_TABS[0];
+  const copy = () => {
+    if(navigator.clipboard) navigator.clipboard.writeText(active.lines.map(l => l.t).join("\n"));
+    if(window.posthog) posthog.capture('cta_clicked',{location:'every_editor',cta:'copy_config',tab});
+  };
+  return (
+    <section id="editors" className="alt" style={{borderTop:"1px solid var(--line)"}}>
+      <div className="wrap">
+        <div className="ee-grid">
+          <div className="ee-left">
+            <div className="label">Runtime</div>
+            <h2>One entry.<br/><em>Every editor.</em></h2>
+            <p className="ee-lede">nable speaks the Model Context Protocol, so the same runtime works in whatever your team already uses. Drop in the config, restart, and ask.</p>
+            <ul className="ee-points">
+              <li><span className="ee-plus">+</span><span>Read-only by default · explicit approval to act</span></li>
+              <li><span className="ee-plus">+</span><span>Credentials in the OS keyring, encrypted at rest</span></li>
+              <li><span className="ee-plus">+</span><span>Zero bytes of billing data leave your machine</span></li>
+            </ul>
+            <div className="ee-runs">RUNS IN <b>CLAUDE</b> · <b>CURSOR</b> · <b>VS CODE</b> · <b>ZED</b> · <b>WINDSURF</b> · <b>CLINE</b></div>
+          </div>
+          <div className="ee-right">
+            <div className="ee-panel">
+              <div className="ee-tabs">
+                {EDITOR_TABS.map(t => (
+                  <button key={t.id} className={"ee-tab" + (t.id===tab ? " on" : "")} onClick={()=>setTab(t.id)}>{t.label}</button>
+                ))}
+              </div>
+              <div className="ee-bar">
+                <span className="ee-dots"><i/><i/><i/></span>
+                <span className="ee-file">{active.bar}</span>
+                <span className="ee-copy" onClick={copy}>copy</span>
+              </div>
+              <pre className="ee-code">{active.lines.map((l,i) => (
+                <div key={i} className={"ee-ln ee-" + l.k}>{l.t}</div>
+              ))}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* Question marquee */
 const QUESTIONS = [
   "What drove our AWS bill up 40% last month?",
@@ -1293,6 +1395,8 @@ function App(){
     <>
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
+      <HowItWorks />
+      <EveryEditor />
       <Depth />
       <Connectors />
       <Architecture version={version} />
