@@ -7413,6 +7413,66 @@ async def get_ai_kpis(
 
 
 @mcp.tool()
+async def optimize_ai_spend(days: int = 30) -> dict:
+    """
+    Ranked, dollar-quantified plan to cut your AI/LLM bill, across OpenAI,
+    Anthropic, AWS Bedrock, Azure OpenAI, and Vertex.
+
+    This is the OpenRouter question answered as analysis, not a proxy: the
+    cheapest way to get the same output. It decomposes spend into its real
+    driver (model choice vs token size vs request volume) and returns the
+    levers ranked by monthly dollars saved:
+
+      - Model routing: move lower-complexity calls to a cheaper sibling model
+        (priced from real input/output ratios, not a guessed percentage)
+      - Prompt caching: raise your Anthropic cache hit rate so repeated input
+        bills at ~10% of price
+      - Output reduction: trim verbose responses (output is the pricier side)
+      - Error reduction: stop paying for failed requests
+      - Model consolidation: collapse model sprawl into clear tiers
+
+    Only levers with a grounded basis carry a savings number; governance levers
+    are listed without inflating the headline. Output-trim savings are skipped
+    for any model that already has a routing recommendation, so nothing is
+    counted twice. nable never sits in your request path; it reads, ranks, and
+    can open the PR.
+
+    Args:
+        days: Lookback window in days (default 30). Savings are normalized to a
+              30-day month.
+
+    Examples:
+        - "How do I cut our AI bill?"
+        - "Where is the waste in our LLM spend?"
+        - "What's the cheapest way to run the same workloads?"
+        - "Optimize our token and model costs."
+    """
+    try:
+        from datetime import date as _date, timedelta
+        ed = _date.today()
+        sd = ed - timedelta(days=days)
+
+        from .connectors.llm_costs import get_all_llm_costs
+        from .connectors.saas.anthropic_usage import get_costs as anthropic_costs, is_configured as anth_configured
+        from .analytics.ai_kpis import full_kpi_report
+        from .analytics.ai_optimizer import build_optimization_plan
+
+        llm_result = get_all_llm_costs(start_date=sd, end_date=ed)
+
+        anthropic_data = None
+        if await anth_configured():
+            try:
+                anthropic_data = anthropic_costs(sd, ed)
+            except Exception as e:
+                log.debug("Anthropic data fetch for optimizer: %s", e)
+
+        kpi = full_kpi_report(llm_costs_result=llm_result, anthropic_data=anthropic_data)
+        return build_optimization_plan(llm_result, kpi, days=days)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def get_llm_unit_economics_full(
     customers: int | None = None,
     mau: int | None = None,
