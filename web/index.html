@@ -448,6 +448,17 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .ee-ln{white-space:pre}
 .ee-cmd{color:var(--fg)}.ee-ok{color:var(--accent)}.ee-dim{color:var(--fg-4)}.ee-p{color:var(--fg-2)}
 @media(max-width:880px){.ee-grid{grid-template-columns:1fr;gap:36px}}
+
+/* AI cost proof panel */
+.aicost-panel{border:1px solid var(--line-2);border-radius:var(--r-xl);background:var(--bg-1);padding:34px 32px;box-shadow:0 32px 80px -32px rgba(0,0,0,.6)}
+.aicost-tag{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-dim);margin-bottom:26px}
+.aicost-big{font-size:clamp(46px,6.5vw,68px);font-weight:300;line-height:1;letter-spacing:-.02em;color:var(--fg)}
+.aicost-big.accent{color:var(--accent)}
+.aicost-unit{font-size:.38em;font-weight:400;color:var(--fg-3);margin-left:4px;letter-spacing:0}
+.aicost-stat p{margin:12px 0 0;color:var(--fg-2);font-size:15px;line-height:1.5;max-width:36ch}
+.aicost-stat p b{color:var(--fg);font-weight:500}
+.aicost-rule{height:1px;background:var(--line);margin:26px 0}
+.aicost-foot{margin-top:26px;font-size:12px;color:var(--fg-3)}
 @media(max-width:880px){.arch-row{grid-template-columns:1fr;gap:12px}.arch-arrow{transform:rotate(90deg);padding:0;min-height:32px}.arch-arrow .line{min-width:40px;width:40px}.arch-col{padding:8px 18px}}
 
 /* question marquee */

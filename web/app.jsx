@@ -244,7 +244,7 @@ function Hero({ layout, interaction }){
               Your cloud and AI bill, answered.
             </h1>
             <p className="lede">
-              Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. nable tracks LLM cost by model, catches anomalies and opens the PR to fix waste. Your token bill keeps climbing even as prices drop. See exactly why. It all runs on your machine, with no vendor holding your data.
+              Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. nable tracks LLM cost by model, catches anomalies, and shows you exactly what to change. Your token bill keeps climbing even as prices drop. See exactly why. It all runs on your machine, with no vendor holding your data.
             </p>
             <InstallRow />
             <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a></p>
@@ -605,8 +605,8 @@ function Depth(){
     {
       n: "03",
       h: "AI spend tracked like a first-class cost.",
-      p: "Bedrock, OpenAI, Anthropic. These don't fit in the usual cost buckets. nable tracks AI spend by model and by team. It spots where expensive models are doing work cheaper ones handle just as well, and flags environments burning AI budget unnecessarily.",
-      chips: ["by model","by team","model routing","AI-native"],
+      p: "Bedrock, OpenAI, Anthropic. These don't fit in the usual cost buckets. nable tracks AI spend by model and by team, so it shows up as a first-class line in every report instead of a mystery lump buried in the bill.",
+      chips: ["by model","by team","first-class","AI-native"],
     },
     {
       n: "04",
@@ -635,6 +635,43 @@ function Depth(){
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* AI cost */
+function AiCost(){
+  return (
+    <section id="ai" className="alt" style={{borderTop:"1px solid var(--line)"}}>
+      <div className="wrap">
+        <div className="ee-grid">
+          <div className="ee-left">
+            <div className="label">Your AI bill</div>
+            <h2>Tools chart your AI spend.<br/><em>nable finds the waste.</em></h2>
+            <p className="ee-lede">Most of an AI bill is input tokens billed at full price, plus calls sent to a frontier model a cheaper one would have answered the same way. nable reads the split from your real usage and shows you the cheapest way to get the same output. No caching guesswork.</p>
+            <ul className="ee-points">
+              <li><span className="ee-plus">+</span><span>Input, output and cache, <b>split from your actual bill</b></span></li>
+              <li><span className="ee-plus">+</span><span>Flags <b>frontier-model calls</b> a cheaper model handles the same</span></li>
+              <li><span className="ee-plus">+</span><span>Separates <b>what you can bank today</b> from what needs a closer look</span></li>
+            </ul>
+          </div>
+          <div className="ee-right">
+            <div className="aicost-panel">
+              <div className="aicost-tag">Real numbers · real dollars · first scan</div>
+              <div className="aicost-stat">
+                <div className="aicost-big">89<span className="aicost-unit">%</span></div>
+                <p>of this Bedrock bill was input tokens, billed at full price with <b>no caching</b></p>
+              </div>
+              <div className="aicost-rule"></div>
+              <div className="aicost-stat">
+                <div className="aicost-big accent">$896<span className="aicost-unit">/mo</span></div>
+                <p>in prompt-caching savings, surfaced on the <b>first scan</b></p>
+              </div>
+              <div className="aicost-foot">Read off a live AWS bill, not a projection.</div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1403,6 +1440,7 @@ function App(){
       <HowItWorks />
       <EveryEditor />
       <Depth />
+      <AiCost />
       <Connectors />
       <Architecture version={version} />
       <Pricing />
