@@ -760,9 +760,9 @@ function EveryEditor(){
             <h2>One entry.<br/><em>Every editor.</em></h2>
             <p className="ee-lede">nable speaks the Model Context Protocol, so the same runtime works in whatever your team already uses. Drop in the config, restart, and ask.</p>
             <ul className="ee-points">
-              <li><span className="ee-plus">+</span><span>Read-only by default · explicit approval to act</span></li>
-              <li><span className="ee-plus">+</span><span>Credentials in the OS keyring, encrypted at rest</span></li>
-              <li><span className="ee-plus">+</span><span>Zero bytes of billing data leave your machine</span></li>
+              <li><span className="ee-plus">+</span><span><b>160+ tools</b> your AI can call, from a cost question to an open PR</span></li>
+              <li><span className="ee-plus">+</span><span>Tracks <b>AI spend by model</b> alongside cloud, Kubernetes, and SaaS</span></li>
+              <li><span className="ee-plus">+</span><span>Real API integrations, with <b>new connectors every month</b></span></li>
             </ul>
             <div className="ee-runs">RUNS IN <b>CLAUDE</b> · <b>CURSOR</b> · <b>VS CODE</b> · <b>ZED</b> · <b>WINDSURF</b> · <b>CLINE</b></div>
           </div>
