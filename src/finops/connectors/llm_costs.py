@@ -43,6 +43,15 @@ _BEDROCK_PRICING: dict[str, dict[str, float]] = {
     "amazon.titan-text-premier-v1:0":            {"input": 0.50,  "output": 1.50},
     "amazon.titan-text-lite-v1":                 {"input": 0.15,  "output": 0.20},
     "amazon.titan-embed-text-v2:0":              {"input": 0.02,  "output": 0.00},
+    # Canonical ids for Bedrock Claude SKU display names. Cost Explorer reports
+    # Bedrock spend as per-model SKUs ("Claude Sonnet 4.5") with no model-id
+    # string, so _normalize_model_id maps them to these keys. Prices mirror
+    # recommendations.bedrock_routing.MODEL_PRICING.
+    "claude-sonnet-4-5":                         {"input": 3.00,  "output": 15.00},
+    "claude-sonnet-4-6":                         {"input": 3.00,  "output": 15.00},
+    "claude-haiku-3-5":                          {"input": 0.80,  "output": 4.00},
+    "claude-haiku-3":                            {"input": 0.25,  "output": 1.25},
+    "claude-opus-4":                             {"input": 15.00, "output": 75.00},
 }
 
 
@@ -127,6 +136,93 @@ def get_bedrock_costs(start_date: date, end_date: date) -> dict[str, Any]:
                       sorted(by_model.items(), key=lambda x: x[1], reverse=True)},
         "daily":     daily,
         "source":    "cost_explorer",
+    }
+
+
+def bedrock_token_cost_split(start_date: date, end_date: date) -> dict[str, Any]:
+    """
+    Split Bedrock spend into input, output, and cache cost from Cost Explorer.
+
+    Bedrock bills each token kind as its own usage type (InputTokenCount,
+    OutputTokenCount, CacheReadInputTokenCount, ...). That split is enough to
+    spot the most common AI waste without any CloudWatch data: an input-heavy
+    bill running with no prompt caching. Cost-only on purpose; per-model token
+    quantities from Cost Explorer are not reliable, but the dollar split is.
+
+    Returns {} when Bedrock is not in use or the query is denied.
+    """
+    try:
+        import boto3
+    except ImportError:
+        return {}
+    try:
+        ce = boto3.client("ce", region_name="us-east-1")
+        period = {"Start": start_date.isoformat(), "End": end_date.isoformat()}
+        discover = ce.get_cost_and_usage(
+            TimePeriod=period, Granularity="MONTHLY",
+            GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}], Metrics=["UnblendedCost"],
+        )
+        services = sorted({
+            g["Keys"][0]
+            for r in discover.get("ResultsByTime", [])
+            for g in r.get("Groups", [])
+            if "bedrock" in g["Keys"][0].lower()
+        })
+        if not services:
+            return {}
+        resp = ce.get_cost_and_usage(
+            TimePeriod=period, Granularity="MONTHLY",
+            Filter={"Dimensions": {"Key": "SERVICE", "Values": services}},
+            GroupBy=[
+                {"Type": "DIMENSION", "Key": "SERVICE"},
+                {"Type": "DIMENSION", "Key": "USAGE_TYPE"},
+            ],
+            Metrics=["UnblendedCost"],
+        )
+    except Exception as e:
+        log.warning("Bedrock token split fetch failed: %s", e)
+        return {}
+
+    buckets = {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0, "other": 0.0}
+    by_model: dict[str, dict[str, float]] = {}
+    for r in resp.get("ResultsByTime", []):
+        for g in r.get("Groups", []):
+            service, ut = g["Keys"][0], g["Keys"][1]
+            amt = float(g["Metrics"]["UnblendedCost"]["Amount"])
+            if amt == 0:
+                continue
+            u = ut.lower()
+            if "cache" in u and "read" in u:
+                kind = "cache_read"
+            elif "cache" in u and ("write" in u or "creat" in u):
+                kind = "cache_write"
+            elif "input" in u:
+                kind = "input"
+            elif "output" in u:
+                kind = "output"
+            else:
+                kind = "other"
+            buckets[kind] += amt
+            model = service.replace(" (Amazon Bedrock Edition)", "").strip() or service
+            m = by_model.setdefault(model, {"input": 0.0, "output": 0.0,
+                                            "cache_read": 0.0, "cache_write": 0.0, "other": 0.0})
+            m[kind] += amt
+
+    total = sum(buckets.values())
+    if total <= 0:
+        return {}
+    cache_cost = buckets["cache_read"] + buckets["cache_write"]
+    return {
+        "input_cost": round(buckets["input"], 2),
+        "output_cost": round(buckets["output"], 2),
+        "cache_read_cost": round(buckets["cache_read"], 2),
+        "cache_write_cost": round(buckets["cache_write"], 2),
+        "other_cost": round(buckets["other"], 2),
+        "total": round(total, 2),
+        "input_share_pct": round(buckets["input"] / total * 100, 1),
+        "output_share_pct": round(buckets["output"] / total * 100, 1),
+        "caching_active": cache_cost > 0,
+        "by_model": {k: {kk: round(vv, 2) for kk, vv in v.items()} for k, v in by_model.items()},
     }
 
 
@@ -278,6 +374,7 @@ def _generate_recommendations(
 
     from .saas.openai_usage import _MODEL_PRICING as OAI_PRICING
     from .saas.anthropic_usage import _MODEL_PRICING as ANT_PRICING
+    from ..recommendations.bedrock_routing import _normalize_model_id
 
     all_pricing = {**OAI_PRICING, **ANT_PRICING, **_BEDROCK_PRICING}
 
@@ -292,6 +389,10 @@ def _generate_recommendations(
         "claude-3-opus-20240229":   "claude-3-5-sonnet-20241022",
         "claude-opus-4-20250514":   "claude-sonnet-4-5-20250929",
         "claude-opus-4-1-20250805": "claude-sonnet-4-5-20250929",
+        # Canonical Bedrock ids (from _normalize_model_id) so Sonnet SKU display
+        # names route to Haiku for lower-complexity tasks.
+        "claude-sonnet-4-5":        "claude-haiku-3-5",
+        "claude-sonnet-4-6":        "claude-haiku-3-5",
         "o1":                       "o3-mini",
     }
 
@@ -304,8 +405,13 @@ def _generate_recommendations(
         # Normalize bedrock/vendor-prefixed ids ("bedrock/anthropic.claude-...")
         # so the match works regardless of provider routing prefix.
         clean = model.split("/")[-1].replace("anthropic.", "").replace("meta.", "").replace("amazon.", "")
+        # Bedrock Cost Explorer reports per-model SKU display names like
+        # "Claude Sonnet 4.5" with no model-id string, so the cleaned id never
+        # matches. Map those to a canonical id ("claude-sonnet-4-5") and match
+        # against both, so model-switch recs fire for Bedrock spend too.
+        canonical = _normalize_model_id(model)
         for expensive, cheaper in downgrades.items():
-            if expensive not in clean:
+            if expensive not in clean and expensive not in canonical:
                 continue
             cur_price, new_price = all_pricing.get(expensive), all_pricing.get(cheaper)
             if not cur_price or not new_price:

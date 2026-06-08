@@ -34,5 +34,28 @@ def test_bedrock_prefixed_id_still_matches():
     assert any("claude-3-5-sonnet" in r["recommendation"] for r in recs)
 
 
+def test_bedrock_sku_display_name_sonnet_to_haiku():
+    # Cost Explorer reports Bedrock spend as SKU display names ("Claude Sonnet
+    # 4.5": spaces + dots, no model-id string). These must normalize to the
+    # canonical id and fire a Sonnet -> Haiku rec for Bedrock-only users.
+    r = _rec_for("Claude Sonnet 4.5", 3224.0)
+    assert r is not None
+    assert "claude-haiku-3-5" in r["recommendation"]
+    # sonnet blended 3+15=18, haiku-3-5 blended 0.8+4=4.8 -> ~73% savings.
+    assert r["estimated_savings_pct"] == "73%"
+    expected = 3224.0 * (1 - 4.8 / 18.0)
+    assert abs(r["estimated_savings_usd"] - expected) < 5.0
+    assert r["estimated_savings_usd"] > 0
+    # Honesty/basis labeling is preserved.
+    assert "price-ratio estimate" in r["basis"]
+
+
+def test_bedrock_sku_display_name_sonnet_4_6_also_matches():
+    r = _rec_for("Claude Sonnet 4.6", 100.0)
+    assert r is not None
+    assert "claude-haiku-3-5" in r["recommendation"]
+    assert r["estimated_savings_usd"] > 0
+
+
 def test_unknown_model_no_crash_no_rec():
     assert _generate_recommendations({"some-unpriced-model-x": 100.0}, {}) == []

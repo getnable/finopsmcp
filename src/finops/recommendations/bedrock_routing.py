@@ -97,22 +97,31 @@ def _parse_model_from_usage_type(usage_type: str) -> str:
 
 
 def _normalize_model_id(raw: str) -> str:
-    """Map a raw CE model string to a canonical MODEL_PRICING key."""
+    """Map a raw model string to a canonical MODEL_PRICING key.
+
+    Handles both CE/Bedrock model ids ("anthropic.claude-3-5-sonnet-20241022")
+    and Cost Explorer SKU display names ("Claude Sonnet 4.5"), where the version
+    is written with spaces and dots instead of dashes.
+    """
     lower = raw.lower()
+    # Collapse spaces and dots to dashes so a SKU display name like
+    # "Claude Sonnet 4.5" compares the same as "claude-sonnet-4-5".
+    canon = lower.replace(" ", "-").replace(".", "-")
     for key in MODEL_PRICING:
-        if key in lower:
+        if key in lower or key in canon:
             return key
-    # Try without date suffix: claude-3-5-sonnet-20241022 -> claude-sonnet-4-5
-    if "sonnet" in lower:
-        if "4-5" in lower or "3-5" in lower:
+    # Fall back to family + version matching for CE usage types that carry a
+    # date suffix and for SKU display names with no embedded model id.
+    if "sonnet" in canon:
+        if "4-5" in canon or "3-5" in canon:
             return "claude-sonnet-4-5"
-        if "4-6" in lower or "claude-3-sonnet" in lower:
+        if "4-6" in canon or "claude-3-sonnet" in canon:
             return "claude-sonnet-4-6"
-    if "haiku" in lower:
-        if "3-5" in lower:
+    if "haiku" in canon:
+        if "3-5" in canon:
             return "claude-haiku-3-5"
         return "claude-haiku-3"
-    if "opus" in lower:
+    if "opus" in canon:
         return "claude-opus-4"
     return raw
 

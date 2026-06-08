@@ -96,9 +96,23 @@ def _target_model(rec_text: str) -> str | None:
     return after.split(" for ", 1)[0].strip() or None
 
 
+def _is_tier_down(target: str | None) -> bool:
+    """A move to a materially weaker model (real quality tradeoff, only for simple
+    tasks), as opposed to a near-equivalent sibling swap."""
+    if not target:
+        return False
+    t = target.lower()
+    return any(k in t for k in ("haiku", "mini", "micro", "nano", "lite", "flash"))
+
+
 def _routing_lever(llm: dict[str, Any], days: int) -> tuple[dict | None, list[dict]]:
     """Build the model-routing lever and a per-model routing table from the
-    already dollar-quantified recommendations in the cost breakdown."""
+    dollar-quantified recommendations in the cost breakdown.
+
+    These savings are a CEILING: they assume every eligible lower-complexity call
+    moves to the cheaper model. We do not know the eligible fraction without a
+    per-call task analysis, so this lever is low confidence and is reported as
+    upside, not as a realizable headline number."""
     recs = llm.get("recommendations") or []
     eff = llm.get("model_efficiency") or []
     provider_of = {e.get("model"): e.get("provider") for e in eff}
@@ -110,19 +124,20 @@ def _routing_lever(llm: dict[str, Any], days: int) -> tuple[dict | None, list[di
         if save <= 0:
             continue
         period_savings += save
+        target = _target_model(r.get("recommendation", ""))
         table.append({
             "model": r.get("model"),
             "provider": provider_of.get(r.get("model")),
             "current_monthly_usd": round(_monthly(float(r.get("current_spend") or 0.0), days), 2),
-            "recommended_model": _target_model(r.get("recommendation", "")),
-            "monthly_savings_usd": round(_monthly(save, days), 2),
-            "quality_risk": "low",
+            "recommended_model": target,
+            "monthly_savings_usd_ceiling": round(_monthly(save, days), 2),
+            "quality_risk": "medium" if _is_tier_down(target) else "low",
         })
 
     if not table:
         return None, []
 
-    table.sort(key=lambda t: t["monthly_savings_usd"], reverse=True)
+    table.sort(key=lambda t: t["monthly_savings_usd_ceiling"], reverse=True)
     monthly = round(_monthly(period_savings, days), 2)
     swaps = ", ".join(
         f"{t['model']} to {t['recommended_model']}"
@@ -130,14 +145,16 @@ def _routing_lever(llm: dict[str, Any], days: int) -> tuple[dict | None, list[di
     )
     lever = {
         "category": "model_routing",
-        "title": f"Route {len(table)} workload(s) to cheaper models",
+        "title": "Route eligible lower-complexity calls to cheaper models (savings ceiling)",
         "monthly_savings_usd": monthly,
-        "confidence": "high",
-        "action": f"Move lower-complexity calls off premium models: {swaps}." if swaps
-                  else "Move lower-complexity calls to the cheaper sibling model in each pair.",
-        "basis": "Blended input+output price ratios between the current and cheaper model. "
-                 "Actual savings track your input/output mix.",
+        "confidence": "low",
+        "action": f"Some calls to {swaps} may be simple enough for the cheaper model. " if swaps
+                  else "Some calls may be simple enough for the cheaper sibling model. ",
+        "basis": "Ceiling only: assumes every eligible call moves. Not all calls qualify, so the "
+                 "real figure is lower. Run recommend_bedrock_model_routing (or classify your "
+                 "call sites) to size the eligible share.",
     }
+    lever["action"] += "Run recommend_bedrock_model_routing to size the eligible share."
     return lever, table
 
 
@@ -268,7 +285,48 @@ def _bedrock_audit_lever(llm: dict[str, Any], routed_models: set) -> dict | None
     }
 
 
-def _spend_shape(llm: dict[str, Any], kpi: dict[str, Any]) -> dict[str, Any]:
+def _bedrock_caching_lever(bedrock_split: dict[str, Any] | None, days: int) -> dict | None:
+    """Bedrock bills input tokens as their own usage type, so Cost Explorer alone
+    shows whether a bill is input-heavy and whether any caching is in use. An
+    input-heavy, uncached bill is the most common large AI saving and needs no
+    CloudWatch. We size it conservatively and label the assumption."""
+    if not bedrock_split:
+        return None
+    inp = float(bedrock_split.get("input_cost", 0.0) or 0.0)
+    if inp <= 1.0:
+        return None
+    share = bedrock_split.get("input_share_pct")
+    caching = bedrock_split.get("caching_active", False)
+    if caching:
+        return {
+            "category": "prompt_caching",
+            "title": "Increase Bedrock cache coverage",
+            "monthly_savings_usd": None,
+            "confidence": "low",
+            "action": "Caching is already on. Widen cache_control to more of your static context "
+                      "(system prompts, retrieved chunks) to raise the share billed at ~10%.",
+            "basis": "Some cache usage is present; the remaining uncached input is the upside, "
+                     "not directly sized here.",
+        }
+    # 30% conservative cacheable share; cache reads cost about 10% of input, so ~90% off.
+    period_savings = inp * 0.30 * _CACHE_SAVINGS_FRACTION
+    monthly = round(_monthly(period_savings, days), 2)
+    share_txt = f"{share:.0f}% of your Bedrock bill" if share is not None else "most of your Bedrock bill"
+    return {
+        "category": "prompt_caching",
+        "title": f"Enable Bedrock prompt caching (input is {share_txt}, currently uncached)",
+        "monthly_savings_usd": monthly,
+        "confidence": "medium",
+        "action": "Add cache_control to your repeated context (system prompts, retrieved chunks, "
+                  "few-shot examples). Cached input bills at about 10% of the input price.",
+        "basis": "Cost Explorer shows the bill is input-heavy with no cache usage type. Estimate "
+                 "assumes 30% of input is static and cacheable; the upside is higher if more of "
+                 "your context repeats.",
+    }
+
+
+def _spend_shape(llm: dict[str, Any], kpi: dict[str, Any],
+                 bedrock_split: dict[str, Any] | None = None) -> dict[str, Any]:
     by_model = llm.get("by_model", {}) or {}
     total = sum(by_model.values()) or float(llm.get("total_usd", 0.0) or 0.0)
     premium = sum(v for m, v in by_model.items() if _is_premium(m))
@@ -284,10 +342,19 @@ def _spend_shape(llm: dict[str, Any], kpi: dict[str, Any]) -> dict[str, Any]:
 
     hit = (kpi.get("cache_hit_rate") or {}).get("hit_rate_pct")
 
+    # Bedrock gives an input/output cost split from Cost Explorer alone, which is
+    # more reliable than token volume for spotting the input-heavy uncached case.
+    bedrock_in_pct = bedrock_split.get("input_share_pct") if bedrock_split else None
+    bedrock_uncached = bool(bedrock_split) and not bedrock_split.get("caching_active", False)
+
     if premium_pct >= 55:
         driver = "model_choice"
         headline = (f"{premium_pct:.0f}% of the bill is premium-tier models. The biggest lever "
                     "is routing simpler tasks to cheaper models.")
+    elif bedrock_in_pct is not None and bedrock_in_pct >= 60 and bedrock_uncached:
+        driver = "input_tokens_uncached"
+        headline = (f"Input is {bedrock_in_pct:.0f}% of your Bedrock bill and none of it is cached. "
+                    "The biggest lever is prompt caching on your repeated context.")
     elif out_pct is not None and out_pct >= 55:
         driver = "output_tokens"
         headline = (f"Output is {out_pct:.0f}% of token volume and the pricier side. The biggest "
@@ -310,8 +377,9 @@ def _spend_shape(llm: dict[str, Any], kpi: dict[str, Any]) -> dict[str, Any]:
         "premium_model_share_pct": premium_pct,
         "downgradeable_tier_share_pct": downgradeable_pct,
         "output_token_share_pct": out_pct,
+        "bedrock_input_cost_share_pct": bedrock_in_pct,
     }
-    if out_pct is None:
+    if out_pct is None and bedrock_in_pct is None:
         shape["note"] = ("Token-level split is unavailable. Connect an Anthropic or OpenAI admin "
                          "key for input/output and cache analysis.")
     return shape
@@ -321,6 +389,7 @@ def build_optimization_plan(
     llm_costs_result: dict[str, Any],
     kpi_report: dict[str, Any] | None = None,
     days: int = 30,
+    bedrock_split: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the ranked AI cost optimization plan.
 
@@ -332,6 +401,9 @@ def build_optimization_plan(
         Output of ``full_kpi_report``. Optional; routing still works without it.
     days:
         Lookback window the inputs cover, used to normalize savings to a month.
+    bedrock_split:
+        Output of ``bedrock_token_cost_split``. Optional; adds the input-heavy
+        uncached caching lever and a more reliable spend-shape driver for Bedrock.
     """
     kpi_report = kpi_report or {}
     total = float(llm_costs_result.get("total_usd", 0.0) or 0.0)
@@ -361,6 +433,7 @@ def build_optimization_plan(
     if routing_lever:
         levers.append(routing_lever)
     for lever in (
+        _bedrock_caching_lever(bedrock_split, days),
         _bedrock_audit_lever(llm_costs_result, routed_models),
         _caching_lever(kpi_report, llm_costs_result, days),
         _output_lever(kpi_report, llm_costs_result, days, routed_models),
@@ -372,20 +445,33 @@ def build_optimization_plan(
 
     def _sort_key(l: dict):
         s = l.get("monthly_savings_usd")
+        conf = _CONFIDENCE_RANK.get(l.get("confidence", "low"), 3)
         if s is None:
-            return (1, _CONFIDENCE_RANK.get(l.get("confidence", "low"), 3), 0.0)
-        return (0, 0, -s)
+            return (1, conf, 0.0)
+        # Dollar levers first, ranked by confidence (realizable before ceilings),
+        # then by size within the same confidence.
+        return (0, conf, -s)
 
     levers.sort(key=_sort_key)
 
+    # Realizable headline: only medium and high confidence dollar levers. Low
+    # confidence levers (routing ceilings) are reported separately as upside so
+    # the headline is never inflated by a number we cannot stand behind.
     addressable = round(sum(
         l["monthly_savings_usd"] for l in levers
         if l.get("monthly_savings_usd") is not None
+        and l.get("confidence") in ("high", "medium")
+    ), 2)
+    potential_upside = round(sum(
+        l["monthly_savings_usd"] for l in levers
+        if l.get("monthly_savings_usd") is not None
+        and l.get("confidence") == "low"
     ), 2)
 
     notes = [
-        "Savings are independent estimates. Caching and routing can overlap on the same "
-        "model, so treat the total as a directional ceiling, not a guarantee.",
+        "Two numbers on purpose: addressable savings are the levers we can stand behind "
+        "(caching, measured error spend). Potential upside is routing ceilings that assume "
+        "eligible calls move, which needs a per-call check before you bank it.",
     ]
 
     return {
@@ -394,7 +480,8 @@ def build_optimization_plan(
         "ai_spend_monthly_usd": monthly_total,
         "addressable_savings_monthly_usd": addressable,
         "addressable_savings_pct": round(addressable / monthly_total * 100, 1) if monthly_total else 0.0,
-        "spend_shape": _spend_shape(llm_costs_result, kpi_report),
+        "potential_upside_monthly_usd": potential_upside,
+        "spend_shape": _spend_shape(llm_costs_result, kpi_report, bedrock_split),
         "levers": levers,
         "routing_table": routing_table,
         "top_3": [l["title"] for l in levers[:3]],

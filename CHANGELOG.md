@@ -2,6 +2,25 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.55
+
+### Changed
+- **`optimize_ai_spend` separates realizable savings from routing ceilings.** The
+  headline `addressable_savings` counts only levers we can stand behind (prompt
+  caching, measured error spend). Model-routing downgrades (Sonnet to Haiku and
+  the like) are reported as `potential_upside`, clearly labeled as a ceiling that
+  assumes eligible calls move, with a pointer to the per-function analyzer. No
+  more inflated headline number.
+
+### Added
+- **Bedrock input/output/cache cost split from Cost Explorer.** `optimize_ai_spend`
+  now spots the most common AI waste with no CloudWatch needed: an input-heavy
+  Bedrock bill running with no prompt caching. It quantifies the caching
+  opportunity and flips the spend-shape driver to caching when input dominates.
+- **Bedrock SKU display names fire model-switch recommendations.** Cost Explorer
+  reports Bedrock spend as names like "Claude Sonnet 4.5"; these now normalize to
+  canonical model ids so Sonnet to Haiku recs work for Bedrock-only users.
+
 ## 0.8.54
 
 ### Added
