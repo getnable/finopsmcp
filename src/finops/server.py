@@ -7452,7 +7452,7 @@ async def optimize_ai_spend(days: int = 30) -> dict:
         ed = _date.today()
         sd = ed - timedelta(days=days)
 
-        from .connectors.llm_costs import get_all_llm_costs
+        from .connectors.llm_costs import get_all_llm_costs, bedrock_token_cost_split
         from .connectors.saas.anthropic_usage import get_costs as anthropic_costs, is_configured as anth_configured
         from .analytics.ai_kpis import full_kpi_report
         from .analytics.ai_optimizer import build_optimization_plan
@@ -7466,8 +7466,15 @@ async def optimize_ai_spend(days: int = 30) -> dict:
             except Exception as e:
                 log.debug("Anthropic data fetch for optimizer: %s", e)
 
+        # Bedrock input/output/cache cost split from Cost Explorer (best effort).
+        try:
+            bedrock_split = bedrock_token_cost_split(sd, ed)
+        except Exception as e:
+            log.debug("Bedrock token split for optimizer: %s", e)
+            bedrock_split = None
+
         kpi = full_kpi_report(llm_costs_result=llm_result, anthropic_data=anthropic_data)
-        return build_optimization_plan(llm_result, kpi, days=days)
+        return build_optimization_plan(llm_result, kpi, days=days, bedrock_split=bedrock_split)
     except Exception as e:
         return {"error": str(e)}
 

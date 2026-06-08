@@ -58,7 +58,7 @@ def _kpi():
     }
 
 
-def test_plan_ranks_levers_and_totals_only_grounded_numbers():
+def test_routing_ceiling_is_upside_not_addressable():
     plan = build_optimization_plan(_llm(), _kpi(), days=30)
 
     cats = [l["category"] for l in plan["levers"]]
@@ -66,20 +66,22 @@ def test_plan_ranks_levers_and_totals_only_grounded_numbers():
     assert "prompt_caching" in cats
     assert "error_reduction" in cats
 
-    # Routing is the biggest lever (538/mo) and must sort first.
-    assert plan["levers"][0]["category"] == "model_routing"
-    assert plan["levers"][0]["monthly_savings_usd"] == 538.0
+    routing = next(l for l in plan["levers"] if l["category"] == "model_routing")
+    # Routing is a ceiling: low confidence, reported as upside, never in the headline.
+    assert routing["confidence"] == "low"
+    assert routing["monthly_savings_usd"] == 538.0
+    assert plan["potential_upside_monthly_usd"] == 538.0
 
-    # Levers with a dollar value come before the null-savings governance lever.
-    savings = [l.get("monthly_savings_usd") for l in plan["levers"]]
-    numeric = [s for s in savings if s is not None]
-    assert savings[: len(numeric)] == numeric  # all numerics first
-    assert numeric == sorted(numeric, reverse=True)
+    # Addressable = only the realizable medium/high levers (caching 27 + error 50).
+    assert plan["addressable_savings_monthly_usd"] == 77.0
+    assert plan["addressable_savings_monthly_usd"] < routing["monthly_savings_usd"]
 
-    # Addressable total only sums grounded levers and is >= the routing+error floor.
-    assert plan["addressable_savings_monthly_usd"] >= 538.0 + 50.0
-    # Sprawl lever has no number, so it cannot be in the total.
-    assert plan["addressable_savings_monthly_usd"] == round(sum(numeric), 2)
+    # Realizable dollar levers rank ahead of the ceiling.
+    first = plan["levers"][0]
+    assert first["confidence"] in ("high", "medium")
+    idx = {l["category"]: i for i, l in enumerate(plan["levers"])}
+    assert idx["error_reduction"] < idx["model_routing"]
+    assert idx["prompt_caching"] < idx["model_routing"]
 
 
 def test_output_trim_skipped_for_routed_models_no_double_count():
@@ -131,6 +133,51 @@ def test_bedrock_sku_named_sonnet_gets_audit_lever_no_invented_dollars():
     # Spend shape should call out model choice, not "mixed".
     assert plan["spend_shape"]["primary_driver"] == "model_choice"
     assert plan["spend_shape"]["downgradeable_tier_share_pct"] == 100.0
+
+
+def test_bedrock_input_heavy_uncached_gets_quantified_caching_lever():
+    # Mirrors the real account: 88% input, no cache usage, SKU-named models.
+    llm = {
+        "total_usd": 2845.0,
+        "by_provider": {"bedrock": 2845.0},
+        "by_model": {"Claude Sonnet 4.5": 2499.0, "Claude Sonnet 4.6": 346.0},
+        "daily": [], "model_efficiency": [], "top_spenders": [], "recommendations": [],
+    }
+    bedrock_split = {
+        "input_cost": 2514.0, "output_cost": 331.0,
+        "cache_read_cost": 0.0, "cache_write_cost": 0.0, "other_cost": 0.0,
+        "total": 2845.0, "input_share_pct": 88.4, "output_share_pct": 11.6,
+        "caching_active": False, "by_model": {},
+    }
+    plan = build_optimization_plan(llm, {}, days=30, bedrock_split=bedrock_split)
+
+    caching = [l for l in plan["levers"] if l["category"] == "prompt_caching"]
+    assert len(caching) == 1
+    lever = caching[0]
+    # A real, conservative number now appears (30% of input at ~90% off).
+    assert lever["monthly_savings_usd"] == round(2514.0 * 0.30 * 0.9, 2)
+    assert lever["confidence"] == "medium"
+    assert plan["addressable_savings_monthly_usd"] >= 600.0
+    # Spend shape should call out the input-heavy uncached driver.
+    assert plan["spend_shape"]["primary_driver"] == "input_tokens_uncached"
+    assert plan["spend_shape"]["bedrock_input_cost_share_pct"] == 88.4
+    # The caching lever (with a dollar value) outranks the no-dollar audit lever.
+    assert plan["levers"][0]["category"] == "prompt_caching"
+
+
+def test_bedrock_caching_skipped_when_already_caching():
+    llm = {"total_usd": 1000.0, "by_provider": {"bedrock": 1000.0},
+           "by_model": {"Claude Sonnet 4.5": 1000.0}, "daily": [],
+           "model_efficiency": [], "top_spenders": [], "recommendations": []}
+    bedrock_split = {"input_cost": 700.0, "output_cost": 100.0, "cache_read_cost": 200.0,
+                     "cache_write_cost": 0.0, "other_cost": 0.0, "total": 1000.0,
+                     "input_share_pct": 70.0, "output_share_pct": 10.0,
+                     "caching_active": True, "by_model": {}}
+    plan = build_optimization_plan(llm, {}, days=30, bedrock_split=bedrock_split)
+    caching = [l for l in plan["levers"] if l["category"] == "prompt_caching"]
+    # Already caching: no invented dollar figure, low-confidence widen-coverage note only.
+    assert len(caching) == 1
+    assert caching[0]["monthly_savings_usd"] is None
 
 
 def test_no_spend_returns_connect_prompt():
