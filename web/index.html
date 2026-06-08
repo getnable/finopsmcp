@@ -422,7 +422,11 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .ee-grid{display:grid;grid-template-columns:1fr 1.1fr;gap:56px;align-items:center}
 .ee-left,.ee-right{min-width:0}
 .ee-panel{max-width:100%}
-.ee-left h2{margin:0}
+.ee-left .label{font-family:'Space Grotesk',system-ui,sans-serif;font-size:11px;font-weight:500;color:var(--accent-dim);letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;gap:10px;margin-bottom:18px}
+.ee-left .label::before{content:"";width:24px;height:1px;background:var(--accent-dim)}
+.ee-left h2{font-size:clamp(36px,4.4vw,56px);line-height:1.04;letter-spacing:-.035em;font-weight:300;margin:0}
+.ee-left h2 em{font-style:italic;font-weight:400;color:var(--accent)}
+.ee-points b{color:var(--fg);font-weight:500}
 .ee-lede{margin-top:24px;font-size:16px;color:var(--fg-2);line-height:1.6;max-width:42ch}
 .ee-points{list-style:none;margin:28px 0 0;padding:0;display:flex;flex-direction:column;gap:13px}
 .ee-points li{display:flex;align-items:flex-start;gap:12px;font-size:14px;color:var(--fg-2);line-height:1.5}
