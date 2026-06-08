@@ -2,6 +2,23 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.54
+
+### Added
+- **`optimize_ai_spend`: a ranked, dollar-quantified plan to cut your AI bill.**
+  Fuses cross-provider LLM costs (OpenAI, Anthropic, Bedrock, Azure OpenAI,
+  Vertex) with the AI KPI report into one ranked set of levers: model routing,
+  prompt caching, output reduction, error reduction, and model consolidation.
+  Only levers with a grounded basis carry a dollar figure, governance levers are
+  listed without inflating the headline, and output-trim savings are skipped for
+  any model that already has a routing rec so nothing double-counts. It also
+  decomposes spend into its real driver: model choice, token size, or request
+  volume. Read-only intelligence, never a runtime proxy.
+- **nable is now a Claude Code plugin.** Run `/plugin marketplace add chaandannn/finopsmcp`
+  then `/plugin install nable@nable` to register the MCP server with no
+  hand-edited config. Ships a `/nable:connect` command that connects a cloud
+  account and shows your first cost number inside the editor.
+
 ## 0.8.53
 
 ### Changed
