@@ -11,6 +11,16 @@ Local-first FinOps, installed as a Claude Code plugin. Ask your AWS, Azure, GCP,
 
 That registers the `nable` MCP server (`uvx finops-mcp`). Restart Claude Code if prompted, then ask a cost question.
 
+## Guided connect
+
+After installing, run the bundled command to connect a cloud account and see your first cost number without leaving the editor:
+
+```
+/nable:connect
+```
+
+It checks what nable can already see (AWS often works with zero setup, it reuses your existing credential chain), shows your spend if you are connected, and gives you the exact terminal command if you are not.
+
 ## Connect your cloud
 
 The plugin wires up the runtime. To link your accounts and see your first cost number, run the setup wizard once:
