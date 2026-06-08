@@ -409,6 +409,40 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .logo-marquee .logo-img.is-icon{height:40px}
 @keyframes logomarq{from{transform:translateX(0)}to{transform:translateX(-33.333%)}}
 @media(prefers-reduced-motion:reduce){.arch-arrow .line::after{animation:none;left:42%;opacity:.7}.logo-track{animation:none}}
+/* How it works — steps */
+.steps{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border:1px solid var(--line);border-radius:var(--r-xl);overflow:hidden;margin-top:44px;background:var(--bg-1)}
+.step{padding:34px 30px 30px;border-right:1px solid var(--line);display:flex;flex-direction:column}
+.step:last-child{border-right:0}
+.step-n{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;color:var(--accent);letter-spacing:.05em;margin-bottom:22px}
+.step-h{font-size:23px;font-weight:500;color:var(--fg);letter-spacing:-.02em;margin:0 0 12px}
+.step-p{font-size:14px;color:var(--fg-2);line-height:1.6;flex:1;margin:0 0 26px}
+.step-ex{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:12px;color:var(--fg-3);padding-top:18px;border-top:1px dashed var(--line-2)}
+@media(max-width:760px){.steps{grid-template-columns:1fr}.step{border-right:0;border-bottom:1px solid var(--line)}.step:last-child{border-bottom:0}}
+/* One entry / every editor */
+.ee-grid{display:grid;grid-template-columns:1fr 1.1fr;gap:56px;align-items:center}
+.ee-left,.ee-right{min-width:0}
+.ee-panel{max-width:100%}
+.ee-left h2{margin:0}
+.ee-lede{margin-top:24px;font-size:16px;color:var(--fg-2);line-height:1.6;max-width:42ch}
+.ee-points{list-style:none;margin:28px 0 0;padding:0;display:flex;flex-direction:column;gap:13px}
+.ee-points li{display:flex;align-items:flex-start;gap:12px;font-size:14px;color:var(--fg-2);line-height:1.5}
+.ee-plus{color:var(--accent);font-family:'Geist Mono','JetBrains Mono',monospace;flex:none}
+.ee-runs{margin-top:32px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11px;color:var(--fg-3);letter-spacing:.06em}
+.ee-runs b{color:var(--fg-2);font-weight:500}
+.ee-panel{border:1px solid var(--line-2);border-radius:var(--r-xl);overflow:hidden;background:var(--bg-1);box-shadow:0 32px 80px -32px rgba(0,0,0,.6)}
+.ee-tabs{display:flex;gap:4px;padding:8px 8px 0;background:var(--bg-2);border-bottom:1px solid var(--line)}
+.ee-tab{background:none;border:none;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:12px;color:var(--fg-3);padding:9px 14px;cursor:pointer;border-radius:6px 6px 0 0;transition:.15s}
+.ee-tab.on{background:var(--bg-1);color:var(--fg)}
+.ee-tab:hover:not(.on){color:var(--fg-2)}
+.ee-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11px;color:var(--fg-3)}
+.ee-dots{display:flex;gap:6px}.ee-dots i{width:8px;height:8px;border-radius:50%;background:var(--line-2);display:inline-block}
+.ee-file{color:var(--fg-3)}
+.ee-copy{margin-left:auto;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);cursor:pointer;border:1px solid var(--line);border-radius:var(--r-xs);padding:3px 8px;transition:.15s}
+.ee-copy:hover{color:var(--fg);border-color:var(--line-2)}
+.ee-code{margin:0;padding:22px 20px;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;line-height:1.95;overflow-x:auto}
+.ee-ln{white-space:pre}
+.ee-cmd{color:var(--fg)}.ee-ok{color:var(--accent)}.ee-dim{color:var(--fg-4)}.ee-p{color:var(--fg-2)}
+@media(max-width:880px){.ee-grid{grid-template-columns:1fr;gap:36px}}
 @media(max-width:880px){.arch-row{grid-template-columns:1fr;gap:12px}.arch-arrow{transform:rotate(90deg);padding:0;min-height:32px}.arch-arrow .line{min-width:40px;width:40px}.arch-col{padding:8px 18px}}
 
 /* question marquee */
