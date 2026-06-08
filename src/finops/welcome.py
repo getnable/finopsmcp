@@ -198,15 +198,29 @@ def _show_value_moment(demo: bool = False) -> None:
         from . import server  # heavy import, only at the value-moment step
 
         async def _run():
-            summary = await server.get_cost_summary()
-            idle = None
-            try:
-                idle = await asyncio.wait_for(server.list_idle_resources(), timeout=12)
-            except Exception:
-                idle = None
-            return summary, idle
+            async def _idle():
+                try:
+                    return await asyncio.wait_for(server.list_idle_resources(), timeout=12)
+                except Exception:
+                    return None
 
-        summary, idle = asyncio.run(asyncio.wait_for(_run(), timeout=30))
+            async def _ai():
+                try:
+                    return await asyncio.wait_for(server.optimize_ai_spend(), timeout=18)
+                except Exception:
+                    return None
+
+            # Run the scans concurrently so the AI optimizer adds no latency.
+            summary, idle, ai_plan = await asyncio.gather(
+                server.get_cost_summary(), _idle(), _ai(), return_exceptions=True,
+            )
+            return (
+                None if isinstance(summary, Exception) else summary,
+                None if isinstance(idle, Exception) else idle,
+                None if isinstance(ai_plan, Exception) else ai_plan,
+            )
+
+        summary, idle, ai_plan = asyncio.run(asyncio.wait_for(_run(), timeout=35))
     except Exception:
         return  # never block setup
 
@@ -238,6 +252,12 @@ def _show_value_moment(demo: bool = False) -> None:
         waste = idle.get("total_monthly_waste_usd") or 0
         if waste and waste >= 1:
             _line(f"  {dim('Idle / wasted')}    {amber('$' + format(waste, ',.0f') + '/mo')}  {dim('doing nothing')}")
+    # Realizable AI savings (e.g. prompt caching). Only the addressable figure,
+    # never the labeled routing ceiling, so onboarding never overpromises.
+    if isinstance(ai_plan, dict) and not ai_plan.get("error"):
+        ai_save = ai_plan.get("addressable_savings_monthly_usd") or 0
+        if ai_save and ai_save >= 10:
+            _line(f"  {dim('AI savings')}       {green('$' + format(ai_save, ',.0f') + '/mo')}  {dim('ready to capture')}")
     _blank()
 
 
