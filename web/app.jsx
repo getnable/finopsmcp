@@ -643,6 +643,10 @@ function Depth(){
 
 /* AI cost */
 function AiCost(){
+  const copy = () => {
+    if(navigator.clipboard) navigator.clipboard.writeText("uvx --from finops-mcp finops welcome");
+    if(window.posthog) posthog.capture('cta_clicked',{location:'ai_cost',cta:'copy_install'});
+  };
   return (
     <section id="ai" className="alt" style={{borderTop:"1px solid var(--line)"}}>
       <div className="wrap">
@@ -666,10 +670,14 @@ function AiCost(){
               </div>
               <div className="aicost-rule"></div>
               <div className="aicost-stat">
-                <div className="aicost-big accent">$896<span className="aicost-unit">/mo</span></div>
-                <p>in prompt-caching savings, surfaced on the <b>first scan</b></p>
+                <div className="aicost-big accent">$10.7k<span className="aicost-unit">/yr</span></div>
+                <p><b>= $896/mo</b> in prompt-caching savings, about a quarter of the AI bill, on the first scan</p>
               </div>
               <div className="aicost-foot">Read off a live AWS bill, not a projection.</div>
+              <div className="aicost-cta">
+                <span className="aicost-cta-l">Ours is a small bill. See your own number, free:</span>
+                <code className="aicost-cmd" onClick={copy}>uvx --from finops-mcp finops welcome</code>
+              </div>
             </div>
           </div>
         </div>
