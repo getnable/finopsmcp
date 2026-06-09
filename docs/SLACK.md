@@ -32,6 +32,16 @@ previews: a card shows what would change (files, estimated savings) and a human
 with the analyst role or above must click Approve before anything is filed or
 opened. Approval cards expire after 24 hours.
 
+Two safety defaults to know:
+
+- Drafting is off until you enable `FINOPS_REQUIRE_AUTH=1`. Without real
+  authentication every Slack user is an admin, which would let anyone draft
+  and approve their own action. Solo operators can opt in instead with
+  `FINOPS_SLACK_ALLOW_REMEDIATION=1`.
+- The person who requested an action cannot approve it. A teammate has to
+  click Approve. Solo operators can allow self-approval with
+  `FINOPS_ALLOW_SELF_APPROVE=1`.
+
 ```
 @nable draft a ticket for the top rightsizing recommendation
 @nable open a PR to right-size the staging RDS instances
@@ -96,7 +106,9 @@ prompt are prompt-cached, so repeat questions cost a fraction of the first.
 | `SLACK_ALERT_CHANNEL` | Where anomaly and budget alerts post |
 | `FINOPS_TF_DIR` | Terraform directory for rightsizing PRs |
 | `GITHUB_FINOPS_TF_REPO` | org/repo the rightsizing PR targets |
-| `FINOPS_REQUIRE_AUTH` | Set to 1 to enforce roles by Slack email |
+| `FINOPS_REQUIRE_AUTH` | Set to 1 to enforce roles by Slack email. Also unlocks remediation drafting |
+| `FINOPS_SLACK_ALLOW_REMEDIATION` | Set to 1 to allow drafting without auth (solo use) |
+| `FINOPS_ALLOW_SELF_APPROVE` | Set to 1 to let the requester approve their own action (solo use) |
 | `FINOPS_QUERY_TIMEOUT` | Seconds before a question is cut off (default 60) |
 | `FINOPS_RCA_TIMEOUT` | Seconds for investigations (default 150) |
 | `FINOPS_MAX_TOOL_CALLS` | Tool call budget per question (default 12) |

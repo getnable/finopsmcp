@@ -33,6 +33,17 @@ All notable changes to finops-mcp (nable).
   credentials in the OS-keyring vault, and the bot loads them from the vault
   at startup. No .env file required.
 
+### Security
+- **Remediation drafting requires real authentication.** With
+  FINOPS_REQUIRE_AUTH off, every Slack user resolves to admin, which would
+  have let anyone draft and approve their own PR or ticket. Drafting is now
+  disabled unless auth is on, or the operator opts in with
+  FINOPS_SLACK_ALLOW_REMEDIATION=1. Enforced both when tool schemas are
+  exposed to the model and again at execution time.
+- **Self-approval blocked.** The requester of a pending action cannot click
+  Approve on it. A different person must review. Solo operators can opt out
+  with FINOPS_ALLOW_SELF_APPROVE=1.
+
 ### Fixed
 - **Slack RBAC identity now reaches the tools.** Identity was stored in a
   ContextVar set in the handler thread, but tools ran in a worker thread where
