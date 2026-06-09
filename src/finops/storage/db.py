@@ -385,6 +385,30 @@ savings_recommendations = Table(
     Column("dedup_key", String(64), nullable=False),   # SHA256 of source+resource_id+recommended_config
 )
 
+# ── Slack bot — thread conversation memory + remediation approvals ───────────
+
+slack_threads = Table(
+    "slack_threads", metadata,
+    Column("thread_key", String(128), primary_key=True),    # "channel:thread_ts" (or channel for DMs)
+    Column("channel", String(64), nullable=False, default=""),
+    Column("messages", Text, nullable=False, default="[]"), # JSON list of {role, content} text turns
+    Column("updated_at", DateTime, nullable=False),
+)
+
+pending_actions = Table(
+    "pending_actions", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("kind", String(32), nullable=False),              # rightsizing_pr | ticket
+    Column("payload", Text, nullable=False, default="{}"),   # JSON args used at execution time
+    Column("preview", Text, nullable=False, default=""),     # human-readable summary shown in the card
+    Column("status", String(16), nullable=False, default="pending"),  # pending|approved|cancelled|expired|failed
+    Column("requested_by", String(128), nullable=False, default=""),  # slack user id
+    Column("resolved_by", String(128), nullable=True),
+    Column("created_at", DateTime, nullable=False),
+    Column("resolved_at", DateTime, nullable=True),
+    Column("result", Text, nullable=True),                   # JSON outcome (pr_url, ticket_url, error)
+)
+
 # ── Indexes — keep hot query paths O(log n) instead of O(n) ──────────────────
 # cost_snapshots: every budget check and spend query filters by date + provider/service
 Index("ix_cs_date_provider",  cost_snapshots.c.snapshot_date, cost_snapshots.c.provider)
@@ -428,6 +452,10 @@ Index("ix_pf_dedup",    pattern_findings.c.dedup_key, unique=True)
 
 # alert_policies: fast lookup by provider + service
 Index("ix_ap_provider_svc", alert_policies.c.provider, alert_policies.c.service_pattern)
+
+# slack bot: TTL prune scans by updated_at; approval lookups filter by status
+Index("ix_slack_threads_updated", slack_threads.c.updated_at)
+Index("ix_pending_status",        pending_actions.c.status)
 
 # savings_recommendations: status checks and dedup
 Index("ix_srec_status",   savings_recommendations.c.status)
