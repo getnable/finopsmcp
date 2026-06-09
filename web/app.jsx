@@ -666,16 +666,16 @@ function AiCost(){
               <div className="aicost-tag">Real numbers · real dollars · first scan</div>
               <div className="aicost-stat">
                 <div className="aicost-big">89<span className="aicost-unit">%</span></div>
-                <p>of this Bedrock bill was input tokens, billed at full price with <b>no caching</b></p>
+                <p>of an early user's Bedrock bill was input tokens, billed at full price with <b>no caching</b></p>
               </div>
               <div className="aicost-rule"></div>
               <div className="aicost-stat">
                 <div className="aicost-big accent">$10.7k<span className="aicost-unit">/yr</span></div>
                 <p><b>= $896/mo</b> in prompt-caching savings, about a quarter of the AI bill, on the first scan</p>
               </div>
-              <div className="aicost-foot">Read off a live AWS bill, not a projection.</div>
+              <div className="aicost-foot">From an early user's first scan. Real numbers, name withheld for now.</div>
               <div className="aicost-cta">
-                <span className="aicost-cta-l">Ours is a small bill. See your own number, free:</span>
+                <span className="aicost-cta-l">This is a small account. See your own number, free:</span>
                 <code className="aicost-cmd" onClick={copy}>uvx --from finops-mcp finops welcome</code>
               </div>
             </div>
