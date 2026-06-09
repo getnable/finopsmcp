@@ -131,7 +131,7 @@ def _run_agent_loop_sync(
 
     tools = list(get_bridge_tools(role))
     remediation_names = set()
-    if remediation.role_can_draft(role):
+    if remediation.role_can_draft(role) and remediation.drafting_enabled():
         drafts = remediation.draft_tool_schemas()
         remediation_names = {t["name"] for t in drafts}
         tools = tools + drafts

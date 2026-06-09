@@ -5,7 +5,18 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+import pytest
+
 from finops.slack_bot import remediation
+
+
+@pytest.fixture(autouse=True)
+def _enable_remediation(monkeypatch):
+    """Drafting is disabled by default (permissive RBAC would defeat the
+    approval gate). Tests opt in explicitly, mirroring a solo operator."""
+    monkeypatch.setenv("FINOPS_SLACK_ALLOW_REMEDIATION", "1")
+    monkeypatch.delenv("FINOPS_REQUIRE_AUTH", raising=False)
+    monkeypatch.delenv("FINOPS_ALLOW_SELF_APPROVE", raising=False)
 
 
 def _draft_ticket(requested_by="U1"):
@@ -196,6 +207,58 @@ def test_approve_pr_runs_for_real(tmp_db, monkeypatch):
         )
     assert opr.call_args.kwargs["dry_run"] is False
     assert outcome["pr_url"] == "https://github.com/acme/infra/pull/7"
+
+
+def test_drafting_disabled_by_default(tmp_db, monkeypatch):
+    """No auth, no opt-in: draft tools refuse to run and create nothing."""
+    monkeypatch.delenv("FINOPS_SLACK_ALLOW_REMEDIATION", raising=False)
+    side_effects: list[dict] = []
+    result = json.loads(
+        remediation.execute_draft_tool(
+            "draft_ticket",
+            {"title": "t", "body": "b"},
+            requested_by="U1",
+            side_effects=side_effects,
+        )
+    )
+    assert "error" in result
+    assert "FINOPS_REQUIRE_AUTH" in result["error"]
+    assert side_effects == []
+    assert not remediation.drafting_enabled()
+
+
+def test_drafting_enabled_under_real_auth(tmp_db, monkeypatch):
+    """FINOPS_REQUIRE_AUTH=1 alone enables drafting, no opt-in needed."""
+    monkeypatch.delenv("FINOPS_SLACK_ALLOW_REMEDIATION", raising=False)
+    monkeypatch.setenv("FINOPS_REQUIRE_AUTH", "1")
+    assert remediation.drafting_enabled()
+    result, side_effects = _draft_ticket()
+    assert result["status"] == "awaiting_approval"
+    assert len(side_effects) == 1
+
+
+def test_self_approval_blocked(tmp_db):
+    """The requester cannot approve their own action."""
+    result, _ = _draft_ticket(requested_by="U1")
+    action_id = result["pending_action_id"]
+    outcome = remediation.approve_action(action_id, resolved_by="U1", role="admin")
+    assert "error" in outcome
+    assert "Self-approval" in outcome["error"]
+    assert remediation.get_pending(action_id)["status"] == "pending"
+
+
+def test_self_approval_optin_for_solo(tmp_db, monkeypatch):
+    """FINOPS_ALLOW_SELF_APPROVE=1 lets a solo operator approve their own draft."""
+    monkeypatch.setenv("FINOPS_ALLOW_SELF_APPROVE", "1")
+    result, _ = _draft_ticket(requested_by="U1")
+    with patch(
+        "finops.integrations.ticketing.create_custom_ticket",
+        return_value="https://x/1",
+    ):
+        outcome = remediation.approve_action(
+            result["pending_action_id"], resolved_by="U1", role="analyst"
+        )
+    assert outcome == {"ticket_url": "https://x/1"}
 
 
 def test_approval_blocks_shape(tmp_db):

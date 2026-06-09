@@ -34,6 +34,30 @@ def role_can_draft(role: str) -> bool:
     return ROLE_LEVEL.get(role, 0) >= ROLE_LEVEL.get(_DRAFT_MIN_ROLE, 999)
 
 
+def drafting_enabled() -> bool:
+    """Remediation drafting requires real authentication, or an explicit opt-in.
+
+    With FINOPS_REQUIRE_AUTH off, every Slack user resolves to admin, which
+    would turn the approval gate into self-serve theater: anyone could draft
+    and approve their own PR. So drafting is only available when RBAC is
+    actually enforced, or when the operator consciously opts in (solo use).
+    """
+    if os.getenv("FINOPS_REQUIRE_AUTH") == "1":
+        return True
+    return os.getenv("FINOPS_SLACK_ALLOW_REMEDIATION") == "1"
+
+
+def _self_approve_allowed() -> bool:
+    return os.getenv("FINOPS_ALLOW_SELF_APPROVE") == "1"
+
+
+_DRAFTING_DISABLED_MSG = (
+    "Remediation drafting is disabled. It requires FINOPS_REQUIRE_AUTH=1 "
+    "(role-based access by Slack email) so a second person approves each "
+    "action. Solo operators can opt in with FINOPS_SLACK_ALLOW_REMEDIATION=1."
+)
+
+
 # ── Draft tools exposed to the Claude loop (analyst+ only) ───────────────────
 
 def draft_tool_schemas() -> list[dict]:
@@ -91,6 +115,10 @@ def execute_draft_tool(
     name: str, args: dict, *, requested_by: str, side_effects: list[dict]
 ) -> str:
     """Run a draft tool from inside the agentic loop. Returns JSON for the tool_result."""
+    # Defense in depth: llm.py also checks drafting_enabled() before exposing
+    # the schemas, but the execution path enforces it independently.
+    if not drafting_enabled():
+        return json.dumps({"error": _DRAFTING_DISABLED_MSG})
     try:
         if name == "draft_rightsizing_pr":
             result = _draft_rightsizing_pr(args, requested_by)
@@ -254,6 +282,18 @@ def approve_action(action_id: int, resolved_by: str, role: str) -> dict:
         return {"error": f"Action #{action_id} not found."}
     if action["status"] != "pending":
         return {"error": f"Action #{action_id} is already {action['status']}."}
+    if (
+        resolved_by
+        and resolved_by == action["requested_by"]
+        and not _self_approve_allowed()
+    ):
+        return {
+            "error": (
+                "Self-approval is disabled: the person who requested an action "
+                "cannot approve it. Ask a teammate to review, or set "
+                "FINOPS_ALLOW_SELF_APPROVE=1 for solo use."
+            )
+        }
     if action["created_at"] < datetime.utcnow() - timedelta(hours=APPROVAL_TTL_HOURS):
         _resolve(action_id, "expired", resolved_by)
         return {"error": f"Action #{action_id} expired (older than {APPROVAL_TTL_HOURS}h). Ask me to draft it again."}
@@ -346,7 +386,7 @@ def approval_blocks(action_id: int) -> list[dict]:
                     "text": (
                         f"Action #{action_id} · requested by <@{action['requested_by']}> · "
                         f"expires in {APPROVAL_TTL_HOURS}h · approving requires the "
-                        f"{_DRAFT_MIN_ROLE} role"
+                        f"{_DRAFT_MIN_ROLE} role and a different person than the requester"
                     ),
                 }
             ],
