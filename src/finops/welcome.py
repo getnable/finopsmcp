@@ -222,16 +222,16 @@ def _show_value_moment(demo: bool = False) -> None:
 
         summary, idle, ai_plan = asyncio.run(asyncio.wait_for(_run(), timeout=35))
     except Exception:
-        return  # never block setup
+        return False  # never block setup
 
     if not isinstance(summary, dict) or summary.get("error"):
-        return
+        return False
     # Real tool returns grand_total_usd / grand_by_service; demo data returns
     # total_usd / by_service. Accept either.
     total = summary.get("grand_total_usd") or summary.get("total_usd") or 0.0
     by_svc = summary.get("grand_by_service") or summary.get("by_service") or {}
     if total <= 0 or not isinstance(by_svc, dict) or not by_svc:
-        return
+        return False
 
     top = sorted(by_svc.items(), key=lambda kv: kv[1], reverse=True)
     top_name, top_val = top[0]
@@ -242,7 +242,8 @@ def _show_value_moment(demo: bool = False) -> None:
     _blank()
     _line(_rule())
     _blank()
-    _line(green("✓") + bold("  nable scanned your account — last 30 days"))
+    _header = "nable on sample data — last 30 days" if demo else "nable scanned your account — last 30 days"
+    _line(green("✓") + bold("  " + _header))
     _blank()
     _line(f"  {dim('Total spend')}      {bold('$' + format(total, ',.0f'))}")
     _line(f"  {dim('Top driver')}       {top_name}  {cyan('$' + format(top_val, ',.0f'))}")
@@ -259,6 +260,7 @@ def _show_value_moment(demo: bool = False) -> None:
         if ai_save and ai_save >= 10:
             _line(f"  {dim('AI savings')}       {green('$' + format(ai_save, ',.0f') + '/mo')}  {dim('ready to capture')}")
     _blank()
+    return True
 
 
 # ── Full onboarding flow (finops welcome) ──────────────────────────────────────
@@ -308,42 +310,73 @@ def run_welcome_flow(demo: bool = False) -> None:
     _line(_rule())
     _blank()
 
-    # Step 3: cloud account
-    _line(bold("Step 3 — Connect your first cloud account"))
-    _blank()
-    _line(f"  {dim('1)')} AWS          {dim('reads your existing AWS profile')}")
-    _line(f"  {dim('2)')} Azure")
-    _line(f"  {dim('3)')} GCP")
-    _line(f"  {dim('4)')} Skip for now")
+    # Step 3: see a number. Zero-config AWS first, then a menu, and a demo
+    # fallback so nobody ever leaves the terminal without seeing value.
+    _line(bold("Step 3 — See your first number"))
     _blank()
 
-    choice = "4"
+    shown = False
+
+    # Most dev machines already carry an AWS credential chain (env vars,
+    # ~/.aws, SSO, instance profile). If so, the fastest path to value is a
+    # read-only scan with those creds: no menu, no stored secrets. Ask first,
+    # one keystroke. Never touch their account unprompted.
+    aws_ambient = False
     try:
-        choice = input("  Choice [1]: ").strip() or "1"
-    except (KeyboardInterrupt, EOFError):
-        choice = "4"
-    _blank()
+        import asyncio as _aio
+        from .connectors.aws import AWSConnector
+        aws_ambient = _aio.run(AWSConnector().is_configured())
+    except Exception:
+        aws_ambient = False
 
-    connected = False
-    if choice == "1":
-        from .setup_wizard import setup_aws_account
-        setup_aws_account()
-        connected = True
-    elif choice == "2":
-        from .setup_wizard import setup_azure
-        setup_azure()
-        connected = True
-    elif choice == "3":
-        from .setup_wizard import setup_gcp
-        setup_gcp()
-        connected = True
-    else:
-        _line(dim("  No problem. Run 'finops setup aws' whenever you're ready."))
+    if aws_ambient:
+        _line(f"  {green('Found AWS credentials')} in your environment.")
+        _line(dim("  nable can run a read-only cost scan with them right now."))
+        _blank()
+        ans = "y"
+        try:
+            ans = input("  Show your real AWS bill now? [Y/n]: ").strip().lower() or "y"
+        except (KeyboardInterrupt, EOFError):
+            ans = "n"
+        _blank()
+        if ans in ("y", "yes"):
+            shown = _show_value_moment(demo=False)
+
+    # No ambient creds, or they declined: offer the full connect menu.
+    if not shown:
+        _line(f"  {dim('1)')} AWS          {dim('reads your existing AWS profile')}")
+        _line(f"  {dim('2)')} Azure")
+        _line(f"  {dim('3)')} GCP")
+        _line(f"  {dim('4)')} Skip for now")
+        _blank()
+        choice = "4"
+        try:
+            choice = input("  Choice [4]: ").strip() or "4"
+        except (KeyboardInterrupt, EOFError):
+            choice = "4"
         _blank()
 
-    # The payoff: a real number in the terminal before they ever open Claude.
-    if connected:
-        _show_value_moment(demo=False)
+        if choice == "1":
+            from .setup_wizard import setup_aws_account
+            setup_aws_account()
+            shown = _show_value_moment(demo=False)
+        elif choice == "2":
+            from .setup_wizard import setup_azure
+            setup_azure()
+            shown = _show_value_moment(demo=False)
+        elif choice == "3":
+            from .setup_wizard import setup_gcp
+            setup_gcp()
+            shown = _show_value_moment(demo=False)
+
+    # Never dead-end. If they skipped, declined, or the scan came up empty,
+    # show nable on sample data so the value lands before they ever leave.
+    if not shown:
+        _blank()
+        _line(bold("Here's nable on a sample bill") + dim("  ·  connect an account to see your own"))
+        _show_value_moment(demo=True)
+        _line(dim("  Ready for real numbers?  ") + cyan("finops setup aws") + dim("  (read-only, ~1 min)"))
+        _blank()
 
     # Finish — one unambiguous next action
     _line(_rule())

@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## Unreleased
+
+### Changed
+- **`finops welcome` never dead-ends, and shows value before asking for keys.**
+  Onboarding analytics showed most installers skipped the credential step and
+  saw nothing, then left. The first run now (1) detects an existing AWS
+  credential chain and offers a one-keystroke read-only scan of your real bill,
+  no setup menu; (2) if you skip or decline, still shows nable on a sample bill
+  so the value lands before you leave the terminal; (3) labels demo output as
+  sample data instead of claiming it scanned your account.
+
 ## 0.8.56
 
 ### Added
