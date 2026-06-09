@@ -1,7 +1,7 @@
 {
   "name": "nable",
   "displayName": "nable — local-first FinOps",
-  "version": "0.8.54",
+  "version": "0.8.56",
   "description": "Ask your AWS, Azure, GCP, Kubernetes, and SaaS bill in plain English, inside Claude. 160+ read-only tools for cost queries, anomaly detection, rightsizing, and PRs. Runs on your machine; credentials stay in your OS keychain.",
   "author": {
     "name": "Chandan Bukkapatnam",

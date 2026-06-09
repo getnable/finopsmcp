@@ -2,7 +2,7 @@
 
 All notable changes to finops-mcp (nable).
 
-## Unreleased
+## 0.8.56
 
 ### Added
 - **The Slack bot now sees the whole platform.** A new tool bridge exposes the
