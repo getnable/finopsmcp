@@ -4,8 +4,19 @@ Local-first FinOps, installed as a Claude Code plugin. Ask your AWS, Azure, GCP,
 
 ## Install
 
+These are Claude Code slash commands, so run them at the **terminal Claude Code CLI** prompt (`claude`), not a plain shell. Some managed or GUI Claude surfaces don't expose `/plugin`.
+
+Run them **one at a time**, waiting for the first to finish before the second. Pasting both at once makes the first command swallow the second and fail.
+
+1. Add the marketplace:
+
 ```
 /plugin marketplace add chaandannn/finopsmcp
+```
+
+2. Once it says the marketplace was added, install the plugin:
+
+```
 /plugin install nable@nable
 ```
 
