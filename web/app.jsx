@@ -770,7 +770,8 @@ const EDITOR_TABS = [
     { k:"dim", t:"  fetching finops-mcp + a matching python…" },
     { k:"ok",  t:"✓ runtime registered · ask nable in your editor" },
   ]},
-  { id:"claudecode", label:"Claude Code", bar:"claude code · /plugin", lines:[
+  { id:"claudecode", label:"Claude Code", bar:"terminal claude cli · /plugin", lines:[
+    { k:"dim", t:"# in the terminal claude cli, run one at a time" },
     { k:"cmd", t:"/plugin marketplace add chaandannn/finopsmcp" },
     { k:"cmd", t:"/plugin install nable@nable" },
     { k:"ok",  t:"✓ nable installed · ask in your editor" },
