@@ -1,0 +1,108 @@
+# nable in Slack
+
+A conversational FinOps teammate in your workspace. Once an engineer sets it up,
+anyone on the team can ask cost questions, run root cause analysis, and kick off
+fixes without leaving Slack.
+
+## What it does
+
+**Ask anything.** Mention `@nable` in a channel or DM it. The bot answers with
+real data from your connected providers through 57+ tools: cloud spend, AI/LLM
+costs, Kubernetes, SaaS, anomalies, forecasts, commitments, waste audits, team
+attribution.
+
+```
+@nable what did we spend last week?
+@nable which team owns the RDS cost increase?
+@nable how much are we wasting on idle resources?
+@nable what's our Bedrock bill and is caching on?
+```
+
+**Follow-ups work.** Threads have memory. Ask "what's driving that?" after an
+answer and the bot knows what "that" is. Context lasts 48 hours per thread.
+
+**Root cause analysis.** Anomaly alerts come with an Investigate button. Free
+text works too: questions like "why did our AWS bill spike?" route to a deeper
+investigation pass that compares periods, finds the top drivers, and reports
+the dollar impact, the likely cause with evidence, and the next step.
+
+**Remediation, gated.** The bot can draft a ticket (Jira, Linear, or GitHub
+Issues) or a Terraform rightsizing PR straight from a conversation. Drafts are
+previews: a card shows what would change (files, estimated savings) and a human
+with the analyst role or above must click Approve before anything is filed or
+opened. Approval cards expire after 24 hours.
+
+```
+@nable draft a ticket for the top rightsizing recommendation
+@nable open a PR to right-size the staging RDS instances
+```
+
+**Alerts and digests.** Anomaly cards with Acknowledge / Create Ticket /
+Investigate buttons, hourly budget checks, scheduled reports. These ride on the
+same bot process.
+
+## Setup (one engineer, about 5 minutes)
+
+```
+pip install "finops-mcp[slack]"
+finops setup slack          # choose option 3: conversational bot
+finops-slack                # start the bot
+```
+
+The wizard prints a Slack app manifest to paste at https://api.slack.com/apps,
+collects the two Slack tokens and your Anthropic API key, validates them, and
+stores everything in your OS keyring. No .env file.
+
+Connect cloud accounts first if you have not: `finops setup aws` (or azure/gcp).
+
+## Access control
+
+By default every Slack user gets full access. For teams, set
+`FINOPS_REQUIRE_AUTH=1` and create API keys with emails matching your Slack
+users. Roles:
+
+| Role    | In Slack                                                        |
+|---------|-----------------------------------------------------------------|
+| viewer  | All read-only questions: costs, anomalies, audits, forecasts    |
+| analyst | Plus: acknowledge anomalies, set budgets, draft and approve tickets and PRs |
+| admin   | Plus: trigger digests                                           |
+
+Role checks run twice: tools a user cannot call are never shown to the model,
+and every call is re-checked at execution time. Destructive tools (resource
+cleanup) and credential management are never reachable from Slack.
+
+## Model usage and cost
+
+The bot runs on your own Anthropic API key with tiered routing so casual
+questions stay cheap:
+
+| Tier   | Used for                  | Default model   |
+|--------|---------------------------|-----------------|
+| simple | Button follow-ups         | claude-haiku-4-5  |
+| chat   | Free-text questions       | claude-sonnet-4-5 |
+| rca    | Root cause investigations | claude-opus-4-5   |
+
+Override with `FINOPS_SLACK_MODEL` (all tiers) or
+`FINOPS_SLACK_MODEL_SIMPLE` / `_CHAT` / `_RCA`. Tool schemas and the system
+prompt are prompt-cached, so repeat questions cost a fraction of the first.
+
+## Configuration reference
+
+| Variable | Purpose |
+|----------|---------|
+| `SLACK_BOT_TOKEN` | Bot OAuth token (xoxb-...), stored by the wizard |
+| `SLACK_APP_TOKEN` | Socket Mode token (xapp-...), stored by the wizard |
+| `ANTHROPIC_API_KEY` | Powers the answers |
+| `SLACK_ALERT_CHANNEL` | Where anomaly and budget alerts post |
+| `FINOPS_TF_DIR` | Terraform directory for rightsizing PRs |
+| `GITHUB_FINOPS_TF_REPO` | org/repo the rightsizing PR targets |
+| `FINOPS_REQUIRE_AUTH` | Set to 1 to enforce roles by Slack email |
+| `FINOPS_QUERY_TIMEOUT` | Seconds before a question is cut off (default 60) |
+| `FINOPS_RCA_TIMEOUT` | Seconds for investigations (default 150) |
+| `FINOPS_MAX_TOOL_CALLS` | Tool call budget per question (default 12) |
+
+## Microsoft Teams
+
+Teams gets one-way Adaptive Card alerts and digests today (`finops setup teams`).
+Two-way conversational Teams is planned; it needs an Azure Bot registration and
+a public endpoint, a different transport from Slack Socket Mode.

@@ -900,14 +900,120 @@ def setup_sso() -> None:
 """)
 
 
+_SLACK_APP_MANIFEST = """\
+display_information:
+  name: nable
+  description: Cloud cost intelligence. Ask your bill anything.
+  background_color: "#0d0f10"
+features:
+  bot_user:
+    display_name: nable
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+      - im:history
+      - im:read
+      - im:write
+      - reactions:read
+      - reactions:write
+      - users:read
+      - users:read.email
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+"""
+
+
+def setup_slack_bot() -> None:
+    """Configure the conversational Slack bot (Socket Mode, two-way)."""
+    _section("Slack: Conversational Bot (questions, RCA, draft PRs and tickets)")
+    print("""  One-time Slack app creation (about 2 minutes):
+    1. Open https://api.slack.com/apps  ->  Create New App  ->  From a manifest
+    2. Pick your workspace, paste the manifest below, click Create
+    3. Basic Information -> App-Level Tokens -> Generate (scope: connections:write)
+       That is your App Token (xapp-...)
+    4. Install App to workspace. OAuth & Permissions shows your Bot Token (xoxb-...)
+
+  Manifest to paste:
+""")
+    for line in _SLACK_APP_MANIFEST.splitlines():
+        print(f"    {line}")
+    print()
+
+    from .security.vault import Vault
+    vault = Vault.default()
+
+    bot_token = _prompt("  Bot Token (xoxb-...)", secret=True)
+    if bot_token and not bot_token.startswith("xoxb-"):
+        _warn("That doesn't look like a bot token (should start with xoxb-).")
+    app_token = _prompt("  App Token (xapp-...)", secret=True)
+    if app_token and not app_token.startswith("xapp-"):
+        _warn("That doesn't look like an app token (should start with xapp-).")
+    anthropic_key = _prompt("  Anthropic API key (sk-ant-..., powers the answers)", secret=True)
+    alert_channel = _prompt("  Alert channel (e.g. #finops-alerts)", default="#finops-alerts")
+
+    # Validate the bot token before storing anything
+    try:
+        import httpx
+        r = httpx.post(
+            "https://slack.com/api/auth.test",
+            headers={"Authorization": f"Bearer {bot_token}"},
+            timeout=10,
+        ).json()
+        if r.get("ok"):
+            _ok(f"Token valid: workspace '{r.get('team', '?')}' as {r.get('user', '?')}")
+        else:
+            _warn(f"Slack rejected the bot token ({r.get('error', 'unknown')}). "
+                  "Storing anyway; fix and re-run if the bot can't start.")
+    except Exception as e:
+        _warn(f"Couldn't validate token ({e}). Storing anyway.")
+
+    if bot_token:
+        vault.store("SLACK_BOT_TOKEN", bot_token)
+    if app_token:
+        vault.store("SLACK_APP_TOKEN", app_token)
+    if anthropic_key:
+        vault.store("ANTHROPIC_API_KEY", anthropic_key)
+    vault.store("SLACK_ALERT_CHANNEL", alert_channel)
+
+    _ok("Slack bot configured")
+    print("""
+  Start it:    finops-slack
+  Then in Slack:
+    @nable what did we spend last week?
+    @nable why did our AWS bill spike?
+    @nable draft a ticket for the top rightsizing recommendation
+
+  Optional, for Terraform rightsizing PRs from Slack:
+    FINOPS_TF_DIR=/path/to/terraform   GITHUB_FINOPS_TF_REPO=org/infra-repo
+
+  Access control: set FINOPS_REQUIRE_AUTH=1 to map Slack users to nable
+  roles (viewer/analyst/admin) by email. Drafting and approving PRs or
+  tickets requires analyst or above.""")
+
+
 def setup_slack() -> None:
     _section("Slack: Cost Alerts and Daily Digest")
     print("  Choose method:")
     print("  1) Incoming Webhook (simpler)")
     print("  2) Bot Token (richer, supports buttons)")
+    print("  3) Conversational bot (two-way: questions, RCA, draft PRs and tickets)")
     choice = _prompt("  Choice", default="1")
     from .security.vault import Vault
     vault = Vault.default()
+    if choice == "3":
+        setup_slack_bot()
+        return
     if choice == "1":
         url = _prompt("  Webhook URL (from Slack App → Incoming Webhooks)", secret=True)
         vault.store("SLACK_WEBHOOK_URL", url)

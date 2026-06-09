@@ -2,6 +2,44 @@
 
 All notable changes to finops-mcp (nable).
 
+## Unreleased
+
+### Added
+- **The Slack bot now sees the whole platform.** A new tool bridge exposes the
+  MCP server's registry to the conversational loop: 57+ tools instead of 6.
+  Ask about AI spend, Kubernetes waste, commitments, team attribution, audits,
+  forecasts, anything the server can answer. One source of truth, no schema
+  drift, role-gated (viewer/analyst/admin) both before the model sees a tool
+  and again at call time. Destructive tools and credential management are
+  never bridged.
+- **Real conversations.** Threads now have memory: follow-ups like "what's
+  driving that?" work. Rolling window per thread, 48h TTL, DMs keep a running
+  context per channel.
+- **Root cause analysis on tap.** The Investigate button and "why did costs
+  spike" questions route to a deeper investigation pass built on
+  explain_recent_cost_drivers, reporting dollar impact, likely cause with
+  evidence, alternatives, and the next step.
+- **Remediation with an approval gate.** From a Slack conversation, nable can
+  draft a ticket (Jira/Linear/GitHub) or a Terraform rightsizing PR. Drafts
+  post a preview card with dry-run details (files, estimated $/mo). Nothing is
+  filed or opened until a human with the analyst role or above clicks Approve.
+  Approvals expire after 24h.
+- **Tiered model routing.** Quick lookups run on Haiku, free-text questions on
+  Sonnet, RCA investigations on Opus. Override with FINOPS_SLACK_MODEL or
+  per-tier FINOPS_SLACK_MODEL_{SIMPLE,CHAT,RCA}. A cost tool should not burn
+  Opus tokens asking what yesterday cost.
+- **finops setup slack option 3: conversational bot.** Prints a paste-ready
+  Slack app manifest, validates the token against auth.test, stores
+  credentials in the OS-keyring vault, and the bot loads them from the vault
+  at startup. No .env file required.
+
+### Fixed
+- **Slack RBAC identity now reaches the tools.** Identity was stored in a
+  ContextVar set in the handler thread, but tools ran in a worker thread where
+  ContextVars do not propagate, so role enforcement silently saw no identity
+  when FINOPS_REQUIRE_AUTH=1. Identity is now passed into the loop and set in
+  the worker thread.
+
 ## 0.8.55
 
 ### Changed

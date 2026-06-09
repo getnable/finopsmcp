@@ -95,13 +95,16 @@ def _resolve_finops_role(slack_user_id: str, client: Any = None) -> str:
     return "viewer"
 
 
-def _set_identity_for_slack(slack_user_id: str, client: Any = None) -> None:
-    """Resolve role and set thread-local identity context for RBAC."""
+def _identity_for_slack(slack_user_id: str, client: Any = None) -> Any:
+    """Resolve a Slack user to an Identity and set it for the current thread.
+
+    Returns the Identity so it can be passed into the agentic loop, which runs
+    in a separate worker thread where ContextVars do not propagate.
+    """
     from ..auth.rbac import Identity, set_current_identity
 
     role = _resolve_finops_role(slack_user_id, client)
 
-    # Build a minimal Identity so require_role() checks work
     email = ""
     try:
         if client:
@@ -119,83 +122,32 @@ def _set_identity_for_slack(slack_user_id: str, client: Any = None) -> None:
         scope_provider=None,
     )
     set_current_identity(ident)
+    return ident
 
 
-SYSTEM_PROMPT = """You are nable, a cloud cost intelligence assistant embedded in Slack.
-You have access to real billing data across AWS, Azure, GCP, and SaaS providers.
+def _call_claude(user_message: str, tier: str = "chat", identity: Any = None) -> str:
+    """Thin compatibility wrapper around the tiered loop (no memory, no side effects)."""
+    from .llm import ask
 
-Answer questions concisely — this is Slack, not a document. Use bullet points and
-short sentences. Format numbers with $ and commas. If costs are high, say so directly.
-If you spot something worth investigating, flag it. Don't hedge excessively.
-
-Never make up data — only report what the tools return. If a provider isn't connected,
-say so and move on. Keep responses under 400 words unless the user asks for detail."""
+    return ask(user_message, tier=tier, identity=identity).answer
 
 
-# ── Claude agentic loop ───────────────────────────────────────────────────────
+def _post_side_effects(client: Any, channel: str, thread_ts: str | None, side_effects: list[dict]) -> None:
+    """Post approval cards (and any future side effects) produced during a loop."""
+    from .remediation import approval_blocks
 
-_QUERY_TIMEOUT = int(os.getenv("FINOPS_QUERY_TIMEOUT", "60"))
-_MAX_TOOL_CALLS = int(os.getenv("FINOPS_MAX_TOOL_CALLS", "8"))
-
-
-def _call_claude_sync(user_message: str, max_tool_calls: int | None = None) -> str:
-    """Synchronous agentic loop — called by the timeout wrapper."""
-    try:
-        import anthropic
-    except ImportError:
-        return "Error: `anthropic` package not installed. Run `pip install anthropic`."
-
-    from .tools import TOOL_SCHEMAS, execute_tool
-
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return "Error: ANTHROPIC_API_KEY not set."
-
-    if max_tool_calls is None:
-        max_tool_calls = _MAX_TOOL_CALLS
-
-    client = anthropic.Anthropic(api_key=api_key)
-    messages: list[dict] = [{"role": "user", "content": user_message}]
-
-    for _ in range(max_tool_calls):
-        response = client.messages.create(
-            model="claude-opus-4-5",
-            max_tokens=1024,
-            system=SYSTEM_PROMPT,
-            tools=TOOL_SCHEMAS,
-            messages=messages,
-        )
-        text_parts = [b.text for b in response.content if hasattr(b, "text")]
-        if response.stop_reason == "end_turn":
-            return "\n".join(text_parts).strip()
-        if response.stop_reason != "tool_use":
-            return "\n".join(text_parts).strip() or "No response."
-        tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
-            result_str = execute_tool(block.name, block.input)
-            tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result_str})
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results})
-
-    return "Reached maximum tool call depth. Please try a more specific question."
-
-
-def _call_claude(user_message: str, max_tool_calls: int | None = None) -> str:
-    """Run the agentic loop with a wall-clock timeout."""
-    import concurrent.futures
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_call_claude_sync, user_message, max_tool_calls)
+    for effect in side_effects or []:
+        if effect.get("type") != "approval_card":
+            continue
         try:
-            return future.result(timeout=_QUERY_TIMEOUT)
-        except concurrent.futures.TimeoutError:
-            log.warning("Claude query timed out after %ds for message: %s", _QUERY_TIMEOUT, user_message[:100])
-            return (
-                f"Sorry, your query took longer than {_QUERY_TIMEOUT} seconds and was stopped. "
-                "Please try a more specific question or break it into smaller parts."
+            client.chat_postMessage(
+                channel=channel,
+                thread_ts=thread_ts,
+                text="Approval needed",
+                blocks=approval_blocks(effect["action_id"]),
             )
+        except Exception as e:
+            log.error("Failed to post approval card: %s", e)
 
 
 # ── Block Kit builders ────────────────────────────────────────────────────────
@@ -287,14 +239,19 @@ def _handle_create_ticket(body: dict, respond: Any) -> None:
         respond(text=f"❌ Ticket creation failed: {e}", replace_original=False)
 
 
-def _handle_investigate(body: dict, client: Any, respond: Any) -> None:
+def _handle_investigate(body: dict, client: Any, respond: Any, identity: Any = None) -> None:
     action = body["actions"][0]
     try:
         info = json.loads(action.get("value", "{}"))
         respond(text="🔍 Investigating...", replace_original=False)
         answer = _call_claude(
-            f"Investigate the cost anomaly for {info.get('provider','')} / {info.get('service','')}. "
-            "What could be causing a spend spike? Check recent trends and give 3 likely root causes and next steps."
+            f"Run a root cause analysis for the cost anomaly on {info.get('provider','')} / "
+            f"{info.get('service','')}. Start with explain_recent_cost_drivers, then drill into "
+            f"the affected service with get_costs_by_service and check get_anomalies for context. "
+            "Report: the dollar impact, the most likely cause with evidence, two alternative "
+            "explanations, and the single next step. If a fix is actionable, offer to draft a ticket.",
+            tier="rca",
+            identity=identity,
         )
         channel   = body.get("channel", {}).get("id", "")
         thread_ts = body.get("message", {}).get("ts", "")
@@ -365,13 +322,54 @@ def main() -> None:
         print("Error: slack_bolt not installed. Run: pip install finops-mcp[slack]")
         raise SystemExit(1)
 
+    # Fall back to the credential vault for anything not in the environment,
+    # so `finops setup slack` is enough and no .env file is required.
+    try:
+        from ..security.vault import Vault
+
+        loaded = Vault.default().load_to_env()
+        if loaded:
+            log.info("Loaded %d credentials from vault", loaded)
+    except Exception as e:
+        log.debug("Vault unavailable, using environment only: %s", e)
+
     bot_token = os.getenv("SLACK_BOT_TOKEN")
     app_token = os.getenv("SLACK_APP_TOKEN")
     if not bot_token or not app_token:
         print("Error: SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set.")
+        print("Run: finops setup slack  (choose the conversational bot option)")
         raise SystemExit(1)
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        print("Warning: ANTHROPIC_API_KEY not set. The bot will connect but can't answer questions.")
 
     app = App(token=bot_token)
+
+    # Load the MCP tool registry once at startup so the first question is fast.
+    try:
+        from .bridge import warm
+
+        print(f"Bridged {warm()} MCP tools into the Slack loop.")
+    except Exception as e:
+        log.error("Tool bridge failed to load, falling back to nothing: %s", e)
+
+    def _converse(event: dict, say: Any, user_text: str, channel: str, thread_ts: str | None) -> None:
+        """Shared mention/DM path: identity, memory, tiering, side effects."""
+        from .llm import ask, pick_tier
+        from . import memory
+
+        user_id = event.get("user", "")
+        identity = _identity_for_slack(user_id, app.client)
+        history = memory.load_history(channel, thread_ts)
+        result = ask(
+            user_text,
+            tier=pick_tier(user_text),
+            identity=identity,
+            history=history,
+            requested_by=user_id,
+        )
+        say(text=result.answer, thread_ts=thread_ts, mrkdwn=True)
+        memory.save_turn(channel, thread_ts, user_text, result.answer)
+        _post_side_effects(app.client, channel, thread_ts, result.side_effects)
 
     @app.event("app_mention")
     def handle_mention(event: dict, say: Any) -> None:
@@ -379,7 +377,6 @@ def main() -> None:
         if _is_rate_limited(user_id):
             say("Rate limit exceeded, please wait a moment.")
             return
-        _set_identity_for_slack(user_id, app.client)
         user_text = _strip_mention(event.get("text", ""))
         if not user_text:
             say("Hi! Ask me anything about your cloud costs. Try: _\"show me last month's spend\"_")
@@ -389,8 +386,7 @@ def main() -> None:
             app.client.reactions_add(channel=event["channel"], timestamp=event["ts"], name="hourglass_flowing_sand")
         except Exception:
             pass
-        answer = _call_claude(user_text)
-        say(text=answer, thread_ts=thread_ts, mrkdwn=True)
+        _converse(event, say, user_text, event["channel"], thread_ts)
         try:
             app.client.reactions_remove(channel=event["channel"], timestamp=event["ts"], name="hourglass_flowing_sand")
         except Exception:
@@ -406,33 +402,68 @@ def main() -> None:
         if _is_rate_limited(user_id):
             say("Rate limit exceeded, please wait a moment.")
             return
-        _set_identity_for_slack(user_id, app.client)
         user_text = event.get("text", "").strip()
         if not user_text:
             return
-        say(text=_call_claude(user_text), mrkdwn=True)
+        # DMs are flat, so the channel itself is the conversation key.
+        _converse(event, say, user_text, event.get("channel", ""), None)
 
     @app.action("ack_anomaly")
     def on_ack(body: dict, client: Any, respond: Any) -> None:
-        _set_identity_for_slack(body.get("user", {}).get("id", ""), client)
+        _identity_for_slack(body.get("user", {}).get("id", ""), client)
         _handle_ack_anomaly(body, client, respond)
 
     @app.action("create_ticket")
     def on_ticket(body: dict, client: Any, respond: Any) -> None:
-        _set_identity_for_slack(body.get("user", {}).get("id", ""), client)
+        _identity_for_slack(body.get("user", {}).get("id", ""), client)
         _handle_create_ticket(body, respond)
 
     @app.action("investigate_anomaly")
     def on_investigate(body: dict, client: Any, respond: Any) -> None:
-        _set_identity_for_slack(body.get("user", {}).get("id", ""), client)
-        _handle_investigate(body, client, respond)
+        identity = _identity_for_slack(body.get("user", {}).get("id", ""), client)
+        _handle_investigate(body, client, respond, identity=identity)
 
     @app.action("view_budget_details")
     def on_budget(body: dict, client: Any, respond: Any) -> None:
-        _set_identity_for_slack(body.get("user", {}).get("id", ""), client)
+        identity = _identity_for_slack(body.get("user", {}).get("id", ""), client)
         bid = body["actions"][0].get("value", "")
-        respond(text=_call_claude(f"Show budget details for budget ID {bid}: spend, burn rate, what's driving it."),
-                replace_original=False)
+        respond(text=_call_claude(
+            f"Show budget details for budget ID {bid}: spend, burn rate, what's driving it.",
+            tier="simple",
+            identity=identity,
+        ), replace_original=False)
+
+    @app.action("approve_action")
+    def on_approve(body: dict, client: Any, respond: Any) -> None:
+        from .remediation import approve_action
+
+        user = body.get("user", {})
+        identity = _identity_for_slack(user.get("id", ""), client)
+        action_id = int(body["actions"][0].get("value", 0))
+        outcome = approve_action(action_id, resolved_by=user.get("id", ""), role=identity.role)
+        if outcome.get("error"):
+            respond(text=f"❌ {outcome['error']}", replace_original=False)
+            return
+        url = outcome.get("pr_url") or outcome.get("ticket_url") or ""
+        label = "PR opened" if outcome.get("pr_url") else "Ticket created"
+        suffix = f": {url}" if url else "."
+        respond(
+            text=f"✅ Action #{action_id} approved by <@{user.get('id','')}>. {label}{suffix}",
+            replace_original=False,
+        )
+
+    @app.action("cancel_action")
+    def on_cancel(body: dict, client: Any, respond: Any) -> None:
+        from .remediation import cancel_action
+
+        user = body.get("user", {})
+        _identity_for_slack(user.get("id", ""), client)
+        action_id = int(body["actions"][0].get("value", 0))
+        outcome = cancel_action(action_id, resolved_by=user.get("id", ""))
+        if outcome.get("error"):
+            respond(text=f"❌ {outcome['error']}", replace_original=False)
+        else:
+            respond(text=f"🚫 Action #{action_id} cancelled by <@{user.get('id','')}>.", replace_original=False)
 
     _start_slack_scheduler(app)
 
