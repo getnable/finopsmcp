@@ -953,11 +953,9 @@ function CheckIcon(){
   );
 }
 
-// NOTE: these Stripe payment links still point at the old $100/seat prices.
-// Until new $1,000/mo and $10,000/yr prices exist in Stripe, the Team CTAs
-// route to the free trial (monthly) and a call (annual) instead of checkout.
-const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
-const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
+// Team checkout: $1,000/mo or $10,000/yr (2 months free).
+const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
+const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 
 const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 
@@ -996,7 +994,7 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
     { key:"solo", name:"Solo", price:"Free", per:"forever", sub:null, rec:false, primary:false,
       cta:"Get started", href:"/docs.html", plan:"solo", ext:false },
     { key:"team", name:"Team", price:teamPrice, per:teamPer, sub:teamSub, rec:true, primary:true,
-      cta:annual?"Talk to us":"Start free trial", href:teamLink, plan:teamPlan, ext:annual },
+      cta:annual?"Get annual":"Get Team", href:teamLink, plan:teamPlan, ext:true },
     { key:"ent", name:"Enterprise", price:"Custom", per:"", sub:null, rec:false, primary:false,
       cta:"Contact us", href:BOOK_CALL_LINK, plan:"enterprise", ext:true },
   ];
@@ -1029,7 +1027,7 @@ function Pricing(){
   const teamPrice = annual ? "$10,000" : "$1,000";
   const teamPer   = annual ? "/ yr flat" : "/ mo flat";
   const teamSub   = annual ? "$833 / mo · 2 months free · unlimited seats" : "7-day free trial · unlimited seats";
-  const teamLink  = annual ? BOOK_CALL_LINK : "/docs.html#install";
+  const teamLink  = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan  = annual ? "team_annual" : "team_monthly";
 
   return (
@@ -1080,9 +1078,9 @@ function Pricing(){
               <div className="pt-name">Team</div>
               <div className="pt-price"><span className="pt-amt">{teamPrice}</span><span className="pt-per">{teamPer}</span></div>
               <div className="pt-sub">{teamSub}</div>
-              <a className="btn btn-primary pt-cta" href={teamLink} {...(annual ? {target:"_blank", rel:"noopener noreferrer"} : {})}
+              <a className="btn btn-primary pt-cta" href={teamLink} target="_blank" rel="noopener noreferrer"
                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:teamPlan,billing:annual?'annual':'monthly'}); }}>
-                {annual ? "Talk to us" : "Start free trial"}</a>
+                {annual ? "Get annual" : "Get Team"}</a>
             </div>
             <div className="ph">
               <div className="pt-name">Enterprise</div>

@@ -576,8 +576,8 @@ const TEAM_FEATURES = [
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
-const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
-const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
+const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
+const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 const PRICE_ROWS = [
   { label: "Seats", solo: "1", team: "unlimited", ent: "unlimited" },
@@ -628,10 +628,10 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
       sub: teamSub,
       rec: true,
       primary: true,
-      cta: annual ? "Talk to us" : "Start free trial",
+      cta: annual ? "Get annual" : "Get Team",
       href: teamLink,
       plan: teamPlan,
-      ext: annual
+      ext: true
     },
     {
       key: "ent",
@@ -665,7 +665,7 @@ function Pricing() {
   const teamPrice = annual ? "$10,000" : "$1,000";
   const teamPer = annual ? "/ yr flat" : "/ mo flat";
   const teamSub = annual ? "$833 / mo \xB7 2 months free \xB7 unlimited seats" : "7-day free trial \xB7 unlimited seats";
-  const teamLink = annual ? BOOK_CALL_LINK : "/docs.html#install";
+  const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan = annual ? "team_annual" : "team_monthly";
   return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the conversational Slack bot and the remediation layer, one flat price, unlimited seats. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
     "button",
@@ -710,12 +710,13 @@ function Pricing() {
     {
       className: "btn btn-primary pt-cta",
       href: teamLink,
-      ...annual ? { target: "_blank", rel: "noopener noreferrer" } : {},
+      target: "_blank",
+      rel: "noopener noreferrer",
       onClick: () => {
         if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: teamPlan, billing: annual ? "annual" : "monthly" });
       }
     },
-    annual ? "Talk to us" : "Start free trial"
+    annual ? "Get annual" : "Get Team"
   )), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Enterprise"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Custom")), /* @__PURE__ */ React.createElement(
     "a",
     {
