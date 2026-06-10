@@ -684,7 +684,7 @@ function Architecture({ version }){
       <div className="wrap">
         <div className="section-head">
           <div className="label">Architecture</div>
-          <h2>Headless by design.<br/><em>No vendor backend.</em></h2>
+          <h2>No vendor backend,<br/><em>by design.</em></h2>
           <p>nable is not SaaS. It runs on your own machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine, and your cost data never touches a nable server, there is no backend or data lake to breach. The figures you ask about go to your editor's own AI to answer the question, the same as any prompt, and nowhere else.</p>
         </div>
         <div className="arch">
@@ -736,7 +736,7 @@ function HowItWorks(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">How it works</div>
-          <h2>Connect, ask, act.<br/><em>Live in four minutes.</em></h2>
+          <h2>Live in <em>four minutes.</em></h2>
           <p>No data pipeline. No dashboard to build. A single MCP entry turns any AI editor into a FinOps console.</p>
         </div>
         <div className="steps">
@@ -894,7 +894,7 @@ function Connectors(){
       <div className="wrap">
         <div className="section-head">
           <div className="label">Connectors</div>
-          <h2>17 sources.<br/><em>One conversation.</em></h2>
+          <h2>All 17 sources,<br/><em>one conversation.</em></h2>
           <p>Every connector is a real API integration, not a CSV export. New providers ship monthly.</p>
         </div>
       </div>
