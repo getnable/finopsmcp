@@ -49,8 +49,13 @@ def test_telemetry_opted_out_in_airgap():
 
 
 def test_telemetry_not_opted_out_without_airgap():
-    """Without air-gap and without NO_TELEMETRY, telemetry is enabled (given a key)."""
+    """Without air-gap, NO_TELEMETRY, or CI, telemetry is enabled (given a key)."""
     env_overrides = {"FINOPS_AIRGAP": "", "NABLE_NO_TELEMETRY": ""}
+    # This test itself runs in CI, where telemetry is (correctly) off. Clear the
+    # CI signals so we isolate the air-gap path, which is what this asserts.
+    import finops.telemetry as _t
+    for _v in _t._CI_ENV_VARS:
+        env_overrides[_v] = ""
     with patch.dict(os.environ, env_overrides, clear=False):
         if "finops.telemetry" in sys.modules:
             del sys.modules["finops.telemetry"]
