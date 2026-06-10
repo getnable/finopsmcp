@@ -41,6 +41,33 @@ def test_window_trims_to_max_turns(tmp_db):
     assert history[0]["content"] != "q0"
 
 
+def test_concurrent_save_does_not_lose_turns(tmp_db):
+    """Two threads saving to the same conversation must not clobber each other.
+
+    Regression for the lost-update race: save_turn read history then wrote in a
+    separate step, so a concurrent save dropped one exchange. The per-thread
+    lock serializes the read-modify-write.
+    """
+    import threading
+
+    barrier = threading.Barrier(2)
+
+    def writer(i):
+        barrier.wait()  # maximize overlap
+        memory.save_turn("C1", "race", f"q{i}", f"a{i}")
+
+    t1 = threading.Thread(target=writer, args=(1,))
+    t2 = threading.Thread(target=writer, args=(2,))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    history = memory.load_history("C1", "race")
+    # Both exchanges survive: 2 writers x 2 messages = 4 entries, none lost.
+    assert len(history) == 4
+    contents = {m["content"] for m in history}
+    assert {"q1", "a1", "q2", "a2"} == contents
+
+
 def test_expired_thread_returns_empty(tmp_db):
     from finops.storage.db import get_engine, slack_threads
 

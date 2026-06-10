@@ -182,16 +182,34 @@ def _quiet_logs() -> None:
         logging.getLogger(name).setLevel(logging.ERROR)
 
 
-def _show_value_moment(demo: bool = False) -> None:
+def _show_value_moment(demo: bool = False) -> bool:
     """After connecting (or in --demo), scan the account and print a real dollar
     figure in the terminal, so setup pays off before the user opens Claude.
 
-    Fully guarded: every failure or slowness is swallowed. This can never block
-    or break onboarding."""
+    Returns True if it printed a real number. Fully guarded: every failure or
+    slowness is swallowed. This can never block or break onboarding."""
+    # Demo mode rides on env flags the server reads. Set them only for the
+    # duration of this call and restore after, so a demo fallback can never
+    # leak demo mode into a later real scan in the same process.
+    _demo_env_prev = None
     if demo:
+        _demo_env_prev = {k: os.environ.get(k) for k in ("FINOPS_DEMO", "FINOPS_DEMO_MODE")}
         os.environ["FINOPS_DEMO"] = "1"
         os.environ["FINOPS_DEMO_MODE"] = "1"
+    try:
+        return _value_moment_body(demo)
+    finally:
+        if _demo_env_prev is not None:
+            for _k, _v in _demo_env_prev.items():
+                if _v is None:
+                    os.environ.pop(_k, None)
+                else:
+                    os.environ[_k] = _v
 
+
+def _value_moment_body(demo: bool = False) -> bool:
+    """Scan and print a real dollar figure. Wrapped by _show_value_moment, which
+    owns the demo-env lifecycle."""
     try:
         _quiet_logs()
         import asyncio
@@ -265,6 +283,9 @@ def _show_value_moment(demo: bool = False) -> None:
 
 # ── Full onboarding flow (finops welcome) ──────────────────────────────────────
 
+_AMBIENT_AWS_TIMEOUT = 3.0  # seconds; cap on the first-run ambient credential probe
+
+
 def run_welcome_flow(demo: bool = False) -> None:
     """
     Interactive onboarding shown when the user runs `finops welcome`.
@@ -325,7 +346,12 @@ def run_welcome_flow(demo: bool = False) -> None:
     try:
         import asyncio as _aio
         from .connectors.aws import AWSConnector
-        aws_ambient = _aio.run(AWSConnector().is_configured())
+        # Hard timeout: the credential chain can reach for an EC2/ECS instance
+        # profile (IMDS at 169.254.169.254) or refresh an expired SSO token,
+        # which hangs for botocore's default connect timeout on a laptop where
+        # IMDS is firewalled. Onboarding must never freeze, so cap it and treat
+        # a timeout as "no ambient creds".
+        aws_ambient = _aio.run(_aio.wait_for(AWSConnector().is_configured(), timeout=_AMBIENT_AWS_TIMEOUT))
     except Exception:
         aws_ambient = False
 

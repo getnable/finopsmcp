@@ -117,6 +117,55 @@ def test_ambient_aws_offers_one_keystroke_real_scan(monkeypatch):
     assert calls == [False]  # one real scan, no menu, no demo fallback
 
 
+def test_slow_ambient_probe_does_not_hang_onboarding(monkeypatch):
+    """A hanging credential probe (firewalled IMDS / stale SSO) must time out and
+    be treated as no ambient creds, not freeze the first run."""
+    monkeypatch.setattr("finops.setup_wizard._configure_claude_desktop", lambda *a, **k: None)
+    monkeypatch.setattr(w, "_AMBIENT_AWS_TIMEOUT", 0.2)
+
+    import asyncio
+
+    async def _hang(self):
+        await asyncio.sleep(5)  # far longer than the timeout
+        return True
+
+    monkeypatch.setattr("finops.connectors.aws.AWSConnector.is_configured", _hang)
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "")  # skip the menu
+
+    calls = []
+    monkeypatch.setattr(w, "_show_value_moment", lambda demo=False: calls.append(demo) or (demo is True))
+
+    w.run_welcome_flow(demo=False)
+
+    # The probe timed out: ambient was treated as absent, so we fell to the demo
+    # fallback rather than offering a real scan or hanging.
+    assert calls == [True]
+
+
+def test_demo_env_restored_after_value_moment(monkeypatch):
+    """A demo scan must not leak FINOPS_DEMO into the process env afterward."""
+    import os as _os
+
+    import finops.server as server
+
+    async def _summary():
+        return {"total_usd": 100.0, "by_service": {"S3": 100.0}}
+
+    async def _none():
+        return None
+
+    monkeypatch.setattr(server, "get_cost_summary", _summary)
+    monkeypatch.setattr(server, "list_idle_resources", _none)
+    monkeypatch.setattr(server, "optimize_ai_spend", _none)
+    monkeypatch.delenv("FINOPS_DEMO", raising=False)
+    monkeypatch.delenv("FINOPS_DEMO_MODE", raising=False)
+
+    w._show_value_moment(demo=True)
+
+    assert "FINOPS_DEMO" not in _os.environ
+    assert "FINOPS_DEMO_MODE" not in _os.environ
+
+
 def test_ambient_aws_declined_falls_through_to_menu_then_demo(monkeypatch):
     """Ambient creds present but user says no -> menu, skip, demo fallback."""
     monkeypatch.setattr("finops.setup_wizard._configure_claude_desktop", lambda *a, **k: None)

@@ -70,8 +70,11 @@ rightsizing PR (draft_rightsizing_pr) if those tools are available to you. Both 
 create a preview card. A human must click Approve in Slack before anything is filed or
 opened. Never claim a ticket or PR exists until it has been approved.
 
-Never make up data. Only report what the tools return. If a provider isn't connected,
-say so and move on. Keep responses under 400 words unless the user asks for detail."""
+Never make up data. Only report what the tools return. If no cloud provider is
+connected (tools return nothing, or errors about no providers/credentials), don't
+show a raw error. Say plainly that no cloud accounts are connected yet and that
+whoever installed nable can connect one with `finops setup aws` (or azure/gcp).
+Keep responses under 400 words unless the user asks for detail."""
 
 
 def model_for_tier(tier: str) -> str:
@@ -112,11 +115,13 @@ def _run_agent_loop_sync(
     try:
         import anthropic
     except ImportError:
-        return LoopResult("Error: `anthropic` package not installed. Run `pip install anthropic`.")
+        log.error("anthropic package not installed; install finops-mcp[slack]")
+        return LoopResult("nable isn't fully set up yet. Ask whoever installed me to finish configuring it.")
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        return LoopResult("Error: ANTHROPIC_API_KEY not set.")
+        log.error("ANTHROPIC_API_KEY not set; the Slack bot cannot call the model")
+        return LoopResult("nable isn't fully set up yet (no AI key configured). Ask whoever installed me to finish setup.")
 
     # Identity must be set in THIS thread: ContextVars do not cross executor threads.
     role = "admin"
