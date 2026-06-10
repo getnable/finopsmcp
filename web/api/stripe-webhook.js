@@ -52,9 +52,21 @@ function b64url(buf) {
   return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function generateKey(email) {
+// Map what the customer paid to a license plan. Team is $1,000/mo or
+// $10,000/yr; negotiated Team deals may be discounted, so anything at or
+// above STRIPE_TEAM_MIN_CENTS (default $500) issues a team key. Below that
+// (legacy $100/seat links still in the wild) issues a pro key. Team keys
+// unlock the conversational Slack bot; pro keys do not.
+const TEAM_MIN_CENTS = parseInt(process.env.STRIPE_TEAM_MIN_CENTS || "50000", 10);
+
+function planForSession(session) {
+  const amount = session.amount_total ?? 0;
+  return amount >= TEAM_MIN_CENTS ? "team" : "pro";
+}
+
+function generateKey(email, plan) {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const payload = b64url(Buffer.from(JSON.stringify({ e: email, d, p: "pro" })));
+  const payload = b64url(Buffer.from(JSON.stringify({ e: email, d, p: plan })));
   const seed = Buffer.from(LICENSE_PRIVATE_KEY, "base64url");
   const keyObj = crypto.createPrivateKey({
     key: Buffer.concat([ED25519_PKCS8_PREFIX, seed]),
@@ -257,9 +269,10 @@ export default async function handler(req, res) {
 
   // 4. Generate key + send email
   try {
-    const key = generateKey(email);
+    const plan = planForSession(session);
+    const key = generateKey(email, plan);
     await sendLicenseEmail(email, key);
-    console.log(`License key delivered to ${email}`);
+    console.log(`License key delivered to ${email} (plan=${plan}, amount=${session.amount_total})`);
   } catch (err) {
     // Return 500 so Stripe retries delivery on transient failures (Resend outage, etc.).
     // DEDUPLICATION RISK: generateKey() is deterministic for the same email+date, so
