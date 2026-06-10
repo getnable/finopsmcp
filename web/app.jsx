@@ -149,7 +149,7 @@ function Ticker({ installs, version }){
           <span>runtime healthy</span>
         </span>
         <span className="sep">·</span>
-        <span className="seg">4k+ installs / mo via PyPI</span>
+        <span className="seg">4k+ PyPI downloads / mo</span>
         <span className="sep">·</span>
         <span className="seg">17 connectors · AWS · Azure · GCP +14</span>
         <span className="sep">·</span>
@@ -385,17 +385,8 @@ function fmtNum(n){
 }
 
 function TrustStrip(){
-  const [installs, setInstalls] = useState(null);
-
-  useEffect(() => {
-    fetch("/api/pypi-stats")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if(d?.data?.last_month) setInstalls(d.data.last_month); })
-      .catch(() => {});
-  }, []);
-
   const items = [
-    {lab:"installs / mo", val: "4k+", sub:"via PyPI · live"},
+    {lab:"built-in tools", val: "165+", sub:"cost, anomaly, rightsizing"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
     {lab:"on our servers", val:"0 bytes", sub:"nable has no backend"},
   ];
