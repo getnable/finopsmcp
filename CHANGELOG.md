@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.60
+
+### Fixed
+- **`install_completed` telemetry now counts real installs, not automation.** It
+  fired on any first CLI run, so cache-warm subprocesses, piped invocations, CI
+  runners, and fresh uvx environments each logged a phantom install with a
+  throwaway id, badly inflating install counts. It now only fires on an
+  interactive, non-CI first run (stdin/stdout are a TTY). CI and build runners
+  send no telemetry at all. A non-interactive first run is a no-op and leaves
+  the first-run sentinel unset, so the first genuine human run still counts once.
+
 ## 0.8.59
 
 ### Security
