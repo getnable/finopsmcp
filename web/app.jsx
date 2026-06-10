@@ -255,7 +255,7 @@ function Hero({ layout, interaction }){
               <div className="hmc-links">
                 <a href="#pricing" className="hmc-pro"
                   onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing_40'}); }}>
-                  See Pro · $100/seat/mo <span className="arr">→</span>
+                  See Team · $1,000/mo flat <span className="arr">→</span>
                 </a>
                 <a href="https://calendar.app.google/gMwYK6WWB7fKpz2B6" target="_blank" rel="noopener noreferrer" className="hmc-book"
                   onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'book_call'}); }}>
@@ -955,6 +955,9 @@ function CheckIcon(){
   );
 }
 
+// NOTE: these Stripe payment links still point at the old $100/seat prices.
+// Until new $1,000/mo and $10,000/yr prices exist in Stripe, the Team CTAs
+// route to the free trial (monthly) and a call (annual) instead of checkout.
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
 const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
 
@@ -962,7 +965,7 @@ const BOOK_CALL_LINK = "https://calendar.app.google/gMwYK6WWB7fKpz2B6";
 
 // Comparison rows. value true -> check, false -> dash, string -> mono text.
 const PRICE_ROWS = [
-  { label: "Seats",                                          solo: "1",         team: "per seat", ent: "unlimited" },
+  { label: "Seats",                                          solo: "1",         team: "unlimited", ent: "unlimited" },
   { label: "Connectors — AWS, Azure, GCP, 17 sources",       solo: true,        team: true,       ent: true },
   { label: "AWS cost data",                                  solo: "Cost Explorer", team: "Explorer + CUR", ent: "Explorer + CUR" },
   { label: "Ask your cloud + AI bill in plain English",      solo: true,        team: true,       ent: true },
@@ -970,6 +973,10 @@ const PRICE_ROWS = [
   { label: "Rightsizing recommendations",                    solo: true,        team: true,       ent: true },
   { label: "AI / LLM spend tracking by model",               solo: true,        team: true,       ent: true },
   { label: "Local-first — keys never leave your machine",    solo: true,        team: true,       ent: true },
+  { label: "Conversational Slack bot — ask the bill anything", solo: false,     team: true,       ent: true },
+  { label: "Root cause analysis on cost spikes, in Slack",   solo: false,       team: true,       ent: true },
+  { label: "Chat remediation: draft the PR or ticket, human approves", solo: false, team: true,   ent: true },
+  { label: "Managed AI included (or bring your own key)",    solo: false,       team: true,       ent: true },
   { label: "Terraform remediation: patch + open the PR",     solo: false,       team: true,       ent: true },
   { label: "Slack / Teams alerts + weekly digest",           solo: false,       team: true,       ent: true },
   { label: "Ticket creation (Jira, Linear, GitHub)",         solo: false,       team: true,       ent: true },
@@ -991,7 +998,7 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
     { key:"solo", name:"Solo", price:"Free", per:"forever", sub:null, rec:false, primary:false,
       cta:"Get started", href:"/docs.html", plan:"solo", ext:false },
     { key:"team", name:"Team", price:teamPrice, per:teamPer, sub:teamSub, rec:true, primary:true,
-      cta:annual?"Get annual":"Start free trial", href:teamLink, plan:teamPlan, ext:true },
+      cta:annual?"Talk to us":"Start free trial", href:teamLink, plan:teamPlan, ext:annual },
     { key:"ent", name:"Enterprise", price:"Custom", per:"", sub:null, rec:false, primary:false,
       cta:"Contact us", href:BOOK_CALL_LINK, plan:"enterprise", ext:true },
   ];
@@ -1021,10 +1028,10 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
 function Pricing(){
   const [annual, setAnnual] = useState(false);
 
-  const teamPrice = annual ? "$1,000" : "$100";
-  const teamPer   = annual ? "/ seat / yr" : "/ seat / mo";
-  const teamSub   = annual ? "$83 / seat / mo · save $200" : "7-day free trial";
-  const teamLink  = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
+  const teamPrice = annual ? "$10,000" : "$1,000";
+  const teamPer   = annual ? "/ yr flat" : "/ mo flat";
+  const teamSub   = annual ? "$833 / mo · 2 months free · unlimited seats" : "7-day free trial · unlimited seats";
+  const teamLink  = annual ? BOOK_CALL_LINK : "/docs.html#install";
   const teamPlan  = annual ? "team_annual" : "team_monthly";
 
   return (
@@ -1033,7 +1040,7 @@ function Pricing(){
         <div className="section-head">
           <div className="label">Pricing</div>
           <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
-          <p>Solo is free forever. Team adds the remediation layer. Enterprise adds SSO, audit logs, and an SLA.</p>
+          <p>Solo is free forever. Team adds the conversational Slack bot and the remediation layer, one flat price, unlimited seats. Enterprise adds SSO, audit logs, and an SLA.</p>
 
           {/* Billing toggle */}
           <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center",marginTop:24}}>
@@ -1075,9 +1082,9 @@ function Pricing(){
               <div className="pt-name">Team</div>
               <div className="pt-price"><span className="pt-amt">{teamPrice}</span><span className="pt-per">{teamPer}</span></div>
               <div className="pt-sub">{teamSub}</div>
-              <a className="btn btn-primary pt-cta" href={teamLink} target="_blank" rel="noopener noreferrer"
+              <a className="btn btn-primary pt-cta" href={teamLink} {...(annual ? {target:"_blank", rel:"noopener noreferrer"} : {})}
                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:teamPlan,billing:annual?'annual':'monthly'}); }}>
-                {annual ? "Get annual" : "Start free trial"}</a>
+                {annual ? "Talk to us" : "Start free trial"}</a>
             </div>
             <div className="ph">
               <div className="pt-name">Enterprise</div>

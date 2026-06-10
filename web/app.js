@@ -242,7 +242,7 @@ function Hero({ layout, interaction }) {
         if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "pricing_40" });
       }
     },
-    "See Pro \xB7 $100/seat/mo ",
+    "See Team \xB7 $1,000/mo flat ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   ), /* @__PURE__ */ React.createElement(
     "a",
@@ -566,7 +566,7 @@ const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
 const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
 const BOOK_CALL_LINK = "https://calendar.app.google/gMwYK6WWB7fKpz2B6";
 const PRICE_ROWS = [
-  { label: "Seats", solo: "1", team: "per seat", ent: "unlimited" },
+  { label: "Seats", solo: "1", team: "unlimited", ent: "unlimited" },
   { label: "Connectors \u2014 AWS, Azure, GCP, 17 sources", solo: true, team: true, ent: true },
   { label: "AWS cost data", solo: "Cost Explorer", team: "Explorer + CUR", ent: "Explorer + CUR" },
   { label: "Ask your cloud + AI bill in plain English", solo: true, team: true, ent: true },
@@ -574,6 +574,10 @@ const PRICE_ROWS = [
   { label: "Rightsizing recommendations", solo: true, team: true, ent: true },
   { label: "AI / LLM spend tracking by model", solo: true, team: true, ent: true },
   { label: "Local-first \u2014 keys never leave your machine", solo: true, team: true, ent: true },
+  { label: "Conversational Slack bot \u2014 ask the bill anything", solo: false, team: true, ent: true },
+  { label: "Root cause analysis on cost spikes, in Slack", solo: false, team: true, ent: true },
+  { label: "Chat remediation: draft the PR or ticket, human approves", solo: false, team: true, ent: true },
+  { label: "Managed AI included (or bring your own key)", solo: false, team: true, ent: true },
   { label: "Terraform remediation: patch + open the PR", solo: false, team: true, ent: true },
   { label: "Slack / Teams alerts + weekly digest", solo: false, team: true, ent: true },
   { label: "Ticket creation (Jira, Linear, GitHub)", solo: false, team: true, ent: true },
@@ -610,10 +614,10 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
       sub: teamSub,
       rec: true,
       primary: true,
-      cta: annual ? "Get annual" : "Start free trial",
+      cta: annual ? "Talk to us" : "Start free trial",
       href: teamLink,
       plan: teamPlan,
-      ext: true
+      ext: annual
     },
     {
       key: "ent",
@@ -644,12 +648,12 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
 }
 function Pricing() {
   const [annual, setAnnual] = useState(false);
-  const teamPrice = annual ? "$1,000" : "$100";
-  const teamPer = annual ? "/ seat / yr" : "/ seat / mo";
-  const teamSub = annual ? "$83 / seat / mo \xB7 save $200" : "7-day free trial";
-  const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
+  const teamPrice = annual ? "$10,000" : "$1,000";
+  const teamPer = annual ? "/ yr flat" : "/ mo flat";
+  const teamSub = annual ? "$833 / mo \xB7 2 months free \xB7 unlimited seats" : "7-day free trial \xB7 unlimited seats";
+  const teamLink = annual ? BOOK_CALL_LINK : "/docs.html#install";
   const teamPlan = annual ? "team_annual" : "team_monthly";
-  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the remediation layer. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the conversational Slack bot and the remediation layer, one flat price, unlimited seats. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => setAnnual((a) => !a),
@@ -692,13 +696,12 @@ function Pricing() {
     {
       className: "btn btn-primary pt-cta",
       href: teamLink,
-      target: "_blank",
-      rel: "noopener noreferrer",
+      ...annual ? { target: "_blank", rel: "noopener noreferrer" } : {},
       onClick: () => {
         if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: teamPlan, billing: annual ? "annual" : "monthly" });
       }
     },
-    annual ? "Get annual" : "Start free trial"
+    annual ? "Talk to us" : "Start free trial"
   )), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Enterprise"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Custom")), /* @__PURE__ */ React.createElement(
     "a",
     {

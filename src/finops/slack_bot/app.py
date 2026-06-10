@@ -312,6 +312,32 @@ def _strip_mention(text: str) -> str:
     return re.sub(r"<@[A-Z0-9]+>", "", text).strip()
 
 
+_UPGRADE_MSG = (
+    "The conversational Slack bot is part of nable Team ($1,000/mo flat, unlimited seats). "
+    "Start a free trial or see plans: https://getnable.com/#pricing — then activate with "
+    "`finops setup license` and restart finops-slack."
+)
+
+
+def _license_gate() -> str | None:
+    """Hard gate: the conversational bot is Team-only (trial passes).
+
+    Returns the user-facing upgrade message when blocked, None when allowed.
+    Called at startup and re-checked per question so an expired trial under a
+    long-running daemon stops answering instead of running forever.
+    """
+    try:
+        from ..license import check_license
+
+        if check_license().is_team:
+            return None
+        return _UPGRADE_MSG
+    except Exception as e:
+        # Never let a license-system bug take the bot down for paying users.
+        log.warning("License check failed open: %s", e)
+        return None
+
+
 _HELP = """\
 nable Slack bot — ask your cloud bill anything, right in Slack.
 
@@ -375,6 +401,11 @@ def main() -> None:
     if not os.getenv("ANTHROPIC_API_KEY"):
         print("Warning: ANTHROPIC_API_KEY not set. The bot will connect but can't answer questions.")
 
+    gate_msg = _license_gate()
+    if gate_msg:
+        print(f"\n{gate_msg}")
+        raise SystemExit(1)
+
     app = App(token=bot_token)
 
     # Load the MCP tool registry once at startup so the first question is fast.
@@ -415,6 +446,11 @@ def main() -> None:
         """Shared mention/DM path: identity, memory, tiering, side effects."""
         from .llm import ask, pick_tier
         from . import memory
+
+        gate_msg = _license_gate()
+        if gate_msg:
+            say(text=gate_msg, thread_ts=thread_ts)
+            return
 
         user_id = event.get("user", "")
         identity = _identity_for_slack(user_id, app.client)

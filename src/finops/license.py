@@ -59,7 +59,7 @@ if not _env_secret:
 _PUBLIC_KEY_B64 = "j3hqbpj9N-2EVtxgVgFgARm_5xAvPtg-yTofdQCugk0"
 
 _KEY_TTL_DAYS   = 366          # pro keys expire 1 year after issue date
-_VALID_PLANS    = {"pro", "trial", "enterprise"}
+_VALID_PLANS    = {"pro", "team", "trial", "enterprise"}
 _UPGRADE_URL    = "https://getnable.com/#pricing"
 _CHECKOUT_URL   = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06"   # direct Stripe checkout (monthly)
 _ACTIVATE_CMD   = "finops setup license"             # shown after purchase
@@ -93,10 +93,18 @@ PRO_FEATURES: set[str] = {
     # users discover value → want Slack alerts + ticket auto-creation → upgrade to Team
 }
 
+# ── Team-only features ($1k/mo flat) ─────────────────────────────────────────
+# The conversational layer: team-shaped value gets team-shaped pricing. Hard
+# gate, no free questions. Trial includes Team so demos feel the full product.
+TEAM_FEATURES: set[str] = {
+    "slack_conversational_bot",  # @nable questions, thread memory, RCA investigations
+    "slack_remediation",         # draft PRs/tickets from chat behind the approval gate
+}
+
 
 @dataclass
 class LicenseStatus:
-    mode: str          # "free" | "trial" | "pro" | "invalid"
+    mode: str          # "free" | "trial" | "pro" | "team" | "enterprise" | "invalid"
     email: str
     issued: str        # YYYY-MM-DD or ""
     message: str
@@ -104,11 +112,17 @@ class LicenseStatus:
 
     @property
     def is_pro(self) -> bool:
-        return self.mode in ("pro", "trial")
+        # Higher tiers include lower. (Enterprise keys previously failed pro
+        # gates because this list stopped at "pro".)
+        return self.mode in ("pro", "team", "enterprise", "trial")
+
+    @property
+    def is_team(self) -> bool:
+        return self.mode in ("team", "enterprise", "trial")
 
     @property
     def is_free(self) -> bool:
-        return self.mode in ("free", "pro", "trial")
+        return self.mode in ("free", "pro", "team", "enterprise", "trial")
 
 
 # ── Crypto helpers ────────────────────────────────────────────────────────────
@@ -381,8 +395,8 @@ def check_license() -> LicenseStatus:
         log.info("License: pro trial — %d days remaining", status.days_remaining)
     elif status.mode == "free":
         log.info("License: free tier")
-    elif status.mode == "pro":
-        log.info("License: pro — %s", status.email)
+    elif status.mode in ("pro", "team", "enterprise"):
+        log.info("License: %s — %s", status.mode, status.email)
     else:
         log.warning("License: invalid key — %s", status.message)
 
@@ -397,6 +411,35 @@ def get_status() -> LicenseStatus:
     if _status is None:
         _status = check_license()
     return _status
+
+
+def require_team(feature: str) -> dict | None:
+    """
+    Gate a Team-only feature ($1,000/mo flat). Returns an error dict if access
+    is denied, None if granted. Trial keys pass, so demos feel the full product.
+
+    Usage:
+        if err := require_team("slack_conversational_bot"):
+            return err
+    """
+    if feature not in TEAM_FEATURES:
+        log.warning("require_team called for non-team feature %r — allowing", feature)
+        return None
+
+    s = get_status()
+    if s.is_team:
+        return None
+
+    friendly = feature.replace("_", " ")
+    return {
+        "error": f"{friendly} requires the Team plan.",
+        "plan": s.mode,
+        "upgrade": (
+            f"The conversational Slack bot and chat remediation are part of nable Team "
+            f"($1,000/mo flat, unlimited seats). Start a free trial or see plans: {_UPGRADE_URL} "
+            f"Then activate with: {_ACTIVATE_CMD}"
+        ),
+    }
 
 
 def require_pro(feature: str) -> dict | None:
