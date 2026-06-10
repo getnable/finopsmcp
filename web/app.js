@@ -252,7 +252,9 @@ function Nav() {
 function Hero({ layout, interaction }) {
   return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud and AI bill, answered."), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. It runs on your machine, and no vendor holds your data."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free for solo use, no credit card \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/docs.html#install", onClick: () => {
     if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs_install" });
-  } }, "VS Code, Windsurf, Zed and more")), /* @__PURE__ */ React.createElement(TrustStrip, null), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("div", { className: "mini-console", "aria-label": "Example: nable answering a cost question" }, /* @__PURE__ */ React.createElement("div", { className: "mc-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mc-dots" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)), /* @__PURE__ */ React.createElement("span", { className: "mc-title" }, "claude \xB7 mcp[nable]")), /* @__PURE__ */ React.createElement("div", { className: "mc-body" }, /* @__PURE__ */ React.createElement("div", { className: "mc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mc-who" }, "YOU"), /* @__PURE__ */ React.createElement("span", null, "Where are we wasting money on EC2?")), /* @__PURE__ */ React.createElement("div", { className: "mc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mc-who mc-n" }, "NABLE"), /* @__PURE__ */ React.createElement("span", null, "11 instances under 15% CPU for 14 days. Rightsizing them saves ", /* @__PURE__ */ React.createElement("b", { className: "mc-save" }, "$1,840/mo"), ". Want the PR?")))), /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement("div", { className: "hmc-links" }, /* @__PURE__ */ React.createElement(
+  } }, "VS Code, Windsurf, Zed and more"), " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "https://calendar.app.google/2duYBqjLXaTmX5xC8", target: "_blank", rel: "noopener noreferrer", onClick: () => {
+    if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "book_demo" });
+  } }, "or book a live demo")), /* @__PURE__ */ React.createElement(TrustStrip, null), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("div", { className: "mini-console", "aria-label": "Example: nable answering a cost question" }, /* @__PURE__ */ React.createElement("div", { className: "mc-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mc-dots" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)), /* @__PURE__ */ React.createElement("span", { className: "mc-title" }, "claude \xB7 mcp[nable]")), /* @__PURE__ */ React.createElement("div", { className: "mc-body" }, /* @__PURE__ */ React.createElement("div", { className: "mc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mc-who" }, "YOU"), /* @__PURE__ */ React.createElement("span", null, "Where are we wasting money on EC2?")), /* @__PURE__ */ React.createElement("div", { className: "mc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mc-who mc-n" }, "NABLE"), /* @__PURE__ */ React.createElement("span", null, "11 instances under 15% CPU for 14 days. Rightsizing them saves ", /* @__PURE__ */ React.createElement("b", { className: "mc-save" }, "$1,840/mo"), ". Want the PR?")))), /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement("div", { className: "hmc-links" }, /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "#pricing",
@@ -266,15 +268,15 @@ function Hero({ layout, interaction }) {
   ), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "https://calendar.app.google/gMwYK6WWB7fKpz2B6",
+      href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
       target: "_blank",
       rel: "noopener noreferrer",
       className: "hmc-book",
       onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "book_call" });
+        if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "book_demo" });
       }
     },
-    "Book a 30-min call ",
+    "Book a live demo ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   )))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction })))));
 }
@@ -576,7 +578,7 @@ function CheckIcon() {
 }
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
 const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
-const BOOK_CALL_LINK = "https://calendar.app.google/gMwYK6WWB7fKpz2B6";
+const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 const PRICE_ROWS = [
   { label: "Seats", solo: "1", team: "unlimited", ent: "unlimited" },
   { label: "Connectors \u2014 AWS, Azure, GCP, 17 sources", solo: true, team: true, ent: true },
@@ -768,16 +770,16 @@ function FootCta() {
   ), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "https://calendar.app.google/gMwYK6WWB7fKpz2B6",
+      href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
       target: "_blank",
       rel: "noopener noreferrer",
       className: "btn btn-ghost",
       style: { padding: "14px 22px", fontSize: 14 },
       onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "footer_cta", cta: "book_call" });
+        if (window.posthog) posthog.capture("cta_clicked", { location: "footer_cta", cta: "book_demo" });
       }
     },
-    "Book a 30-min call"
+    "Book a live demo"
   )), /* @__PURE__ */ React.createElement(EmailCapture, { source: "footer", placeholder: "drop your email, we'll send the setup guide", btnLabel: "Send it", center: true })), /* @__PURE__ */ React.createElement("p", { className: "mono", style: { marginTop: 32, fontSize: 12, color: "var(--fg-3)", letterSpacing: ".04em" } }, "$ uvx --from finops-mcp finops welcome"), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 24, fontSize: 13, color: "var(--fg-3)" } }, "Building something? ", /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent-dim)" } }, "Read the founder note and investor thesis \u2192"))));
 }
 function FounderNote() {
@@ -964,6 +966,6 @@ function App() {
     }).catch(() => {
     });
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(HowItWorks, null), /* @__PURE__ */ React.createElement(EveryEditor, null), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(HowItWorks, null), /* @__PURE__ */ React.createElement(EveryEditor, null), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
 }
 ReactDOM.createRoot(document.getElementById("app")).render(/* @__PURE__ */ React.createElement(App, null));

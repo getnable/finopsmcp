@@ -247,7 +247,7 @@ function Hero({ layout, interaction }){
               Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. It runs on your machine, and no vendor holds your data.
             </p>
             <InstallRow />
-            <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a></p>
+            <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a> · <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'book_demo' }); }}>or book a live demo</a></p>
             <TrustStrip />
             <div className="hero-mobile-cta">
               <div className="mini-console" aria-label="Example: nable answering a cost question">
@@ -264,9 +264,9 @@ function Hero({ layout, interaction }){
                   onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing_40'}); }}>
                   See Team · $1,000/mo flat <span className="arr">→</span>
                 </a>
-                <a href="https://calendar.app.google/gMwYK6WWB7fKpz2B6" target="_blank" rel="noopener noreferrer" className="hmc-book"
-                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'book_call'}); }}>
-                  Book a 30-min call <span className="arr">→</span>
+                <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" className="hmc-book"
+                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'book_demo'}); }}>
+                  Book a live demo <span className="arr">→</span>
                 </a>
               </div>
             </div>
@@ -959,7 +959,7 @@ function CheckIcon(){
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
 const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
 
-const BOOK_CALL_LINK = "https://calendar.app.google/gMwYK6WWB7fKpz2B6";
+const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 
 // Comparison rows. value true -> check, false -> dash, string -> mono text.
 const PRICE_ROWS = [
@@ -1159,11 +1159,11 @@ function FootCta(){
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'}); }}>
               Get started free <span className="arr">→</span>
             </a>
-            <a href="https://calendar.app.google/gMwYK6WWB7fKpz2B6"
+            <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8"
                target="_blank" rel="noopener noreferrer"
                className="btn btn-ghost" style={{padding:"14px 22px",fontSize:14}}
-               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'book_call'}); }}>
-              Book a 30-min call
+               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'book_demo'}); }}>
+              Book a live demo
             </a>
           </div>
           <EmailCapture source="footer" placeholder="drop your email, we'll send the setup guide" btnLabel="Send it" center={true} />
@@ -1460,6 +1460,7 @@ function App(){
       <Pricing />
       <MidCta />
       <FAQ />
+      <FootCta />
       <Footer version={version} />
       <Tweaks />
     </>
