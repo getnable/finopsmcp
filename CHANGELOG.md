@@ -2,7 +2,7 @@
 
 All notable changes to finops-mcp (nable).
 
-## Unreleased
+## 0.8.58
 
 ### Added
 - **Team plan ($1,000/mo flat, unlimited seats).** The conversational layer is
