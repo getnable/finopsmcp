@@ -168,7 +168,7 @@ function LogoMark() {
   return /* @__PURE__ */ React.createElement("svg", { width: "26", height: "26", viewBox: "0 0 32 32", className: "mark-img", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("rect", { width: "32", height: "32", rx: "7", fill: "var(--accent)" }), /* @__PURE__ */ React.createElement("path", { d: "M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z", fill: "var(--bg)" }));
 }
 function Ticker({ installs, version }) {
-  return /* @__PURE__ */ React.createElement("div", { className: "ticker" }, /* @__PURE__ */ React.createElement("div", { className: "ticker-inner" }, /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("span", { className: "dot" }), /* @__PURE__ */ React.createElement("b", null, "nable"), /* @__PURE__ */ React.createElement("span", null, "runtime healthy")), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, "4k+ installs / mo via PyPI"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, "17 connectors \xB7 AWS \xB7 Azure \xB7 GCP +14"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent)", textDecoration: "none", fontWeight: 500 } }, "About & investors \u2192"))));
+  return /* @__PURE__ */ React.createElement("div", { className: "ticker" }, /* @__PURE__ */ React.createElement("div", { className: "ticker-inner" }, /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("span", { className: "dot" }), /* @__PURE__ */ React.createElement("b", null, "nable"), /* @__PURE__ */ React.createElement("span", null, "runtime healthy")), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, "4k+ PyPI downloads / mo"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, "17 connectors \xB7 AWS \xB7 Azure \xB7 GCP +14"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent)", textDecoration: "none", fontWeight: 500 } }, "About & investors \u2192"))));
 }
 function Nav() {
   const [open, setOpen] = useState(false);
@@ -325,15 +325,8 @@ function fmtNum(n) {
   return String(n);
 }
 function TrustStrip() {
-  const [installs, setInstalls] = useState(null);
-  useEffect(() => {
-    fetch("/api/pypi-stats").then((r) => r.ok ? r.json() : null).then((d) => {
-      if (d?.data?.last_month) setInstalls(d.data.last_month);
-    }).catch(() => {
-    });
-  }, []);
   const items = [
-    { lab: "installs / mo", val: "4k+", sub: "via PyPI \xB7 live" },
+    { lab: "built-in tools", val: "165+", sub: "cost, anomaly, rightsizing" },
     { lab: "providers", val: "17", sub: "AWS \xB7 Azure \xB7 GCP +" },
     { lab: "on our servers", val: "0 bytes", sub: "nable has no backend" }
   ];
