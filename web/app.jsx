@@ -955,7 +955,10 @@ function CheckIcon(){
   );
 }
 
-// Team checkout: $1,000/mo or $10,000/yr (2 months free).
+// Pro checkout: $100/mo or $1,000/yr (the renamed previous "team" product).
+const PRO_MONTHLY_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
+const PRO_ANNUAL_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
+// Team checkout: $1,000/mo or $10,000/yr (2 months free). Adds the Slack bot.
 const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 
@@ -963,25 +966,25 @@ const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 
 // Comparison rows. value true -> check, false -> dash, string -> mono text.
 const PRICE_ROWS = [
-  { label: "Seats",                                          solo: "1",         team: "unlimited", ent: "unlimited" },
-  { label: "Connectors — AWS, Azure, GCP, 17 sources",       solo: true,        team: true,       ent: true },
-  { label: "AWS cost data",                                  solo: "Cost Explorer", team: "Explorer + CUR", ent: "Explorer + CUR" },
-  { label: "Ask your cloud + AI bill anything",              solo: true,        team: true,       ent: true },
-  { label: "Anomaly detection",                              solo: true,        team: true,       ent: true },
-  { label: "Rightsizing recommendations",                    solo: true,        team: true,       ent: true },
-  { label: "AI / LLM spend tracking by model",               solo: true,        team: true,       ent: true },
-  { label: "Local-first — keys never leave your machine",    solo: true,        team: true,       ent: true },
-  { label: "Conversational Slack bot — ask the bill anything", solo: false,     team: true,       ent: true },
-  { label: "Root cause analysis on cost spikes, in Slack",   solo: false,       team: true,       ent: true },
-  { label: "Chat remediation: draft the PR or ticket, human approves", solo: false, team: true,   ent: true },
-  { label: "Managed AI included (or bring your own key)",    solo: false,       team: true,       ent: true },
-  { label: "Terraform remediation: patch + open the PR",     solo: false,       team: true,       ent: true },
-  { label: "Slack / Teams alerts + weekly digest",           solo: false,       team: true,       ent: true },
-  { label: "Ticket creation (Jira, Linear, GitHub)",         solo: false,       team: true,       ent: true },
-  { label: "Budget alerts + commitment analysis",            solo: false,       team: true,       ent: true },
-  { label: "Team dashboard + Tableau / Power BI",            solo: false,       team: true,       ent: true },
-  { label: "SSO + audit logs",                               solo: false,       team: false,      ent: true },
-  { label: "Support",                                        solo: "Community", team: "Email",     ent: "Slack + SLA" },
+  { label: "Seats",                                          solo: "1",         pro: "unlimited",  team: "unlimited", ent: "unlimited" },
+  { label: "Connectors — AWS, Azure, GCP, 17 sources",       solo: true,        pro: true,         team: true,       ent: true },
+  { label: "AWS cost data",                                  solo: "Cost Explorer", pro: "Explorer + CUR", team: "Explorer + CUR", ent: "Explorer + CUR" },
+  { label: "Ask your cloud + AI bill anything",              solo: true,        pro: true,         team: true,       ent: true },
+  { label: "Anomaly detection",                              solo: true,        pro: true,         team: true,       ent: true },
+  { label: "Rightsizing recommendations",                    solo: true,        pro: true,         team: true,       ent: true },
+  { label: "AI / LLM spend tracking by model",               solo: true,        pro: true,         team: true,       ent: true },
+  { label: "Local-first — keys never leave your machine",    solo: true,        pro: true,         team: true,       ent: true },
+  { label: "Terraform remediation: patch + open the PR",     solo: false,       pro: true,         team: true,       ent: true },
+  { label: "Slack / Teams alerts + weekly digest",           solo: false,       pro: true,         team: true,       ent: true },
+  { label: "Ticket creation (Jira, Linear, GitHub)",         solo: false,       pro: true,         team: true,       ent: true },
+  { label: "Budget alerts + commitment analysis",            solo: false,       pro: true,         team: true,       ent: true },
+  { label: "Team dashboard + Tableau / Power BI",            solo: false,       pro: true,         team: true,       ent: true },
+  { label: "Conversational Slack bot — ask the bill anything", solo: false,     pro: false,        team: true,       ent: true },
+  { label: "Root cause analysis on cost spikes, in Slack",   solo: false,       pro: false,        team: true,       ent: true },
+  { label: "Chat remediation: draft the PR or ticket, human approves", solo: false, pro: false,    team: true,       ent: true },
+  { label: "Managed AI included (or bring your own key)",    solo: false,       pro: false,        team: true,       ent: true },
+  { label: "SSO + audit logs",                               solo: false,       pro: false,        team: false,      ent: true },
+  { label: "Support",                                        solo: "Community", pro: "Email",      team: "Email",     ent: "Slack + SLA" },
 ];
 
 function PCell({ v }){
@@ -991,10 +994,12 @@ function PCell({ v }){
 }
 
 // Mobile-only: stack the tiers into cards (the comparison table is unreadable on a phone).
-function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }){
+function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, teamPrice, teamPer, teamSub, teamLink, teamPlan }){
   const tiers = [
     { key:"solo", name:"Solo", price:"Free", per:"forever", sub:null, rec:false, primary:false,
       cta:"Get started", href:"/docs.html", plan:"solo", ext:false },
+    { key:"pro", name:"Pro", price:proPrice, per:proPer, sub:proSub, rec:false, primary:false,
+      cta:annual?"Get annual":"Get Pro", href:proLink, plan:proPlan, ext:true },
     { key:"team", name:"Team", price:teamPrice, per:teamPer, sub:teamSub, rec:true, primary:true,
       cta:annual?"Get annual":"Get Team", href:teamLink, plan:teamPlan, ext:true },
     { key:"ent", name:"Enterprise", price:"Custom", per:"", sub:null, rec:false, primary:false,
@@ -1026,9 +1031,15 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
 function Pricing(){
   const [annual, setAnnual] = useState(false);
 
+  const proPrice  = annual ? "$1,000" : "$100";
+  const proPer    = annual ? "/ yr flat" : "/ mo flat";
+  const proSub    = annual ? "$83 / mo · 2 months free" : "7-day free trial";
+  const proLink   = annual ? PRO_ANNUAL_LINK : PRO_MONTHLY_LINK;
+  const proPlan   = annual ? "pro_annual" : "pro_monthly";
+
   const teamPrice = annual ? "$10,000" : "$1,000";
   const teamPer   = annual ? "/ yr flat" : "/ mo flat";
-  const teamSub   = annual ? "$833 / mo · 2 months free · unlimited seats" : "7-day free trial · unlimited seats";
+  const teamSub   = annual ? "$833 / mo · 2 months free" : "7-day free trial";
   const teamLink  = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan  = annual ? "team_annual" : "team_monthly";
 
@@ -1038,7 +1049,7 @@ function Pricing(){
         <div className="section-head">
           <div className="label">Pricing</div>
           <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
-          <p>Solo is free forever. Team adds the conversational Slack bot and the remediation layer, one flat price, unlimited seats. Enterprise adds SSO, audit logs, and an SLA.</p>
+          <p>Solo is free forever. Pro adds the remediation layer: PRs, tickets, alerts, dashboards. Team adds the conversational Slack bot and managed AI. Enterprise adds SSO, audit logs, and an SLA.</p>
 
           {/* Billing toggle */}
           <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center",marginTop:24}}>
@@ -1075,6 +1086,14 @@ function Pricing(){
               <a className="btn btn-ghost pt-cta" href="/docs.html"
                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'}); }}>Get started</a>
             </div>
+            <div className="ph">
+              <div className="pt-name">Pro</div>
+              <div className="pt-price"><span className="pt-amt">{proPrice}</span><span className="pt-per">{proPer}</span></div>
+              <div className="pt-sub">{proSub}</div>
+              <a className="btn btn-ghost pt-cta" href={proLink} target="_blank" rel="noopener noreferrer"
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:proPlan,billing:annual?'annual':'monthly'}); }}>
+                {annual ? "Get annual" : "Get Pro"}</a>
+            </div>
             <div className="ph pcol-team">
               <div className="pt-rec">Recommended</div>
               <div className="pt-name">Team</div>
@@ -1096,6 +1115,7 @@ function Pricing(){
               <React.Fragment key={i}>
                 <div className="pr pr-label">{r.label}</div>
                 <div className="pr pr-cell"><PCell v={r.solo} /></div>
+                <div className="pr pr-cell"><PCell v={r.pro} /></div>
                 <div className="pr pr-cell pcol-team"><PCell v={r.team} /></div>
                 <div className="pr pr-cell"><PCell v={r.ent} /></div>
               </React.Fragment>
@@ -1103,7 +1123,7 @@ function Pricing(){
           </div>
         </div>
 
-        <PricingCards annual={annual} teamPrice={teamPrice} teamPer={teamPer} teamSub={teamSub} teamLink={teamLink} teamPlan={teamPlan} />
+        <PricingCards annual={annual} proPrice={proPrice} proPer={proPer} proSub={proSub} proLink={proLink} proPlan={proPlan} teamPrice={teamPrice} teamPer={teamPer} teamSub={teamSub} teamLink={teamLink} teamPlan={teamPlan} />
 
         <p className="pfoot">No credit card for Solo. Team trial requires a card, cancel any time.</p>
         <p className="pfoot pdemo">Weighing Team for your org?{" "}

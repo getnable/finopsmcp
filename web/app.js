@@ -588,36 +588,38 @@ const TEAM_FEATURES = [
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
+const PRO_MONTHLY_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
+const PRO_ANNUAL_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
 const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 const PRICE_ROWS = [
-  { label: "Seats", solo: "1", team: "unlimited", ent: "unlimited" },
-  { label: "Connectors \u2014 AWS, Azure, GCP, 17 sources", solo: true, team: true, ent: true },
-  { label: "AWS cost data", solo: "Cost Explorer", team: "Explorer + CUR", ent: "Explorer + CUR" },
-  { label: "Ask your cloud + AI bill anything", solo: true, team: true, ent: true },
-  { label: "Anomaly detection", solo: true, team: true, ent: true },
-  { label: "Rightsizing recommendations", solo: true, team: true, ent: true },
-  { label: "AI / LLM spend tracking by model", solo: true, team: true, ent: true },
-  { label: "Local-first \u2014 keys never leave your machine", solo: true, team: true, ent: true },
-  { label: "Conversational Slack bot \u2014 ask the bill anything", solo: false, team: true, ent: true },
-  { label: "Root cause analysis on cost spikes, in Slack", solo: false, team: true, ent: true },
-  { label: "Chat remediation: draft the PR or ticket, human approves", solo: false, team: true, ent: true },
-  { label: "Managed AI included (or bring your own key)", solo: false, team: true, ent: true },
-  { label: "Terraform remediation: patch + open the PR", solo: false, team: true, ent: true },
-  { label: "Slack / Teams alerts + weekly digest", solo: false, team: true, ent: true },
-  { label: "Ticket creation (Jira, Linear, GitHub)", solo: false, team: true, ent: true },
-  { label: "Budget alerts + commitment analysis", solo: false, team: true, ent: true },
-  { label: "Team dashboard + Tableau / Power BI", solo: false, team: true, ent: true },
-  { label: "SSO + audit logs", solo: false, team: false, ent: true },
-  { label: "Support", solo: "Community", team: "Email", ent: "Slack + SLA" }
+  { label: "Seats", solo: "1", pro: "unlimited", team: "unlimited", ent: "unlimited" },
+  { label: "Connectors \u2014 AWS, Azure, GCP, 17 sources", solo: true, pro: true, team: true, ent: true },
+  { label: "AWS cost data", solo: "Cost Explorer", pro: "Explorer + CUR", team: "Explorer + CUR", ent: "Explorer + CUR" },
+  { label: "Ask your cloud + AI bill anything", solo: true, pro: true, team: true, ent: true },
+  { label: "Anomaly detection", solo: true, pro: true, team: true, ent: true },
+  { label: "Rightsizing recommendations", solo: true, pro: true, team: true, ent: true },
+  { label: "AI / LLM spend tracking by model", solo: true, pro: true, team: true, ent: true },
+  { label: "Local-first \u2014 keys never leave your machine", solo: true, pro: true, team: true, ent: true },
+  { label: "Terraform remediation: patch + open the PR", solo: false, pro: true, team: true, ent: true },
+  { label: "Slack / Teams alerts + weekly digest", solo: false, pro: true, team: true, ent: true },
+  { label: "Ticket creation (Jira, Linear, GitHub)", solo: false, pro: true, team: true, ent: true },
+  { label: "Budget alerts + commitment analysis", solo: false, pro: true, team: true, ent: true },
+  { label: "Team dashboard + Tableau / Power BI", solo: false, pro: true, team: true, ent: true },
+  { label: "Conversational Slack bot \u2014 ask the bill anything", solo: false, pro: false, team: true, ent: true },
+  { label: "Root cause analysis on cost spikes, in Slack", solo: false, pro: false, team: true, ent: true },
+  { label: "Chat remediation: draft the PR or ticket, human approves", solo: false, pro: false, team: true, ent: true },
+  { label: "Managed AI included (or bring your own key)", solo: false, pro: false, team: true, ent: true },
+  { label: "SSO + audit logs", solo: false, pro: false, team: false, ent: true },
+  { label: "Support", solo: "Community", pro: "Email", team: "Email", ent: "Slack + SLA" }
 ];
 function PCell({ v }) {
   if (v === true) return /* @__PURE__ */ React.createElement("span", { className: "pcheck" }, /* @__PURE__ */ React.createElement(CheckIcon, null));
   if (v === false) return /* @__PURE__ */ React.createElement("span", { className: "pdash" }, "\u2013");
   return /* @__PURE__ */ React.createElement("span", { className: "pval" }, v);
 }
-function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }) {
+function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, teamPrice, teamPer, teamSub, teamLink, teamPlan }) {
   const tiers = [
     {
       key: "solo",
@@ -631,6 +633,19 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
       href: "/docs.html",
       plan: "solo",
       ext: false
+    },
+    {
+      key: "pro",
+      name: "Pro",
+      price: proPrice,
+      per: proPer,
+      sub: proSub,
+      rec: false,
+      primary: false,
+      cta: annual ? "Get annual" : "Get Pro",
+      href: proLink,
+      plan: proPlan,
+      ext: true
     },
     {
       key: "team",
@@ -674,12 +689,17 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
 }
 function Pricing() {
   const [annual, setAnnual] = useState(false);
+  const proPrice = annual ? "$1,000" : "$100";
+  const proPer = annual ? "/ yr flat" : "/ mo flat";
+  const proSub = annual ? "$83 / mo \xB7 2 months free" : "7-day free trial";
+  const proLink = annual ? PRO_ANNUAL_LINK : PRO_MONTHLY_LINK;
+  const proPlan = annual ? "pro_annual" : "pro_monthly";
   const teamPrice = annual ? "$10,000" : "$1,000";
   const teamPer = annual ? "/ yr flat" : "/ mo flat";
-  const teamSub = annual ? "$833 / mo \xB7 2 months free \xB7 unlimited seats" : "7-day free trial \xB7 unlimited seats";
+  const teamSub = annual ? "$833 / mo \xB7 2 months free" : "7-day free trial";
   const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan = annual ? "team_annual" : "team_monthly";
-  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team adds the conversational Slack bot and the remediation layer, one flat price, unlimited seats. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Pro adds the remediation layer: PRs, tickets, alerts, dashboards. Team adds the conversational Slack bot and managed AI. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => setAnnual((a) => !a),
@@ -717,6 +737,18 @@ function Pricing() {
       }
     },
     "Get started"
+  )), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Pro"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, proPrice), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, proPer)), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, proSub), /* @__PURE__ */ React.createElement(
+    "a",
+    {
+      className: "btn btn-ghost pt-cta",
+      href: proLink,
+      target: "_blank",
+      rel: "noopener noreferrer",
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: proPlan, billing: annual ? "annual" : "monthly" });
+      }
+    },
+    annual ? "Get annual" : "Get Pro"
   )), /* @__PURE__ */ React.createElement("div", { className: "ph pcol-team" }, /* @__PURE__ */ React.createElement("div", { className: "pt-rec" }, "Recommended"), /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Team"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, teamPrice), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, teamPer)), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, teamSub), /* @__PURE__ */ React.createElement(
     "a",
     {
@@ -741,7 +773,7 @@ function Pricing() {
       }
     },
     "Contact us"
-  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.solo })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.team })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement(PricingCards, { annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Solo. Team trial requires a card, cancel any time."), /* @__PURE__ */ React.createElement("p", { className: "pfoot pdemo" }, "Weighing Team for your org?", " ", /* @__PURE__ */ React.createElement(
+  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.solo })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.pro })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.team })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement(PricingCards, { annual, proPrice, proPer, proSub, proLink, proPlan, teamPrice, teamPer, teamSub, teamLink, teamPlan }), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Solo. Team trial requires a card, cancel any time."), /* @__PURE__ */ React.createElement("p", { className: "pfoot pdemo" }, "Weighing Team for your org?", " ", /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
