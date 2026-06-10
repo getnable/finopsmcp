@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## Unreleased
+
+### Added
+- **Team plan ($1,000/mo flat, unlimited seats).** The conversational layer is
+  now a paid tier: the Slack bot (questions, thread memory, RCA), chat
+  remediation behind the human approval gate, and managed AI. Hard gate: the
+  bot checks the license at startup and on every question; free and solo Pro
+  keys get a clear upgrade message, trial keys get the full product. New
+  "team" license plan with require_team gating; enterprise keys now correctly
+  pass pro gates too (they previously failed the is_pro check). Pricing page
+  updated: $1,000/mo or $10,000/yr, unlimited seats.
+
 ## 0.8.57
 
 ### Changed
