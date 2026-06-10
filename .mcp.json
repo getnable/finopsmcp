@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "nable": {
-      "command": "uvx",
-      "args": ["finops-mcp"]
-    }
-  }
-}
