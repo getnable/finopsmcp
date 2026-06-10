@@ -115,9 +115,32 @@ def _print_header() -> None:
 
 # ── One-time welcome (auto-shown on first run) ─────────────────────────────────
 
+def _is_interactive_install() -> bool:
+    """True only when a human is actually at the terminal.
+
+    install_completed used to fire on ANY first CLI run, so piped invocations,
+    `finops --help` in scripts, the cache-warm subprocess inside `finops
+    upgrade` (capture_output, so stdin is a pipe), and fresh CI/uvx environments
+    all counted as installs. A real first-run welcome is interactive, so we gate
+    on stdin/stdout being a TTY and not running under CI.
+    """
+    try:
+        from . import telemetry as _tel
+        if _tel.is_ci():
+            return False
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except Exception:
+        return False
+
+
 def show_welcome() -> None:
-    """Print on the very first CLI invocation, then never again."""
+    """Print on the very first interactive CLI invocation, then never again."""
     if not _is_first_run():
+        return
+
+    # Non-interactive / automated first runs are not installs. Stay a no-op and
+    # leave the sentinel unset so the first genuine human run still counts once.
+    if not _is_interactive_install():
         return
 
     _mark_welcomed()

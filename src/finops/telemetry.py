@@ -70,7 +70,24 @@ def _is_opted_out() -> bool:
     _airgap = os.environ.get("FINOPS_AIRGAP", "").strip()
     if _airgap not in ("", "0", "false", "no"):
         return True  # air-gap mode: no non-provider outbound allowed
+    if is_ci():
+        return True  # CI / build runners are not users; never count or ping
     return bool(os.environ.get(_OPT_OUT_ENV, "").strip())
+
+
+# Build and CI runners fire the CLI on every cold job, which used to look like
+# a flood of fresh installs. They are never real users, so they never send
+# telemetry. Detected from the standard env vars these systems set.
+_CI_ENV_VARS = (
+    "CI", "CONTINUOUS_INTEGRATION", "GITHUB_ACTIONS", "GITLAB_CI", "CIRCLECI",
+    "BUILDKITE", "JENKINS_URL", "TF_BUILD", "TEAMCITY_VERSION", "TRAVIS",
+    "APPVEYOR", "DRONE", "CODEBUILD_BUILD_ID", "BITBUCKET_BUILD_NUMBER",
+    "RUNNER_OS",
+)
+
+
+def is_ci() -> bool:
+    return any(os.environ.get(v) for v in _CI_ENV_VARS)
 
 
 # ─── Session state (accumulated in-process, flushed periodically) ─────────────
