@@ -244,7 +244,7 @@ function Hero({ layout, interaction }){
               Your cloud and AI bill, answered.
             </h1>
             <p className="lede">
-              Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. nable tracks LLM cost by model, catches anomalies, and shows you exactly what to change. Your token bill keeps climbing even as prices drop. See exactly why. It all runs on your machine, with no vendor holding your data.
+              Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. It runs on your machine, and no vendor holds your data.
             </p>
             <InstallRow />
             <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a></p>
