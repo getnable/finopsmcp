@@ -250,7 +250,7 @@ function Nav() {
   ))));
 }
 function Hero({ layout, interaction }) {
-  return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud and AI bill, answered."), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Ask your AWS, Azure, GCP and AI spend anything, in plain English, inside Claude or Cursor. It runs on your machine, and no vendor holds your data."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free for solo use, no credit card \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/docs.html#install", onClick: () => {
+  return /* @__PURE__ */ React.createElement("header", { className: "hero " + (layout === "editorial" ? "editorial" : ""), id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Your cloud and AI bill, answered."), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Ask your AWS, Azure, GCP and AI spend anything, inside Claude or Cursor. It runs on your machine, and no vendor holds your data."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free for solo use, no credit card \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/docs.html#install", onClick: () => {
     if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs_install" });
   } }, "VS Code, Windsurf, Zed and more"), " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "https://calendar.app.google/2duYBqjLXaTmX5xC8", target: "_blank", rel: "noopener noreferrer", onClick: () => {
     if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "book_demo" });
@@ -458,7 +458,7 @@ function Architecture({ version }) {
 }
 const STEPS = [
   { n: "01", h: "Connect", p: "Point nable at AWS, Azure, GCP and 14 more sources. Credentials land in your OS keyring, never on our servers.", ex: "finops setup aws" },
-  { n: "02", h: "Ask", p: "Open Claude, Cursor, or any MCP editor and ask in plain English. nable turns the question into live, read-only API calls.", ex: '"What drove our bill up last week?"' },
+  { n: "02", h: "Ask", p: "Open Claude, Cursor, or any MCP editor and just ask. nable turns the question into live, read-only API calls.", ex: '"What drove our bill up last week?"' },
   { n: "03", h: "Act", p: "Approve a rightsizing PR, open a ticket, post to Slack. Answers become actions, every one written to an audit log.", ex: '"Open a PR to downsize the idle instances."' }
 ];
 function HowItWorks() {
@@ -583,7 +583,7 @@ const PRICE_ROWS = [
   { label: "Seats", solo: "1", team: "unlimited", ent: "unlimited" },
   { label: "Connectors \u2014 AWS, Azure, GCP, 17 sources", solo: true, team: true, ent: true },
   { label: "AWS cost data", solo: "Cost Explorer", team: "Explorer + CUR", ent: "Explorer + CUR" },
-  { label: "Ask your cloud + AI bill in plain English", solo: true, team: true, ent: true },
+  { label: "Ask your cloud + AI bill anything", solo: true, team: true, ent: true },
   { label: "Anomaly detection", solo: true, team: true, ent: true },
   { label: "Rightsizing recommendations", solo: true, team: true, ent: true },
   { label: "AI / LLM spend tracking by model", solo: true, team: true, ent: true },
