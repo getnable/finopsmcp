@@ -188,7 +188,9 @@ function Nav(){
                  onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a></li>
         </ul>
         <div className="right">
-          <a href="/account.html" className="btn btn-ghost">Sign in</a>
+          <a href="/account.html" className="nav-signin">Sign in</a>
+          <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" className="btn btn-ghost"
+             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'book_demo'}); }}>Book a demo</a>
           <a href="/docs.html" className="btn btn-primary"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'}); }}>
             Get started free <span className="arr">→</span>
@@ -1104,6 +1106,10 @@ function Pricing(){
         <PricingCards annual={annual} teamPrice={teamPrice} teamPer={teamPer} teamSub={teamSub} teamLink={teamLink} teamPlan={teamPlan} />
 
         <p className="pfoot">No credit card for Solo. Team trial requires a card, cancel any time.</p>
+        <p className="pfoot pdemo">Weighing Team for your org?{" "}
+          <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
+             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',cta:'book_demo'}); }}>
+            Book a 20-min demo</a> and we'll run it on your own bill.</p>
       </div>
     </section>
   );

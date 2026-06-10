@@ -192,7 +192,19 @@ function Nav() {
       }
     },
     "GitHub"
-  ))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "btn btn-ghost" }, "Sign in"), /* @__PURE__ */ React.createElement(
+  ))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "nav-signin" }, "Sign in"), /* @__PURE__ */ React.createElement(
+    "a",
+    {
+      href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
+      target: "_blank",
+      rel: "noopener noreferrer",
+      className: "btn btn-ghost",
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "nav", cta: "book_demo" });
+      }
+    },
+    "Book a demo"
+  ), /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "/docs.html",
@@ -729,7 +741,18 @@ function Pricing() {
       }
     },
     "Contact us"
-  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.solo })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.team })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement(PricingCards, { annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Solo. Team trial requires a card, cancel any time.")));
+  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.solo })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.team })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement(PricingCards, { annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Solo. Team trial requires a card, cancel any time."), /* @__PURE__ */ React.createElement("p", { className: "pfoot pdemo" }, "Weighing Team for your org?", " ", /* @__PURE__ */ React.createElement(
+    "a",
+    {
+      href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
+      target: "_blank",
+      rel: "noopener noreferrer",
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", cta: "book_demo" });
+      }
+    },
+    "Book a 20-min demo"
+  ), " and we'll run it on your own bill.")));
 }
 function MidCta() {
   return /* @__PURE__ */ React.createElement("section", { id: "mid-cta", style: { borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { paddingTop: 72, paddingBottom: 72 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 24, textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { style: { marginBottom: 10 } }, "Ready to stop guessing?"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-2)", maxWidth: "46ch", margin: "0 auto", lineHeight: 1.6 } }, "Minutes from install to your first real insight. Free forever for solo use.")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "center" } }, /* @__PURE__ */ React.createElement(
