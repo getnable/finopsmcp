@@ -1,10 +1,10 @@
 # nable: The FinOps copilot that runs on your machine
 
-[![PyPI Downloads](https://img.shields.io/pypi/dm/finops-mcp?label=installs%2Fmonth&color=brightgreen)](https://pypi.org/project/finops-mcp/)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/finops-mcp?label=downloads%2Fmonth&color=brightgreen)](https://pypi.org/project/finops-mcp/)
 [![PyPI Version](https://img.shields.io/pypi/v/finops-mcp?color=blue)](https://pypi.org/project/finops-mcp/)
 [![Docs](https://img.shields.io/badge/docs-getnable.com-black)](https://getnable.com/docs)
 
-**Connect Claude to your real AWS, Azure, GCP, and SaaS billing data. Ask questions in plain English. Get answers in seconds.**
+**Connect Claude to your real AWS, Azure, GCP, and SaaS billing data. Ask your bill anything. Get answers in seconds.**
 
 👉 **[getnable.com](https://getnable.com)** · quickstart guide, docs, and free tier
 
