@@ -192,6 +192,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .btn-ghost:hover{color:var(--fg);border-color:var(--fg-3);background:var(--bg-2)}
 .btn .arr{transition:transform .18s}
 .btn:hover .arr{transform:translateX(2px)}
+.nav .right{display:flex;align-items:center;gap:12px}
+.nav-signin{color:var(--fg-3);font-size:13.5px;font-family:'Space Grotesk',system-ui,sans-serif;padding:0 4px;transition:color .15s}
+.nav-signin:hover{color:var(--fg)}
 @media(max-width:880px){.nav ul{display:none}.nav .right{display:none}}
 .nav-hamburger{display:none;align-items:center;justify-content:center;width:40px;height:40px;color:var(--fg-2);border-radius:var(--r-md);transition:color .18s,background .18s}
 .nav-hamburger:hover{color:var(--fg);background:var(--bg-2)}
@@ -525,6 +528,9 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .pdash{color:var(--fg-4);font-size:15px}
 .pval{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:12px;color:var(--fg-2);text-align:center}
 .pfoot{margin-top:22px;font-size:12px;color:var(--fg-4);text-align:center;font-family:'Space Grotesk',system-ui,sans-serif}
+.pdemo{margin-top:10px;font-size:13px;color:var(--fg-3)}
+.pdemo a{color:var(--accent);border-bottom:1px solid var(--accent-dim);transition:.15s}
+.pdemo a:hover{border-bottom-color:var(--accent)}
 .pcards{display:none}
 @media(max-width:760px){
   .ptable-wrap{display:none}
