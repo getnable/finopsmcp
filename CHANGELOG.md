@@ -5,6 +5,15 @@ All notable changes to finops-mcp (nable).
 ## 0.8.57
 
 ### Changed
+- **Releases can no longer slow or break existing installs.** Configs written
+  by the wizard now pin the exact version (`uvx finops-mcp==X`) instead of
+  resolving "latest" at client startup, which could exceed Claude Desktop's
+  startup timeout on the first launch after a release ("Server disconnected").
+  Upgrades are now explicit: `finops upgrade` resolves the latest version,
+  downloads it into the uvx cache up front, then moves the config pin, so the
+  next Claude Desktop restart is instant. The Claude Code plugin pins the
+  server version the same way, and the test suite fails a release that bumps
+  the package without the plugin pin.
 - **`finops welcome` never dead-ends, and shows value before asking for keys.**
   Onboarding analytics showed most installers skipped the credential step and
   saw nothing, then left. The first run now (1) detects an existing AWS

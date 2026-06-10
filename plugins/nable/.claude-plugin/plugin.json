@@ -15,7 +15,7 @@
   "mcpServers": {
     "nable": {
       "command": "uvx",
-      "args": ["finops-mcp"]
+      "args": ["finops-mcp==0.8.57"]
     }
   }
 }

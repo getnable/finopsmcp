@@ -1463,6 +1463,8 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("pagerduty",    help="Connect PagerDuty seat counts")
     sub.add_parser("databricks",   help="Connect Databricks DBU consumption and job costs")
     sub.add_parser("claude",       help="Register nable in Claude Desktop config")
+    up_p = sub.add_parser("upgrade", help="Upgrade nable: cache the new version, then move the config pin")
+    up_p.add_argument("version", nargs="?", default="", help="Target version (default: latest on PyPI)")
     sub.add_parser("aws-cur",      help="Deploy AWS CUR pipeline via CloudFormation")
     config_p = sub.add_parser("config", help="Configure user preferences (persona, etc.)")
     config_p.add_argument("--persona", metavar="ROLE", default="",
@@ -1664,6 +1666,9 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "claude":
         _configure_claude_desktop()
+        return
+    elif parsed.cmd == "upgrade":
+        _run_upgrade(getattr(parsed, "version", ""))
         return
     elif parsed.cmd == "aws-cur":
         _run_aws_cur_setup()
@@ -2093,6 +2098,128 @@ def _run_infra_overview(provider: str = "") -> None:
         print_saas_setup(p)
 
 
+def _installed_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("finops-mcp")
+    except Exception:
+        return ""
+
+
+def _pinned_package(target: str = "") -> str:
+    """The uvx target written into client configs, pinned to one version.
+
+    Unpinned, every PyPI release makes the next cold launch re-resolve and
+    download, which can exceed an MCP client's startup timeout. Pinned, a
+    release changes nothing for existing installs until `finops upgrade`.
+    """
+    v = target or _installed_version()
+    return f"finops-mcp=={v}" if v else "finops-mcp"
+
+
+def _claude_config_file() -> "Path | None":
+    """Return the existing claude_desktop_config.json, or None."""
+    candidates = [
+        Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+        Path.home() / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json",
+        Path.home() / ".config" / "Claude" / "claude_desktop_config.json",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
+def _run_upgrade(target: str = "") -> None:
+    """Move the nable version pin forward, deliberately.
+
+    Wizard-written configs pin finops-mcp==X so a PyPI release never slows or
+    breaks a working install. This command is the explicit opt-in: resolve the
+    target version, download it into the uvx cache now (outside any client
+    startup window), rewrite the pin, then ask for one Claude Desktop restart.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    _section("Upgrade nable")
+    current = _installed_version() or "unknown"
+
+    if not target:
+        try:
+            import httpx
+            r = httpx.get("https://pypi.org/pypi/finops-mcp/json", timeout=10)
+            r.raise_for_status()
+            target = r.json()["info"]["version"]
+        except Exception as e:
+            _err(f"Could not reach PyPI to find the latest version ({e}).")
+            print("  Pass one explicitly:  finops upgrade 0.8.57")
+            return
+
+    print(f"  Installed: {current}")
+    print(f"  Latest:    {target}")
+
+    uvx_bin = shutil.which("uvx")
+    if not uvx_bin:
+        _warn("uvx not found, so there is no cache to warm or pin to move.")
+        print("  If you installed with pip, upgrade with:")
+        print(f"    pip install -U 'finops-mcp=={target}'")
+        return
+
+    # The slow part happens HERE, on purpose, not at Claude Desktop startup.
+    print("  Downloading and caching the new version (so Claude never waits on it)...")
+    try:
+        res = subprocess.run(
+            [uvx_bin, "--from", f"finops-mcp=={target}", "finops", "--help"],
+            capture_output=True, text=True, timeout=300,
+        )
+        if res.returncode != 0:
+            _err(f"Could not cache finops-mcp {target}: {(res.stderr or res.stdout).strip()[:300]}")
+            _warn("Your config was NOT changed. You are still on the working version.")
+            return
+    except Exception as e:
+        _err(f"Could not cache finops-mcp {target}: {e}")
+        _warn("Your config was NOT changed. You are still on the working version.")
+        return
+    _ok(f"finops-mcp {target} cached")
+
+    # Move the pin in the Claude Desktop config (nable key, legacy finops key too).
+    config_path = _claude_config_file()
+    if not config_path:
+        _warn("Claude Desktop config not found. Nothing to repin.")
+        print("  If you use another MCP client, update its nable entry to:")
+        print(f"    {uvx_bin} {_pinned_package(target)}")
+        return
+    try:
+        config = json.loads(config_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        _err(f"Could not parse {config_path}: {e}")
+        return
+
+    moved = False
+    for server_key in ("nable", "finops"):
+        entry = config.get("mcpServers", {}).get(server_key)
+        if not entry:
+            continue
+        args = entry.get("args") or []
+        new_args = [
+            _pinned_package(target) if isinstance(a, str) and a.split("==")[0] == "finops-mcp" else a
+            for a in args
+        ]
+        if new_args != args:
+            entry["args"] = new_args
+            moved = True
+    if moved:
+        config_path.write_text(json.dumps(config, indent=2) + "\n")
+        config_path.chmod(0o600)
+        _ok(f"Claude Desktop pinned to finops-mcp=={target}")
+        print("\n  Restart Claude Desktop once to pick it up. The new version is already")
+        print("  cached, so the restart is instant.")
+    else:
+        _warn("No finops-mcp pin found in the Claude Desktop config (nothing changed).")
+        print("  Re-run 'finops setup claude' to write a pinned entry.")
+
+
 def _configure_claude_desktop() -> None:
     """
     Auto-detect claude_desktop_config.json and inject the nable MCP server
@@ -2175,8 +2302,14 @@ def _configure_claude_desktop_inner() -> None:
             )
 
     if uvx_bin:
-        mcp_entry = {"command": uvx_bin, "args": ["finops-mcp"]}
-        display_cmd = f"uvx finops-mcp  (uvx found at {uvx_bin})"
+        # Pin the exact installed version. An unpinned "finops-mcp" re-resolves
+        # "latest" on the first launch after every PyPI release, and that cold
+        # download can blow past Claude Desktop's startup timeout ("Server
+        # disconnected"). Pinned, releases are invisible until the user runs
+        # `finops upgrade`, which moves the pin and pre-warms the cache.
+        pinned = _pinned_package()
+        mcp_entry = {"command": uvx_bin, "args": [pinned]}
+        display_cmd = f"uvx {pinned}  (uvx found at {uvx_bin})"
     else:
         mcp_entry = {"command": finops_bin}
         display_cmd = finops_bin
