@@ -7,15 +7,18 @@ import importlib
 
 import pytest
 
-# Throwaway test keypair (NOT the production keys). The public half is injected
-# into the module so these tests are self-contained and don't depend on the
-# shipped public key.
-_TEST_PRIV = "8HW1kTWT2OIuBRaBY-YcfmweY9hoECjF7uedaJfzID4"
-_TEST_PUB = "j3hqbpj9N-2EVtxgVgFgARm_5xAvPtg-yTofdQCugk0"
+# Throwaway test keypair, generated solely for tests and unrelated to any
+# production key. The public half is genuinely injected into the module (see
+# _license) so these tests verify with the test key, never the shipped one.
+# (A prior version pasted the real production private key here, which leaked it;
+# this pair derives a public key that is NOT the bundled one, by design.)
+_TEST_PRIV = "8fbe8En53x3KhJ93ZwEmE3L0IVLHQm6yI-gn3FGIpeg"
+_TEST_PUB = "sxzvFKJjtkqH4xZWXQZLvrYhRxQFVoaJ5YRiEu18dMw"
 
 
 def _license(monkeypatch, secret=None, priv=_TEST_PRIV):
-    """Reload the license module with a controlled environment."""
+    """Reload the license module with a controlled environment, then inject the
+    test public key so verification does not depend on the bundled production key."""
     if secret is None:
         monkeypatch.delenv("FINOPS_LICENSE_SECRET", raising=False)
     else:
@@ -26,6 +29,7 @@ def _license(monkeypatch, secret=None, priv=_TEST_PRIV):
         monkeypatch.setenv("FINOPS_LICENSE_PRIVATE_KEY", priv)
     import finops.license as L
     importlib.reload(L)
+    L._PUBLIC_KEY_B64 = _TEST_PUB  # verify against the test key, not production
     return L
 
 
@@ -47,6 +51,24 @@ def test_v2_tampered_payload_rejected(monkeypatch):
     flipped = "A" if key[12] != "A" else "B"
     bad = key[:12] + flipped + key[13:]
     assert L.validate_key(bad).mode == "invalid"
+
+
+# Compromised seed that was once committed in this repo (public GitHub history).
+# Production rotated away from it on 2026-06-09. This test fails loudly if the
+# bundled public key is ever reverted to the one that seed signs for.
+_LEAKED_SEED = "8HW1kTWT2OIuBRaBY-YcfmweY9hoECjF7uedaJfzID4"
+
+
+def test_leaked_seed_cannot_forge_against_bundled_key(monkeypatch):
+    """A key signed by the historically-leaked private seed must NOT validate
+    against the bundled production public key. Guards the key rotation."""
+    monkeypatch.setenv("FINOPS_LICENSE_PRIVATE_KEY", _LEAKED_SEED)
+    import finops.license as L
+    importlib.reload(L)
+    # Note: no public-key injection — verify against the REAL bundled key.
+    forged = L.generate_key("attacker@evil.com", plan="enterprise")
+    assert L.validate_key(forged).mode == "invalid"
+    importlib.reload(L)  # restore clean module state for later tests
 
 
 def test_v2_forged_signature_rejected(monkeypatch):

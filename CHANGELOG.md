@@ -2,6 +2,16 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.59
+
+### Security
+- **Rotated the license signing key.** The previous Ed25519 public key shipped
+  in the package paired with a private seed that had been committed to the
+  public repo (in a test file), so anyone could mint valid license keys. The
+  key is rotated; the leaked seed no longer validates against the bundled key,
+  and a regression test fails the build if it ever does again. The test suite
+  now uses its own throwaway keypair, genuinely separate from production.
+
 ## 0.8.58
 
 ### Added
