@@ -250,6 +250,13 @@ function Hero({ layout, interaction }){
             <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a></p>
             <TrustStrip />
             <div className="hero-mobile-cta">
+              <div className="mini-console" aria-label="Example: nable answering a cost question">
+                <div className="mc-bar"><span className="mc-dots"><i/><i/><i/></span><span className="mc-title">claude · mcp[nable]</span></div>
+                <div className="mc-body">
+                  <div className="mc-row"><span className="mc-who">YOU</span><span>Where are we wasting money on EC2?</span></div>
+                  <div className="mc-row"><span className="mc-who mc-n">NABLE</span><span>11 instances under 15% CPU for 14 days. Rightsizing them saves <b className="mc-save">$1,840/mo</b>. Want the PR?</span></div>
+                </div>
+              </div>
               <p className="hmc-lead">nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide.</p>
               <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Get the guide" />
               <div className="hmc-links">
