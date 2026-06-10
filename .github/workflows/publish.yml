@@ -1,9 +1,13 @@
-name: Publish to PyPI
+name: Publish (PyPI + MCP Registry)
 
 on:
   push:
     tags:
       - "v*.*.*"
+  # Manual trigger: lets an agent or human re-run publishing for the current
+  # main (e.g. when the tag predates a workflow change, or to retry the
+  # registry leg alone). skip-existing makes the PyPI step a no-op on re-runs.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -41,3 +45,23 @@ jobs:
           #   Repository: finops
           #   Workflow: publish.yml
           skip-existing: true
+
+  publish-mcp-registry:
+    name: Publish to MCP Registry
+    runs-on: ubuntu-latest
+    # The registry validates that the PyPI package referenced in server.json
+    # exists, so publish there first.
+    needs: build-and-publish
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Login to registry (GitHub Actions OIDC, no tokens or device codes)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json
+        run: ./mcp-publisher publish
