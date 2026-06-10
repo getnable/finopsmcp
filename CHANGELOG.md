@@ -2,7 +2,7 @@
 
 All notable changes to finops-mcp (nable).
 
-## Unreleased
+## 0.8.57
 
 ### Changed
 - **`finops welcome` never dead-ends, and shows value before asking for keys.**
@@ -12,6 +12,24 @@ All notable changes to finops-mcp (nable).
   no setup menu; (2) if you skip or decline, still shows nable on a sample bill
   so the value lands before you leave the terminal; (3) labels demo output as
   sample data instead of claiming it scanned your account.
+
+### Fixed
+- **Onboarding can no longer hang on the ambient AWS check.** The first-run
+  credential probe is capped at 3 seconds, so a firewalled IMDS endpoint or a
+  stale SSO profile times out cleanly instead of freezing setup.
+- **Slack thread memory no longer loses turns under concurrency.** Two quick
+  @nable mentions in the same thread used to race and drop one exchange; the
+  read-modify-write is now serialized per thread.
+- **`finops-slack --help` works** and prints real usage instead of failing with
+  a token error. The bot also prints a clear ready line on start, and warns at
+  startup when no cloud provider is connected (cost questions would otherwise
+  come back empty with no explanation).
+- **Friendlier in-Slack errors.** A misconfigured bot tells end users "nable
+  isn't fully set up yet, ask whoever installed me" instead of leaking env-var
+  names, with the technical detail logged server-side.
+- **Demo mode no longer leaks.** `FINOPS_DEMO` is set only for the duration of a
+  sample-data scan and restored after, so it can't switch a later real scan to
+  demo data in the same process.
 
 ## 0.8.56
 

@@ -233,7 +233,7 @@ def _handle_create_ticket(body: dict, respond: Any) -> None:
         if url:
             respond(text=f"🎫 Ticket created: {url}", replace_original=False)
         else:
-            respond(text="❌ No ticketing provider configured. Set JIRA_BASE_URL, JIRA_API_TOKEN, JIRA_USER_EMAIL, JIRA_PROJECT_KEY",
+            respond(text="❌ No ticket tracker is connected yet. Ask whoever set up nable to connect Jira, Linear, or GitHub Issues.",
                     replace_original=False)
     except Exception as e:
         respond(text=f"❌ Ticket creation failed: {e}", replace_original=False)
@@ -312,7 +312,40 @@ def _strip_mention(text: str) -> str:
     return re.sub(r"<@[A-Z0-9]+>", "", text).strip()
 
 
+_HELP = """\
+nable Slack bot — ask your cloud bill anything, right in Slack.
+
+Usage:
+  finops-slack            Start the bot (Socket Mode, no public endpoint needed)
+  finops-slack --help     Show this help
+
+Setup (once):
+  finops setup slack      Choose option 3, the conversational bot. Stores the two
+                          Slack tokens and your Anthropic key in the OS keyring.
+
+In Slack, once it's running:
+  @nable what did we spend last week?
+  @nable why did our AWS bill spike?
+  @nable draft a ticket for the top rightsizing recommendation
+
+Key environment variables (see docs/SLACK.md for the full list):
+  SLACK_BOT_TOKEN, SLACK_APP_TOKEN   Slack tokens (xoxb-/xapp-)
+  ANTHROPIC_API_KEY                  Powers the answers
+  SLACK_ALERT_CHANNEL                Where anomaly/budget alerts post
+  FINOPS_REQUIRE_AUTH=1              Enforce roles by Slack email; unlocks remediation
+  FINOPS_SLACK_MODEL                 Override the model for every tier
+
+Docs: https://getnable.com/docs
+"""
+
+
 def main() -> None:
+    import sys
+
+    if any(a in ("-h", "--help", "help") for a in sys.argv[1:]):
+        print(_HELP)
+        return
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     try:
@@ -351,6 +384,32 @@ def main() -> None:
         print(f"Bridged {warm()} MCP tools into the Slack loop.")
     except Exception as e:
         log.error("Tool bridge failed to load, falling back to nothing: %s", e)
+
+    # Bot-side activation guard. With no cloud connected, every cost question
+    # comes back empty, which reads as "the bot is broken". Warn the operator at
+    # startup so they connect a provider before inviting the team. Timeboxed and
+    # fully guarded so a slow/firewalled credential probe can never block boot.
+    try:
+        import asyncio as _aio
+
+        from ..connectors.aws import AWSConnector
+        from ..connectors.azure import AzureConnector
+        from ..connectors.gcp import GCPConnector
+
+        async def _any_provider() -> bool:
+            for conn in (AWSConnector(), AzureConnector(), GCPConnector()):
+                try:
+                    if await _aio.wait_for(conn.is_configured(), timeout=3):
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        if not _aio.run(_any_provider()):
+            print("Warning: no cloud accounts connected yet. Run: finops setup aws (or azure/gcp).")
+            print("         The bot answers, but cost questions return empty until you connect one.")
+    except Exception as e:
+        log.debug("Provider check skipped: %s", e)
 
     def _converse(event: dict, say: Any, user_text: str, channel: str, thread_ts: str | None) -> None:
         """Shared mention/DM path: identity, memory, tiering, side effects."""
@@ -474,7 +533,9 @@ def main() -> None:
             "All users have full access. Set FINOPS_REQUIRE_AUTH=1 to enforce RBAC."
         )
 
-    print("nable Slack bot starting (Socket Mode)...")
+    print("nable Slack bot connecting (Socket Mode)...")
+    print("Ready. In Slack, mention the bot: @nable what did we spend last week?")
+    print("Press Ctrl+C to stop.")
     SocketModeHandler(app, app_token).start()
 
 
