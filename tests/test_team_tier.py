@@ -35,8 +35,10 @@ def test_tier_inclusion_matrix():
 
 
 def test_team_plan_key_roundtrip(monkeypatch):
-    # Test keypair from test_license_v2: the public half matches the bundled key.
-    monkeypatch.setenv("FINOPS_LICENSE_PRIVATE_KEY", "8HW1kTWT2OIuBRaBY-YcfmweY9hoECjF7uedaJfzID4")
+    # Throwaway test keypair (not production). Inject the matching public key so
+    # the round-trip verifies against the test key, never the bundled one.
+    monkeypatch.setenv("FINOPS_LICENSE_PRIVATE_KEY", "8fbe8En53x3KhJ93ZwEmE3L0IVLHQm6yI-gn3FGIpeg")
+    monkeypatch.setattr(lic, "_PUBLIC_KEY_B64", "sxzvFKJjtkqH4xZWXQZLvrYhRxQFVoaJ5YRiEu18dMw")
     key = lic.generate_key("buyer@acme.com", plan="team")
     status = lic.validate_key(key)
     assert status.mode == "team"

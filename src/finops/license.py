@@ -56,7 +56,7 @@ if not _env_secret:
 # keys but cannot create them. Keys are signed with the matching private key
 # (FINOPS_LICENSE_PRIVATE_KEY), held server-side only and never bundled — so
 # clients verify with no shared secret and nobody can forge keys from the package.
-_PUBLIC_KEY_B64 = "j3hqbpj9N-2EVtxgVgFgARm_5xAvPtg-yTofdQCugk0"
+_PUBLIC_KEY_B64 = "5wMiDYa-2vOJqIr94jOkIovlTm_bBDdh43B5uFJ3Y34"
 
 _KEY_TTL_DAYS   = 366          # pro keys expire 1 year after issue date
 _VALID_PLANS    = {"pro", "team", "trial", "enterprise"}
