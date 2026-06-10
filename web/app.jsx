@@ -1225,6 +1225,8 @@ function Footer({ version }){
             <h5>Product</h5>
             <a href="#connectors">Connectors</a>
             <a href="#pricing">Pricing</a>
+            <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
+               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_nav',cta:'book_demo'}); }}>Book a demo</a>
             <a href="#faq">FAQ</a>
           </div>
           <div>
