@@ -184,8 +184,8 @@ function Nav(){
           <li><button className="nav-link" onClick={()=>scrollTo('pricing')}>Pricing</button></li>
           <li><button className="nav-link" onClick={()=>{ scrollTo('faq'); if(window.posthog) posthog.capture('nav_clicked',{item:'faq'}); }}>FAQ</button></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
-          <li><a href="/about">About</a></li>
-          <li><a href="/commitment-calculator.html" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'calculator'}); }}>Calculator</a></li>
+          <li><a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer"
+                 onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a></li>
         </ul>
         <div className="right">
           <a href="/account.html" className="btn btn-ghost">Sign in</a>
@@ -217,8 +217,8 @@ function Nav(){
           <button className="nav-mobile-item" onClick={()=>{ scrollTo('pricing'); if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</button>
           <button className="nav-mobile-item" onClick={()=>{ scrollTo('faq'); if(window.posthog) posthog.capture('nav_clicked',{item:'faq'}); }}>FAQ</button>
           <a className="nav-mobile-item" href="/docs.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
-          <a className="nav-mobile-item" href="/about" onClick={()=>setOpen(false)}>About</a>
-          <a className="nav-mobile-item" href="/commitment-calculator.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'calculator'}); }}>Calculator</a>
+          <a className="nav-mobile-item" href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer"
+             onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a>
           <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:10}}>
             <a href="/account.html" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
             <a href="/docs.html" className="btn btn-primary" style={{justifyContent:"center"}}
