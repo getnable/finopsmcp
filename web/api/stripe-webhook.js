@@ -52,15 +52,40 @@ function b64url(buf) {
   return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-// Map what the customer paid to a license plan. Team is $1,000/mo or
-// $10,000/yr; negotiated Team deals may be discounted, so anything at or
-// above STRIPE_TEAM_MIN_CENTS (default $500) issues a team key. Below that
-// (legacy $100/seat links still in the wild) issues a pro key. Team keys
-// unlock the conversational Slack bot; pro keys do not.
+// Map the checkout to a license plan. Primary signal: which payment link the
+// customer used (session.payment_link, a plink_... id). Set these in Vercel:
+//   STRIPE_TEAM_PAYMENT_LINKS — comma-separated plink ids for Team links
+//   STRIPE_PRO_PAYMENT_LINKS  — comma-separated plink ids for Pro links
+// (Stripe Dashboard → Payment links → click a link → id is in the URL.)
+//
+// Fallback when the link id is unknown (negotiated deals, manual invoices):
+// amount at or above STRIPE_TEAM_MIN_CENTS (default $500) issues a team key.
+// The fallback cannot tell Pro annual ($1,000/yr) from Team monthly
+// ($1,000/mo) — both are 100000 cents — so that exact amount falls back to
+// PRO. Issuing the cheaper key to a Team buyer is a recoverable support
+// email; silently handing the Slack-bot tier to a Pro buyer is not. With the
+// link env vars set, the ambiguity never arises. Team keys unlock the
+// conversational Slack bot; pro keys do not.
 const TEAM_MIN_CENTS = parseInt(process.env.STRIPE_TEAM_MIN_CENTS || "50000", 10);
+const PRO_ANNUAL_TEAM_MONTHLY_COLLISION_CENTS = 100000;
+
+function _linkSet(envVar) {
+  return new Set(
+    (process.env[envVar] || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+}
 
 function planForSession(session) {
+  const link = session.payment_link || null;
+  if (link) {
+    if (_linkSet("STRIPE_TEAM_PAYMENT_LINKS").has(link)) return "team";
+    if (_linkSet("STRIPE_PRO_PAYMENT_LINKS").has(link)) return "pro";
+  }
   const amount = session.amount_total ?? 0;
+  if (amount === PRO_ANNUAL_TEAM_MONTHLY_COLLISION_CENTS) return "pro";
   return amount >= TEAM_MIN_CENTS ? "team" : "pro";
 }
 
@@ -104,7 +129,8 @@ function verifyStripe(rawBody, sigHeader, secret) {
 
 // ─── Email via Resend ─────────────────────────────────────────────────────────
 
-async function sendLicenseEmail(to, licenseKey) {
+async function sendLicenseEmail(to, licenseKey, plan) {
+  const planLabel = plan === "team" ? "Team" : "Pro";
   const html = `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"/></head>
@@ -120,7 +146,7 @@ async function sendLicenseEmail(to, licenseKey) {
   </div>
 
   <h1 style="font-size:22px;font-weight:500;letter-spacing:-0.025em;color:#1a1915;margin:0 0 10px;">
-    Your nable Team license key
+    Your nable ${planLabel} license key
   </h1>
   <p style="font-size:15px;color:#54524a;line-height:1.65;margin:0 0 32px;">
     Thanks for subscribing. Here's your license key — keep it somewhere safe.
@@ -148,7 +174,7 @@ async function sendLicenseEmail(to, licenseKey) {
   <!-- Step 2 -->
   <div style="margin-bottom:36px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 2 — </strong>Restart your editor. Team features unlock immediately.
+      <strong style="color:#1a1915;">Step 2 — </strong>Restart your editor. ${planLabel} features unlock immediately.
     </p>
     <p style="font-size:12px;color:#8b8879;margin:6px 0 0;">
       If you haven't installed nable yet, run <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;">pip install finops-mcp &amp;&amp; finops setup</code> first.
@@ -182,7 +208,7 @@ async function sendLicenseEmail(to, licenseKey) {
       from: "nable <hello@getnable.com>",
       reply_to: "hello@getnable.com",
       to: [to],
-      subject: "Your nable Team license key",
+      subject: `Your nable ${planLabel} license key`,
       html,
     }),
   });
@@ -271,8 +297,8 @@ export default async function handler(req, res) {
   try {
     const plan = planForSession(session);
     const key = generateKey(email, plan);
-    await sendLicenseEmail(email, key);
-    console.log(`License key delivered to ${email} (plan=${plan}, amount=${session.amount_total})`);
+    await sendLicenseEmail(email, key, plan);
+    console.log(`License key delivered to ${email} (plan=${plan}, amount=${session.amount_total}, link=${session.payment_link || "none"})`);
   } catch (err) {
     // Return 500 so Stripe retries delivery on transient failures (Resend outage, etc.).
     // DEDUPLICATION RISK: generateKey() is deterministic for the same email+date, so
