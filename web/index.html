@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>nable · Ask your whole cloud and AI bill</title>
+<link rel="canonical" href="https://getnable.com/" />
 <meta name="description" content="Ask your whole cloud and AI bill anything, inside Claude. AWS, Azure, GCP plus OpenAI, Anthropic and Bedrock, answered on your machine." />
 <meta property="og:title" content="nable · Ask your whole cloud and AI bill" />
 <meta property="og:description" content="Ask your whole cloud and AI bill anything, inside Claude. AWS, Azure, GCP plus OpenAI, Anthropic and Bedrock, answered on your machine." />
@@ -42,8 +43,9 @@
       "publisher": { "@id": "https://getnable.com/#org" },
       "description": "Local-first, AI-native FinOps. Ask your whole cloud and AI bill anything inside Claude, Cursor and other MCP editors. Connects to AWS, Azure, GCP and 10+ SaaS and AI providers, and your credentials never leave your machine.",
       "offers": [
-        { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD", "description": "Cost queries, anomaly detection, rightsizing, LLM spend tracking, every connector. No credit card, no expiry." },
-        { "@type": "Offer", "name": "Team", "price": "100", "priceCurrency": "USD", "description": "Per seat per month. Adds ticket auto-creation, scheduled digests and commitment recommendations. Also available at $1,000 per seat per year." }
+        { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD", "description": "Solo use. Cost queries, anomaly detection, rightsizing, LLM spend tracking, every connector. No credit card, no expiry." },
+        { "@type": "Offer", "name": "Pro", "price": "100", "priceCurrency": "USD", "description": "$100 per month flat, unlimited seats. Adds Terraform remediation PRs, ticket creation, Slack and Teams alerts, digests, budgets and commitment recommendations. $1,000 per year billed annually." },
+        { "@type": "Offer", "name": "Team", "price": "1000", "priceCurrency": "USD", "description": "$1,000 per month flat, unlimited seats. Everything in Pro plus the conversational Slack bot, root cause analysis and chat remediation, and managed AI. $10,000 per year billed annually." }
       ]
     },
     {
@@ -53,7 +55,7 @@
         { "@type": "Question", "name": "Where do my credentials and billing data go?", "acceptedAnswer": { "@type": "Answer", "text": "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data is cached in a local SQLite database on your machine. nable has no backend, so we never see your cost data or credentials, and there is no vendor data lake to breach. When you ask a question in your AI editor, the cost figures nable returns are sent to your editor's own AI model to answer the question, the same as anything else in that chat, not to a nable server. For zero AI exposure you can use the local dashboard or CLI, which never touch a model." } },
         { "@type": "Question", "name": "What editors does it work with?", "acceptedAnswer": { "@type": "Answer", "text": "Claude Desktop, Cursor, Windsurf, Zed, and anything that supports MCP. The setup wizard configures your editor automatically. If you use multiple editors, run the wizard once per editor." } },
         { "@type": "Question", "name": "How long does setup take?", "acceptedAnswer": { "@type": "Answer", "text": "A few minutes. Run uvx --from finops-mcp finops welcome (uv fetches a matching Python and runs the setup wizard, no PATH setup needed), or pip install -U finops-mcp && finops welcome if you are already on Python 3.10 or newer. The wizard connects Claude, connects your cloud, and shows your first cost number right in the terminal. To see it on sample data first, run uvx --from finops-mcp finops welcome --demo." } },
-        { "@type": "Question", "name": "Is the free tier actually free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and every connector. Team adds automated ticket creation, scheduled digests, and commitment analysis." } },
+        { "@type": "Question", "name": "Is the free tier actually free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and every connector. Pro adds remediation PRs, tickets, alerts and commitment analysis. Team adds the conversational Slack bot." } },
         { "@type": "Question", "name": "I only have one AWS account. Is this worth it?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Rightsizing and anomaly detection alone are usually worth it. Most people find savings in the first session. You can add more providers later." } },
         { "@type": "Question", "name": "Do you support multiple AWS accounts or organizations?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Run finops setup aws --add to connect additional accounts. You can query across all of them in a single conversation. Multi-account org rollups are on the roadmap for Q3." } },
         { "@type": "Question", "name": "Does it work in AWS GovCloud?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. nable runs entirely on your machine and queries your cloud provider APIs directly. There are no nable servers in the middle, no data lake, and no SaaS authorization required. It works with GovCloud regions (us-gov-west-1, us-gov-east-1) the same as commercial regions." } }
@@ -117,7 +119,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.0/dist/fonts/geist-mono/style.css" />
 
 <!-- React vendored on our own origin so a corporate CDN block can never blank the page -->
 <script src="/vendor/react.production.min.js"></script>

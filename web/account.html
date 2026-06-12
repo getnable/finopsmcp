@@ -398,7 +398,7 @@
     }
 
     // Plan display
-    const planLabel = isPro ? 'Team' : isTrial ? 'Trial' : 'Free';
+    const planLabel = data.plan === 'team' ? 'Team' : isPro ? 'Pro' : isTrial ? 'Trial' : 'Free';
     document.getElementById('plan-name-display').textContent = planLabel;
     const statusEl = document.getElementById('plan-status-display');
     if (isPro) {
