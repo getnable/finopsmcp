@@ -1,11 +1,11 @@
 # nable
 
-> Local-first, AI-native FinOps. Ask your whole cloud and AI bill anything in plain English, right inside Claude, Cursor, or any MCP editor. nable runs on your own machine, connects to AWS, Azure, GCP and 10+ SaaS and AI providers, and your credentials never leave your laptop.
+> Local-first, AI-native FinOps. Ask your whole cloud and AI bill anything, right inside Claude, Cursor, or any MCP editor. nable runs on your own machine, connects to AWS, Azure, GCP and 10+ SaaS and AI providers, and your credentials never leave your laptop.
 
-nable is an MCP server you install locally. It answers cost questions, detects anomalies, recommends rightsizing, tracks AI and LLM spend by model (Amazon Bedrock, OpenAI, Anthropic, Azure OpenAI), and can patch your Terraform and open the PR to fix waste. There is no SaaS account to create and no nable backend that holds your data. The differentiator is the intersection: genuinely multi-cloud, plus cross-provider AI spend, plus true local-first, in one plain-English answer.
+nable is an MCP server you install locally. It answers cost questions, detects anomalies, recommends rightsizing, tracks AI and LLM spend by model (Amazon Bedrock, OpenAI, Anthropic, Azure OpenAI), and can patch your Terraform and open the PR to fix waste. There is no SaaS account to create and no nable backend that holds your data. The differentiator is the intersection: genuinely multi-cloud, plus cross-provider AI spend, plus true local-first, in one answer.
 
 ## What nable does
-- Ask cloud and AI cost questions in plain English across AWS, Azure, GCP, OpenAI, Anthropic, Bedrock and more
+- Ask cloud and AI cost questions across AWS, Azure, GCP, OpenAI, Anthropic, Bedrock and more
 - Detect cost anomalies against a rolling baseline and alert in Slack or Teams
 - Generate rightsizing recommendations, then patch the Terraform and open the PR
 - Track LLM spend by model and provider, with cost per token and per customer
@@ -32,5 +32,5 @@ uvx --from finops-mcp finops welcome
 
 ## Contact
 - Site: https://getnable.com
-- Book a 30-minute call: https://calendar.app.google/2duYBqjLXaTmX5xC8
+- Book a 20-minute demo: https://calendar.app.google/2duYBqjLXaTmX5xC8
 - LinkedIn: https://www.linkedin.com/company/getnable/

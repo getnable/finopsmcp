@@ -562,7 +562,7 @@ function Console({ interaction }){
 function Thesis(){
   const cards = [
     {n:"01 · TAM", h:"Cloud spend is the #2 line item in modern software.", p:"$700B+ annual cloud + SaaS spend, growing 18% YoY. Every dollar is unaccountable until someone reconciles 8 dashboards and a CSV. That reconciliation work is the wedge."},
-    {n:"02 · Shift", h:"FinOps moved from a quarterly review to a real-time question.", p:"AI editors made plain-English access to live data the default interface. Asking \"what spiked\" is now cheaper than building a dashboard. The dashboard era is the legacy era."},
+    {n:"02 · Shift", h:"FinOps moved from a quarterly review to a real-time question.", p:"AI editors made conversational access to live data the default interface. Asking \"what spiked\" is now cheaper than building a dashboard. The dashboard era is the legacy era."},
     {n:"03 · Moat", h:"Local-first compounds with every connector.", p:"Credentials in the OS keyring. No data lake. No SOC-2 surface area. Each new connector is a feature shipment, not a security review. Enterprise sells itself."},
   ];
   return (

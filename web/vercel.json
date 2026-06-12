@@ -9,6 +9,7 @@
     { "source": "/faq", "destination": "/" }
   ],
   "redirects": [
+    { "source": "/compare.html", "destination": "/finops-mcp-comparison", "permanent": true },
     { "source": "/api/sso/:path*", "has": [{"type": "query", "key": "error"}], "destination": "/account?error=sso_not_configured", "permanent": false }
   ],
   "headers": [
