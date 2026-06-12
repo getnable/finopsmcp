@@ -8,6 +8,23 @@ import os
 import sys
 from unittest.mock import patch, MagicMock
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_modules():
+    """These tests delete and re-import finops.config / finops.telemetry to get
+    fresh module state. Restore the originals afterward so other test files
+    (and finops.server, which holds a reference) keep patching the same module
+    objects regardless of execution order."""
+    saved = {k: sys.modules.get(k) for k in ("finops.config", "finops.telemetry")}
+    yield
+    for k, v in saved.items():
+        if v is not None:
+            sys.modules[k] = v
+        else:
+            sys.modules.pop(k, None)
+
 
 def _reload_config(env: dict):
     """Reload config module with a given env."""
@@ -19,8 +36,9 @@ def _reload_config(env: dict):
 
 
 def test_airgap_off_by_default():
-    env = {k: v for k, v in os.environ.items() if k != "FINOPS_AIRGAP"}
-    cfg = _reload_config(env)
+    # patch.dict(..., clear=False) cannot delete a key by omission, so blank it
+    # explicitly or a developer with FINOPS_AIRGAP=1 exported sees this fail.
+    cfg = _reload_config({"FINOPS_AIRGAP": ""})
     assert cfg.is_airgap() is False
 
 

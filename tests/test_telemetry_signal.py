@@ -58,6 +58,9 @@ def test_send_event_prefers_httpx_for_cert_safety(monkeypatch):
     # python.org macOS builds, so events silently dropped. httpx (certifi) must be
     # the primary path.
     monkeypatch.setenv("NABLE_POSTHOG_KEY", "phc_test")
+    # _send_event now checks opt-out itself; neutralize CI/air-gap signals so
+    # this test exercises the transport path.
+    monkeypatch.setattr(_tel(), "_is_opted_out", lambda: False)
     fake_httpx = types.ModuleType("httpx")
     posted = {}
     fake_httpx.post = lambda url, json, timeout: posted.update({"url": url, "json": json})

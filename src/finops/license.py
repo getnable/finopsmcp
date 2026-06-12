@@ -16,7 +16,8 @@ pro          Full access. Unlocked by a signed license key.
              commitment purchase recommendations, multi-team org reports.
 
 Key format:  FINOPS-2-{b64_payload}-{b64_ed25519_sig}   (current)
-             FINOPS-1-{b64_payload}-{b64_hmac}           (legacy, still validated)
+             FINOPS-1-{b64_payload}-{b64_hmac}           (retired: the v1 HMAC secret
+             leaked in public git history, so v1 keys are forgeable and never accepted)
   payload:   base64url(json: {"e": email, "d": issued_YYYYMMDD, "p": "pro"})
   v2 sig:    Ed25519(private_key, "2:" + b64_payload). Clients verify with the
              bundled public key — no shared secret, and keys cannot be forged.
@@ -254,8 +255,11 @@ def generate_key(email: str, plan: str = "pro", version: int = 2) -> str:
 
     version=2 (default): Ed25519, signed with FINOPS_LICENSE_PRIVATE_KEY. Clients
         verify with the bundled public key and need no shared secret.
-    version=1: legacy HMAC, signed with FINOPS_LICENSE_SECRET. Kept for compatibility.
+    version=1 is retired: its HMAC secret leaked in public git history, so any
+        v1 key is forgeable. Generation and validation both refuse it.
     """
+    if version == 1:
+        raise ValueError("v1 license keys are retired; the signing secret is public.")
     payload = _b64(json.dumps({"e": email, "d": date.today().strftime("%Y%m%d"), "p": plan}).encode())
     if version == 2:
         priv_b64 = os.environ.get("FINOPS_LICENSE_PRIVATE_KEY", "")
@@ -268,7 +272,6 @@ def generate_key(email: str, plan: str = "pro", version: int = 2) -> str:
         priv = Ed25519PrivateKey.from_private_bytes(_unb64(priv_b64))
         sig = _b64(priv.sign(f"2:{payload}".encode()))
         return f"FINOPS-2-{payload}-{sig}"
-    return f"FINOPS-1-{payload}-{_sign('1', payload)}"
 
 
 def validate_key(key: str) -> LicenseStatus:
@@ -310,17 +313,17 @@ def validate_key(key: str) -> LicenseStatus:
 
     _, version, payload_b64, provided_sig = parts
 
-    # Verify the signature by version.
-    #   v2 (Ed25519): verified with the bundled public key — no shared secret needed.
-    #   v1 (HMAC):    needs FINOPS_LICENSE_SECRET; without it we cannot verify, so
-    #                 fall through to free/trial rather than accept a forged key.
-    if version == "2":
-        sig_ok = _verify_ed25519(payload_b64, provided_sig)
-    else:
-        if not _SECRET:
-            log.warning("v1 key presented but FINOPS_LICENSE_SECRET is not set; treating as unkeyed.")
-            return validate_key("")
-        sig_ok = hmac.compare_digest(_sign("1", payload_b64), provided_sig)
+    # Verify the signature. Only v2 (Ed25519, bundled public key) is accepted.
+    # v1 HMAC keys are retired: the signing secret leaked in public git
+    # history, so every v1 key is forgeable and must be refused.
+    if version == "1":
+        return LicenseStatus(
+            mode="invalid",
+            email="",
+            issued="",
+            message=f"v1 license keys are retired. Get a current key at {_UPGRADE_URL}",
+        )
+    sig_ok = _verify_ed25519(payload_b64, provided_sig)
 
     if not sig_ok:
         return LicenseStatus(

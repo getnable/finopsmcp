@@ -72,7 +72,8 @@ def _is_opted_out() -> bool:
         return True  # air-gap mode: no non-provider outbound allowed
     if is_ci():
         return True  # CI / build runners are not users; never count or ping
-    return bool(os.environ.get(_OPT_OUT_ENV, "").strip())
+    _opt = os.environ.get(_OPT_OUT_ENV, "").strip()
+    return _opt not in ("", "0", "false", "no")
 
 
 # Build and CI runners fire the CLI on every cold job, which used to look like
@@ -150,6 +151,10 @@ def _send(install_id: str, properties: dict) -> None:
 def _send_event(install_id: str, event: str, properties: dict) -> None:
     """Send a single named event to PostHog.
 
+    Every caller funnels through here, so the opt-out check lives here too:
+    direct call sites (setup wizard, server) must never bypass air-gap, CI,
+    or NABLE_NO_TELEMETRY.
+
     Prefer httpx because it ships certifi's CA bundle. urllib relies on the
     platform OpenSSL trust store, which on python.org macOS builds is empty until
     the user runs "Install Certificates.command", so urllib silently fails cert
@@ -157,6 +162,8 @@ def _send_event(install_id: str, event: str, properties: dict) -> None:
     counts downward for exactly the macOS-on-python.org segment. httpx avoids it;
     urllib is only a fallback when httpx is not installed.
     """
+    if _is_opted_out():
+        return
     body = {
         "api_key": _POSTHOG_KEY,
         "event": event,

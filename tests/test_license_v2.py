@@ -85,9 +85,14 @@ def test_generating_v2_requires_private_key(monkeypatch):
         L.generate_key("user@example.com")
 
 
-def test_v1_still_works_with_secret(monkeypatch):
-    """Legacy HMAC keys still validate when the secret is present (backward compat)."""
+def test_v1_keys_are_retired(monkeypatch):
+    """The v1 HMAC secret leaked in public git history, so v1 keys are
+    forgeable: generation refuses and validation rejects them."""
+    import pytest as _pytest
     L = _license(monkeypatch, secret="unit-test-secret")
-    key = L.generate_key("user@example.com", version=1)
-    assert key.startswith("FINOPS-1-")
-    assert L.validate_key(key).mode == "pro"
+    with _pytest.raises(ValueError):
+        L.generate_key("user@example.com", version=1)
+    fake_v1 = "FINOPS-1-eyJlIjoiYSJ9-c2ln"
+    status = L.validate_key(fake_v1)
+    assert status.mode == "invalid"
+    assert "retired" in status.message
