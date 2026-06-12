@@ -36,6 +36,23 @@ async function _kvMarkSeen(eventId) {
   }
 }
 
+// Undo the dedup marks when delivery fails, so Stripe's retry is processed
+// instead of being swallowed as a duplicate. Without this, a Resend outage
+// means the customer paid and never gets a key.
+async function _kvUnmark(eventId) {
+  const url = process.env.VERCEL_KV_REST_API_URL;
+  const token = process.env.VERCEL_KV_REST_API_TOKEN;
+  if (!url || !token) return;
+  try {
+    await fetch(`${url}/del/${encodeURIComponent(`stripe_dedup:${eventId}`)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    // KV unmark failure leaves a 24h-expiring mark; the in-memory delete
+    // still lets a retry through on a fresh instance.
+  }
+}
+
 // Set FINOPS_LICENSE_PRIVATE_KEY in Vercel project environment variables.
 // Ed25519 private signing key (raw 32-byte seed, base64url). The matching public
 // key is bundled in the MCP server (license.py) and verifies keys with no shared
@@ -84,9 +101,26 @@ function planForSession(session) {
     if (_linkSet("STRIPE_TEAM_PAYMENT_LINKS").has(link)) return "team";
     if (_linkSet("STRIPE_PRO_PAYMENT_LINKS").has(link)) return "pro";
   }
-  const amount = session.amount_total ?? 0;
+  return planForAmount(session.amount_total ?? 0);
+}
+
+function planForAmount(amount) {
   if (amount === PRO_ANNUAL_TEAM_MONTHLY_COLLISION_CENTS) return "pro";
   return amount >= TEAM_MIN_CENTS ? "team" : "pro";
+}
+
+// Renewal invoices carry price ids, not payment links. Map via
+//   STRIPE_TEAM_PRICE_IDS / STRIPE_PRO_PRICE_IDS — comma-separated price_...
+// ids (Stripe Dashboard → Products → price). Falls back to amount.
+function planForInvoice(invoice) {
+  const priceIds = (invoice.lines?.data || [])
+    .map((l) => l.price?.id)
+    .filter(Boolean);
+  const teamIds = _linkSet("STRIPE_TEAM_PRICE_IDS");
+  const proIds = _linkSet("STRIPE_PRO_PRICE_IDS");
+  if (priceIds.some((id) => teamIds.has(id))) return "team";
+  if (priceIds.some((id) => proIds.has(id))) return "pro";
+  return planForAmount(invoice.amount_paid ?? 0);
 }
 
 function generateKey(email, plan) {
@@ -107,24 +141,28 @@ function generateKey(email, plan) {
 const STRIPE_TIMESTAMP_TOLERANCE_S = 300; // 5 minutes — reject replays
 
 function verifyStripe(rawBody, sigHeader, secret) {
-  // sigHeader format: t=timestamp,v1=hex_sig[,v0=...]
-  const parts = Object.fromEntries(sigHeader.split(",").map((p) => p.split("=", 2)));
+  // sigHeader format: t=timestamp,v1=hex_sig[,v1=...,v0=...]
+  // During secret rotation Stripe signs with both secrets and sends multiple
+  // v1 entries, so collect them all and accept if any matches.
+  const pairs = sigHeader.split(",").map((p) => p.split("=", 2));
+  const t = (pairs.find(([k]) => k === "t") || [])[1];
+  const v1s = pairs.filter(([k]) => k === "v1").map(([, v]) => v || "");
 
   // Replay attack prevention: reject if timestamp is more than 5 minutes old
-  const ts = parseInt(parts.t, 10);
+  const ts = parseInt(t, 10);
   const now = Math.floor(Date.now() / 1000);
   if (isNaN(ts) || Math.abs(now - ts) > STRIPE_TIMESTAMP_TOLERANCE_S) {
     console.error(`Stripe webhook timestamp out of tolerance: ts=${ts} now=${now}`);
     return false;
   }
 
-  const signed = `${parts.t}.${rawBody}`;
+  const signed = `${t}.${rawBody}`;
   const expected = crypto.createHmac("sha256", secret).update(signed).digest("hex");
-  // timingSafeEqual needs same-length buffers
   const expBuf = Buffer.from(expected, "hex");
-  const gotBuf = Buffer.from(parts.v1 || "", "hex");
-  if (expBuf.length !== gotBuf.length) return false;
-  return crypto.timingSafeEqual(expBuf, gotBuf);
+  return v1s.some((v1) => {
+    const gotBuf = Buffer.from(v1, "hex");
+    return expBuf.length === gotBuf.length && crypto.timingSafeEqual(expBuf, gotBuf);
+  });
 }
 
 // ─── Email via Resend ─────────────────────────────────────────────────────────
@@ -265,9 +303,23 @@ export default async function handler(req, res) {
   const event = JSON.parse(rawBody);
   console.log(`Stripe event: ${event.type} [${event.id}]`);
 
-  // Only handle successful checkouts
-  if (event.type !== "checkout.session.completed") {
+  // Handle first purchases (checkout) and renewals/upgrades (invoice.paid).
+  // License keys expire after 366 days, so renewals must re-issue one.
+  if (event.type !== "checkout.session.completed" && event.type !== "invoice.paid") {
     return res.status(200).json({ received: true, skipped: event.type });
+  }
+
+  if (event.type === "invoice.paid") {
+    const inv = event.data.object;
+    // subscription_create is already covered by checkout.session.completed;
+    // $0 invoices (trial starts) should not mint a key.
+    const reason = inv.billing_reason || "";
+    if (reason !== "subscription_cycle" && reason !== "subscription_update") {
+      return res.status(200).json({ received: true, skipped: `invoice:${reason}` });
+    }
+    if (!inv.amount_paid) {
+      return res.status(200).json({ received: true, skipped: "invoice:zero_amount" });
+    }
   }
 
   // Deduplicate — check in-memory first (fast), then KV (cross-instance)
@@ -282,30 +334,31 @@ export default async function handler(req, res) {
     return res.status(200).json({ received: true, deduplicated: true });
   }
 
-  const session = event.data.object;
-  const email =
-    session.customer_details?.email ||
-    session.customer_email ||
-    null;
+  const obj = event.data.object;
+  const isInvoice = event.type === "invoice.paid";
+  const email = isInvoice
+    ? obj.customer_email || obj.customer_details?.email || null
+    : obj.customer_details?.email || obj.customer_email || null;
 
   if (!email) {
-    console.error(`No email on session ${session.id}`);
+    console.error(`No email on ${event.type} ${obj.id}`);
     return res.status(200).json({ received: true, warning: "no email found" });
   }
 
   // 4. Generate key + send email
   try {
-    const plan = planForSession(session);
+    const plan = isInvoice ? planForInvoice(obj) : planForSession(obj);
     const key = generateKey(email, plan);
     await sendLicenseEmail(email, key, plan);
-    console.log(`License key delivered to ${email} (plan=${plan}, amount=${session.amount_total}, link=${session.payment_link || "none"})`);
+    console.log(`License key delivered to ${email} (event=${event.type}, plan=${plan}, amount=${obj.amount_total ?? obj.amount_paid}, link=${obj.payment_link || "none"})`);
   } catch (err) {
-    // Return 500 so Stripe retries delivery on transient failures (Resend outage, etc.).
-    // DEDUPLICATION RISK: generateKey() is deterministic for the same email+date, so
-    // retries on the same day will generate the same key and the customer receives a
-    // duplicate email but an identical key — acceptable. If Stripe retries on a different
-    // calendar day, the key will differ; both keys will be valid. Log session.id to
-    // detect and deduplicate at the application level if this becomes a concern.
+    // Return 500 so Stripe retries delivery on transient failures (Resend
+    // outage, etc.), and UNDO the dedup marks so the retry is actually
+    // processed instead of being swallowed as a duplicate. generateKey() is
+    // deterministic for the same email+date, so a same-day retry sends the
+    // same key again — harmless.
+    processedEvents.delete(event.id);
+    await _kvUnmark(event.id);
     console.error(`Delivery failed for ${email}:`, err.message);
     return res.status(500).json({ error: err.message });
   }

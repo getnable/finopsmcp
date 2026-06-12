@@ -22,6 +22,20 @@ const RESEND_API = "https://api.resend.com";
 
 // ── Crypto helpers ────────────────────────────────────────────────────────────
 
+const rotMap = new Map();
+function rotationLimited(email) {
+  const now = Date.now();
+  const entry = rotMap.get(email) || { count: 0, resetAt: now + 3600000 };
+  if (now > entry.resetAt) {
+    entry.count = 0;
+    entry.resetAt = now + 3600000;
+  }
+  if (entry.count >= 3) return true;
+  entry.count += 1;
+  rotMap.set(email, entry);
+  return false;
+}
+
 async function hmacHex(secret, message) {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -261,9 +275,21 @@ export default async function handler(req) {
 
   const { email, plan } = session;
 
+  // A session holder can still loop this and flood their own inbox or burn
+  // Resend quota; cap rotations per email per hour.
+  if (rotationLimited(email)) {
+    return new Response(
+      JSON.stringify({ error: "Too many rotations. Try again in an hour." }),
+      {
+        status: 429,
+        headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+      }
+    );
+  }
+
   if (plan !== "pro" && plan !== "trial") {
     return new Response(
-      JSON.stringify({ error: "Key rotation requires a Team subscription." }),
+      JSON.stringify({ error: "Key rotation requires a Pro or Team subscription." }),
       {
         status: 403,
         headers: { "Content-Type": "application/json", ...CORS_HEADERS },

@@ -317,8 +317,11 @@ export default async function handler(req) {
     return Response.redirect("https://getnable.com/?sso_error=misconfigured", 302);
   }
 
-  // Verify CSRF state (required when present)
-  if (state) {
+  // Verify CSRF state. Required: a callback without state is a forged login.
+  if (!state) {
+    return Response.redirect("https://getnable.com/?sso_error=missing_state", 302);
+  }
+  {
     const valid = await verifyState(ACCOUNT_SECRET, state);
     if (!valid) {
       return Response.redirect("https://getnable.com/?sso_error=invalid_state", 302);

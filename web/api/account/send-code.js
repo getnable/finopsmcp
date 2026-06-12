@@ -19,6 +19,31 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+// ── Rate limiting (in-memory; resets on cold start, fine for edge) ───────────
+// Throttled per IP and per target email so one caller cannot flood a victim's
+// inbox or burn the Resend quota.
+const rlMap = new Map();
+const RL_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+const RL_MAX = 5;
+
+function rateLimited(key) {
+  const now = Date.now();
+  const entry = rlMap.get(key) || { count: 0, resetAt: now + RL_WINDOW_MS };
+  if (now > entry.resetAt) {
+    entry.count = 0;
+    entry.resetAt = now + RL_WINDOW_MS;
+  }
+  if (entry.count >= RL_MAX) return true;
+  entry.count += 1;
+  rlMap.set(key, entry);
+  if (rlMap.size > 500) {
+    for (const [k, v] of rlMap) {
+      if (now > v.resetAt) rlMap.delete(k);
+    }
+  }
+  return false;
+}
+
 // ── HMAC helper (Web Crypto, available in edge runtime) ───────────────────────
 
 async function hmacHex(secret, message) {
@@ -110,6 +135,15 @@ export default async function handler(req) {
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     // Return 200 to avoid email enumeration
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+    });
+  }
+
+  // Rate limit by caller IP and by target inbox. 200 on the email-keyed
+  // limit so the response does not reveal whether the address is known.
+  if (rateLimited(`ip:${ip}`) || rateLimited(`em:${email}`)) {
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...CORS_HEADERS },
