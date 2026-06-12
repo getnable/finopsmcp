@@ -36,6 +36,45 @@ def test_ci_opts_out_of_all_telemetry(monkeypatch):
     assert tel._is_opted_out()
 
 
+def test_send_event_itself_honors_opt_out(monkeypatch):
+    """_send_event is called directly by the setup wizard and server, so the
+    opt-out check must live inside it, not only in the wrappers. A CI/air-gap/
+    opted-out environment must produce zero network calls."""
+    import sys
+
+    monkeypatch.setattr(tel, "_POSTHOG_KEY", "phc_x")
+    monkeypatch.setenv("CI", "1")
+
+    posted = []
+
+    class _FakeHttpx:
+        @staticmethod
+        def post(*a, **k):
+            posted.append(a)
+
+    monkeypatch.setitem(sys.modules, "httpx", _FakeHttpx)
+    tel._send_event("install-id", "setup_wizard_started", {})
+    assert posted == []
+
+    # and with CI cleared plus a key, it does send
+    _clear_ci(monkeypatch)
+    monkeypatch.delenv("FINOPS_AIRGAP", raising=False)
+    monkeypatch.delenv(tel._OPT_OUT_ENV, raising=False)
+    tel._send_event("install-id", "setup_wizard_started", {})
+    assert len(posted) == 1
+
+
+def test_no_telemetry_env_zero_means_on(monkeypatch):
+    """NABLE_NO_TELEMETRY=0 must NOT opt out, matching FINOPS_AIRGAP parsing."""
+    monkeypatch.setattr(tel, "_POSTHOG_KEY", "phc_x")
+    monkeypatch.delenv("FINOPS_AIRGAP", raising=False)
+    _clear_ci(monkeypatch)
+    monkeypatch.setenv(tel._OPT_OUT_ENV, "0")
+    assert not tel._is_opted_out()
+    monkeypatch.setenv(tel._OPT_OUT_ENV, "1")
+    assert tel._is_opted_out()
+
+
 def _run_show_welcome(monkeypatch, *, first_run, ci, stdin_tty, stdout_tty):
     _clear_ci(monkeypatch)
     if ci:

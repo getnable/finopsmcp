@@ -64,6 +64,10 @@ def _fire_telemetry(event: str, properties: dict) -> None:
             daemon=True,
         )
         t.start()
+        # A first run that prints the welcome and exits immediately would kill
+        # this daemon thread mid-POST, permanently uncounting the install
+        # (the sentinel is already set). A short join lets it land.
+        t.join(timeout=2)
     except Exception:
         pass
 
@@ -147,7 +151,7 @@ def show_welcome() -> None:
     _fire_telemetry("install_completed", {"source": "finops_welcome"})
     _print_header()
 
-    _line(bold("Ask your AI about cloud costs in plain English:"))
+    _line(bold("Ask your AI about cloud costs:"))
     _blank()
     for q in [
         '"What drove our AWS costs up 40% this month?"',

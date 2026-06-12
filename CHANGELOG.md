@@ -2,6 +2,25 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.61
+
+### Security
+- **v1 license keys are retired.** The legacy HMAC signing secret was exposed
+  in public git history, making every v1 key forgeable. v1 keys are no longer
+  generated or accepted; v2 (Ed25519) keys are unaffected.
+
+### Fixed
+- **All telemetry now honors opt-out, air-gap and CI suppression.** The setup
+  wizard and server sent events through a path that skipped the guards, so
+  CI runs, air-gapped machines and opted-out users still pinged PostHog, and
+  offline machines stalled up to 9 seconds per CLI command. The check now
+  lives in the sender itself.
+- `NABLE_NO_TELEMETRY=0` no longer opts out; falsy values ("0", "false",
+  "no") are treated as off, matching `FINOPS_AIRGAP` parsing.
+- A fast-exiting first run could mark the welcome sentinel and exit before
+  the `install_completed` event was delivered, permanently uncounting that
+  install. The sender now gets a short window to land.
+
 ## 0.8.60
 
 ### Fixed
