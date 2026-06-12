@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import date, datetime, timezone
 from typing import Any
@@ -113,6 +114,19 @@ class AzureConnector(BaseConnector):
         group_by: list[str] | None = None,
         filters: dict[str, Any] | None = None,
     ) -> CostSummary:
+        # Read-through cache + parallel subscriptions. Azure Cost Management is
+        # the slowest provider API in the stack, and the sync SDK call used to
+        # run on the event loop, blocking every other connector while it waited.
+        import copy as _copy
+        from .. import cache as _cache
+        _ck = _cache.make_key(
+            "azure.get_costs", ",".join(sorted(self._subscription_ids)),
+            start_date.isoformat(), end_date.isoformat(), granularity,
+        )
+        _hit = _cache.get(_ck)
+        if _hit is not None:
+            return _copy.deepcopy(_hit)
+
         merged = CostSummary(
             provider="azure",
             start_date=start_date,
@@ -124,9 +138,11 @@ class AzureConnector(BaseConnector):
             entries=[],
         )
 
-        for sub_id in self._subscription_ids:
-            raw = self._query_costs(sub_id, start_date, end_date, granularity)
-            summary = self._parse_result(raw, sub_id, start_date, end_date)
+        async def _one(sub_id: str) -> CostSummary:
+            raw = await asyncio.to_thread(self._query_costs, sub_id, start_date, end_date, granularity)
+            return self._parse_result(raw, sub_id, start_date, end_date)
+
+        for summary in await asyncio.gather(*[_one(s) for s in self._subscription_ids]):
             merged.total_usd += summary.total_usd
             for k, v in summary.by_service.items():
                 merged.by_service[k] = merged.by_service.get(k, 0.0) + v
@@ -136,6 +152,7 @@ class AzureConnector(BaseConnector):
                 merged.by_region[k] = merged.by_region.get(k, 0.0) + v
             merged.entries.extend(summary.entries)
 
+        _cache.set(_ck, _copy.deepcopy(merged), _cache.COST_TTL)
         return merged
 
     async def get_costs_as_focus(
