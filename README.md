@@ -40,8 +40,10 @@ Most spend is concentrated in us-east-1 ($5,841 of the $7,284 AWS total).
 
 **Step 1: Install and run the setup wizard**
 ```bash
-pip install finops-mcp && finops setup
+uvx --from finops-mcp finops welcome
 ```
+
+Already on Python 3.10+? `pip install -U finops-mcp && finops welcome` works too.
 
 The wizard walks through connecting your providers and auto-configures Claude Desktop at the end. No config file editing, no manual env vars.
 
@@ -197,7 +199,7 @@ Config file locations:
 
 | Provider | What it pulls |
 |---|---|
-| AWS | Cost Explorer (free tier) · CUR via S3 (Team: line-item granularity, savings plans, reservations) |
+| AWS | Cost Explorer (free tier) · CUR via S3 (Pro: line-item granularity, savings plans, reservations) |
 | Azure | Cost Management API · Advisor cost recs · VM rightsizing (Azure Monitor) · native budgets · forecast |
 | GCP | Cloud Billing API + BigQuery export |
 | Datadog | Usage Metering API v2: real dollar amounts |
@@ -210,6 +212,10 @@ Config file locations:
 | Vercel | Invoice API (Enterprise) |
 | PagerDuty | Seat count |
 | New Relic | Data ingest + user counts |
+| Stripe | Fees and billing activity |
+| Databricks | DBU usage and SQL warehouse spend |
+| OpenAI | API usage and token spend by model |
+| Anthropic | Claude API usage and token spend |
 
 **Azure roles.** The Azure tools span three RBAC roles, granted to the service
 principal on each subscription. Without them, the affected tools return empty
@@ -236,25 +242,29 @@ nable is not just a connector that pipes billing data into Claude. It runs activ
 
 **AWS deep audit** goes well beyond Cost Explorer. It pulls CloudWatch metrics for every running resource and flags waste that never shows up on your bill until it's too late: gp2 volumes that should be gp3 (20% cheaper, same performance), unattached EBS volumes, idle NAT Gateways costing $32/mo in base charges, RDS backup retention set way too high, CloudWatch Log Groups with no retention policy growing forever, and Lambda functions allocated 2x the memory they actually use. Think of it as Compute Optimizer plus the layer underneath it.
 
-**Anomaly detection** uses z-score, CUSUM drift, and day-of-week seasonal normalization. When something spikes, it drills into Cost Explorer by tag and tells you which team, environment, or service drove it. Free tier shows findings in Claude; Team adds Slack/Teams alerts and auto-ticketing.
+**Anomaly detection** uses z-score, CUSUM drift, and day-of-week seasonal normalization. When something spikes, it drills into Cost Explorer by tag and tells you which team, environment, or service drove it. Anomaly findings and Slack/Teams alerts are free; Pro adds auto-ticketing.
 
-**Rightsizing** combines AWS Compute Optimizer with nable's own CloudWatch analysis. It gives you specific recommended instance types with estimated savings, not just a list of underutilized resources. Free tier shows recommendations in Claude; Team adds ticket auto-creation.
+**Rightsizing** combines AWS Compute Optimizer with nable's own CloudWatch analysis. It gives you specific recommended instance types with estimated savings, not just a list of underutilized resources. Recommendations are free; Pro adds ticket auto-creation.
 
-**Commitment analysis** (Team plan) models Savings Plans and Reserved Instance coverage against your actual usage. It shows your current effective discount rate, coverage gaps, and what you would save by purchasing additional commitments.
+**Commitment analysis** (Pro plan) models Savings Plans and Reserved Instance coverage against your actual usage. It shows your current effective discount rate, coverage gaps, and what you would save by purchasing additional commitments.
 
 ---
 
-## Team plan
+## Plans
 
-- **Slack / Teams anomaly alerts:** get notified the moment spend spikes, not the next morning
-- **Ticket auto-creation:** Jira, Linear, or GitHub issues for anomalies, rightsizing, and waste
-- Cost attribution by team, service, or tag
-- Scheduled email reports
-- Commitment purchase recommendations with ROI projections
-- Org-wide multi-account cost rollup
-- Invoice email parsing via IMAP for vendors without APIs
+**Free** (solo): cost queries, anomaly detection with Slack/Teams alerts,
+rightsizing, AI/LLM spend tracking, every connector.
 
-**$40/seat/mo. 7-day free trial, no credit card required.** Subscribe at [getnable.com](https://getnable.com).
+**Pro** ($100/mo flat): ticket auto-creation (Jira, Linear, GitHub), scheduled
+email reports, commitment purchase recommendations with ROI projections,
+org-wide multi-account rollup, line-item CUR and Azure resource detail, unit
+economics.
+
+**Team** ($1,000/mo flat, unlimited seats): everything in Pro, plus the
+conversational Slack bot: ask the bill anything in Slack, root cause analysis
+on spikes, chat remediation with human approval.
+
+**Pro $100/mo flat. Team $1,000/mo flat, unlimited seats. 7-day free trial, no credit card required.** Subscribe at [getnable.com](https://getnable.com).
 
 ---
 

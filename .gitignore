@@ -89,3 +89,12 @@ nable-gtm.js
 
 # local Claude Code MCP config (dev convenience, not shipped)
 .mcp.json
+
+# video render output (frames + mp4s, ~1.2GB; sources stay local anyway)
+docs/video/launch/scenes/frames-*/
+docs/video/launch/scenes/sq/
+docs/video/launch/scenes/pt/
+docs/video/launch/scenes/*.mp4
+docs/video/launch/*.mp4
+docs/video/*.mp4
+docs/video/*.gif

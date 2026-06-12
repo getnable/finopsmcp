@@ -27,8 +27,8 @@ uvx --from finops-mcp finops welcome
 
 ## Pricing summary
 - Free: $0, no credit card, no expiry. Cost queries, anomaly detection, rightsizing, LLM spend tracking, every connector.
-- Pro: $100 per month. Adds remediation PRs, ticket auto-creation, scheduled email digests, and commitment recommendations.
-- Team: $1,000 per month flat, unlimited seats. Adds the conversational Slack bot, RCA in Slack, and org reports.
+- Pro: $100 per month. Adds remediation PRs, ticket auto-creation, scheduled email digests, commitment recommendations, and org reports.
+- Team: $1,000 per month flat, unlimited seats. Adds the conversational Slack bot and RCA in Slack.
 
 ## Contact
 - Site: https://getnable.com

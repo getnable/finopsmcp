@@ -435,7 +435,7 @@ function Depth() {
       n: "01",
       h: "Your biggest savings, in one question.",
       p: "Ask 'where am I wasting money?' and get a ranked list of every opportunity across your infrastructure, sorted by dollar impact. No dashboard to configure. No report to schedule. No knowing what to look for. Just results.",
-      chips: ["ranked by $", "works day one", "no setup", "20 scanners"]
+      chips: ["ranked by $", "works day one", "no setup", "19 scanners"]
     },
     {
       n: "02",
@@ -845,7 +845,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Is the free tier actually free?",
-    a: "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and all 17 connectors. Team adds automated ticket creation, scheduled digests, and commitment analysis."
+    a: "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and all 17 connectors. Pro adds remediation PRs, tickets, digests and commitment analysis. Team adds the conversational Slack bot."
   },
   {
     q: "I only have one AWS account. Is this worth it?",
@@ -853,7 +853,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Do you support multiple AWS accounts or organizations?",
-    a: "Yes. Run `finops setup aws --add` to connect additional accounts. You can query across all of them in a single conversation. Multi-account org rollups are on the roadmap for Q3."
+    a: "Yes. Run `finops setup aws --add` to connect additional accounts. You can query across all of them in a single conversation. Org-wide rollups across accounts are included in Pro."
   },
   {
     q: "Does it work in AWS GovCloud?",
