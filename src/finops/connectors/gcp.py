@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import os
 from datetime import date, datetime, timezone
 from typing import Any
@@ -155,9 +157,23 @@ class GCPConnector(BaseConnector):
             entries=[],
         )
 
-        for billing_account_id in self._billing_account_ids:
-            rows = self._query_bigquery(billing_account_id, start_date, end_date)
-            summary = self._rows_to_summary(rows, billing_account_id, start_date, end_date)
+        # Read-through cache + parallel billing accounts; BigQuery used to run
+        # synchronously on the event loop and block every other connector.
+        import copy as _copy
+        from .. import cache as _cache
+        _ck = _cache.make_key(
+            "gcp.get_costs", ",".join(sorted(self._billing_account_ids)),
+            start_date.isoformat(), end_date.isoformat(), granularity,
+        )
+        _hit = _cache.get(_ck)
+        if _hit is not None:
+            return _copy.deepcopy(_hit)
+
+        async def _one(billing_account_id: str) -> CostSummary:
+            rows = await asyncio.to_thread(self._query_bigquery, billing_account_id, start_date, end_date)
+            return self._rows_to_summary(rows, billing_account_id, start_date, end_date)
+
+        for summary in await asyncio.gather(*[_one(b) for b in self._billing_account_ids]):
             merged.total_usd += summary.total_usd
             for k, v in summary.by_service.items():
                 merged.by_service[k] = merged.by_service.get(k, 0.0) + v
@@ -167,6 +183,7 @@ class GCPConnector(BaseConnector):
                 merged.by_region[k] = merged.by_region.get(k, 0.0) + v
             merged.entries.extend(summary.entries)
 
+        _cache.set(_ck, _copy.deepcopy(merged), _cache.COST_TTL)
         return merged
 
     async def get_costs_as_focus(

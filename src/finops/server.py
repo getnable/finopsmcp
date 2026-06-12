@@ -264,10 +264,11 @@ async def connection_status() -> str:
 
 async def _active(subset: dict | None = None) -> dict[str, Any]:
     pool = subset or _ALL_CONNECTORS
-    result = {}
-    for name, connector in pool.items():
-        if await connector.is_configured():
-            result[name] = connector
+    items = list(pool.items())
+    flags = await asyncio.gather(
+        *[c.is_configured() for _, c in items], return_exceptions=True
+    )
+    result = {n: c for (n, c), ok in zip(items, flags) if ok is True}
     return result
 
 
@@ -436,6 +437,20 @@ def _summary_to_dict(summary: CostSummary) -> dict:
     return d
 
 
+async def _fetch_costs_cached(name: str, connector: Any, start: date, end: date, granularity: str = "MONTHLY"):
+    """Read-through cached connector.get_costs. AWS caches internally; every
+    other connector repaid full provider-API latency on each repeat question
+    in a conversation. Single-flight per key via cache.aget_or_set."""
+    import copy as _copy
+    from . import cache as _cache
+    _ck = _cache.make_key("connector.get_costs", name, start.isoformat(), end.isoformat(), granularity)
+
+    async def _produce():
+        return await connector.get_costs(start, end, granularity=granularity)
+
+    return _copy.deepcopy(await _cache.aget_or_set(_ck, _cache.COST_TTL, _produce))
+
+
 async def _gather_costs(
     targets: dict[str, Any],
     start: date,
@@ -447,7 +462,7 @@ async def _gather_costs(
 
     async def _safe_fetch(name: str, connector: Any):
         try:
-            summary = await connector.get_costs(start, end, granularity=granularity)
+            summary = await _fetch_costs_cached(name, connector, start, end, granularity=granularity)
             return name, summary, None
         except Exception as exc:
             log.error(
@@ -803,17 +818,22 @@ async def get_costs_by_service(
     combined: dict[str, dict[str, float]] = {}
     errors: dict[str, str] = {}
 
-    for name, connector in targets.items():
+    async def _one_svc(name: str, connector: Any):
         try:
-            summary = await connector.get_costs(sd, ed)
-            for svc, amt in summary.by_service.items():
-                if service_filter and service_filter.lower() not in svc.lower():
-                    continue
-                if svc not in combined:
-                    combined[svc] = {}
-                combined[svc][name] = combined[svc].get(name, 0.0) + amt
+            return name, await _fetch_costs_cached(name, connector, sd, ed), None
         except Exception as exc:
-            errors[name] = str(exc)
+            return name, None, str(exc)
+
+    for name, summary, err in await asyncio.gather(*[_one_svc(n, c) for n, c in targets.items()]):
+        if err is not None:
+            errors[name] = err
+            continue
+        for svc, amt in summary.by_service.items():
+            if service_filter and service_filter.lower() not in svc.lower():
+                continue
+            if svc not in combined:
+                combined[svc] = {}
+            combined[svc][name] = combined[svc].get(name, 0.0) + amt
 
     ranked = sorted(
         [
@@ -926,22 +946,27 @@ async def compare_providers(
     provider_totals: list[dict] = []
     grand_total = 0.0
 
-    for name, connector in targets.items():
+    async def _one_total(name: str, connector: Any):
         try:
-            summary = await connector.get_costs(sd, ed)
-            provider_totals.append({
-                "provider": name,
-                "category": "cloud" if name in _CLOUD_CONNECTORS else "saas",
-                "total_usd": round(summary.total_usd, 4),
-                "total_formatted": _fmt_usd(summary.total_usd),
-                "top_services": [
-                    {"service": k, "amount_usd": round(v, 4)}
-                    for k, v in sorted(summary.by_service.items(), key=lambda x: -x[1])[:5]
-                ],
-            })
-            grand_total += summary.total_usd
+            return name, await _fetch_costs_cached(name, connector, sd, ed), None
         except Exception as exc:
-            provider_totals.append({"provider": name, "error": str(exc)})
+            return name, None, str(exc)
+
+    for name, summary, err in await asyncio.gather(*[_one_total(n, c) for n, c in targets.items()]):
+        if err is not None:
+            provider_totals.append({"provider": name, "error": err})
+            continue
+        provider_totals.append({
+            "provider": name,
+            "category": "cloud" if name in _CLOUD_CONNECTORS else "saas",
+            "total_usd": round(summary.total_usd, 4),
+            "total_formatted": _fmt_usd(summary.total_usd),
+            "top_services": [
+                {"service": k, "amount_usd": round(v, 4)}
+                for k, v in sorted(summary.by_service.items(), key=lambda x: -x[1])[:5]
+            ],
+        })
+        grand_total += summary.total_usd
 
     for p in provider_totals:
         if "total_usd" in p:
@@ -1010,13 +1035,14 @@ async def list_accounts(provider: str | None = None) -> dict:
     """
     pool = {provider: _ALL_CONNECTORS[provider]} if provider and provider in _ALL_CONNECTORS else _ALL_CONNECTORS
     targets = await _active(pool)
-    result: dict[str, list] = {}
-    for name, connector in targets.items():
+    async def _one_accts(name: str, connector: Any):
         try:
-            result[name] = await connector.list_accounts()
+            return name, await connector.list_accounts()
         except Exception as exc:
-            result[name] = [{"error": str(exc)}]
-    return result
+            return name, [{"error": str(exc)}]
+
+    pairs = await asyncio.gather(*[_one_accts(n, c) for n, c in targets.items()])
+    return dict(pairs)
 
 
 @mcp.tool()
@@ -6890,7 +6916,7 @@ async def get_llm_costs(
         sd = _date.fromisoformat(start_date) if start_date else None
         ed = _date.fromisoformat(end_date) if end_date else _date.today()
         from .connectors.llm_costs import get_all_llm_costs
-        result = get_all_llm_costs(start_date=sd, end_date=ed, days=days)
+        result = await asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed, days=days)
 
         # Bound token cost: by_model can be unbounded (many models), daily can be
         # a long window. Trim DETAIL only; keep every total and count intact.
@@ -6969,7 +6995,7 @@ async def get_llm_cost_by_model(
         ed = _date.today()
         sd = ed - timedelta(days=days)
         from .connectors.llm_costs import get_all_llm_costs
-        result = get_all_llm_costs(start_date=sd, end_date=ed)
+        result = await asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed)
 
         if provider:
             # Filter to specific provider
@@ -7023,7 +7049,7 @@ async def get_llm_unit_economics(
         ed = _date.today()
         sd = ed - timedelta(days=days)
         from .connectors.llm_costs import get_all_llm_costs
-        result = get_all_llm_costs(start_date=sd, end_date=ed)
+        result = await asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed)
         total = result["total_usd"]
 
         out: dict = {
@@ -7393,13 +7419,13 @@ async def get_ai_kpis(
         from .connectors.saas.anthropic_usage import get_costs as anthropic_costs, is_configured as anth_configured
         from .analytics.ai_kpis import full_kpi_report
 
-        llm_result = get_all_llm_costs(start_date=sd, end_date=ed)
+        llm_result = await asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed)
 
         # Fetch Anthropic data separately for cache analysis
         anthropic_data = None
         if await anth_configured():
             try:
-                anthropic_data = anthropic_costs(sd, ed)
+                anthropic_data = await asyncio.to_thread(anthropic_costs, sd, ed)
             except Exception as e:
                 log.debug("Anthropic data fetch for KPI: %s", e)
 
@@ -7457,12 +7483,12 @@ async def optimize_ai_spend(days: int = 30) -> dict:
         from .analytics.ai_kpis import full_kpi_report
         from .analytics.ai_optimizer import build_optimization_plan
 
-        llm_result = get_all_llm_costs(start_date=sd, end_date=ed)
+        llm_result = await asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed)
 
         anthropic_data = None
         if await anth_configured():
             try:
-                anthropic_data = anthropic_costs(sd, ed)
+                anthropic_data = await asyncio.to_thread(anthropic_costs, sd, ed)
             except Exception as e:
                 log.debug("Anthropic data fetch for optimizer: %s", e)
 
@@ -7527,7 +7553,7 @@ async def get_llm_unit_economics_full(
             get_cost_per_project,
         )
 
-        llm_result   = get_all_llm_costs(start_date=sd, end_date=ed)
+        llm_result   = await asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed)
         total_ai_usd = llm_result.get("total_usd", 0.0)
 
         # Gather provider-level data for project breakdown
@@ -7536,13 +7562,13 @@ async def get_llm_unit_economics_full(
 
         if await openai_configured():
             try:
-                openai_data = openai_costs(sd, ed)
+                openai_data = await asyncio.to_thread(openai_costs, sd, ed)
             except Exception:
                 pass
 
         if await anth_configured():
             try:
-                anthropic_data = anthropic_costs(sd, ed)
+                anthropic_data = await asyncio.to_thread(anthropic_costs, sd, ed)
             except Exception:
                 pass
 
@@ -8281,15 +8307,20 @@ async def get_view(
 
         # Aggregate per-connector daily data directly
         daily: dict[str, float] = {}
-        for name, connector in active.items():
+
+        async def _one_daily(name: str, connector: Any):
             try:
-                summary = await connector.get_costs(start, today, granularity="DAILY")
-                # daily_breakdown is a dict[str, float] keyed by date string if available
-                breakdown = getattr(summary, "daily_breakdown", None) or {}
-                for day_str, amt in breakdown.items():
-                    daily[day_str] = daily.get(day_str, 0.0) + amt
+                return await _fetch_costs_cached(name, connector, start, today, granularity="DAILY")
             except Exception:
-                pass
+                return None
+
+        for summary in await asyncio.gather(*[_one_daily(n, c) for n, c in active.items()]):
+            if summary is None:
+                continue
+            # daily_breakdown is a dict[str, float] keyed by date string if available
+            breakdown = getattr(summary, "daily_breakdown", None) or {}
+            for day_str, amt in breakdown.items():
+                daily[day_str] = daily.get(day_str, 0.0) + amt
 
         rows = [{"date": d, "spend": _fmt_usd(v)} for d, v in sorted(daily.items())]
         return {
@@ -8336,16 +8367,20 @@ async def get_view(
             active = {k: v for k, v in active.items() if k == provider}
 
         tag_totals: dict[str, float] = {}
-        for name, connector in active.items():
+
+        async def _one_tags(connector: Any):
             try:
                 if hasattr(connector, "get_costs_by_tag"):
-                    result = await connector.get_costs_by_tag(start, end, tag_key=tag_key)
-                    for tag_val, amt in result.items():
-                        if tag_value and tag_val != tag_value:
-                            continue
-                        tag_totals[tag_val] = tag_totals.get(tag_val, 0.0) + amt
+                    return await connector.get_costs_by_tag(start, end, tag_key=tag_key)
             except Exception:
                 pass
+            return {}
+
+        for result in await asyncio.gather(*[_one_tags(c) for c in active.values()]):
+            for tag_val, amt in result.items():
+                if tag_value and tag_val != tag_value:
+                    continue
+                tag_totals[tag_val] = tag_totals.get(tag_val, 0.0) + amt
 
         if not tag_totals:
             return {
@@ -8759,13 +8794,18 @@ async def get_focus_costs(
     all_records = []
     errors: dict[str, str] = {}
 
-    for name, connector in active_cloud.items():
+    async def _one_focus(name: str, connector: Any):
         try:
-            records = await connector.get_costs_as_focus(sd, ed)
-            all_records.extend(records)
+            return name, await connector.get_costs_as_focus(sd, ed), None
         except Exception as exc:
             log.error("FOCUS fetch failed: provider=%s error=%s", name, exc)
-            errors[name] = str(exc)
+            return name, None, str(exc)
+
+    for name, records, err in await asyncio.gather(*[_one_focus(n, c) for n, c in active_cloud.items()]):
+        if err is not None:
+            errors[name] = err
+        else:
+            all_records.extend(records)
 
     if not all_records and errors:
         return {"error": "All providers failed", "details": errors}

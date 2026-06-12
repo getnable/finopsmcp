@@ -275,6 +275,15 @@ def get_all_llm_costs(
     from .saas.anthropic_usage import get_costs as anthropic_costs, is_configured as anthropic_configured
     from .saas.vertex_costs import get_vertex_costs, is_configured as vertex_configured
 
+    # Read-through cache: these four fetches are the slowest path in the
+    # product and agentic sessions re-ask constantly.
+    import copy as _copy
+    from .. import cache as _cache
+    _ck = _cache.make_key("llm.get_all", start_date.isoformat(), end_date.isoformat())
+    _hit = _cache.get(_ck)
+    if _hit is not None:
+        return _copy.deepcopy(_hit)
+
     results: dict[str, dict] = {}
 
     # Use asyncio.run() safely — avoid deprecated get_event_loop on Python 3.10+
@@ -292,36 +301,47 @@ def get_all_llm_costs(
         except RuntimeError:
             return asyncio.run(coro)
 
-    # OpenAI
-    try:
+    # The four provider fetches are independent network calls that used to run
+    # serially (the single biggest chunk of query latency). Run them in a
+    # thread pool so the slowest provider sets the wall clock, not the sum.
+    def _fetch_openai():
         if _run(openai_configured()):
-            results["openai"] = openai_costs(start_date, end_date)
-    except Exception as e:
-        log.debug("OpenAI cost fetch error: %s", e)
+            return openai_costs(start_date, end_date)
+        return None
 
-    # Anthropic
-    try:
+    def _fetch_anthropic():
         if _run(anthropic_configured()):
-            results["anthropic"] = anthropic_costs(start_date, end_date)
-    except Exception as e:
-        log.debug("Anthropic cost fetch error: %s", e)
+            return anthropic_costs(start_date, end_date)
+        return None
 
-    # Bedrock
-    try:
+    def _fetch_bedrock():
         import boto3
         boto3.client("sts").get_caller_identity()  # quick auth check
-        results["bedrock"] = get_bedrock_costs(start_date, end_date)
-    except Exception as e:
-        log.debug("Bedrock cost fetch skipped: %s", e)
+        return get_bedrock_costs(start_date, end_date)
 
-    # Vertex AI
-    try:
+    def _fetch_vertex():
         if _run(vertex_configured()):
             v = get_vertex_costs(start_date, end_date)
             if v.get("source") != "none":
-                results["vertex"] = v
-    except Exception as e:
-        log.debug("Vertex AI cost fetch skipped: %s", e)
+                return v
+        return None
+
+    import concurrent.futures
+    _fetchers = {
+        "openai": _fetch_openai,
+        "anthropic": _fetch_anthropic,
+        "bedrock": _fetch_bedrock,
+        "vertex": _fetch_vertex,
+    }
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as _pool:
+        _futs = {name: _pool.submit(fn) for name, fn in _fetchers.items()}
+        for name, fut in _futs.items():
+            try:
+                data = fut.result()
+                if data is not None:
+                    results[name] = data
+            except Exception as e:
+                log.debug("%s cost fetch skipped: %s", name, e)
 
     # Aggregate
     total = 0.0
@@ -352,7 +372,7 @@ def get_all_llm_costs(
 
     recommendations = _generate_recommendations(by_model, results)
 
-    return {
+    _out = {
         "period":       f"{start_date} → {end_date}",
         "total_usd":    round(total, 4),
         "by_provider":  by_provider,
@@ -363,6 +383,8 @@ def get_all_llm_costs(
         "recommendations": recommendations,
         "sources":      {k: v.get("source", "none") for k, v in results.items()},
     }
+    _cache.set(_ck, _copy.deepcopy(_out), _cache.COST_TTL)
+    return _out
 
 
 def _generate_recommendations(
