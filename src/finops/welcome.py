@@ -148,8 +148,10 @@ def show_welcome() -> None:
         return
 
     _mark_welcomed()
-    _fire_telemetry("install_completed", {"source": "finops_welcome"})
+    # Banner first: _fire_telemetry briefly joins its sender thread, and on a
+    # slow network that wait should happen behind visible output, not before it.
     _print_header()
+    _fire_telemetry("install_completed", {"source": "finops_welcome"})
 
     _line(bold("Ask your AI about cloud costs:"))
     _blank()

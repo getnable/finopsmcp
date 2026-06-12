@@ -113,13 +113,24 @@ function planForAmount(amount) {
 //   STRIPE_TEAM_PRICE_IDS / STRIPE_PRO_PRICE_IDS — comma-separated price_...
 // ids (Stripe Dashboard → Products → price). Falls back to amount.
 function planForInvoice(invoice) {
-  const priceIds = (invoice.lines?.data || [])
-    .map((l) => l.price?.id)
-    .filter(Boolean);
+  // Line price id moved between Stripe API versions: classic `line.price.id`
+  // vs basil-era `line.pricing.price_details.price`. Read both. On proration
+  // invoices (upgrades/downgrades) multiple lines carry different prices, so
+  // classify from the line with the latest period end (the plan going
+  // forward), not "any line matches".
+  const lines = (invoice.lines?.data || [])
+    .map((l) => ({
+      id: l.price?.id || l.pricing?.price_details?.price || null,
+      end: l.period?.end ?? 0,
+    }))
+    .filter((l) => l.id)
+    .sort((a, b) => b.end - a.end);
   const teamIds = _linkSet("STRIPE_TEAM_PRICE_IDS");
   const proIds = _linkSet("STRIPE_PRO_PRICE_IDS");
-  if (priceIds.some((id) => teamIds.has(id))) return "team";
-  if (priceIds.some((id) => proIds.has(id))) return "pro";
+  for (const { id } of lines) {
+    if (teamIds.has(id)) return "team";
+    if (proIds.has(id)) return "pro";
+  }
   return planForAmount(invoice.amount_paid ?? 0);
 }
 

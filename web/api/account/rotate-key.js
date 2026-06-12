@@ -118,9 +118,9 @@ function bytesToB64url(bytes) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function generateLicenseKey(email) {
+async function generateLicenseKey(email, plan = "pro") {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const payload = b64url(JSON.stringify({ e: email, d, p: "pro" }));
+  const payload = b64url(JSON.stringify({ e: email, d, p: plan }));
   const seed = b64urlToBytes(process.env.FINOPS_LICENSE_PRIVATE_KEY);
   const pkcs8 = new Uint8Array(ED25519_PKCS8_PREFIX.length + seed.length);
   pkcs8.set(ED25519_PKCS8_PREFIX);
@@ -287,7 +287,7 @@ export default async function handler(req) {
     );
   }
 
-  if (plan !== "pro" && plan !== "trial") {
+  if (plan !== "pro" && plan !== "team" && plan !== "trial") {
     return new Response(
       JSON.stringify({ error: "Key rotation requires a Pro or Team subscription." }),
       {
@@ -299,7 +299,7 @@ export default async function handler(req) {
 
   let license_key;
   try {
-    license_key = await generateLicenseKey(email);
+    license_key = await generateLicenseKey(email, plan === "team" ? "team" : "pro");
   } catch (err) {
     console.error("License key generation failed:", err.message);
     return new Response(
