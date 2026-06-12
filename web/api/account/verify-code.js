@@ -54,6 +54,31 @@ function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
+// ── Attempt throttling (in-memory; resets on cold start) ─────────────────────
+// The OTP is 6 digits and fixed for a ~20 minute window, so unlimited guesses
+// would make it brute-forceable. Cap attempts per email and per IP.
+const attemptMap = new Map();
+const ATTEMPT_WINDOW_MS = 10 * 60 * 1000; // matches one OTP bucket
+const ATTEMPT_MAX = 5;
+
+function tooManyAttempts(key) {
+  const now = Date.now();
+  const entry = attemptMap.get(key) || { count: 0, resetAt: now + ATTEMPT_WINDOW_MS };
+  if (now > entry.resetAt) {
+    entry.count = 0;
+    entry.resetAt = now + ATTEMPT_WINDOW_MS;
+  }
+  if (entry.count >= ATTEMPT_MAX) return true;
+  entry.count += 1;
+  attemptMap.set(key, entry);
+  if (attemptMap.size > 500) {
+    for (const [k, v] of attemptMap) {
+      if (now > v.resetAt) attemptMap.delete(k);
+    }
+  }
+  return false;
+}
+
 // ── OTP verification ──────────────────────────────────────────────────────────
 
 async function verifyOtp(secret, email, code) {
@@ -184,6 +209,18 @@ export default async function handler(req) {
       status: 400,
       headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
+  }
+
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  if (tooManyAttempts(`em:${email}`) || tooManyAttempts(`ip:${ip}`)) {
+    return new Response(
+      JSON.stringify({ error: "Too many attempts. Try again in a few minutes." }),
+      {
+        status: 429,
+        headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+      }
+    );
   }
 
   const ACCOUNT_SECRET = process.env.ACCOUNT_SECRET;
