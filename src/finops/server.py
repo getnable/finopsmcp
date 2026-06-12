@@ -11072,7 +11072,7 @@ async def what_can_nable_do() -> str:
     # Core — always available
     lines += [
         "### Find savings",
-        '- **"What are my biggest savings opportunities?"** — runs 20 scanners, ranked by dollar impact',
+        '- **"What are my biggest savings opportunities?"** — runs 19 scanners, ranked by dollar impact',
         '- **"Why did my bill spike?"** — anomaly detection with tag attribution',
         '- **"Show me rightsizing recommendations"** — EC2, RDS, Lambda, EKS',
         '- **"What Graviton instances can I migrate to?"** — 20-40% compute savings',
@@ -11319,7 +11319,7 @@ async def get_nable_roi(
                 f"**Solo plan is free.** You're getting ${found_total:,.0f}/mo in recommendations at zero cost.",
                 f"Annualized opportunity: ${found_annualized:,.0f}.",
                 "",
-                f"Upgrade to Team ($100/mo) to unlock auto-remediation and verified savings tracking.",
+                f"Upgrade to Pro ($100/mo) to unlock auto-remediation and verified savings tracking.",
                 f"At ${verified_total:,.0f}/mo verified savings, payback is "
                 f"{'less than 1 week' if verified_total > 0 else 'immediate once first savings are verified'}.",
             ]

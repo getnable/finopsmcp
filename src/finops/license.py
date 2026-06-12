@@ -62,7 +62,8 @@ _PUBLIC_KEY_B64 = "5wMiDYa-2vOJqIr94jOkIovlTm_bBDdh43B5uFJ3Y34"
 _KEY_TTL_DAYS   = 366          # pro keys expire 1 year after issue date
 _VALID_PLANS    = {"pro", "team", "trial", "enterprise"}
 _UPGRADE_URL    = "https://getnable.com/#pricing"
-_CHECKOUT_URL   = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08"   # Team $1,000/mo direct checkout
+_CHECKOUT_URL     = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08"   # Team $1,000/mo direct checkout
+_PRO_CHECKOUT_URL = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06"   # Pro $100/mo direct checkout
 _ACTIVATE_CMD   = "finops setup license"             # shown after purchase
 _TRIAL_DAYS  = 7
 _TRIAL_FILE  = Path.home() / ".finops-mcp" / "trial_start"
@@ -493,12 +494,12 @@ def require_pro(feature: str) -> dict | None:
         ("business_metrics",           "📈 Unit economics — cost per customer, hosting % of MRR"),
     ]
 
-    lines = [f"⬡  nable Team — everything in free, plus:\n"]
+    lines = [f"⬡  nable Pro — everything in free, plus:\n"]
     for key, desc in _TEAM_FEATURES:
         marker = "▶" if key == feature else " "
         lines.append(f"  {marker} {desc}")
-    lines.append(f"\n  You hit this because '{friendly}' requires Team.")
-    lines.append(f"\n  → 7-day free trial: {_CHECKOUT_URL}")
+    lines.append(f"\n  You hit this because '{friendly}' requires Pro.")
+    lines.append(f"\n  → 7-day free trial: {_PRO_CHECKOUT_URL}")
     lines.append(f"  → Then activate:    {_ACTIVATE_CMD} <your-key>")
 
     return {
