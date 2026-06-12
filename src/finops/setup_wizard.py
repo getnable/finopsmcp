@@ -1470,8 +1470,8 @@ def main(args: list[str] | None = None) -> None:
     config_p.add_argument("--persona", metavar="ROLE", default="",
                           help="Set response persona: engineer, finops, finance, platform")
 
-    lic_p = sub.add_parser("license",       help="Activate a Team license key (FINOPS-1-...)")
-    lic_p.add_argument("key", nargs="?", default="", help="License key (FINOPS-1-...)")
+    lic_p = sub.add_parser("license",       help="Activate a Pro or Team license key (FINOPS-2-...)")
+    lic_p.add_argument("key", nargs="?", default="", help="License key (FINOPS-2-...)")
     sub.add_parser("license-status",        help="Check current license plan and expiry")
     infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
@@ -1827,7 +1827,7 @@ def _offer_email_signup() -> None:
 def _run_license_setup(key: str = "") -> None:
     """
     Activate a Team license key.
-    Called by: finops setup license FINOPS-1-xxx
+    Called by: finops setup license FINOPS-2-xxx
                 finops setup license   (interactive, prompts for key)
     """
     from .license import validate_key, _UPGRADE_URL, _CHECKOUT_URL
@@ -1839,11 +1839,11 @@ def _run_license_setup(key: str = "") -> None:
     if not key:
         print(f"  Subscribe at: {_CHECKOUT_URL}")
         print("  After checkout your license key is shown on the confirmation page")
-        print("  and emailed to you. It starts with FINOPS-1-\n")
+        print("  and emailed to you. It starts with FINOPS-2-\n")
         key = _prompt("  Paste your license key").strip()
 
     if not key:
-        _warn("No key entered. Run 'finops setup license FINOPS-1-...' to activate.")
+        _warn("No key entered. Run 'finops setup license FINOPS-2-...' to activate.")
         return
 
     # Validate before storing
@@ -1918,7 +1918,7 @@ def _run_license_status() -> None:
 
     if status.mode == "free":
         print(f"\n  Upgrade at: {_UPGRADE_URL}")
-        print("  Then run:   finops setup license FINOPS-1-...\n")
+        print("  Then run:   finops setup license FINOPS-2-...\n")
     elif status.mode == "trial":
         print(f"\n  Upgrade before trial ends: {_UPGRADE_URL}\n")
     else:

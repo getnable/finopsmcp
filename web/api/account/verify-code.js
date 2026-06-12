@@ -54,19 +54,23 @@ function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
-// ── Attempt throttling (in-memory; resets on cold start) ─────────────────────
+// ── Attempt throttling ────────────────────────────────────────────────────────
 // The OTP is 6 digits and fixed for a ~20 minute window, so unlimited guesses
-// would make it brute-forceable. Cap attempts per email and per IP.
+// would make it brute-forceable. Edge module scope is per-isolate (per PoP,
+// per cold start), so an in-memory cap alone multiplies by the number of
+// isolates an attacker can reach. The real cap therefore lives in Vercel KV
+// (shared, durable); the in-memory map is only a fallback when KV is not
+// configured.
 const attemptMap = new Map();
-const ATTEMPT_WINDOW_MS = 10 * 60 * 1000; // matches one OTP bucket
+const ATTEMPT_WINDOW_S = 600; // matches one OTP bucket
 const ATTEMPT_MAX = 5;
 
-function tooManyAttempts(key) {
+function localTooMany(key) {
   const now = Date.now();
-  const entry = attemptMap.get(key) || { count: 0, resetAt: now + ATTEMPT_WINDOW_MS };
+  const entry = attemptMap.get(key) || { count: 0, resetAt: now + ATTEMPT_WINDOW_S * 1000 };
   if (now > entry.resetAt) {
     entry.count = 0;
-    entry.resetAt = now + ATTEMPT_WINDOW_MS;
+    entry.resetAt = now + ATTEMPT_WINDOW_S * 1000;
   }
   if (entry.count >= ATTEMPT_MAX) return true;
   entry.count += 1;
@@ -77,6 +81,30 @@ function tooManyAttempts(key) {
     }
   }
   return false;
+}
+
+async function tooManyAttempts(key) {
+  const url = process.env.VERCEL_KV_REST_API_URL;
+  const token = process.env.VERCEL_KV_REST_API_TOKEN;
+  if (url && token) {
+    try {
+      const k = encodeURIComponent(`otp_attempts:${key}`);
+      const res = await fetch(`${url}/incr/${k}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      const count = Number(data.result);
+      if (count === 1) {
+        await fetch(`${url}/expire/${k}/${ATTEMPT_WINDOW_S}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+      if (Number.isFinite(count)) return count > ATTEMPT_MAX;
+    } catch {
+      // KV unreachable: fall through to the local cap rather than failing open
+    }
+  }
+  return localTooMany(key);
 }
 
 // ── OTP verification ──────────────────────────────────────────────────────────
@@ -120,9 +148,9 @@ function bytesToB64url(bytes) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function generateLicenseKey(email) {
+async function generateLicenseKey(email, plan = "pro") {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const payload = b64url(JSON.stringify({ e: email, d, p: "pro" }));
+  const payload = b64url(JSON.stringify({ e: email, d, p: plan }));
   const seed = b64urlToBytes(process.env.FINOPS_LICENSE_PRIVATE_KEY);
   const pkcs8 = new Uint8Array(ED25519_PKCS8_PREFIX.length + seed.length);
   pkcs8.set(ED25519_PKCS8_PREFIX);
@@ -167,6 +195,18 @@ async function getStripePlan(email, stripeKey) {
   );
   if (!activeSub) return "free";
   if (activeSub.status === "trialing") return "trial";
+  // Team vs Pro: match the subscription's price ids against
+  // STRIPE_TEAM_PRICE_IDS (comma-separated, set in Vercel).
+  const teamIds = new Set(
+    (process.env.STRIPE_TEAM_PRICE_IDS || "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean)
+  );
+  const priceIds = (activeSub.items?.data || [])
+    .map((i) => i.price?.id)
+    .filter(Boolean);
+  if (priceIds.some((id) => teamIds.has(id))) return "team";
   return "pro";
 }
 
@@ -213,7 +253,7 @@ export default async function handler(req) {
 
   const ip =
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  if (tooManyAttempts(`em:${email}`) || tooManyAttempts(`ip:${ip}`)) {
+  if ((await tooManyAttempts(`em:${email}`)) || (await tooManyAttempts(`ip:${ip}`))) {
     return new Response(
       JSON.stringify({ error: "Too many attempts. Try again in a few minutes." }),
       {
@@ -259,9 +299,10 @@ export default async function handler(req) {
 
   // Generate license key for pro/trial users
   let license_key = null;
-  if ((plan === "pro" || plan === "trial") && LICENSE_PRIVATE_KEY) {
+  if ((plan === "pro" || plan === "team" || plan === "trial") && LICENSE_PRIVATE_KEY) {
     try {
-      license_key = await generateLicenseKey(email);
+      // Trial keys sign as pro (trial of the pro feature set); team signs team.
+      license_key = await generateLicenseKey(email, plan === "team" ? "team" : "pro");
     } catch (err) {
       console.error("License key generation error:", err.message);
     }

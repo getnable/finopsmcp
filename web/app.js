@@ -564,27 +564,6 @@ const LOGOS = [
 function Connectors() {
   return /* @__PURE__ */ React.createElement("section", { id: "connectors", className: "alt" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Connectors"), /* @__PURE__ */ React.createElement("h2", null, "All 17 sources,", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "one conversation.")), /* @__PURE__ */ React.createElement("p", null, "Every connector is a real API integration, not a CSV export. New providers ship monthly."))), /* @__PURE__ */ React.createElement("div", { className: "logo-marquee" }, /* @__PURE__ */ React.createElement("div", { className: "logo-track" }, [...LOGOS, ...LOGOS, ...LOGOS].map((l, i) => /* @__PURE__ */ React.createElement("img", { className: "logo-img" + (l.icon ? " is-icon" : ""), key: i, src: "/vendor/logos/" + l.f + ".svg", alt: l.n, title: l.n, loading: "lazy" })))), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("p", { className: "logo-band-note" }, "+ 8 more connectors \xB7 new providers ship monthly")));
 }
-const SOLO_FEATURES = [
-  "Cost queries across all providers",
-  "Anomaly detection",
-  "Rightsizing recommendations",
-  "All 17 connectors",
-  "Your credentials never leave your machine",
-  "Works in Claude, Cursor, Windsurf, Zed"
-];
-const TEAM_FEATURES = [
-  "Everything in Solo",
-  "Terraform remediation: patch files, open PR",
-  "Slack and Teams alerts: anomalies, budgets, weekly digest",
-  "Publish cost reports to Notion for the whole team",
-  "Ticket creation (Jira, Linear, GitHub Issues)",
-  "Scheduled cost digests via email",
-  "Budget alerts and soft checks",
-  "Commitment analysis and RI recommendations",
-  "No shared database required",
-  "Team dashboard at http://your-ip:8080. No install required for viewers.",
-  "Tableau and Power BI integration: connect via Web Data Connector or OData feed"
-];
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
