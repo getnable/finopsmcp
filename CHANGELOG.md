@@ -2,6 +2,19 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.66
+
+### Install reliability
+- **Install and launch now pin a clean managed Python (`--python 3.12`).** On an
+  Apple Silicon Mac with an x86_64 Anaconda base, uvx would source-build
+  cryptography for the wrong architecture and fail ("incompatible architecture"),
+  which also meant the MCP server could silently fail to start in Claude or Cursor
+  for that cohort. Forcing a managed interpreter makes the build arch-native and
+  isolated from any conda/system Python. Applied consistently across the install
+  command, the configs the wizard writes (Claude Desktop, Cursor, Claude Code),
+  the Cursor one-click deeplink, the Claude Code plugin, the README, and the docs,
+  so the interpreter is cached at install time and the launch is a cache hit.
+
 ## 0.8.65
 
 ### Onboarding

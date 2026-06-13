@@ -228,10 +228,10 @@
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install and connect, one command</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">uvx --from finops-mcp finops welcome</span></div>
+              <div class="code-block p-4"><span class="cmd">uvx --python 3.12 --from finops-mcp finops welcome</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
-            <p class="text-xs mt-2" style="color:var(--muted)">uv fetches a matching Python and runs the setup wizard. No PATH setup, no separate install step. Want a look first? <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx --from finops-mcp finops welcome --demo</code> runs it on sample data. Already on Python 3.10+? <code class="text-xs px-1 rounded" style="background:var(--surface2)">pip install -U finops-mcp &amp;&amp; finops welcome</code>. No uv? <code class="text-xs px-1 rounded" style="background:var(--surface2)">brew install uv</code>.</p>
+            <p class="text-xs mt-2" style="color:var(--muted)">uv fetches a matching Python and runs the setup wizard. No PATH setup, no separate install step. Want a look first? <code class="text-xs px-1 rounded" style="background:var(--surface2)">uvx --python 3.12 --from finops-mcp finops welcome --demo</code> runs it on sample data. Already on Python 3.10+? <code class="text-xs px-1 rounded" style="background:var(--surface2)">pip install -U finops-mcp &amp;&amp; finops welcome</code>. No uv? <code class="text-xs px-1 rounded" style="background:var(--surface2)">brew install uv</code>.</p>
           </div>
         </div>
 
@@ -288,7 +288,7 @@
           <div class="flex-1">
             <p class="text-sm font-semibold mb-2" style="color:var(--text)">Install and run the welcome wizard</p>
             <div class="code-wrap">
-              <div class="code-block p-4"><span class="cmd">uvx --from finops-mcp finops welcome</span></div>
+              <div class="code-block p-4"><span class="cmd">uvx --python 3.12 --from finops-mcp finops welcome</span></div>
               <button class="copy-btn" onclick="copyCode(this)">Copy</button>
             </div>
             <p class="text-xs mt-2" style="color:var(--muted)">The welcome command walks you through connecting Claude and your first cloud account, then shows your first cost number in the terminal. Takes about 5 minutes (including IAM setup). uv fetches a matching Python automatically and needs no PATH setup. Already on Python 3.10+? <code class="text-xs px-1 rounded" style="background:var(--surface2)">pip install -U finops-mcp &amp;&amp; finops welcome</code> works too.</p>
