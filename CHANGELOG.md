@@ -2,6 +2,16 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.68
+
+### Telemetry
+- **`provider_connected` now fires on the ambient-credential path too.** When a
+  user connects via an existing AWS profile, SSO, or the default credential chain
+  (no manual key entry), the welcome flow confirms a real read and emits
+  `provider_connected` with `auth_method="ambient"`. Previously only the manual
+  access-key/role/profile path emitted it, so the activation metric was blind to
+  everyone who connected the easy way and undercounted real connections.
+
 ## 0.8.67
 
 ### Onboarding
