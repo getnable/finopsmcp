@@ -2,6 +2,34 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.65
+
+### Onboarding
+- **The setup wizard now wires Cursor and Claude Code, not just Claude Desktop.**
+  `finops welcome` writes `~/.cursor/mcp.json` and prints the exact
+  `claude mcp add` command for Claude Code, and it reports which editors were
+  actually configured instead of telling a Cursor user "you're set up" with
+  nothing written. The shared config builder keeps all three clients in sync and
+  never clobbers an unparseable config.
+- **Restart guidance on the success screen.** MCP clients only load servers at
+  startup, so the finish step now says to fully quit and reopen your editor, with
+  a "you should see nable in your tool list" checkpoint.
+- **Credential entry is no longer a dead end.** The auth-method menu validates
+  your pick (a typo re-prompts instead of silently forcing manual key entry),
+  temporary `ASIA` keys are accepted, and a no-key path exits cleanly with the
+  steps to get one rather than blocking.
+- **The one-click read-only key link is only shown once its template is
+  published**, so the wizard never points you at a dead URL; until then it prints
+  console steps. Adds the read-only-key CloudFormation template and a publish
+  script.
+- **Entry friction.** README lists `uv` as a prerequisite and sets the first-run
+  download expectation. The `setup_wizard_started` ping is now off the critical
+  path so a slow network can't stall the terminal before output.
+
+### Telemetry
+- `first_cost_query_success` no longer fires in demo mode, so the activation
+  metric counts only people who saw their own real cost number.
+
 ## 0.8.64
 
 ### Security
