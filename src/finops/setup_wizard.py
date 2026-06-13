@@ -505,37 +505,35 @@ def setup_aws_account() -> None:
 
 
 def _print_one_click_key_offer(region: str = "us-east-1") -> None:
-    """Print the fast path to a read-only AWS key for people with no creds locally.
+    """Print how to get a read-only AWS key for people with no creds locally.
 
-    Prefers the one-click CloudFormation link when its template is actually
-    published; otherwise falls back to explicit console steps. We never advertise
-    the one-click link as the 'fastest way' when it would 404 (the placeholder
-    bucket does not exist until publish).
+    Local console steps are always the default: nothing in this path touches
+    nable's servers. When the template is published, a one-click CloudFormation
+    stack is offered as an OPTIONAL convenience below the local steps, never as
+    the required path, so the connect flow stays local-first by default.
     """
     from .security.iam_setup import quick_create_url, quick_create_available
 
+    # Default path: fully local. No nable-hosted step, nothing leaves the machine
+    # or the user's AWS account. This stays the connect flow's default to keep the
+    # local-first claim clean.
+    print(
+        "\n  Create a read-only access key (about a minute, your own account):\n\n"
+        "  1. AWS console -> IAM -> Users -> your user -> Security credentials\n"
+        '  2. Create access key -> "Other" -> Create. The secret shows once.\n'
+        "  3. Paste the Access Key ID and Secret below.\n"
+        "  For a least-privilege policy to attach: finops setup aws --iam-template\n"
+    )
+    # Optional, opt-in convenience: a prefilled CloudFormation stack. It loads a
+    # public, auditable read-only template, and the keys it creates never leave the
+    # user's account. Shown only when the template is published, and only as an
+    # alternative below the local steps, never as the required path.
     if quick_create_available():
-        url = quick_create_url(region=region)
         print(
-            "\n  Fastest way (about a minute, creates a read-only key in your own\n"
-            "  AWS account, no existing credentials needed):\n\n"
-            "  1. Open this one-click link. It loads a CloudFormation stack you can\n"
-            "     read before running. The policy is read-only: no create, modify,\n"
-            "     or delete of anything.\n"
+            "  Optional one-click: opens a prefilled read-only stack (public,\n"
+            "  auditable template; your keys stay in your account):\n"
         )
-        print(f"     {url}\n")
-        print(
-            '  2. Click "Create stack". When it finishes, open the "Outputs" tab.\n'
-            "  3. Copy AccessKeyId and SecretAccessKey from Outputs, paste below.\n"
-        )
-    else:
-        print(
-            "\n  Create a read-only access key (about a minute, your own account):\n\n"
-            "  1. AWS console -> IAM -> Users -> your user -> Security credentials\n"
-            '  2. Create access key -> "Other" -> Create. The secret shows once.\n'
-            "  3. Paste the Access Key ID and Secret below.\n"
-            "  For a least-privilege policy to attach, run: finops setup aws --iam-template\n"
-        )
+        print(f"     {quick_create_url(region=region)}\n")
 
 
 def _setup_aws_manual(taken: set) -> None:

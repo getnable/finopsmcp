@@ -72,18 +72,21 @@ def test_quick_create_unavailable_for_placeholder(monkeypatch):
     assert I.quick_create_available() is True
 
 
-def test_offer_hides_dead_link_until_published(monkeypatch, capsys):
-    # Placeholder URL -> must NOT print a console quick-create link, show steps instead.
+def test_one_click_is_opt_in_local_steps_are_the_default(monkeypatch, capsys):
+    # Unpublished: only the fully-local console steps, no nable-hosted link.
     monkeypatch.setattr(I, "CFN_KEY_TEMPLATE_S3_URL", I._CFN_TEMPLATE_PLACEHOLDER)
     W._print_one_click_key_offer()
     out = capsys.readouterr().out
-    assert "console.aws.amazon.com/cloudformation" not in out
     assert "IAM -> Users" in out
+    assert "console.aws.amazon.com/cloudformation" not in out
 
-    # Published URL -> the one-click link appears.
+    # Published: local steps STAY the default; the one-click is shown only as an
+    # optional addition, never replacing the local path.
     monkeypatch.setattr(I, "CFN_KEY_TEMPLATE_S3_URL", "https://real.s3.amazonaws.com/t.json")
     W._print_one_click_key_offer()
     out2 = capsys.readouterr().out
+    assert "IAM -> Users" in out2  # local path remains the default
+    assert "Optional one-click" in out2
     assert "console.aws.amazon.com/cloudformation" in out2
 
 
