@@ -40,11 +40,20 @@ Most spend is concentrated in us-east-1 ($5,841 of the $7,284 AWS total).
 ## Quick start
 
 **Step 1: Install and run the setup wizard**
+
+Need `uv`? It is not preinstalled on macOS or most Linux:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
+# or: brew install uv
+```
+Then:
 ```bash
 uvx --from finops-mcp finops welcome
 ```
 
-Already on Python 3.10+? `pip install -U finops-mcp && finops welcome` works too.
+No `uv` and don't want it? On Python 3.10+, `pip install -U finops-mcp && finops welcome` works too.
+
+First run downloads dependencies, so give it a moment before the welcome screen appears.
 
 The wizard walks through connecting your providers and auto-configures Claude Desktop at the end. No config file editing, no manual env vars.
 

@@ -102,6 +102,17 @@ def _line(content: str = "") -> None:
     print(f"  {content}")
 
 
+def _and_list(items: list) -> str:
+    """Join client names for prose: ['Cursor'] -> 'Cursor'; ['A','B'] -> 'A and B'."""
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
 def _blank() -> None:
     print()
 
@@ -340,18 +351,21 @@ def run_welcome_flow(demo: bool = False) -> None:
     _line(bold("3 steps to your first cost insight:"))
     _blank()
     _line(f"  {green('1')}  {bold('Install')}          {green('done')}")
-    _line(f"  {amber('2')}  {bold('Connect Claude')}   {dim('writing your MCP config')}")
+    _line(f"  {amber('2')}  {bold('Connect editor')}   {dim('writing your MCP config')}")
     _line(f"  {dim('3')}  {dim('Connect a cloud')}  {dim('AWS, Azure, or GCP')}")
     _blank()
     _line(_rule())
     _blank()
 
-    # Step 2: auto-configure Claude / Cursor (no manual command, no Enter)
-    _line(bold("Step 2 — Connecting nable to Claude"))
+    # Step 2: auto-configure every MCP client we can find (Claude Desktop, Cursor)
+    # and surface the exact command for Claude Code. Honest about what got wired,
+    # so a Cursor/Claude Code user is never told "you're set up" with nothing written.
+    _line(bold("Step 2 — Connecting nable to your editor"))
     _blank()
+    client_result = {"configured": [], "manual": []}
     try:
-        from .setup_wizard import _configure_claude_desktop
-        _configure_claude_desktop()
+        from .setup_wizard import _configure_mcp_clients
+        client_result = _configure_mcp_clients()
     except (KeyboardInterrupt, EOFError):
         _line(dim("  Skipped. Run 'finops setup claude' later."))
     except Exception:
@@ -433,14 +447,25 @@ def run_welcome_flow(demo: bool = False) -> None:
         _line(dim("  Ready for real numbers?  ") + cyan("finops setup aws") + dim("  (read-only, ~1 min)"))
         _blank()
 
-    # Finish — one unambiguous next action
+    # Finish — honest about which clients are wired, and the restart cliff. MCP
+    # clients only load servers at startup, so a user with the editor already open
+    # sees no nable tools and assumes setup failed. Name the restart explicitly.
     _line(_rule())
     _blank()
-    _line(bold(green("You're set up.")) + "  Open Claude (or Cursor) and ask:")
+    _configured = client_result.get("configured", [])
+    _manual = client_result.get("manual", [])
+    if _configured:
+        _line(bold(green("You're set up.")) + "  " + bold("Fully quit and reopen " + _and_list(_configured)) + dim(" (not just close the window), then ask:"))
+    else:
+        _line(bold(green("nable is installed.")) + "  Add it to your editor with the command below, then ask:")
     _blank()
     _line(f"  {cyan(_MAGIC_Q)}")
     _blank()
-    _line(dim("  Not seeing nable? Run 'finops doctor' to check the connection."))
+    for _client, _cmd in _manual:
+        _line(dim(f"  Using {_client}? Run:  ") + cyan(_cmd))
+    if _manual:
+        _blank()
+    _line(dim("  You should see nable in your editor's MCP tool list. Not there? Run 'finops doctor'."))
     _blank()
     _line(f"  Docs    →  {cyan('https://getnable.com/docs')}")
     _line(f"  Support →  {cyan('hello@getnable.com')}")
