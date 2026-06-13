@@ -2,6 +2,21 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.64
+
+### Security
+- **The published least-privilege IAM policy is now complete.** Three
+  free-tier tools (idle load balancer detection, ECR cleanup, ECS
+  rightsizing) call AWS describe APIs whose actions were missing from the
+  generated policy, so a credential scoped to it hit AccessDenied on those
+  tools. Added the read-only actions (ELB, ECR, ECS, S3 multipart, two org
+  actions) to `finops setup aws --iam-template`/`--iam-terraform` and
+  `--check-scope`. Still write-free except the one documented
+  `logs:PutRetentionPolicy`. Full policy published at getnable.com/iam.
+- **Air-gap now covers the setup-wizard email capture.** It POSTed to
+  getnable.com without checking `FINOPS_AIRGAP`; it is now gated, so air-gap
+  mode truly sends nothing to any non-provider endpoint.
+
 ## 0.8.63
 
 ### Fixed
