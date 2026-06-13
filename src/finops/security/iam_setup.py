@@ -66,12 +66,22 @@ _REQUIRED_ACTIONS: list[str] = [
     "ec2:DescribeAddresses",
     "ec2:DescribeNatGateways",
     "ec2:DescribeImages",
+    # Elastic Load Balancing (idle load balancer detection)
+    "elasticloadbalancing:DescribeLoadBalancers",
     # RDS (deep audit — backup retention, utilization)
     "rds:DescribeDBInstances",
     "rds:DescribeDBSnapshots",
     # Lambda (deep audit — memory analysis)
     "lambda:ListFunctions",
     "lambda:GetFunctionConfiguration",
+    # ECR (image cleanup recommendations)
+    "ecr:DescribeRepositories",
+    "ecr:DescribeImages",
+    # ECS (service rightsizing)
+    "ecs:ListClusters",
+    "ecs:ListServices",
+    "ecs:DescribeServices",
+    "ecs:DescribeTaskDefinition",
     # CloudWatch Logs (retention policy audit)
     "logs:DescribeLogGroups",
     "logs:DescribeLogStreams",
@@ -80,14 +90,18 @@ _REQUIRED_ACTIONS: list[str] = [
     "cloudtrail:DescribeTrails",
     "cloudtrail:GetTrailStatus",
     "cloudtrail:GetEventSelectors",
-    # S3 (storage class analysis)
+    # S3 (storage class + abandoned multipart-upload analysis)
     "s3:ListAllMyBuckets",
     "s3:GetBucketLocation",
     "s3:GetBucketIntelligentTieringConfiguration",
+    "s3:ListBucketMultipartUploads",
+    "s3:ListMultipartUploadParts",
     # Organizations (org rollup — optional but harmless to include)
     "organizations:ListAccounts",
     "organizations:ListRoots",
     "organizations:ListOrganizationalUnitsForParent",
+    "organizations:ListParents",
+    "organizations:DescribeOrganizationalUnit",
     "organizations:DescribeOrganization",
     "organizations:DescribeAccount",
     # STS (account ID + role assumption)

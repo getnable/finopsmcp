@@ -1781,6 +1781,14 @@ def _offer_email_signup() -> None:
     Offer a free weekly cost digest and capture email for follow-up.
     Non-blocking: any error is silently skipped.
     """
+    # Air-gap mode forbids all non-provider egress. This step POSTs to
+    # getnable.com, so under air-gap do not even prompt.
+    try:
+        from .config import is_airgap
+        if is_airgap():
+            return
+    except Exception:
+        pass
     # Skip if already captured in this session or previously declined
     sentinel = Path.home() / ".config" / "finops" / ".email_captured"
     if sentinel.exists():

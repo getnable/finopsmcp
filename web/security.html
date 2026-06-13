@@ -76,6 +76,7 @@
 <li><code>finops setup aws --iam-terraform</code> prints the same as Terraform</li>
 <li><code>finops setup aws --check-scope</code> proves a credential has no write permissions</li>
 </ul>
+<p>And you can watch the wire yourself. Because nable has no backend, run it behind a packet capture (<code>tcpdump</code>, Little Snitch, your egress firewall) and confirm the only outbound destinations are your own cloud provider APIs. Two exceptions, both yours to disable: anonymous opt-out usage telemetry to PostHog (no cost figures, account IDs, or credentials; off with <code>NABLE_NO_TELEMETRY=1</code>); and, only if you explicitly opt into peer benchmarking which is off by default, anonymized differentially-private cost ratios (no dollars, no identifiers) to our benchmarking pool. <code>FINOPS_AIRGAP=1</code> forbids all non-provider traffic including both. The full per-cloud permission set and copy-paste policies are on the <a href="/iam" style="color:var(--accent)">access scope page</a>.</p>
 
 <h2>AI exposure, stated plainly</h2>
 <p>When you ask a question in Claude, Cursor or another MCP editor, the cost figures nable returns are sent to that editor's AI model to compose the answer, the same as anything else in the chat. nable itself sends nothing to any model. For zero model exposure, use the local dashboard or CLI, which never touch one. Enterprises routing AI through private endpoints (Bedrock, Azure OpenAI) keep that boundary too: nable does not change where your editor sends its context.</p>

@@ -20,6 +20,7 @@ nable is an MCP server you install locally. It answers cost questions, detects a
 - [Docs](https://getnable.com/docs): install and setup, every tool, connector guides
 - [Pricing](https://getnable.com/pricing.md): plans and prices, machine-readable
 - [Security](https://getnable.com/security): architecture, credential handling, AI exposure, disclosure policy
+- [Access scope](https://getnable.com/iam): exact least-privilege read-only IAM policies for AWS, GCP, Azure; what nable can and cannot touch
 - [FinOps MCP comparison](https://getnable.com/finops-mcp-comparison): nable vs AWS Billing MCP, Vantage, Finout and open-source servers, compared honestly
 - [About](https://getnable.com/about): who builds nable and why
 
