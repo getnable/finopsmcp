@@ -1,0 +1,144 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Read-only IAM user and access key for nable (finops-mcp). Scoped to the exact read APIs nable needs (Cost Explorer, Compute Optimizer, CloudWatch metrics, EC2/RDS/Lambda/S3 describe, CloudTrail, Logs). No create, modify, or delete permissions of any kind. The access key id and secret appear in the Outputs tab once: copy them into the nable setup wizard. You can delete this stack any time to revoke access.",
+  "Parameters": {
+    "UserName": {
+      "Type": "String",
+      "Default": "nable-finops-readonly",
+      "Description": "Name for the read-only IAM user"
+    }
+  },
+  "Resources": {
+    "NableReadOnlyPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "NableFinopsReadOnlyPolicy",
+        "Description": "Exact permissions nable needs \u2014 nothing more.",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "NableReadOnly",
+              "Effect": "Allow",
+              "Action": [
+                "ce:GetCostAndUsage",
+                "ce:GetCostForecast",
+                "ce:GetReservationUtilization",
+                "ce:GetReservationCoverage",
+                "ce:GetSavingsPlansPurchaseRecommendation",
+                "ce:GetSavingsPlansUtilization",
+                "ce:GetSavingsPlansUtilizationDetails",
+                "ce:GetSavingsPlansCoverage",
+                "ce:GetRightsizingRecommendation",
+                "ce:ListCostAllocationTags",
+                "ce:DescribeCostCategoryDefinition",
+                "compute-optimizer:GetEC2InstanceRecommendations",
+                "compute-optimizer:GetLambdaFunctionRecommendations",
+                "compute-optimizer:GetRDSDatabaseRecommendations",
+                "compute-optimizer:GetECSServiceRecommendations",
+                "compute-optimizer:GetEnrollmentStatus",
+                "compute-optimizer:GetRecommendationSummaries",
+                "cloudwatch:GetMetricData",
+                "cloudwatch:GetMetricStatistics",
+                "cloudwatch:ListMetrics",
+                "ec2:DescribeInstances",
+                "ec2:DescribeRegions",
+                "ec2:DescribeVolumes",
+                "ec2:DescribeSnapshots",
+                "ec2:DescribeAddresses",
+                "ec2:DescribeNatGateways",
+                "ec2:DescribeImages",
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "rds:DescribeDBInstances",
+                "rds:DescribeDBSnapshots",
+                "lambda:ListFunctions",
+                "lambda:GetFunctionConfiguration",
+                "ecr:DescribeRepositories",
+                "ecr:DescribeImages",
+                "ecs:ListClusters",
+                "ecs:ListServices",
+                "ecs:DescribeServices",
+                "ecs:DescribeTaskDefinition",
+                "logs:DescribeLogGroups",
+                "logs:DescribeLogStreams",
+                "logs:PutRetentionPolicy",
+                "cloudtrail:DescribeTrails",
+                "cloudtrail:GetTrailStatus",
+                "cloudtrail:GetEventSelectors",
+                "s3:ListAllMyBuckets",
+                "s3:GetBucketLocation",
+                "s3:GetBucketIntelligentTieringConfiguration",
+                "s3:ListBucketMultipartUploads",
+                "s3:ListMultipartUploadParts",
+                "organizations:ListAccounts",
+                "organizations:ListRoots",
+                "organizations:ListOrganizationalUnitsForParent",
+                "organizations:ListParents",
+                "organizations:DescribeOrganizationalUnit",
+                "organizations:DescribeOrganization",
+                "organizations:DescribeAccount",
+                "sts:GetCallerIdentity",
+                "sts:AssumeRole"
+              ],
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    },
+    "NableReadOnlyUser": {
+      "Type": "AWS::IAM::User",
+      "Properties": {
+        "UserName": {
+          "Ref": "UserName"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Ref": "NableReadOnlyPolicy"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "nable-finops"
+          },
+          {
+            "Key": "Purpose",
+            "Value": "cost-intelligence-read-only"
+          }
+        ]
+      }
+    },
+    "NableAccessKey": {
+      "Type": "AWS::IAM::AccessKey",
+      "Properties": {
+        "UserName": {
+          "Ref": "NableReadOnlyUser"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "AccessKeyId": {
+      "Description": "Paste this as the AWS Access Key ID in the nable setup wizard",
+      "Value": {
+        "Ref": "NableAccessKey"
+      }
+    },
+    "SecretAccessKey": {
+      "Description": "Paste this as the AWS Secret Access Key in the nable setup wizard (shown once)",
+      "Value": {
+        "Fn::GetAtt": [
+          "NableAccessKey",
+          "SecretAccessKey"
+        ]
+      }
+    },
+    "PolicyArn": {
+      "Description": "ARN of the read-only managed policy attached to this user",
+      "Value": {
+        "Ref": "NableReadOnlyPolicy"
+      }
+    }
+  }
+}

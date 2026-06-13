@@ -476,6 +476,10 @@ def setup_aws_account() -> None:
                 return
     else:
         print("  No working AWS credentials found on this machine.\n")
+        print(
+            "  That is fine. The next step can mint a read-only key in your own\n"
+            "  AWS account with one click, no existing credentials needed.\n"
+        )
 
     if chosen:
         name = _auto_aws_name(chosen, taken)
@@ -500,6 +504,40 @@ def setup_aws_account() -> None:
     _setup_aws_manual(taken)
 
 
+def _print_one_click_key_offer(region: str = "us-east-1") -> None:
+    """Print the fast path to a read-only AWS key for people with no creds locally.
+
+    Prefers the one-click CloudFormation link when its template is actually
+    published; otherwise falls back to explicit console steps. We never advertise
+    the one-click link as the 'fastest way' when it would 404 (the placeholder
+    bucket does not exist until publish).
+    """
+    from .security.iam_setup import quick_create_url, quick_create_available
+
+    if quick_create_available():
+        url = quick_create_url(region=region)
+        print(
+            "\n  Fastest way (about a minute, creates a read-only key in your own\n"
+            "  AWS account, no existing credentials needed):\n\n"
+            "  1. Open this one-click link. It loads a CloudFormation stack you can\n"
+            "     read before running. The policy is read-only: no create, modify,\n"
+            "     or delete of anything.\n"
+        )
+        print(f"     {url}\n")
+        print(
+            '  2. Click "Create stack". When it finishes, open the "Outputs" tab.\n'
+            "  3. Copy AccessKeyId and SecretAccessKey from Outputs, paste below.\n"
+        )
+    else:
+        print(
+            "\n  Create a read-only access key (about a minute, your own account):\n\n"
+            "  1. AWS console -> IAM -> Users -> your user -> Security credentials\n"
+            '  2. Create access key -> "Other" -> Create. The secret shows once.\n'
+            "  3. Paste the Access Key ID and Secret below.\n"
+            "  For a least-privilege policy to attach, run: finops setup aws --iam-template\n"
+        )
+
+
 def _setup_aws_manual(taken: set) -> None:
     """Manual credential entry. Reached only when auto-detect finds nothing, or
     the user explicitly chooses to enter credentials by hand. Verifies before
@@ -514,7 +552,14 @@ def _setup_aws_manual(taken: set) -> None:
     print("  1) IAM access key  (most common)")
     print("  2) Cross-account IAM role ARN")
     print("  3) AWS CLI profile  (~/.aws/config)")
-    cred_choice = _prompt("  Choice", default="1")
+    # Validate the pick instead of silently treating any typo as "enter an access
+    # key" — a wrong fork dumped no-creds users onto a key prompt they could not
+    # satisfy, a confirmed quit point.
+    while True:
+        cred_choice = _prompt("  Choice", default="1")
+        if cred_choice in ("1", "2", "3", ""):
+            break
+        _warn("Please pick 1, 2, or 3.")
 
     access_key = secret_key = role_arn = profile = ""
     auth_method = "access_key"
@@ -549,23 +594,13 @@ def _setup_aws_manual(taken: set) -> None:
         auth_method = "profile"
 
     else:
-        print("""
-  Create an AWS access key (takes ~90 seconds):
-
-  1. Open this URL in your browser:
-     https://console.aws.amazon.com/iam/home#/users
-
-  2. Click your username -> Security credentials -> Access keys
-     -> Create access key -> choose "Other" -> Create
-
-  3. Copy both values below. The secret is only shown once.
-""")
-        access_key = _prompt("  AWS Access Key ID (starts with AKIA...)")
-        while not access_key.startswith("AK") or len(access_key) < 16:
+        _print_one_click_key_offer(region)
+        access_key = _prompt("  AWS Access Key ID (starts with AKIA or ASIA)")
+        while not (access_key.startswith("AKIA") or access_key.startswith("ASIA")) or len(access_key) < 16:
             if not access_key:
-                _warn("No Access Key ID entered. Run 'finops setup aws' to try again.")
+                _warn("No key entered. Create one with the steps above, then re-run 'finops setup aws'.")
                 return
-            _warn("That doesn't look like a valid Access Key ID (should start with AKIA, 20 chars)")
+            _warn("That doesn't look like an Access Key ID (should start with AKIA or ASIA, ~20 chars).")
             access_key = _prompt("  AWS Access Key ID")
         secret_key = _prompt("  AWS Secret Access Key", secret=True)
         while len(secret_key) < 20:
@@ -1398,12 +1433,22 @@ def main(args: list[str] | None = None) -> None:
     # Check PATH early so users know if the command won't be available in new shells
     _check_path_warning()
 
-    # Track setup wizard start
+    # Track setup wizard start, fire-and-forget. A bare _send_event here blocks the
+    # main thread on a network POST (up to ~5s on a captive-portal/filtered network)
+    # before argparse and first output, reading as a hang. Thread it like
+    # record_tool_call does so telemetry never sits in the critical path.
     try:
         from . import telemetry as _tel
-        _tel._send_event(_tel._get_install_id(), "setup_wizard_started", {
-            "subcommand": args[0] if args else "interactive",
-        })
+        import threading as _th
+        _th.Thread(
+            target=_tel._send_event,
+            args=(
+                _tel._get_install_id(),
+                "setup_wizard_started",
+                {"subcommand": args[0] if args else "interactive"},
+            ),
+            daemon=True,
+        ).start()
     except Exception:
         pass
 
@@ -1442,6 +1487,7 @@ def main(args: list[str] | None = None) -> None:
     aws_p.add_argument("--list",         action="store_true", help="List all configured AWS accounts")
     aws_p.add_argument("--iam-template", action="store_true", help="Print least-privilege IAM CloudFormation template")
     aws_p.add_argument("--iam-terraform",action="store_true", help="Print least-privilege IAM Terraform snippet")
+    aws_p.add_argument("--launch-stack", action="store_true", help="Print the one-click link that mints a read-only access key")
     aws_p.add_argument("--check-scope",  action="store_true", help="Verify your AWS key is read-only")
     sub.add_parser("azure",        help="Connect Azure Cost Management")
     sub.add_parser("gcp",          help="Connect GCP Cloud Billing / BigQuery export")
@@ -1643,6 +1689,15 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "aws" and getattr(parsed, "iam_terraform", False):
         from .security.iam_setup import print_iam_template
         print_iam_template("terraform")
+        return
+    elif parsed.cmd == "aws" and getattr(parsed, "launch_stack", False):
+        from .security.iam_setup import quick_create_url
+        print(
+            "\n  One-click: open this link, click Create stack, then copy\n"
+            "  AccessKeyId and SecretAccessKey from the Outputs tab into\n"
+            "  'finops setup aws'. The stack is read-only and auditable.\n"
+        )
+        print(f"  {quick_create_url()}\n")
         return
     elif parsed.cmd == "aws" and getattr(parsed, "check_scope", False):
         from .security.iam_setup import check_credential_scope
@@ -2232,10 +2287,124 @@ def _run_upgrade(target: str = "") -> None:
         print("  Re-run 'finops setup claude' to write a pinned entry.")
 
 
-def _configure_claude_desktop() -> None:
+def _build_mcp_server_entry() -> "tuple[dict, str]":
+    """Build the nable mcpServers entry (command/args/env), shared by every client
+    writer so Claude Desktop, Cursor, and Claude Code never drift apart. Pins the
+    installed version under uvx for the same reason Claude Desktop does: an
+    unpinned re-resolve on first launch can blow past a client's startup timeout."""
+    import shutil
+    uvx_bin = shutil.which("uvx")
+    finops_bin = shutil.which("finops-mcp") or str(Path(sys.executable).parent / "finops-mcp")
+    if uvx_bin:
+        mcp_entry: dict = {"command": uvx_bin, "args": [_pinned_package()]}
+        display_cmd = f"uvx {_pinned_package()}"
+    else:
+        mcp_entry = {"command": finops_bin}
+        display_cmd = finops_bin
+    try:
+        from .security.vault import Vault
+        _val = Vault.default().get("FINOPS_LICENSE_KEY")
+        if _val:
+            mcp_entry["env"] = {"FINOPS_LICENSE_KEY": _val}
+    except Exception:
+        pass
+    return mcp_entry, display_cmd
+
+
+def _merge_write_mcpservers(config_path: Path, mcp_entry: dict) -> bool:
+    """Merge nable into a {"mcpServers": {...}} JSON config, preserving other
+    servers and migrating a legacy "finops" key. Returns True on write, False if
+    the file is unreadable, never clobber a config we cannot parse."""
+    import json
+    try:
+        config = json.loads(config_path.read_text()) if config_path.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        return False
+    if not isinstance(config, dict):
+        return False
+    servers = config.setdefault("mcpServers", {})
+    if not isinstance(servers, dict):
+        return False
+    existing = servers.get("nable") or servers.get("finops") or {}
+    entry = dict(mcp_entry)
+    if isinstance(existing, dict) and existing.get("env"):
+        entry["env"] = {**existing["env"], **entry.get("env", {})}
+    servers.pop("finops", None)
+    servers["nable"] = entry
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
+    try:
+        config_path.chmod(0o600)
+    except OSError:
+        pass
+    return True
+
+
+def _cursor_config_path() -> "Path | None":
+    """~/.cursor/mcp.json when Cursor is plausibly installed (its dir exists or the
+    app is present). Cursor reads global MCP servers from this file."""
+    cursor_dir = Path.home() / ".cursor"
+    present = (
+        cursor_dir.exists()
+        or Path("/Applications/Cursor.app").exists()
+        or (Path.home() / "Applications" / "Cursor.app").exists()
+    )
+    return (cursor_dir / "mcp.json") if present else None
+
+
+def _configure_cursor(mcp_entry: dict) -> bool:
+    """Write nable into ~/.cursor/mcp.json (same schema as Claude Desktop)."""
+    path = _cursor_config_path()
+    if path is None:
+        return False
+    if _merge_write_mcpservers(path, mcp_entry):
+        _ok(f"Cursor configured → {path}")
+        return True
+    _warn(f"Could not parse {path}; left it untouched.")
+    return False
+
+
+def _claude_code_add_command() -> "str | None":
+    """The `claude mcp add` one-liner for Claude Code, if its CLI is on PATH. We
+    print this rather than shelling out, so we never mutate the user's Claude Code
+    config in a way that depends on their CLI version."""
+    import shutil
+    if not shutil.which("claude"):
+        return None
+    if shutil.which("uvx"):
+        return f"claude mcp add -s user nable -- uvx {_pinned_package()}"
+    return "claude mcp add -s user nable -- finops-mcp"
+
+
+def _configure_mcp_clients() -> dict:
+    """Wire nable into every MCP client we can detect, and report the truth.
+
+    Returns {"configured": [auto-written client names], "manual": [(client, cmd)]}
+    so the caller tells the user exactly which editors are ready and what is left,
+    instead of claiming "you're set up" for clients that were never wired (the
+    silent Cursor/Claude Code miss that sank a real slice of the funnel)."""
+    configured: list = []
+    manual: list = []
+    mcp_entry, _display = _build_mcp_server_entry()
+
+    if _configure_claude_desktop():
+        configured.append("Claude Desktop")
+    try:
+        if _cursor_config_path() is not None and _configure_cursor(mcp_entry):
+            configured.append("Cursor")
+    except Exception:
+        pass
+    cc = _claude_code_add_command()
+    if cc:
+        manual.append(("Claude Code", cc))
+    return {"configured": configured, "manual": manual}
+
+
+def _configure_claude_desktop() -> bool:
     """
     Auto-detect claude_desktop_config.json and inject the nable MCP server
-    with the correct absolute path to finops-mcp.
+    with the correct absolute path to finops-mcp. Returns True when configured
+    (or already configured), False otherwise.
 
     This is the #1 reason nable doesn't work on company computers. Claude
     Desktop is a GUI app that doesn't inherit the user's shell PATH, so
@@ -2244,16 +2413,19 @@ def _configure_claude_desktop() -> None:
     We resolve the absolute path at setup time and write it to the config.
     """
     try:
-        _configure_claude_desktop_inner()
+        return bool(_configure_claude_desktop_inner())
     except (KeyboardInterrupt, EOFError):
         print("\n  Claude Desktop configuration skipped.")
+        return False
     except Exception as e:
         _warn(f"Claude Desktop auto-config failed: {e}")
         print("  Run 'finops setup claude' to try again, or configure manually.")
+        return False
 
 
-def _configure_claude_desktop_inner() -> None:
-    """Inner implementation -- called by _configure_claude_desktop with error handling."""
+def _configure_claude_desktop_inner() -> bool:
+    """Inner implementation -- called by _configure_claude_desktop with error handling.
+    Returns True when the config was written or was already current, else False."""
     import json
     import shutil
 
@@ -2288,14 +2460,14 @@ def _configure_claude_desktop_inner() -> None:
                 print("  1. Install Claude Desktop from https://claude.ai/download")
                 print("  2. Open Claude Desktop at least once, then run 'finops setup claude'")
                 print("  ──────────────────────────────────────────────────")
-                return
+                return False
         else:
             print("\n  ──────────────────────────────────────────────────")
             print("  Claude Desktop not found. To finish setup manually:")
             print("  1. Install Claude Desktop from https://claude.ai/download")
             print("  2. Run 'finops setup claude' after installing")
             print("  ──────────────────────────────────────────────────")
-            return
+            return False
 
     # Determine the best launch strategy:
     # 1. uvx  — isolated venv, works in corporate environments with no PATH issues
@@ -2334,7 +2506,7 @@ def _configure_claude_desktop_inner() -> None:
         except (json.JSONDecodeError, OSError) as parse_err:
             _warn(f"Could not parse Claude Desktop config: {parse_err}")
             _warn(f"Check {config_path} manually before re-running 'finops setup claude'.")
-            return
+            return False
     else:
         config = {}
 
@@ -2369,7 +2541,7 @@ def _configure_claude_desktop_inner() -> None:
     # (pop "finops", register "nable") even when the command is otherwise identical.
     if existing_base == new_base and not vault_env and "nable" in config["mcpServers"]:
         _ok(f"Claude Desktop already configured: {display_cmd}")
-        return
+        return True
 
     print(f"\n  ──────────────────────────────────────────────────")
     print(f"  Configure Claude Desktop to use nable?")
@@ -2388,12 +2560,12 @@ def _configure_claude_desktop_inner() -> None:
     except (KeyboardInterrupt, EOFError):
         print("\n  Skipped. Add manually:")
         _print_manual_config(mcp_entry)
-        return
+        return False
 
     if ans not in ("y", "yes", ""):
         print("  Skipped. Add manually:")
         _print_manual_config(mcp_entry)
-        return
+        return False
 
     # Preserve any env keys already in the existing entry that we're not overwriting
     if existing.get("env"):
@@ -2412,6 +2584,7 @@ def _configure_claude_desktop_inner() -> None:
 
     _ok(f"Claude Desktop configured → {config_path}")
     print("  Restart Claude Desktop for the changes to take effect.")
+    return True
 
 
 def _print_manual_config(mcp_entry: dict) -> None:

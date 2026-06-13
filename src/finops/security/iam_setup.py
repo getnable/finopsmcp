@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from typing import Any
 
@@ -196,6 +197,94 @@ CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
     },
 }
 
+# The role template above needs you to already have AWS credentials on the box to
+# assume the role. Most people who get stuck in setup do NOT, so the one-click
+# activation path uses this template instead: it mints a read-only IAM user and an
+# access key in their own account. They paste the two outputs into the wizard and
+# they are connected, with no pre-existing credentials required.
+CLOUDFORMATION_TEMPLATE_KEY: dict[str, Any] = {
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": (
+        "Read-only IAM user and access key for nable (finops-mcp). "
+        "Scoped to the exact read APIs nable needs (Cost Explorer, Compute "
+        "Optimizer, CloudWatch metrics, EC2/RDS/Lambda/S3 describe, CloudTrail, "
+        "Logs). No create, modify, or delete permissions of any kind. The access "
+        "key id and secret appear in the Outputs tab once: copy them into the "
+        "nable setup wizard. You can delete this stack any time to revoke access."
+    ),
+    "Parameters": {
+        "UserName": {
+            "Type": "String",
+            "Default": "nable-finops-readonly",
+            "Description": "Name for the read-only IAM user",
+        },
+    },
+    "Resources": {
+        "NableReadOnlyPolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "ManagedPolicyName": "NableFinopsReadOnlyPolicy",
+                "Description": "Exact permissions nable needs — nothing more.",
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "NableReadOnly",
+                            "Effect": "Allow",
+                            "Action": _REQUIRED_ACTIONS,
+                            "Resource": "*",
+                        }
+                    ],
+                },
+            },
+        },
+        "NableReadOnlyUser": {
+            "Type": "AWS::IAM::User",
+            "Properties": {
+                "UserName": {"Ref": "UserName"},
+                "ManagedPolicyArns": [{"Ref": "NableReadOnlyPolicy"}],
+                "Tags": [
+                    {"Key": "ManagedBy", "Value": "nable-finops"},
+                    {"Key": "Purpose", "Value": "cost-intelligence-read-only"},
+                ],
+            },
+        },
+        "NableAccessKey": {
+            "Type": "AWS::IAM::AccessKey",
+            "Properties": {"UserName": {"Ref": "NableReadOnlyUser"}},
+        },
+    },
+    "Outputs": {
+        "AccessKeyId": {
+            "Description": "Paste this as the AWS Access Key ID in the nable setup wizard",
+            "Value": {"Ref": "NableAccessKey"},
+        },
+        "SecretAccessKey": {
+            "Description": "Paste this as the AWS Secret Access Key in the nable setup wizard (shown once)",
+            "Value": {"Fn::GetAtt": ["NableAccessKey", "SecretAccessKey"]},
+        },
+        "PolicyArn": {
+            "Description": "ARN of the read-only managed policy attached to this user",
+            "Value": {"Ref": "NableReadOnlyPolicy"},
+        },
+    },
+}
+
+# The AWS console's quick-create flow only loads templates from an S3 URL, so the
+# key template above is published to S3 (see scripts/publish_cfn.py) and the
+# resulting URL goes here. Overridable via env for testing or a custom bucket.
+# The placeholder below is NOT a live bucket: until the template is actually
+# published and NABLE_CFN_TEMPLATE_URL is set, quick_create_available() returns
+# False so the wizard never advertises a dead one-click link.
+_CFN_TEMPLATE_PLACEHOLDER = "https://nable-public.s3.amazonaws.com/cloudformation/readonly-key.json"
+CFN_KEY_TEMPLATE_S3_URL = os.environ.get("NABLE_CFN_TEMPLATE_URL", _CFN_TEMPLATE_PLACEHOLDER)
+
+
+def quick_create_available() -> bool:
+    """True only when a real published template URL is configured (not the
+    placeholder), so callers never advertise a one-click link that 404s."""
+    return bool(CFN_KEY_TEMPLATE_S3_URL) and CFN_KEY_TEMPLATE_S3_URL != _CFN_TEMPLATE_PLACEHOLDER
+
 _TERRAFORM_TEMPLATE = '''\
 # ── nable (finops-mcp) least-privilege IAM role ───────────────────────────────
 # Grants read-only access to Cost Explorer, Compute Optimizer, CloudWatch
@@ -257,8 +346,35 @@ output "nable_role_arn" {{
 
 
 def generate_cloudformation() -> str:
-    """Return CloudFormation template JSON string."""
+    """Return CloudFormation template JSON string (read-only role)."""
     return json.dumps(CLOUDFORMATION_TEMPLATE, indent=2)
+
+
+def generate_cloudformation_key() -> str:
+    """Return CloudFormation template JSON string (read-only user + access key).
+
+    This is the template behind the one-click connect link. It mints a scoped
+    read-only IAM user and an access key the user pastes into the setup wizard.
+    """
+    return json.dumps(CLOUDFORMATION_TEMPLATE_KEY, indent=2)
+
+
+def quick_create_url(region: str = "us-east-1", stack_name: str = "nable-readonly") -> str:
+    """One-click AWS console URL that opens the read-only-key stack pre-loaded.
+
+    The user reviews the template (read-only, auditable), clicks Create, then
+    copies AccessKeyId and SecretAccessKey from the Outputs tab into the wizard.
+    Collapses the IAM step from a dozen console clicks to two copy-pastes, and
+    works even when the user has no AWS credentials configured locally.
+    """
+    from urllib.parse import quote
+
+    template_url = quote(CFN_KEY_TEMPLATE_S3_URL, safe="")
+    return (
+        f"https://console.aws.amazon.com/cloudformation/home?region={region}"
+        f"#/stacks/create/review?templateURL={template_url}"
+        f"&stackName={stack_name}"
+    )
 
 
 def generate_terraform() -> str:
