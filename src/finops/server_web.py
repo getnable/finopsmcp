@@ -206,16 +206,23 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
             total = 0.0
             by_service: dict[str, float] = {}
             account_id = ""
-            for _name, connector in configured.items():
+
+            _t = int(os.getenv("FINOPS_PROVIDER_TIMEOUT_S", "90"))
+
+            async def _one(connector):
                 try:
-                    summary = await connector.get_costs(start, end)
-                    total += summary.total_usd
-                    for svc, amt in summary.by_service.items():
-                        by_service[svc] = by_service.get(svc, 0.0) + amt
-                    if not account_id and summary.by_account:
-                        account_id = next(iter(summary.by_account))
+                    return await asyncio.wait_for(connector.get_costs(start, end), timeout=_t)
                 except Exception:
-                    pass
+                    return None
+
+            for summary in await asyncio.gather(*[_one(c) for c in configured.values()]):
+                if summary is None:
+                    continue
+                total += summary.total_usd
+                for svc, amt in summary.by_service.items():
+                    by_service[svc] = by_service.get(svc, 0.0) + amt
+                if not account_id and summary.by_account:
+                    account_id = next(iter(summary.by_account))
             return total, by_service, account_id
 
         mtd_total, mtd_services, account_id = await _sum_costs(mtd_start, today)
@@ -1926,6 +1933,15 @@ class _Handler(BaseHTTPRequestHandler):
         port = self.server.server_address[1]
         return f"http://localhost:{port}"
 
+    def _host_allowed(self) -> bool:
+        """Reject DNS-rebound requests: a browser script at evil.com that
+        rebinds its hostname to 127.0.0.1 still sends Host: evil.com."""
+        host = (self.headers.get("Host") or "").split(":")[0].lower()
+        allowed = {"localhost", "127.0.0.1", "::1", "[::1]"}
+        extra = os.getenv("FINOPS_DASHBOARD_ALLOWED_HOSTS", "")
+        allowed.update(h.strip().lower() for h in extra.split(",") if h.strip())
+        return host in allowed
+
     def _send(self, status: int, content_type: str, body: bytes) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -2078,6 +2094,9 @@ button:hover{{filter:brightness(1.1)}}
         self.wfile.write(body)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._host_allowed():
+            self._send(403, "text/plain", b"Forbidden: unrecognized Host header")
+            return
         """Handle POST endpoints: /login and /api/mark-done."""
         from urllib.parse import urlparse, parse_qs
         parsed = urlparse(self.path)
@@ -2124,6 +2143,9 @@ button:hover{{filter:brightness(1.1)}}
             self._serve_login_page(error=True)
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._host_allowed():
+            self._send(403, "text/plain", b"Forbidden: unrecognized Host header")
+            return
         from urllib.parse import urlparse, parse_qs
         parsed = urlparse(self.path)
         path = parsed.path

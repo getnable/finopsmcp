@@ -5,6 +5,9 @@ from datetime import date
 from typing import Any
 
 import httpx
+import logging
+
+log = logging.getLogger(__name__)
 
 _SEVERITY_COLOR = {"high": "attention", "medium": "warning", "low": "good"}
 _SEVERITY_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
@@ -145,6 +148,38 @@ def daily_digest_card(
         "version": "1.4",
         "body": body,
     }
+
+
+_ALLOWED_WEBHOOK_SUFFIXES = (".webhook.office.com", ".office.com", ".office365.com")
+
+
+async def send_to_webhook(url: str, text: str) -> bool:
+    """Send plain text to an explicit Teams webhook URL (report subscriptions
+    carry their own URL, unlike alerts which use the configured default)."""
+    from urllib.parse import urlparse
+    host = urlparse(url).hostname or ""
+    if not any(host == s.lstrip(".") or host.endswith(s) for s in _ALLOWED_WEBHOOK_SUFFIXES):
+        log.warning("Teams webhook host %r is not an Office webhook domain; refusing to post.", host)
+        return False
+    card = {
+        "type": "message",
+        "attachments": [{
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "content": {
+                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                "type": "AdaptiveCard",
+                "version": "1.4",
+                "body": [{"type": "TextBlock", "text": text, "wrap": True}],
+            },
+        }],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(url, json=card)
+            return resp.status_code in (200, 202)
+    except Exception as exc:
+        log.warning("Teams webhook post failed: %s", exc)
+        return False
 
 
 async def send_anomaly_alert(anomaly: dict[str, Any]) -> bool:

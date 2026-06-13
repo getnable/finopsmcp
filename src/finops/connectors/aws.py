@@ -53,6 +53,16 @@ class AWSConnector(BaseConnector):
 
     def _make_client(self, role_arn: str | None = None):
         import boto3
+        from botocore.config import Config as _BotoConfig
+
+        # Without explicit timeouts botocore waits 60s per attempt with ~4
+        # retries; under CE throttling that leaks worker threads for minutes
+        # (asyncio.wait_for cancels the awaiting coroutine, not the thread).
+        _cfg = _BotoConfig(
+            connect_timeout=5,
+            read_timeout=15,
+            retries={"max_attempts": 2, "mode": "standard"},
+        )
 
         # GovCloud note: AWS Cost Explorer is available in GovCloud regions.
         # Valid GovCloud CE endpoints: us-gov-west-1, us-gov-east-1.
@@ -62,7 +72,7 @@ class AWSConnector(BaseConnector):
 
         # If a session was injected (via account registry), use it directly
         if self._session and not role_arn:
-            return self._session.client("ce", region_name=_region)
+            return self._session.client("ce", region_name=_region, config=_cfg)
 
         if role_arn:
             sts = boto3.client("sts")
@@ -74,8 +84,9 @@ class AWSConnector(BaseConnector):
                 aws_secret_access_key=creds["SecretAccessKey"],
                 aws_session_token=creds["SessionToken"],
                 region_name=_region,
+                config=_cfg,
             )
-        return boto3.client("ce", region_name=_region)
+        return boto3.client("ce", region_name=_region, config=_cfg)
 
     def _account_id(self, role_arn: str | None = None) -> str:
         import boto3

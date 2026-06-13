@@ -558,6 +558,12 @@ def get_engine() -> Engine:
         metadata.create_all(_ENGINE)
         _run_sqlite_migrations(_ENGINE)
         db_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        # WAL mode creates -wal/-shm sidecars under the process umask; they
+        # briefly hold recently written rows, so clamp them too when present.
+        for _suffix in ("-wal", "-shm"):
+            _side = db_path.with_name(db_path.name + _suffix)
+            if _side.exists():
+                _side.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
     return _ENGINE
 
