@@ -126,6 +126,30 @@ def test_value_moment_does_not_hang_on_blocking_scan(monkeypatch):
     assert elapsed < 10, f"value moment took {elapsed:.1f}s; the cap did not fire"
 
 
+def test_ambient_connect_emits_provider_connected(monkeypatch):
+    # The ambient-cred path (existing profile / SSO / default chain) never calls
+    # setup_aws_account, so it must emit provider_connected itself, otherwise the
+    # activation metric is blind to everyone who connects the easy way.
+    from finops import setup_wizard
+    from finops.connectors.aws import AWSConnector
+
+    monkeypatch.setattr(WC, "_show_value_moment", lambda demo=False: True)
+    monkeypatch.setattr(setup_wizard, "_configure_mcp_clients",
+                        lambda: {"configured": [], "manual": []})
+
+    async def _ambient_ok(self):
+        return True
+
+    monkeypatch.setattr(AWSConnector, "is_configured", _ambient_ok)
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "y")
+
+    emitted = []
+    monkeypatch.setattr(setup_wizard, "_emit_provider_connected", lambda m: emitted.append(m))
+
+    WC.run_welcome_flow(demo=False)
+    assert "ambient" in emitted
+
+
 def test_and_list_prose():
     assert WC._and_list([]) == ""
     assert WC._and_list(["Cursor"]) == "Cursor"

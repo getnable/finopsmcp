@@ -435,6 +435,16 @@ def run_welcome_flow(demo: bool = False) -> None:
         _blank()
         if ans in ("y", "yes"):
             shown = _show_value_moment(demo=False)
+            if shown:
+                # A confirmed read with ambient creds is a real connection. The
+                # ambient path never calls setup_aws_account, so without this the
+                # activation metric misses everyone who connects via an existing
+                # profile, SSO, or the default chain. auth_method marks it ambient.
+                try:
+                    from .setup_wizard import _emit_provider_connected
+                    _emit_provider_connected("ambient")
+                except Exception:
+                    pass
 
     # No ambient creds, or they declined: offer the full connect menu.
     if not shown:
