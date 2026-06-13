@@ -2,6 +2,38 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.62
+
+### Performance
+- **Cost queries drop from ~20s to the slowest single provider, repeats are
+  free.** Azure and GCP connectors ran their sync SDK calls on the event
+  loop, blocking every other connector; the AI-spend path fetched four
+  providers serially with blocking HTTP at 10 call sites; six server loops
+  queried providers one at a time; and only AWS had a cache. All connectors
+  now run concurrently off the event loop with a shared 12h read-through
+  cache. Measured 4x3s providers: 3.0s cold, 0ms warm.
+- Hard per-provider timeout (`FINOPS_PROVIDER_TIMEOUT_S`, default 90s) so one
+  hung provider API can no longer freeze a query. The Azure SDK ships with no
+  timeout at all.
+- AWS Cost Explorer / STS clients now set botocore connect/read timeouts;
+  the defaults leaked worker threads for minutes under throttling.
+
+### Fixed
+- **Teams report delivery was silently broken.** reports.py called
+  `teams.send_to_webhook`, which never existed, so every Teams report
+  subscription threw and was swallowed. Implemented it (refuses non-Office
+  webhook hosts) with regression tests.
+- Setup wizard told buyers their license key starts with `FINOPS-1-`; real
+  keys are `FINOPS-2-`. The in-product upsell branded the seven Pro features
+  as "Team" and linked the $1,000 Team checkout for a $100 Pro gate; both now
+  correct.
+- Dashboard fetches run in parallel under the same provider timeout and reject
+  requests with an unrecognized Host header (DNS-rebinding hardening,
+  `FINOPS_DASHBOARD_ALLOWED_HOSTS` extends the allowlist).
+- SQLite WAL/SHM sidecar files clamped to 0600 like the main db.
+- Slack approval cards strip `<!channel>`/`<@user>` tokens from user-supplied
+  ticket previews.
+
 ## 0.8.61
 
 ### Security
