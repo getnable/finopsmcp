@@ -2171,6 +2171,21 @@ def _installed_version() -> str:
         return ""
 
 
+# Pin uvx to a clean managed interpreter. Without it, uv builds against whatever
+# `python` the user's shell exposes, and an x86_64 Anaconda base on an Apple
+# Silicon machine makes uv source-build cryptography for the wrong architecture
+# and fail ("incompatible architecture"). A managed version is arch-native and
+# isolated from any conda/system Python contamination. The install command uses
+# the same flag, so the interpreter is cached before the client ever launches.
+_MANAGED_PYTHON = "3.12"
+
+
+def _uvx_args(target: str = "") -> list:
+    """The uvx args list written into client configs: a managed Python plus the
+    pinned package, so the launch is arch-clean and a cache hit after install."""
+    return ["--python", _MANAGED_PYTHON, _pinned_package(target)]
+
+
 def _pinned_package(target: str = "") -> str:
     """The uvx target written into client configs, pinned to one version.
 
@@ -2294,8 +2309,8 @@ def _build_mcp_server_entry() -> "tuple[dict, str]":
     uvx_bin = shutil.which("uvx")
     finops_bin = shutil.which("finops-mcp") or str(Path(sys.executable).parent / "finops-mcp")
     if uvx_bin:
-        mcp_entry: dict = {"command": uvx_bin, "args": [_pinned_package()]}
-        display_cmd = f"uvx {_pinned_package()}"
+        mcp_entry: dict = {"command": uvx_bin, "args": _uvx_args()}
+        display_cmd = f"uvx --python {_MANAGED_PYTHON} {_pinned_package()}"
     else:
         mcp_entry = {"command": finops_bin}
         display_cmd = finops_bin
@@ -2370,7 +2385,7 @@ def _claude_code_add_command() -> "str | None":
     if not shutil.which("claude"):
         return None
     if shutil.which("uvx"):
-        return f"claude mcp add -s user nable -- uvx {_pinned_package()}"
+        return f"claude mcp add -s user nable -- uvx --python {_MANAGED_PYTHON} {_pinned_package()}"
     return "claude mcp add -s user nable -- finops-mcp"
 
 
@@ -2490,8 +2505,8 @@ def _configure_claude_desktop_inner() -> bool:
         # disconnected"). Pinned, releases are invisible until the user runs
         # `finops upgrade`, which moves the pin and pre-warms the cache.
         pinned = _pinned_package()
-        mcp_entry = {"command": uvx_bin, "args": [pinned]}
-        display_cmd = f"uvx {pinned}  (uvx found at {uvx_bin})"
+        mcp_entry = {"command": uvx_bin, "args": _uvx_args()}
+        display_cmd = f"uvx --python {_MANAGED_PYTHON} {pinned}  (uvx found at {uvx_bin})"
     else:
         mcp_entry = {"command": finops_bin}
         display_cmd = finops_bin

@@ -48,7 +48,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
 ```
 Then:
 ```bash
-uvx --from finops-mcp finops welcome
+uvx --python 3.12 --from finops-mcp finops welcome
 ```
 
 No `uv` and don't want it? On Python 3.10+, `pip install -U finops-mcp && finops welcome` works too.
@@ -59,13 +59,13 @@ The wizard walks through connecting your providers and auto-configures Claude De
 
 **Using Cursor?** One-click install (opens Cursor and adds nable):
 
-[`cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19`](cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19)
+[`cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLXB5dGhvbiIsICIzLjEyIiwgImZpbm9wcy1tY3AiXX0=`](cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLXB5dGhvbiIsICIzLjEyIiwgImZpbm9wcy1tY3AiXX0=)
 
 Then run `finops setup` once to connect a cloud account.
 
 **On Anaconda?** Use uvx (isolated, won't touch your Anaconda environment):
 ```bash
-brew install uv && uvx finops-mcp setup
+brew install uv && uvx --python 3.12 finops-mcp setup
 ```
 
 **Step 2: Connect AWS (usually one keystroke)**
@@ -181,7 +181,7 @@ Or add manually to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "finops": { "command": "uvx", "args": ["finops-mcp"] }
+    "nable": { "command": "uvx", "args": ["--python", "3.12", "finops-mcp"] }
   }
 }
 ```

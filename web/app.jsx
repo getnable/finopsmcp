@@ -293,7 +293,7 @@ function Hero({ layout, interaction }){
   );
 }
 
-const CURSOR_DEEPLINK = "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJmaW5vcHMtbWNwIl19";
+const CURSOR_DEEPLINK = "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLXB5dGhvbiIsICIzLjEyIiwgImZpbm9wcy1tY3AiXX0=";
 
 const INSTALL_POPUPS = {
   claude: {
@@ -303,7 +303,7 @@ const INSTALL_POPUPS = {
       <>Restart Claude Desktop. nable connects as a local MCP server.</>,
     ],
     cmdLabel: "In your terminal",
-    cmd: "uvx --from finops-mcp finops welcome",
+    cmd: "uvx --python 3.12 --from finops-mcp finops welcome",
     altCmd: "pip install -U finops-mcp && finops welcome",
     note: "uv installs a matching Python for you, so this works on any setup. No uv? brew install uv. Runs on your machine, no nable backend.",
   },
@@ -314,9 +314,9 @@ const INSTALL_POPUPS = {
       <>Add nable to your Codex MCP config below, then restart Codex.</>,
     ],
     cmdLabel: "In your terminal",
-    cmd: "uvx --from finops-mcp finops welcome",
+    cmd: "uvx --python 3.12 --from finops-mcp finops welcome",
     altCmd: "pip install -U finops-mcp && finops welcome",
-    toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["finops-mcp"]',
+    toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["--python", "3.12", "finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
     note: "uv installs a matching Python automatically. The ChatGPT app needs a hosted connector, on the roadmap.",
   },
@@ -385,7 +385,7 @@ function InstallRow(){
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3" strokeLinecap="round" strokeLinejoin="round"/></svg>
         Run this in your terminal
       </span>
-      <CopyCmd cmd="uvx --from finops-mcp finops welcome" />
+      <CopyCmd cmd="uvx --python 3.12 --from finops-mcp finops welcome" />
       <div className="install-row">
         <a className="iclient is-primary" href={CURSOR_DEEPLINK}
           onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'add_to_cursor' }); }}>
@@ -660,7 +660,7 @@ function Depth(){
 /* AI cost */
 function AiCost(){
   const copy = () => {
-    if(navigator.clipboard) navigator.clipboard.writeText("uvx --from finops-mcp finops welcome");
+    if(navigator.clipboard) navigator.clipboard.writeText("uvx --python 3.12 --from finops-mcp finops welcome");
     if(window.posthog) posthog.capture('cta_clicked',{location:'ai_cost',cta:'copy_install'});
   };
   return (
@@ -692,7 +692,7 @@ function AiCost(){
               <div className="aicost-foot">From an early user's first scan. Real numbers, name withheld for now.</div>
               <div className="aicost-cta">
                 <span className="aicost-cta-l">This is a small account. See your own number, free:</span>
-                <code className="aicost-cmd" onClick={copy}>uvx --from finops-mcp finops welcome</code>
+                <code className="aicost-cmd" onClick={copy}>uvx --python 3.12 --from finops-mcp finops welcome</code>
               </div>
             </div>
           </div>
@@ -782,7 +782,7 @@ function HowItWorks(){
 /* One entry. Every editor. — tabbed runtime config */
 const EDITOR_TABS = [
   { id:"terminal", label:"Terminal", bar:"bash", lines:[
-    { k:"cmd", t:"$ uvx --from finops-mcp finops welcome" },
+    { k:"cmd", t:"$ uvx --python 3.12 --from finops-mcp finops welcome" },
     { k:"dim", t:"  fetching finops-mcp + a matching python…" },
     { k:"ok",  t:"✓ runtime registered · ask nable in your editor" },
   ]},
@@ -1145,7 +1145,7 @@ function MidCta(){
             </a>
           </div>
           <p className="mono" style={{fontSize:11,color:"var(--fg-4)",letterSpacing:".05em"}}>
-            uvx --from finops-mcp finops welcome
+            uvx --python 3.12 --from finops-mcp finops welcome
           </p>
         </div>
       </div>
@@ -1180,7 +1180,7 @@ function FootCta(){
           <EmailCapture source="footer" placeholder="drop your email, we'll send the setup guide" btnLabel="Send it" center={true} />
         </div>
         <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-3)",letterSpacing:".04em"}}>
-          $ uvx --from finops-mcp finops welcome
+          $ uvx --python 3.12 --from finops-mcp finops welcome
         </p>
         <p style={{marginTop:24,fontSize:13,color:"var(--fg-3)"}}>
           Building something? <a href="/about" style={{color:"var(--accent-dim)"}}>Read the founder note and investor thesis →</a>
@@ -1283,7 +1283,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How long does setup take?",
-    a: "A few minutes. Run `uvx --from finops-mcp finops welcome` (uv fetches a matching Python and runs the setup wizard, no PATH setup needed), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. The wizard connects Claude, connects your cloud, and shows your first cost number right in the terminal. Want to see it first? `uvx --from finops-mcp finops welcome --demo` runs it on sample data."
+    a: "A few minutes. Run `uvx --python 3.12 --from finops-mcp finops welcome` (uv fetches a matching Python and runs the setup wizard, no PATH setup needed), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. The wizard connects Claude, connects your cloud, and shows your first cost number right in the terminal. Want to see it first? `uvx --python 3.12 --from finops-mcp finops welcome --demo` runs it on sample data."
   },
   {
     q: "Is the free tier actually free?",

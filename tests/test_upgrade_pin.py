@@ -92,7 +92,9 @@ def test_plugin_pin_matches_package_version():
 
     plugin = json.loads((root / "plugins/nable/.claude-plugin/plugin.json").read_text())
     args = plugin["mcpServers"]["nable"]["args"]
-    assert args == [f"finops-mcp=={pkg_version}"]
+    # The finops-mcp token is pinned and last; a managed --python prefix is fine.
+    assert args[-1] == f"finops-mcp=={pkg_version}"
+    assert "--python" in args
     assert plugin["version"] == pkg_version
 
 

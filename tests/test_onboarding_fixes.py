@@ -49,8 +49,23 @@ def test_build_entry_pins_version_under_uvx_when_available(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda b: "/usr/bin/uvx" if b == "uvx" else None)
     entry, display = W._build_mcp_server_entry()
     assert entry["command"] == "/usr/bin/uvx"
-    assert entry["args"] and entry["args"][0].startswith("finops-mcp")
+    assert entry["args"] and entry["args"][-1].startswith("finops-mcp")
     assert "uvx" in display
+
+
+def test_uvx_args_pin_a_managed_python():
+    # Every written config must force a clean managed interpreter, so an x86_64
+    # conda base on Apple Silicon can't make uvx source-build for the wrong arch.
+    args = W._uvx_args()
+    assert args[:2] == ["--python", W._MANAGED_PYTHON]
+    assert args[-1].startswith("finops-mcp")
+
+
+def test_build_entry_carries_managed_python(monkeypatch):
+    import shutil
+    monkeypatch.setattr(shutil, "which", lambda b: "/usr/bin/uvx" if b == "uvx" else None)
+    entry, _ = W._build_mcp_server_entry()
+    assert "--python" in entry["args"] and W._MANAGED_PYTHON in entry["args"]
 
 
 def test_configure_cursor_writes_when_path_present(monkeypatch):
