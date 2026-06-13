@@ -1216,7 +1216,7 @@ function Footer({ version }){
               <LogoMark />
               <span>nable</span>
             </a>
-            <p style={{color:"var(--fg-3)",fontSize:13,maxWidth:"34ch",lineHeight:1.55,marginTop:10}}>Your cloud bill, in your editor. Made in Austin, TX.</p>
+            <p style={{color:"var(--fg-3)",fontSize:13,maxWidth:"34ch",lineHeight:1.55,marginTop:10}}>Your cloud and AI bill, answered. Made in Austin, TX.</p>
           </div>
           <div>
             <h5>Product</h5>
@@ -1231,7 +1231,7 @@ function Footer({ version }){
             <a href="/docs.html">Docs</a>
             <a href="/docs.html#quickstart">Quickstart</a>
             <a href="/docs.html#iam">IAM templates</a>
-            <a href="/docs.html#security">Security brief</a>
+            <a href="/security">Security</a>
           </div>
           <div>
             <h5>Company</h5>
@@ -1243,7 +1243,7 @@ function Footer({ version }){
           </div>
         </div>
         <div className="foot-meta">
-          <span>2026 nable · all rights reserved</span>
+          <span>2026 nable · <a href="/privacy" style={{color:"var(--fg-3)"}}>Privacy</a> · <a href="/terms" style={{color:"var(--fg-3)"}}>Terms</a></span>
           <span>nable · runtime healthy</span>
         </div>
       </div>
