@@ -446,8 +446,9 @@ _PROVIDER_TIMEOUT_S = int(os.getenv("FINOPS_PROVIDER_TIMEOUT_S", "90"))
 async def _fetch_costs_cached(name: str, connector: Any, start: date, end: date, granularity: str = "MONTHLY"):
     """Read-through cached connector.get_costs. AWS caches internally; every
     other connector repaid full provider-API latency on each repeat question
-    in a conversation. Single-flight per key via cache.aget_or_set, hard
-    timeout per provider so one hung API cannot stall the whole query."""
+    in a conversation. Note: aget_or_set does NOT single-flight; two callers
+    missing the same key concurrently both fetch (harmless, last write wins).
+    Hard timeout per provider so one hung API cannot stall the whole query."""
     import copy as _copy
     from . import cache as _cache
     _ck = _cache.make_key("connector.get_costs", name, start.isoformat(), end.isoformat(), granularity)

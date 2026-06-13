@@ -210,7 +210,14 @@ def _draft_ticket(args: dict, requested_by: str) -> dict:
     if not title or not body:
         return {"error": "Both title and body are required."}
 
-    body_preview = body if len(body) <= 600 else body[:597] + "..."
+    def _strip_mentions(text: str) -> str:
+        """Crafted ticket bodies must not smuggle <!channel>/<@user> pings
+        into the approval card."""
+        import re as _re
+        return _re.sub(r"<[!@][^>]*>", "", text)
+
+    title = _strip_mentions(title)
+    body_preview = _strip_mentions(body if len(body) <= 600 else body[:597] + "...")
     preview = f"*Ticket draft* ({priority} priority)\n*{title}*\n{body_preview}"
     action_id = _create_pending(
         kind="ticket",
