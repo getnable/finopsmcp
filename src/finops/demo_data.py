@@ -336,6 +336,50 @@ def llm_costs() -> dict[str, Any]:
     }
 
 
+def cost_drivers() -> dict[str, Any]:
+    """Demo 'why did the bill change' answer, consistent with the $12,847
+    acme-production story (up 23.4% vs the prior month)."""
+    return {
+        "period": f"{_MONTH_START} to {_TODAY}",
+        "comparison_period": "prior 30 days",
+        "total_current_usd": 12847.22,
+        "total_previous_usd": 10410.00,
+        "net_change_usd": 2437.22,
+        "net_change_pct": 23.4,
+        "top_increases": [
+            {"key": "AWS Data Transfer", "current": 1890.33, "previous": 1180.00, "delta": 710.33, "delta_pct": 60.2, "direction": "increase"},
+            {"key": "Amazon EC2", "current": 7240.10, "previous": 6100.00, "delta": 1140.10, "delta_pct": 18.7, "direction": "increase"},
+            {"key": "Amazon RDS", "current": 2100.44, "previous": 1720.00, "delta": 380.44, "delta_pct": 22.1, "direction": "increase"},
+        ],
+        "top_decreases": [
+            {"key": "Amazon S3", "current": 822.15, "previous": 917.00, "delta": -94.85, "delta_pct": -10.3, "direction": "decrease"},
+        ],
+        "all_drivers": [],
+        "summary": (
+            "Costs rose $2,437 (+23.4%) vs the prior 30 days. The standout is "
+            "Data Transfer, up 60% ($710), which usually means a new cross-AZ or "
+            "egress path went live. EC2 added $1,140 from on-demand growth, and RDS "
+            "$380. S3 fell $95. Start with the Data Transfer jump: it is the fastest "
+            "to trace to a single change."
+        ),
+    }
+
+
+def bedrock_split() -> dict[str, Any]:
+    """Demo Bedrock input/output/cache split, consistent with the ~$330 Bedrock
+    line in llm_costs(): input-heavy and uncached, which is the signature
+    caching finding. Lets optimize_ai_spend fire the prompt-caching lever with
+    no credentials."""
+    return {
+        "input_cost": 294.0,       # ~89% of the $330 Bedrock bill
+        "output_cost": 36.0,
+        "cache_read_cost": 0.0,
+        "cache_write_cost": 0.0,
+        "input_share_pct": 89.0,
+        "caching_active": False,
+    }
+
+
 DEMO_RESPONSES: dict[str, Any] = {
     "get_cost_summary":             cost_summary,
     "get_anomalies":                anomalies,
@@ -345,6 +389,7 @@ DEMO_RESPONSES: dict[str, Any] = {
     "get_tag_cost_breakdown_cur":   cost_summary_cur,
     "get_llm_costs":                llm_costs,
     "get_llm_cost_by_model":        llm_costs,
+    "explain_recent_cost_drivers":  cost_drivers,
 }
 
 

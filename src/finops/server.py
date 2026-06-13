@@ -7490,6 +7490,15 @@ async def optimize_ai_spend(days: int = 30) -> dict:
         - "What's the cheapest way to run the same workloads?"
         - "Optimize our token and model costs."
     """
+    from .demo_data import is_demo
+    if is_demo():
+        # Run the real planner over demo LLM data so the wedge actually
+        # demonstrates (routing + caching levers, dollar savings), no creds.
+        from .demo_data import llm_costs as _demo_llm, bedrock_split as _demo_split
+        from .analytics.ai_optimizer import build_optimization_plan
+        plan = build_optimization_plan(_demo_llm(), days=days, bedrock_split=_demo_split())
+        plan["_demo_mode"] = True
+        return plan
     try:
         from datetime import date as _date, timedelta
         ed = _date.today()
@@ -11227,6 +11236,9 @@ async def explain_recent_cost_drivers(
         days:  Comparison window length in days (default 30)
         top_n: Number of top drivers to return (default 10)
     """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("explain_recent_cost_drivers") or {}
     try:
         today = date.today()
         period_end = today

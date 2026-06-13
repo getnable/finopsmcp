@@ -1416,7 +1416,7 @@ def main(args: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(
         prog="finops",
-        description="nable: connect your cloud + SaaS billing to Claude and ask cost questions in plain English.",
+        description="nable: connect your cloud + SaaS billing to Claude and ask cost questions in your editor.",
         epilog=(
             "quick start\n"
             "  finops welcome          guided setup: connect Claude + your first cloud account\n"
@@ -1429,6 +1429,10 @@ def main(args: list[str] | None = None) -> None:
             "docs: https://getnable.com/docs\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--version", action="version",
+        version=f"nable (finops-mcp) {_installed_version() or 'unknown'}",
     )
     sub = parser.add_subparsers(dest="cmd", metavar="<command>")
 
