@@ -2,6 +2,20 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.63
+
+### Fixed
+- **Demo mode now answers the headline questions.** A cold install
+  (`finops welcome --demo`, no credentials) is the first thing a cautious
+  trialist runs. `optimize_ai_spend` returned "No AI spend detected" there,
+  hiding the AI-cost differentiator; it now runs the real optimizer over
+  sample data and headlines the signature finding (input-heavy uncached
+  Bedrock spend) with honestly confidence-labelled levers.
+  `explain_recent_cost_drivers` returned "No providers connected"; it now
+  answers with a coherent cost-change story.
+- `finops --version` now works (it errored with "unrecognized arguments").
+- CLI help no longer says "plain English."
+
 ## 0.8.62
 
 ### Performance
