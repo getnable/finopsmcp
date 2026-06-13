@@ -340,7 +340,7 @@ function InstallRow() {
     setOpen((o) => o === id ? null : id);
     if (window.posthog) posthog.capture("install_opened", { client: id });
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "installer", id: "install" }, /* @__PURE__ */ React.createElement("div", { className: "install-row" }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "installer", id: "install" }, /* @__PURE__ */ React.createElement("span", { className: "install-cmdlabel" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3", strokeLinecap: "round", strokeLinejoin: "round" })), "Run this in your terminal"), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx --from finops-mcp finops welcome" }), /* @__PURE__ */ React.createElement("div", { className: "install-row" }, /* @__PURE__ */ React.createElement(
     "a",
     {
       className: "iclient is-primary",

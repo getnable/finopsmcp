@@ -370,6 +370,11 @@ function InstallRow(){
   };
   return (
     <div className="installer" id="install">
+      <span className="install-cmdlabel">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        Run this in your terminal
+      </span>
+      <CopyCmd cmd="uvx --from finops-mcp finops welcome" />
       <div className="install-row">
         <a className="iclient is-primary" href={CURSOR_DEEPLINK}
           onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'add_to_cursor' }); }}>
