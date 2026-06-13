@@ -38,6 +38,9 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
+          # PEP 740 provenance attestations (default on >= v1.11; set explicitly
+          # so a future default change cannot silently drop them).
+          attestations: true
           # Uses PyPI Trusted Publishing (OIDC) — no token needed in secrets.
           # Set up at: https://pypi.org/manage/project/finops-mcp/settings/publishing/
           # Add GitHub Actions publisher:

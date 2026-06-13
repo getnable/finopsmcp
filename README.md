@@ -2,6 +2,7 @@
 
 [![PyPI Downloads](https://img.shields.io/pypi/dm/finops-mcp?label=downloads%2Fmonth&color=brightgreen)](https://pypi.org/project/finops-mcp/)
 [![PyPI Version](https://img.shields.io/pypi/v/finops-mcp?color=blue)](https://pypi.org/project/finops-mcp/)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/chaandannn/finopsmcp/badge)](https://scorecard.dev/viewer/?uri=github.com/chaandannn/finopsmcp)
 [![Docs](https://img.shields.io/badge/docs-getnable.com-black)](https://getnable.com/docs)
 
 **Connect Claude to your real AWS, Azure, GCP, and SaaS billing data. Ask your bill anything. Get answers in seconds.**
