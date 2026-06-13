@@ -236,6 +236,7 @@ function Nav(){
 
 /* Hero */
 function Hero({ layout, interaction }){
+  const [showInstall, setShowInstall] = useState(false);
   return (
     <header className={"hero " + (layout === "editorial" ? "editorial" : "")} id="top">
       <div className="hero-grid-bg"></div>
@@ -243,13 +244,23 @@ function Hero({ layout, interaction }){
         <div className="hero-inner">
           <div className="hero-left">
             <h1 className="display">
-              Your cloud and AI bill, answered.
+              Stop guessing why cloud costs went up. Ask.
             </h1>
             <p className="lede">
-              Ask your AWS, Azure, GCP and AI spend anything, inside Claude or Cursor. It runs on your machine, and no vendor holds your data.
+              Connect AWS, Azure, GCP, Datadog, Snowflake, and more. Get answers, anomalies, and savings opportunities, without sending your billing data to another vendor.
             </p>
-            <InstallRow />
-            <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a> · <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'book_demo' }); }}>or book a live demo</a></p>
+            <div className="hero-cta-row">
+              <button className="btn btn-primary" onClick={() => { setShowInstall(true); if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
+                Start free <span className="arr">→</span>
+              </button>
+              <a className="btn btn-ghost" href="#runtime" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'view_demo' }); }}>View demo</a>
+            </div>
+            {showInstall && (
+              <div className="hero-install-reveal">
+                <InstallRow />
+                <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a> · <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'book_demo' }); }}>or book a live demo</a></p>
+              </div>
+            )}
             <TrustStrip />
             <div className="hero-mobile-cta">
               <div className="mini-console" aria-label="Example: nable answering a cost question">
