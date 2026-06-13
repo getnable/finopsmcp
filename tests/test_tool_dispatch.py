@@ -93,3 +93,53 @@ def test_bedrock_costs_captures_sku_named_services(monkeypatch):
     # SKU service name becomes the model label; non-bedrock service excluded.
     assert "Claude Sonnet 4.5" in out["by_model"]
     assert "Textract" not in json.dumps(out["by_model"])
+
+
+def _record_events(monkeypatch):
+    """Capture telemetry event names fired synchronously through the dispatch
+    wrapper. first_cost_query_success is sent inline (not threaded), so it lands
+    deterministically; threaded tool_called pings are irrelevant to these asserts."""
+    seen = []
+    monkeypatch.setattr(
+        server._telemetry, "_send_event",
+        lambda install_id, event, properties=None: seen.append(event),
+    )
+    return seen
+
+
+def test_first_cost_query_success_not_fired_in_demo_mode(monkeypatch):
+    # Demo cost responses are non-error dicts. Without the is_demo() guard in the
+    # dispatch wrapper, the activation metric would count people who only ever saw
+    # the demo dataset, never their own real cost number.
+    import finops.demo_data as demo_data
+    monkeypatch.setattr(demo_data, "DEMO_MODE", True)
+    server._first_cost_query_fired = False
+    seen = _record_events(monkeypatch)
+
+    res = asyncio.run(server.mcp.call_tool("get_cost_summary", {}))
+    d = _payload(res)
+    assert isinstance(d, dict) and "error" not in d  # demo returned real-looking data
+    assert "first_cost_query_success" not in seen
+
+
+def test_first_cost_query_success_fires_on_real_data(monkeypatch):
+    # Real (non-demo) cost answer must fire the activation event exactly once.
+    import finops.demo_data as demo_data
+    monkeypatch.setattr(demo_data, "DEMO_MODE", False)
+
+    async def fake_active(pool):
+        return {"aws": object()}
+
+    async def fake_gather(targets, sd, ed, granularity):
+        return (1234.0, {"aws": {"total": 1234.0}}, {"Amazon EC2": 1234.0})
+
+    monkeypatch.setattr(server, "_active", fake_active)
+    monkeypatch.setattr(server, "_gather_costs", fake_gather)
+    server._first_cost_query_fired = False
+    seen = _record_events(monkeypatch)
+
+    res = asyncio.run(server.mcp.call_tool("get_cost_summary", {}))
+    d = _payload(res)
+    assert "error" not in d, d
+    assert d["grand_total_usd"] == 1234.0
+    assert seen.count("first_cost_query_success") == 1

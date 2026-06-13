@@ -142,15 +142,20 @@ def _instrumented_tool(*dargs, **dkwargs):
                 outcome=_outcome,
                 account=_account,
             )
-            # Fire first_cost_query event once per session — signals real value delivery
+            # Fire first_cost_query event once per session — signals real value delivery.
+            # Gate the telemetry on real (non-demo) data: demo responses are also
+            # non-error dicts, so without this guard the activation metric would count
+            # people who only ever saw the demo dataset, not their own cost number.
             if fn.__name__ in _COST_QUERY_TOOLS and not _first_cost_query_fired:
                 if isinstance(result, dict) and "error" not in result:
                     _first_cost_query_fired = True
-                    _telemetry._send_event(
-                        _telemetry._get_install_id(),
-                        "first_cost_query_success",
-                        {"tool": fn.__name__, "plan": _telemetry._session.get("plan", "free")},
-                    )
+                    from .demo_data import is_demo as _is_demo
+                    if not _is_demo():
+                        _telemetry._send_event(
+                            _telemetry._get_install_id(),
+                            "first_cost_query_success",
+                            {"tool": fn.__name__, "plan": _telemetry._session.get("plan", "free")},
+                        )
                     # The magic moment: on the very first cost answer, steer the model
                     # to proactively surface real waste. Turns "it works" into "it found
                     # money" without slowing this query, and the scan it triggers records
