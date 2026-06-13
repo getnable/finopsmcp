@@ -105,6 +105,27 @@ def test_one_click_is_opt_in_local_steps_are_the_default(monkeypatch, capsys):
     assert "console.aws.amazon.com/cloudformation" in out2
 
 
+def test_value_moment_does_not_hang_on_blocking_scan(monkeypatch):
+    # The bug: get_cost_summary can make a blocking call (SSO refresh, slow Cost
+    # Explorer) that pins the event loop, so an asyncio timeout never fires and
+    # setup hangs forever. The thread join must return on the wall-clock cap.
+    import time
+    from finops import server
+
+    monkeypatch.setattr(WC, "_VALUE_MOMENT_TIMEOUT", 1)
+
+    async def _block():
+        time.sleep(30)  # blocking I/O on the loop, the exact hang case
+        return {"grand_total_usd": 1.0}
+
+    monkeypatch.setattr(server, "get_cost_summary", _block)
+    t0 = time.monotonic()
+    res = WC._value_moment_body(demo=False)
+    elapsed = time.monotonic() - t0
+    assert res is False
+    assert elapsed < 10, f"value moment took {elapsed:.1f}s; the cap did not fire"
+
+
 def test_and_list_prose():
     assert WC._and_list([]) == ""
     assert WC._and_list(["Cursor"]) == "Cursor"

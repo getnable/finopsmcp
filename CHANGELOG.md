@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.67
+
+### Onboarding
+- **The first-run "show your bill" scan can no longer hang setup.** It was
+  wrapped in a 35s asyncio timeout, but that timeout cannot fire when a blocking
+  call (an SSO token refresh or a slow Cost Explorer request) pins the event
+  loop, so for some credential setups the welcome flow hung forever at "Show your
+  real AWS bill now?". The scan now runs in a daemon thread with a real
+  wall-clock cap that returns on time regardless of blocking I/O, plus a "this
+  can take up to ~30s" progress line so it never looks dead. On timeout it falls
+  back gracefully; your editor config is already written by this point.
+
 ## 0.8.66
 
 ### Install reliability

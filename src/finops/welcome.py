@@ -247,40 +247,65 @@ def _show_value_moment(demo: bool = False) -> bool:
                     os.environ[_k] = _v
 
 
+_VALUE_MOMENT_TIMEOUT = 30  # seconds; hard wall-clock cap on the first-run scan
+
+
 def _value_moment_body(demo: bool = False) -> bool:
     """Scan and print a real dollar figure. Wrapped by _show_value_moment, which
     owns the demo-env lifecycle."""
-    try:
-        _quiet_logs()
-        import asyncio
-        from . import server  # heavy import, only at the value-moment step
+    if not demo:
+        _line(dim("  Scanning your account, this can take up to ~30s..."))
 
-        async def _run():
-            async def _idle():
-                try:
-                    return await asyncio.wait_for(server.list_idle_resources(), timeout=12)
-                except Exception:
-                    return None
+    # Run the scan in a daemon thread with a wall-clock join cap. An asyncio
+    # timeout alone is NOT enough: get_cost_summary can make a blocking call (an
+    # SSO token refresh, a slow Cost Explorer request) that pins the event loop,
+    # so asyncio.wait_for never gets to fire and setup hangs forever. A thread
+    # join returns on time even when the inner work is blocked; the abandoned
+    # thread is a daemon and dies with the process.
+    import threading
 
-            async def _ai():
-                try:
-                    return await asyncio.wait_for(server.optimize_ai_spend(), timeout=18)
-                except Exception:
-                    return None
+    holder: dict = {}
 
-            # Run the scans concurrently so the AI optimizer adds no latency.
-            summary, idle, ai_plan = await asyncio.gather(
-                server.get_cost_summary(), _idle(), _ai(), return_exceptions=True,
-            )
-            return (
-                None if isinstance(summary, Exception) else summary,
-                None if isinstance(idle, Exception) else idle,
-                None if isinstance(ai_plan, Exception) else ai_plan,
-            )
+    def _work():
+        try:
+            _quiet_logs()
+            import asyncio
+            from . import server  # heavy import, only at the value-moment step
 
-        summary, idle, ai_plan = asyncio.run(asyncio.wait_for(_run(), timeout=35))
-    except Exception:
-        return False  # never block setup
+            async def _run():
+                async def _idle():
+                    try:
+                        return await asyncio.wait_for(server.list_idle_resources(), timeout=12)
+                    except Exception:
+                        return None
+
+                async def _ai():
+                    try:
+                        return await asyncio.wait_for(server.optimize_ai_spend(), timeout=18)
+                    except Exception:
+                        return None
+
+                # Run the scans concurrently so the AI optimizer adds no latency.
+                summary, idle, ai_plan = await asyncio.gather(
+                    server.get_cost_summary(), _idle(), _ai(), return_exceptions=True,
+                )
+                return (
+                    None if isinstance(summary, Exception) else summary,
+                    None if isinstance(idle, Exception) else idle,
+                    None if isinstance(ai_plan, Exception) else ai_plan,
+                )
+
+            holder["v"] = asyncio.run(_run())
+        except Exception:
+            holder["v"] = None
+
+    _t = threading.Thread(target=_work, daemon=True)
+    _t.start()
+    _t.join(timeout=_VALUE_MOMENT_TIMEOUT)
+    res = holder.get("v")
+    if not res:
+        return False  # timed out or failed; caller falls back to demo/next step
+    summary, idle, ai_plan = res
 
     if not isinstance(summary, dict) or summary.get("error"):
         return False
