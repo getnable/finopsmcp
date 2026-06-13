@@ -437,16 +437,32 @@ def _summary_to_dict(summary: CostSummary) -> dict:
     return d
 
 
+# A provider API with no timeout can hang a query forever (the Azure SDK in
+# particular ships without one). Cap every connector fetch; override per
+# environment when a provider is legitimately slow.
+_PROVIDER_TIMEOUT_S = int(os.getenv("FINOPS_PROVIDER_TIMEOUT_S", "90"))
+
+
 async def _fetch_costs_cached(name: str, connector: Any, start: date, end: date, granularity: str = "MONTHLY"):
     """Read-through cached connector.get_costs. AWS caches internally; every
     other connector repaid full provider-API latency on each repeat question
-    in a conversation. Single-flight per key via cache.aget_or_set."""
+    in a conversation. Single-flight per key via cache.aget_or_set, hard
+    timeout per provider so one hung API cannot stall the whole query."""
     import copy as _copy
     from . import cache as _cache
     _ck = _cache.make_key("connector.get_costs", name, start.isoformat(), end.isoformat(), granularity)
 
     async def _produce():
-        return await connector.get_costs(start, end, granularity=granularity)
+        try:
+            return await asyncio.wait_for(
+                connector.get_costs(start, end, granularity=granularity),
+                timeout=_PROVIDER_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                f"{name} did not answer within {_PROVIDER_TIMEOUT_S}s "
+                f"(set FINOPS_PROVIDER_TIMEOUT_S to raise the limit)"
+            ) from None
 
     return _copy.deepcopy(await _cache.aget_or_set(_ck, _cache.COST_TTL, _produce))
 

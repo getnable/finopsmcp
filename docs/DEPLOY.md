@@ -69,8 +69,8 @@ Finance interfaces (non-engineers consume nable here):
 
 ## 3. Onboard the non-engineers
 
-- **Slack**: invite the nable bot to a channel, or have people DM it. They ask in
-  plain English.
+- **Slack**: invite the nable bot to a channel, or have people DM it. They ask.
+
 - **Email digests**: subscribe recipients from the dashboard, or with the
   `subscribe_to_report` tool in Claude.
 - **Dashboard**: share the URL and the password.
@@ -92,3 +92,43 @@ git pull
 docker compose build
 docker compose up -d
 ```
+
+## Enterprise rollout: nable for a whole engineering org
+
+The model: every engineer runs nable locally against a scoped read-only
+credential; the Slack bot and Postgres run as one small shared service. No
+nable servers are involved at any point.
+
+### Per-engineer install (5 minutes each, or one MDM policy)
+
+1. Pin the version. Install with `uvx --from finops-mcp==X.Y.Z finops welcome`
+   or ship it via your existing tooling (Homebrew/pip mirror, MDM script).
+   The setup wizard writes editor config automatically; `finops upgrade`
+   moves a machine forward deliberately, never silently.
+2. Issue scoped credentials, not personal keys. Your platform team creates
+   one read-only role from the generated template:
+   `finops setup aws --iam-template` (CloudFormation) or `--iam-terraform`.
+   Verify any credential with `finops setup aws --check-scope`.
+3. Credentials land in the OS keyring per machine. Nothing to distribute in
+   plaintext, nothing to rotate centrally when an engineer leaves beyond the
+   IAM role itself.
+
+### The shared piece: team mode
+
+Run Postgres (your infra) and the Slack bot as a service (this document,
+above). That adds: shared cost snapshots, RBAC (viewer/analyst/admin with
+team scoping), the conversational Slack bot, and approval-gated remediation.
+SSO via OIDC: set the issuer/client env vars and roles map from your IdP.
+
+### Controls your security team will ask about
+
+- Read-only by architecture; one optional write permission
+  (`logs:PutRetentionPolicy`), and destructive cleanup is off unless
+  `FINOPS_CLEANUP_ENABLED=true`.
+- Audit log of every tool call (duration, outcome, actor in team mode).
+- `FINOPS_AIRGAP=1` forbids all non-provider traffic; `NABLE_NO_TELEMETRY=1`
+  disables telemetry alone.
+- Cost figures are composed by the AI editor each engineer already uses; for
+  zero model exposure use the local dashboard or CLI. nable adds no new
+  model endpoint.
+- Full architecture writeup: https://getnable.com/security

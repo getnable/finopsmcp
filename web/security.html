@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Security · nable</title>
+<meta name="description" content="How nable handles credentials, cost data and AI exposure. Local-first architecture: your data never reaches a nable server. Read-only cloud access, OS keyring storage, offline license verification, opt-out telemetry." />
+<link rel="canonical" href="https://getnable.com/security" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d0f10;--bg-1:#121517;--bg-2:#16191c;
+    --fg:#f4f7f8;--fg-2:#aeb7bd;--fg-3:#6b7177;
+    --line:#1f2428;--line-2:#2a3036;--accent:#4db8d4;--ok:#3cba7a;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  html,body{background:var(--bg);color:var(--fg);font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.6;font-size:15.5px;letter-spacing:-.005em}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 86%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:14px 0}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between}
+  .logo{font-weight:600;font-size:16px;letter-spacing:-.02em}
+  .logo .n{color:var(--accent)}
+  .nav-cta{display:inline-flex;padding:8px 16px;border-radius:8px;background:var(--accent);color:#06181d;font-size:13.5px;font-weight:600}
+  header.hero{padding:64px 0 12px}
+  .crumb{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:20px}
+  h1{font-size:clamp(30px,4.2vw,44px);font-weight:500;letter-spacing:-.03em;line-height:1.1}
+  h1 .accent{color:var(--accent)}
+  .lede{margin-top:16px;font-size:16.5px;color:var(--fg-2);max-width:64ch;line-height:1.65}
+  .updated{margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--fg-3)}
+  main{padding:32px 0 56px}
+  h2{font-size:21px;font-weight:500;letter-spacing:-.02em;margin:40px 0 12px}
+  h3{font-size:16px;font-weight:500;margin:24px 0 8px}
+  p,li{color:var(--fg-2);font-size:15px;max-width:72ch}
+  ul{padding-left:22px;margin:10px 0}
+  li{margin:6px 0}
+  code{font-family:var(--mono);font-size:13px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--fg)}
+  .card{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);padding:22px 26px;margin:14px 0}
+  .card h3{margin-top:0}
+  strong{color:var(--fg);font-weight:600}
+  footer{border-top:1px solid var(--line);padding:26px 0;font-size:13px;color:var(--fg-3)}
+  .foot-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  footer a{color:var(--fg-2)}
+  footer a:hover{color:var(--fg)}
+</style>
+</head>
+<body>
+<nav><div class="wrap nav-inner">
+  <a class="logo" href="/"><span class="n">n</span>able</a>
+  <a class="nav-cta" href="/#install">Get started free</a>
+</div></nav>
+<header class="hero"><div class="wrap">
+  <div class="crumb"><a href="/">getnable.com</a> / security</div>
+  <h1>Security, <span class="accent">by design</span>.</h1>
+  <p class="lede">nable is not SaaS. It runs on your machine, holds credentials in your OS keyring, queries your cloud providers directly, and has no backend that receives your data. Most security questionnaires get shorter from here.</p>
+  <p class="updated">Last updated: June 13, 2026</p>
+</div></header>
+<main><div class="wrap">
+
+<h2>Architecture</h2>
+<div class="card"><h3>Where things live</h3>
+<ul>
+<li><strong>Credentials</strong>: your OS keyring (macOS Keychain, Windows Credential Manager, libsecret on Linux), encrypted at rest with Fernet. Never written to config files in plaintext, never transmitted to nable.</li>
+<li><strong>Cost data</strong>: cached in a local SQLite database on your machine (Postgres in team mode, hosted by you). nable has no data lake; there is nothing of yours on our side to breach.</li>
+<li><strong>License verification</strong>: offline. Keys are Ed25519-signed and verified against a public key bundled in the package. No license server, no phone-home check.</li>
+<li><strong>The website and billing</strong> are the only nable-operated systems. They never see cloud credentials or cost data.</li>
+</ul></div>
+
+<h2>Cloud access is read-only</h2>
+<p>nable calls read APIs: Cost Explorer, Cost Management, billing exports, CloudWatch metrics, describe calls. One optional exception exists and is documented: <code>logs:PutRetentionPolicy</code>, used only if you ask nable to fix log groups with no retention policy. Destructive cleanup actions are disabled unless you explicitly set <code>FINOPS_CLEANUP_ENABLED=true</code>.</p>
+<p>You do not have to trust this paragraph. Generate a least-privilege credential and verify it:</p>
+<ul>
+<li><code>finops setup aws --iam-template</code> prints a scoped read-only CloudFormation policy</li>
+<li><code>finops setup aws --iam-terraform</code> prints the same as Terraform</li>
+<li><code>finops setup aws --check-scope</code> proves a credential has no write permissions</li>
+</ul>
+
+<h2>AI exposure, stated plainly</h2>
+<p>When you ask a question in Claude, Cursor or another MCP editor, the cost figures nable returns are sent to that editor's AI model to compose the answer, the same as anything else in the chat. nable itself sends nothing to any model. For zero model exposure, use the local dashboard or CLI, which never touch one. Enterprises routing AI through private endpoints (Bedrock, Azure OpenAI) keep that boundary too: nable does not change where your editor sends its context.</p>
+
+<h2>Telemetry</h2>
+<p>Anonymous usage telemetry is on by default and documented: a random install id, tool names, counts, version and plan tier. Never cost data, account ids, resource names or credentials. Disable with <code>NABLE_NO_TELEMETRY=1</code>, or set <code>FINOPS_AIRGAP=1</code> to forbid all non-provider network traffic. CI environments are auto-excluded.</p>
+
+<h2>Team mode</h2>
+<ul>
+<li><strong>RBAC</strong>: viewer, analyst and admin roles with team scoping; API keys stored as SHA-256 hashes.</li>
+<li><strong>SSO</strong>: OIDC with strict validation (algorithm allowlist, issuer, audience, expiry and CSRF state all enforced).</li>
+<li><strong>Audit log</strong>: every tool call recorded with duration and outcome.</li>
+<li><strong>Remediation approvals</strong>: drafted actions require an approval from a second person by default (analyst or above, 24-hour expiry, replay-proof).</li>
+</ul>
+
+<h2>Supply chain</h2>
+<p>Releases publish to PyPI via GitHub Actions trusted publishing (OIDC, no long-lived tokens). The source is public and the package is what the repo builds. Dependency updates are monitored automatically.</p>
+
+<h2>Disclosure</h2>
+<p>Report vulnerabilities to <a href="mailto:hello@getnable.com" style="color:var(--accent)">hello@getnable.com</a>. Acknowledgment within 48 hours, fixes for confirmed issues within 14 days. Disclosed issues are documented in the changelog: when the legacy v1 license signing secret appeared in public git history, the keypair was rotated within hours and v1 keys were permanently retired, documented in release notes rather than scrubbed.</p>
+</div></main>
+<footer><div class="wrap foot-inner">
+  <span><span style="color:var(--accent)">n</span>able · local-first FinOps</span>
+  <span><a href="/">Home</a> · <a href="/security">Security</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="mailto:hello@getnable.com">Contact</a></span>
+</div></footer>
+</body></html>
