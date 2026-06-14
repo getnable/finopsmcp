@@ -109,9 +109,17 @@ def get_costs(
         "total_usd": float,
         "by_model": {"gpt-4o": float, ...},
         "by_project": {"proj_abc": float, ...},
+        "by_model_tokens": {"gpt-4o": {"input_tokens": int, "output_tokens": int,
+                            "cache_read_input_tokens": int,
+                            "cache_creation_input_tokens": int,
+                            "request_count": int}, ...},
         "daily": [{"date": "YYYY-MM-DD", "total_usd": float, "by_model": {...}}, ...],
         "source": "api" | "estimated",
       }
+
+    The ``by_model_tokens`` block matches the Anthropic connector shape so the
+    AI KPI engine (cache hit rate, context-window utilisation, prompt
+    efficiency) works for OpenAI accounts, not just Anthropic ones.
     """
     try:
         import httpx
@@ -164,7 +172,20 @@ def get_costs(
     if admin_key:
         project_names = get_projects(admin_key, org_id)
 
-    return _parse_costs_response(data, project_names=project_names)
+    parsed = _parse_costs_response(data, project_names=project_names)
+
+    # The costs endpoint returns dollars only, no token counts. Pull per-model
+    # tokens from the usage endpoint so the KPI engine has real input/output/
+    # cache/request data for OpenAI. A token-fetch failure must not break the
+    # cost result, so it's best-effort.
+    try:
+        toks = _fetch_usage_tokens(start_date, end_date, api_key, org_id)
+        parsed["by_model_tokens"] = toks
+    except Exception as e:
+        log.debug("OpenAI token usage fetch skipped: %s", e)
+        parsed.setdefault("by_model_tokens", {})
+
+    return parsed
 
 
 def _parse_costs_response(
@@ -220,6 +241,79 @@ def _parse_costs_response(
     return result
 
 
+def _accumulate_tokens(result: dict, by_model_tokens: dict[str, dict[str, int]]) -> None:
+    """
+    Fold one OpenAI usage/completions result row into a by_model_tokens map
+    shaped like the Anthropic connector's (input_tokens / output_tokens /
+    cache_read_input_tokens / cache_creation_input_tokens) plus request_count.
+
+    OpenAI reports ``input_tokens`` as the TOTAL input (cached included) and
+    ``input_cached_tokens`` as the cached subset. We store fresh input
+    (total minus cached) so cache hit-rate math matches Anthropic semantics,
+    where ``input_tokens`` means uncached input. OpenAI has no separate
+    cache-creation charge, so cache_creation_input_tokens stays 0.
+    """
+    model = result.get("model_id") or result.get("model") or "unknown"
+    total_input  = int(result.get("input_tokens", 0) or 0)
+    cached_input = int(result.get("input_cached_tokens", 0) or 0)
+    fresh_input  = max(0, total_input - cached_input)
+    bucket = by_model_tokens.setdefault(model, {
+        "input_tokens":                0,
+        "output_tokens":               0,
+        "cache_read_input_tokens":     0,
+        "cache_creation_input_tokens": 0,
+        "request_count":               0,
+    })
+    bucket["input_tokens"]            += fresh_input
+    bucket["output_tokens"]           += int(result.get("output_tokens", 0) or 0)
+    bucket["cache_read_input_tokens"] += cached_input
+    bucket["request_count"]           += int(result.get("num_model_requests", 0) or 0)
+
+
+def _fetch_usage_tokens(
+    start_date: date,
+    end_date: date,
+    api_key: str,
+    org_id: str | None,
+) -> dict[str, dict[str, int]]:
+    """
+    Fetch per-model token counts from /v1/organization/usage/completions and
+    return a by_model_tokens map. Used to enrich the costs-API result, which
+    carries dollars but no tokens. Returns {} gracefully on any error.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return {}
+
+    from datetime import datetime, timezone
+    start_ts = int(datetime(start_date.year, start_date.month, start_date.day,
+                            tzinfo=timezone.utc).timestamp())
+    end_ts   = int(datetime(end_date.year, end_date.month, end_date.day,
+                            tzinfo=timezone.utc).timestamp())
+
+    resp = httpx.get(
+        "https://api.openai.com/v1/organization/usage/completions",
+        params={
+            "start_time": start_ts,
+            "end_time":   end_ts,
+            "bucket_width": "1d",
+            "group_by": ["model"],
+            "limit": 180,
+        },
+        headers=_headers(api_key, org_id),
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    by_model_tokens: dict[str, dict[str, int]] = {}
+    for bucket in data.get("data", []):
+        for result in bucket.get("results", []):
+            _accumulate_tokens(result, by_model_tokens)
+    return by_model_tokens
+
+
 def _estimate_from_usage(
     start_date: date,
     end_date: date,
@@ -263,6 +357,7 @@ def _estimate_from_usage(
 
     total = 0.0
     by_model: dict[str, float] = {}
+    by_model_tokens: dict[str, dict[str, int]] = {}
     daily: list[dict] = []
 
     for bucket in data.get("data", []):
@@ -279,6 +374,8 @@ def _estimate_from_usage(
             bucket_total += cost
             bucket_by_model[model] = bucket_by_model.get(model, 0.0) + cost
             by_model[model]        = by_model.get(model, 0.0) + cost
+            # Same usage rows already carry the token counts the KPI engine needs.
+            _accumulate_tokens(result, by_model_tokens)
 
         total += bucket_total
         ts = bucket.get("start_time", 0)
@@ -292,6 +389,7 @@ def _estimate_from_usage(
         "by_model":   {k: round(v, 4) for k, v in
                        sorted(by_model.items(), key=lambda x: x[1], reverse=True)},
         "by_project": {},
+        "by_model_tokens": by_model_tokens,
         "daily":      daily,
         "source":     "estimated",
         "note":       "Costs estimated from token counts × published prices. Does not reflect discounts or credits.",
@@ -299,8 +397,8 @@ def _estimate_from_usage(
 
 
 def _empty_result(reason: str) -> dict[str, Any]:
-    return {"total_usd": 0.0, "by_model": {}, "by_project": {}, "daily": [],
-            "source": "none", "reason": reason}
+    return {"total_usd": 0.0, "by_model": {}, "by_project": {}, "by_model_tokens": {},
+            "daily": [], "source": "none", "reason": reason}
 
 
 async def is_configured() -> bool:

@@ -533,6 +533,43 @@ async def list_connected_providers() -> dict:
                 "status": "connected" if configured else "not configured: run uvx finops-mcp setup",
             }
 
+    # LLM / AI providers are module-level (not in the class registry above), so
+    # surface them explicitly. This is where AI-native accounts actually spend:
+    # direct model APIs, gateways (OpenRouter/LiteLLM), and GPU/inference infra.
+    from .connectors.saas import (
+        openai_usage, anthropic_usage, vertex_costs, openrouter, litellm, gpu_infra,
+    )
+    _llm_async = {
+        "openai": openai_usage.is_configured,
+        "anthropic": anthropic_usage.is_configured,
+        "vertex": vertex_costs.is_configured,
+        "openrouter": openrouter.is_configured,
+        "litellm": litellm.is_configured,
+    }
+    for name, check in _llm_async.items():
+        try:
+            configured = await check()
+        except Exception:
+            configured = False
+        result[name] = {
+            "category": "llm",
+            "configured": configured,
+            "status": "connected" if configured else "not configured: run uvx finops-mcp setup",
+        }
+    _llm_sync = {
+        "modal": gpu_infra.modal_configured,
+        "together": gpu_infra.together_configured,
+        "replicate": gpu_infra.replicate_configured,
+    }
+    for name, check in _llm_sync.items():
+        configured = bool(check())
+        result[name] = {
+            "category": "llm",
+            "configured": configured,
+            "status": "connected (cost via invoice import)" if configured
+                      else "not configured: run uvx finops-mcp setup",
+        }
+
     # Surface plan status so Claude can proactively mention upgrade when relevant
     status = get_status()
     if status.mode == "trial":
@@ -6983,6 +7020,108 @@ async def get_llm_costs(
             )
 
         return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_gpu_infra_costs(
+    days: int = 30,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """
+    Report spend status across serverless-GPU / inference-infra providers —
+    Modal, Together, and Replicate. For the model-builder slice of AI startups
+    this is the single largest variable cost, billed per GPU-second inside each
+    vendor's own dashboard and invisible to any cloud bill.
+
+    Honest note: these vendors gate per-range cost behind paid plans or omit it
+    from their public API. nable confirms each credential and reports what's
+    reachable; until a usable usage endpoint exists, track these bills via the
+    invoice email parser.
+
+    Args:
+        days: Lookback window in days (default 30). Ignored if start_date set.
+        start_date: ISO date string (YYYY-MM-DD). Optional.
+        end_date: ISO date string (YYYY-MM-DD). Defaults to today.
+
+    Examples:
+        - "How much are we spending on Modal / Replicate / Together?"
+        - "Show my GPU inference infra costs"
+        - "Is my Modal account connected?"
+    """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_gpu_infra_costs") or {}
+    try:
+        from datetime import date as _date, timedelta as _td
+        ed = _date.fromisoformat(end_date) if end_date else _date.today()
+        sd = _date.fromisoformat(start_date) if start_date else ed - _td(days=days)
+        from .connectors.saas.gpu_infra import get_all_gpu_infra_costs
+        return await asyncio.to_thread(get_all_gpu_infra_costs, sd, ed)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_credit_status(months: int = 6) -> dict:
+    """
+    Track AWS promotional-credit (Activate) burn-down and detect the moment
+    billing flips from credits to cash — the cliff where an early startup first
+    feels cost pain. AWS sends no native alert for this.
+
+    Reads Cost Explorer's RECORD_TYPE (Charge type) to separate gross usage,
+    credits applied, and net cash per month. No CUR/Athena setup needed. AWS has
+    no API for the remaining Activate balance, so runway is inferred from the
+    observed monthly credit-consumption trend, not a stated balance.
+
+    Args:
+        months: Months of history to analyze (default 6).
+
+    Examples:
+        - "Are my AWS credits about to run out?"
+        - "When do my credits flip to cash?"
+        - "How much of my bill is still covered by credits?"
+    """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_credit_status") or {}
+    try:
+        from .connectors.credit_tracking import get_credit_status as _gcs
+        return await asyncio.to_thread(_gcs, months)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_ai_billing_blind_spots(days: int = 30) -> dict:
+    """
+    Flag AWS AI/Marketplace spend that bypasses AWS Cost Anomaly Detection —
+    Bedrock (bills through Marketplace), other Marketplace AI/SaaS, and SageMaker.
+    These line items are invisible to AWS's own anomaly detector, so a spike goes
+    unnoticed until the invoice lands. nable watches them directly.
+
+    Args:
+        days: Lookback window in days (default 30).
+
+    Examples:
+        - "What AI spend is AWS not watching for anomalies?"
+        - "Show my Bedrock/Marketplace billing blind spots"
+    """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_ai_billing_blind_spots") or {}
+    try:
+        from datetime import date as _date, timedelta as _td
+        ed = _date.today()
+        sd = ed - _td(days=days)
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is None or not await aws.is_configured():
+            return {"error": "AWS not configured", "blind_spot_count": 0, "findings": []}
+        summary = await aws.get_costs(sd, ed, granularity="MONTHLY")
+        from .connectors.credit_tracking import detect_billing_blind_spots
+        return detect_billing_blind_spots(summary.by_service)
     except Exception as e:
         return {"error": str(e)}
 

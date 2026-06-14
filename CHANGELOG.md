@@ -2,6 +2,54 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.71
+
+### AI-native cost coverage
+- **New gateway connectors: OpenRouter and LiteLLM.** OpenRouter is where a large
+  share of early AI startups route token traffic (one key, 300+ models); the
+  connector reads per-model cost, tokens, and requests from the activity endpoint,
+  and falls back to a credits-only summary on a standard key. LiteLLM reads a
+  self-hosted proxy's `/spend/logs` and aggregates spend by model and day, all on
+  the user's own network. Both flow into `get_llm_costs`.
+- **GPU/inference-infra connectors: Modal, Together, Replicate** (`get_gpu_infra_costs`).
+  These hold the largest variable cost for model-builders. Each confirms the
+  credential and reports the gate honestly (billing APIs are Team/Enterprise-only
+  or omit per-range cost) rather than fabricate spend. Track these via invoice
+  import until a usable usage endpoint exists.
+- **`list_connected_providers` now has an `llm` category** so OpenAI, Anthropic,
+  Vertex, OpenRouter, LiteLLM, Modal, Together, and Replicate are visible. They
+  were previously absent from the provider list entirely.
+
+### AI KPI engine correctness
+- **OpenAI now feeds the AI KPIs, not just Anthropic.** `full_kpi_report` built its
+  combined token map from `[anthropic_data]` only, and the OpenAI connector
+  returned cost without tokens, so an OpenAI-heavy account (the common case) got
+  empty cache, context-window, and prompt-efficiency analysis with a misleading
+  "connect OpenAI with an admin key" note OpenAI could not satisfy. The OpenAI
+  connector now emits `by_model_tokens` (fresh input, cache reads, request counts)
+  matching the Anthropic shape, the aggregator surfaces merged per-model tokens
+  across all providers, and the KPI engine consumes them. Cache analysis now works
+  for OpenAI too. Guarded against double-counting Anthropic when both inputs are
+  present.
+
+### Credit cliff + AI-billing blind spots
+- **AWS credit-to-cash flip detection** (`get_credit_status`). Reads Cost Explorer's
+  RECORD_TYPE (Charge type) to separate gross usage, credits applied, and net cash
+  per month, then detects the moment promotional credits stop covering the bill —
+  the cliff where an early startup first feels cost pain, which AWS sends no native
+  alert for. No CUR/Athena pipeline: works on a read-only key. Honest that AWS
+  exposes no API for the remaining Activate balance, so the trend is inferred from
+  observed consumption.
+- **Cash-flip alarm**: a daily `credit_check` scheduler job fires a Slack alert once
+  when the flip trips, deduped by month and status.
+- **AI-billing blind spots** (`get_ai_billing_blind_spots`). Flags Bedrock,
+  Marketplace, and SageMaker spend that bypasses AWS Cost Anomaly Detection, so a
+  spike does not go unnoticed until the invoice lands.
+
+### Setup
+- Added setup-wizard entries and CLI subcommands for openrouter, litellm, modal,
+  together, and replicate.
+
 ## 0.8.70
 
 ### Remediation

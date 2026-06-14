@@ -97,9 +97,6 @@ def cache_hit_rate(anthropic_data: dict[str, Any]) -> dict[str, Any]:
     total_fresh_input  = 0
     savings_usd        = 0.0
 
-    from .saas.anthropic_usage import _MODEL_PRICING  # type: ignore[import]  # noqa: F401
-    # resolve pricing lazily below
-
     for model, tok in tokens.items():
         reads   = tok.get("cache_read_input_tokens", 0)
         creates = tok.get("cache_creation_input_tokens", 0)
@@ -819,21 +816,49 @@ def full_kpi_report(
         "by_provider":   llm_costs_result.get("by_provider", {}),
     }
 
-    # Collect all by_model_tokens across providers (best effort)
+    # Collect all by_model_tokens across providers (best effort). The aggregated
+    # llm_costs_result now carries merged per-model tokens from every provider
+    # that reports them (OpenAI, Anthropic, gateways), so it is the primary
+    # source. anthropic_data is still accepted for direct callers that pass it
+    # alongside a token-less aggregate (e.g. legacy tests); its models are only
+    # merged when the aggregate did not already account for them, so anthropic
+    # tokens are never double-counted when both are present.
     combined_tokens: dict[str, dict[str, int]] = {}
-    for provider_data in [anthropic_data] if anthropic_data else []:
-        for model, tok in (provider_data.get("by_model_tokens") or {}).items():
-            if model not in combined_tokens:
-                combined_tokens[model] = {}
-            for k, v in tok.items():
-                combined_tokens[model][k] = combined_tokens[model].get(k, 0) + v
 
-    # 1. Cache hit rate (Anthropic only)
+    def _merge_tokens(src: dict[str, Any] | None) -> None:
+        for model, tok in ((src or {}).get("by_model_tokens") or {}).items():
+            bucket = combined_tokens.setdefault(model, {})
+            for k, v in tok.items():
+                try:
+                    bucket[k] = bucket.get(k, 0) + int(v)
+                except (TypeError, ValueError):
+                    continue
+
+    _merge_tokens(llm_costs_result)
+    if anthropic_data:
+        for model, tok in (anthropic_data.get("by_model_tokens") or {}).items():
+            if model in combined_tokens:
+                continue  # already represented by the aggregate; avoid double count
+            bucket = combined_tokens.setdefault(model, {})
+            for k, v in tok.items():
+                try:
+                    bucket[k] = bucket.get(k, 0) + int(v)
+                except (TypeError, ValueError):
+                    continue
+
+    # 1. Cache hit rate. Anthropic reports cache tokens directly; OpenAI reports
+    # input_cached_tokens (mapped to cache_read_input_tokens by the connector),
+    # so cache analysis now works for either. Prefer the richer Anthropic payload
+    # when present, else compute from the combined token map if any provider
+    # carries cache-read data.
     if anthropic_data:
         report["cache_hit_rate"] = cache_hit_rate(anthropic_data)
+    elif any(t.get("cache_read_input_tokens", 0) or t.get("input_tokens", 0)
+             for t in combined_tokens.values()):
+        report["cache_hit_rate"] = cache_hit_rate({"by_model_tokens": combined_tokens})
     else:
         report["cache_hit_rate"] = {
-            "note": "Anthropic not configured — cache hit analysis unavailable."
+            "note": "No token-level data — connect Anthropic or OpenAI with an admin key for cache analysis."
         }
 
     # 2. Context window utilisation

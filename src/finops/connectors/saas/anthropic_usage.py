@@ -249,17 +249,41 @@ def _fetch_workspace_usage(
     return _parse_usage(data, source="estimated")
 
 
+def _int(value: Any) -> int:
+    """Coerce an API token/count field to int, tolerating None and strings."""
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _parse_usage(data: dict, source: str) -> dict[str, Any]:
     total = 0.0
     by_model: dict[str, float] = {}
     by_model_tokens: dict[str, dict[str, int]] = {}
     daily: list[dict] = []
 
+    # Best-effort request/error tallies. The Usage API returns token counts, not
+    # request/error counts, so these usually stay 0 and the keys are omitted from
+    # the result, keeping error_spend_estimate in its graceful "not available"
+    # path. They populate only if a future/enterprise response carries them.
+    total_requests = 0
+    error_requests = 0
+
     for entry in data.get("data", data.get("usage", [])):
         model      = entry.get("model") or entry.get("model_id") or "unknown"
-        input_tok  = entry.get("input_tokens", 0)
-        output_tok = entry.get("output_tokens", 0)
+        # Fresh (uncached) input. The workspace report names this `input_tokens`;
+        # the org usage report names it `uncached_input_tokens`. Accept either.
+        input_tok  = _int(entry.get("input_tokens", entry.get("uncached_input_tokens", 0)))
+        output_tok = _int(entry.get("output_tokens", 0))
+        # Prompt-cache token counts, billed separately by Anthropic. The KPI layer
+        # reads these to compute cache hit rate and cache-read savings.
+        cache_read     = _int(entry.get("cache_read_input_tokens", 0))
+        cache_creation = _int(entry.get("cache_creation_input_tokens", 0))
         day        = entry.get("date") or entry.get("timestamp", "")[:10]
+
+        total_requests += _int(entry.get("request_count", entry.get("num_requests", 0)))
+        error_requests += _int(entry.get("error_count", entry.get("num_errors", 0)))
 
         # If actual cost is in the response, use it
         cost = float(entry.get("cost_usd", 0.0))
@@ -270,10 +294,18 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
 
         total += cost
         by_model[model] = by_model.get(model, 0.0) + cost
-        if model not in by_model_tokens:
-            by_model_tokens[model] = {"input": 0, "output": 0}
-        by_model_tokens[model]["input"]  += input_tok
-        by_model_tokens[model]["output"] += output_tok
+        # Sub-keys match what ai_kpis.py reads: input_tokens / output_tokens /
+        # cache_read_input_tokens / cache_creation_input_tokens.
+        bucket = by_model_tokens.setdefault(model, {
+            "input_tokens":                0,
+            "output_tokens":               0,
+            "cache_read_input_tokens":     0,
+            "cache_creation_input_tokens": 0,
+        })
+        bucket["input_tokens"]                += input_tok
+        bucket["output_tokens"]               += output_tok
+        bucket["cache_read_input_tokens"]     += cache_read
+        bucket["cache_creation_input_tokens"] += cache_creation
 
         # Accumulate daily
         existing = next((d for d in daily if d["date"] == day), None)
@@ -285,7 +317,7 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
             daily.append({"date": day, "total_usd": round(cost, 4),
                           "by_model": {model: round(cost, 4)}})
 
-    return {
+    result: dict[str, Any] = {
         "total_usd":      round(total, 4),
         "by_model":       {k: round(v, 4) for k, v in
                            sorted(by_model.items(), key=lambda x: x[1], reverse=True)},
@@ -294,6 +326,12 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
         "source":         source,
         **({"note": "Costs estimated from token counts × published prices."} if source == "estimated" else {}),
     }
+    # Surface request/error counts only when the API actually returned them, so
+    # error_spend_estimate reports a real rate rather than a fabricated 0%.
+    if total_requests > 0:
+        result["total_requests"] = total_requests
+        result["error_requests"] = error_requests
+    return result
 
 
 def _empty(reason: str) -> dict[str, Any]:
