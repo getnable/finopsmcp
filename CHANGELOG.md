@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.69
+
+### Onboarding
+- **The first-run "sample bill" no longer renders empty.** On the skip-for-now
+  path, the value-moment ran `list_idle_resources` and `optimize_ai_spend`
+  alongside the cost summary, but `list_idle_resources` had no demo guard, so in
+  demo mode it reached for real AWS and blocked the whole scan, leaving "Here's
+  nable on a sample bill" followed by nothing. Now the headline number is fetched
+  first on its own wall-clock cap and always renders; the optional idle/AI scans
+  run only for real accounts (no demo dataset exists for them) and each on its own
+  cap, so a slow or blocking scan can never blank the number the user came for.
+
 ## 0.8.68
 
 ### Telemetry
