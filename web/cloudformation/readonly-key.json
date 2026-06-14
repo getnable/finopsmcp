@@ -61,7 +61,6 @@
                 "ecs:DescribeTaskDefinition",
                 "logs:DescribeLogGroups",
                 "logs:DescribeLogStreams",
-                "logs:PutRetentionPolicy",
                 "cloudtrail:DescribeTrails",
                 "cloudtrail:GetTrailStatus",
                 "cloudtrail:GetEventSelectors",

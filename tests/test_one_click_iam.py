@@ -76,3 +76,18 @@ def test_one_click_is_published_and_live_by_default():
     url = I.quick_create_url()
     assert "getnable-public.s3.us-east-2.amazonaws.com" in url
     assert url.startswith("https://console.aws.amazon.com/cloudformation/home")
+
+
+def test_connect_key_is_strictly_read_only_no_writes():
+    """The one-click connect credential must be 100% read. Specifically guards
+    against logs:PutRetentionPolicy (a write) creeping back in, since the template
+    advertises 'no create, modify, or delete permissions of any kind' and a
+    security-minded user reads this policy on the connect screen."""
+    actions = _policy_actions(json.loads(I.generate_cloudformation_key()))
+    assert "logs:PutRetentionPolicy" not in actions
+    # Every action must be a read verb (Get/Describe/List) or benign STS auth.
+    for a in actions:
+        verb = a.split(":", 1)[1]
+        assert verb.startswith(("Get", "Describe", "List")) or a in (
+            "sts:GetCallerIdentity", "sts:AssumeRole",
+        ), f"{a} is not a read-only action"

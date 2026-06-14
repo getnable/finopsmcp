@@ -2,6 +2,23 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.73
+
+### The one-click connect key is now strictly read-only
+The published CloudFormation template advertised "no create, modify, or delete
+permissions of any kind" but its action list still carried `logs:PutRetentionPolicy`,
+a write, left over from a never-built auto-remediation path. nable never calls it
+(the log-retention feature only reads and then hands the user a CLI command to run
+themselves), so it was dead permission that contradicted the read-only claim on the
+exact artifact a security-minded user reads at connect time.
+
+- Removed `logs:PutRetentionPolicy` from the connect credential. The one-click key
+  and the role/Terraform templates are now 100% read (Get/Describe/List + STS auth),
+  so "read-only, auditable" is defensible verbatim.
+- Added `logs:Put/Create/Delete` to the over-privilege guard so a write can't creep
+  back into the policy unnoticed, plus a test asserting every action in the connect
+  key is a read verb.
+
 ## 0.8.72
 
 ### Onboarding: kill the no-creds connect wall
