@@ -399,6 +399,22 @@ def job_weekly_email_digest() -> None:
         log.exception("Weekly email digest job failed")
 
 
+def job_auto_verify() -> None:
+    """Verify acted-on recommendations against live cloud state and record realized
+    savings. This is what makes the rightsizing PR body's promise ("nable will
+    auto-verify the change and record realized savings within 24h") actually true:
+    without it, verification only ran when a human remembered to call verify_savings().
+    Re-reads the actual instance type, so it only confirms a saving once the merged
+    change has been applied; otherwise it is a harmless no-op until next run."""
+    try:
+        from ..recommendations.savings_tracker import auto_verify_acted_on
+        verified = auto_verify_acted_on()
+        if verified:
+            log.info("Auto-verify: confirmed %d realized saving(s)", len(verified))
+    except Exception:
+        log.exception("Auto-verify job failed")
+
+
 # ── Scheduler lifecycle ───────────────────────────────────────────────────────
 
 def start_scheduler() -> BackgroundScheduler | None:
@@ -438,6 +454,12 @@ def start_scheduler() -> BackgroundScheduler | None:
     # Weekly Slack insight every Monday at 09:30 UTC (30 min after email)
     weekly_slack_cron = os.environ.get("FINOPS_WEEKLY_SLACK_CRON", "30 9 * * 1")
     _scheduler.add_job(job_weekly_slack_insight, CronTrigger.from_crontab(weekly_slack_cron), id="weekly_slack_insight", replace_existing=True)
+
+    # Auto-verify acted-on recommendations daily at 03:00 UTC, so a merged-and-applied
+    # rightsizing PR gets its realized saving recorded within 24h, as the PR body
+    # promises. Closes the find -> fix -> prove loop without a human re-running anything.
+    verify_cron = os.environ.get("FINOPS_VERIFY_CRON", "0 3 * * *")
+    _scheduler.add_job(job_auto_verify, CronTrigger.from_crontab(verify_cron), id="auto_verify", replace_existing=True)
 
     _scheduler.start()
     log.info("Scheduler started (snapshot=%s, anomaly=%s, digest=%s)", snapshot_cron, anomaly_cron, digest_cron)

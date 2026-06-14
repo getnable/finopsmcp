@@ -203,12 +203,20 @@ def open_rightsizing_pr(
         )
 
         if not tf_resource_type or not tf_resource_name:
-            skipped.append({
-                "id": row.id,
-                "resource_id": row.resource_id,
-                "reason": "Missing tf_resource_type or tf_resource_name in recommended_config. "
-                          "Cannot locate resource in Terraform.",
-            })
+            if state_load_error:
+                reason = (
+                    f"No Terraform state found in {tf_dir} ({state_load_error}). Run this from "
+                    f"your IaC directory (where terraform.tfstate or `terraform show -json` is "
+                    f"available), or pass resource_overrides to map this recommendation to its "
+                    f".tf address."
+                )
+            else:
+                reason = (
+                    f"Resource {row.resource_id} is not managed in this Terraform state. If it "
+                    f"lives in another module or repo, pass a resource_override mapping it to its "
+                    f"tf_resource_type/tf_resource_name."
+                )
+            skipped.append({"id": row.id, "resource_id": row.resource_id, "reason": reason})
             continue
 
         # Resolve new instance type value (attribute name varies by resource type)

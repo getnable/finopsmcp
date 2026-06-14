@@ -157,6 +157,62 @@ def test_no_open_recommendations_returns_error() -> None:
     assert result.get("pr_url") is None
 
 
+# ── Test: the defensible path — resolve resource_id from real Terraform state ──
+
+def test_resolves_from_terraform_state_without_cfg_tf_fields(tmp_path: Path) -> None:
+    """The moat path: recommended_config carries NO tf address; nable resolves the
+    cloud resource_id to its .tf address from a real terraform.tfstate and patches
+    it. Uses the REAL build_id_map / resolve_recommendation / find_resource_file
+    (not mocked), so a regression here silently breaks the find->fix loop."""
+    tf = tmp_path / "main.tf"
+    tf.write_text('resource "aws_instance" "api" {\n  instance_type = "m5.xlarge"\n}\n')
+    state = {"version": 4, "resources": [
+        {"type": "aws_instance", "name": "api", "instances": [
+            {"attributes": {"id": "i-realstate", "instance_type": "m5.xlarge"}}]}]}
+    (tmp_path / "terraform.tfstate").write_text(json.dumps(state))
+
+    # No tf_resource_type/name in the rec — it must come from state resolution.
+    row = _make_row(
+        resource_id="i-realstate", resource_name="api",
+        rec_cfg={"instance_type": "m5.large", "from_instance_type": "m5.xlarge"},
+    )
+
+    with _patch_db([row]), \
+         patch("finops.remediation.rightsizing_pr.mark_acted_on", return_value=True), \
+         patch("finops.remediation.rightsizing_pr._git"):
+        result = open_rightsizing_pr(tf_dir=str(tmp_path), patch_only=True)
+
+    assert result.get("files_modified"), result
+    assert "m5.large" in tf.read_text()
+    assert "m5.xlarge" not in tf.read_text()
+
+
+# ── Test: the verification step is scheduled (closes the find->fix->prove loop) ─
+
+def test_job_auto_verify_runs_the_verifier_safely(monkeypatch) -> None:
+    from finops.scheduler import jobs
+    called = {}
+
+    def _fake():
+        called["ran"] = True
+        return []
+
+    monkeypatch.setattr("finops.recommendations.savings_tracker.auto_verify_acted_on", _fake)
+    jobs.job_auto_verify()  # must not raise
+    assert called.get("ran")
+
+
+def test_scheduler_registers_auto_verify() -> None:
+    from finops.scheduler.jobs import start_scheduler, stop_scheduler
+    sched = start_scheduler()
+    try:
+        if sched is None:
+            pytest.skip("scheduler single-owner lock held elsewhere")
+        assert sched.get_job("auto_verify") is not None, "auto_verify job not registered"
+    finally:
+        stop_scheduler()
+
+
 # ── Test: skipped when tf_resource_type is missing ────────────────────────────
 
 def test_skips_rec_missing_tf_resource_type(tmp_path: Path) -> None:

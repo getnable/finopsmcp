@@ -2,7 +2,23 @@
 
 All notable changes to finops-mcp (nable).
 
-## 0.8.69
+## 0.8.70
+
+### Remediation
+- **The rightsizing find -> fix -> prove loop now actually closes.** The PR pipeline
+  already resolved a cloud resource ID to its Terraform address from state and
+  opened a real PR with the fix, but the verification it promised in the PR body
+  ("nable will auto-verify the change and record realized savings within 24h") was
+  never scheduled, so it only ran if a human remembered to call `verify_savings`.
+  Added a daily `auto_verify` scheduler job that re-reads the live resource and
+  records the realized saving once a merged change is applied. The promise is now
+  kept automatically.
+- **Clearer skips.** When a recommendation can't be located in Terraform, the skip
+  message now says whether no state was found (run from your IaC dir, or pass
+  `resource_overrides`) or the resource isn't managed in this state, instead of a
+  generic "cannot locate" line.
+- Tests: locked in the auto-resolution-from-real-`tfstate` path (the defensible
+  code), plus the auto-verify job wiring.
 
 ### Onboarding
 - **The first-run "sample bill" no longer renders empty.** On the skip-for-now
