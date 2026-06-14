@@ -271,13 +271,14 @@ CLOUDFORMATION_TEMPLATE_KEY: dict[str, Any] = {
 }
 
 # The AWS console's quick-create flow only loads templates from an S3 URL, so the
-# key template above is published to S3 (see scripts/publish_cfn.py) and the
-# resulting URL goes here. Overridable via env for testing or a custom bucket.
-# The placeholder below is NOT a live bucket: until the template is actually
-# published and NABLE_CFN_TEMPLATE_URL is set, quick_create_available() returns
-# False so the wizard never advertises a dead one-click link.
+# key template above is published to a public S3 object (see scripts/publish_cfn.py)
+# and the live URL is the default below. Overridable via env for testing or a
+# custom bucket. _CFN_TEMPLATE_PLACEHOLDER is kept as the "unpublished" sentinel:
+# if the default is ever reset to it, quick_create_available() returns False so the
+# wizard never advertises a dead one-click link.
 _CFN_TEMPLATE_PLACEHOLDER = "https://nable-public.s3.amazonaws.com/cloudformation/readonly-key.json"
-CFN_KEY_TEMPLATE_S3_URL = os.environ.get("NABLE_CFN_TEMPLATE_URL", _CFN_TEMPLATE_PLACEHOLDER)
+_CFN_TEMPLATE_PUBLISHED = "https://getnable-public.s3.us-east-2.amazonaws.com/cloudformation/readonly-key.json"
+CFN_KEY_TEMPLATE_S3_URL = os.environ.get("NABLE_CFN_TEMPLATE_URL", _CFN_TEMPLATE_PUBLISHED)
 
 
 def quick_create_available() -> bool:

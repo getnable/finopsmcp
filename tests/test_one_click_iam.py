@@ -64,3 +64,15 @@ def test_committed_template_matches_source_of_truth():
     committed = pathlib.Path(__file__).resolve().parent.parent / "web" / "cloudformation" / "readonly-key.json"
     assert committed.exists(), "run scripts/publish_cfn.py --dry-run to regenerate"
     assert json.loads(committed.read_text()) == json.loads(I.generate_cloudformation_key())
+
+
+def test_one_click_is_published_and_live_by_default():
+    """After publishing the template to S3, the one-click path must be ON by
+    default (no env var needed), since end users never set NABLE_CFN_TEMPLATE_URL.
+    Guards against a silent regression back to the unpublished placeholder."""
+    assert I.CFN_KEY_TEMPLATE_S3_URL == I._CFN_TEMPLATE_PUBLISHED
+    assert I.CFN_KEY_TEMPLATE_S3_URL != I._CFN_TEMPLATE_PLACEHOLDER
+    assert I.quick_create_available() is True
+    url = I.quick_create_url()
+    assert "getnable-public.s3.us-east-2.amazonaws.com" in url
+    assert url.startswith("https://console.aws.amazon.com/cloudformation/home")

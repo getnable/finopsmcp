@@ -181,3 +181,35 @@ def test_and_list_prose():
     assert WC._and_list(["Cursor"]) == "Cursor"
     assert WC._and_list(["Claude Desktop", "Cursor"]) == "Claude Desktop and Cursor"
     assert WC._and_list(["A", "B", "C"]) == "A, B, and C"
+
+
+def test_no_creds_offer_leads_with_cloudshell_fast_path(capsys):
+    """A no-local-key user should be pointed at AWS CloudShell first: it is
+    already authenticated, so nable's ambient detection shows a real bill in
+    seconds with nothing to mint. This is the lever for first value in <10 min."""
+    from finops.setup_wizard import _print_one_click_key_offer
+
+    _print_one_click_key_offer(region="us-east-1")
+    out = capsys.readouterr().out
+    assert "CloudShell" in out
+    assert "pip install finops-mcp && finops welcome" in out
+    # The local key path must still be present, just no longer the only option.
+    assert "Create access key" in out
+
+
+def test_oneclick_aws_url_is_gated_on_publish(monkeypatch):
+    """The welcome flow surfaces the one-click CFN link only when the template is
+    actually published, so a no-creds user never sees a dead link, and the fast
+    path lights up automatically the moment it goes live."""
+    import finops.welcome as WC
+    import finops.security.iam_setup as IAM
+
+    # Unpublished (default placeholder) -> no link shown.
+    monkeypatch.setattr(IAM, "quick_create_available", lambda: False)
+    assert WC._oneclick_aws_url() is None
+
+    # Published -> the real quick-create URL is surfaced.
+    monkeypatch.setattr(IAM, "quick_create_available", lambda: True)
+    monkeypatch.setattr(IAM, "quick_create_url",
+                        lambda region="us-east-1", stack_name="nable-readonly": "https://example/launch")
+    assert WC._oneclick_aws_url() == "https://example/launch"
