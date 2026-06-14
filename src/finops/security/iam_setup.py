@@ -5,7 +5,7 @@ Two outputs:
   1. CloudFormation template  — paste into AWS Console or deploy via CLI
   2. Terraform snippet        — drop into your infra repo
 
-Permissions nable needs (read-only except logs:PutRetentionPolicy):
+Permissions nable needs (strictly read-only):
   Cost Explorer   → ce:Get*, ce:Describe*, ce:List*
   Compute Opt.    → compute-optimizer:Get* (EC2, Lambda, RDS, ECS)
   CloudWatch      → cloudwatch:GetMetricData, GetMetricStatistics, ListMetrics
@@ -13,15 +13,15 @@ Permissions nable needs (read-only except logs:PutRetentionPolicy):
                      Addresses,NatGateways,Images}
   RDS deep audit  → rds:Describe{DBInstances,DBSnapshots}
   Lambda audit    → lambda:ListFunctions, GetFunctionConfiguration
-  CW Logs audit   → logs:DescribeLogGroups, DescribeLogStreams,
-                     PutRetentionPolicy (optional — auto-remediation)
+  CW Logs audit   → logs:DescribeLogGroups, DescribeLogStreams
   CloudTrail      → cloudtrail:DescribeTrails, GetTrailStatus, GetEventSelectors
   S3              → s3:ListAllMyBuckets, GetBucketLocation,
                      GetBucketIntelligentTieringConfiguration
   Organizations   → organizations:List*, Describe* (org rollup)
   STS             → sts:GetCallerIdentity, AssumeRole (cross-account)
 
-Nothing in this list can terminate, delete, modify, or create compute resources.
+Nothing in this list can create, modify, delete, or terminate any resource. It
+is strictly read-only.
 """
 from __future__ import annotations
 
@@ -83,10 +83,11 @@ _REQUIRED_ACTIONS: list[str] = [
     "ecs:ListServices",
     "ecs:DescribeServices",
     "ecs:DescribeTaskDefinition",
-    # CloudWatch Logs (retention policy audit)
+    # CloudWatch Logs (retention audit — read only; the fix nable surfaces is a
+    # copy-paste `aws logs put-retention-policy` CLI command the user runs
+    # themselves, so the connect key needs no write permission)
     "logs:DescribeLogGroups",
     "logs:DescribeLogStreams",
-    "logs:PutRetentionPolicy",  # needed if auto-remediation is desired
     # CloudTrail (waste pattern detection)
     "cloudtrail:DescribeTrails",
     "cloudtrail:GetTrailStatus",
@@ -117,6 +118,7 @@ _DANGEROUS_ACTIONS_PREFIXES = [
     "iam:Create", "iam:Delete", "iam:Attach", "iam:Detach", "iam:Put", "iam:Update",
     "rds:Create", "rds:Delete", "rds:Modify",
     "lambda:Create", "lambda:Delete", "lambda:Update", "lambda:Invoke",
+    "logs:Put", "logs:Create", "logs:Delete",  # logs writes (e.g. PutRetentionPolicy)
 ]
 
 CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
@@ -125,8 +127,7 @@ CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
         "Least-privilege IAM role for nable (finops-mcp). "
         "Grants read access to Cost Explorer, Compute Optimizer, CloudWatch metrics, "
         "EC2/RDS/Lambda/S3/CloudTrail describe APIs, and CloudWatch Logs. "
-        "Includes logs:PutRetentionPolicy for optional auto-remediation of infinite log retention. "
-        "No compute create/modify/delete permissions of any kind."
+        "Strictly read-only: no create, modify, or delete permissions of any kind."
     ),
     "Parameters": {
         "RoleName": {
@@ -541,8 +542,7 @@ def print_iam_template(fmt: str = "cloudformation") -> None:
 
     print()
     print("─" * 60)
-    print("  These permissions are read-only (except logs:PutRetentionPolicy")
-    print("  for optional auto-remediation). nable cannot create, terminate,")
-    print("  or delete any compute resource with this policy.")
+    print("  These permissions are strictly read-only. nable cannot create,")
+    print("  modify, terminate, or delete any resource with this policy.")
     print("─" * 60)
     print()
