@@ -342,6 +342,21 @@ def _value_moment_body(demo: bool = False) -> bool:
 _AMBIENT_AWS_TIMEOUT = 3.0  # seconds; cap on the first-run ambient credential probe
 
 
+def _oneclick_aws_url() -> str | None:
+    """Return the one-click read-only-key CloudFormation URL when it's published,
+    else None. Gated on quick_create_available() so the welcome flow never shows a
+    dead link, and lights up automatically once the template goes live. This is
+    the fast path for the no-local-creds user, the segment that otherwise stalls
+    out the 5-10 minute onboarding."""
+    try:
+        from .security.iam_setup import quick_create_available, quick_create_url
+        if quick_create_available():
+            return quick_create_url()
+    except Exception:
+        pass
+    return None
+
+
 def run_welcome_flow(demo: bool = False) -> None:
     """
     Interactive onboarding shown when the user runs `finops welcome`.
@@ -439,6 +454,14 @@ def run_welcome_flow(demo: bool = False) -> None:
 
     # No ambient creds, or they declined: offer the full connect menu.
     if not shown:
+        # Lead with the one-click read-only key when it's published: a no-creds
+        # user gets connected in two copy-pastes instead of hand-minting a key.
+        _oneclick = _oneclick_aws_url()
+        if _oneclick:
+            _line(f"  {green('Fastest')} — one-click read-only AWS key, no local creds needed:")
+            _line(f"    {cyan(_oneclick)}")
+            _line(dim("    Click it, create the stack, then choose 1 below and paste the two outputs."))
+            _blank()
         _line(f"  {dim('1)')} AWS          {dim('reads your existing AWS profile')}")
         _line(f"  {dim('2)')} Azure")
         _line(f"  {dim('3)')} GCP")
@@ -471,6 +494,9 @@ def run_welcome_flow(demo: bool = False) -> None:
         _line(bold("Here's nable on a sample bill") + dim("  ·  connect an account to see your own"))
         _show_value_moment(demo=True)
         _line(dim("  Ready for real numbers?  ") + cyan("finops setup aws") + dim("  (read-only, ~1 min)"))
+        _oneclick = _oneclick_aws_url()
+        if _oneclick:
+            _line(dim("  Or one-click a read-only key:  ") + cyan(_oneclick))
         _blank()
 
     # Finish — honest about which clients are wired, and the restart cliff. MCP

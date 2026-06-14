@@ -514,11 +514,22 @@ def _print_one_click_key_offer(region: str = "us-east-1") -> None:
     """
     from .security.iam_setup import quick_create_url, quick_create_available
 
-    # Default path: fully local. No nable-hosted step, nothing leaves the machine
-    # or the user's AWS account. This stays the connect flow's default to keep the
-    # local-first claim clean.
+    # Fastest path for someone with no local key: AWS CloudShell is already
+    # authenticated with their console session, so nable's ambient-credential
+    # detection fires there and shows a real bill in seconds — no key to mint, no
+    # console clicking, nothing hosted by nable. This is the single biggest lever
+    # for getting a no-creds user to first value inside the 5-10 minute window.
     print(
-        "\n  Create a read-only access key (about a minute, your own account):\n\n"
+        "\n  Fastest with no local key — AWS CloudShell (already signed in):\n"
+        "    1. Open AWS CloudShell (the >_ terminal icon, top of the console).\n"
+        "    2. Run:  pip install finops-mcp && finops welcome\n"
+        "    nable uses CloudShell's own credentials and shows your real bill on the spot.\n"
+    )
+    # Default path for a local/editor key: fully local. No nable-hosted step,
+    # nothing leaves the machine or the user's AWS account. This stays the connect
+    # flow's default to keep the local-first claim clean.
+    print(
+        "  Or create a read-only access key (about a minute, your own account):\n\n"
         "  1. AWS console -> IAM -> Users -> your user -> Security credentials\n"
         '  2. Create access key -> "Other" -> Create. The secret shows once.\n'
         "  3. Paste the Access Key ID and Secret below.\n"

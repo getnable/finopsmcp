@@ -2,6 +2,29 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.72
+
+### Onboarding: kill the no-creds connect wall
+The activation funnel showed the problem plainly: ~99 machines start setup in 30
+days, ~5 connect a real provider. The entire drop is at the connect step, and the
+worst case is the user with no local AWS credentials, who was forced to hand-mint
+an IAM key in the console.
+
+- **One-click AWS connect is now live.** The read-only CloudFormation template is
+  published, so `quick_create_available()` is true by default and `finops setup aws`
+  surfaces a launch-stack link: the user clicks, creates a read-only stack, and
+  pastes two outputs. No pre-existing credentials needed. This stays local-first:
+  the template is a static public artifact, the keys are created in the user's own
+  account, and nothing routes through nable's servers.
+- **The welcome flow leads with it.** When the one-click link is available, the
+  connect menu and the skip-path hint both surface "Fastest, one-click read-only
+  AWS key" so a no-creds user sees the fast path immediately instead of a key
+  prompt they can't satisfy. Gated on publish, so it never shows a dead link.
+- **AWS CloudShell fast-path.** For a no-local-key user, the connect offer now
+  points at CloudShell (already authenticated): `pip install finops-mcp && finops
+  welcome` shows their real bill in seconds via ambient-credential detection, with
+  nothing to mint.
+
 ## 0.8.71
 
 ### AI-native cost coverage
