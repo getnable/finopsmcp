@@ -131,3 +131,38 @@ def test_scheduler_registers_credit_check():
         assert sched.get_job("credit_check") is not None, "credit_check job not registered"
     finally:
         stop_scheduler()
+
+
+def test_partial_current_month_does_not_false_flip():
+    """The credit alarm must not cry wolf at month start. Prior months ~100%
+    covered, current month has only started accruing (gross tiny, credits not yet
+    posted by AWS) -> must NOT be critical OR warning, since the scheduler alerts
+    on both. Assesses the latest settled month instead."""
+    series = [_month(f"2026-0{i}-01", 3000.0, 3000.0, 0.0) for i in range(1, 6)]
+    series.append(_month("2026-06-01", gross=80.0, credits=0.0, net=80.0))
+    res = analyze_credits(series)
+    assert res["cash_flip_detected"] is False
+    assert res["status"] not in ("critical", "warning")
+    assert res["latest_credit_coverage_pct"] == 100.0  # the settled month, not the partial one
+
+
+def test_single_month_full_credit_coverage_is_active():
+    """A fully credit-covered single month (months=1) must register as credits
+    active and report 100% coverage, not 'no spend or credits detected'."""
+    res = analyze_credits([_month("2026-06-01", gross=5000.0, credits=5000.0, net=0.0)])
+    assert res["credits_active"] is True
+    assert res["latest_credit_coverage_pct"] == 100.0
+    assert res["cash_flip_detected"] is False
+
+
+def test_mature_month_still_flips():
+    """The guard must not suppress a REAL flip: a fully-accrued current month whose
+    credits stopped covering still trips critical."""
+    series = [
+        _month("2026-04-01", 1000.0, 950.0, 50.0),
+        _month("2026-05-01", 1100.0, 900.0, 200.0),
+        _month("2026-06-01", 1200.0, 10.0, 1190.0),   # mature gross, credits gone
+    ]
+    res = analyze_credits(series)
+    assert res["cash_flip_detected"] is True
+    assert res["status"] == "critical"

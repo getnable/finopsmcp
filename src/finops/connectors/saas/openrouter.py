@@ -108,7 +108,11 @@ def _fetch_activity(api_key: str, start_date: date, end_date: date) -> dict[str,
 
     for row in rows:
         day = str(row.get("date") or "")[:10]
-        if not day or day < start_s or day >= end_s:
+        # Inclusive window [start_date, end_date]. The callers (get_all_llm_costs,
+        # get_llm_costs) default end_date to today and intend it inclusive, like the
+        # sibling connectors. An end-EXCLUSIVE check here dropped today's spend, and
+        # made a single-day query (start == end == today) return an empty result.
+        if not day or day < start_s or day > end_s:
             continue
         model = row.get("model") or row.get("model_permaslug") or "unknown"
         cost = _float(row.get("usage"))
@@ -148,11 +152,15 @@ def _fetch_credits_summary(api_key: str) -> dict[str, Any]:
     try:
         resp = httpx.get(f"{_API_BASE}/credits", headers=_headers(api_key), timeout=30)
         resp.raise_for_status()
-        data = resp.json().get("data", {})
+        data = resp.json().get("data") or {}
     except Exception as e:
         log.debug("OpenRouter credits fetch failed: %s", e)
         return _empty("api_error")
 
+    # A 200 with a null or non-dict "data" field (malformed/off-nominal response)
+    # must degrade gracefully, not crash get_costs on the .get below.
+    if not isinstance(data, dict):
+        data = {}
     total_credits = _float(data.get("total_credits"))
     total_usage   = _float(data.get("total_usage"))
     return {

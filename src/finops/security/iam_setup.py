@@ -18,7 +18,7 @@ Permissions nable needs (strictly read-only):
   S3              → s3:ListAllMyBuckets, GetBucketLocation,
                      GetBucketIntelligentTieringConfiguration
   Organizations   → organizations:List*, Describe* (org rollup)
-  STS             → sts:GetCallerIdentity, AssumeRole (cross-account)
+  STS             → sts:GetCallerIdentity (account id only)
 
 Nothing in this list can create, modify, delete, or terminate any resource. It
 is strictly read-only.
@@ -106,9 +106,12 @@ _REQUIRED_ACTIONS: list[str] = [
     "organizations:DescribeOrganizationalUnit",
     "organizations:DescribeOrganization",
     "organizations:DescribeAccount",
-    # STS (account ID + role assumption)
+    # STS (account id only). sts:AssumeRole is deliberately NOT here: the
+    # single-account connect key never assumes a role, and granting AssumeRole on
+    # "*" turns a "read-only" key into a privilege-escalation primitive (it can
+    # assume any role whose trust policy allows the account root, which is common).
+    # Cross-account setups grant AssumeRole separately, scoped to the specific role.
     "sts:GetCallerIdentity",
-    "sts:AssumeRole",
 ]
 
 # Actions that WOULD indicate over-provisioned credentials
@@ -119,6 +122,7 @@ _DANGEROUS_ACTIONS_PREFIXES = [
     "rds:Create", "rds:Delete", "rds:Modify",
     "lambda:Create", "lambda:Delete", "lambda:Update", "lambda:Invoke",
     "logs:Put", "logs:Create", "logs:Delete",  # logs writes (e.g. PutRetentionPolicy)
+    "sts:Assume",  # AssumeRole et al — escalation primitive, not a read
 ]
 
 CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
@@ -261,7 +265,7 @@ CLOUDFORMATION_TEMPLATE_KEY: dict[str, Any] = {
             "Value": {"Ref": "NableAccessKey"},
         },
         "SecretAccessKey": {
-            "Description": "Paste this as the AWS Secret Access Key in the nable setup wizard (shown once)",
+            "Description": "Paste this as the AWS Secret Access Key in the nable setup wizard. Treat it as a secret (it stays visible in this stack's Outputs); delete this stack any time to revoke the key.",
             "Value": {"Fn::GetAtt": ["NableAccessKey", "SecretAccessKey"]},
         },
         "PolicyArn": {

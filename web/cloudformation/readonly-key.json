@@ -76,8 +76,7 @@
                 "organizations:DescribeOrganizationalUnit",
                 "organizations:DescribeOrganization",
                 "organizations:DescribeAccount",
-                "sts:GetCallerIdentity",
-                "sts:AssumeRole"
+                "sts:GetCallerIdentity"
               ],
               "Resource": "*"
             }
@@ -125,7 +124,7 @@
       }
     },
     "SecretAccessKey": {
-      "Description": "Paste this as the AWS Secret Access Key in the nable setup wizard (shown once)",
+      "Description": "Paste this as the AWS Secret Access Key in the nable setup wizard. Treat it as a secret (it stays visible in this stack's Outputs); delete this stack any time to revoke the key.",
       "Value": {
         "Fn::GetAtt": [
           "NableAccessKey",

@@ -85,9 +85,12 @@ def test_connect_key_is_strictly_read_only_no_writes():
     security-minded user reads this policy on the connect screen."""
     actions = _policy_actions(json.loads(I.generate_cloudformation_key()))
     assert "logs:PutRetentionPolicy" not in actions
-    # Every action must be a read verb (Get/Describe/List) or benign STS auth.
+    # sts:AssumeRole is an escalation primitive (it can assume a role whose trust
+    # policy allows the account root), not a read. The connect key must not carry it.
+    assert "sts:AssumeRole" not in actions
+    # Every action must be a read verb (Get/Describe/List) or the one benign STS
+    # identity read. No sts:Assume*, no writes.
     for a in actions:
         verb = a.split(":", 1)[1]
-        assert verb.startswith(("Get", "Describe", "List")) or a in (
-            "sts:GetCallerIdentity", "sts:AssumeRole",
-        ), f"{a} is not a read-only action"
+        assert verb.startswith(("Get", "Describe", "List")) or a == "sts:GetCallerIdentity", \
+            f"{a} is not a read-only action"

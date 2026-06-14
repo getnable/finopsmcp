@@ -213,3 +213,151 @@ def test_oneclick_aws_url_is_gated_on_publish(monkeypatch):
     monkeypatch.setattr(IAM, "quick_create_url",
                         lambda region="us-east-1", stack_name="nable-readonly": "https://example/launch")
     assert WC._oneclick_aws_url() == "https://example/launch"
+
+
+def test_llm_ambient_provider_detects_env_keys(monkeypatch):
+    """AI-native users export OPENAI_API_KEY/ANTHROPIC_API_KEY; the welcome flow
+    should detect that and offer the token bill as the fast first number."""
+    import finops.welcome as WC
+    for k in ("OPENAI_API_KEY", "OPENAI_ADMIN_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_ADMIN_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    assert WC._llm_ambient_provider() is None
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert WC._llm_ambient_provider() == "OpenAI"
+    monkeypatch.delenv("OPENAI_API_KEY")
+    monkeypatch.setenv("ANTHROPIC_ADMIN_KEY", "sk-ant-admin")
+    assert WC._llm_ambient_provider() == "Anthropic"
+
+
+def test_llm_value_moment_renders_real_token_bill(monkeypatch, capsys):
+    """The AI-native value moment must show the token bill (get_llm_costs), not a
+    cloud summary that would be empty for an OpenAI-only account."""
+    import finops.welcome as WC
+    from finops import server
+
+    async def _fake_llm(days=30):
+        return {
+            "total_usd": 14033.0,
+            "by_provider": {"anthropic": 9100.0, "openai": 4933.0},
+            "top_spenders": [{"model": "claude-sonnet-4-5", "cost_usd": 9100.0}],
+        }
+
+    monkeypatch.setattr(server, "get_llm_costs", _fake_llm)
+    assert WC._llm_value_moment() is True
+    out = capsys.readouterr().out
+    assert "14,033" in out
+    assert "anthropic" in out
+
+
+def test_llm_value_moment_false_when_no_spend(monkeypatch):
+    import finops.welcome as WC
+    from finops import server
+
+    async def _zero(days=30):
+        return {"total_usd": 0.0, "by_provider": {}, "top_spenders": []}
+
+    monkeypatch.setattr(server, "get_llm_costs", _zero)
+    assert WC._llm_value_moment() is False
+
+
+def test_llm_admin_key_hint_points_to_admin_keys(capsys):
+    """A connected LLM key with no billing data is almost always a non-admin key.
+    The flow must tell the user that with the exact next step, not dead-end on an
+    empty bill, the most likely confusion on the AI-native connect path."""
+    import finops.welcome as WC
+
+    WC._llm_admin_key_hint("OpenAI")
+    out = capsys.readouterr().out
+    assert "admin key" in out
+    assert "platform.openai.com/settings/organization/admin-keys" in out
+    assert "finops setup openai" in out
+
+    WC._llm_admin_key_hint("Anthropic")
+    out = capsys.readouterr().out
+    assert "admin key" in out
+    assert "finops setup anthropic" in out
+
+
+def test_doctor_license_check_reports_tier(monkeypatch):
+    """finops doctor must surface the license tier so a user (e.g. a design partner
+    activating a Team key) can confirm FINOPS_LICENSE_KEY took, see free tier with
+    the activation hint, and catch an invalid/expired key."""
+    import finops.doctor as D
+    import finops.license as L
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(L, "get_status",
+                        lambda: SimpleNamespace(mode="team", email="owner@agentcard.com", days_remaining=0))
+    res = D._check_license()
+    assert res["ok"] is True and "Team" in res["detail"]
+
+    monkeypatch.setattr(L, "get_status",
+                        lambda: SimpleNamespace(mode="free", email="", days_remaining=0))
+    res = D._check_license()
+    assert res["ok"] is None and "FINOPS_LICENSE_KEY" in res["detail"]
+
+    monkeypatch.setattr(L, "get_status",
+                        lambda: SimpleNamespace(mode="invalid", email="", days_remaining=0))
+    res = D._check_license()
+    assert res["ok"] is False
+
+
+def test_normalize_and_check_key_strips_and_validates():
+    """A pasted key with quotes/whitespace must be cleaned before storing, and a
+    wrong-prefix paste (wrong provider, or an org id in the key field) must warn,
+    so it doesn't become a silent empty bill."""
+    from finops.setup_wizard import _normalize_and_check_key
+
+    # surrounding quotes + whitespace stripped, valid prefix -> no warning
+    clean, warn = _normalize_and_check_key("OPENAI_API_KEY", '  "sk-abc123"  ')
+    assert clean == "sk-abc123"
+    assert warn is None
+
+    # org id pasted into the OpenAI key field -> warns
+    clean, warn = _normalize_and_check_key("OPENAI_API_KEY", "org-xyz")
+    assert clean == "org-xyz"
+    assert warn is not None and "sk-" in warn
+
+    # Anthropic key in the OpenAI field -> warns (wrong provider)
+    _, warn = _normalize_and_check_key("OPENAI_API_KEY", "sk-ant-abc")
+    assert warn is None  # 'sk-ant-' still starts with 'sk-', so OpenAI prefix passes
+    _, warn = _normalize_and_check_key("ANTHROPIC_API_KEY", "sk-openai-xyz")
+    assert warn is not None  # not 'sk-ant-'
+
+    # unknown env var (e.g. an org id field) -> never warns
+    clean, warn = _normalize_and_check_key("OPENAI_ORG_ID", "org-123")
+    assert clean == "org-123" and warn is None
+
+
+def test_value_moment_shows_llm_spend_alongside_cloud(monkeypatch, capsys):
+    """A user with both cloud creds and a model provider must see the token bill
+    in the same value moment, not just the (often smaller) cloud bill. The token
+    bill is the AI-native hero number and the thing no cloud dashboard shows."""
+    import finops.welcome as WC
+    from finops import server
+
+    async def _summary():
+        return {"grand_total_usd": 1200.0, "grand_by_service": {"Amazon EC2": 1200.0}}
+
+    async def _idle():
+        return {}
+
+    async def _ai():
+        return {}
+
+    async def _llm(days=30):
+        return {"total_usd": 14033.0, "by_provider": {"anthropic": 14033.0}, "top_spenders": []}
+
+    async def _configured():
+        return True
+
+    monkeypatch.setattr(server, "get_cost_summary", _summary)
+    monkeypatch.setattr(server, "list_idle_resources", _idle)
+    monkeypatch.setattr(server, "optimize_ai_spend", _ai)
+    monkeypatch.setattr(server, "get_llm_costs", _llm)
+    monkeypatch.setattr(WC, "_any_llm_configured", _configured)
+
+    assert WC._value_moment_body(demo=False) is True
+    out = capsys.readouterr().out
+    assert "AI / LLM spend" in out
+    assert "14,033" in out      # the token bill, bigger than the $1,200 cloud bill

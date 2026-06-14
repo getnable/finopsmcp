@@ -100,3 +100,5 @@ docs/video/*.mp4
 docs/video/*.gif
 
 stripe-env-helper.mjs
+.vercel
+.env*

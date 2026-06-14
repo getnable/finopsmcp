@@ -504,6 +504,41 @@ def _check_path_and_install() -> dict:
     }
 
 
+def _check_license() -> dict:
+    """Report the active license tier so a user can confirm a key took effect.
+    This is the terminal-side answer to 'did my FINOPS_LICENSE_KEY activate?'"""
+    try:
+        from .license import get_status
+        s = get_status()
+        mode = getattr(s, "mode", "free")
+    except Exception as e:
+        return {"name": "License", "ok": None,
+                "detail": f"Could not read license status: {e}", "warnings": []}
+
+    label = {"team": "Team", "pro": "Pro", "enterprise": "Enterprise",
+             "trial": "Trial", "free": "Free"}.get(mode, mode)
+
+    if mode in ("pro", "team", "enterprise"):
+        email = getattr(s, "email", "") or ""
+        detail = f"{label} plan active" + (f" ({email})" if email else "")
+        return {"name": "License", "ok": True, "detail": detail, "warnings": []}
+    if mode == "trial":
+        days = getattr(s, "days_remaining", 0)
+        return {"name": "License", "ok": True,
+                "detail": f"Trial active, {days} day(s) left — all features unlocked.",
+                "warnings": []}
+    if mode == "invalid":
+        return {"name": "License", "ok": False,
+                "detail": ("FINOPS_LICENSE_KEY is set but invalid or expired. Re-check the "
+                           "key (no extra spaces/quotes), or ask for a fresh one."),
+                "warnings": []}
+    # free
+    return {"name": "License", "ok": None,
+            "detail": ("Free tier. To activate a paid key, set FINOPS_LICENSE_KEY in your "
+                       "nable MCP config env block (then fully restart your editor)."),
+            "warnings": []}
+
+
 def run_doctor(as_json: bool = False) -> int:
     """
     Run all health checks and print a report.
@@ -511,6 +546,7 @@ def run_doctor(as_json: bool = False) -> int:
     """
     checks = [
         _check_path_and_install(),
+        _check_license(),
         _check_keyring_storage(),
         _check_aws_scope(),
         _check_azure_permissions(),
