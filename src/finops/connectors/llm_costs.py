@@ -274,6 +274,8 @@ def get_all_llm_costs(
     from .saas.openai_usage import get_costs as openai_costs, is_configured as openai_configured
     from .saas.anthropic_usage import get_costs as anthropic_costs, is_configured as anthropic_configured
     from .saas.vertex_costs import get_vertex_costs, is_configured as vertex_configured
+    from .saas.openrouter import get_costs as openrouter_costs, is_configured as openrouter_configured
+    from .saas.litellm import get_costs as litellm_costs, is_configured as litellm_configured
 
     # Read-through cache: these four fetches are the slowest path in the
     # product and agentic sessions re-ask constantly.
@@ -326,14 +328,30 @@ def get_all_llm_costs(
                 return v
         return None
 
+    def _fetch_openrouter():
+        if _run(openrouter_configured()):
+            v = openrouter_costs(start_date, end_date)
+            if v.get("source") != "none":
+                return v
+        return None
+
+    def _fetch_litellm():
+        if _run(litellm_configured()):
+            v = litellm_costs(start_date, end_date)
+            if v.get("source") != "none":
+                return v
+        return None
+
     import concurrent.futures
     _fetchers = {
         "openai": _fetch_openai,
         "anthropic": _fetch_anthropic,
         "bedrock": _fetch_bedrock,
         "vertex": _fetch_vertex,
+        "openrouter": _fetch_openrouter,
+        "litellm": _fetch_litellm,
     }
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as _pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(_fetchers)) as _pool:
         _futs = {name: _pool.submit(fn) for name, fn in _fetchers.items()}
         for name, fut in _futs.items():
             try:
@@ -347,6 +365,7 @@ def get_all_llm_costs(
     total = 0.0
     by_provider: dict[str, float] = {}
     by_model: dict[str, float] = {}
+    by_model_tokens: dict[str, dict[str, int]] = {}
     daily_map: dict[str, float] = {}
 
     for provider, data in results.items():
@@ -357,6 +376,18 @@ def get_all_llm_costs(
         for model, cost in data.get("by_model", {}).items():
             full_key = f"{model}"  # keep model names as-is; provider is implicit
             by_model[full_key] = by_model.get(full_key, 0.0) + cost
+
+        # Merge per-model token counts from every provider that reports them
+        # (OpenAI, Anthropic, gateways). Bedrock/Vertex report cost-only and
+        # contribute nothing here, which is correct. This is what lets the KPI
+        # engine cover OpenAI accounts, not just Anthropic.
+        for model, tok in (data.get("by_model_tokens") or {}).items():
+            bucket = by_model_tokens.setdefault(model, {})
+            for k, v in tok.items():
+                try:
+                    bucket[k] = bucket.get(k, 0) + int(v)
+                except (TypeError, ValueError):
+                    continue
 
         for day_entry in data.get("daily", []):
             d = day_entry.get("date", "")
@@ -378,6 +409,7 @@ def get_all_llm_costs(
         "by_provider":  by_provider,
         "by_model":     {k: round(v, 4) for k, v in
                          sorted(by_model.items(), key=lambda x: x[1], reverse=True)},
+        "by_model_tokens": by_model_tokens,
         "daily":        daily,
         "top_spenders": top_spenders,
         "recommendations": recommendations,

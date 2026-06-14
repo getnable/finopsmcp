@@ -399,6 +399,104 @@ def job_weekly_email_digest() -> None:
         log.exception("Weekly email digest job failed")
 
 
+async def _check_credits_and_alert() -> dict | None:
+    """
+    Watch the AWS credit-to-cash flip and alert once when it happens. The credit
+    cliff is the #1 real trigger for an early startup to care about cost; native
+    AWS tooling sends no notification when credits deplete and billing flips to
+    cash. Dedup is keyed on (month, status) so a flip alerts once, not daily.
+    """
+    from ..connectors.credit_tracking import get_credit_status
+    from ..notifications import slack
+
+    try:
+        status = await asyncio.to_thread(get_credit_status, 6)
+    except Exception:
+        log.exception("Credit status check failed")
+        return None
+
+    if status.get("status") not in ("critical", "warning"):
+        return None
+
+    monthly = status.get("monthly") or []
+    latest_month = monthly[-1]["month"] if monthly else str(date.today())
+    dedup_key = f"{latest_month}:{status['status']}"
+    if _credit_alert_already_sent(dedup_key):
+        return None
+
+    headline = status.get("headline", "AWS credit status changed.")
+    net = status.get("latest_net_cash_usd", 0.0)
+    icon = "🚨" if status["status"] == "critical" else "⚠️"
+    text = f"{icon} AWS credits: {headline}"
+    blocks = [
+        {"type": "header",
+         "text": {"type": "plain_text", "text": f"{icon} AWS credit alert"}},
+        {"type": "section",
+         "text": {"type": "mrkdwn", "text": f"*{headline}*"}},
+        {"type": "section", "fields": [
+            {"type": "mrkdwn", "text": f"*Latest net cash*\n${net:,.0f}/mo"},
+            {"type": "mrkdwn",
+             "text": f"*Credit coverage*\n{status.get('latest_credit_coverage_pct', 0):.0f}%"},
+        ]},
+    ]
+
+    sent = False
+    if slack.is_configured():
+        try:
+            sent = await slack.send(blocks, text) or sent
+        except Exception:
+            log.exception("Slack credit alert failed")
+
+    if sent:
+        _mark_credit_alert_sent(dedup_key)
+    return status
+
+
+def _credit_alert_state_path():
+    import os
+    from pathlib import Path
+    base = Path(os.environ.get("FINOPS_HOME", str(Path.home() / ".finops-mcp")))
+    return base / "credit_alert_state.json"
+
+
+def _credit_alert_already_sent(key: str) -> bool:
+    import json
+    p = _credit_alert_state_path()
+    try:
+        if p.exists():
+            return key in set(json.loads(p.read_text()).get("sent", []))
+    except Exception:
+        pass
+    return False
+
+
+def _mark_credit_alert_sent(key: str) -> None:
+    import json
+    p = _credit_alert_state_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        data = {"sent": []}
+        if p.exists():
+            data = json.loads(p.read_text())
+        sent = set(data.get("sent", []))
+        sent.add(key)
+        # keep the list bounded
+        data["sent"] = sorted(sent)[-50:]
+        p.write_text(json.dumps(data))
+    except Exception:
+        log.debug("Could not persist credit alert state")
+
+
+def job_credit_check() -> None:
+    """Check the AWS credit-to-cash flip and alert once when it trips."""
+    try:
+        result = _run(_check_credits_and_alert())
+        if result:
+            log.info("Credit check: status=%s", result.get("status"))
+    except Exception:
+        log.exception("Credit check job failed")
+
+
 def job_auto_verify() -> None:
     """Verify acted-on recommendations against live cloud state and record realized
     savings. This is what makes the rightsizing PR body's promise ("nable will
@@ -460,6 +558,12 @@ def start_scheduler() -> BackgroundScheduler | None:
     # promises. Closes the find -> fix -> prove loop without a human re-running anything.
     verify_cron = os.environ.get("FINOPS_VERIFY_CRON", "0 3 * * *")
     _scheduler.add_job(job_auto_verify, CronTrigger.from_crontab(verify_cron), id="auto_verify", replace_existing=True)
+
+    # Credit-to-cash flip watch daily at 04:00 UTC. Fires once when promotional
+    # credits stop covering the bill — the moment an early startup first feels
+    # cost pain, which AWS sends no native notification for.
+    credit_cron = os.environ.get("FINOPS_CREDIT_CRON", "0 4 * * *")
+    _scheduler.add_job(job_credit_check, CronTrigger.from_crontab(credit_cron), id="credit_check", replace_existing=True)
 
     _scheduler.start()
     log.info("Scheduler started (snapshot=%s, anomaly=%s, digest=%s)", snapshot_cron, anomaly_cron, digest_cron)

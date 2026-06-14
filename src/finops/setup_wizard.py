@@ -1505,6 +1505,11 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("sso",          help="Configure enterprise SSO (OIDC / Okta / Azure AD)")
     sub.add_parser("openai",       help="Connect OpenAI usage and billing API")
     sub.add_parser("anthropic",    help="Connect Anthropic usage API")
+    sub.add_parser("openrouter",   help="Connect OpenRouter gateway usage")
+    sub.add_parser("litellm",      help="Connect a self-hosted LiteLLM proxy")
+    sub.add_parser("modal",        help="Connect Modal serverless-GPU account")
+    sub.add_parser("together",     help="Connect Together AI account")
+    sub.add_parser("replicate",    help="Connect Replicate account")
     sub.add_parser("cohere",       help="Connect Cohere API usage")
     sub.add_parser("mistral",      help="Connect Mistral AI API usage")
     sub.add_parser("newrelic",     help="Connect New Relic data ingest and seat costs")
@@ -1632,6 +1637,24 @@ def main(args: list[str] | None = None) -> None:
             ("ANTHROPIC_API_KEY", "API Key (sk-ant-...)", True),
             ("ANTHROPIC_ADMIN_KEY", "Admin Key for org usage data (optional)", True),
             ("ANTHROPIC_ORGANIZATION_ID", "Organization ID (optional)", False),
+        ]),
+        "openrouter": lambda: setup_saas_api_key("OpenRouter", [
+            ("OPENROUTER_API_KEY", "API Key (sk-or-...)", True),
+            ("OPENROUTER_PROVISIONING_KEY", "Provisioning key for per-model usage (optional, recommended)", True),
+        ]),
+        "litellm": lambda: setup_saas_api_key("LiteLLM proxy", [
+            ("LITELLM_PROXY_URL", "Proxy base URL (e.g. http://localhost:4000)", False),
+            ("LITELLM_MASTER_KEY", "Master/admin key (sk-...)", True),
+        ]),
+        "modal": lambda: setup_saas_api_key("Modal", [
+            ("MODAL_TOKEN_ID", "Token ID (ak-...)", True),
+            ("MODAL_TOKEN_SECRET", "Token secret (as-...)", True),
+        ]),
+        "together": lambda: setup_saas_api_key("Together AI", [
+            ("TOGETHER_API_KEY", "API Key", True),
+        ]),
+        "replicate": lambda: setup_saas_api_key("Replicate", [
+            ("REPLICATE_API_TOKEN", "API Token (r8_...)", True),
         ]),
         "cohere": lambda: setup_saas_api_key("Cohere", [
             ("COHERE_API_KEY", "API Key", True),
@@ -1787,7 +1810,7 @@ def main(args: list[str] | None = None) -> None:
         # Interactive full setup
         _wizard_select_persona()
 
-        providers = ["aws", "azure", "gcp", "openai", "anthropic", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams", "notion", "n8n"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "openrouter", "litellm", "modal", "together", "replicate", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams", "notion", "n8n"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")
