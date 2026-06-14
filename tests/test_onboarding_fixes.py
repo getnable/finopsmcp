@@ -150,6 +150,32 @@ def test_ambient_connect_emits_provider_connected(monkeypatch):
     assert "ambient" in emitted
 
 
+def test_demo_value_moment_renders_and_skips_real_aws_tools(monkeypatch):
+    # The bug: list_idle_resources had no demo guard, so in demo mode it reached
+    # for real AWS and blocked the value-moment, rendering the "sample bill" empty.
+    # Demo must render the headline from get_cost_summary and never call the
+    # un-guarded real-AWS tools.
+    import finops.demo_data as dd
+    from finops import server
+
+    monkeypatch.setattr(dd, "DEMO_MODE", True)
+    called = {"idle": 0, "ai": 0}
+
+    async def _idle(*a, **k):
+        called["idle"] += 1
+        return {}
+
+    async def _ai(*a, **k):
+        called["ai"] += 1
+        return {}
+
+    monkeypatch.setattr(server, "list_idle_resources", _idle)
+    monkeypatch.setattr(server, "optimize_ai_spend", _ai)
+
+    assert WC._value_moment_body(demo=True) is True
+    assert called["idle"] == 0 and called["ai"] == 0
+
+
 def test_and_list_prose():
     assert WC._and_list([]) == ""
     assert WC._and_list(["Cursor"]) == "Cursor"

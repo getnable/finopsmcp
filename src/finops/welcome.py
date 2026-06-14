@@ -250,62 +250,53 @@ def _show_value_moment(demo: bool = False) -> bool:
 _VALUE_MOMENT_TIMEOUT = 30  # seconds; hard wall-clock cap on the first-run scan
 
 
+def _run_capped(fn, timeout: float):
+    """Run fn() in a daemon thread; return its result, or None if it does not
+    finish within `timeout` seconds. Returns on time even when fn pins the event
+    loop or blocks on I/O, which a plain asyncio timeout cannot interrupt. The
+    abandoned thread is a daemon and dies with the process."""
+    import threading
+
+    box: dict = {}
+
+    def _w():
+        try:
+            box["v"] = fn()
+        except Exception:
+            box["v"] = None
+
+    t = threading.Thread(target=_w, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+    return box.get("v")
+
+
 def _value_moment_body(demo: bool = False) -> bool:
     """Scan and print a real dollar figure. Wrapped by _show_value_moment, which
     owns the demo-env lifecycle."""
     if not demo:
         _line(dim("  Scanning your account, this can take up to ~30s..."))
 
-    # Run the scan in a daemon thread with a wall-clock join cap. An asyncio
-    # timeout alone is NOT enough: get_cost_summary can make a blocking call (an
-    # SSO token refresh, a slow Cost Explorer request) that pins the event loop,
-    # so asyncio.wait_for never gets to fire and setup hangs forever. A thread
-    # join returns on time even when the inner work is blocked; the abandoned
-    # thread is a daemon and dies with the process.
-    import threading
+    import asyncio
+    from . import server  # heavy import, only at the value-moment step
 
-    holder: dict = {}
+    _quiet_logs()
 
-    def _work():
-        try:
-            _quiet_logs()
-            import asyncio
-            from . import server  # heavy import, only at the value-moment step
+    # Headline first, on its own wall-clock cap. The user came for this number, so
+    # the optional idle/AI scans below must never block or blank it. _run_capped's
+    # daemon-thread join returns on time even when a call pins the event loop (an
+    # asyncio timeout alone would not fire — the bug that used to hang setup and
+    # blanked this scan when an un-guarded tool reached for real AWS in demo).
+    summary = _run_capped(lambda: asyncio.run(server.get_cost_summary()), _VALUE_MOMENT_TIMEOUT)
 
-            async def _run():
-                async def _idle():
-                    try:
-                        return await asyncio.wait_for(server.list_idle_resources(), timeout=12)
-                    except Exception:
-                        return None
-
-                async def _ai():
-                    try:
-                        return await asyncio.wait_for(server.optimize_ai_spend(), timeout=18)
-                    except Exception:
-                        return None
-
-                # Run the scans concurrently so the AI optimizer adds no latency.
-                summary, idle, ai_plan = await asyncio.gather(
-                    server.get_cost_summary(), _idle(), _ai(), return_exceptions=True,
-                )
-                return (
-                    None if isinstance(summary, Exception) else summary,
-                    None if isinstance(idle, Exception) else idle,
-                    None if isinstance(ai_plan, Exception) else ai_plan,
-                )
-
-            holder["v"] = asyncio.run(_run())
-        except Exception:
-            holder["v"] = None
-
-    _t = threading.Thread(target=_work, daemon=True)
-    _t.start()
-    _t.join(timeout=_VALUE_MOMENT_TIMEOUT)
-    res = holder.get("v")
-    if not res:
-        return False  # timed out or failed; caller falls back to demo/next step
-    summary, idle, ai_plan = res
+    # Optional extras, real accounts only. There is no demo idle/AI dataset, and
+    # calling those tools in demo would reach for real AWS, so skip them in demo.
+    # Each runs on its own cap so a slow scan can't hold the headline hostage.
+    idle = None
+    ai_plan = None
+    if not demo and isinstance(summary, dict) and not summary.get("error"):
+        idle = _run_capped(lambda: asyncio.run(server.list_idle_resources()), 12)
+        ai_plan = _run_capped(lambda: asyncio.run(server.optimize_ai_spend()), 18)
 
     if not isinstance(summary, dict) or summary.get("error"):
         return False
