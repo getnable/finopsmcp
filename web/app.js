@@ -579,7 +579,7 @@ const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
 const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 const PRICE_ROWS = [
-  { label: "Seats", solo: "1", pro: "unlimited", team: "unlimited", ent: "unlimited" },
+  { label: "Users", solo: "Just you", pro: "Your whole team", team: "Your whole team", ent: "Your whole org" },
   { label: "Core FinOps: cost queries, anomalies, rightsizing, AI/LLM tracking, 17 connectors, local-first", solo: true, pro: true, team: true, ent: true },
   { label: "AWS cost data", solo: "Cost Explorer", pro: "Explorer + CUR", team: "Explorer + CUR", ent: "Explorer + CUR" },
   { label: "Terraform remediation: patch + open the PR", solo: false, pro: true, team: true, ent: true },
