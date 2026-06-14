@@ -286,11 +286,15 @@ async def _send_daily_digest() -> bool:
 
 # ── Sync wrappers for APScheduler ─────────────────────────────────────────────
 
-def _run(coro) -> None:
+def _run(coro):
+    """Run a coroutine to completion and return its result (or None on error).
+    Returning the result lets callers like job_credit_check act on it; the other
+    job_* callers ignore the return value, so this is backward-compatible."""
     try:
-        asyncio.run(coro)
+        return asyncio.run(coro)
     except Exception:
         log.exception("Scheduled job failed")
+        return None
 
 
 def job_snapshot() -> None:
@@ -464,7 +468,9 @@ def _credit_alert_already_sent(key: str) -> bool:
     p = _credit_alert_state_path()
     try:
         if p.exists():
-            return key in set(json.loads(p.read_text()).get("sent", []))
+            loaded = json.loads(p.read_text())
+            sent = loaded.get("sent", []) if isinstance(loaded, dict) else []
+            return key in set(sent)
     except Exception:
         pass
     return False
@@ -477,7 +483,12 @@ def _mark_credit_alert_sent(key: str) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         data = {"sent": []}
         if p.exists():
-            data = json.loads(p.read_text())
+            loaded = json.loads(p.read_text())
+            # If the file is corrupt (non-dict JSON from a partial write), drop it and
+            # rewrite a valid one, so dedup self-heals instead of failing open forever
+            # and re-sending the same alert on every run.
+            if isinstance(loaded, dict):
+                data = loaded
         sent = set(data.get("sent", []))
         sent.add(key)
         # keep the list bounded

@@ -271,6 +271,18 @@ def _run_capped(fn, timeout: float):
     return box.get("v")
 
 
+async def _any_llm_configured() -> bool:
+    """Fast (vault/env, no network) check for a connected model provider, so the
+    value moment only spends time fetching the token bill when there is one."""
+    try:
+        from .connectors.saas.openai_usage import is_configured as _oai
+        from .connectors.saas.anthropic_usage import is_configured as _ant
+        from .connectors.saas.openrouter import is_configured as _or
+        return bool(await _oai() or await _ant() or await _or())
+    except Exception:
+        return False
+
+
 def _value_moment_body(demo: bool = False) -> bool:
     """Scan and print a real dollar figure. Wrapped by _show_value_moment, which
     owns the demo-env lifecycle."""
@@ -294,9 +306,16 @@ def _value_moment_body(demo: bool = False) -> bool:
     # Each runs on its own cap so a slow scan can't hold the headline hostage.
     idle = None
     ai_plan = None
+    llm = None
     if not demo and isinstance(summary, dict) and not summary.get("error"):
         idle = _run_capped(lambda: asyncio.run(server.list_idle_resources()), 12)
         ai_plan = _run_capped(lambda: asyncio.run(server.optimize_ai_spend()), 18)
+        # AI-native users connect a model provider too, and the token bill is their
+        # biggest number and the thing no cloud dashboard shows. Surface it in the
+        # same value moment instead of only the cloud bill. Gated on a fast config
+        # check so cloud-only users never wait on a token fetch.
+        if _run_capped(lambda: asyncio.run(_any_llm_configured()), 3):
+            llm = _run_capped(lambda: asyncio.run(server.get_llm_costs(days=30)), 15)
 
     if not isinstance(summary, dict) or summary.get("error"):
         return False
@@ -320,6 +339,12 @@ def _value_moment_body(demo: bool = False) -> bool:
     _line(green("✓") + bold("  " + _header))
     _blank()
     _line(f"  {dim('Total spend')}      {bold('$' + format(total, ',.0f'))}")
+    # The token bill (OpenAI/Anthropic/Bedrock/gateways), the AI-native hero number,
+    # shown alongside the cloud bill when a model provider is connected.
+    if isinstance(llm, dict):
+        llm_total = llm.get("total_usd") or 0
+        if llm_total >= 1:
+            _line(f"  {dim('AI / LLM spend')}   {bold('$' + format(llm_total, ',.0f'))}  {dim('OpenAI, Anthropic, Bedrock')}")
     _line(f"  {dim('Top driver')}       {top_name}  {cyan('$' + format(top_val, ',.0f'))}")
     if ai_share >= 5:
         _line(f"  {dim('AI / ML share')}    {bold(str(ai_share) + '%')}  {dim('of your cloud bill')}")
@@ -335,6 +360,105 @@ def _value_moment_body(demo: bool = False) -> bool:
             _line(f"  {dim('AI savings')}       {green('$' + format(ai_save, ',.0f') + '/mo')}  {dim('ready to capture')}")
     _blank()
     return True
+
+
+def _llm_ambient_provider() -> str | None:
+    """Return 'OpenAI' or 'Anthropic' when a model-provider key is already in the
+    shell environment, else None. AI-native startups' biggest cost is the token
+    bill, and they usually have OPENAI_API_KEY/ANTHROPIC_API_KEY exported already,
+    so this is their fastest path to a real first number, no cloud account needed."""
+    import os
+    if os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_ADMIN_KEY"):
+        return "OpenAI"
+    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_ADMIN_KEY"):
+        return "Anthropic"
+    return None
+
+
+def _llm_value_moment() -> bool:
+    """Print the user's real LLM/token bill as the first number. Mirrors the cloud
+    value moment but reads get_llm_costs, so an AI-native account sees its actual
+    spend (OpenAI + Anthropic + gateways) instead of a cloud summary that would be
+    empty for them. Returns True only when a real dollar figure was shown."""
+    import asyncio
+    from . import server
+
+    _quiet_logs()
+    result = _run_capped(lambda: asyncio.run(server.get_llm_costs(days=30)), _VALUE_MOMENT_TIMEOUT)
+    if not isinstance(result, dict) or result.get("error"):
+        return False
+    total = result.get("total_usd") or 0.0
+    if total <= 0:
+        return False
+
+    by_provider = result.get("by_provider") or {}
+    top_spenders = result.get("top_spenders") or []
+
+    _blank()
+    _line(_rule())
+    _blank()
+    _line(green("✓") + bold("  nable scanned your AI spend — last 30 days"))
+    _blank()
+    _line(f"  {dim('Total AI spend')}   {bold('$' + format(total, ',.0f'))}")
+    if by_provider:
+        prov, amt = sorted(by_provider.items(), key=lambda kv: kv[1], reverse=True)[0]
+        _line(f"  {dim('Top provider')}     {prov}  {cyan('$' + format(amt, ',.0f'))}")
+    if top_spenders:
+        m = top_spenders[0]
+        _line(f"  {dim('Top model')}        {m.get('model', '')}  {cyan('$' + format(m.get('cost_usd', 0), ',.0f'))}")
+    _blank()
+    return True
+
+
+def _connect_llm_provider() -> bool:
+    """Prompt for an OpenAI or Anthropic key, store it, and show the token bill.
+    The AI-native segment's first real number is its model spend, not a cloud bill."""
+    from .setup_wizard import setup_saas_api_key
+    try:
+        pick = input("  Which? 1) OpenAI  2) Anthropic  [1]: ").strip() or "1"
+    except (KeyboardInterrupt, EOFError):
+        return False
+    _blank()
+    try:
+        if pick == "2":
+            setup_saas_api_key("Anthropic", [
+                ("ANTHROPIC_API_KEY", "API Key (sk-ant-...)", True),
+                ("ANTHROPIC_ADMIN_KEY", "Admin Key for org usage data (optional)", True),
+                ("ANTHROPIC_ORGANIZATION_ID", "Organization ID (optional)", False),
+            ])
+        else:
+            setup_saas_api_key("OpenAI", [
+                ("OPENAI_API_KEY", "API Key (sk-...)", True),
+                ("OPENAI_ADMIN_KEY", "Admin/Org Key for billing data (sk-admin-..., optional)", True),
+                ("OPENAI_ORG_ID", "Organization ID (org-..., optional)", False),
+            ])
+    except (KeyboardInterrupt, EOFError):
+        return False
+    except Exception:
+        return False
+    shown = _llm_value_moment()
+    if not shown:
+        _llm_admin_key_hint("Anthropic" if pick == "2" else "OpenAI")
+    return shown
+
+
+def _llm_admin_key_hint(provider: str) -> None:
+    """A connected LLM key that returns no org billing data is almost always a
+    regular (non-admin) key. Org cost data needs an ADMIN key, so say that with the
+    exact next step instead of dead-ending the user on an empty bill, the single
+    most likely confusion on the AI-native connect path."""
+    _blank()
+    if provider == "OpenAI":
+        _line(dim("  Key works, but no org billing data came back. OpenAI cost data needs an"))
+        _line(dim("  ") + bold("admin key") + dim(" (sk-admin-...), not a regular key."))
+        _line(dim("  Create one:  ") + cyan("https://platform.openai.com/settings/organization/admin-keys"))
+        _line(dim("  Then run:    ") + cyan("finops setup openai") + dim("  and paste it as the Admin key."))
+    elif provider == "Anthropic":
+        _line(dim("  Key works, but no org usage data came back. Anthropic cost data needs an"))
+        _line(dim("  ") + bold("admin key") + dim(" plus your Organization ID."))
+        _line(dim("  Create one in the Anthropic Console under Settings -> Admin keys, then run:"))
+        _line(dim("  ") + cyan("finops setup anthropic") + dim("  and paste them."))
+    _blank()
 
 
 # ── Full onboarding flow (finops welcome) ──────────────────────────────────────
@@ -452,6 +576,35 @@ def run_welcome_flow(demo: bool = False) -> None:
                 except Exception:
                     pass
 
+    # No cloud creds shown yet: AI-native users usually have a model-provider key
+    # in their env, and the token bill IS their biggest cost. Offer it as the fast
+    # first number before falling back to the cloud connect menu.
+    if not shown:
+        _llm_prov = _llm_ambient_provider()
+        if _llm_prov:
+            _line(f"  {green('Found ' + _llm_prov + ' credentials')} in your environment.")
+            _line(dim("  nable can show your AI / LLM bill with them right now."))
+            _blank()
+            ans = "y"
+            try:
+                ans = input(f"  Show your {_llm_prov} bill now? [Y/n]: ").strip().lower() or "y"
+            except (KeyboardInterrupt, EOFError):
+                ans = "n"
+            _blank()
+            if ans in ("y", "yes"):
+                shown = _llm_value_moment()
+                if shown:
+                    try:
+                        from .setup_wizard import _emit_provider_connected
+                        _emit_provider_connected("ambient")
+                    except Exception:
+                        pass
+                else:
+                    # Key is present but returned no billing data: almost always a
+                    # non-admin key. Point them at the admin key instead of leaving
+                    # them staring at an empty AI bill.
+                    _llm_admin_key_hint(_llm_prov)
+
     # No ambient creds, or they declined: offer the full connect menu.
     if not shown:
         # Lead with the one-click read-only key when it's published: a no-creds
@@ -465,13 +618,14 @@ def run_welcome_flow(demo: bool = False) -> None:
         _line(f"  {dim('1)')} AWS          {dim('reads your existing AWS profile')}")
         _line(f"  {dim('2)')} Azure")
         _line(f"  {dim('3)')} GCP")
-        _line(f"  {dim('4)')} Skip for now")
+        _line(f"  {dim('4)')} OpenAI / Anthropic   {dim('paste an API key, see your token bill')}")
+        _line(f"  {dim('5)')} Skip for now")
         _blank()
-        choice = "4"
+        choice = "5"
         try:
-            choice = input("  Choice [4]: ").strip() or "4"
+            choice = input("  Choice [5]: ").strip() or "5"
         except (KeyboardInterrupt, EOFError):
-            choice = "4"
+            choice = "5"
         _blank()
 
         if choice == "1":
@@ -486,6 +640,10 @@ def run_welcome_flow(demo: bool = False) -> None:
             from .setup_wizard import setup_gcp
             setup_gcp()
             shown = _show_value_moment(demo=False)
+        elif choice == "4":
+            # AI-native fast path: connect a model provider and show the token
+            # bill, the number that actually matters for this segment.
+            shown = _connect_llm_provider()
 
     # Never dead-end. If they skipped, declined, or the scan came up empty,
     # show nable on sample data so the value lands before they ever leave.

@@ -2,6 +2,52 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.74
+
+A security pass (/cso) and a correctness pass (/debug) over the recent work, plus
+onboarding polish so a connect-to-value run holds up for a real first user.
+
+### Security
+- **Removed `sts:AssumeRole` from the read-only connect key.** It's a privilege-
+  escalation primitive, not a read: in an account with a role that trusts the
+  account root (common), a holder of the "read-only" key could assume it and gain
+  its permissions. The single-account connect never assumes a role, so it's gone,
+  and `sts:Assume` is now in the over-privilege guard. The key is now strictly read.
+- Corrected the CloudFormation Outputs wording: the secret access key is not "shown
+  once," it persists in the stack Outputs; the description now says so and points to
+  deleting the stack to revoke.
+
+### Correctness (verified review findings)
+- **Credit alarm no longer cries wolf at month start.** AWS posts promotional
+  credits on a lag, so a healthy, fully-covered account looked uncovered early in
+  the month and could fire a false "credits flipped to cash" alert. It now assesses
+  the latest settled month, not the in-progress one.
+- **OpenRouter window is end-inclusive.** It was dropping today's spend, and a
+  single-day query returned empty. Also hardened the credits fallback against a
+  malformed/null API response.
+- **Context-window KPI no longer reports nonsense for Anthropic.** With no per-
+  request data it was dividing whole-period tokens by 1 and labeling a thousands-
+  of-percent figure "healthy"; it now says the data is unavailable, and Anthropic
+  populates request counts when the API provides them.
+- Fixed `model_sprawl` double-counting `o3-mini`/`o1-mini` as both cheap and
+  expensive (substring match), a single-month credit query mislabeled as "no
+  credits", a mislabeled `monthly_usd` on the blind-spot tool (now `window_usd`,
+  it's a window sum), a dead success-log in the credit-check job, and a corrupt
+  alert-dedup file that would re-send daily (now self-heals). Clamped a positive
+  credit-clawback row so it can't produce negative coverage.
+
+### Onboarding
+- **The value moment shows the token bill, not just the cloud bill.** A user with
+  both AWS and a model provider now sees their AI/LLM spend alongside cloud spend,
+  the bigger number for an AI-native team and the thing no cloud dashboard shows.
+- AI-native fast path: ambient `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` offers an
+  instant token-bill scan, plus an explicit OpenAI/Anthropic connect menu option.
+- A connected model key that returns no billing data now explains it needs an admin
+  key (with the exact URL), instead of dead-ending on an empty bill.
+- `finops doctor` reports the license tier, so activating a key is verifiable.
+- API-key entry strips wrapping quotes/whitespace and warns on a wrong-provider
+  paste, instead of silently storing a broken key.
+
 ## 0.8.73
 
 ### The one-click connect key is now strictly read-only

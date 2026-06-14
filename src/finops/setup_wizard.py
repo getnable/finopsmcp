@@ -846,6 +846,35 @@ def setup_gcp() -> None:
             pass
 
 
+# Expected prefixes for known API-key env vars. Used to catch the common paste
+# mistakes (wrong provider's key, an org id in the key field) at entry time
+# instead of letting a bad key turn into a confusing empty bill later.
+_KEY_PREFIX_HINTS: dict[str, tuple[str, str]] = {
+    "OPENAI_API_KEY":           ("sk-",     "OpenAI keys start with 'sk-'"),
+    "OPENAI_ADMIN_KEY":         ("sk-",     "OpenAI admin keys start with 'sk-admin-' (or 'sk-')"),
+    "ANTHROPIC_API_KEY":        ("sk-ant-", "Anthropic keys start with 'sk-ant-'"),
+    "ANTHROPIC_ADMIN_KEY":      ("sk-ant-", "Anthropic admin keys start with 'sk-ant-'"),
+    "OPENROUTER_API_KEY":       ("sk-or-",  "OpenRouter keys start with 'sk-or-'"),
+    "OPENROUTER_PROVISIONING_KEY": ("sk-or-", "OpenRouter keys start with 'sk-or-'"),
+    "REPLICATE_API_TOKEN":      ("r8_",     "Replicate tokens start with 'r8_'"),
+}
+
+
+def _normalize_and_check_key(env_key: str, val: str) -> tuple[str, str | None]:
+    """Strip whitespace and a wrapping pair of quotes from a pasted credential, and
+    return (clean_value, warning_or_None). A quoted or wrong-prefix paste is the most
+    common reason a connected provider then shows an empty bill. Returns a warning
+    rather than rejecting, so an evolving key format is never hard-blocked."""
+    clean = (val or "").strip()
+    if len(clean) >= 2 and clean[0] == clean[-1] and clean[0] in ("'", '"'):
+        clean = clean[1:-1].strip()
+    hint = _KEY_PREFIX_HINTS.get(env_key)
+    warn = None
+    if hint and clean and not clean.startswith(hint[0]):
+        warn = f"{hint[1]} — double-check you pasted the right value."
+    return clean, warn
+
+
 def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]) -> None:
     """Generic wizard for API-key SaaS providers."""
     _section(f"{provider_name}")
@@ -854,6 +883,9 @@ def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]
     stored_any = False
     for env_key, label, is_secret in env_vars:
         val = _prompt(f"  {label}", secret=is_secret)
+        val, warn = _normalize_and_check_key(env_key, val)
+        if warn:
+            _warn(warn)
         if val:
             vault.store(env_key, val)
             stored_any = True

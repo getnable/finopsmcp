@@ -77,9 +77,13 @@ def fetch_record_type_monthly(months: int = 6, today: date | None = None, ce=Non
             by_type[rtype] = round(amt, 4)
             net += amt
             if rtype in _CREDIT_TYPES:
-                credits += -amt          # credit rows are negative; store magnitude
+                # Credit rows are normally negative (they offset the bill); store the
+                # magnitude. Clamp at 0 so a positive Credit row (a credit clawback /
+                # reversal, rare but real) can't produce a negative "credits" value
+                # and a bogus negative coverage downstream. net_cash still nets it.
+                credits += max(0.0, -amt)
             elif rtype in _REFUND_TYPES:
-                refunds += -amt
+                refunds += max(0.0, -amt)
             elif amt > 0:
                 gross += amt
         out.append({
@@ -113,15 +117,28 @@ def analyze_credits(per_month: list[dict]) -> dict[str, Any]:
     nets = [m["net_cash"] for m in per_month]
     coverage = [(c / g if g > 0 else 0.0) for c, g in zip(credits, grosses)]
 
-    prior_cov = coverage[:-1]
-    latest_cov = coverage[-1]
-    prior_max_cov = max(prior_cov) if prior_cov else 0.0
-    credits_active = prior_max_cov >= 0.30 or any(c > 1.0 for c in credits[:-1])
+    # credits_active = "are credits meaningfully in play". Consider ALL months,
+    # including the latest, so a fully credit-covered single month (months=1, or a
+    # brand-new account) still registers instead of being mislabeled "no credits".
+    max_cov = max(coverage) if coverage else 0.0
+    credits_active = max_cov >= 0.30 or any(c > 1.0 for c in credits)
 
-    latest_net = nets[-1]
-    # Cash-flip: credits used to carry the bill, now coverage has collapsed and
-    # real cash is going out the door.
-    cash_flip = bool(credits_active and latest_cov < 0.10 and latest_net > 25.0)
+    # Assess coverage/flip on the latest SETTLED month. The in-progress current month
+    # is unreliable: gross accrues immediately but AWS posts the offsetting Credit row
+    # days later, so a healthy covered account looks uncovered at the start of a
+    # month. If the current month's gross is well below the trailing baseline, it is
+    # too early to judge, so assess the prior settled month instead. This kills the
+    # start-of-month false "credits flipped to cash" alarm (both critical AND warning,
+    # since the scheduler alerts on both).
+    prior_gross = sorted(g for g in grosses[:-1] if g > 0)
+    baseline_gross = prior_gross[len(prior_gross) // 2] if prior_gross else 0.0  # median
+    assess_idx = len(per_month) - 1
+    if baseline_gross > 0 and grosses[-1] < 0.5 * baseline_gross and len(per_month) >= 2:
+        assess_idx = len(per_month) - 2
+    assess_cov = coverage[assess_idx]
+    assess_net = nets[assess_idx]
+
+    cash_flip = bool(credits_active and assess_cov < 0.10 and assess_net > 25.0)
 
     # Declining-credit trend + best-effort months-to-zero from a linear slope on
     # the credit magnitudes (only meaningful while credits are still flowing).
@@ -147,18 +164,18 @@ def analyze_credits(per_month: list[dict]) -> dict[str, Any]:
         status = "critical"
         headline = (
             f"Credits flipped to cash. Your bill was largely credit-covered and is "
-            f"now ${latest_net:,.0f}/mo in real cash. This is the cliff."
+            f"now ${assess_net:,.0f}/mo in real cash. This is the cliff."
         )
-    elif credits_active and latest_cov < 0.50:
+    elif credits_active and assess_cov < 0.50:
         status = "warning"
         headline = (
-            f"Credit coverage is dropping ({latest_cov*100:.0f}% of the latest bill). "
-            f"Cash exposure is climbing."
+            f"Credit coverage is dropping ({assess_cov*100:.0f}% of the latest "
+            f"settled bill). Cash exposure is climbing."
         )
     elif credits_active:
         status = "ok"
         headline = (
-            f"Credits are covering {latest_cov*100:.0f}% of the bill. "
+            f"Credits are covering {assess_cov*100:.0f}% of the bill. "
             f"Watch for the flip when they run low."
         )
     elif any(n > 25.0 for n in nets):
@@ -173,8 +190,10 @@ def analyze_credits(per_month: list[dict]) -> dict[str, Any]:
         "headline": headline,
         "cash_flip_detected": cash_flip,
         "credits_active": credits_active,
-        "latest_credit_coverage_pct": round(latest_cov * 100, 1),
-        "latest_net_cash_usd": round(latest_net, 2),
+        # Reported on the assessed (latest settled) month, so the figures match the
+        # status and aren't skewed by the in-progress month's credit-posting lag.
+        "latest_credit_coverage_pct": round(assess_cov * 100, 1),
+        "latest_net_cash_usd": round(assess_net, 2),
         "credit_trend": trend,
         "estimated_months_to_zero_credits": months_to_zero,
         "monthly": per_month,
@@ -224,13 +243,15 @@ def detect_billing_blind_spots(by_service: dict[str, float]) -> dict[str, Any]:
             if hint_key in s:
                 findings.append({
                     "service": service,
-                    "monthly_usd": round(float(amount), 2),
+                    # Spend over the caller's lookback window, NOT a calendar month:
+                    # a 30-day window can straddle two months and by_service sums both.
+                    "window_usd": round(float(amount), 2),
                     "reason": reason,
                 })
                 total_blind += float(amount)
                 break
 
-    findings.sort(key=lambda f: f["monthly_usd"], reverse=True)
+    findings.sort(key=lambda f: f["window_usd"], reverse=True)
     return {
         "blind_spot_count": len(findings),
         "total_blind_spot_usd": round(total_blind, 2),

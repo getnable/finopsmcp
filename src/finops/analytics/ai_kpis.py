@@ -197,16 +197,22 @@ def context_window_utilization(usage_data: dict[str, Any]) -> dict[str, Any]:
     low_util_models: list[str] = []
 
     for model, tok in tokens_map.items():
-        if isinstance(tok, dict):
-            input_tokens = tok.get("input_tokens", 0)
-            # Estimate request count from token data if available
-            request_count = tok.get("request_count", 1)
-        else:
+        if not isinstance(tok, dict):
             # tok is a cost float (aggregated data without token detail)
             continue
+        input_tokens = tok.get("input_tokens", 0)
+        request_count = tok.get("request_count", 0)
 
-        if request_count == 0:
-            request_count = 1
+        if request_count <= 0:
+            # No per-request data. The Anthropic Usage API returns token totals, not
+            # request counts, so dividing the whole-period token sum by 1 would report
+            # a meaningless thousands-of-percent figure and falsely label it "healthy".
+            # Surface that it is unavailable instead of guessing. OpenAI carries
+            # num_model_requests, so its models still compute a real average.
+            by_model_result[model] = {
+                "note": "per-request data unavailable; context-window utilisation not computed",
+            }
+            continue
 
         avg_input   = input_tokens / request_count
         max_context = _CONTEXT_WINDOWS.get(model, _CONTEXT_WINDOWS["_default"])
@@ -328,6 +334,11 @@ def model_sprawl_score(by_model: dict[str, float]) -> dict[str, Any]:
         k in m for k in ["haiku", "gpt-4o-mini", "o3-mini", "o4-mini", "gemini-1.5-flash",
                           "gemini-2.0-flash", "gpt-3.5", "text-bison", "chat-bison"]
     )]
+    # The expensive keys are bare ("o1", "o3") and substring-match cheap reasoning
+    # models ("o3" in "o3-mini", "o1" in "o1-mini"), so those got counted as BOTH,
+    # inflating expensive_cost and firing a false "expensive models still cost $X"
+    # flag. A model classified cheap is cheap; remove it from expensive.
+    expensive_models = [m for m in expensive_models if m not in cheap_models]
 
     if cheap_models and expensive_models:
         cheap_share  = sum(shares.get(m, 0) for m in cheap_models)

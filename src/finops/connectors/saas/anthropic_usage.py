@@ -282,7 +282,8 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
         cache_creation = _int(entry.get("cache_creation_input_tokens", 0))
         day        = entry.get("date") or entry.get("timestamp", "")[:10]
 
-        total_requests += _int(entry.get("request_count", entry.get("num_requests", 0)))
+        req = _int(entry.get("request_count", entry.get("num_requests", 0)))
+        total_requests += req
         error_requests += _int(entry.get("error_count", entry.get("num_errors", 0)))
 
         # If actual cost is in the response, use it
@@ -301,11 +302,16 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
             "output_tokens":               0,
             "cache_read_input_tokens":     0,
             "cache_creation_input_tokens": 0,
+            "request_count":               0,
         })
         bucket["input_tokens"]                += input_tok
         bucket["output_tokens"]               += output_tok
         bucket["cache_read_input_tokens"]     += cache_read
         bucket["cache_creation_input_tokens"] += cache_creation
+        # Per-model request count when the org/enterprise Usage API carries it; lets
+        # context-window utilisation compute a real per-request average. Usually 0 on
+        # the token-only Usage API, in which case the KPI marks it unavailable.
+        bucket["request_count"]               += req
 
         # Accumulate daily
         existing = next((d for d in daily if d["date"] == day), None)
