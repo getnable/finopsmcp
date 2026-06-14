@@ -253,7 +253,7 @@ function Hero({ layout, interaction }){
               <button className="btn btn-primary" onClick={() => { setShowInstall(true); if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
                 Start free <span className="arr">→</span>
               </button>
-              <a className="btn btn-ghost" href="#runtime" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'view_demo' }); }}>View demo</a>
+              <a className="btn btn-ghost" href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'book_demo' }); }}>Book a demo</a>
             </div>
             {showInstall && (
               <div className="hero-install-reveal">
