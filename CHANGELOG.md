@@ -2,6 +2,47 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.75
+
+The AI cost moat: optimize, forecast, and monitor token spend, including committed
+contracts. Visibility is table stakes; this release moves nable to the layer where
+the defensibility is. Plus a stack-tailored "what can you do?" so a connected user
+actually discovers the 160+ tools.
+
+### AI commitments & contracts
+- **Reserved-Instance analysis for tokens.** A new commitment engine optimizes spend
+  against committed AI contracts: prepaid credits, Azure OpenAI PTUs, AWS Bedrock
+  Provisioned Throughput, and enterprise rate cards. For each it reports coverage,
+  utilization, your effective $/Mtok versus on-demand, break-even, a right-size
+  recommendation, and runway, priced against your actual negotiated terms, not list.
+  With no contract configured it tells you whether your spend is high and stable
+  enough to justify buying one. Tool: `get_llm_commitment_analysis`. Configure
+  contracts via `FINOPS_AI_CONTRACTS` or `~/.finops-mcp/ai_contracts.json`, which
+  stay on your machine.
+
+### AI forecast & monitor
+- **Token-spend forecasting with an exhaustion date.** Projects the AI bill,
+  month-over-month growth, and the day your credits or commitment run out, using the
+  per-account Holt-Winters forecaster. Tool: `forecast_llm_costs`.
+- **Daily token-spend monitor.** Watches for spend spikes and commitment contracts
+  needing attention (under-utilized capacity, enterprise minimum shortfall, expiring
+  commitment), with a Slack alert and self-healing dedup. Tool: `get_ai_spend_monitor`,
+  runs daily via the scheduler. Credits-to-cash stays with the existing credit job to
+  avoid double-alerting.
+
+### Discovery
+- **"What can you do?" is now tailored to your stack.** It detects everything connected
+  (cloud, SaaS, LLM providers, Kubernetes) and renders a capability map grouped by
+  outcome, with the asks you'd actually type, the dollar impact, honest per-group tool
+  counts, and the highest-value thing left to connect. Replaces a hardcoded AWS-centric
+  list that missed most of the product.
+
+### Copy
+- The share card and the plugin marketplace listing no longer say "plain English"; the
+  positioning is now "FinOps that lives in your AI editor."
+
+Full suite: 822 passed.
+
 ## 0.8.74
 
 A security pass (/cso) and a correctness pass (/debug) over the recent work, plus
