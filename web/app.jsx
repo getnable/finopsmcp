@@ -1284,10 +1284,6 @@ function MidCta(){
               Read the docs
             </a>
           </div>
-          <div style={{display:"inline-flex",alignItems:"center",gap:8,marginTop:2,fontFamily:"var(--mono)",fontSize:12,color:"var(--success)",border:"1px solid #2a5c43",borderRadius:"var(--r-md)",padding:"7px 13px"}}>
-            <span style={{width:6,height:6,borderRadius:"50%",background:"var(--success)",display:"inline-block"}}></span>
-            found $1,840/mo on day one
-          </div>
         </div>
       </div>
     </section>
