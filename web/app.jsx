@@ -273,6 +273,10 @@ function Hero({ layout, interaction }){
               <p className="hmc-lead">nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide.</p>
               <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Get the guide" />
               <div className="hmc-links">
+                <a href="/demo.html" className="hmc-pro"
+                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'full_demo'}); }}>
+                  Ask the live demo <span className="arr">→</span>
+                </a>
                 <a href="#pricing" className="hmc-pro"
                   onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing_40'}); }}>
                   See Team · $1,000/mo flat <span className="arr">→</span>
@@ -493,47 +497,143 @@ const QUERIES = [
       </>
     )
   },
+  {
+    q: "What can you actually do?",
+    response: (
+      <>
+        <p>A lot, and all of it from your editor. On a connected account I can:</p>
+        <ul className="caps">
+          <li><b>Answer cost questions</b> across AWS, Azure, GCP, Kubernetes and 13+ SaaS and AI providers</li>
+          <li><b>Catch anomalies</b> with Z-score detection and name the tag driving the spike</li>
+          <li><b>Find savings</b>: rightsizing, idle cleanup, commitment and discount coverage</li>
+          <li><b>Track AI spend</b> by model and forecast where your token bill lands</li>
+          <li><b>Act</b>: open a rightsizing PR against your IaC, file a ticket, post to Slack</li>
+        </ul>
+        <p style={{marginTop:12}}><span style={{color:"var(--accent)"}}>160+ tools</span> in all. Pick a prompt below to run a real one.</p>
+      </>
+    )
+  },
+  {
+    q: "What's our AI and LLM bill?",
+    response: (
+      <>
+        <p>Token spend across your model providers this month, normalized to USD:</p>
+        <div className="ttable">
+          <div className="r hd"><span>Provider · model</span><span>Spend</span><span>delta MoM</span></div>
+          <div className="r"><span>OpenAI · gpt-4o</span><span className="v num">$4,120</span><span className="d up num">+34%</span></div>
+          <div className="r"><span>Anthropic · Claude</span><span className="v num">$2,880</span><span className="d up num">+21%</span></div>
+          <div className="r"><span>AWS · Bedrock</span><span className="v num">$1,610</span><span className="d up num">+12%</span></div>
+          <div className="r total"><span>Total AI / LLM</span><span className="v num">$8,610</span><span className="d up num">+26%</span></div>
+        </div>
+        <p style={{marginTop:12}}>Your token bill is up <span style={{color:"var(--alert)"}}>26%</span> even as per-token prices fell. A gpt-4o classifier is the driver; route it to a cheaper model to save about <span style={{color:"var(--accent)"}}>$1,400 / mo</span>.</p>
+      </>
+    )
+  },
+];
+
+// Match a typed question to one of the six canned answers above. Tight on
+// purpose: only answer when the topic is clearly one of these, otherwise
+// return -1 and hit the GATE, the "ask that on your real bill" moment. The
+// fuller /demo.html experience is for visitors who want to go deeper.
+function matchQuery(text){
+  const t = (text || "").toLowerCase();
+  // Capabilities ("what can you do").
+  if(/what can|capabilit|what do you do|what does nable|use case|everything you|all the tools|how does (this|it) work|what should i ask/.test(t)) return 4;
+  // AI / LLM spend.
+  if(/\bai\b|llm|token|openai|anthropic|claude|bedrock|\bgpt|inference|model (spend|cost|bill)/.test(t)) return 5;
+  // Commitment / discount coverage.
+  if(/discount|savings ?plan|reserved|reservation|\bri\b|commitment|coverage|effective (rate|discount)|\bcud/.test(t)) return 3;
+  // Anomalies / spikes.
+  if(/anomal|spike|spiking|surge|unusual|datadog|went up|going up|jump/.test(t)) return 2;
+  // Multi-cloud compute comparison (needs a cross-provider or month-over-month signal).
+  if(/across (all )?(provider|cloud)|all providers|multi-?cloud|aws.*(vs|versus|and).*(azure|gcp)|month.?over.?month|\bmom\b|april.*march|march.*april|compute.*(across|provider|month|vs|versus)/.test(t)) return 1;
+  // EC2 waste / rightsizing / concrete savings.
+  if(/ec2|wast|idle|rightsiz|right-?siz|over-?provision|low cpu|cut (cost|spend)|save money|saving money|where can i save|trim/.test(t)) return 0;
+  return -1;
+}
+
+// A question we don't have a canned answer for is the highest-intent moment.
+// Instead of faking an answer (or paying a model), gate straight to the real
+// product, framed as "ask that on your own bill."
+const GATE = (
+  <>
+    <p>That's exactly the kind of question nable answers against your <b>own</b> account, with your real numbers. This demo only knows the sample account above.</p>
+    <p style={{marginTop:12}}>Connect it in about a minute, then ask away on your real bill. It runs on your machine, nothing leaves it:</p>
+    <div className="gate-cmd"><CopyCmd cmd="uvx --python 3.12 --from finops-mcp finops welcome" /></div>
+    <p className="gate-sub">Free for solo use, no signup. <a href="/demo.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'gate_full_demo' }); }}>See the full demo →</a></p>
+  </>
+);
+
+const CHIPS = [
+  { label: "What can you do?", idx: 4 },
+  { label: "Where's the EC2 waste?", idx: 0 },
+  { label: "What's our AI bill?", idx: 5 },
+  { label: "Any anomalies this week?", idx: 2 },
+  { label: "Effective discount rate?", idx: 3 },
 ];
 
 function Console({ interaction }){
-  const [idx, setIdx] = useState(0);
   // Render the first answer immediately on mount, so the proof is on screen
-  // before any animation runs. Cycling queries animate normally after that.
-  const [phase, setPhase] = useState("answered");
+  // before any animation runs. The console auto-cycles the canned library as a
+  // live walkthrough until the visitor types or focuses the input; from then on
+  // it answers what they ask.
+  const [phase, setPhase] = useState("answered");      // typing | thinking | answered
   const [typed, setTyped] = useState(QUERIES[0].q);
+  const [answer, setAnswer] = useState(QUERIES[0].response);
+  const [asked, setAsked] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [input, setInput] = useState("");
+  const [cycleIdx, setCycleIdx] = useState(0);
+  const [isGate, setIsGate] = useState(false);
   const timers = useRef([]);
   const firstRun = useRef(true);
 
-  useEffect(() => {
-    if(firstRun.current){
-      firstRun.current = false;
-      return;
-    }
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-    setTyped(""); setPhase("typing");
-    const q = QUERIES[idx].q;
-    let i = 0;
-    function step(){
-      if(i <= q.length){
-        setTyped(q.slice(0,i));
-        i++;
-        timers.current.push(setTimeout(step, 18 + Math.random()*22));
-      } else {
-        timers.current.push(setTimeout(() => setPhase("thinking"), 300));
-        timers.current.push(setTimeout(() => setPhase("answered"), 1050));
-      }
-    }
-    step();
-    return () => timers.current.forEach(clearTimeout);
-  }, [idx]);
+  function clearTimers(){ timers.current.forEach(clearTimeout); timers.current = []; }
 
+  function runExchange(qText, ansJSX){
+    clearTimers();
+    setTyped(""); setAnswer(ansJSX); setPhase("typing");
+    let i = 0;
+    (function step(){
+      if(i <= qText.length){
+        setTyped(qText.slice(0,i)); i++;
+        timers.current.push(setTimeout(step, 16 + Math.random()*20));
+      } else {
+        timers.current.push(setTimeout(() => setPhase("thinking"), 280));
+        timers.current.push(setTimeout(() => setPhase("answered"), 1000));
+      }
+    })();
+  }
+
+  // Auto-cycle the canned proof until the visitor engages.
   useEffect(() => {
-    if(interaction !== "cycling") return;
+    if(firstRun.current){ firstRun.current = false; return; }
+    if(interaction !== "cycling" || asked || focused) return;
     if(phase !== "answered") return;
-    const t = setTimeout(() => setIdx(i => (i+1) % QUERIES.length), 6500);
+    const t = setTimeout(() => {
+      const next = (cycleIdx + 1) % QUERIES.length;
+      setCycleIdx(next);
+      runExchange(QUERIES[next].q, QUERIES[next].response);
+    }, 6500);
     return () => clearTimeout(t);
-  }, [phase, interaction, idx]);
+  }, [phase, interaction, asked, focused, cycleIdx]);
+
+  useEffect(() => () => clearTimers(), []);
+
+  function ask(text){
+    const q = (text || "").trim();
+    if(!q) return;
+    setAsked(true); setInput("");
+    const m = matchQuery(q);
+    setIsGate(m < 0);
+    runExchange(q, m >= 0 ? QUERIES[m].response : GATE);
+    if(window.posthog) posthog.capture('hero_demo_ask', { matched: m >= 0 });
+  }
+  function pickChip(c){
+    setAsked(true); setInput(""); setIsGate(false);
+    runExchange(QUERIES[c.idx].q, QUERIES[c.idx].response);
+    if(window.posthog) posthog.capture('hero_demo_chip', { idx: c.idx });
+  }
 
   return (
     <div className="console" id="runtime">
@@ -558,17 +658,39 @@ function Console({ interaction }){
         {phase === "answered" && (
           <div className="msg">
             <div className="av ai">nable</div>
-            <div className="bubble">{QUERIES[idx].response}</div>
+            <div className="bubble">{answer}</div>
           </div>
         )}
       </div>
-      <div className="q-pager">
-        <span style={{color:"var(--fg-4)"}}>live walkthrough · click to explore</span>
-        <div className="dots" role="tablist">
-          {QUERIES.map((_,i) => (
-            <i key={i} className={i===idx?"on":""} onClick={()=>setIdx(i)} role="tab" aria-selected={i===idx} tabIndex={0}></i>
-          ))}
+      <div className="console-foot">
+        <div className="ask-hint">
+          <span className="ask-live"></span>
+          Ask anything · live demo data, no install
+          <a className="full-demo-link" href="/demo.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'full_demo' }); }}>Open full demo →</a>
         </div>
+        {!asked && (
+          <div className="ask-chips">
+            {CHIPS.map((c,i) => (
+              <button key={i} type="button" onClick={() => pickChip(c)}>{c.label}</button>
+            ))}
+          </div>
+        )}
+        <form className="console-ask" onSubmit={(e) => { e.preventDefault(); ask(input); }}>
+          <input className="console-input" value={input}
+            placeholder="Ask this demo account anything…"
+            onChange={(e) => setInput(e.target.value)}
+            onFocus={() => setFocused(true)}
+            aria-label="Ask nable about the demo account" />
+          <button type="submit" className="console-send" aria-label="Ask nable">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M7 11V3.5M7 3.5L3.7 6.8M7 3.5l3.3 3.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+        </form>
+        {asked && phase === "answered" && !isGate && (
+          <div className="console-convert">
+            <span>Demo data · run it on your own bill:</span>
+            <CopyCmd cmd="uvx --python 3.12 --from finops-mcp finops welcome" />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1466,7 +1588,6 @@ function App(){
       <Hero layout={t.layout} interaction={t.interaction} />
       <HowItWorks />
       <EveryEditor />
-      <Depth />
       <AiCost />
       <Connectors />
       <Architecture version={version} />

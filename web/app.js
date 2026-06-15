@@ -275,6 +275,17 @@ function Hero({ layout, interaction }) {
   } }, "or book a live demo"))), /* @__PURE__ */ React.createElement(TrustStrip, null), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("div", { className: "mini-console", "aria-label": "Example: nable answering a cost question" }, /* @__PURE__ */ React.createElement("div", { className: "mc-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mc-dots" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)), /* @__PURE__ */ React.createElement("span", { className: "mc-title" }, "claude \xB7 mcp[nable]")), /* @__PURE__ */ React.createElement("div", { className: "mc-body" }, /* @__PURE__ */ React.createElement("div", { className: "mc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mc-who" }, "YOU"), /* @__PURE__ */ React.createElement("span", null, "Where are we wasting money on EC2?")), /* @__PURE__ */ React.createElement("div", { className: "mc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mc-who mc-n" }, "NABLE"), /* @__PURE__ */ React.createElement("span", null, "11 instances under 15% CPU for 14 days. Rightsizing them saves ", /* @__PURE__ */ React.createElement("b", { className: "mc-save" }, "$1,840/mo"), ". Want the PR?")))), /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement("div", { className: "hmc-links" }, /* @__PURE__ */ React.createElement(
     "a",
     {
+      href: "/demo.html",
+      className: "hmc-pro",
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "full_demo" });
+      }
+    },
+    "Ask the live demo ",
+    /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
+  ), /* @__PURE__ */ React.createElement(
+    "a",
+    {
       href: "#pricing",
       className: "hmc-pro",
       onClick: () => {
@@ -387,45 +398,116 @@ const QUERIES = [
   {
     q: "What's our effective discount rate this quarter?",
     response: /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", null, "Blended across Savings Plans, RIs, and committed-use discounts on GCP. Coverage measured against on-demand list:"), /* @__PURE__ */ React.createElement("div", { className: "ttable" }, /* @__PURE__ */ React.createElement("div", { className: "r hd" }, /* @__PURE__ */ React.createElement("span", null, "Commitment"), /* @__PURE__ */ React.createElement("span", null, "Coverage"), /* @__PURE__ */ React.createElement("span", null, "Effective rate")), /* @__PURE__ */ React.createElement("div", { className: "r" }, /* @__PURE__ */ React.createElement("span", null, "AWS \xB7 Savings Plans (1y)"), /* @__PURE__ */ React.createElement("span", { className: "v num" }, "82%"), /* @__PURE__ */ React.createElement("span", { className: "d down num" }, "-24.1%")), /* @__PURE__ */ React.createElement("div", { className: "r" }, /* @__PURE__ */ React.createElement("span", null, "AWS \xB7 RIs (RDS, ElastiCache)"), /* @__PURE__ */ React.createElement("span", { className: "v num" }, "71%"), /* @__PURE__ */ React.createElement("span", { className: "d down num" }, "-31.8%")), /* @__PURE__ */ React.createElement("div", { className: "r" }, /* @__PURE__ */ React.createElement("span", null, "GCP \xB7 CUDs (compute)"), /* @__PURE__ */ React.createElement("span", { className: "v num" }, "64%"), /* @__PURE__ */ React.createElement("span", { className: "d down num" }, "-20.4%")), /* @__PURE__ */ React.createElement("div", { className: "r total" }, /* @__PURE__ */ React.createElement("span", null, "Blended effective discount"), /* @__PURE__ */ React.createElement("span", { className: "v num" }, "-"), /* @__PURE__ */ React.createElement("span", { className: "d down num" }, "-26.7%"))), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 12 } }, "You'd unlock another ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--accent)" } }, "$8,200 / mo"), " by raising Compute SP coverage to 92%. Model it?"))
+  },
+  {
+    q: "What can you actually do?",
+    response: /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", null, "A lot, and all of it from your editor. On a connected account I can:"), /* @__PURE__ */ React.createElement("ul", { className: "caps" }, /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("b", null, "Answer cost questions"), " across AWS, Azure, GCP, Kubernetes and 13+ SaaS and AI providers"), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("b", null, "Catch anomalies"), " with Z-score detection and name the tag driving the spike"), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("b", null, "Find savings"), ": rightsizing, idle cleanup, commitment and discount coverage"), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("b", null, "Track AI spend"), " by model and forecast where your token bill lands"), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("b", null, "Act"), ": open a rightsizing PR against your IaC, file a ticket, post to Slack")), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--accent)" } }, "160+ tools"), " in all. Pick a prompt below to run a real one."))
+  },
+  {
+    q: "What's our AI and LLM bill?",
+    response: /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", null, "Token spend across your model providers this month, normalized to USD:"), /* @__PURE__ */ React.createElement("div", { className: "ttable" }, /* @__PURE__ */ React.createElement("div", { className: "r hd" }, /* @__PURE__ */ React.createElement("span", null, "Provider \xB7 model"), /* @__PURE__ */ React.createElement("span", null, "Spend"), /* @__PURE__ */ React.createElement("span", null, "delta MoM")), /* @__PURE__ */ React.createElement("div", { className: "r" }, /* @__PURE__ */ React.createElement("span", null, "OpenAI \xB7 gpt-4o"), /* @__PURE__ */ React.createElement("span", { className: "v num" }, "$4,120"), /* @__PURE__ */ React.createElement("span", { className: "d up num" }, "+34%")), /* @__PURE__ */ React.createElement("div", { className: "r" }, /* @__PURE__ */ React.createElement("span", null, "Anthropic \xB7 Claude"), /* @__PURE__ */ React.createElement("span", { className: "v num" }, "$2,880"), /* @__PURE__ */ React.createElement("span", { className: "d up num" }, "+21%")), /* @__PURE__ */ React.createElement("div", { className: "r" }, /* @__PURE__ */ React.createElement("span", null, "AWS \xB7 Bedrock"), /* @__PURE__ */ React.createElement("span", { className: "v num" }, "$1,610"), /* @__PURE__ */ React.createElement("span", { className: "d up num" }, "+12%")), /* @__PURE__ */ React.createElement("div", { className: "r total" }, /* @__PURE__ */ React.createElement("span", null, "Total AI / LLM"), /* @__PURE__ */ React.createElement("span", { className: "v num" }, "$8,610"), /* @__PURE__ */ React.createElement("span", { className: "d up num" }, "+26%"))), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 12 } }, "Your token bill is up ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--alert)" } }, "26%"), " even as per-token prices fell. A gpt-4o classifier is the driver; route it to a cheaper model to save about ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--accent)" } }, "$1,400 / mo"), "."))
   }
 ];
+function matchQuery(text) {
+  const t = (text || "").toLowerCase();
+  if (/what can|capabilit|what do you do|what does nable|use case|everything you|all the tools|how does (this|it) work|what should i ask/.test(t)) return 4;
+  if (/\bai\b|llm|token|openai|anthropic|claude|bedrock|\bgpt|inference|model (spend|cost|bill)/.test(t)) return 5;
+  if (/discount|savings ?plan|reserved|reservation|\bri\b|commitment|coverage|effective (rate|discount)|\bcud/.test(t)) return 3;
+  if (/anomal|spike|spiking|surge|unusual|datadog|went up|going up|jump/.test(t)) return 2;
+  if (/across (all )?(provider|cloud)|all providers|multi-?cloud|aws.*(vs|versus|and).*(azure|gcp)|month.?over.?month|\bmom\b|april.*march|march.*april|compute.*(across|provider|month|vs|versus)/.test(t)) return 1;
+  if (/ec2|wast|idle|rightsiz|right-?siz|over-?provision|low cpu|cut (cost|spend)|save money|saving money|where can i save|trim/.test(t)) return 0;
+  return -1;
+}
+const GATE = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", null, "That's exactly the kind of question nable answers against your ", /* @__PURE__ */ React.createElement("b", null, "own"), " account, with your real numbers. This demo only knows the sample account above."), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 12 } }, "Connect it in about a minute, then ask away on your real bill. It runs on your machine, nothing leaves it:"), /* @__PURE__ */ React.createElement("div", { className: "gate-cmd" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx --python 3.12 --from finops-mcp finops welcome" })), /* @__PURE__ */ React.createElement("p", { className: "gate-sub" }, "Free for solo use, no signup. ", /* @__PURE__ */ React.createElement("a", { href: "/demo.html", onClick: () => {
+  if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "gate_full_demo" });
+} }, "See the full demo \u2192")));
+const CHIPS = [
+  { label: "What can you do?", idx: 4 },
+  { label: "Where's the EC2 waste?", idx: 0 },
+  { label: "What's our AI bill?", idx: 5 },
+  { label: "Any anomalies this week?", idx: 2 },
+  { label: "Effective discount rate?", idx: 3 }
+];
 function Console({ interaction }) {
-  const [idx, setIdx] = useState(0);
   const [phase, setPhase] = useState("answered");
   const [typed, setTyped] = useState(QUERIES[0].q);
+  const [answer, setAnswer] = useState(QUERIES[0].response);
+  const [asked, setAsked] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [input, setInput] = useState("");
+  const [cycleIdx, setCycleIdx] = useState(0);
+  const [isGate, setIsGate] = useState(false);
   const timers = useRef([]);
   const firstRun = useRef(true);
+  function clearTimers() {
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+  }
+  function runExchange(qText, ansJSX) {
+    clearTimers();
+    setTyped("");
+    setAnswer(ansJSX);
+    setPhase("typing");
+    let i = 0;
+    (function step() {
+      if (i <= qText.length) {
+        setTyped(qText.slice(0, i));
+        i++;
+        timers.current.push(setTimeout(step, 16 + Math.random() * 20));
+      } else {
+        timers.current.push(setTimeout(() => setPhase("thinking"), 280));
+        timers.current.push(setTimeout(() => setPhase("answered"), 1e3));
+      }
+    })();
+  }
   useEffect(() => {
     if (firstRun.current) {
       firstRun.current = false;
       return;
     }
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-    setTyped("");
-    setPhase("typing");
-    const q = QUERIES[idx].q;
-    let i = 0;
-    function step() {
-      if (i <= q.length) {
-        setTyped(q.slice(0, i));
-        i++;
-        timers.current.push(setTimeout(step, 18 + Math.random() * 22));
-      } else {
-        timers.current.push(setTimeout(() => setPhase("thinking"), 300));
-        timers.current.push(setTimeout(() => setPhase("answered"), 1050));
-      }
-    }
-    step();
-    return () => timers.current.forEach(clearTimeout);
-  }, [idx]);
-  useEffect(() => {
-    if (interaction !== "cycling") return;
+    if (interaction !== "cycling" || asked || focused) return;
     if (phase !== "answered") return;
-    const t = setTimeout(() => setIdx((i) => (i + 1) % QUERIES.length), 6500);
+    const t = setTimeout(() => {
+      const next = (cycleIdx + 1) % QUERIES.length;
+      setCycleIdx(next);
+      runExchange(QUERIES[next].q, QUERIES[next].response);
+    }, 6500);
     return () => clearTimeout(t);
-  }, [phase, interaction, idx]);
-  return /* @__PURE__ */ React.createElement("div", { className: "console", id: "runtime" }, /* @__PURE__ */ React.createElement("div", { className: "console-bar" }, /* @__PURE__ */ React.createElement("div", { className: "dots" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)), /* @__PURE__ */ React.createElement("span", { className: "title" }, "claude \xB7 mcp[nable] \xB7 ~/projects/platform-infra"), /* @__PURE__ */ React.createElement("span", { className: "status" }, "runtime active")), /* @__PURE__ */ React.createElement("div", { className: "console-body" }, /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av you" }, "you"), /* @__PURE__ */ React.createElement("div", { className: "bubble user" }, /* @__PURE__ */ React.createElement("p", null, typed, /* @__PURE__ */ React.createElement("span", { className: "cursor" })))), phase === "thinking" && /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av ai" }, "nable"), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "thinking" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)))), phase === "answered" && /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av ai" }, "nable"), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, QUERIES[idx].response))), /* @__PURE__ */ React.createElement("div", { className: "q-pager" }, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--fg-4)" } }, "live walkthrough \xB7 click to explore"), /* @__PURE__ */ React.createElement("div", { className: "dots", role: "tablist" }, QUERIES.map((_, i) => /* @__PURE__ */ React.createElement("i", { key: i, className: i === idx ? "on" : "", onClick: () => setIdx(i), role: "tab", "aria-selected": i === idx, tabIndex: 0 })))));
+  }, [phase, interaction, asked, focused, cycleIdx]);
+  useEffect(() => () => clearTimers(), []);
+  function ask(text) {
+    const q = (text || "").trim();
+    if (!q) return;
+    setAsked(true);
+    setInput("");
+    const m = matchQuery(q);
+    setIsGate(m < 0);
+    runExchange(q, m >= 0 ? QUERIES[m].response : GATE);
+    if (window.posthog) posthog.capture("hero_demo_ask", { matched: m >= 0 });
+  }
+  function pickChip(c) {
+    setAsked(true);
+    setInput("");
+    setIsGate(false);
+    runExchange(QUERIES[c.idx].q, QUERIES[c.idx].response);
+    if (window.posthog) posthog.capture("hero_demo_chip", { idx: c.idx });
+  }
+  return /* @__PURE__ */ React.createElement("div", { className: "console", id: "runtime" }, /* @__PURE__ */ React.createElement("div", { className: "console-bar" }, /* @__PURE__ */ React.createElement("div", { className: "dots" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)), /* @__PURE__ */ React.createElement("span", { className: "title" }, "claude \xB7 mcp[nable] \xB7 ~/projects/platform-infra"), /* @__PURE__ */ React.createElement("span", { className: "status" }, "runtime active")), /* @__PURE__ */ React.createElement("div", { className: "console-body" }, /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av you" }, "you"), /* @__PURE__ */ React.createElement("div", { className: "bubble user" }, /* @__PURE__ */ React.createElement("p", null, typed, /* @__PURE__ */ React.createElement("span", { className: "cursor" })))), phase === "thinking" && /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av ai" }, "nable"), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "thinking" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)))), phase === "answered" && /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av ai" }, "nable"), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, answer))), /* @__PURE__ */ React.createElement("div", { className: "console-foot" }, /* @__PURE__ */ React.createElement("div", { className: "ask-hint" }, /* @__PURE__ */ React.createElement("span", { className: "ask-live" }), "Ask anything \xB7 live demo data, no install", /* @__PURE__ */ React.createElement("a", { className: "full-demo-link", href: "/demo.html", onClick: () => {
+    if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "full_demo" });
+  } }, "Open full demo \u2192")), !asked && /* @__PURE__ */ React.createElement("div", { className: "ask-chips" }, CHIPS.map((c, i) => /* @__PURE__ */ React.createElement("button", { key: i, type: "button", onClick: () => pickChip(c) }, c.label))), /* @__PURE__ */ React.createElement("form", { className: "console-ask", onSubmit: (e) => {
+    e.preventDefault();
+    ask(input);
+  } }, /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      className: "console-input",
+      value: input,
+      placeholder: "Ask this demo account anything\u2026",
+      onChange: (e) => setInput(e.target.value),
+      onFocus: () => setFocused(true),
+      "aria-label": "Ask nable about the demo account"
+    }
+  ), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "console-send", "aria-label": "Ask nable" }, /* @__PURE__ */ React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 14 14", fill: "none", stroke: "currentColor", strokeWidth: "2", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M7 11V3.5M7 3.5L3.7 6.8M7 3.5l3.3 3.3", strokeLinecap: "round", strokeLinejoin: "round" })))), asked && phase === "answered" && !isGate && /* @__PURE__ */ React.createElement("div", { className: "console-convert" }, /* @__PURE__ */ React.createElement("span", null, "Demo data \xB7 run it on your own bill:"), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx --python 3.12 --from finops-mcp finops welcome" }))));
 }
 function Thesis() {
   const cards = [
@@ -1010,6 +1092,6 @@ function App() {
     }).catch(() => {
     });
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(HowItWorks, null), /* @__PURE__ */ React.createElement(EveryEditor, null), /* @__PURE__ */ React.createElement(Depth, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(HowItWorks, null), /* @__PURE__ */ React.createElement(EveryEditor, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
 }
 ReactDOM.createRoot(document.getElementById("app")).render(/* @__PURE__ */ React.createElement(App, null));
