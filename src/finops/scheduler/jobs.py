@@ -508,6 +508,123 @@ def job_credit_check() -> None:
         log.exception("Credit check job failed")
 
 
+# ── AI / token spend monitor ──────────────────────────────────────────────────
+
+def _alert_state_path(name: str):
+    import os
+    from pathlib import Path
+    base = Path(os.environ.get("FINOPS_HOME", str(Path.home() / ".finops-mcp")))
+    return base / f"{name}_alert_state.json"
+
+
+def _alert_already_sent(name: str, key: str) -> bool:
+    import json
+    p = _alert_state_path(name)
+    try:
+        if p.exists():
+            loaded = json.loads(p.read_text())
+            sent = loaded.get("sent", []) if isinstance(loaded, dict) else []
+            return key in set(sent)
+    except Exception:
+        pass
+    return False
+
+
+def _mark_alert_sent(name: str, key: str) -> None:
+    import json
+    p = _alert_state_path(name)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        data = {"sent": []}
+        if p.exists():
+            loaded = json.loads(p.read_text())
+            # Self-heal a corrupt (non-dict) state file instead of failing open
+            # and re-alerting forever.
+            if isinstance(loaded, dict):
+                data = loaded
+        sent = set(data.get("sent", []))
+        sent.add(key)
+        data["sent"] = sorted(sent)[-50:]
+        p.write_text(json.dumps(data))
+    except Exception:
+        log.debug("Could not persist %s alert state", name)
+
+
+async def _check_ai_spend_and_alert() -> dict | None:
+    """Watch the token layer: alert on a token-spend spike and on commitment
+    contracts that need attention (capacity under-utilized, enterprise minimum
+    shortfall, commitment expiring). The credits-to-cash flip is handled by
+    job_credit_check, so this passes credit_analysis=None and skips credits
+    contracts to avoid double-alerting and an extra AWS call. Dedup keyed on
+    (month, conditions) so each condition alerts once per month."""
+    from ..connectors.llm_costs import get_all_llm_costs
+    from ..analytics.llm_commitments import load_contracts, analyze_portfolio, total_tokens
+    from ..anomaly.detector import detect_for_series
+    from ..notifications import slack
+
+    try:
+        data = await asyncio.to_thread(get_all_llm_costs, None, None, 30)
+    except Exception:
+        log.exception("AI spend monitor: cost fetch failed")
+        return None
+
+    daily = data.get("daily") or []
+    series = [float(d.get("total_usd", 0.0)) for d in daily if isinstance(d, dict)]
+    findings: list[str] = []
+    kinds: list[str] = []
+
+    # 1) Token-spend spike. Only alert on spikes (over-run): the latest day can be
+    # partial and under-report, which would look like a drop, never a false spike.
+    if len(series) >= 2:
+        res = detect_for_series("ai", "LLM tokens", "llm", date.today(), series[-1], series[:-1])
+        if res and res.direction == "spike":
+            findings.append(f"Token spend spike: {res.summary()}")
+            kinds.append("spike")
+
+    # 2) Commitment contracts needing attention (capacity / rate_card).
+    contracts = [c for c in load_contracts() if (c.get("type") or "").lower() != "credits"]
+    if contracts:
+        usage = {"tokens": total_tokens(data.get("by_model_tokens")),
+                 "spend_usd": float(data.get("total_usd", 0.0)), "days": 30,
+                 "credit_analysis": None}
+        port = analyze_portfolio(contracts, usage)
+        for item in port.get("needs_attention", []):
+            findings.append(item["headline"])
+            kinds.append(f"contract:{item['label']}:{item['status']}")
+
+    if not findings:
+        return None
+
+    dedup_key = f"{str(date.today())[:7]}:" + "|".join(sorted(kinds))
+    if _alert_already_sent("ai", dedup_key):
+        return None
+
+    text = "nable AI spend alert"
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": "🤖 AI spend alert"}},
+        *[{"type": "section", "text": {"type": "mrkdwn", "text": f}} for f in findings],
+    ]
+    sent = False
+    if slack.is_configured():
+        try:
+            sent = await slack.send(blocks, text) or sent
+        except Exception:
+            log.exception("Slack AI spend alert failed")
+    if sent:
+        _mark_alert_sent("ai", dedup_key)
+    return {"findings": findings, "sent": sent}
+
+
+def job_ai_monitor() -> None:
+    """Watch token/LLM spend for spikes and commitment contracts needing attention."""
+    try:
+        result = _run(_check_ai_spend_and_alert())
+        if result:
+            log.info("AI spend monitor: %d finding(s)", len(result.get("findings", [])))
+    except Exception:
+        log.exception("AI spend monitor job failed")
+
+
 def job_auto_verify() -> None:
     """Verify acted-on recommendations against live cloud state and record realized
     savings. This is what makes the rightsizing PR body's promise ("nable will
@@ -575,6 +692,10 @@ def start_scheduler() -> BackgroundScheduler | None:
     # cost pain, which AWS sends no native notification for.
     credit_cron = os.environ.get("FINOPS_CREDIT_CRON", "0 4 * * *")
     _scheduler.add_job(job_credit_check, CronTrigger.from_crontab(credit_cron), id="credit_check", replace_existing=True)
+
+    # AI/token spend monitor at 05:00 UTC: token-spend spikes + commitment attention
+    ai_monitor_cron = os.environ.get("FINOPS_AI_MONITOR_CRON", "0 5 * * *")
+    _scheduler.add_job(job_ai_monitor, CronTrigger.from_crontab(ai_monitor_cron), id="ai_monitor", replace_existing=True)
 
     _scheduler.start()
     log.info("Scheduler started (snapshot=%s, anomaly=%s, digest=%s)", snapshot_cron, anomaly_cron, digest_cron)
