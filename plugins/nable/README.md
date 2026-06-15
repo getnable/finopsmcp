@@ -1,6 +1,6 @@
 # nable for Claude Code
 
-Local-first FinOps, installed as a Claude Code plugin. Ask your AWS, Azure, GCP, Kubernetes, and SaaS bill in plain English, right where you already work.
+Local-first FinOps, installed as a Claude Code plugin. Ask what's driving your AWS, Azure, GCP, Kubernetes, and SaaS bill, right where you already work.
 
 ## Install
 
