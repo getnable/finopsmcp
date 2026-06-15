@@ -7127,6 +7127,165 @@ async def get_ai_billing_blind_spots(days: int = 30) -> dict:
 
 
 @mcp.tool()
+async def get_llm_commitment_analysis(days: int = 30) -> dict:
+    """
+    Optimize token spend against committed AI contracts: prepaid credits, Azure
+    OpenAI PTUs, AWS Bedrock Provisioned Throughput, and enterprise rate cards.
+    This is Reserved-Instance analysis for tokens. nable prices you against your
+    ACTUAL negotiated terms, not list, which a provider dashboard cannot do.
+
+    For each contract it reports coverage, utilization, your effective $/Mtok
+    versus on-demand, break-even utilization, a right-size recommendation, and
+    runway. With no contract configured it tells you whether your on-demand spend
+    is high and stable enough to justify buying one.
+
+    Configure contracts via the FINOPS_AI_CONTRACTS env var (a JSON array) or
+    ~/.finops-mcp/ai_contracts.json. Terms stay on your machine.
+
+    Args:
+        days: Lookback window for observed usage (default 30).
+
+    Examples:
+        - "Are we utilizing our Azure OpenAI PTUs?"
+        - "What's our effective token rate versus on-demand?"
+        - "Should we buy provisioned throughput for our token spend?"
+        - "Are we clearing our Anthropic enterprise minimum?"
+    """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_llm_commitment_analysis") or {}
+    try:
+        from .connectors.llm_costs import get_all_llm_costs
+        from .analytics.llm_commitments import (
+            load_contracts, analyze_portfolio, recommend_commitment,
+            total_tokens, EXAMPLE_CONTRACTS)
+        data = await asyncio.to_thread(get_all_llm_costs, None, None, days)
+        contracts = load_contracts()
+
+        if not contracts:
+            daily = [d.get("total_usd", 0.0) for d in (data.get("daily") or [])]
+            monthly = float(data.get("total_usd", 0.0)) * (30.0 / max(1, days))
+            return {
+                "configured_contracts": 0,
+                "recommendation": recommend_commitment(daily, monthly),
+                "how_to_add_contracts": (
+                    "Set FINOPS_AI_CONTRACTS to a JSON array, or write "
+                    "~/.finops-mcp/ai_contracts.json. nable then prices you against "
+                    "your real terms, not list."),
+                "example_contracts": EXAMPLE_CONTRACTS,
+            }
+
+        credit_analysis = None
+        if any((c.get("type") or "").lower() == "credits" for c in contracts):
+            try:
+                from .connectors.credit_tracking import get_credit_status as _gcs
+                credit_analysis = await asyncio.to_thread(_gcs, 6)
+            except Exception:
+                credit_analysis = None
+
+        usage = {
+            "tokens": total_tokens(data.get("by_model_tokens")),
+            "spend_usd": float(data.get("total_usd", 0.0)),
+            "days": days,
+            "credit_analysis": credit_analysis,
+        }
+        result = analyze_portfolio(contracts, usage)
+        result["configured_contracts"] = len(contracts)
+        result["window_days"] = days
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def forecast_llm_costs(horizon_days: int = 90, balance_usd: float | None = None) -> dict:
+    """
+    Forecast AI/LLM token spend and, if you give a balance, the date your credits
+    or commitment run out. Uses nable's per-account forecaster (Holt-Winters with
+    linear and naive fallbacks by history length) on your daily token-cost series.
+
+    Headline outputs: projected next-30-day spend, implied month-over-month
+    growth, and the runway-to-exhaustion date. That exhaustion date is what
+    finance wants and what no provider dashboard gives.
+
+    Args:
+        horizon_days: How far forward to project (default 90).
+        balance_usd: Remaining credit/commitment balance to burn down (optional).
+
+    Examples:
+        - "Forecast our AI spend for the next quarter"
+        - "When will our $100k in credits run out at this rate?"
+        - "Is our token bill accelerating?"
+    """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("forecast_llm_costs") or {}
+    try:
+        from .connectors.llm_costs import get_all_llm_costs
+        from .analytics.token_forecast import forecast_token_spend
+        data = await asyncio.to_thread(get_all_llm_costs, None, None, 90)
+        daily = data.get("daily") or []
+        return await asyncio.to_thread(forecast_token_spend, daily, horizon_days, balance_usd)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_ai_spend_monitor(days: int = 30) -> dict:
+    """
+    On-demand view of what nable's daily AI-spend monitor watches: a spike or drop
+    on your token-spend series, plus commitment contracts that need attention
+    (capacity under-utilized, enterprise minimum shortfall, commitment expiring).
+    The scheduler runs this daily and alerts via Slack; this returns the same view
+    on demand.
+
+    Args:
+        days: Lookback window in days (default 30).
+
+    Examples:
+        - "Did our token spend spike?"
+        - "Is any AI commitment being wasted right now?"
+    """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_ai_spend_monitor") or {}
+    try:
+        from datetime import date as _date
+        from .connectors.llm_costs import get_all_llm_costs
+        from .analytics.llm_commitments import load_contracts, analyze_portfolio, total_tokens
+        from .anomaly.detector import detect_for_series
+        data = await asyncio.to_thread(get_all_llm_costs, None, None, days)
+        series = [float(d.get("total_usd", 0.0)) for d in (data.get("daily") or [])
+                  if isinstance(d, dict)]
+
+        anomaly = None
+        if len(series) >= 2:
+            res = detect_for_series("ai", "LLM tokens", "llm", _date.today(), series[-1], series[:-1])
+            if res:
+                anomaly = {"direction": res.direction, "severity": res.severity,
+                           "pct_change": res.pct_change, "summary": res.summary()}
+
+        contracts = [c for c in load_contracts() if (c.get("type") or "").lower() != "credits"]
+        attention: list = []
+        if contracts:
+            usage = {"tokens": total_tokens(data.get("by_model_tokens")),
+                     "spend_usd": float(data.get("total_usd", 0.0)), "days": days,
+                     "credit_analysis": None}
+            attention = analyze_portfolio(contracts, usage).get("needs_attention", [])
+
+        return {
+            "window_days": days,
+            "total_usd": round(float(data.get("total_usd", 0.0)), 2),
+            "spend_anomaly": anomaly,
+            "contracts_needing_attention": attention,
+            "note": "Daily token-spend anomaly plus commitment contracts needing attention. "
+                    "The scheduler alerts on these via Slack; this is the on-demand view.",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def get_llm_cost_by_model(
     days: int = 30,
     provider: str | None = None,
