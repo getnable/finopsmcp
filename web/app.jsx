@@ -560,7 +560,7 @@ const GATE = (
     <p>That's exactly the kind of question nable answers against your <b>own</b> account, with your real numbers. This demo only knows the sample account above.</p>
     <p style={{marginTop:12}}>Connect it in about a minute, then ask away on your real bill. It runs on your machine, nothing leaves it:</p>
     <div className="gate-cmd"><CopyCmd cmd="uvx --python 3.12 --from finops-mcp finops welcome" /></div>
-    <p className="gate-sub">Free for solo use, no signup. <a href="/demo.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'gate_full_demo' }); }}>See the full demo →</a></p>
+    <p className="gate-sub">Free for solo use, no signup. Runs on your machine.</p>
   </>
 );
 
@@ -681,7 +681,6 @@ function Console({ interaction }){
         <div className="ask-hint">
           <span className="ask-live"></span>
           Ask anything · live demo data, no install
-          <a className="full-demo-link" href="/demo.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'full_demo' }); }}>Open full demo →</a>
         </div>
         {(!asked || offTopic) && (
           <div className="ask-chips">
