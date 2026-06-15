@@ -564,6 +564,18 @@ const GATE = (
   </>
 );
 
+// Off-topic / nonsense ("bob cat?") is not a finops question, so don't earnestly
+// claim "that's what nable answers." Redirect to the demo's actual scope.
+const OFFTOPIC = (
+  <>
+    <p>That one's outside this demo. nable here only covers cloud and AI cost, so ask about your AWS, Azure, GCP, Kubernetes or AI spend, or try a prompt below.</p>
+  </>
+);
+
+// Does the question even look like a cloud/AI cost question? Separates a real
+// but uncanned finops question (which gets the install gate) from off-topic noise.
+const FINANCE_RE = /cost|spend|bill|budget|forecast|sav(e|ing)|money|cheap|expensive|pric(e|ing)|discount|invoice|usage|waste|idle|optimi[sz]e|rightsiz|reserved|reservation|commitment|anomal|cloud|aws|azure|gcp|ec2|\bs3\b|rds|lambda|fargate|eks|kubernetes|k8s|container|cluster|instance|\bvm\b|server|database|storage|snowflake|databricks|datadog|gpu|\bai\b|llm|token|openai|anthropic|claude|bedrock|gpt|\bmodel\b|provider|region|account|\btag|dollar|\$/;
+
 const CHIPS = [
   { label: "What can you do?", idx: 4 },
   { label: "Where's the EC2 waste?", idx: 0 },
@@ -585,6 +597,7 @@ function Console({ interaction }){
   const [input, setInput] = useState("");
   const [cycleIdx, setCycleIdx] = useState(0);
   const [isGate, setIsGate] = useState(false);
+  const [offTopic, setOffTopic] = useState(false);
   const timers = useRef([]);
   const firstRun = useRef(true);
 
@@ -625,12 +638,14 @@ function Console({ interaction }){
     if(!q) return;
     setAsked(true); setInput("");
     const m = matchQuery(q);
-    setIsGate(m < 0);
-    runExchange(q, m >= 0 ? QUERIES[m].response : GATE);
-    if(window.posthog) posthog.capture('hero_demo_ask', { matched: m >= 0 });
+    let kind;
+    if(m >= 0){ setIsGate(false); setOffTopic(false); runExchange(q, QUERIES[m].response); kind = "answer"; }
+    else if(FINANCE_RE.test(q.toLowerCase())){ setIsGate(true); setOffTopic(false); runExchange(q, GATE); kind = "gate"; }
+    else { setIsGate(false); setOffTopic(true); runExchange(q, OFFTOPIC); kind = "offtopic"; }
+    if(window.posthog) posthog.capture('hero_demo_ask', { kind });
   }
   function pickChip(c){
-    setAsked(true); setInput(""); setIsGate(false);
+    setAsked(true); setInput(""); setIsGate(false); setOffTopic(false);
     runExchange(QUERIES[c.idx].q, QUERIES[c.idx].response);
     if(window.posthog) posthog.capture('hero_demo_chip', { idx: c.idx });
   }
@@ -668,7 +683,7 @@ function Console({ interaction }){
           Ask anything · live demo data, no install
           <a className="full-demo-link" href="/demo.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'full_demo' }); }}>Open full demo →</a>
         </div>
-        {!asked && (
+        {(!asked || offTopic) && (
           <div className="ask-chips">
             {CHIPS.map((c,i) => (
               <button key={i} type="button" onClick={() => pickChip(c)}>{c.label}</button>
@@ -685,7 +700,7 @@ function Console({ interaction }){
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M7 11V3.5M7 3.5L3.7 6.8M7 3.5l3.3 3.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
         </form>
-        {asked && phase === "answered" && !isGate && (
+        {asked && phase === "answered" && !isGate && !offTopic && (
           <div className="console-convert">
             <span>Demo data · run it on your own bill:</span>
             <CopyCmd cmd="uvx --python 3.12 --from finops-mcp finops welcome" />

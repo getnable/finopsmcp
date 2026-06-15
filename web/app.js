@@ -421,6 +421,8 @@ function matchQuery(text) {
 const GATE = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", null, "That's exactly the kind of question nable answers against your ", /* @__PURE__ */ React.createElement("b", null, "own"), " account, with your real numbers. This demo only knows the sample account above."), /* @__PURE__ */ React.createElement("p", { style: { marginTop: 12 } }, "Connect it in about a minute, then ask away on your real bill. It runs on your machine, nothing leaves it:"), /* @__PURE__ */ React.createElement("div", { className: "gate-cmd" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx --python 3.12 --from finops-mcp finops welcome" })), /* @__PURE__ */ React.createElement("p", { className: "gate-sub" }, "Free for solo use, no signup. ", /* @__PURE__ */ React.createElement("a", { href: "/demo.html", onClick: () => {
   if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "gate_full_demo" });
 } }, "See the full demo \u2192")));
+const OFFTOPIC = /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", null, "That one's outside this demo. nable here only covers cloud and AI cost, so ask about your AWS, Azure, GCP, Kubernetes or AI spend, or try a prompt below."));
+const FINANCE_RE = /cost|spend|bill|budget|forecast|sav(e|ing)|money|cheap|expensive|pric(e|ing)|discount|invoice|usage|waste|idle|optimi[sz]e|rightsiz|reserved|reservation|commitment|anomal|cloud|aws|azure|gcp|ec2|\bs3\b|rds|lambda|fargate|eks|kubernetes|k8s|container|cluster|instance|\bvm\b|server|database|storage|snowflake|databricks|datadog|gpu|\bai\b|llm|token|openai|anthropic|claude|bedrock|gpt|\bmodel\b|provider|region|account|\btag|dollar|\$/;
 const CHIPS = [
   { label: "What can you do?", idx: 4 },
   { label: "Where's the EC2 waste?", idx: 0 },
@@ -437,6 +439,7 @@ function Console({ interaction }) {
   const [input, setInput] = useState("");
   const [cycleIdx, setCycleIdx] = useState(0);
   const [isGate, setIsGate] = useState(false);
+  const [offTopic, setOffTopic] = useState(false);
   const timers = useRef([]);
   const firstRun = useRef(true);
   function clearTimers() {
@@ -481,20 +484,36 @@ function Console({ interaction }) {
     setAsked(true);
     setInput("");
     const m = matchQuery(q);
-    setIsGate(m < 0);
-    runExchange(q, m >= 0 ? QUERIES[m].response : GATE);
-    if (window.posthog) posthog.capture("hero_demo_ask", { matched: m >= 0 });
+    let kind;
+    if (m >= 0) {
+      setIsGate(false);
+      setOffTopic(false);
+      runExchange(q, QUERIES[m].response);
+      kind = "answer";
+    } else if (FINANCE_RE.test(q.toLowerCase())) {
+      setIsGate(true);
+      setOffTopic(false);
+      runExchange(q, GATE);
+      kind = "gate";
+    } else {
+      setIsGate(false);
+      setOffTopic(true);
+      runExchange(q, OFFTOPIC);
+      kind = "offtopic";
+    }
+    if (window.posthog) posthog.capture("hero_demo_ask", { kind });
   }
   function pickChip(c) {
     setAsked(true);
     setInput("");
     setIsGate(false);
+    setOffTopic(false);
     runExchange(QUERIES[c.idx].q, QUERIES[c.idx].response);
     if (window.posthog) posthog.capture("hero_demo_chip", { idx: c.idx });
   }
   return /* @__PURE__ */ React.createElement("div", { className: "console", id: "runtime" }, /* @__PURE__ */ React.createElement("div", { className: "console-bar" }, /* @__PURE__ */ React.createElement("div", { className: "dots" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)), /* @__PURE__ */ React.createElement("span", { className: "title" }, "claude \xB7 mcp[nable] \xB7 ~/projects/platform-infra"), /* @__PURE__ */ React.createElement("span", { className: "status" }, "runtime active")), /* @__PURE__ */ React.createElement("div", { className: "console-body" }, /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av you" }, "you"), /* @__PURE__ */ React.createElement("div", { className: "bubble user" }, /* @__PURE__ */ React.createElement("p", null, typed, /* @__PURE__ */ React.createElement("span", { className: "cursor" })))), phase === "thinking" && /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av ai" }, "nable"), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "thinking" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)))), phase === "answered" && /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av ai" }, "nable"), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, answer))), /* @__PURE__ */ React.createElement("div", { className: "console-foot" }, /* @__PURE__ */ React.createElement("div", { className: "ask-hint" }, /* @__PURE__ */ React.createElement("span", { className: "ask-live" }), "Ask anything \xB7 live demo data, no install", /* @__PURE__ */ React.createElement("a", { className: "full-demo-link", href: "/demo.html", onClick: () => {
     if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "full_demo" });
-  } }, "Open full demo \u2192")), !asked && /* @__PURE__ */ React.createElement("div", { className: "ask-chips" }, CHIPS.map((c, i) => /* @__PURE__ */ React.createElement("button", { key: i, type: "button", onClick: () => pickChip(c) }, c.label))), /* @__PURE__ */ React.createElement("form", { className: "console-ask", onSubmit: (e) => {
+  } }, "Open full demo \u2192")), (!asked || offTopic) && /* @__PURE__ */ React.createElement("div", { className: "ask-chips" }, CHIPS.map((c, i) => /* @__PURE__ */ React.createElement("button", { key: i, type: "button", onClick: () => pickChip(c) }, c.label))), /* @__PURE__ */ React.createElement("form", { className: "console-ask", onSubmit: (e) => {
     e.preventDefault();
     ask(input);
   } }, /* @__PURE__ */ React.createElement(
@@ -507,7 +526,7 @@ function Console({ interaction }) {
       onFocus: () => setFocused(true),
       "aria-label": "Ask nable about the demo account"
     }
-  ), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "console-send", "aria-label": "Ask nable" }, /* @__PURE__ */ React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 14 14", fill: "none", stroke: "currentColor", strokeWidth: "2", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M7 11V3.5M7 3.5L3.7 6.8M7 3.5l3.3 3.3", strokeLinecap: "round", strokeLinejoin: "round" })))), asked && phase === "answered" && !isGate && /* @__PURE__ */ React.createElement("div", { className: "console-convert" }, /* @__PURE__ */ React.createElement("span", null, "Demo data \xB7 run it on your own bill:"), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx --python 3.12 --from finops-mcp finops welcome" }))));
+  ), /* @__PURE__ */ React.createElement("button", { type: "submit", className: "console-send", "aria-label": "Ask nable" }, /* @__PURE__ */ React.createElement("svg", { width: "14", height: "14", viewBox: "0 0 14 14", fill: "none", stroke: "currentColor", strokeWidth: "2", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M7 11V3.5M7 3.5L3.7 6.8M7 3.5l3.3 3.3", strokeLinecap: "round", strokeLinejoin: "round" })))), asked && phase === "answered" && !isGate && !offTopic && /* @__PURE__ */ React.createElement("div", { className: "console-convert" }, /* @__PURE__ */ React.createElement("span", null, "Demo data \xB7 run it on your own bill:"), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx --python 3.12 --from finops-mcp finops welcome" }))));
 }
 function Thesis() {
   const cards = [
