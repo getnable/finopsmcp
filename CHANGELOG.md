@@ -2,6 +2,30 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.76
+
+Onboarding instrumentation and a faster ambient connect, aimed at the activation
+wall (105 wizard starts, 5 provider connects). Now we can see exactly where people
+drop, and the credential-detection step never hangs.
+
+### Activation
+- **Step-level funnel events.** The AWS connect flow now emits a `setup_step` event
+  at each stage: connect opened, ambient probe done (with candidate count), ambient
+  confirmed/declined, no-ambient-creds, manual opened, method selected, one-click
+  offered, connect attempted, verify failed. The flow previously fired only start and
+  success, so the ~95% who abandoned mid-wizard were invisible.
+- **Failed manual connects now report.** A credential that fails verification emits
+  `provider_connect_failed` instead of silently returning, so broken-key drop-offs are
+  finally measurable.
+- **Ambient detection is parallel and time-capped.** `_detect_aws_candidates` probed
+  each AWS profile sequentially with multi-second timeouts and no global cap, so a
+  machine with several profiles (or an expiring SSO token, or firewalled IMDS) stalled
+  onboarding for 30s or more. Probes now run concurrently under a hard 4-second
+  deadline, so detect-then-connect stays fast and never freezes. Named profiles are
+  still preferred; the default chain is deduped against them.
+
+Full suite: 829 passed.
+
 ## 0.8.75
 
 The AI cost moat: optimize, forecast, and monitor token spend, including committed
