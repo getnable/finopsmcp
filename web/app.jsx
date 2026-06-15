@@ -1262,16 +1262,20 @@ function Pricing(){
 function MidCta(){
   return (
     <section id="mid-cta" style={{borderTop:"1px solid var(--line)",borderBottom:"1px solid var(--line)"}}>
-      <div className="wrap" style={{paddingTop:72,paddingBottom:72}}>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:24,textAlign:"center"}}>
+      <div className="wrap" style={{paddingTop:76,paddingBottom:76}}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:22,textAlign:"center"}}>
           <div>
-            <h2 style={{marginBottom:10}}>Ready to stop guessing?</h2>
-            <p style={{color:"var(--fg-2)",maxWidth:"46ch",margin:"0 auto",lineHeight:1.6}}>
+            <h2 style={{marginBottom:12}}>Ready to stop guessing?</h2>
+            <p style={{color:"var(--fg-2)",maxWidth:"38ch",margin:"0 auto",lineHeight:1.55,textWrap:"balance"}}>
               Minutes from install to your first real insight. Free forever for solo use.
             </p>
           </div>
+          <div style={{display:"inline-flex",alignItems:"stretch",background:"var(--bg-1)",border:"1px solid var(--line-2)",borderRadius:"var(--r-md)",fontFamily:"var(--mono)",fontSize:13.5,overflow:"hidden",maxWidth:"100%"}}>
+            <span style={{padding:"12px 13px",color:"var(--fg-3)",background:"var(--bg-2)",borderRight:"1px solid var(--line)"}}>$</span>
+            <span style={{padding:"12px 16px",color:"var(--fg)",whiteSpace:"nowrap",overflowX:"auto"}}>uvx --python 3.12 --from finops-mcp finops welcome</span>
+          </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"center"}}>
-            <a href="/docs.html" className="btn btn-primary"
+            <a href="/docs.html#install" className="btn btn-primary"
               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'mid_cta',cta:'start_free'}); }}>
               Get started free <span className="arr">→</span>
             </a>
@@ -1280,9 +1284,10 @@ function MidCta(){
               Read the docs
             </a>
           </div>
-          <p className="mono" style={{fontSize:11,color:"var(--fg-4)",letterSpacing:".05em"}}>
-            uvx --python 3.12 --from finops-mcp finops welcome
-          </p>
+          <div style={{display:"inline-flex",alignItems:"center",gap:8,marginTop:2,fontFamily:"var(--mono)",fontSize:12,color:"var(--success)",border:"1px solid #2a5c43",borderRadius:"var(--r-md)",padding:"7px 13px"}}>
+            <span style={{width:6,height:6,borderRadius:"50%",background:"var(--success)",display:"inline-block"}}></span>
+            found $1,840/mo on day one
+          </div>
         </div>
       </div>
     </section>
