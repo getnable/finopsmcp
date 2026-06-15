@@ -554,6 +554,12 @@ def run_welcome_flow(demo: bool = False) -> None:
         aws_ambient = False
 
     if aws_ambient:
+        try:
+            from .setup_wizard import _emit_provider_connected, _emit_step
+        except Exception:
+            def _emit_provider_connected(*a, **k): pass
+            def _emit_step(*a, **k): pass
+        _emit_step("welcome_ambient_detected")
         _line(f"  {green('Found AWS credentials')} in your environment.")
         _line(dim("  nable can run a read-only cost scan with them right now."))
         _blank()
@@ -564,17 +570,16 @@ def run_welcome_flow(demo: bool = False) -> None:
             ans = "n"
         _blank()
         if ans in ("y", "yes"):
+            _emit_step("welcome_ambient_accepted")
             shown = _show_value_moment(demo=False)
             if shown:
                 # A confirmed read with ambient creds is a real connection. The
                 # ambient path never calls setup_aws_account, so without this the
                 # activation metric misses everyone who connects via an existing
                 # profile, SSO, or the default chain. auth_method marks it ambient.
-                try:
-                    from .setup_wizard import _emit_provider_connected
-                    _emit_provider_connected("ambient")
-                except Exception:
-                    pass
+                _emit_provider_connected("ambient")
+        else:
+            _emit_step("welcome_ambient_declined")
 
     # No cloud creds shown yet: AI-native users usually have a model-provider key
     # in their env, and the token bill IS their biggest cost. Offer it as the fast

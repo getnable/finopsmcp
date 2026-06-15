@@ -325,6 +325,7 @@ def _detect_aws_candidates() -> list:
     not inherit shell env vars when Claude Desktop spawns it.
     """
     import boto3
+    import concurrent.futures
 
     def _probe(profile):
         try:
@@ -341,22 +342,43 @@ def _detect_aws_candidates() -> list:
         except Exception:
             return None  # no creds / expired SSO token / no permission — just skip
 
-    candidates, seen = [], set()
     try:
         profiles = boto3.Session().available_profiles
     except Exception:
         profiles = []
-    for p in profiles:
-        c = _probe(p)
-        if c and c["account_id"] not in seen:
-            c["label"] = f"profile '{p}'"
-            candidates.append(c)
-            seen.add(c["account_id"])
-    if not candidates:
-        c = _probe(None)
-        if c:
-            c["label"] = "default credentials"
-            candidates.append(c)
+
+    # Probe every named profile plus the ambient default chain (None) concurrently
+    # under a hard wall-clock deadline. Sequential probing stalled onboarding for
+    # seconds per profile when an SSO token needed refreshing or IMDS was
+    # firewalled; with several profiles that became a 30s+ freeze and a quit point.
+    # Anything unresolved past the deadline is abandoned (treated as "no creds").
+    _DEADLINE = 4.0
+    targets = list(profiles) + [None]
+    resolved: list = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+        futs = {pool.submit(_probe, p): p for p in targets}
+        try:
+            for fut in concurrent.futures.as_completed(futs, timeout=_DEADLINE):
+                r = fut.result()
+                if r:
+                    p = futs[fut]
+                    r["label"] = f"profile '{p}'" if p else "default credentials"
+                    resolved.append(r)
+        except concurrent.futures.TimeoutError:
+            pass  # deadline hit — use whatever resolved in time
+
+    # Prefer named profiles; include the default chain only for accounts a named
+    # profile didn't already cover. Dedupe by account_id.
+    named = [r for r in resolved if r["profile"]]
+    default = [r for r in resolved if not r["profile"]]
+    candidates, seen = [], set()
+    for r in named + default:
+        if r["account_id"] in seen:
+            continue
+        if not r["profile"] and any(n["account_id"] == r["account_id"] for n in named):
+            continue
+        candidates.append(r)
+        seen.add(r["account_id"])
     return candidates
 
 
@@ -405,6 +427,20 @@ def _emit_provider_connected(auth_method: str) -> None:
         pass
 
 
+def _emit_step(step: str, **props) -> None:
+    """Fire a granular onboarding-funnel event so we can see exactly which step a
+    user abandons at. Opt-out, CI, and air-gap are enforced inside telemetry, so
+    this is safe to call unconditionally. provider defaults to aws (the only
+    instrumented connect flow today); pass provider=... to override."""
+    try:
+        from . import telemetry as _tel
+        payload = {"step": step, "provider": "aws"}
+        payload.update(props)
+        _tel._send_event(_tel._get_install_id(), "setup_step", payload)
+    except Exception:
+        pass
+
+
 def _finalize_aws_account(name: str) -> None:
     """Set default (auto if first), print the summary, offer to add another."""
     from .accounts import list_accounts, set_default_account
@@ -440,6 +476,7 @@ def setup_aws_account() -> None:
     from .accounts import AccountConfig, add_account, get_boto3_session, list_accounts
 
     _section("AWS: Add Account")
+    _emit_step("aws_connect_opened")
 
     existing = list_accounts()
     taken = {a.name for a in existing}
@@ -449,6 +486,7 @@ def setup_aws_account() -> None:
 
     print("  Checking for AWS credentials on this machine...")
     candidates = [c for c in _detect_aws_candidates() if c["account_id"] not in have_ids]
+    _emit_step("ambient_probe_done", candidates=len(candidates))
 
     chosen = None
     if candidates:
@@ -460,6 +498,7 @@ def setup_aws_account() -> None:
             if ans in ("y", "yes", ""):
                 chosen = c
             elif ans != "m":
+                _emit_step("ambient_declined")
                 print("  Skipped.")
                 return
         else:
@@ -475,6 +514,7 @@ def setup_aws_account() -> None:
                 _warn("Invalid choice. Run 'finops setup aws' to try again.")
                 return
     else:
+        _emit_step("no_ambient_creds")
         print("  No working AWS credentials found on this machine.\n")
         print(
             "  That is fine. The next step can mint a read-only key in your own\n"
@@ -482,6 +522,7 @@ def setup_aws_account() -> None:
         )
 
     if chosen:
+        _emit_step("ambient_confirmed", auth_method="profile" if chosen["profile"] else "default_chain")
         name = _auto_aws_name(chosen, taken)
         cfg = AccountConfig(
             name=name,
@@ -556,6 +597,7 @@ def _setup_aws_manual(taken: set) -> None:
     import boto3
 
     region = "us-east-1"  # CE is global; scanners auto-discover regions. No prompt.
+    _emit_step("manual_opened")
 
     print("\n  How should nable authenticate?")
     print("  1) IAM access key  (most common)")
@@ -569,6 +611,8 @@ def _setup_aws_manual(taken: set) -> None:
         if cred_choice in ("1", "2", "3", ""):
             break
         _warn("Please pick 1, 2, or 3.")
+    _emit_step("manual_method_selected",
+               method={"2": "role_arn", "3": "profile"}.get(cred_choice, "access_key"))
 
     access_key = secret_key = role_arn = profile = ""
     auth_method = "access_key"
@@ -603,6 +647,7 @@ def _setup_aws_manual(taken: set) -> None:
         auth_method = "profile"
 
     else:
+        _emit_step("oneclick_offered")
         _print_one_click_key_offer(region)
         access_key = _prompt("  AWS Access Key ID (starts with AKIA or ASIA)")
         while not (access_key.startswith("AKIA") or access_key.startswith("ASIA")) or len(access_key) < 16:
@@ -628,10 +673,19 @@ def _setup_aws_manual(taken: set) -> None:
         os.environ["AWS_DEFAULT_REGION"] = region
 
     # Verify BEFORE saving. Never persist a broken config.
+    _emit_step("connect_attempted", auth_method=auth_method)
     try:
         session = get_boto3_session(cfg)
         account_id = session.client("sts").get_caller_identity()["Account"]
     except Exception as e:
+        _emit_step("verify_failed", auth_method=auth_method)
+        try:
+            from . import telemetry as _tel
+            _tel._send_event(_tel._get_install_id(), "provider_connect_failed", {
+                "provider": "aws", "auth_method": auth_method, "error_type": type(e).__name__,
+            })
+        except Exception:
+            pass
         _warn(f"Could not verify credentials: {e}")
         if profile:
             _warn("That profile did not authenticate. If it is an SSO profile, run 'aws sso login' first.")
