@@ -1264,7 +1264,7 @@
         <p class="text-sm leading-relaxed mb-3" style="color:var(--muted)">
           The difference is the real dollar savings that resource captured from the SP. Grouped by a resource tag
           (e.g. <code style="font-family:var(--mono);font-size:12px;background:var(--bg-3);padding:1px 6px;border-radius:4px;">team</code>),
-          this gives each team their effective discount rate and savings captured. No tool below the $50K/yr tier offers this at line-item granularity.
+          this gives each team their effective discount rate and savings captured. It reads Savings Plan and RI effective cost straight from your CUR, so the attribution is line-item exact.
         </p>
 
         <div class="warn-box mb-4" style="border-color:rgba(184,140,58,0.25);background:rgba(184,140,58,0.04);">
@@ -1513,7 +1513,7 @@
     const block = btn.previousElementSibling;
     const text = block.innerText.replace(/^Copy$/m, '').trim();
     navigator.clipboard.writeText(text).then(() => {
-      btn.textContent = 'Copied!';
+      btn.textContent = 'Copied';
       btn.classList.add('copied');
       setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
     });

@@ -415,7 +415,7 @@ function fmtNum(n){
 
 function TrustStrip(){
   const items = [
-    {lab:"built-in tools", val: "165+", sub:"cost, anomaly, rightsizing"},
+    {lab:"built-in tools", val: "160+", sub:"cost, anomaly, rightsizing"},
     {lab:"providers", val:"17", sub:"AWS · Azure · GCP +"},
     {lab:"on our servers", val:"0 bytes", sub:"nable has no backend"},
   ];
@@ -884,7 +884,7 @@ function Architecture({ version }){
   );
 }
 
-/* How it works — Connect / Ask / Act */
+/* How it works: Connect / Ask / Act */
 const STEPS = [
   { n:"01", h:"Connect", p:"Point nable at AWS, Azure, GCP and 14 more sources. Credentials land in your OS keyring, never on our servers.", ex:"finops setup aws" },
   { n:"02", h:"Ask",     p:"Open Claude, Cursor, or any MCP editor and just ask. nable turns the question into live, read-only API calls.", ex:'"What drove our bill up last week?"' },
@@ -915,7 +915,7 @@ function HowItWorks(){
   );
 }
 
-/* One entry. Every editor. — tabbed runtime config */
+/* One entry. Every editor. Tabbed runtime config */
 const EDITOR_TABS = [
   { id:"terminal", label:"Terminal", bar:"bash", lines:[
     { k:"cmd", t:"$ uvx --python 3.12 --from finops-mcp finops welcome" },
@@ -1120,7 +1120,7 @@ function PCell({ v }){
 function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, teamPrice, teamPer, teamSub, teamLink, teamPlan }){
   const tiers = [
     { key:"solo", name:"Solo", price:"Free", per:"forever", sub:null, rec:false, primary:false,
-      cta:"Get started", href:"/docs.html", plan:"solo", ext:false },
+      cta:"Start free", href:"/docs.html", plan:"solo", ext:false },
     { key:"pro", name:"Pro", price:proPrice, per:proPer, sub:proSub, rec:false, primary:false,
       cta:annual?"Get annual":"Get Pro", href:proLink, plan:proPlan, ext:true },
     { key:"team", name:"Team", price:teamPrice, per:teamPer, sub:teamSub, rec:true, primary:true,
@@ -1207,7 +1207,7 @@ function Pricing(){
               <div className="pt-name">Solo</div>
               <div className="pt-price"><span className="pt-amt">Free</span><span className="pt-per">forever</span></div>
               <a className="btn btn-ghost pt-cta" href="/docs.html"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'}); }}>Get started</a>
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'}); }}>Start free</a>
             </div>
             <div className="ph">
               <div className="pt-name">Pro</div>
