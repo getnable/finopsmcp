@@ -376,7 +376,7 @@ function fmtNum(n) {
 }
 function TrustStrip() {
   const items = [
-    { lab: "built-in tools", val: "165+", sub: "cost, anomaly, rightsizing" },
+    { lab: "built-in tools", val: "160+", sub: "cost, anomaly, rightsizing" },
     { lab: "providers", val: "17", sub: "AWS \xB7 Azure \xB7 GCP +" },
     { lab: "on our servers", val: "0 bytes", sub: "nable has no backend" }
   ];
@@ -703,7 +703,7 @@ function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, team
       sub: null,
       rec: false,
       primary: false,
-      cta: "Get started",
+      cta: "Start free",
       href: "/docs.html",
       plan: "solo",
       ext: false
@@ -810,7 +810,7 @@ function Pricing() {
         if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: "solo" });
       }
     },
-    "Get started"
+    "Start free"
   )), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Pro"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, proPrice), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, proPer)), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, proSub), /* @__PURE__ */ React.createElement(
     "a",
     {

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>nable — Textract Remediation</title>
+<title>nable · Textract Remediation</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"/>
 <style>
@@ -246,7 +246,7 @@ response = textract.<span class="fn">detect_document_text</span>(
     <span class="kw">except</span> s3.exceptions.NoSuchKey:
         <span class="kw">pass</span>
 
-    <span class="cm"># Cache miss — call Textract</span>
+    <span class="cm"># Cache miss, call Textract</span>
     result = textract.<span class="fn">detect_document_text</span>(
         Document={<span class="st">"S3Object"</span>: {<span class="st">"Bucket"</span>: bucket, <span class="st">"Name"</span>: key}}
     )
@@ -258,10 +258,10 @@ response = textract.<span class="fn">detect_document_text</span>(
   <div class="step">
     <h3>Order of operations</h3>
     <ol class="order">
-      <li>Run the CloudWatch query first — know your baseline</li>
-      <li>Ship the non-prod environment gate — fastest savings, lowest risk</li>
-      <li>Evaluate API tier — only if Step 1 shows you're using <code>AnalyzeDocument</code></li>
-      <li>Add caching — if Step 1 shows repeated document processing</li>
+      <li>Run the CloudWatch query first, know your baseline</li>
+      <li>Ship the non-prod environment gate, fastest savings, lowest risk</li>
+      <li>Evaluate API tier, only if Step 1 shows you're using <code>AnalyzeDocument</code></li>
+      <li>Add caching, if Step 1 shows repeated document processing</li>
     </ol>
 
     <div class="bottom-line">

@@ -126,7 +126,7 @@
       "ecs:ListClusters", "ecs:ListServices",
       "ecs:DescribeServices", "ecs:DescribeTaskDefinition",
       "logs:DescribeLogGroups", "logs:DescribeLogStreams",
-      <span class="w">"logs:PutRetentionPolicy",</span>  <span class="w">// the one optional write — omit to be pure read-only</span>
+      <span class="w">"logs:PutRetentionPolicy",</span>  <span class="w">// the one optional write, omit to be pure read-only</span>
       "cloudtrail:DescribeTrails", "cloudtrail:GetTrailStatus",
       "cloudtrail:GetEventSelectors",
       "s3:ListAllMyBuckets", "s3:GetBucketLocation",
@@ -142,7 +142,7 @@
   }]
 }</pre>
 <p>Every action is a <code>Get</code>, <code>List</code>, <code>Describe</code>, or read. There is no <code>Create</code>, <code>Delete</code>, <code>Modify</code>, <code>Run</code>, <code>Terminate</code>, or <code>Put</code> anywhere except the single annotated log-retention line.</p>
-<p>One optional, separate backend: if you turn on the detailed CUR-via-Athena cost path (off by default, not part of this policy), it additionally needs read access to Athena and Glue plus a scoped <code>s3:PutObject</code> to its own Athena query-results bucket. That is the only write outside log retention, it is opt-in, and it is scoped to a bucket you designate.</p>
+<p>One optional, separate backend: if you turn on the detailed CUR-via-Athena cost path (off by default, not part of this policy), it also needs read access to Athena and Glue plus a scoped <code>s3:PutObject</code> to its own Athena query-results bucket. That is the only write outside log retention, it is opt-in, and it is scoped to a bucket you designate.</p>
 
 <h2>Google Cloud</h2>
 <h3>roles to grant the service account</h3>
