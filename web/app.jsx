@@ -97,7 +97,7 @@ function EmailCapture({ source = "hero", placeholder = "email", btnLabel = "Get 
 
   if(state === "done"){
     return (
-      <p style={{fontFamily:"'Space Grotesk',system-ui,sans-serif",fontSize:12,color:"var(--accent)",letterSpacing:".02em",
+      <p style={{fontFamily:"'Bricolage Grotesque',system-ui,sans-serif",fontSize:12,color:"var(--accent)",letterSpacing:".02em",
         textAlign: center ? "center" : "left", marginTop: 8}}>
         Check your inbox. Setup guide on its way.
       </p>
@@ -121,7 +121,7 @@ function EmailCapture({ source = "hero", placeholder = "email", btnLabel = "Get 
       </button>
       {state === "error" && (
         <span style={{position:"absolute",bottom:-20,left:0,fontSize:11,
-          color:"var(--alert)",fontFamily:"'Space Grotesk',system-ui,sans-serif"}}>
+          color:"var(--alert)",fontFamily:"'Bricolage Grotesque',system-ui,sans-serif"}}>
           Something went wrong. Try again.
         </span>
       )}
@@ -1331,7 +1331,7 @@ function FounderNote(){
   return (
     <section id="founder" style={{borderTop:"1px solid var(--line)"}}>
       <div className="wrap" style={{maxWidth:680,paddingTop:80,paddingBottom:80}}>
-        <div style={{fontFamily:"'Space Grotesk',system-ui,sans-serif",fontWeight:500,fontSize:11,color:"var(--accent-dim)",letterSpacing:".08em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:24}}>
+        <div style={{fontFamily:"'Bricolage Grotesque',system-ui,sans-serif",fontWeight:500,fontSize:11,color:"var(--accent-dim)",letterSpacing:".08em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:24}}>
           <span style={{width:24,height:1,background:"var(--accent-dim)",display:"inline-block"}}></span>
           Why I built this
         </div>
@@ -1444,7 +1444,7 @@ function FAQ(){
   return (
     <section id="faq" className="alt">
       <div className="wrap" style={{maxWidth:720,paddingTop:80,paddingBottom:80}}>
-        <div style={{fontFamily:"'Space Grotesk',system-ui,sans-serif",fontWeight:500,fontSize:11,color:"var(--accent-dim)",letterSpacing:".08em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
+        <div style={{fontFamily:"'Bricolage Grotesque',system-ui,sans-serif",fontWeight:500,fontSize:11,color:"var(--accent-dim)",letterSpacing:".08em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
           <span style={{width:24,height:1,background:"var(--accent-dim)",display:"inline-block"}}></span>
           FAQ
         </div>
@@ -1468,7 +1468,7 @@ function FAQ(){
                     background:"none",
                     border:"none",
                     color: isOpen ? "var(--fg)" : "var(--fg-2)",
-                    fontFamily:"'Space Grotesk',system-ui,sans-serif",
+                    fontFamily:"'Bricolage Grotesque',system-ui,sans-serif",
                     fontSize:16,
                     fontWeight:500,
                     textAlign:"left",
@@ -1539,7 +1539,7 @@ function PaletteSwatches({ value, onChange }){
               display:"flex",alignItems:"center",gap:8,padding:"7px 9px",
               border:"1px solid",borderColor: on ? "var(--accent)" : "rgba(255,255,255,.12)",
               borderRadius:7,background:"rgba(255,255,255,.03)",color:"var(--fg)",
-              fontFamily:"'Space Grotesk',system-ui,sans-serif",fontSize:12,cursor:"pointer",
+              fontFamily:"'Bricolage Grotesque',system-ui,sans-serif",fontSize:12,cursor:"pointer",
               boxShadow: on ? "0 0 0 2px rgba(95,232,160,.18)" : "none",
               transition:".15s"
             }}>
