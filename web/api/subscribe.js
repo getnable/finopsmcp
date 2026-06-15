@@ -152,6 +152,40 @@ function checkRateLimit(ip) {
   return true; // allowed
 }
 
+// KV-backed rate limit (global across edge instances) with a hard daily cap.
+// The in-memory limiter above only sees one warm instance, so IP-rotating bots
+// slip past it; the KV global counter bounds total welcome emails/day no matter
+// how many IPs or instances are in play, which stops this endpoint from being
+// turned into a spam cannon on our sending domain. Falls back to in-memory when
+// KV is not configured or unreachable, so a KV outage never blocks legit signups.
+const SUBSCRIBE_DAILY_CAP = Number(process.env.SUBSCRIBE_DAILY_CAP) || 200;
+const SUBSCRIBE_IP_HOURLY_CAP = 5;
+
+async function kvRateLimit(ip) {
+  const url = process.env.VERCEL_KV_REST_API_URL;
+  const token = process.env.VERCEL_KV_REST_API_TOKEN;
+  if (!url || !token) return null; // not configured → caller uses in-memory
+  const auth = { headers: { Authorization: `Bearer ${token}` } };
+  try {
+    // Per-IP: cap per hour.
+    const ipKey = encodeURIComponent(`sub_rl_ip:${ip}`);
+    const ipCount = Number((await (await fetch(`${url}/incr/${ipKey}`, auth)).json()).result);
+    if (ipCount === 1) await fetch(`${url}/expire/${ipKey}/3600`, auth);
+    if (Number.isFinite(ipCount) && ipCount > SUBSCRIBE_IP_HOURLY_CAP) return { ok: false };
+
+    // Global daily circuit breaker, bounds total sends/day across all IPs.
+    const day = new Date().toISOString().slice(0, 10);
+    const gKey = encodeURIComponent(`sub_rl_day:${day}`);
+    const gCount = Number((await (await fetch(`${url}/incr/${gKey}`, auth)).json()).result);
+    if (gCount === 1) await fetch(`${url}/expire/${gKey}/172800`, auth);
+    if (Number.isFinite(gCount) && gCount > SUBSCRIBE_DAILY_CAP) return { ok: false };
+
+    return { ok: true };
+  } catch {
+    return null; // KV error → fall back to in-memory
+  }
+}
+
 export default async function handler(req) {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -176,7 +210,10 @@ export default async function handler(req) {
     }
   }
 
-  if (!checkRateLimit(ip)) {
+  // Prefer the global KV limiter; fall back to in-memory if KV is unavailable.
+  const kvVerdict = await kvRateLimit(ip);
+  const allowed = kvVerdict ? kvVerdict.ok : checkRateLimit(ip);
+  if (!allowed) {
     return new Response(JSON.stringify({ error: "Too many requests. Try again later." }), {
       status: 429,
       headers: { "Content-Type": "application/json", ...CORS_HEADERS },

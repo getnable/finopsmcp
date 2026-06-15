@@ -60,6 +60,36 @@ function _rateLimited(ip) {
   return arr.length > max;
 }
 
+// KV-backed limiter (global across warm instances) with a hard daily cap, so if
+// ANTHROPIC_API_KEY is ever set the spend is bounded no matter how many IPs or
+// instances an attacker spreads across. Falls back to the in-memory limiter
+// above when KV is not configured or unreachable.
+const DEMO_ASK_DAILY_CAP = Number(process.env.DEMO_ASK_DAILY_CAP) || 1000;
+const DEMO_ASK_IP_CAP = 15; // per 10 min, matches the in-memory fallback
+
+async function _kvLimited(ip) {
+  const url = process.env.VERCEL_KV_REST_API_URL;
+  const token = process.env.VERCEL_KV_REST_API_TOKEN;
+  if (!url || !token) return null; // not configured → caller uses in-memory
+  const auth = { headers: { Authorization: `Bearer ${token}` } };
+  try {
+    const ipKey = encodeURIComponent(`demoask_ip:${ip}`);
+    const ipCount = Number((await (await fetch(`${url}/incr/${ipKey}`, auth)).json()).result);
+    if (ipCount === 1) await fetch(`${url}/expire/${ipKey}/600`, auth);
+    if (Number.isFinite(ipCount) && ipCount > DEMO_ASK_IP_CAP) return true;
+
+    const day = new Date().toISOString().slice(0, 10);
+    const gKey = encodeURIComponent(`demoask_day:${day}`);
+    const gCount = Number((await (await fetch(`${url}/incr/${gKey}`, auth)).json()).result);
+    if (gCount === 1) await fetch(`${url}/expire/${gKey}/172800`, auth);
+    if (Number.isFinite(gCount) && gCount > DEMO_ASK_DAILY_CAP) return true;
+
+    return false;
+  } catch {
+    return null; // KV error → fall back to in-memory
+  }
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "POST only" });
@@ -83,7 +113,9 @@ module.exports = async function handler(req, res) {
   }
 
   const ip = ((req.headers["x-forwarded-for"] || "").split(",")[0] || "").trim() || "unknown";
-  if (_rateLimited(ip)) {
+  const _kv = await _kvLimited(ip);
+  const _limited = _kv === null ? _rateLimited(ip) : _kv;
+  if (_limited) {
     res.status(429).json({ answer: null, reason: "rate_limited" });
     return;
   }
