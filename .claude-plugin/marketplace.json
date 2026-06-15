@@ -1,6 +1,6 @@
 {
   "name": "nable",
-  "description": "Local-first FinOps for Claude. Ask your AWS, Azure, GCP, Kubernetes, and SaaS bill in plain English.",
+  "description": "Local-first FinOps for Claude. Ask what's driving your AWS, Azure, GCP, Kubernetes, and SaaS bill, right where you work.",
   "owner": {
     "name": "Chandan Bukkapatnam",
     "url": "https://getnable.com"
