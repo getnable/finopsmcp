@@ -3,10 +3,11 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>nable: session replay</title>
+<title>nable · ask a real cloud bill anything</title>
+<meta name="description" content="Try nable in your browser. Ask a real demo cloud and AI bill anything and get the same answers nable gives inside Claude. No install, no signup."/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <link href="https://cdn.jsdelivr.net/npm/geist-mono@1/index.css" rel="stylesheet"/>
 <style>
   :root{
@@ -16,25 +17,32 @@
     --accent:#4db8d4; --accent-dim:#2c7d91;
     --success:#3cba7a; --warn:#e6a840; --alert:#e05c4b;
     --mono:'Geist Mono',ui-monospace,'JetBrains Mono',monospace;
-    /* code syntax theme (local to this replay asset) */
     --c-kw:#c08bd6; --c-str:#9bd97a; --c-com:#5b6b73; --c-fn:#5aa6df; --c-num:#e0a85c;
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--fg);
-    font-family:'Instrument Sans',ui-sans-serif,system-ui,sans-serif;
+    font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;
     font-size:15.5px;line-height:1.55;-webkit-font-smoothing:antialiased;
-    letter-spacing:-.005em;font-feature-settings:"ss01","cv11"}
+    letter-spacing:-.011em}
   ::selection{background:var(--accent);color:var(--bg)}
 
-  #chat{max-width:760px;margin:0 auto;padding:72px 28px 60vh}
+  header{max-width:760px;margin:0 auto;padding:34px 28px 4px}
+  header .top{display:flex;align-items:center;gap:10px}
+  header .logo{font-weight:600;font-size:18px;letter-spacing:-.03em}
+  header .logo .n{color:var(--accent)}
+  header .badge{font-family:var(--mono);font-size:11px;color:var(--fg-3);
+    border:1px solid var(--line);border-radius:2px;padding:2px 7px;margin-left:auto}
+  header h1{font-size:25px;font-weight:600;letter-spacing:-.035em;margin:18px 0 6px;line-height:1.1}
+  header h1 .accent{color:var(--accent)}
+  header .sub{color:var(--fg-2);font-size:15px;max-width:620px}
+  header .sub code{font-family:var(--mono);font-size:.85em;color:var(--accent)}
 
-  .turn{margin:0 0 30px}
+  #chat{max-width:760px;margin:0 auto;padding:18px 28px 240px}
+
+  .turn{margin:0 0 28px}
   .turn.user{display:flex;justify-content:flex-end}
   .bubble{background:var(--bg-2);border:1px solid var(--line);
     border-radius:14px;padding:11px 16px;max-width:80%;color:var(--fg)}
-  .cursor{display:inline-block;width:8px;height:1.05em;vertical-align:-2px;
-    margin-left:1px;background:var(--accent);animation:blink .9s steps(1) infinite}
-  @keyframes blink{50%{opacity:0}}
 
   .nlabel{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;
     letter-spacing:.06em;color:var(--accent);text-transform:uppercase;margin-bottom:14px}
@@ -42,7 +50,6 @@
   .nbody>*{margin:0 0 16px}
   .nbody>*:last-child{margin-bottom:0}
 
-  /* thinking */
   .thinking{display:flex;gap:5px;align-items:center;height:14px}
   .thinking span{width:6px;height:6px;border-radius:50%;background:var(--fg-3);
     animation:tk 1s ease-in-out infinite}
@@ -50,8 +57,7 @@
   .thinking span:nth-child(3){animation-delay:.3s}
   @keyframes tk{0%,100%{opacity:.25}50%{opacity:.9}}
 
-  /* fade-up reveal */
-  .blk{opacity:0;transform:translateY(6px);transition:opacity .32s ease-out,transform .32s ease-out}
+  .blk{opacity:0;transform:translateY(6px);transition:opacity .3s ease-out,transform .3s ease-out}
   .blk.show{opacity:1;transform:none}
 
   p{margin:0}
@@ -62,7 +68,6 @@
   code.chip{font-family:var(--mono);font-size:.86em;color:var(--c-str);
     background:var(--bg-2);border:1px solid var(--line);border-radius:3px;padding:1px 5px}
 
-  /* big headline number */
   .big{padding:4px 0}
   .biglabel{font-size:12px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-3)}
   .bigrow{display:flex;align-items:baseline;gap:8px;margin-top:4px}
@@ -71,7 +76,6 @@
   .bigunit{font-size:16px;color:var(--fg-3)}
   .bigsub{margin-top:8px;color:var(--fg-2);font-size:14.5px}
 
-  /* table */
   table{width:100%;border-collapse:collapse;font-size:14.5px}
   thead th{text-align:left;background:var(--bg-2);color:var(--fg-3);font-weight:500;
     font-size:12.5px;letter-spacing:.02em;padding:11px 14px}
@@ -82,12 +86,10 @@
   td.save{font-family:var(--mono);color:var(--accent);white-space:nowrap;font-variant-numeric:tabular-nums}
   td.eff{color:var(--fg-2)}
 
-  /* key/value list (pricing) */
   .kv{display:flex;flex-direction:column;gap:9px}
   .kv .row{display:flex;align-items:baseline;gap:10px;font-size:14.5px}
   .kv .row .v{color:var(--fg-2)}
 
-  /* bullet / numbered lists */
   ul.b,ol.b{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:9px}
   ul.b li,ol.b li{color:var(--fg-2);padding-left:22px;position:relative}
   ul.b li::before{content:"";position:absolute;left:4px;top:.62em;width:4px;height:4px;border-radius:50%;background:var(--fg-4)}
@@ -96,66 +98,79 @@
   ol.b li::before{content:counter(n) ".";position:absolute;left:0;top:0;color:var(--fg-3);font-variant-numeric:tabular-nums}
   ul.b li code,ol.b li code{font-family:var(--mono);font-size:.88em;color:var(--accent)}
 
-  /* code block */
   pre{margin:0;background:#0a0c0d;border:1px solid var(--line);border-radius:12px;
     padding:18px 20px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.65;
     color:var(--fg);white-space:pre}
   .c-kw{color:var(--c-kw)} .c-str{color:var(--c-str)} .c-com{color:var(--c-com)}
   .c-fn{color:var(--c-fn)} .c-num{color:var(--c-num)}
 
-  /* callout strip */
   .callout{border-left:3px solid var(--accent);background:var(--bg-1);
     padding:13px 16px;border-radius:0 8px 8px 0;color:var(--fg)}
   .callout strong{font-weight:600}
 
-  /* grade */
   .grade{font-size:15.5px;color:var(--fg-2)}
   .grade .g{font-family:var(--mono);font-size:30px;font-weight:600;color:var(--warn);vertical-align:-4px;margin:0 4px}
-  .grade .sc{color:var(--fg-3)}
 
-  /* end card */
-  #end{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:18px;opacity:0;pointer-events:none;
-    transition:opacity .6s ease;z-index:20}
-  #end.show{opacity:1}
-  #end .logo{font-size:46px;font-weight:600;letter-spacing:-.03em}
-  #end .logo .n{color:var(--accent)}
-  #end .tag{color:var(--fg-2);font-size:18px}
-  #end .url{color:var(--fg-3);font-family:var(--mono);font-size:13px;margin-top:6px}
+  /* composer */
+  #composer{position:fixed;left:0;right:0;bottom:0;z-index:10;
+    background:linear-gradient(180deg,rgba(13,15,16,0) 0%,var(--bg) 34%);padding:26px 28px 20px}
+  #composer .inner{max-width:760px;margin:0 auto}
+  #chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .chip-q{background:var(--bg-1);border:1px solid var(--line-2);color:var(--fg-2);
+    border-radius:6px;padding:7px 12px;font-size:13px;font-family:inherit;cursor:pointer;
+    transition:.14s;letter-spacing:-.01em}
+  .chip-q:hover{color:var(--fg);border-color:var(--accent-dim)}
+  #form{display:flex;gap:10px;align-items:flex-end}
+  #q{flex:1;background:var(--bg-1);border:1px solid var(--line-2);border-radius:6px;
+    color:var(--fg);font-family:inherit;font-size:15px;padding:13px 14px;resize:none;
+    min-height:48px;max-height:140px;line-height:1.4}
+  #q:focus{outline:none;border-color:var(--accent)}
+  #q::placeholder{color:var(--fg-3)}
+  #send{background:var(--accent);color:#06222c;border:none;border-radius:8px;
+    padding:0 18px;height:48px;font-weight:600;font-size:14px;font-family:inherit;cursor:pointer;transition:.14s}
+  #send:hover{filter:brightness(1.08)}
+  #send:disabled{opacity:.45;cursor:default}
+  #foot{max-width:760px;margin:9px auto 0;color:var(--fg-3);font-size:12px;text-align:center}
+  #foot code{font-family:var(--mono);color:var(--fg-2)}
+  #foot a{color:var(--accent-dim);text-decoration:none}
+  #foot a:hover{color:var(--accent)}
 
-  /* replay control (not part of the shot, bottom right, subtle) */
-  #replay{position:fixed;right:16px;bottom:14px;z-index:30;background:var(--bg-2);
-    color:var(--fg-2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;
-    font-family:inherit;font-size:12.5px;cursor:pointer;opacity:.5;transition:.15s}
-  #replay:hover{opacity:1;color:var(--fg);border-color:var(--line-2)}
-
-  @media (prefers-reduced-motion:reduce){.blk{transition:none}.cursor{animation:none}}
+  @media (prefers-reduced-motion:reduce){.blk{transition:none}}
+  @media (max-width:560px){header h1{font-size:22px}#send{padding:0 14px}}
 </style>
 </head>
 <body>
+  <header>
+    <div class="top">
+      <span class="logo"><span class="n">n</span>able</span>
+      <span class="badge">demo · acme-production</span>
+    </div>
+    <h1>Ask this cloud and AI bill <span class="accent">anything</span>.</h1>
+    <p class="sub">This is a real demo account ($13,703/mo, AWS), answered by nable. Type a question or tap one below. Same answers you'd get inside Claude, no install. Point it at your own bill with <code>uvx --from finops-mcp finops welcome</code>.</p>
+  </header>
+
   <div id="chat"></div>
-  <div id="end">
-    <div class="logo"><span class="n">n</span>able</div>
-    <div class="tag">Your cloud bill, answerable in Claude.</div>
-    <div class="url">pip install finops-mcp</div>
+
+  <div id="composer">
+    <div class="inner">
+      <div id="chips"></div>
+      <form id="form">
+        <textarea id="q" rows="1" placeholder="Ask about this bill… e.g. where can I save money?" autocomplete="off"></textarea>
+        <button id="send" type="submit">Ask</button>
+      </form>
+    </div>
+    <div id="foot">Demo data for illustration. Your real bill never leaves your machine. <a href="/">getnable.com</a></div>
   </div>
-  <button id="replay" onclick="location.reload()">↺ Replay</button>
 
 <script>
-/* ── pacing (tune these for recording) ───────────────────────────────────── */
-const SPEED = 1;            // >1 faster, <1 slower
-const T = { char:26, think:650, block:520, afterQ:380, betweenTurns:1300, end:1100, first:600 };
-const wait = x => new Promise(r => setTimeout(r, x / SPEED));
-
 /* ── helpers ─────────────────────────────────────────────────────────────── */
-const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const md  = s => esc(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
                        .replace(/`([^`]+)`/g,'<code class="chip">$1</code>');
 
 const PY_KW = new Set(['def','class','import','from','as','return','if','elif','else','for',
   'while','in','and','or','not','is','None','True','False','try','except','finally','raise',
   'with','pass','lambda','yield','global','nonlocal','assert','break','continue']);
-
 function hlPy(src){
   src = esc(src);
   const re = /(#[^\n]*)|([rbfRBF]{0,2}"(?:[^"\\]|\\.)*"|[rbfRBF]{0,2}'(?:[^'\\]|\\.)*')|(\b\d+\.?\d*\b)|([A-Za-z_]\w*)/g;
@@ -181,11 +196,11 @@ function hlBash(src){
     return m;
   });
 }
-
 const el = (tag, cls, html) => { const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e; };
 const scrollDown = () => window.scrollTo({ top: document.body.scrollHeight, behavior:'smooth' });
+const wait = ms => new Promise(r => setTimeout(r, ms));
 
-/* ── block builder ───────────────────────────────────────────────────────── */
+/* ── block builder (renders nable-style answer blocks) ───────────────────── */
 function buildBlock(b){
   switch(b.t){
     case 'p':    return el('p', null, md(b.html));
@@ -221,12 +236,11 @@ function buildBlock(b){
     case 'grade':   return el('div','grade',
       `Efficiency score: <span class="g">${esc(b.score)}</span> ${md(b.note)}`);
   }
-  return el('div');
+  return el('div', null, md(b.html||''));
 }
-
 function animateCount(e){
   const n = e.querySelector('.bignum'); if(!n) return;
-  const target = +n.dataset.v, dur = 850 / SPEED, st = performance.now();
+  const target = +n.dataset.v, dur = 800, st = performance.now();
   (function tick(now){
     let p = Math.min(1,(now-st)/dur); p = 1-Math.pow(1-p,3);
     n.textContent = '$'+Math.round(target*p).toLocaleString('en-US');
@@ -234,50 +248,14 @@ function animateCount(e){
   })(st);
 }
 
-/* ── engine ──────────────────────────────────────────────────────────────── */
-async function typeQuestion(text){
-  const row = el('div','turn user'), b = el('div','bubble'), cur = el('span','cursor');
-  b.appendChild(cur); row.appendChild(b); chat.appendChild(row); scrollDown();
-  for(const ch of text){ cur.insertAdjacentText('beforebegin', ch); await wait(T.char); }
-  cur.remove();
-}
-async function startAnswer(){
-  const row = el('div','turn nable');
-  row.appendChild(el('div','nlabel','<span class="dot"></span>NABLE'));
-  const body = el('div','nbody'); row.appendChild(body); chat.appendChild(row);
-  const think = el('div','thinking','<span></span><span></span><span></span>');
-  body.appendChild(think); scrollDown(); await wait(T.think); think.remove();
-  return body;
-}
-async function reveal(body, node){
-  node.classList.add('blk'); body.appendChild(node);
-  requestAnimationFrame(()=>node.classList.add('show'));
-  scrollDown(); await wait(T.block);
-}
-async function play(){
-  for(let i=0;i<TURNS.length;i++){
-    await wait(i===0 ? T.first : T.betweenTurns);
-    await typeQuestion(TURNS[i].q);
-    await wait(T.afterQ);
-    const body = await startAnswer();
-    for(const blk of TURNS[i].blocks){
-      const node = buildBlock(blk);
-      await reveal(body, node);
-      if(blk.t==='big') animateCount(node);
-    }
-  }
-  await wait(T.end);
-  document.getElementById('end').classList.add('show');
-}
-
-const chat = document.getElementById('chat');
-
-/* ── script ──────────────────────────────────────────────────────────────── */
-const TURNS = [
+/* ── canned intent library (the common asks, answered instantly) ─────────── */
+const INTENTS = [
 {
-  q: "hey just downloaded nable, what is my cloud spend and savings",
-  blocks: [
-    { t:'p', html:"Here's the summary across your connected accounts:" },
+  id:'summary',
+  triggers:['driving','drivers','breakdown','total','overview','summary','how much','what is my','what\'s my','this month','cloud spend','spend this','my spend','my bill','my cost'],
+  q:"What's driving my cloud spend?",
+  blocks:[
+    { t:'p', html:"Here's the picture across your connected accounts:" },
     { t:'big', label:'Cloud spend · last 30 days', value:13703, unit:'/mo',
       sub:"Only AWS is connected. Top drivers: Textract ($4,830), Bedrock ($3,817), DocumentDB ($1,906), RDS ($740)." },
     { t:'p', html:"**Projected month-end:** ~$15,742  (day 27 of 31)" },
@@ -285,117 +263,258 @@ const TURNS = [
     { t:'table', head:['Action','Savings/mo','Effort'], rows:[
       ['Disable Textract in QA/staging','$960 – $1,900','Low'],
       ['Route classifier Lambda to Haiku','$500 – $1,200','Medium'],
-      ['Buy DocumentDB + RDS Reserved Instances','$925','Zero (AWS console)'],
+      ['Buy DocumentDB + RDS Reserved Instances','$925','Zero (console)'],
       ['Set CloudWatch log retention (166 groups)','$3','Low'],
-      ['Delete stopped Windows Server EC2','$4','Zero'],
     ]},
-    { t:'callout', html:"**Biggest immediate win:** Buy the RIs today. Zero code changes, $925/mo back." },
-    { t:'grade', score:'49.5 / 100',
-      note:"Biggest gaps are tag hygiene and commitment coverage." },
-    { t:'p', html:"Want to dig into any of these specifically?" },
-  ]
+    { t:'callout', html:"**Biggest immediate win:** buy the RIs today. Zero code, $925/mo back." },
+    { t:'p', html:"Ask about any of these and I'll give you the playbook." },
+  ],
 },
 {
-  q: "how do i remediate textract?",
-  blocks: [
-    { t:'p', html:"Based on what we found this session, here's the specific playbook:" },
-
-    { t:'step', text:"Step 1: Find out what you're actually calling (5 minutes)" },
-    { t:'p', html:"Run this for each operation to see where the volume is:" },
-    { t:'code', lang:'bash', src:
-`aws cloudwatch get-metric-statistics \\
-  --namespace AWS/Textract \\
-  --metric-name SuccessfulRequestCount \\
-  --dimensions Name=Operation,Value=AnalyzeDocument \\
-  --start-time 2026-04-27T00:00:00Z \\
-  --end-time 2026-05-27T00:00:00Z \\
-  --period 2592000 --statistics Sum
-
-# Run again for each:
-# Value=DetectDocumentText
-# Value=AnalyzeExpense
-# Value=AnalyzeID` },
-    { t:'p', html:"This tells you which API you're hammering and the exact volume. Everything else follows from this." },
-
-    { t:'step', text:"Step 2: Kill non-prod Textract (highest confidence fix)" },
-    { t:'p', html:"Your log groups show 4 environments running Textract Lambdas:" },
-    { t:'ul', items:[
-      "`company-textract-lambda-prd`",
-      "`company-textract-lambda-qa`",
-      "`company-textract-lambda-stg`",
-      "`company-textract-lambda-dev` (inferred)",
+  id:'savings',
+  triggers:['save','savings','waste','wasted','cut','reduce','optimi','opportunit','lower my','cheaper'],
+  q:"Where can I save money?",
+  blocks:[
+    { t:'p', html:"Found **$2,392 – $4,032/mo** across 5 actions, ranked by impact:" },
+    { t:'table', head:['Action','Savings/mo','Effort'], rows:[
+      ['Disable Textract in QA/staging/dev','$960 – $1,900','Low'],
+      ['Route the classifier Lambda to Haiku','$500 – $1,200','Medium'],
+      ['Buy DocumentDB + RDS Reserved Instances','$925','Zero (console)'],
+      ['Set CloudWatch log retention (166 groups)','$3','Low'],
+      ['Delete the stopped Windows EC2','$4','Zero'],
     ]},
-    { t:'p', html:"In your Lambda code, add an environment gate:" },
+    { t:'callout', html:"**Start here:** the Reserved Instances. $925/mo back today, zero code change." },
+    { t:'p', html:"Ask about any one of these for the step-by-step." },
+  ],
+},
+{
+  id:'ai',
+  triggers:['ai bill','ai spend','ai/llm','llm','token','bedrock','gpt','openai','anthropic',' model','inference','ai cost'],
+  q:"What's my AI / LLM bill?",
+  blocks:[
+    { t:'big', label:'AI / LLM spend · last 30 days', value:3817, unit:'/mo',
+      sub:"All through **Bedrock**, ~28% of your cloud bill. The driver is an AnalyzeExpense classifier on a gpt-4o-class model." },
+    { t:'p', html:"Per-token prices keep falling, but your token *volume* grows, so the bill climbs. Two levers:" },
+    { t:'ul', items:[
+      "**Route to a cheaper model.** The classifier doesn't need a frontier model; Haiku-class cuts **$500 – $1,200/mo**.",
+      "**Cache repeat documents.** The same files reprocessed on retries pay twice.",
+    ]},
+    { t:'p', html:"Connect an OpenAI or Anthropic key and nable adds your direct token spend, unit economics, and credit/commitment runway on top of Bedrock." },
+  ],
+},
+{
+  id:'anomaly',
+  triggers:['spike','anomaly','anomalies','went up','go up','increase','increasing','jump','surge','why did','grew','growing'],
+  q:"Why did my bill go up?",
+  blocks:[
+    { t:'p', html:"You're up **+$3,293 vs the prior 30 days** ($10,410 → $13,703), and it's concentrated:" },
+    { t:'big', label:'Textract', value:4830, unit:'/mo',
+      sub:"Now your top line item, up sharply. The AnalyzeExpense path plus non-prod Textract Lambdas (qa/stg/dev) are hitting the live API." },
+    { t:'p', html:"Bedrock ($3,817) is the second driver. Net: the growth is in AI + document processing, not core infra." },
+    { t:'p', html:"Ask **\"how do I fix my Textract costs\"** for the remediation." },
+  ],
+},
+{
+  id:'rightsizing',
+  triggers:['rightsiz','right-siz','right siz','oversiz','idle','underutil','instance','ec2'],
+  q:"Any rightsizing opportunities?",
+  blocks:[
+    { t:'p', html:"A couple of clear ones from utilization data:" },
+    { t:'ul', items:[
+      "**Stopped Windows EC2 still billing EBS** — delete it. $4/mo, zero risk.",
+      "**DocumentDB + RDS are steady-state** — already rightsized, but on-demand. Reserved Instances cut **$925/mo** with no change to the workload.",
+    ]},
+    { t:'callout', html:"On your real account, nable opens the Terraform PR for the change. You review and merge." },
+  ],
+},
+{
+  id:'commit',
+  triggers:['reserved','reserv','savings plan','commitment','commit','coverage','ri '],
+  q:"Should I buy Reserved Instances?",
+  blocks:[
+    { t:'p', html:"Yes, it's your highest-confidence win. DocumentDB ($1,906/mo) and RDS ($740/mo) are steady, predictable, and on-demand." },
+    { t:'big', label:'Reserved Instance savings', value:925, unit:'/mo',
+      sub:"Zero code, zero risk, buy in the AWS console. About $11,100/yr back." },
+    { t:'p', html:"Thin commitment coverage is one of the two things dragging your efficiency score to **49.5/100**. This fixes most of it." },
+  ],
+},
+{
+  id:'textract',
+  triggers:['textract','document processing','ocr','analyzedocument','detectdocument','analyzeexpense'],
+  q:"How do I fix my Textract costs?",
+  blocks:[
+    { t:'p', html:"Textract is your top line item at **$4,830/mo**. Here's the playbook, highest-confidence first:" },
+    { t:'step', text:"Step 1: Kill non-prod Textract (fastest win)" },
+    { t:'p', html:"Your log groups show 4 environments running Textract Lambdas: `prd`, `qa`, `stg`, `dev`. Only prod should hit the live API:" },
     { t:'code', lang:'py', src:
 `import os
 
 def process_document(document):
     if os.environ.get("ENV") == "production":
         return call_textract(document)
-    else:
-        return load_fixture_response(document)  # pre-saved Textract output` },
-    { t:'p', html:"Save a handful of real Textract responses as JSON fixtures for QA/staging. Non-prod never touches the API again." },
-
-    { t:'step', text:"Step 3: Check if you're using the right API tier" },
-    { t:'p', html:"Pricing per 1,000 pages:" },
+    return load_fixture_response(document)  # pre-saved Textract output` },
+    { t:'p', html:"Save a few real responses as JSON fixtures for non-prod. **$960 – $1,900/mo**, no accuracy risk in prod." },
+    { t:'step', text:"Step 2: Check the API tier" },
     { t:'kv', rows:[
-      ['DetectDocumentText','$1.50 (raw text only)'],
-      ['AnalyzeDocument','tables: $15'],
-      ['AnalyzeDocument','forms: $50'],
-      ['AnalyzeExpense','$10'],
+      ['DetectDocumentText','$1.50 / 1k pages (raw text)'],
+      ['AnalyzeDocument (tables)','$15 / 1k pages'],
+      ['AnalyzeDocument (forms)','$50 / 1k pages'],
+      ['AnalyzeExpense','$10 / 1k pages'],
     ]},
-    { t:'p', html:"If your downstream code only needs raw text blocks, switch from `AnalyzeDocument` to `DetectDocumentText`. One line change, 10-33x cheaper." },
-    { t:'code', lang:'py', src:
-`# Before (expensive if you only need text)
-response = textract.analyze_document(
-    Document={"S3Object": {"Bucket": bucket, "Name": key}},
-    FeatureTypes=["TABLES", "FORMS"]
-)
-
-# After (if you only use Blocks of type LINE or WORD)
-response = textract.detect_document_text(
-    Document={"S3Object": {"Bucket": bucket, "Name": key}}
-)` },
-
-    { t:'step', text:"Step 4: Add a result cache" },
-    { t:'p', html:"If the same documents get reprocessed (retries, re-runs, duplicate uploads), cache the output:" },
-    { t:'code', lang:'py', src:
-`import hashlib, json, boto3
-
-def get_textract_result(bucket, key):
-    doc_hash = hashlib.md5(f"{bucket}/{key}".encode()).hexdigest()
-    cache_key = f"textract-cache/{doc_hash}.json"
-
-    s3 = boto3.client("s3")
-
-    # Check cache first
-    try:
-        cached = s3.get_object(Bucket=bucket, Key=cache_key)
-        return json.loads(cached["Body"].read())
-    except s3.exceptions.NoSuchKey:
-        pass
-
-    # Cache miss - call Textract
-    result = textract.detect_document_text(
-        Document={"S3Object": {"Bucket": bucket, "Name": key}}
-    )
-    s3.put_object(Bucket=bucket, Key=cache_key, Body=json.dumps(result))
-    return result` },
-    { t:'p', html:"S3 storage for cached results is essentially free compared to Textract API costs." },
-
-    { t:'step', text:"Order of operations" },
-    { t:'ol', items:[
-      "Run the CloudWatch query first, know your baseline",
-      "Ship the non-prod environment gate, fastest savings, lowest risk",
-      "Evaluate API tier, only if Step 1 shows you're using `AnalyzeDocument`",
-      "Add caching, if Step 1 shows repeated document processing",
+    { t:'p', html:"If your code only reads text Blocks, switch `AnalyzeDocument` to `DetectDocumentText`. One line, 10–33x cheaper." },
+    { t:'step', text:"Step 3: Cache repeats" },
+    { t:'p', html:"If retries or duplicate uploads reprocess the same files, cache the result in S3 (essentially free vs the API). Order: kill non-prod, then tier, then cache." },
+  ],
+},
+{
+  id:'capabilities',
+  triggers:['what can you do','what can nable','what do you do','what can you help','capabilit','how does this work','how does nable'],
+  q:"What can nable do?",
+  blocks:[
+    { t:'p', html:"On this demo bill, try asking:" },
+    { t:'ul', items:[
+      "**\"What's driving my spend?\"** — ranked drivers and projected month-end",
+      "**\"Where can I save?\"** — every opportunity, ranked by dollars",
+      "**\"What's my AI/LLM bill?\"** — token spend by model, with fixes",
+      "**\"Why did my bill go up?\"** — the anomaly and its specific driver",
+      "**\"How do I fix Textract?\"** — the actual remediation steps",
     ]},
-    { t:'callout', html:"**Step 2 alone** could save $960–$1,900/mo with a deploy. No accuracy risk, no behavioral change in prod." },
-  ]
+    { t:'p', html:"On your **real** bill, nable also opens the Terraform PR, files the Jira ticket, posts to Slack, and forecasts your credit runway. 160+ tools, all read-only, all on your machine." },
+  ],
 },
 ];
 
-window.addEventListener('load', play);
+/* ── matching ────────────────────────────────────────────────────────────── */
+function matchIntent(text){
+  const q = ' ' + text.toLowerCase() + ' ';
+  let best = null, bestScore = 0;
+  for(const it of INTENTS){
+    let score = 0;
+    for(const t of it.triggers){ if(q.includes(t)) score += t.length; }
+    if(score > bestScore){ bestScore = score; best = it; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+/* ── chat engine ─────────────────────────────────────────────────────────── */
+const chat = document.getElementById('chat');
+const qInput = document.getElementById('q');
+const sendBtn = document.getElementById('send');
+let busy = false;
+
+function addUser(text){
+  const row = el('div','turn user');
+  row.appendChild(el('div','bubble', esc(text)));
+  chat.appendChild(row); scrollDown();
+}
+function startAnswer(){
+  const row = el('div','turn nable');
+  row.appendChild(el('div','nlabel','<span class="dot"></span>NABLE'));
+  const body = el('div','nbody'); row.appendChild(body); chat.appendChild(row);
+  const think = el('div','thinking','<span></span><span></span><span></span>');
+  body.appendChild(think); scrollDown();
+  return { body, think };
+}
+async function revealBlocks(body, blocks){
+  for(const b of blocks){
+    const node = buildBlock(b);
+    node.classList.add('blk'); body.appendChild(node);
+    requestAnimationFrame(()=>node.classList.add('show'));
+    if(b.t==='big') animateCount(node);
+    scrollDown();
+    await wait(150);
+  }
+}
+function renderText(body, text){
+  // Fallback (Haiku) answers come back as plain text; render line-by-line,
+  // grouping "- " runs into a bullet list. Reuses the same block styles.
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const blocks = []; let bullets = [];
+  const flush = () => { if(bullets.length){ blocks.push({t:'ul', items:bullets}); bullets=[]; } };
+  for(const l of lines){
+    if(/^[-•]\s+/.test(l)) bullets.push(l.replace(/^[-•]\s+/,''));
+    else { flush(); blocks.push({t:'p', html:l}); }
+  }
+  flush();
+  return revealBlocks(body, blocks);
+}
+
+async function ask(text){
+  text = (text||'').trim();
+  if(!text || busy) return;
+  busy = true; sendBtn.disabled = true;
+  qInput.value=''; qInput.style.height='auto';
+  addUser(text);
+
+  const { body, think } = startAnswer();
+  const intent = matchIntent(text);
+  await wait(intent ? 420 : 260);
+
+  if(intent){
+    think.remove();
+    await revealBlocks(body, intent.blocks);
+  } else {
+    try {
+      const r = await fetch('/api/demo-ask', {
+        method:'POST',
+        headers:{'content-type':'application/json'},
+        body: JSON.stringify({ question: text }),
+      });
+      const data = await r.json().catch(()=>({}));
+      think.remove();
+      if(data && data.answer){
+        await renderText(body, data.answer);
+      } else {
+        await fallbackMessage(body, data && data.reason);
+      }
+    } catch(e){
+      think.remove();
+      await fallbackMessage(body, 'error');
+    }
+  }
+  busy = false; sendBtn.disabled = false; qInput.focus();
+}
+
+async function fallbackMessage(body, reason){
+  const rl = reason === 'rate_limited';
+  await revealBlocks(body, [
+    { t:'p', html: rl
+        ? "You've asked a lot in a short window, give it a minute. In the meantime, the questions below answer instantly:"
+        : "I answer the common questions about this demo bill instantly. For anything else, point nable at your **real** bill and ask there:" },
+    { t:'code', lang:'bash', src:"uvx --python 3.12 --from finops-mcp finops welcome" },
+    { t:'p', html:"Or try one of these:" },
+    { t:'ul', items:[
+      "What's driving my spend?",
+      "Where can I save money?",
+      "What's my AI/LLM bill?",
+      "How do I fix my Textract costs?",
+    ]},
+  ]);
+}
+
+/* ── starter chips + form wiring ─────────────────────────────────────────── */
+const STARTERS = [
+  "What's driving my spend?",
+  "Where can I save money?",
+  "What's my AI/LLM bill?",
+  "Why did my bill go up?",
+  "How do I fix my Textract costs?",
+];
+const chipsBox = document.getElementById('chips');
+STARTERS.forEach(s=>{
+  const c = el('button','chip-q', esc(s)); c.type='button';
+  c.onclick = ()=>{ if(!busy) ask(s); };
+  chipsBox.appendChild(c);
+});
+
+document.getElementById('form').addEventListener('submit', e=>{ e.preventDefault(); ask(qInput.value); });
+qInput.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); ask(qInput.value); }
+});
+qInput.addEventListener('input', ()=>{
+  qInput.style.height='auto'; qInput.style.height=Math.min(qInput.scrollHeight,140)+'px';
+});
+qInput.focus();
 </script>
 </body>
 </html>
