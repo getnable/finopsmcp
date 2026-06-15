@@ -11404,116 +11404,72 @@ async def publish_cost_report_to_notion(
 
 
 @mcp.tool()
-async def what_can_nable_do() -> str:
+async def what_can_nable_do(detailed: bool = False) -> str:
     """
-    Shows everything nable can help with, tailored to what's connected.
+    Show everything nable can do, tailored to what you've connected.
 
-    Call this when the user asks:
-        - "What can you do?"
-        - "What features do you have?"
-        - "What should I try first?"
-        - "What else can nable do?"
-        - "Show me what's available"
-        - "Help" or "getting started"
-
-    Always call this after a user connects their first account — it gives
-    them a clear picture of what's now possible without overwhelming them.
+    Call this when the user asks "what can you do?", "what features do you have?",
+    "what should I try first?", "show me what's available", or "help". Always call
+    it right after a user connects their first account, so they see what just
+    became possible. Pass detailed=True to also list the underlying tool names.
     """
-    connected = []
-    not_connected = []
+    connected: set[str] = set()
 
-    for name, connector in _CLOUD_CONNECTORS.items():
+    # Cloud + SaaS connectors live in the class registries.
+    for pool in (_CLOUD_CONNECTORS, _SAAS_CONNECTORS):
+        for name, connector in pool.items():
+            try:
+                if await connector.is_configured():
+                    connected.add(name)
+            except Exception:
+                pass
+
+    # LLM / AI providers are module-level detectors (where AI-native accounts
+    # actually spend: direct APIs, gateways, and GPU infra).
+    from .connectors.saas import (
+        openai_usage, anthropic_usage, vertex_costs, openrouter, litellm, gpu_infra,
+    )
+    for name, check in {
+        "openai": openai_usage.is_configured,
+        "anthropic": anthropic_usage.is_configured,
+        "vertex": vertex_costs.is_configured,
+        "openrouter": openrouter.is_configured,
+        "litellm": litellm.is_configured,
+    }.items():
         try:
-            if await connector.is_configured():
-                connected.append(name)
-            else:
-                not_connected.append(name)
+            if await check():
+                connected.add(name)
         except Exception:
-            not_connected.append(name)
+            pass
+    for name, check in {
+        "modal": gpu_infra.modal_configured,
+        "together": gpu_infra.together_configured,
+        "replicate": gpu_infra.replicate_configured,
+    }.items():
+        try:
+            if check():
+                connected.add(name)
+        except Exception:
+            pass
 
-    has_aws = "aws" in connected
-    has_slack = "slack" in connected
-    has_notion = "notion" in connected
-    has_n8n = "n8n" in connected
+    from .capabilities import has_llm as _has_llm, render_capabilities
+    if _has_llm(connected):
+        connected.add("llm")
 
-    lines = ["## What nable can do for you", ""]
+    # Best-effort Kubernetes detection: a reachable kubeconfig (no agent needed).
+    try:
+        import os
+        from pathlib import Path
+        if os.environ.get("KUBECONFIG") or (Path.home() / ".kube" / "config").exists():
+            connected.add("kubernetes")
+    except Exception:
+        pass
 
-    # Core — always available
-    lines += [
-        "### Find savings",
-        '- **"What are my biggest savings opportunities?"** — runs 19 scanners, ranked by dollar impact',
-        '- **"Why did my bill spike?"** — anomaly detection with tag attribution',
-        '- **"Show me rightsizing recommendations"** — EC2, RDS, Lambda, EKS',
-        '- **"What Graviton instances can I migrate to?"** — 20-40% compute savings',
-        '- **"Audit my public IPv4 addresses"** — $3.60/mo per unused IP since Feb 2024',
-        '- **"Any spot instance opportunities?"** — up to 90% savings on eligible workloads',
-        "",
-    ]
-
-    if has_aws:
-        lines += [
-            "### Fix savings (Terraform close-the-loop)",
-            '- **"Open a PR for the top rightsizing rec"** — reads tfstate, patches .tf, opens GitHub PR',
-            '- **"Apply the tag fixes"** — writes missing tags directly to your .tf files',
-            "",
-        ]
-
-    lines += [
-        "### Understand your bill",
-        '- **"Break down my AWS spend by service"** — last 30/60/90 days',
-        '- **"What are my Bedrock costs by model?"** — per-token, per-model breakdown',
-        '- **"How much am I spending on Textract?"** — and which environments are calling it',
-        '- **"Show my commitment coverage"** — RI and Savings Plan gaps',
-        "",
-        "### Share findings",
-        '- **"Export to CSV"** — saves to ~/Downloads, opens clean in Excel or Sheets',
-        '- **"Start the team dashboard"** — browser-based dashboard your whole team can access, no Claude required',
-    ]
-
-    if has_notion:
-        lines.append('- **"Publish to Notion"** — updates your team\'s shared cost dashboard')
-    else:
-        lines.append('- **"Publish to Notion"** — share with your team *(run `finops setup notion` to enable)*')
-
-    if has_n8n:
-        lines.append('- **"Push to n8n"** — triggers your automation workflow')
-    else:
-        lines.append('- **"Push to n8n"** — wire cost events into any automation *(run `finops setup n8n` to enable)*')
-
-    lines.append("")
-    lines += [
-        "### Automate",
-    ]
-
-    if has_slack:
-        lines.append("- Anomaly alerts → Slack (connected)")
-    else:
-        lines.append('- **Slack alerts** — anomaly and budget notifications *(run `finops setup slack` to enable)*')
-
-    lines += [
-        '- **Weekly digest** — top spend drivers every Monday via email',
-        '- **Budget enforcement** — alerts at 80%, blocks at 100%',
-        "",
-    ]
-
-    # What's not connected yet
-    if not_connected:
-        missing = [p for p in not_connected if p not in ("notion", "n8n", "slack")]
-        if missing:
-            lines += [
-                "### Connect more providers",
-                f"You have **{len(connected)}** provider(s) connected. These are available:",
-            ]
-            for p in missing[:6]:
-                lines.append(f"- `finops setup {p}`")
-            if len(missing) > 6:
-                lines.append(f"- ...and {len(missing) - 6} more (`finops setup` to see the full list)")
-            lines.append("")
-
-    lines.append("---")
-    lines.append("*Ask about any of these in plain English. No commands to memorize.*")
-
-    return "\n".join(lines)
+    try:
+        plan = get_status().mode
+    except Exception:
+        plan = "free"
+    return render_capabilities(connected, plan=plan, detailed=detailed)
 
 
 @mcp.tool()
