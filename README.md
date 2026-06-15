@@ -5,9 +5,9 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/chaandannn/finopsmcp/badge)](https://scorecard.dev/viewer/?uri=github.com/chaandannn/finopsmcp)
 [![Docs](https://img.shields.io/badge/docs-getnable.com-black)](https://getnable.com/docs)
 
-**Connect Claude to your real AWS, Azure, GCP, and SaaS billing data. Ask your bill anything. Get answers in seconds.**
+**Connect Claude to your real AWS, Azure, GCP, and SaaS billing data. Ask your bill anything, answered in your editor.**
 
-👉 **[getnable.com](https://getnable.com)** · quickstart guide, docs, and free tier
+**[getnable.com](https://getnable.com)** · quickstart guide, docs, and free tier
 
 ![nable in Claude Desktop](docs/claude-cost-answer.png)
 
@@ -250,7 +250,7 @@ az role assignment create --assignee <client-id> --role 'Monitoring Reader' --sc
 
 nable is not just a connector that pipes billing data into Claude. It runs active analysis on your infrastructure and surfaces findings as tools Claude can reason about and act on.
 
-**AWS deep audit** goes well beyond Cost Explorer. It pulls CloudWatch metrics for every running resource and flags waste that never shows up on your bill until it's too late: gp2 volumes that should be gp3 (20% cheaper, same performance), unattached EBS volumes, idle NAT Gateways costing $32/mo in base charges, RDS backup retention set way too high, CloudWatch Log Groups with no retention policy growing forever, and Lambda functions allocated 2x the memory they actually use. Think of it as Compute Optimizer plus the layer underneath it.
+**AWS deep audit** goes well beyond Cost Explorer. It pulls CloudWatch metrics for every running resource and flags waste that never shows up on your bill: gp2 volumes that should be gp3 (20% cheaper, same performance), unattached EBS volumes, idle NAT Gateways costing $32/mo in base charges, RDS backup retention set way too high, CloudWatch Log Groups with no retention policy growing forever, and Lambda functions allocated 2x the memory they actually use. Think of it as Compute Optimizer plus the layer underneath it.
 
 **Anomaly detection** uses z-score, CUSUM drift, and day-of-week seasonal normalization. When something spikes, it drills into Cost Explorer by tag and tells you which team, environment, or service drove it. Anomaly findings and Slack/Teams alerts are free; Pro adds auto-ticketing.
 
