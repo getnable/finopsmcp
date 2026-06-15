@@ -882,7 +882,7 @@ function MidCta() {
       }
     },
     "Read the docs"
-  )), /* @__PURE__ */ React.createElement("div", { style: { display: "inline-flex", alignItems: "center", gap: 8, marginTop: 2, fontFamily: "var(--mono)", fontSize: 12, color: "var(--success)", border: "1px solid #2a5c43", borderRadius: "var(--r-md)", padding: "7px 13px" } }, /* @__PURE__ */ React.createElement("span", { style: { width: 6, height: 6, borderRadius: "50%", background: "var(--success)", display: "inline-block" } }), "found $1,840/mo on day one"))));
+  )))));
 }
 function FootCta() {
   return /* @__PURE__ */ React.createElement("section", { className: "foot-cta", id: "cta" }, /* @__PURE__ */ React.createElement("div", { className: "foot-cta-grid" }), /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { position: "relative" } }, /* @__PURE__ */ React.createElement("div", { className: "eyebrow", style: { marginBottom: 32, display: "inline-flex" } }, /* @__PURE__ */ React.createElement("span", { className: "d" }), " Free tier \xB7 no credit card"), /* @__PURE__ */ React.createElement("h2", { className: "display" }, "Stop staring at graphs.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Start closing tickets.")), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 48, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement(
