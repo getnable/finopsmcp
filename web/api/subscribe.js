@@ -55,10 +55,7 @@ function welcomeHtml(email) {
 <body>
 <div class="card">
   <div class="header">
-    <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">
-      <rect width="32" height="32" rx="7" fill="#fbfaf7"/>
-      <path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#1a1915"/>
-    </svg>
+    <svg width="24" height="24" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><defs><linearGradient id="nmg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5cc1da"/><stop offset="1" stop-color="#3a9ab6"/></linearGradient></defs><rect width="120" height="120" rx="27" fill="url(#nmg)"/><path d="M44 80 L44 56 A16 16 0 0 1 76 56 L76 80" fill="none" stroke="#0d0f10" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <span class="wordmark" style="margin-left:8px">nable</span>
   </div>
   <div class="body">
