@@ -683,7 +683,7 @@ function Console({ interaction }){
       <div className="console-foot">
         <div className="ask-hint">
           <span className="ask-live"></span>
-          Ask anything · live demo data, no install
+          Live demo data · no install, no signup
         </div>
         {(!asked || offTopic) && (
           <div className="ask-chips">
@@ -694,7 +694,7 @@ function Console({ interaction }){
         )}
         <form className="console-ask" onSubmit={(e) => { e.preventDefault(); ask(input); }}>
           <input className="console-input" value={input}
-            placeholder="Ask this demo account anything…"
+            placeholder="Ask about this demo bill…"
             onChange={(e) => setInput(e.target.value)}
             onFocus={() => setFocused(true)}
             aria-label="Ask nable about the demo account" />
