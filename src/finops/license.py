@@ -156,15 +156,27 @@ def _verify_ed25519(payload_b64: str, sig_b64: str) -> bool:
 
 # ── Machine fingerprint ───────────────────────────────────────────────────────
 
+# Local anti-tamper key for the trial clock and machine fingerprint. This is
+# deliberately NOT the Pro signing secret (_SECRET), which is unset on real
+# installs — HMAC-ing the trial with an empty key made every trial signature
+# forgeable by anyone, even without reading the source. This is local-first DRM,
+# not a security boundary: the constant ships in the open-source package, so a
+# determined user who reads the source can still forge it. It only raises the bar
+# above the trivial empty-key default and stops casual trial-clock tampering. The
+# real lock, if trial abuse ever costs real money, is server-side validation,
+# avoided today because local-first / no-egress is a core product promise.
+_TRIAL_OBFUSCATION_KEY = b"finops-mcp.trial.anti-tamper.v1"
+
+
 def _machine_id() -> str:
     parts = [platform.node(), platform.machine(), str(Path.home())]
     raw = "|".join(parts).encode()
-    return hmac.new(_SECRET, raw, hashlib.sha256).hexdigest()[:24]
+    return hmac.new(_TRIAL_OBFUSCATION_KEY, raw, hashlib.sha256).hexdigest()[:24]
 
 
 def _sign_date(iso_date: str) -> str:
     msg = f"trial:{_machine_id()}:{iso_date}".encode()
-    return hmac.new(_SECRET, msg, hashlib.sha256).hexdigest()[:32]
+    return hmac.new(_TRIAL_OBFUSCATION_KEY, msg, hashlib.sha256).hexdigest()[:32]
 
 
 # ── Keyring helpers ───────────────────────────────────────────────────────────

@@ -243,8 +243,9 @@ async function createSessionToken(secret, email, plan, role) {
 async function verifyState(secret, state) {
   try {
     const [payloadB64, sig] = state.split(".");
-    if (!payloadB64) return null;
-    if (sig === "unsigned") return payloadB64; // dev mode without ACCOUNT_SECRET
+    if (!payloadB64 || !sig) return null;
+    // No "unsigned" escape hatch: the callback never runs without ACCOUNT_SECRET,
+    // and accepting unsigned state let an attacker forge it with no secret.
 
     const expected = (await hmacHex(secret, payloadB64)).slice(0, 16);
     let diff = 0;
@@ -409,7 +410,7 @@ export default async function handler(req) {
 
   // Redirect back to the app with token in fragment (never in query string to avoid server logs)
   // The frontend reads the fragment and stores it in memory / sessionStorage.
-  const returnTo = (() => {
+  let returnTo = (() => {
     try {
       const decoded = atob(state.split(".")[0]);
       const parts = decoded.split(":");
@@ -419,6 +420,9 @@ export default async function handler(req) {
       return "/";
     }
   })();
+  // Defense in depth: re-validate the redirect target. Same-site relative paths
+  // only; blocks //evil.com, /\evil.com, and @evil.com (open redirect / token theft).
+  if (!/^\/($|[^/\\])/.test(returnTo)) returnTo = "/";
 
   const fragment = new URLSearchParams({
     token: token || "",

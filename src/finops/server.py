@@ -296,18 +296,44 @@ def _resolve_safe_path(raw: str, must_exist: bool = False) -> "str | dict":
     Resolve and validate a caller-supplied filesystem path.
 
     Returns the resolved absolute path string, or an error dict if the path
-    is invalid. Guards against path traversal (/../) and empty inputs.
-    Optionally checks that the path exists.
+    is invalid. Empty inputs are rejected and the path is normalized so a
+    /../ cannot smuggle in traversal.
+
+    For writes (must_exist=False) the path is additionally confined to your
+    home directory or the system temp dir and may not target a hidden/dotfile
+    path, so a tool argument steered by prompt injection (in tag data or a
+    connector response) cannot overwrite ~/.zshenv or ~/.ssh/authorized_keys.
+
+    For reads (must_exist=True) the path is only resolved and checked for
+    existence. Read targets are terraform dirs and plan files the caller points
+    nable at: a repo under /opt, a checkout in /tmp, a mounted volume. Confining
+    those would break real usage, and a read is not the write RCE vector.
     """
-    import pathlib
+    import pathlib, tempfile
     if not raw or not raw.strip():
         return {"error": "Path must not be empty"}
     try:
         p = pathlib.Path(raw).expanduser().resolve()
     except Exception:
         return {"error": "Invalid path"}
-    if must_exist and not p.exists():
-        return {"error": f"Path does not exist: {p}"}
+    if must_exist:
+        if not p.exists():
+            return {"error": f"Path does not exist: {p}"}
+        return str(p)
+    home = pathlib.Path.home().resolve()
+    tmp = pathlib.Path(tempfile.gettempdir()).resolve()
+    base = None
+    for b in (home, tmp):
+        try:
+            p.relative_to(b)
+            base = b
+            break
+        except ValueError:
+            continue
+    if base is None:
+        return {"error": f"Path must be inside your home directory ({home}) or the system temp directory"}
+    if any(part.startswith(".") for part in p.relative_to(base).parts):
+        return {"error": "Refusing to write to a hidden/dotfile path"}
     return str(p)
 
 
