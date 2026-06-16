@@ -102,6 +102,14 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  // Fail closed: never run the live model without a durable, cross-instance cap.
+  // The in-memory limiter is per-warm-instance and keyed on a spoofable
+  // x-forwarded-for, so without Vercel KV the daily cost ceiling cannot hold.
+  if (!process.env.VERCEL_KV_REST_API_URL || !process.env.VERCEL_KV_REST_API_TOKEN) {
+    res.status(200).json({ answer: null, reason: "disabled" });
+    return;
+  }
+
   let body = req.body;
   if (typeof body === "string") {
     try { body = JSON.parse(body); } catch { body = {}; }

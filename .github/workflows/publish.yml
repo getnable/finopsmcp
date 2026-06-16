@@ -19,10 +19,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 
@@ -36,7 +36,7 @@ jobs:
         run: python -m twine check dist/*
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
         with:
           # PEP 740 provenance attestations (default on >= v1.11; set explicitly
           # so a future default change cannot silently drop them).
@@ -57,11 +57,22 @@ jobs:
     needs: build-and-publish
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Install mcp-publisher
+      - name: Install mcp-publisher (pinned + checksum-verified)
         run: |
-          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" | tar xz mcp-publisher
+          # This job holds id-token: write, so the binary it runs must be
+          # verified, not trusted blindly from releases/latest. Pin the release
+          # version AND the artifact SHA256, then check the digest before
+          # extracting or executing. A swapped or compromised upstream binary
+          # fails the digest check and never runs. Runner is always ubuntu-latest
+          # (linux/amd64); checksum from registry_1.7.9_checksums.txt.
+          VERSION="v1.7.9"
+          ASSET="mcp-publisher_linux_amd64.tar.gz"
+          SHA256="ab128162b0616090b47cf245afe0a23f3ef08936fdce19074f5ba0a4469281ac"
+          curl -sSL --fail "https://github.com/modelcontextprotocol/registry/releases/download/${VERSION}/${ASSET}" -o "${ASSET}"
+          echo "${SHA256}  ${ASSET}" | sha256sum -c -
+          tar xzf "${ASSET}" mcp-publisher
 
       - name: Login to registry (GitHub Actions OIDC, no tokens or device codes)
         run: ./mcp-publisher login github-oidc
