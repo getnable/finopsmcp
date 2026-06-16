@@ -29,6 +29,23 @@ class GCPConnector(BaseConnector):
         )
         return has_creds and bool(self._billing_account_ids)
 
+    def project_ids(self) -> list[str]:
+        """
+        GCP resource scans (Compute, Monitoring) are per-project, not per-billing-
+        account. Read GCP_PROJECT_IDS (comma-separated) first, then fall back to the
+        default project on the Application Default Credentials.
+        """
+        ids = [p.strip() for p in os.getenv("GCP_PROJECT_IDS", "").split(",") if p.strip()]
+        if ids:
+            return ids
+        try:
+            import google.auth
+
+            _, project = google.auth.default()
+            return [project] if project else []
+        except Exception:
+            return []
+
     # ── internal helpers ────────────────────────────────────────────────────
 
     def _client(self):

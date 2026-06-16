@@ -3243,6 +3243,83 @@ async def audit_aws_waste(
 
 
 @mcp.tool()
+async def audit_gcp_waste(
+    projects: list[str] | None = None,
+    checks: list[str] | None = None,
+    idle_days: int = 14,
+    snapshot_age_days: int = 30,
+) -> dict:
+    """
+    Deep GCP waste audit: scans Compute Engine across all zones/regions for
+    unattached persistent disks, reserved-but-idle static IPs, old snapshots, and
+    idle VMs (CPU joined from Cloud Monitoring). Returns findings sorted by
+    estimated monthly savings.
+
+    Args:
+        projects: GCP project IDs to scan. Defaults to GCP_PROJECT_IDS or the
+                  default project on your credentials.
+        checks: Subset to run: disks, ips, snapshots, idle_vms. Defaults to all.
+        idle_days: Lookback window for the idle-VM CPU check (default 14).
+        snapshot_age_days: Flag snapshots older than this many days (default 30).
+
+    Examples:
+        - "Run a full GCP waste audit"
+        - "Find unattached GCP disks and idle static IPs"
+        - "Which GCP VMs are idle this month?"
+    """
+    gcp = _CLOUD_CONNECTORS.get("gcp")
+    if gcp is None or not await gcp.is_configured():
+        return {"error": "GCP is not configured. Run 'finops setup gcp' to connect."}
+    try:
+        from .recommendations.gcp_waste import audit_gcp_waste as _run
+        report = await _run(
+            gcp,
+            projects=projects,
+            checks=checks,
+            idle_days=idle_days,
+            snapshot_age_days=snapshot_age_days,
+        )
+        if report.get("error"):
+            return report
+
+        # Same token-budget cap as the AWS audit: keep the highest-value findings,
+        # leave the aggregates (computed over the whole list) intact.
+        all_findings = report.get("findings") or []
+        if all_findings:
+            kept, omitted = fit_to_budget(all_findings, max_tokens=6000)
+            report["findings"] = kept
+            if omitted > 0:
+                report["findings_truncated"] = (
+                    f"Showing top {len(kept)} of {len(all_findings)} findings by monthly "
+                    f"savings. {omitted} lower-value findings omitted. Use by_category, "
+                    f"by_project, and by_severity for the full breakdown, or pass checks/"
+                    f"projects to narrow the scan."
+                )
+
+        monthly = report.get("total_estimated_monthly_savings", 0)
+        n = report.get("total_findings", 0)
+        report["summary"] = (
+            f"Found {n} GCP waste finding(s) across "
+            f"{len(report.get('projects_scanned', []))} project(s). "
+            f"Estimated savings: ${monthly:,.2f}/mo "
+            f"(${report.get('total_estimated_annual_savings', 0):,.2f}/yr)."
+        )
+
+        if monthly > 0 and n > 0:
+            nudge = _team_nudge(
+                f"To auto-create Jira, Linear, or GitHub tickets for these {n} GCP "
+                f"findings so your team actually acts on them, upgrade to Team:"
+            )
+            if nudge:
+                report["_upgrade"] = nudge
+
+        return report
+    except Exception as e:
+        log.error("audit_gcp_waste failed: %s", e, exc_info=True)
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def get_traffic_cost_breakdown(
     days: int = 30,
 ) -> dict:

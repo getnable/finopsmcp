@@ -42,6 +42,8 @@ dependencies = [
     "azure-identity>=1.15.0",
     "google-cloud-billing>=1.13.0",
     "google-cloud-bigquery>=3.17.0",
+    "google-cloud-compute>=1.19.0",     # resource enumeration for GCP waste audit
+    "google-cloud-monitoring>=2.21.0",  # CPU utilization join for idle-VM detection
     # storage + scheduling
     "sqlalchemy>=2.0.0",
     "apscheduler>=3.10.0",
