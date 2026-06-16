@@ -421,8 +421,8 @@ export default async function handler(req) {
     }
   })();
   // Defense in depth: re-validate the redirect target. Same-site relative paths
-  // only; blocks //evil.com, /\evil.com, and @evil.com (open redirect / token theft).
-  if (!/^\/($|[^/\\])/.test(returnTo)) returnTo = "/";
+  // only; blocks //evil.com, /\evil.com, @evil.com, and /./ and /../ segments.
+  if (!/^\/($|[^/\\.])/.test(returnTo)) returnTo = "/";
 
   const fragment = new URLSearchParams({
     token: token || "",

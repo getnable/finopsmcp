@@ -2,6 +2,30 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.77
+
+Deep GCP audits, plus a round of security hardening.
+
+### GCP
+- **`audit_gcp_waste`.** First resource-level GCP audit: unattached persistent
+  disks, reserved static IPs that are not in use, snapshots past an age
+  threshold, and idle VMs (CPU joined from Cloud Monitoring). Findings come back
+  sorted by estimated monthly savings with by-category, by-severity and
+  by-project rollups. Set `GCP_PROJECT_IDS` (the setup wizard now prompts for it)
+  to enable it; needs `roles/compute.viewer` and `roles/monitoring.viewer`.
+
+### Security
+- **SSO callback hardening.** Removed the unsigned-state escape hatch (state is
+  always signature-verified now) and re-validate the post-login redirect to
+  same-site paths, closing an account and license-key takeover via open redirect.
+- **demo-ask fails closed** when Vercel KV is unset, so the live model never runs
+  without a durable cross-instance cost cap.
+- **Export path confinement.** `export_cost_report_csv` confines writes to your
+  home or temp dir and refuses dotfile targets.
+- **Supply chain.** Every GitHub Action is pinned to a commit SHA, `mcp-publisher`
+  is pinned and SHA256-verified before it runs, and the trial clock signs with a
+  dedicated key.
+
 ## 0.8.76
 
 Onboarding instrumentation and a faster ambient connect, aimed at the activation

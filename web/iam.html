@@ -150,8 +150,10 @@
   <li><code>roles/billing.viewer</code> on the billing account, to read cost</li>
   <li><code>roles/bigquery.dataViewer</code> on the billing-export dataset</li>
   <li><code>roles/bigquery.jobUser</code> on the project, to run the export queries</li>
+  <li><code>roles/compute.viewer</code> on each audited project, to list idle disks, static IPs, snapshots and VMs (optional, for the GCP waste audit)</li>
+  <li><code>roles/monitoring.viewer</code> on each audited project, to read VM CPU for idle detection (optional, for the GCP waste audit)</li>
 </ul>
-<p>All three are read and query roles. nable reads your Cloud Billing export in BigQuery; it does not write to BigQuery or touch any other GCP service.</p>
+<p>All are read and query roles. nable reads your Cloud Billing export in BigQuery and, for the optional waste audit, lists Compute resources and reads Monitoring metrics. It writes to nothing. Set <code>GCP_PROJECT_IDS</code> (the setup wizard prompts for it) to turn the resource audit on.</p>
 
 <h2>Azure</h2>
 <h3>RBAC roles per subscription</h3>

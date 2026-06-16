@@ -204,6 +204,19 @@ CATALOG: list[dict[str, Any]] = [
                   "scan_cloudwatch_waste", "scan_lambda_concurrency_waste"],
     },
     {
+        "id": "gcp_audits",
+        "title": "Deep GCP audits",
+        "gate": lambda c: "gcp" in c,
+        "count": 4,
+        "blurb": "Resource-level GCP waste scans the billing export cannot see.",
+        "asks": [
+            ("Run a full GCP waste audit", "unattached disks, idle IPs, old snapshots, idle VMs"),
+            ("Find unattached GCP persistent disks", "and reserved static IPs that are not in use"),
+            ("Which GCP VMs are idle this month?", "CPU joined from Cloud Monitoring"),
+        ],
+        "tools": ["audit_gcp_waste"],
+    },
+    {
         "id": "azure",
         "title": "Azure deep dives",
         "gate": lambda c: "azure" in c,
