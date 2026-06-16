@@ -1110,7 +1110,7 @@ const PRICE_ROWS = [
   { label: "RCA + chat remediation: drafts the fix, a human approves", solo: false, pro: false,    team: true,       ent: true },
   { label: "Managed AI included (or bring your own key)",    solo: false,       pro: false,        team: true,       ent: true },
   { label: "SSO + audit logs",                               solo: false,       pro: false,        team: false,      ent: true },
-  { label: "Support",                                        solo: "Community", pro: "Email",      team: "Email",     ent: "Slack + SLA" },
+  { label: "Support",                                        solo: "Slack",     pro: "Slack",      team: "Slack",     ent: "Slack + SLA" },
 ];
 
 function PCell({ v }){
