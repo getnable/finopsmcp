@@ -91,10 +91,18 @@ def restore_credentials_file() -> str | None:
     return str(path)
 
 
-def store_billing_accounts(billing_account_ids: list[str], bq_table: str | None = None) -> None:
+def store_billing_accounts(
+    billing_account_ids: list[str],
+    bq_table: str | None = None,
+    project_ids: list[str] | None = None,
+) -> None:
     from ..vault import Vault
     vault = Vault.default()
     vault.store("GCP_BILLING_ACCOUNT_IDS", ",".join(billing_account_ids))
     if bq_table:
         vault.store("GCP_BQ_BILLING_TABLE", bq_table)
+    if project_ids:
+        # Resource scans (the Compute/Monitoring waste audit) are per-project, not
+        # per-billing-account. Stored so audit_gcp_waste works without env setup.
+        vault.store("GCP_PROJECT_IDS", ",".join(project_ids))
     print(f"  ✓ GCP billing accounts stored: {', '.join(billing_account_ids)}")

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -63,6 +64,15 @@ IDLE_CPU_THRESHOLD: float = 0.05  # 5%
 MAX_INSTANCES_FOR_IDLE: int = 200
 
 ALL_CHECKS: tuple[str, ...] = ("disks", "ips", "snapshots", "idle_vms")
+
+# GCP project-id format (lowercase, 6-30 chars). Validated before a project goes
+# into any API path or Monitoring filter string.
+_PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
+
+PRICING_BASIS = (
+    "Estimates use GCP us-central1 on-demand list prices; actual cost varies by "
+    "region, committed-use discounts, and negotiated pricing."
+)
 
 
 # ── small parsers ─────────────────────────────────────────────────────────────
@@ -182,6 +192,11 @@ def _instance_cpu_utilization(project: str, instance_id: str, days: int) -> floa
     """
     from google.cloud import monitoring_v3
 
+    if not _PROJECT_RE.match(project):
+        raise ValueError(f"Invalid GCP project id: {project!r}")
+    # instance_id comes from the Compute API, but escape it regardless so a value
+    # with a quote or backslash cannot break out of the Monitoring filter string.
+    safe_id = instance_id.replace("\\", "\\\\").replace('"', '\\"')
     client = monitoring_v3.MetricServiceClient()
     now = datetime.now(timezone.utc)
     seconds = int(now.timestamp())
@@ -190,7 +205,7 @@ def _instance_cpu_utilization(project: str, instance_id: str, days: int) -> floa
     )
     flt = (
         'metric.type="compute.googleapis.com/instance/cpu/utilization" '
-        f'AND resource.labels.instance_id="{instance_id}"'
+        f'AND resource.labels.instance_id="{safe_id}"'
     )
     series = client.list_time_series(
         request={
@@ -418,6 +433,7 @@ async def audit_gcp_waste(
         "provider": "gcp",
         "projects_scanned": projects,
         "checks_run": run,
+        "pricing_basis": PRICING_BASIS,
         "findings": findings,
         "total_findings": len(findings),
         "total_estimated_monthly_savings": round(total_monthly, 2),

@@ -873,11 +873,15 @@ def setup_gcp() -> None:
     billing_ids_raw = _prompt("  Billing account IDs (comma-separated, format: XXXXXX-XXXXXX-XXXXXX)")
     billing_ids = [b.strip() for b in billing_ids_raw.split(",") if b.strip()]
     bq_table = _prompt("  BigQuery billing export table (optional, e.g. project.dataset.table)", default="")
+    project_ids_raw = _prompt(
+        "  Project IDs for resource audits (comma-separated, optional; enables the "
+        "GCP waste scan for idle disks, IPs and VMs)", default="")
+    project_ids = [p.strip() for p in project_ids_raw.split(",") if p.strip()]
 
     from .security.oauth.gcp import import_service_account_key, store_billing_accounts
     try:
         import_service_account_key(key_path)
-        store_billing_accounts(billing_ids, bq_table or None)
+        store_billing_accounts(billing_ids, bq_table or None, project_ids or None)
         _ok("GCP credentials stored")
         try:
             from . import telemetry as _tel
