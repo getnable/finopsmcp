@@ -7,11 +7,11 @@
  *   3. Identifies the user in PostHog server-side (optional, enriches DAU data)
  *
  * Required env vars (set in Vercel project settings):
- *   RESEND_API_KEY      — from resend.com (free tier: 3k emails/mo)
- *   LOOPS_API_KEY       — from loops.so   (free tier: 1k contacts)
+ *   RESEND_API_KEY     , from resend.com (free tier: 3k emails/mo)
+ *   LOOPS_API_KEY      , from loops.so   (free tier: 1k contacts)
  *
  * Optional:
- *   POSTHOG_API_KEY     — server-side identification for product analytics
+ *   POSTHOG_API_KEY    , server-side identification for product analytics
  */
 
 export const config = { runtime: 'edge', maxDuration: 10 };
@@ -60,7 +60,7 @@ function welcomeHtml(email) {
   </div>
   <div class="body">
     <h1>Set up nable in 5 minutes.</h1>
-    <p class="sub">Three steps. The wizard handles the rest — no config file editing, no manual env vars.</p>
+    <p class="sub">Three steps. The wizard handles the rest, no config file editing, no manual env vars.</p>
 
     <div class="step">
       <div class="step-header">
@@ -125,7 +125,7 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// Simple in-memory rate limiter (resets on cold start — good enough for edge)
+// Simple in-memory rate limiter (resets on cold start, good enough for edge)
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const RATE_LIMIT_MAX = 5; // max 5 subscribes per IP per hour
@@ -190,12 +190,12 @@ export default async function handler(req) {
   }
 
   if (req.method !== "POST") {
-    // Bots and scanners probe this endpoint with GET — redirect browsers cleanly
+    // Bots and scanners probe this endpoint with GET, redirect browsers cleanly
     // rather than serving a raw JSON error page.
     return Response.redirect("https://getnable.com", 302);
   }
 
-  // Rate limiting via IP — edge runtime provides cf headers or x-forwarded-for
+  // Rate limiting via IP, edge runtime provides cf headers or x-forwarded-for
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   console.log(`subscribe request from ip=${ip}`);
 
@@ -244,7 +244,7 @@ export default async function handler(req) {
 
   const results = await Promise.allSettled([
 
-    // 1. Loops — add/update contact, triggers onboarding sequence
+    // 1. Loops, add/update contact, triggers onboarding sequence
     LOOPS_KEY && fetch(`${LOOPS_API}/contacts/create`, {
       method: "POST",
       headers: { Authorization: `Bearer ${LOOPS_KEY}`, "Content-Type": "application/json" },
@@ -260,7 +260,7 @@ export default async function handler(req) {
       }),
     }),
 
-    // 2. Resend — immediate welcome email
+    // 2. Resend, immediate welcome email
     RESEND_KEY && fetch(`${RESEND_API}/emails`, {
       method: "POST",
       headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
@@ -273,7 +273,7 @@ export default async function handler(req) {
       }),
     }),
 
-    // 3. PostHog — server-side identify so website + product events merge
+    // 3. PostHog, server-side identify so website + product events merge
     PH_KEY && fetch(`${POSTHOG_API}/capture/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

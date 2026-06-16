@@ -188,7 +188,7 @@ def show_welcome() -> None:
     _blank()
     _line(_rule())
     _blank()
-    _line(green("✓") + bold("  7-day free trial — all features unlocked."))
+    _line(green("✓") + bold("  7-day free trial, all features unlocked."))
     _line(dim("   No credit card required."))
     _blank()
     _line(f"  Docs  →  {cyan('https://getnable.com/docs')}")
@@ -297,7 +297,7 @@ def _value_moment_body(demo: bool = False) -> bool:
     # Headline first, on its own wall-clock cap. The user came for this number, so
     # the optional idle/AI scans below must never block or blank it. _run_capped's
     # daemon-thread join returns on time even when a call pins the event loop (an
-    # asyncio timeout alone would not fire — the bug that used to hang setup and
+    # asyncio timeout alone would not fire, the bug that used to hang setup and
     # blanked this scan when an un-guarded tool reached for real AWS in demo).
     summary = _run_capped(lambda: asyncio.run(server.get_cost_summary()), _VALUE_MOMENT_TIMEOUT)
 
@@ -335,7 +335,7 @@ def _value_moment_body(demo: bool = False) -> bool:
     _blank()
     _line(_rule())
     _blank()
-    _header = "nable on sample data — last 30 days" if demo else "nable scanned your account — last 30 days"
+    _header = "nable on sample data, last 30 days" if demo else "nable scanned your account, last 30 days"
     _line(green("✓") + bold("  " + _header))
     _blank()
     _line(f"  {dim('Total spend')}      {bold('$' + format(total, ',.0f'))}")
@@ -397,7 +397,7 @@ def _llm_value_moment() -> bool:
     _blank()
     _line(_rule())
     _blank()
-    _line(green("✓") + bold("  nable scanned your AI spend — last 30 days"))
+    _line(green("✓") + bold("  nable scanned your AI spend, last 30 days"))
     _blank()
     _line(f"  {dim('Total AI spend')}   {bold('$' + format(total, ',.0f'))}")
     if by_provider:
@@ -515,7 +515,7 @@ def run_welcome_flow(demo: bool = False) -> None:
     # Step 2: auto-configure every MCP client we can find (Claude Desktop, Cursor)
     # and surface the exact command for Claude Code. Honest about what got wired,
     # so a Cursor/Claude Code user is never told "you're set up" with nothing written.
-    _line(bold("Step 2 — Connecting nable to your editor"))
+    _line(bold("Step 2, Connecting nable to your editor"))
     _blank()
     client_result = {"configured": [], "manual": []}
     try:
@@ -531,7 +531,7 @@ def run_welcome_flow(demo: bool = False) -> None:
 
     # Step 3: see a number. Zero-config AWS first, then a menu, and a demo
     # fallback so nobody ever leaves the terminal without seeing value.
-    _line(bold("Step 3 — See your first number"))
+    _line(bold("Step 3, See your first number"))
     _blank()
 
     shown = False
@@ -616,7 +616,7 @@ def run_welcome_flow(demo: bool = False) -> None:
         # user gets connected in two copy-pastes instead of hand-minting a key.
         _oneclick = _oneclick_aws_url()
         if _oneclick:
-            _line(f"  {green('Fastest')} — one-click read-only AWS key, no local creds needed:")
+            _line(f"  {green('Fastest')}, one-click read-only AWS key, no local creds needed:")
             _line(f"    {cyan(_oneclick)}")
             _line(dim("    Click it, create the stack, then choose 1 below and paste the two outputs."))
             _blank()
@@ -662,7 +662,7 @@ def run_welcome_flow(demo: bool = False) -> None:
             _line(dim("  Or one-click a read-only key:  ") + cyan(_oneclick))
         _blank()
 
-    # Finish — honest about which clients are wired, and the restart cliff. MCP
+    # Finish, honest about which clients are wired, and the restart cliff. MCP
     # clients only load servers at startup, so a user with the editor already open
     # sees no nable tools and assumes setup failed. Name the restart explicitly.
     _line(_rule())

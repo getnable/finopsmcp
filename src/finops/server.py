@@ -142,7 +142,7 @@ def _instrumented_tool(*dargs, **dkwargs):
                 outcome=_outcome,
                 account=_account,
             )
-            # Fire first_cost_query event once per session — signals real value delivery.
+            # Fire first_cost_query event once per session, signals real value delivery.
             # Gate the telemetry on real (non-demo) data: demo responses are also
             # non-error dicts, so without this guard the activation metric would count
             # people who only ever saw the demo dataset, not their own cost number.
@@ -215,7 +215,7 @@ except Exception:
 @mcp.resource("finops://status")
 async def connection_status() -> str:
     """
-    Returns nable's current connection status — which providers are configured,
+    Returns nable's current connection status, which providers are configured,
     the active plan, and setup instructions if nothing is connected.
     AI clients should read this resource on first connect to understand what data is available.
     """
@@ -659,12 +659,12 @@ async def check_connector_health() -> dict:
                 result["fix"] = f"Run: finops setup {name}"
                 return result
 
-            # Minimal live probe — list_accounts is the lightest call on every connector
+            # Minimal live probe, list_accounts is the lightest call on every connector
             await asyncio.wait_for(connector.list_accounts(), timeout=10.0)
             result["healthy"] = True
             result["response_ms"] = int((time.monotonic() - t0) * 1000)
         except asyncio.TimeoutError:
-            result["error"] = "Timeout (>10s) — credentials may be valid but API is slow"
+            result["error"] = "Timeout (>10s), credentials may be valid but API is slow"
             result["fix"] = "Check network connectivity or API endpoint status"
         except Exception as e:
             msg = str(e)
@@ -677,12 +677,12 @@ async def check_connector_health() -> dict:
             elif any(k in msg.lower() for k in ("not found", "404")):
                 result["fix"] = f"Resource not found. Re-configure: finops setup {name}"
             elif any(k in msg.lower() for k in ("rate limit", "throttl", "429")):
-                result["fix"] = "Rate limited — nable will auto-retry. No action needed."
+                result["fix"] = "Rate limited, nable will auto-retry. No action needed."
             else:
                 result["fix"] = f"Re-run setup: finops setup {name}"
         return result
 
-    # Run all probes in parallel (don't await serially — would take minutes)
+    # Run all probes in parallel (don't await serially, would take minutes)
     tasks = [_probe(name, conn) for name, conn in _ALL_CONNECTORS.items()]
     probes = await asyncio.gather(*tasks, return_exceptions=False)
 
@@ -788,7 +788,7 @@ async def get_cost_summary(
         "grand_by_service": {k: round(v, 4) for k, v in _ranked_services[:50]},
     }
     # If any provider reports a non-USD currency, the grand total mixes currencies
-    # and must not be presented as USD. nable does not convert — surface it loudly.
+    # and must not be presented as USD. nable does not convert, surface it loudly.
     _currencies = {
         p.get("currency", "USD") for p in by_provider.values()
         if isinstance(p, dict) and "error" not in p
@@ -1249,7 +1249,7 @@ async def get_total_spend_all_sources(
     end_date: str | None = None,
 ) -> dict:
     """
-    Grand total across ALL connected sources — cloud infrastructure + SaaS tools combined.
+    Grand total across ALL connected sources, cloud infrastructure + SaaS tools combined.
     The true "total technology spend" number.
 
     Examples:
@@ -1604,7 +1604,7 @@ async def acknowledge_anomaly(anomaly_id: int) -> dict:
         anomaly_id: The ID from get_anomalies().
 
     Examples:
-        - "Dismiss anomaly 42 — it was a planned migration"
+        - "Dismiss anomaly 42, it was a planned migration"
         - "Acknowledge that spike, it was expected"
     """
     if err := require_role("analyst"):
@@ -1821,14 +1821,14 @@ async def send_onboarding_email(
     Send an onboarding email to a specific address.
 
     Variants:
-      welcome    → "Here's how easy setup is" — sent on email capture
+      welcome    → "Here's how easy setup is", sent on email capture
       day7       → Nudge for users who haven't connected a provider yet
       trial_end  → Trial expiring in N days, soft upgrade prompt
 
     Args:
         to_email: Recipient email address
         variant: "welcome", "day7", or "trial_end"
-        days_left: For trial_end variant — days until trial expires
+        days_left: For trial_end variant, days until trial expires
 
     Examples:
         - "Send the welcome email to john@example.com"
@@ -1841,10 +1841,10 @@ async def send_onboarding_email(
         from .notifications.onboarding_email import send_welcome, send_day7_nudge, send_trial_ending
         if variant == "welcome":
             ok = send_welcome(to_email)
-            subject = "Ask Claude about your cloud bill — here's how (10 min setup)"
+            subject = "Ask Claude about your cloud bill, here's how (10 min setup)"
         elif variant == "day7":
             ok = send_day7_nudge(to_email)
-            subject = "Quick check-in — did nable setup go okay?"
+            subject = "Quick check-in, did nable setup go okay?"
         elif variant == "trial_end":
             ok = send_trial_ending(to_email, days_left)
             subject = f"nable trial ends in {days_left} day{'s' if days_left != 1 else ''}"
@@ -1910,7 +1910,7 @@ async def check_notification_config() -> dict:
     }
 
 
-# ── Vault tools (read-only — never expose values) ─────────────────────────────
+# ── Vault tools (read-only, never expose values) ─────────────────────────────
 
 
 @mcp.tool()
@@ -2111,7 +2111,7 @@ async def generate_account_dashboard(
             elif sys.platform.startswith("linux"):
                 subprocess.Popen(["xdg-open", path])
             elif sys.platform == "win32":
-                os.startfile(path)  # noqa: S606 — startfile is safe; no shell
+                os.startfile(path)  # noqa: S606, startfile is safe; no shell
         except Exception:
             pass  # opening the browser is best-effort
 
@@ -2190,7 +2190,7 @@ async def export_cost_report(
     period_end = ed.isoformat()
 
     if title is None:
-        title = f"Cloud Cost Report — {period_start} to {period_end}"
+        title = f"Cloud Cost Report, {period_start} to {period_end}"
 
     all_sections = ["cost_summary", "services", "anomalies", "rightsizing", "savings", "budgets"]
     wanted = set(sections or all_sections)
@@ -2358,7 +2358,7 @@ async def dismiss_recommendation(recommendation_id: int, reason: str = "") -> di
         reason: Optional note on why you're dismissing it (e.g. "reserved for burst traffic").
 
     Examples:
-        - "Dismiss recommendation 15 — we need that instance for peak load"
+        - "Dismiss recommendation 15, we need that instance for peak load"
         - "Mark recommendation 8 as won't fix"
     """
     from .recommendations.savings_tracker import mark_dismissed
@@ -2383,7 +2383,7 @@ async def verify_savings() -> dict:
     records the actual measured savings.
 
     Examples:
-        - "Verify our savings — check if the rightsizing changes were made"
+        - "Verify our savings, check if the rightsizing changes were made"
         - "Confirm which recommendations actually happened"
         - "Check if our EC2 downsizes are done"
     """
@@ -2687,7 +2687,7 @@ async def create_rightsizing_tickets(
     provider: str = "aws",
 ) -> dict:
     """
-    Create tickets for rightsizing recommendations — over-provisioned EC2, RDS,
+    Create tickets for rightsizing recommendations, over-provisioned EC2, RDS,
     and other resources that could be downsized to save money.
 
     Args:
@@ -2776,7 +2776,7 @@ async def create_kubernetes_waste_tickets(
         # report is a ClusterReport dataclass; node_utilization is list[dict]
         reports = k8s_conn.analyze_all_clusters()
         for report in reports:
-            # Idle nodes — idle_nodes is list[str] of node names
+            # Idle nodes, idle_nodes is list[str] of node names
             for node in report.node_utilization:
                 if node["node"] in report.idle_nodes and node["monthly_cost"] >= min_monthly_waste:
                     finding = {
@@ -2793,7 +2793,7 @@ async def create_kubernetes_waste_tickets(
                     if url:
                         urls.append({"type": "idle_node", "name": node["node"], "url": url})
 
-            # Over-provisioned workloads — rightsizing_opportunities is list[dict]
+            # Over-provisioned workloads, rightsizing_opportunities is list[dict]
             for opp in report.rightsizing_opportunities:
                 waste = opp.get("potential_savings_usd", 0)
                 if waste >= min_monthly_waste:
@@ -2809,7 +2809,7 @@ async def create_kubernetes_waste_tickets(
                     if url:
                         urls.append({"type": "over_provisioned", "name": opp.get("workload"), "url": url})
 
-        # Orphaned Helm releases — discover_helm_releases requires a k8s client
+        # Orphaned Helm releases, discover_helm_releases requires a k8s client
         try:
             k8s_client = k8s_conn._load_client()
             releases = discover_helm_releases(k8s_client)
@@ -2972,7 +2972,7 @@ async def push_weekly_insight() -> dict:
     Covers: week-over-week spend change, top cost movers, open savings pipeline,
     active anomalies, budget alerts, and a single recommended action.
 
-    This is the proactive format — an analyst briefing, not a metric dump.
+    This is the proactive format, an analyst briefing, not a metric dump.
     Runs automatically every Monday morning when scheduled. Use this to
     trigger it on demand.
 
@@ -3110,7 +3110,7 @@ async def push_weekly_insight() -> dict:
         }
     return {
         "sent": False,
-        "error": "Slack send failed — check SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN.",
+        "error": "Slack send failed, check SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN.",
     }
 
 
@@ -3119,7 +3119,7 @@ async def send_weekly_digest_now() -> dict:
     """
     Immediately send the weekly email digest to the configured recipient.
     Includes spend summary, anomalies, and top rightsizing recommendations.
-    Works without Claude — pure standalone email.
+    Works without Claude, pure standalone email.
 
     Examples:
         - "Send the weekly cost digest now"
@@ -4045,7 +4045,7 @@ async def get_effective_rate_profile() -> dict:
     billed amounts against public on-demand prices.
 
     Captures EDP discounts, MOSA/negotiated rates, and private pricing
-    automatically from Cost Explorer or CUR — no manual input needed.
+    automatically from Cost Explorer or CUR, no manual input needed.
 
     Used internally by the commitment optimizer and PR cost estimator.
     Useful for understanding how large your negotiated discount actually is.
@@ -4288,16 +4288,16 @@ async def get_efficiency_scorecard(
     provider: str | None = None,
 ) -> dict:
     """
-    FinOps efficiency scorecard — a 0–100 score with letter grade across
+    FinOps efficiency scorecard, a 0–100 score with letter grade across
     5 dimensions: compute efficiency, waste reduction, commitment coverage,
     tag hygiene, and anomaly response. Tracked over time so you can see
     if you're improving.
 
     Scope options:
-      - "overall"         — everything combined (default)
-      - team=platform     — filter by team tag
-      - environment=prod  — filter by environment tag
-      - provider=aws      — single provider view
+      - "overall"        , everything combined (default)
+      - team=platform    , filter by team tag
+      - environment=prod , filter by environment tag
+      - provider=aws     , single provider view
 
     Examples:
         - "What's our FinOps score?"
@@ -4352,7 +4352,7 @@ async def get_efficiency_scorecard(
         except Exception:
             pass
 
-        # Try commitment data — scoped by tag when filtering by team/env
+        # Try commitment data, scoped by tag when filtering by team/env
         tag_filter: dict | None = None
         if team:
             tag_filter = {"team": team}
@@ -4522,7 +4522,7 @@ async def get_commitment_coverage_by_tag(
 
     At 70% tag coverage we measure the tagged resources directly via
     Cost Explorer, then solve algebraically for the untagged 30% using
-    account totals — producing a full-domain estimate with confidence rating.
+    account totals, producing a full-domain estimate with confidence rating.
 
     Args:
         tag_key:          Tag key to filter on (e.g. "domain", "team", "service")
@@ -4615,10 +4615,10 @@ async def get_helm_release_costs(
     namespace: str | None = None,
 ) -> dict:
     """
-    Cost breakdown by Helm release — shows what each release actually costs
+    Cost breakdown by Helm release, shows what each release actually costs
     rather than raw deployment names. Detects orphaned releases wasting money.
 
-    Works without the helm CLI — reads release state directly from cluster secrets.
+    Works without the helm CLI, reads release state directly from cluster secrets.
 
     Examples:
         - "How much does our Prometheus stack cost?"
@@ -4803,12 +4803,12 @@ async def get_cluster_efficiency(context: str | None = None) -> dict:
     breakdown, and prioritised recommendations ranked by dollar impact.
 
     Scores across 4 dimensions:
-      - CPU efficiency    (30 pts) — actual usage vs requests (needs metrics-server)
-      - Memory efficiency (30 pts) — actual usage vs requests (needs metrics-server)
-      - Idle node penalty (20 pts) — penalised for nodes under 10% utilisation
-      - Waste ratio       (20 pts) — penalised for % of cost that's unrecoverable
+      - CPU efficiency    (30 pts), actual usage vs requests (needs metrics-server)
+      - Memory efficiency (30 pts), actual usage vs requests (needs metrics-server)
+      - Idle node penalty (20 pts), penalised for nodes under 10% utilisation
+      - Waste ratio       (20 pts), penalised for % of cost that's unrecoverable
 
-    Works without metrics-server — uses request fill-ratio against node capacity.
+    Works without metrics-server, uses request fill-ratio against node capacity.
 
     Examples:
         - "What's our Kubernetes efficiency score?"
@@ -4847,7 +4847,7 @@ async def get_cluster_efficiency(context: str | None = None) -> dict:
             "F": "High waste. A dedicated sprint on cluster efficiency will pay for itself in weeks.",
         }.get(grade, "")
         result["headline"] = (
-            f"Cluster '{report.cluster}' scores {score:.0f}/100 (Grade {grade}) — "
+            f"Cluster '{report.cluster}' scores {score:.0f}/100 (Grade {grade}), "
             f"${total:,.0f}/mo total, ${waste:,.0f}/mo estimated waste. {grade_msg}"
         )
 
@@ -5275,7 +5275,7 @@ async def subscribe_to_report(
         team: Scope report to a specific team tag value
         provider: Scope report to a specific cloud provider (aws, azure, gcp)
         lookback_days: How many days of history to include (default 7)
-        cron: Custom cron expression — overrides frequency (e.g. "0 8 * * 1-5")
+        cron: Custom cron expression, overrides frequency (e.g. "0 8 * * 1-5")
 
     Examples:
         - "Send me a daily Slack report with spend and anomalies to #finops"
@@ -5294,7 +5294,7 @@ async def subscribe_to_report(
                 "valid_sections": VALID_SECTIONS,
             }
 
-        # Email delivery is Pro-only — warn at subscription time, don't block creation
+        # Email delivery is Pro-only, warn at subscription time, don't block creation
         email_note = None
         if email_addresses and require_pro("scheduled_email_digests") is not None:
             email_note = (
@@ -5335,7 +5335,7 @@ async def subscribe_to_report(
 @mcp.tool()
 async def list_report_subscriptions() -> dict:
     """
-    List all active report subscriptions — their names, schedules, sections, and delivery channels.
+    List all active report subscriptions, their names, schedules, sections, and delivery channels.
 
     Examples:
         - "What reports are scheduled?"
@@ -5433,7 +5433,7 @@ async def set_budget(
     Args:
         name: Budget name (e.g. "Platform Team Monthly")
         limit_usd: Spending limit in USD
-        scope_type: What to watch — "total", "provider", "team", "service"
+        scope_type: What to watch, "total", "provider", "team", "service"
         scope_value: The specific value (e.g. "aws", "platform", "EC2")
                      Use "*" for total account budget
         period: "monthly" or "weekly"
@@ -5471,7 +5471,7 @@ async def check_budget_status(budget_name: str = "") -> dict:
     what's remaining, and whether any budgets are in warning or exceeded status.
 
     Args:
-        budget_name: Filter to a specific budget name (optional — shows all if empty)
+        budget_name: Filter to a specific budget name (optional, shows all if empty)
 
     Examples:
         - "Check all budgets"
@@ -5498,7 +5498,7 @@ async def check_budget_status(budget_name: str = "") -> dict:
             },
             "budgets": results,
             "alert": (
-                f"🔴 {len(exceeded)} budget(s) exceeded! Immediate action required."
+                f"🔴 {len(exceeded)} budget(s) exceeded. Immediate action required."
                 if exceeded else
                 f"🟡 {len(warnings)} budget(s) approaching limit."
                 if warnings else
@@ -5552,7 +5552,7 @@ async def delete_budget(budget_id: int) -> dict:
 @mcp.tool()
 async def sync_budgets_from_yaml(yaml_path: str) -> dict:
     """
-    Import budgets from a budget.yml file. Idempotent — running twice
+    Import budgets from a budget.yml file. Idempotent, running twice
     is safe. Use this to version-control your spending limits alongside
     your infrastructure code.
 
@@ -5959,20 +5959,19 @@ async def get_savings_plan_showback(
 
     This is the showback problem no other tool solves at line-item granularity.
     Instead of blending SP/RI discounts across the account, nable attributes the
-    real dollar benefit back to the team or service that consumed the covered usage —
-    using CUR fields that Cost Explorer doesn't expose.
+    real dollar benefit back to the team or service that consumed the covered usage,    using CUR fields that Cost Explorer doesn't expose.
 
     For each team (or tag value):
-      • effective_cost     — what they actually paid under SP/RI rates
-      • on_demand_equiv    — what they would have paid without commitments
-      • savings_captured   — real dollar benefit from Savings Plans + RIs
-      • discount_rate_pct  — their effective discount rate
-      • sp_savings / ri_savings — broken out by commitment type
+      • effective_cost    , what they actually paid under SP/RI rates
+      • on_demand_equiv   , what they would have paid without commitments
+      • savings_captured  , real dollar benefit from Savings Plans + RIs
+      • discount_rate_pct , their effective discount rate
+      • sp_savings / ri_savings, broken out by commitment type
 
     Requires CUR delivery to S3 and Athena. Team plan feature.
 
     Args:
-        tag_key:    Resource tag to group by — "team", "project", "env" (default "team")
+        tag_key:    Resource tag to group by, "team", "project", "env" (default "team")
         start_date: ISO date YYYY-MM-DD (default: start of current month)
         end_date:   ISO date YYYY-MM-DD (default: today)
         include_ri: Include Reserved Instance savings alongside SP savings (default True)
@@ -6357,11 +6356,11 @@ def create_api_key(
     Create a new API key for a team member. Requires admin role in shared mode.
 
     Roles:
-      viewer   — read-only cost queries, optionally scoped to one team/provider
-      analyst  — viewer + attribution writes, budget management, snapshot triggers
-      admin    — full access, can manage keys and connectors
+      viewer  , read-only cost queries, optionally scoped to one team/provider
+      analyst , viewer + attribution writes, budget management, snapshot triggers
+      admin   , full access, can manage keys and connectors
 
-    The raw key (nbl_...) is shown ONCE — it is not stored. Save it immediately.
+    The raw key (nbl_...) is shown ONCE, it is not stored. Save it immediately.
 
     Examples:
         - "Create a viewer key for Alice scoped to the platform team"
@@ -6398,7 +6397,7 @@ def list_api_keys() -> list[dict]:
 @mcp.tool()
 def revoke_api_key(key_id: int) -> dict:
     """
-    Revoke an API key by ID. The key is soft-deleted — it stops working immediately.
+    Revoke an API key by ID. The key is soft-deleted, it stops working immediately.
     Requires admin role. Use list_api_keys to find the key ID first.
 
     Examples:
@@ -6516,7 +6515,7 @@ async def generate_terraform_tag_fixes(
 ) -> dict:
     """
     Generate HCL patches for all open tag violations in tf_dir.
-    Shows a unified diff per .tf file — does NOT write to disk.
+    Shows a unified diff per .tf file, does NOT write to disk.
     Run audit_terraform_tags first to populate violations.
 
     Args:
@@ -6774,7 +6773,7 @@ async def open_rightsizing_pr(
     manual mapping needed as long as your tf_dir has state available.
 
     Resolution order:
-      1. Terraform state (automatic — reads instance IDs from state)
+      1. Terraform state (automatic, reads instance IDs from state)
       2. resource_overrides (manual fallback if state is unavailable)
       3. recommended_config stored in DB
 
@@ -6831,14 +6830,14 @@ def main() -> None:
     import logging
     import sys
 
-    # `uvx finops-mcp setup` — route to the setup wizard instead of starting the server.
+    # `uvx finops-mcp setup`, route to the setup wizard instead of starting the server.
     if len(sys.argv) > 1 and sys.argv[1] == "setup":
         from .setup_wizard import main as setup_main
         setup_main(sys.argv[2:])
         return
 
     # When run directly from a terminal (not piped by Claude Desktop), stdin is a TTY.
-    # The MCP server communicates over stdio — running it interactively makes no sense
+    # The MCP server communicates over stdio, running it interactively makes no sense
     # and just hangs. Show a helpful message and redirect to the setup wizard instead.
     if sys.stdin.isatty():
         print()
@@ -6858,7 +6857,7 @@ def main() -> None:
         sys.exit(0)
 
     logging.basicConfig(level=logging.INFO)
-    # Silence APScheduler's noisy "Adding job tentatively" lines — they fire once per
+    # Silence APScheduler's noisy "Adding job tentatively" lines, they fire once per
     # scheduled job at startup and are meaningless to end users.
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
@@ -6886,8 +6885,8 @@ def main() -> None:
         "   📧  Scheduled email reports at any cadence",
         "   💰  RI / Savings Plan recommendations with $ ROI",
         "   🏢  Org-wide multi-account rollup & OU breakdown",
-        "   🔍  Line-item CUR data — per-resource & RI waste",
-        "   📈  Unit economics — cost per customer, % of MRR",
+        "   🔍  Line-item CUR data, per-resource & RI waste",
+        "   📈  Unit economics, cost per customer, % of MRR",
     ]
 
     if status.mode == "pro":
@@ -6950,7 +6949,7 @@ async def get_llm_costs(
     end_date: str | None = None,
 ) -> dict:
     """
-    Aggregate AI/LLM spend across all configured providers — OpenAI, Anthropic,
+    Aggregate AI/LLM spend across all configured providers, OpenAI, Anthropic,
     AWS Bedrock, Azure OpenAI, and Vertex AI.
 
     Shows total spend, breakdown by provider, breakdown by model, daily trend,
@@ -7031,8 +7030,7 @@ async def get_gpu_infra_costs(
     end_date: str | None = None,
 ) -> dict:
     """
-    Report spend status across serverless-GPU / inference-infra providers —
-    Modal, Together, and Replicate. For the model-builder slice of AI startups
+    Report spend status across serverless-GPU / inference-infra providers,    Modal, Together, and Replicate. For the model-builder slice of AI startups
     this is the single largest variable cost, billed per GPU-second inside each
     vendor's own dashboard and invisible to any cloud bill.
 
@@ -7068,7 +7066,7 @@ async def get_gpu_infra_costs(
 async def get_credit_status(months: int = 6) -> dict:
     """
     Track AWS promotional-credit (Activate) burn-down and detect the moment
-    billing flips from credits to cash — the cliff where an early startup first
+    billing flips from credits to cash, the cliff where an early startup first
     feels cost pain. AWS sends no native alert for this.
 
     Reads Cost Explorer's RECORD_TYPE (Charge type) to separate gross usage,
@@ -7097,8 +7095,7 @@ async def get_credit_status(months: int = 6) -> dict:
 @mcp.tool()
 async def get_ai_billing_blind_spots(days: int = 30) -> dict:
     """
-    Flag AWS AI/Marketplace spend that bypasses AWS Cost Anomaly Detection —
-    Bedrock (bills through Marketplace), other Marketplace AI/SaaS, and SageMaker.
+    Flag AWS AI/Marketplace spend that bypasses AWS Cost Anomaly Detection,    Bedrock (bills through Marketplace), other Marketplace AI/SaaS, and SageMaker.
     These line items are invisible to AWS's own anomaly detector, so a spike goes
     unnoticed until the invoice lands. nable watches them directly.
 
@@ -7298,7 +7295,7 @@ async def get_llm_cost_by_model(
 
     Args:
         days: Lookback window in days (default 30).
-        provider: Filter to a specific provider — "openai", "anthropic", "bedrock".
+        provider: Filter to a specific provider, "openai", "anthropic", "bedrock".
                   Leave blank to see all providers.
 
     Examples:
@@ -7353,7 +7350,7 @@ async def get_llm_unit_economics(
     cost per API request, cost per user, cost per document processed, etc.
 
     Args:
-        metric_name:  What you're dividing by — "request", "user", "document",
+        metric_name:  What you're dividing by, "request", "user", "document",
                       "transaction", or any label. Default: "request".
         metric_count: How many units occurred in the period. If omitted, returns
                       total spend only and asks for the metric count.
@@ -7362,7 +7359,7 @@ async def get_llm_unit_economics(
     Examples:
         - "What's our cost per API request for AI features?"
         - "We processed 50000 documents this month. What's our cost per doc?"
-        - "Cost per active user for our AI features last 30 days — we had 1200 users"
+        - "Cost per active user for our AI features last 30 days, we had 1200 users"
     """
     try:
         from datetime import date as _date, timedelta
@@ -7415,7 +7412,7 @@ async def get_langfuse_model_costs(
     """
     Break down LLM spend and token usage by model from Langfuse observability data.
 
-    Shows cost and token consumption for every model tracked in Langfuse — useful
+    Shows cost and token consumption for every model tracked in Langfuse, useful
     for understanding which models are driving spend and optimizing model selection.
 
     Requires:
@@ -7475,7 +7472,7 @@ async def get_langfuse_trace_volume(
     end_date: str | None = None,
 ) -> dict:
     """
-    Daily trace and observation counts from Langfuse — usage volume over time.
+    Daily trace and observation counts from Langfuse, usage volume over time.
 
     Use this to identify request spikes, growth trends, or unexpected volume surges
     that may be driving LLM cost increases.
@@ -7527,7 +7524,7 @@ async def benchmark_costs(
 
     Args:
         account_id: AWS account ID to analyse
-        vertical:   industry peer group — saas, ecommerce, fintech, media, ai_ml, default
+        vertical:   industry peer group, saas, ecommerce, fintech, media, ai_ml, default
         days:       lookback period for metric calculation
 
     Returns per-metric comparisons with assessments (better/similar/worse) and insights.
@@ -7555,7 +7552,7 @@ async def forecast_costs(
 
     Args:
         account_id:   AWS account ID or provider account identifier
-        service:      specific service to forecast (e.g. "EC2", "RDS") — omit for total
+        service:      specific service to forecast (e.g. "EC2", "RDS"), omit for total
         horizon_days: number of days to forecast (default 30)
         history_days: days of history to fit the model (default 90, need ≥14)
 
@@ -7711,7 +7708,7 @@ async def get_ai_kpis(
       - Context window utilisation per model (are you paying for 200K context but using 2K?)
       - Model sprawl score (Herfindahl index of model concentration)
       - Peak usage day-of-week and weekend vs weekday patterns
-      - Prompt efficiency (output/input token ratio — flags verbose or wrong-model usage)
+      - Prompt efficiency (output/input token ratio, flags verbose or wrong-model usage)
       - Error spend estimate (tokens wasted on failed requests)
       - AI vs infrastructure spend ratio (benchmark: healthy SaaS = 5–15%)
 
@@ -7866,7 +7863,7 @@ async def get_llm_unit_economics_full(
     Examples:
         - "What's our AI cost per customer? We have 800 paying customers."
         - "We have $50K MRR and 1200 MAU. What's our AI unit economics?"
-        - "Cost per API request for our AI features — we handled 2 million requests"
+        - "Cost per API request for our AI features, we handled 2 million requests"
         - "Is our AI spend sustainable at our current scale?"
     """
     try:
@@ -9296,7 +9293,7 @@ async def get_textract_costs(days: int = 30, account: str = "") -> str:
 async def audit_textract_environment_waste(days: int = 30) -> dict:
     """
     Analyzes Textract spend by environment to find non-production API calls.
-    Textract charges per page — QA and staging environments often call it
+    Textract charges per page, QA and staging environments often call it
     unnecessarily. Identifies which Lambda functions or services are calling
     Textract in non-prod and estimates the monthly waste.
 
@@ -9378,7 +9375,7 @@ async def list_active_services(
     Use this to discover what services are running before querying a specific one.
     Returns services sorted by cost so you can see the top drivers at a glance.
 
-    Works for any service — EC2, RDS, ElastiCache, AppSync, Kendra, IoT Core,
+    Works for any service, EC2, RDS, ElastiCache, AppSync, Kendra, IoT Core,
     WorkSpaces, Pinpoint, or anything else in your account.
 
     Args:
@@ -9441,7 +9438,7 @@ async def get_service_cost(
     """
     Get cost breakdown for any named cloud service on AWS, Azure, or GCP.
 
-    Handles any service — common ones like EC2 and RDS, or less common ones
+    Handles any service, common ones like EC2 and RDS, or less common ones
     like AppSync, Kendra, MSK, WorkSpaces, IoT Core, Pinpoint, Forecast,
     MemoryDB, Clean Rooms, Lake Formation, and 200+ others.
 
@@ -10597,7 +10594,7 @@ async def run_full_cost_audit(
     Run a full cost optimization audit across all connected AWS resources.
     Use this when the user explicitly asks for a full audit, cost scan, or
     optimization sweep. For simple cost questions ("what did I spend last month?")
-    prefer get_cost_summary or get_costs_by_service — they are faster and cheaper.
+    prefer get_cost_summary or get_costs_by_service, they are faster and cheaper.
 
     Good triggers: "run a cost audit", "scan for savings", "find waste",
     "full optimization report", "what should I optimize?".
@@ -10797,7 +10794,7 @@ async def run_full_cost_audit(
     total_annual = total_monthly * 12
 
     lines = [
-        f"## Cost Audit — Top {len(top)} Opportunities",
+        f"## Cost Audit, Top {len(top)} Opportunities",
         f"**Estimated monthly saving: ${total_monthly:,.2f} | Annual: ${total_annual:,.2f}**",
         "",
         "| # | Opportunity | Category | Monthly Saving |",
@@ -10810,10 +10807,10 @@ async def run_full_cost_audit(
     lines.append("*Run any individual tool for full details and remediation commands.*")
     lines.append("")
     lines.append("**What do you want to do with these results?**")
-    lines.append("- `export to CSV` — save to ~/Downloads for Excel or Sheets")
-    lines.append("- `publish to Notion` — share with your team (requires NOTION_API_KEY)")
-    lines.append("- `push to n8n` — trigger your automation workflow")
-    lines.append("- `tell me more about #1` — deep dive on the top opportunity")
+    lines.append("- `export to CSV`, save to ~/Downloads for Excel or Sheets")
+    lines.append("- `publish to Notion`, share with your team (requires NOTION_API_KEY)")
+    lines.append("- `push to n8n`, trigger your automation workflow")
+    lines.append("- `tell me more about #1`, deep dive on the top opportunity")
 
     if errors:
         lines.append(f"\n*Scanners skipped (no data or not configured): {', '.join(errors)}*")
@@ -11169,7 +11166,7 @@ async def publish_cost_report_to_notion(
     """
     Runs the full cost audit and publishes results to your team's Notion page.
 
-    The Notion page can be shared with anyone on the team — they don't need
+    The Notion page can be shared with anyone on the team, they don't need
     nable installed. Use this to give leadership, finance, and engineering
     leads a shared cost view without a separate dashboard.
 
@@ -11365,7 +11362,7 @@ async def publish_cost_report_to_notion(
     top_findings = findings[:20]
 
     if not top_findings:
-        return "No savings opportunities found — nothing to publish."
+        return "No savings opportunities found, nothing to publish."
 
     total_monthly = sum(f["monthly_savings"] for f in top_findings)
     total_annual = total_monthly * 12
@@ -11581,7 +11578,7 @@ async def get_nable_roi(
     Shows the return on investment from using nable: savings found, acted on, and verified
     versus the cost of the tool itself.
 
-    This report is unique to nable — no other FinOps tool can show this calculation
+    This report is unique to nable, no other FinOps tool can show this calculation
     because they cost more per month than many teams' actual savings.
 
     Use when:
