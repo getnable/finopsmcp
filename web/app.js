@@ -682,7 +682,7 @@ const PRICE_ROWS = [
   { label: "Terraform remediation: patch + open the PR", solo: false, pro: true, team: true, ent: true },
   { label: "Slack / Teams alerts, digests + tickets (Jira, Linear, GitHub)", solo: false, pro: true, team: true, ent: true },
   { label: "Budgets, commitments + BI dashboards", solo: false, pro: true, team: true, ent: true },
-  { label: "Conversational Slack bot: ask the bill anything", solo: false, pro: false, team: true, ent: true },
+  { label: "Slack bot: ask cost questions, no editor needed", solo: false, pro: false, team: true, ent: true },
   { label: "RCA + chat remediation: drafts the fix, a human approves", solo: false, pro: false, team: true, ent: true },
   { label: "Managed AI included (or bring your own key)", solo: false, pro: false, team: true, ent: true },
   { label: "SSO + audit logs", solo: false, pro: false, team: false, ent: true },
