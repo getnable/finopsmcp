@@ -159,7 +159,7 @@ export default async function handler(req) {
   }
 
   // Generate deterministic 6-digit OTP from HMAC(secret, email:bucket).
-  // Because it's derived — not random — verify-code.js can recompute it
+  // Because it's derived, not random, verify-code.js can recompute it
   // without any KV store. Valid for a 10-minute bucket window.
   const timeBucket = Math.floor(Date.now() / 600000);
   const mac = await hmacHex(ACCOUNT_SECRET, `otp:${email}:${timeBucket}`);

@@ -125,7 +125,7 @@ async function verifyOtp(secret, email, code) {
   return false;
 }
 
-// ── License key generation (v2, Ed25519 — mirrors license.py) ─────────────────
+// ── License key generation (v2, Ed25519, mirrors license.py) ─────────────────
 // Signs with FINOPS_LICENSE_PRIVATE_KEY (raw 32-byte seed). The MCP server
 // verifies with the bundled public key, so no shared secret is needed anywhere.
 

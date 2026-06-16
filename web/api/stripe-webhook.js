@@ -5,15 +5,15 @@
  * and emails it to the customer via Resend.
  *
  * Required env vars (set in Vercel project settings):
- *   STRIPE_WEBHOOK_SECRET   — from Stripe Dashboard → Webhooks → signing secret
- *   RESEND_API_KEY          — from resend.com
+ *   STRIPE_WEBHOOK_SECRET  , from Stripe Dashboard → Webhooks → signing secret
+ *   RESEND_API_KEY         , from resend.com
  */
 
 import crypto from "node:crypto";
 
 // Two-layer deduplication:
-// Layer 1 — in-memory Set: fast dedup within the same warm Lambda instance.
-// Layer 2 — Vercel KV (optional): cross-instance persistent dedup.
+// Layer 1, in-memory Set: fast dedup within the same warm Lambda instance.
+// Layer 2, Vercel KV (optional): cross-instance persistent dedup.
 //   Set VERCEL_KV_REST_API_URL + VERCEL_KV_REST_API_TOKEN in Vercel project settings
 //   to enable. Without KV, cold-start duplicates may re-send the same key email
 //   (harmless: same email+date produces the same key, so both emails are valid).
@@ -22,10 +22,10 @@ const processedEvents = new Set();
 async function _kvMarkSeen(eventId) {
   const url = process.env.VERCEL_KV_REST_API_URL;
   const token = process.env.VERCEL_KV_REST_API_TOKEN;
-  if (!url || !token) return false; // KV not configured — fall back to in-memory
+  if (!url || !token) return false; // KV not configured, fall back to in-memory
   try {
     const key = `stripe_dedup:${eventId}`;
-    // SET NX EX 86400 — set only if not exists, expire after 24h
+    // SET NX EX 86400, set only if not exists, expire after 24h
     const res = await fetch(`${url}/set/${encodeURIComponent(key)}/1/EX/86400/NX`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -71,14 +71,14 @@ function b64url(buf) {
 
 // Map the checkout to a license plan. Primary signal: which payment link the
 // customer used (session.payment_link, a plink_... id). Set these in Vercel:
-//   STRIPE_TEAM_PAYMENT_LINKS — comma-separated plink ids for Team links
-//   STRIPE_PRO_PAYMENT_LINKS  — comma-separated plink ids for Pro links
+//   STRIPE_TEAM_PAYMENT_LINKS, comma-separated plink ids for Team links
+//   STRIPE_PRO_PAYMENT_LINKS , comma-separated plink ids for Pro links
 // (Stripe Dashboard → Payment links → click a link → id is in the URL.)
 //
 // Fallback when the link id is unknown (negotiated deals, manual invoices):
 // amount at or above STRIPE_TEAM_MIN_CENTS (default $500) issues a team key.
 // The fallback cannot tell Pro annual ($1,000/yr) from Team monthly
-// ($1,000/mo) — both are 100000 cents — so that exact amount falls back to
+// ($1,000/mo), both are 100000 cents, so that exact amount falls back to
 // PRO. Issuing the cheaper key to a Team buyer is a recoverable support
 // email; silently handing the Slack-bot tier to a Pro buyer is not. With the
 // link env vars set, the ambiguity never arises. Team keys unlock the
@@ -110,7 +110,7 @@ function planForAmount(amount) {
 }
 
 // Renewal invoices carry price ids, not payment links. Map via
-//   STRIPE_TEAM_PRICE_IDS / STRIPE_PRO_PRICE_IDS — comma-separated price_...
+//   STRIPE_TEAM_PRICE_IDS / STRIPE_PRO_PRICE_IDS, comma-separated price_...
 // ids (Stripe Dashboard → Products → price). Falls back to amount.
 function planForInvoice(invoice) {
   // Line price id moved between Stripe API versions: classic `line.price.id`
@@ -149,7 +149,7 @@ function generateKey(email, plan) {
 
 // ─── Stripe signature verification ───────────────────────────────────────────
 
-const STRIPE_TIMESTAMP_TOLERANCE_S = 300; // 5 minutes — reject replays
+const STRIPE_TIMESTAMP_TOLERANCE_S = 300; // 5 minutes, reject replays
 
 function verifyStripe(rawBody, sigHeader, secret) {
   // sigHeader format: t=timestamp,v1=hex_sig[,v1=...,v0=...]
@@ -195,7 +195,7 @@ async function sendLicenseEmail(to, licenseKey, plan) {
     Your nable ${planLabel} license key
   </h1>
   <p style="font-size:15px;color:#54524a;line-height:1.65;margin:0 0 32px;">
-    Thanks for subscribing. Here's your license key — keep it somewhere safe.
+    Thanks for subscribing. Here's your license key, keep it somewhere safe.
   </p>
 
   <!-- Key block -->
@@ -208,7 +208,7 @@ async function sendLicenseEmail(to, licenseKey, plan) {
   <!-- Step 1 -->
   <div style="margin-bottom:20px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 1 — </strong>Run this command in your terminal. It activates your key and writes it to your editor config automatically.
+      <strong style="color:#1a1915;">Step 1, </strong>Run this command in your terminal. It activates your key and writes it to your editor config automatically.
     </p>
     <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
       <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
@@ -220,7 +220,7 @@ async function sendLicenseEmail(to, licenseKey, plan) {
   <!-- Step 2 -->
   <div style="margin-bottom:36px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 2 — </strong>Restart your editor. ${planLabel} features unlock immediately.
+      <strong style="color:#1a1915;">Step 2, </strong>Restart your editor. ${planLabel} features unlock immediately.
     </p>
     <p style="font-size:12px;color:#8b8879;margin:6px 0 0;">
       If you haven't installed nable yet, run <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;">pip install finops-mcp &amp;&amp; finops setup</code> first.
@@ -330,7 +330,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // Deduplicate — check in-memory first (fast), then KV (cross-instance)
+  // Deduplicate, check in-memory first (fast), then KV (cross-instance)
   if (processedEvents.has(event.id)) {
     console.log(`Duplicate event ${event.id} (in-memory) - skipping`);
     return res.status(200).json({ received: true, deduplicated: true });
@@ -364,7 +364,7 @@ export default async function handler(req, res) {
     // outage, etc.), and UNDO the dedup marks so the retry is actually
     // processed instead of being swallowed as a duplicate. generateKey() is
     // deterministic for the same email+date, so a same-day retry sends the
-    // same key again — harmless.
+    // same key again, harmless.
     processedEvents.delete(event.id);
     await _kvUnmark(event.id);
     console.error(`Delivery failed for ${email}:`, err.message);

@@ -234,7 +234,7 @@ def setup_aws() -> None:
         identity = sts.get_caller_identity()
         _ok(f"Connection verified: account {identity['Account']}")
 
-        # Check Cost Explorer access specifically — this is the core permission
+        # Check Cost Explorer access specifically, this is the core permission
         ce_ok = False
         try:
             ce = boto3.client("ce", region_name="us-east-1")
@@ -340,7 +340,7 @@ def _detect_aws_candidates() -> list:
                 "region": session.region_name or "us-east-1",
             }
         except Exception:
-            return None  # no creds / expired SSO token / no permission — just skip
+            return None  # no creds / expired SSO token / no permission, just skip
 
     try:
         profiles = boto3.Session().available_profiles
@@ -365,7 +365,7 @@ def _detect_aws_candidates() -> list:
                     r["label"] = f"profile '{p}'" if p else "default credentials"
                     resolved.append(r)
         except concurrent.futures.TimeoutError:
-            pass  # deadline hit — use whatever resolved in time
+            pass  # deadline hit, use whatever resolved in time
 
     # Prefer named profiles; include the default chain only for accounts a named
     # profile didn't already cover. Dedupe by account_id.
@@ -557,11 +557,11 @@ def _print_one_click_key_offer(region: str = "us-east-1") -> None:
 
     # Fastest path for someone with no local key: AWS CloudShell is already
     # authenticated with their console session, so nable's ambient-credential
-    # detection fires there and shows a real bill in seconds — no key to mint, no
+    # detection fires there and shows a real bill in seconds, no key to mint, no
     # console clicking, nothing hosted by nable. This is the single biggest lever
     # for getting a no-creds user to first value inside the 5-10 minute window.
     print(
-        "\n  Fastest with no local key — AWS CloudShell (already signed in):\n"
+        "\n  Fastest with no local key, AWS CloudShell (already signed in):\n"
         "    1. Open AWS CloudShell (the >_ terminal icon, top of the console).\n"
         "    2. Run:  pip install finops-mcp && finops welcome\n"
         "    nable uses CloudShell's own credentials and shows your real bill on the spot.\n"
@@ -604,7 +604,7 @@ def _setup_aws_manual(taken: set) -> None:
     print("  2) Cross-account IAM role ARN")
     print("  3) AWS CLI profile  (~/.aws/config)")
     # Validate the pick instead of silently treating any typo as "enter an access
-    # key" — a wrong fork dumped no-creds users onto a key prompt they could not
+    # key", a wrong fork dumped no-creds users onto a key prompt they could not
     # satisfy, a confirmed quit point.
     while True:
         cred_choice = _prompt("  Choice", default="1")
@@ -925,7 +925,7 @@ def _normalize_and_check_key(env_key: str, val: str) -> tuple[str, str | None]:
     hint = _KEY_PREFIX_HINTS.get(env_key)
     warn = None
     if hint and clean and not clean.startswith(hint[0]):
-        warn = f"{hint[1]} — double-check you pasted the right value."
+        warn = f"{hint[1]}, double-check you pasted the right value."
     return clean, warn
 
 
@@ -958,7 +958,7 @@ def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]
 
 
 def setup_sso() -> None:
-    """Enterprise SSO wizard — configures OIDC for Okta, Azure AD, Google Workspace, etc."""
+    """Enterprise SSO wizard, configures OIDC for Okta, Azure AD, Google Workspace, etc."""
     _section("Enterprise SSO: OIDC Configuration")
     print("""
   nable supports SSO via OIDC (OpenID Connect).
@@ -1517,8 +1517,7 @@ def main(args: list[str] | None = None) -> None:
     if args is None:
         args = _sys.argv[1:]
 
-    # Allow `finops setup` and `finops setup aws` as aliases —
-    # strip the leading "setup" so both `finops aws` and `finops setup aws` work.
+    # Allow `finops setup` and `finops setup aws` as aliases,    # strip the leading "setup" so both `finops aws` and `finops setup aws` work.
     if args and args[0] == "setup":
         args = args[1:]
 
@@ -1771,7 +1770,7 @@ def main(args: list[str] | None = None) -> None:
             ("DATABRICKS_TOKEN", "Personal Access Token or Service Principal token", True),
             ("DATABRICKS_ACCOUNT_ID", "Account ID for billing API (optional, leave blank for single-workspace)", False),
             ("DATABRICKS_ACCOUNT_TOKEN", "Account-level token (optional, defaults to DATABRICKS_TOKEN)", True),
-            ("DATABRICKS_DBU_PRICE", "DBU price in USD (optional, default 0.40 — use your contract rate)", False),
+            ("DATABRICKS_DBU_PRICE", "DBU price in USD (optional, default 0.40, use your contract rate)", False),
         ]),
     }
 
@@ -1978,7 +1977,7 @@ def _offer_email_signup() -> None:
         return
 
     if not email or "@" not in email:
-        # User skipped — mark so we don't ask again this install
+        # User skipped, mark so we don't ask again this install
         try:
             sentinel.parent.mkdir(parents=True, exist_ok=True)
             sentinel.write_text("skipped\n")
@@ -2000,7 +1999,7 @@ def _offer_email_signup() -> None:
         sentinel.parent.mkdir(parents=True, exist_ok=True)
         sentinel.write_text(f"{email}\n")
     except Exception:
-        # Don't block setup if the request fails — but don't write the sentinel
+        # Don't block setup if the request fails, but don't write the sentinel
         # so the user is re-prompted next time (their email was never recorded)
         _ok("Got it. We'll follow up soon.")
 
@@ -2049,7 +2048,7 @@ def _run_license_setup(key: str = "") -> None:
     # Also try to write directly into the Claude Desktop config
     _inject_license_into_claude_config(key)
 
-    print(f"\n  ✓  Team plan active — {status.email or 'license validated'}")
+    print(f"\n  ✓  Team plan active, {status.email or 'license validated'}")
     print(f"  ✓  Key stored in vault.")
     print(f"  ✓  Plan: {status.mode.upper()}")
     if status.issued:
@@ -2586,7 +2585,7 @@ def _configure_claude_desktop_inner() -> bool:
             if mac_app.exists() or mac_app_user.exists():
                 mac_claude_dir.mkdir(parents=True, exist_ok=True)
                 config_path = mac_claude_dir / "claude_desktop_config.json"
-                print("\n  (Claude Desktop app found but not yet launched — creating config directory.)")
+                print("\n  (Claude Desktop app found but not yet launched, creating config directory.)")
             else:
                 print("\n  ──────────────────────────────────────────────────")
                 print("  Claude Desktop not found. To finish setup manually:")
@@ -2603,7 +2602,7 @@ def _configure_claude_desktop_inner() -> bool:
             return False
 
     # Determine the best launch strategy:
-    # 1. uvx  — isolated venv, works in corporate environments with no PATH issues
+    # 1. uvx , isolated venv, works in corporate environments with no PATH issues
     # 2. absolute path to finops-mcp binary
     uvx_bin = shutil.which("uvx")
     finops_bin = shutil.which("finops-mcp")

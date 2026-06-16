@@ -95,7 +95,7 @@ async function verifySessionToken(secret, token) {
   return parsed; // { email, plan, exp }
 }
 
-// ── License key generation (v2, Ed25519 — mirrors license.py) ─────────────────
+// ── License key generation (v2, Ed25519, mirrors license.py) ─────────────────
 // Signs with FINOPS_LICENSE_PRIVATE_KEY (raw 32-byte seed). The MCP server
 // verifies with the bundled public key, so no shared secret is needed anywhere.
 
@@ -158,7 +158,7 @@ async function sendRotationEmail(to, licenseKey, resendKey) {
 
   <div style="margin-bottom:16px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 1 — </strong>Set it in your environment:
+      <strong style="color:#1a1915;">Step 1, </strong>Set it in your environment:
     </p>
     <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
       <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
@@ -169,7 +169,7 @@ async function sendRotationEmail(to, licenseKey, resendKey) {
 
   <div style="margin-bottom:24px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 2 — </strong>Update the key in your Claude Desktop config (<code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">~/Library/Application Support/Claude/claude_desktop_config.json</code>):
+      <strong style="color:#1a1915;">Step 2, </strong>Update the key in your Claude Desktop config (<code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11.5px;">~/Library/Application Support/Claude/claude_desktop_config.json</code>):
     </p>
     <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
       <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
