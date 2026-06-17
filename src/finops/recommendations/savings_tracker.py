@@ -256,6 +256,81 @@ def get_summary() -> dict[str, Any]:
     }
 
 
+def quality_signal() -> dict[str, Any]:
+    """
+    The recommendation-quality flywheel: per recommendation type (source), how
+    often recs actually get acted on and how close the PREDICTED savings were to
+    the MEASURED realized savings.
+
+    This is the moat's training signal (rank and suppress low-yield rec types) and
+    the verified-savings proof, not just a log of what we suggested. Per source:
+    total, acted (acted_on + verified), verified, predicted_monthly_usd,
+    realized_monthly_usd, act_rate (acted / total), and accuracy (realized vs
+    predicted among VERIFIED recs only: 1.0 = predictions landed, <1 = we
+    over-predicted, >1 = under-predicted). Plus the headline verified monthly and
+    annual run-rate. Sorted so the rec types that actually pay off lead.
+    """
+    sr = savings_recommendations
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                sr.c.source,
+                sr.c.status,
+                func.count().label("cnt"),
+                func.sum(sr.c.estimated_monthly_savings_usd).label("sum_est"),
+                func.sum(sr.c.verified_monthly_savings_usd).label("sum_ver"),
+            ).group_by(sr.c.source, sr.c.status)
+        ).fetchall()
+
+    agg: dict[str, dict] = {}
+    for r in rows:
+        d = agg.setdefault(r.source or "unknown", {
+            "total": 0, "acted": 0, "verified": 0,
+            "predicted_monthly_usd": 0.0,
+            "realized_monthly_usd": 0.0,
+            "predicted_of_verified_usd": 0.0,
+        })
+        cnt = r.cnt or 0
+        d["total"] += cnt
+        d["predicted_monthly_usd"] += float(r.sum_est or 0.0)
+        if r.status in ("acted_on", "verified"):
+            d["acted"] += cnt
+        if r.status == "verified":
+            d["verified"] += cnt
+            d["realized_monthly_usd"] += float(r.sum_ver or 0.0)
+            d["predicted_of_verified_usd"] += float(r.sum_est or 0.0)
+
+    by_source = []
+    total_realized = 0.0
+    for src, d in agg.items():
+        total = d["total"] or 1
+        pov = d["predicted_of_verified_usd"]
+        realized = d["realized_monthly_usd"]
+        total_realized += realized
+        by_source.append({
+            "source": src,
+            "total": d["total"],
+            "acted": d["acted"],
+            "verified": d["verified"],
+            "act_rate": round(d["acted"] / total, 3),
+            "predicted_monthly_usd": round(d["predicted_monthly_usd"], 2),
+            "realized_monthly_usd": round(realized, 2),
+            # accuracy is only meaningful once a source has verified recs to measure
+            "accuracy": round(realized / pov, 3) if pov > 0 else None,
+        })
+    by_source.sort(key=lambda s: s["realized_monthly_usd"], reverse=True)
+
+    return {
+        "verified_monthly_usd": round(total_realized, 2),
+        "verified_annual_run_rate_usd": round(total_realized * 12, 2),
+        "by_source": by_source,
+        "note": ("accuracy compares predicted vs measured realized savings among "
+                 "verified recommendations; act_rate is acted-or-verified over total. "
+                 "Sources with a low act_rate or low accuracy are candidates to suppress."),
+    }
+
+
 def list_recommendations(
     status: str | None = None,
     source: str | None = None,
