@@ -314,3 +314,59 @@ class TestSavingsTrackerLayer:
                 assert summary["verified_annual_usd"] == round(480.0 * 12, 2)
 
                 db_mod._ENGINE = None
+
+    def test_quality_signal_empty(self):
+        """quality_signal on an empty ledger returns zeroed headline + no sources."""
+        with tempfile.TemporaryDirectory() as td:
+            with patch.dict(os.environ, {"FINOPS_DB_PATH": str(Path(td) / "test.db")}):
+                from src.finops.storage import db as db_mod
+                db_mod._ENGINE = None
+
+                from src.finops.recommendations.savings_tracker import quality_signal
+                q = quality_signal()
+                assert q["verified_monthly_usd"] == 0.0
+                assert q["verified_annual_run_rate_usd"] == 0.0
+                assert q["by_source"] == []
+
+                db_mod._ENGINE = None
+
+    def test_quality_signal_act_rate_and_accuracy(self):
+        """Per-source act_rate and predicted-vs-realized accuracy are computed."""
+        with tempfile.TemporaryDirectory() as td:
+            with patch.dict(os.environ, {"FINOPS_DB_PATH": str(Path(td) / "test.db")}):
+                from src.finops.storage import db as db_mod
+                db_mod._ENGINE = None
+
+                from src.finops.recommendations.savings_tracker import (
+                    record_recommendation, mark_acted_on, mark_verified, quality_signal,
+                )
+                # two rightsizing recs; one is verified at 80% of its estimate
+                r1 = record_recommendation(
+                    source="rightsizing", provider="aws", resource_id="i-1",
+                    resource_type="ec2", resource_name="a",
+                    current_config={}, recommended_config={"instance_type": "m5.large"},
+                    description="rec1", estimated_monthly_savings_usd=100.0,
+                )
+                record_recommendation(
+                    source="rightsizing", provider="aws", resource_id="i-2",
+                    resource_type="ec2", resource_name="b",
+                    current_config={}, recommended_config={"instance_type": "m5.large"},
+                    description="rec2", estimated_monthly_savings_usd=200.0,
+                )
+                mark_acted_on(r1)
+                mark_verified(r1, actual_monthly_savings_usd=80.0)
+
+                q = quality_signal()
+                assert q["verified_monthly_usd"] == 80.0
+                assert q["verified_annual_run_rate_usd"] == round(80.0 * 12, 2)
+
+                rs = next(s for s in q["by_source"] if s["source"] == "rightsizing")
+                assert rs["total"] == 2
+                assert rs["acted"] == 1          # only r1 acted/verified
+                assert rs["verified"] == 1
+                assert rs["act_rate"] == round(1 / 2, 3)
+                assert rs["realized_monthly_usd"] == 80.0
+                # accuracy = realized(80) / predicted-among-verified(100) = 0.8
+                assert rs["accuracy"] == 0.8
+
+                db_mod._ENGINE = None

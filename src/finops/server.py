@@ -2533,6 +2533,26 @@ async def get_savings_ledger(
 
 
 @mcp.tool()
+async def get_recommendation_quality() -> dict:
+    """
+    The recommendation-quality flywheel: per recommendation type, how often recs
+    get acted on and how close the predicted savings were to the measured realized
+    savings. The verified-savings proof, and the signal for which recommendation
+    types actually pay off.
+
+    Use when:
+        - "Which of our recommendations actually saved money?"
+        - "How accurate are nable's savings estimates?"
+        - "How much have we verifiably saved, and from what?"
+    """
+    try:
+        from .recommendations.savings_tracker import quality_signal
+        return quality_signal()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def list_profiles() -> str:
     """
     List all configured nable profiles (for multi-account or multi-client setups).
