@@ -134,9 +134,44 @@ function planForInvoice(invoice) {
   return planForAmount(invoice.amount_paid ?? 0);
 }
 
-function generateKey(email, plan) {
+// Key expiry. A license key now carries an explicit expiry "x" (YYYYMMDD) so a
+// lapsed subscription stops within the billing cycle, not 366 days later. On
+// renewals (invoice.paid) we read the actual paid-through date from the invoice
+// line period; on first purchase (checkout) the session carries no period, so we
+// assume monthly (the standard plan) unless the link is a known annual one, in
+// which case we omit "x" and the client falls back to its legacy 366-day TTL
+// (safe: an annual buyer is never locked out early).
+const KEY_GRACE_DAYS = 10; // covers Stripe smart-retries / dunning before lockout
+const MONTHLY_KEY_DAYS = 31 + KEY_GRACE_DAYS;
+const MS_PER_DAY = 86400000;
+
+function ymd(date) {
+  return date.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+// Latest covered period end (unix seconds) across an invoice's lines, or 0.
+function invoicePeriodEnd(invoice) {
+  const ends = (invoice.lines?.data || []).map((l) => l.period?.end ?? 0);
+  return ends.length ? Math.max(...ends) : 0;
+}
+
+// The explicit expiry (YYYYMMDD) to embed, or null to use the legacy TTL.
+function keyExpiryYmd(obj, isInvoice) {
+  if (isInvoice) {
+    const end = invoicePeriodEnd(obj); // unix seconds, the paid-through date
+    if (end > 0) return ymd(new Date((end + KEY_GRACE_DAYS * 86400) * 1000));
+    return ymd(new Date(Date.now() + MONTHLY_KEY_DAYS * MS_PER_DAY));
+  }
+  const link = obj.payment_link || null;
+  if (link && _linkSet("STRIPE_ANNUAL_PAYMENT_LINKS").has(link)) return null;
+  return ymd(new Date(Date.now() + MONTHLY_KEY_DAYS * MS_PER_DAY));
+}
+
+function generateKey(email, plan, expiryYmd) {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const payload = b64url(Buffer.from(JSON.stringify({ e: email, d, p: plan })));
+  const fields = { e: email, d, p: plan };
+  if (expiryYmd) fields.x = expiryYmd;
+  const payload = b64url(Buffer.from(JSON.stringify(fields)));
   const seed = Buffer.from(LICENSE_PRIVATE_KEY, "base64url");
   const keyObj = crypto.createPrivateKey({
     key: Buffer.concat([ED25519_PKCS8_PREFIX, seed]),
@@ -312,7 +347,8 @@ export default async function handler(req, res) {
   console.log(`Stripe event: ${event.type} [${event.id}]`);
 
   // Handle first purchases (checkout) and renewals/upgrades (invoice.paid).
-  // License keys expire after 366 days, so renewals must re-issue one.
+  // Each renewal re-issues a key whose embedded expiry tracks the new billing
+  // period, so a lapsed subscription stops within the cycle (plus grace).
   if (event.type !== "checkout.session.completed" && event.type !== "invoice.paid") {
     return res.status(200).json({ received: true, skipped: event.type });
   }
@@ -356,9 +392,10 @@ export default async function handler(req, res) {
   // 4. Generate key + send email
   try {
     const plan = isInvoice ? planForInvoice(obj) : planForSession(obj);
-    const key = generateKey(email, plan);
+    const expiryYmd = keyExpiryYmd(obj, isInvoice);
+    const key = generateKey(email, plan, expiryYmd);
     await sendLicenseEmail(email, key, plan);
-    console.log(`License key delivered to ${email} (event=${event.type}, plan=${plan}, amount=${obj.amount_total ?? obj.amount_paid}, link=${obj.payment_link || "none"})`);
+    console.log(`License key delivered to ${email} (event=${event.type}, plan=${plan}, expiry=${expiryYmd || "legacy-ttl"}, amount=${obj.amount_total ?? obj.amount_paid}, link=${obj.payment_link || "none"})`);
   } catch (err) {
     // Return 500 so Stripe retries delivery on transient failures (Resend
     // outage, etc.), and UNDO the dedup marks so the retry is actually

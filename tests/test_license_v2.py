@@ -4,8 +4,11 @@ The whole point of v2: a client validates a key with the bundled PUBLIC key and
 needs no shared secret, and nobody can forge a key without the private key.
 """
 import importlib
+import json as _json
+from datetime import date, timedelta
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 # Throwaway test keypair, generated solely for tests and unrelated to any
 # production key. The public half is genuinely injected into the module (see
@@ -96,3 +99,77 @@ def test_v1_keys_are_retired(monkeypatch):
     status = L.validate_key(fake_v1)
     assert status.mode == "invalid"
     assert "retired" in status.message
+
+
+# ── explicit per-cycle expiry ("x") ───────────────────────────────────────────
+# Keys now carry an explicit expiry the webhook derives from the billing cycle,
+# so a lapsed monthly subscription stops within the cycle instead of 366 days
+# later. Keys without "x" keep the legacy TTL behavior (backward compatible).
+
+
+def _mint(L, fields):
+    """Sign an arbitrary v2 payload the way the Stripe webhook emits it: compact
+    JSON (no spaces, like JS JSON.stringify), Ed25519 over "2:{payload}". Lets a
+    test control the issue date "d" and explicit expiry "x" precisely."""
+    priv = Ed25519PrivateKey.from_private_bytes(L._unb64(_TEST_PRIV))
+    payload = L._b64(_json.dumps(fields, separators=(",", ":")).encode())
+    sig = L._b64(priv.sign(f"2:{payload}".encode()))
+    return f"FINOPS-2-{payload}-{sig}"
+
+
+def test_explicit_expiry_future_is_valid(monkeypatch):
+    L = _license(monkeypatch)
+    key = L.generate_key("user@example.com", expiry_days=30)
+    st = L.validate_key(key)
+    assert st.mode == "pro" and st.is_pro
+
+
+def test_explicit_expiry_past_is_expired(monkeypatch):
+    L = _license(monkeypatch)
+    key = L.generate_key("user@example.com", expiry_days=-1)
+    st = L.validate_key(key)
+    assert st.mode == "invalid"
+    assert "expired" in st.message.lower()
+
+
+def test_explicit_expiry_overrides_legacy_ttl(monkeypatch):
+    """Issued today but with "x" in the past: expired, even though the 366-day
+    TTL window is wide open. This is what makes a monthly key die with the cycle."""
+    L = _license(monkeypatch)
+    today = date.today().strftime("%Y%m%d")
+    past = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
+    key = _mint(L, {"e": "user@example.com", "d": today, "p": "pro", "x": past})
+    st = L.validate_key(key)
+    assert st.mode == "invalid"
+    assert "expired" in st.message.lower()
+
+
+def test_webhook_wire_format_with_expiry_validates(monkeypatch):
+    """Cross-language parity: a key minted exactly the way the JS webhook emits
+    it (compact JSON, fields e/d/p/x) validates and honors the embedded expiry."""
+    L = _license(monkeypatch)
+    today = date.today().strftime("%Y%m%d")
+    future = (date.today() + timedelta(days=41)).strftime("%Y%m%d")
+    key = _mint(L, {"e": "team@acme.com", "d": today, "p": "team", "x": future})
+    st = L.validate_key(key)
+    assert st.mode == "team"
+    assert st.email == "team@acme.com"
+
+
+def test_legacy_key_without_expiry_uses_ttl(monkeypatch):
+    """No "x": a key issued well within the 366-day window stays valid. The
+    legacy fallback path is unchanged for keys minted before this field existed."""
+    L = _license(monkeypatch)
+    recent = (date.today() - timedelta(days=10)).strftime("%Y%m%d")
+    key = _mint(L, {"e": "user@example.com", "d": recent, "p": "pro"})
+    assert L.validate_key(key).mode == "pro"
+
+
+def test_legacy_key_beyond_ttl_is_expired(monkeypatch):
+    """No "x", issued more than 366 days ago: still expires via the legacy TTL."""
+    L = _license(monkeypatch)
+    old = (date.today() - timedelta(days=400)).strftime("%Y%m%d")
+    key = _mint(L, {"e": "user@example.com", "d": old, "p": "pro"})
+    st = L.validate_key(key)
+    assert st.mode == "invalid"
+    assert "expired" in st.message.lower()

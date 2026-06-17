@@ -308,6 +308,85 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
 @media(prefers-reduced-motion:reduce){
   *{transition:none!important;animation:none!important}
 }
+
+/* ── Nav tabs (Dashboard / Ask) ───────────────────────────────────────────── */
+.nav-tabs{display:flex;align-items:center;gap:2px}
+.nav-tab{
+  font-family:var(--font);font-size:13px;font-weight:500;letter-spacing:.005em;
+  color:var(--fg3);background:transparent;border:none;cursor:pointer;
+  padding:6px 12px;border-radius:7px;transition:background .15s,color .15s;
+}
+.nav-tab:hover{color:var(--fg2);background:var(--bg2)}
+.nav-tab.active{color:var(--fg);background:var(--bg2)}
+
+/* ── Ask (agent) view ─────────────────────────────────────────────────────── */
+.agent-wrap{max-width:820px;margin:0 auto}
+.agent-head{margin-bottom:18px}
+.agent-head h1{font-size:20px;font-weight:600;letter-spacing:-.02em;color:var(--fg);margin-bottom:6px}
+.agent-head p{font-size:13px;color:var(--fg2);line-height:1.55;max-width:640px}
+.agent-panel{
+  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow-sm);display:flex;flex-direction:column;overflow:hidden;
+}
+.agent-log{
+  padding:22px;overflow-y:auto;min-height:320px;
+  max-height:calc(100vh - 360px);display:flex;flex-direction:column;gap:14px;
+}
+.agent-empty{margin:auto;text-align:center;max-width:460px;padding:20px 0}
+.agent-empty .ae-mark{
+  width:40px;height:40px;border-radius:10px;background:rgba(77,184,212,.1);
+  border:1px solid rgba(77,184,212,.25);display:flex;align-items:center;justify-content:center;
+  margin:0 auto 14px;color:var(--accent);font-size:20px;font-weight:700;
+}
+.agent-empty p{font-size:13px;color:var(--fg3);line-height:1.5;margin-bottom:16px}
+.agent-starters{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.starter{
+  font-family:var(--font);font-size:12px;color:var(--fg2);
+  background:var(--bg2);border:1px solid var(--line2);border-radius:8px;
+  padding:7px 12px;cursor:pointer;transition:background .15s,border-color .15s,color .15s;
+}
+.starter:hover{background:var(--bg3);color:var(--fg);border-color:var(--accent)}
+.msg{display:flex;max-width:100%}
+.msg-user{justify-content:flex-end}
+.msg-agent{justify-content:flex-start}
+.msg-bubble{
+  font-size:14px;line-height:1.6;padding:11px 15px;border-radius:12px;
+  max-width:88%;word-wrap:break-word;overflow-wrap:anywhere;
+}
+.msg-user .msg-bubble{background:rgba(77,184,212,.12);border:1px solid rgba(77,184,212,.22);color:var(--fg);border-bottom-right-radius:4px}
+.msg-agent .msg-bubble{background:var(--bg2);border:1px solid var(--line);color:var(--fg);border-bottom-left-radius:4px}
+.msg-err .msg-bubble{background:rgba(224,92,75,.08);border-color:rgba(224,92,75,.25);color:var(--fg2)}
+.msg-bubble strong{font-weight:650}
+.agent-code{font-family:var(--mono);font-size:12.5px;background:var(--bg3);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--accent)}
+.agent-pre{font-family:var(--mono);font-size:12.5px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:8px 0;overflow-x:auto;white-space:pre;color:var(--fg2);line-height:1.5}
+.dots{display:inline-flex;gap:4px;align-items:center;height:18px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--fg3);animation:blink 1.2s infinite both}
+.dots i:nth-child(2){animation-delay:.2s}
+.dots i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.agent-composer{
+  display:flex;gap:10px;align-items:flex-end;padding:14px;
+  border-top:1px solid var(--line);background:var(--bg1);
+  position:sticky;bottom:0;
+}
+.agent-input{
+  flex:1;font-family:var(--font);font-size:14px;line-height:1.5;color:var(--fg);
+  background:var(--bg2);border:1px solid var(--line2);border-radius:8px;
+  padding:10px 13px;resize:none;max-height:140px;min-height:42px;
+  transition:border-color .15s;
+}
+.agent-input:focus{outline:none;border-color:var(--accent)}
+.agent-input::placeholder{color:var(--fg3)}
+.agent-send{
+  flex-shrink:0;width:42px;height:42px;border-radius:8px;border:none;cursor:pointer;
+  background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;
+  transition:background .15s,opacity .15s;
+}
+.agent-send:hover:not(:disabled){background:var(--accent2)}
+.agent-send:disabled{opacity:.45;cursor:default}
+.agent-send svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.agent-note{font-size:11px;color:var(--fg3);text-align:center;padding:10px 4px;line-height:1.5;width:100%}
+.agent-disclaimer{font-size:11px;color:var(--fg3);text-align:center;margin-top:12px;line-height:1.5}
 </style>
 </head>
 <body>
@@ -317,6 +396,11 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
   <div class="topbar-left">
     <a class="logo" href="/"><span class="n">n</span>able</a>
     <div class="nav-sep"></div>
+    <div class="nav-tabs" role="tablist">
+      <button class="nav-tab active" data-view="dashboard">Dashboard</button>
+      <button class="nav-tab" data-view="agent">Ask</button>
+    </div>
+    <div class="nav-sep" id="title-sep"></div>
     <div class="nav-title" id="hdr-title">Cost Dashboard</div>
   </div>
   <div class="topbar-right">
@@ -334,7 +418,7 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
   </div>
 </nav>
 
-<div class="page">
+<div class="page" id="view-dashboard">
   <div id="err-banner" class="err-banner"></div>
 
   <div id="bizctx" class="bizctx"></div>
@@ -459,6 +543,37 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
     </div>
   </div>
 
+</div>
+
+<!-- Ask (agent) view -->
+<div class="page" id="view-agent" style="display:none">
+  <div class="agent-wrap">
+    <div class="agent-head">
+      <h1>Ask nable</h1>
+      <p>A FinOps analyst with read access to your connected accounts. Ask about spend, what changed, anomalies, or where to cut waste. It proposes, it never executes on its own.</p>
+    </div>
+    <div class="agent-panel">
+      <div class="agent-log" id="agent-log">
+        <div class="agent-empty" id="agent-empty">
+          <div class="ae-mark">n</div>
+          <p>Ask anything about your cloud bill. nable reads your live cost data to answer.</p>
+          <div class="agent-starters" id="agent-starters">
+            <button class="starter">What did we spend this month?</button>
+            <button class="starter">What changed since last month?</button>
+            <button class="starter">Where can we cut waste right now?</button>
+            <button class="starter">Any cost anomalies this week?</button>
+          </div>
+        </div>
+      </div>
+      <div class="agent-composer" id="agent-composer">
+        <textarea class="agent-input" id="agent-input" rows="1" placeholder="Ask about your cloud spend…" autocomplete="off"></textarea>
+        <button class="agent-send" id="agent-send" aria-label="Send" title="Send">
+          <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="agent-disclaimer">nable can read your cost data and propose changes. It will not make changes on its own.</div>
+  </div>
 </div>
 
 <footer>Powered by <a href="https://getnable.com" target="_blank" rel="noopener">nable</a></footer>
@@ -903,9 +1018,104 @@ if(window._READONLY){
   document.querySelectorAll('.theme-btn').forEach(b=>b.style.display='none');
 }
 
+// ── Ask (agent) tab ───────────────────────────────────────────────────────────
+function switchView(view){
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.toggle('active',t.dataset.view===view));
+  const dash=document.getElementById('view-dashboard'),ag=document.getElementById('view-agent');
+  if(dash) dash.style.display=view==='dashboard'?'':'none';
+  if(ag) ag.style.display=view==='agent'?'':'none';
+  const showDash=view==='dashboard';
+  ['title-sep','hdr-title'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=showDash?'':'none';});
+  if(view==='agent'){const i=document.getElementById('agent-input');if(i)i.focus();}
+}
+
+// Light markdown: fenced code, inline code, bold, line breaks. Fenced blocks are
+// pulled out before escaping so their contents are escaped once and never get
+// <br>-mangled.
+function fmtAnswer(t){
+  const blocks=[];
+  let s=String(t||'').replace(/```([\s\S]*?)```/g,(m,code)=>{
+    blocks.push(code.replace(/^\n+|\n+$/g,''));return '@@CODEBLK'+(blocks.length-1)+'@@';
+  });
+  s=esc(s);
+  s=s.replace(/`([^`]+)`/g,'<code class="agent-code">$1</code>');
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  s=s.replace(/\n/g,'<br>');
+  s=s.replace(/@@CODEBLK(\d+)@@/g,(m,i)=>'<pre class="agent-pre">'+esc(blocks[+i])+'</pre>');
+  return s;
+}
+
+function appendMsg(role,text,opts){
+  opts=opts||{};
+  const log=document.getElementById('agent-log');
+  const empty=document.getElementById('agent-empty');
+  if(empty) empty.style.display='none';
+  const wrap=document.createElement('div');
+  wrap.className='msg msg-'+role+(opts.err?' msg-err':'');
+  const bubble=document.createElement('div');
+  bubble.className='msg-bubble';
+  if(opts.thinking){bubble.innerHTML='<span class="dots"><i></i><i></i><i></i></span>';}
+  else{bubble.innerHTML=role==='agent'?fmtAnswer(text):esc(text);}
+  wrap.appendChild(bubble);
+  log.appendChild(wrap);
+  log.scrollTop=log.scrollHeight;
+  return wrap;
+}
+
+let agentBusy=false;
+function setAgentBusy(b){agentBusy=b;const s=document.getElementById('agent-send');if(s)s.disabled=b;}
+
+async function askAgent(q){
+  q=(q||'').trim();
+  if(!q||agentBusy) return;
+  const input=document.getElementById('agent-input');
+  appendMsg('user',q);
+  if(input){input.value='';input.style.height='auto';}
+  const thinking=appendMsg('agent','',{thinking:true});
+  setAgentBusy(true);
+  try{
+    const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+    const data=await r.json().catch(()=>({}));
+    thinking.remove();
+    if(r.ok && data && data.answer){
+      appendMsg('agent',data.answer);
+    }else if(r.status===401){
+      appendMsg('agent','Your session expired. Reload the page and sign in again to ask.',{err:true});
+    }else{
+      appendMsg('agent','I could not answer that. The server may be missing an Anthropic API key (set ANTHROPIC_API_KEY where finops serve runs), or the model is unavailable right now.',{err:true});
+    }
+  }catch(e){
+    thinking.remove();
+    appendMsg('agent','Network error reaching the agent. Check that the server is running and try again.',{err:true});
+  }finally{
+    setAgentBusy(false);
+    const i=document.getElementById('agent-input'); if(i) i.focus();
+  }
+}
+
+function initAgent(){
+  document.querySelectorAll('.nav-tab').forEach(t=>t.addEventListener('click',()=>switchView(t.dataset.view)));
+  const input=document.getElementById('agent-input');
+  const send=document.getElementById('agent-send');
+  const composer=document.getElementById('agent-composer');
+  if(send) send.addEventListener('click',()=>askAgent(input?input.value:''));
+  if(input){
+    input.addEventListener('keydown',e=>{
+      if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();askAgent(input.value);}
+    });
+    input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,140)+'px';});
+  }
+  document.querySelectorAll('.starter').forEach(b=>b.addEventListener('click',()=>askAgent(b.textContent)));
+  // A view-only link can't drive the agent (it can propose actions), so disable input there.
+  if(window._READONLY && composer){
+    composer.innerHTML='<div class="agent-note">Asking is disabled on a view-only link. Open your own nable dashboard to use the agent.</div>';
+  }
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 initDate();
 initRangeControls();
+initAgent();
 loadData();
 setInterval(loadData,60000);
 </script>
