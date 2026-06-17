@@ -263,17 +263,27 @@ def _get_or_create_trial_start() -> date:
 
 # ── Key generation / validation ───────────────────────────────────────────────
 
-def generate_key(email: str, plan: str = "pro", version: int = 2) -> str:
+def generate_key(email: str, plan: str = "pro", version: int = 2,
+                 expiry_days: int | None = None) -> str:
     """Generate a signed license key. Run server-side, where the signing key lives.
 
     version=2 (default): Ed25519, signed with FINOPS_LICENSE_PRIVATE_KEY. Clients
         verify with the bundled public key and need no shared secret.
     version=1 is retired: its HMAC secret leaked in public git history, so any
         v1 key is forgeable. Generation and validation both refuse it.
+
+    expiry_days: when set, embeds an explicit expiry ("x", YYYYMMDD) this many
+        days out. The client treats "x" as a hard expiry; keys without it fall
+        back to the legacy _KEY_TTL_DAYS window from the issue date. The Stripe
+        webhook sets this so a monthly subscription's key dies with the billing
+        cycle (plus grace), not a year after issue.
     """
     if version == 1:
         raise ValueError("v1 license keys are retired; the signing secret is public.")
-    payload = _b64(json.dumps({"e": email, "d": date.today().strftime("%Y%m%d"), "p": plan}).encode())
+    fields = {"e": email, "d": date.today().strftime("%Y%m%d"), "p": plan}
+    if expiry_days is not None:
+        fields["x"] = (date.today() + timedelta(days=expiry_days)).strftime("%Y%m%d")
+    payload = _b64(json.dumps(fields).encode())
     if version == 2:
         priv_b64 = os.environ.get("FINOPS_LICENSE_PRIVATE_KEY", "")
         if not priv_b64:
@@ -377,20 +387,31 @@ def validate_key(key: str) -> LicenseStatus:
         issued_str = issued_raw
         issued     = None
 
-    # Expiry check: keys are valid for _KEY_TTL_DAYS from issue date.
-    if issued is not None:
+    # Expiry check. A key may carry an explicit expiry "x" (YYYYMMDD) set at
+    # issue time from the billing cycle; honor it as a hard expiry. Keys without
+    # "x" (legacy) fall back to _KEY_TTL_DAYS from the issue date. The explicit
+    # expiry is what makes a lapsed monthly subscription stop within the cycle
+    # instead of a year later.
+    expiry_raw = payload.get("x", "")
+    expiry = None
+    if expiry_raw:
+        try:
+            expiry = date(int(expiry_raw[:4]), int(expiry_raw[4:6]), int(expiry_raw[6:8]))
+        except (ValueError, TypeError):
+            expiry = None
+    if expiry is None and issued is not None:
         expiry = issued + timedelta(days=_KEY_TTL_DAYS)
-        today  = date.today()
-        if today > expiry:
-            return LicenseStatus(
-                mode="invalid",
-                email=email,
-                issued=issued_str,
-                message=(
-                    f"License key expired on {expiry.isoformat()}. "
-                    f"Renew your subscription at {_UPGRADE_URL}"
-                ),
-            )
+
+    if expiry is not None and date.today() > expiry:
+        return LicenseStatus(
+            mode="invalid",
+            email=email,
+            issued=issued_str,
+            message=(
+                f"License key expired on {expiry.isoformat()}. "
+                f"Renew your subscription at {_UPGRADE_URL}"
+            ),
+        )
 
     return LicenseStatus(
         mode=plan,
