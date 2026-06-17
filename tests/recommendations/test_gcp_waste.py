@@ -235,3 +235,20 @@ def test_checks_subset_only_runs_requested():
     assert out["checks_run"] == ["disks"]
     assert out["total_findings"] == 1
     assert out["findings"][0]["category"] == "unattached_disk"
+
+
+# ── GCPConnector.project_ids() (feeds the waste audit) ────────────────────────
+
+
+def test_gcp_connector_project_ids_from_env(monkeypatch):
+    """project_ids() parses GCP_PROJECT_IDS comma-separated and trims blanks."""
+    from finops.connectors.gcp import GCPConnector
+    monkeypatch.setenv("GCP_PROJECT_IDS", " proj-a , proj-b ,")
+    assert GCPConnector().project_ids() == ["proj-a", "proj-b"]
+
+
+def test_gcp_connector_project_ids_no_env_returns_list(monkeypatch):
+    """With no env var, it falls back to ADC and never raises; always a list."""
+    monkeypatch.delenv("GCP_PROJECT_IDS", raising=False)
+    from finops.connectors.gcp import GCPConnector
+    assert isinstance(GCPConnector().project_ids(), list)
