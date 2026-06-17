@@ -31,6 +31,20 @@ def _get(url: str, timeout: float = 5.0) -> tuple[int, str]:
         return r.status, r.read().decode()
 
 
+def _post(url: str, payload: dict | None = None, raw: bytes | None = None,
+          timeout: float = 5.0) -> tuple[int, str]:
+    import urllib.error
+    data = raw if raw is not None else json.dumps(payload or {}).encode()
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
@@ -451,3 +465,54 @@ def test_session_mint_is_thread_safe():
     for t in threads:
         t.join()
     assert not errors, f"session mint raced: {errors[:2]}"
+
+
+# ── Tests: /api/agent (the in-browser cost copilot) ──────────────────────────
+
+def test_api_agent_happy_path(running_server):
+    """POST /api/agent returns the shared agent loop's answer as JSON."""
+    _, port = running_server
+    from finops.slack_bot.llm import LoopResult
+    with patch("finops.slack_bot.llm.ask",
+               return_value=LoopResult("Your top driver is EC2 at $800/mo.")):
+        status, body = _post(
+            f"http://127.0.0.1:{port}/api/agent",
+            {"question": "what drove our bill up?"},
+        )
+    assert status == 200
+    assert json.loads(body)["answer"].startswith("Your top driver")
+
+
+def test_api_agent_passes_stripped_question_to_loop(running_server):
+    """The user's question reaches the agent loop trimmed."""
+    _, port = running_server
+    from finops.slack_bot.llm import LoopResult
+    mock_ask = MagicMock(return_value=LoopResult("ok"))
+    with patch("finops.slack_bot.llm.ask", mock_ask):
+        _post(f"http://127.0.0.1:{port}/api/agent", {"question": "  hello cost  "})
+    assert mock_ask.called
+    assert mock_ask.call_args.args[0] == "hello cost"
+
+
+def test_api_agent_empty_question_400(running_server):
+    _, port = running_server
+    status, _ = _post(f"http://127.0.0.1:{port}/api/agent", {"question": "   "})
+    assert status == 400
+
+
+def test_api_agent_invalid_json_400(running_server):
+    _, port = running_server
+    status, _ = _post(f"http://127.0.0.1:{port}/api/agent", raw=b"not json at all")
+    assert status == 400
+
+
+def test_api_agent_degrades_when_loop_errors(running_server):
+    """If the agent loop raises, the endpoint returns 200 with answer=None and an
+    error field (never a 500), so the chat UI can show a friendly message."""
+    _, port = running_server
+    with patch("finops.slack_bot.llm.ask", side_effect=RuntimeError("boom")):
+        status, body = _post(f"http://127.0.0.1:{port}/api/agent", {"question": "x"})
+    assert status == 200
+    data = json.loads(body)
+    assert data["answer"] is None
+    assert "error" in data
