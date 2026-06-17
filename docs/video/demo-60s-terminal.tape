@@ -22,11 +22,11 @@ Set TypingSpeed 38ms
 Set CursorBlink false
 
 # ── 1. one-line install ──────────────────────────────────────────────────────
-Type "pip install finops-mcp"
+Type "uvx --from finops-mcp finops welcome"
 Sleep 500ms
 Enter
 Sleep 200ms
-Type "Successfully installed finops-mcp-0.8.45"
+Type "Successfully installed finops-mcp-0.8.77"
 Enter
 Sleep 900ms
 

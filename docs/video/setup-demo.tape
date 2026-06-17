@@ -29,7 +29,7 @@ Sleep 600ms
 Enter
 Sleep 400ms
 
-Type "pip install finops-mcp"
+Type "uvx --from finops-mcp finops welcome"
 Sleep 800ms
 Enter
 
@@ -38,7 +38,7 @@ Sleep 200ms
 Type "Collecting finops-mcp"
 Enter
 Sleep 100ms
-Type "  Downloading finops_mcp-0.8.25-py3-none-any.whl (124 kB)"
+Type "  Downloading finops_mcp-0.8.77-py3-none-any.whl (124 kB)"
 Enter
 Sleep 100ms
 Type "Collecting boto3>=1.34.0"
@@ -50,7 +50,7 @@ Sleep 80ms
 Type "Collecting sqlalchemy>=2.0.0"
 Enter
 Sleep 600ms
-Type "Successfully installed finops-mcp-0.8.25"
+Type "Successfully installed finops-mcp-0.8.77"
 Enter
 Sleep 1200ms
 
@@ -59,7 +59,7 @@ Type "finops --version"
 Sleep 600ms
 Enter
 Sleep 300ms
-Type "finops-mcp 0.8.25"
+Type "finops-mcp 0.8.77"
 Enter
 Sleep 1000ms
 

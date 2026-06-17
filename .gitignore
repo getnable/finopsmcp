@@ -77,6 +77,7 @@ docs/linkedin-copy.md
 docs/PRICING.md
 docs/video/claude-demo-script.md
 docs/video/demo-runbook.md
+docs/everything-nable.md
 ONBOARDING_AUDIT.md
 vc-brief*
 competitive-analysis*
@@ -90,14 +91,29 @@ nable-gtm.js
 # local Claude Code MCP config (dev convenience, not shipped)
 .mcp.json
 
-# video render output (frames + mp4s, ~1.2GB; sources stay local anyway)
-docs/video/launch/scenes/frames-*/
-docs/video/launch/scenes/sq/
-docs/video/launch/scenes/pt/
-docs/video/launch/scenes/*.mp4
-docs/video/launch/*.mp4
+# video render output (~1.2GB of frames, mp4s, and rendered HTML/PNG decks).
+# Only the small hand-authored text sources (.tape scripts, _demo_fns.sh,
+# storyboard.md) are committed. Everything generated stays local.
+docs/video/launch/
+docs/video/frames/
+docs/video/ads/
+docs/video/slides/
+docs/video/producthunt/
+
+# Binary / rendered assets anywhere under docs/video/
+docs/video/**/*.mp4
+docs/video/**/*.webm
+docs/video/**/*.gif
+docs/video/**/*.png
+docs/video/**/*.jpg
+docs/video/**/*.jpeg
+docs/video/**/*.woff2
 docs/video/*.mp4
+docs/video/*.webm
 docs/video/*.gif
+docs/video/*.png
+docs/video/*.jpg
+docs/video/*.jpeg
 
 stripe-env-helper.mjs
 .vercel
