@@ -2121,6 +2121,34 @@ button:hover{{filter:brightness(1.1)}}
                 self._send(500, "application/json", body)
             return
 
+        if path == "/api/agent":
+            # The in-browser cost copilot. Reuses the Slack bot's agent loop so
+            # there is one brain. Full-access session only (not read-only viewers,
+            # since the agent can draft remediations). Runs on the user's own
+            # ANTHROPIC_API_KEY; degrades to a friendly message if the key or the
+            # anthropic package is missing. Stateless for v1 (one question per call).
+            if not self._cookie_valid():
+                self._send(401, "application/json", b'{"error":"Unauthorized"}')
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+                question = (json.loads(raw or "{}").get("question") or "").strip()[:1000]
+            except (ValueError, TypeError):
+                self._send(400, "application/json", b'{"error":"Invalid JSON"}')
+                return
+            if not question:
+                self._send(400, "application/json", b'{"error":"empty question"}')
+                return
+            try:
+                from .slack_bot.llm import ask
+                result = ask(question, tier="chat")
+                self._send(200, "application/json", json.dumps({"answer": result.answer}).encode())
+            except Exception as exc:
+                log.error("agent query failed: %s", exc, exc_info=True)
+                self._send(200, "application/json", json.dumps({"answer": None, "error": "agent error"}).encode())
+            return
+
         if path != "/login":
             self._send(404, "text/plain", b"Not found")
             return
