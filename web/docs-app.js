@@ -136,7 +136,7 @@ const SAAS = [
       ['Go to <strong>New Relic → API Keys → Create key</strong>. Type: User key.'],
       ['Set the env vars manually, or run <code class="ic">finops setup</code> in interactive mode and select New Relic.'],
     ],
-    env:[['NEW_RELIC_API_KEY','NRAK-...'],['NEW_RELIC_ACCOUNT_ID','1234567'],['NEW_RELIC_INGEST_PRICE_PER_GB','0.35','your contract rate']] },
+    env:[['NEW_RELIC_API_KEY','NRAK-...'],['NEW_RELIC_ACCOUNT_ID','1234567'],['NEW_RELIC_INGEST_PRICE_PER_GB','0.35','your contract rate per GB'],['NEW_RELIC_FULL_PLATFORM_PRICE','99','contract rate per full-platform user/mo']] },
 
   { id:'langfuse', name:'Langfuse', logo:null, badge:'lf', crumb:'SaaS tools',
     blurb:'Tracks LLM observability cost via the Langfuse Daily Metrics API — model cost, token usage, and trace volume per project, so AI spend lands beside cloud spend.',
