@@ -42,6 +42,16 @@ def _dedup(source: str, resource_id: str, recommended_config: dict) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
+def _bucket(resource_type: str | None, environment: str | None) -> str | None:
+    """Coarse env/workload bucket for the learning signal. Lazy import keeps the
+    learning package (which imports this module) out of import-time cycles."""
+    try:
+        from .learning.bucket import bucket_for
+        return bucket_for(resource_type, environment)
+    except Exception:
+        return None
+
+
 # ── Upsert a recommendation ───────────────────────────────────────────────────
 
 def record_recommendation(
@@ -56,6 +66,7 @@ def record_recommendation(
     estimated_monthly_savings_usd: float,
     account_id: str = "",
     region: str = "",
+    environment: str | None = None,
 ) -> int | None:
     """
     Persist a recommendation. Returns the row ID, or None if it already exists.
@@ -107,6 +118,7 @@ def record_recommendation(
                 status="open",
                 generated_at=datetime.now(timezone.utc),
                 dedup_key=key,
+                environment_bucket=_bucket(resource_type, environment),
             )
         )
         return result.inserted_primary_key[0]
@@ -368,6 +380,7 @@ def list_recommendations(
             "acted_on_at": r.acted_on_at.isoformat() if r.acted_on_at else None,
             "verified_at": r.verified_at.isoformat() if r.verified_at else None,
             "dismiss_reason": r.dismiss_reason,
+            "environment_bucket": getattr(r, "environment_bucket", None),
         })
     return result
 
