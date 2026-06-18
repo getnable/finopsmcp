@@ -3,9 +3,8 @@ name: OpenSSF Scorecard
 on:
   branch_protection_rule:
   schedule:
-    - cron: "20 7 * * 1"   # weekly, Monday
-  push:
-    branches: ["main"]
+    - cron: "20 7 * * 1"   # weekly, Monday — scorecard is periodic, not per-commit
+  workflow_dispatch:        # allow manual runs (e.g. to validate a fix)
 
 permissions: read-all
 
@@ -23,7 +22,7 @@ jobs:
           persist-credentials: false
 
       - name: Run analysis
-        uses: ossf/scorecard-action@ff5dd8929f96a8a4dc67d13f32b8c75057829621 # v2.4.0
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
           results_file: results.sarif
           results_format: sarif
