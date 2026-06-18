@@ -2338,12 +2338,29 @@ async def list_savings_recommendations(
     total_potential = sum(r["estimated_monthly_savings_usd"] for r in recs if r["status"] == "open")
     total_verified = sum(r["verified_monthly_savings_usd"] or 0 for r in recs if r["status"] == "verified")
 
-    return {
+    out = {
         "count": len(recs),
         "recommendations": recs,
         "open_potential_usd": round(total_potential, 2),
         "verified_savings_usd": round(total_verified, 2),
     }
+    # Learning loop: on the actionable (open) view, rank + suppress per what this
+    # customer actually acts on. Propose-only; a no-op until the ledger has signal.
+    if status in (None, "open"):
+        try:
+            from .recommendations.learning import customer_signal, rescore
+            sig = customer_signal()
+            rs = rescore(recs, sig, savings_key="estimated_monthly_savings_usd", source_key="source")
+            out["recommendations"] = rs["ranked"]
+            if rs["suppressed_count"]:
+                out["suppressed_for_you"] = rs["suppressed_for_you"]
+                out["suppressed_count"] = rs["suppressed_count"]
+            if any(s.get("coverage") != "COLD" for s in sig.get("by_source", [])):
+                out["learning_note"] = ("Ranked for you from which recommendation types you act on. "
+                                        "Call get_recommendation_learning() for the why.")
+        except Exception as exc:
+            log.debug("learning rescore skipped in list_savings_recommendations: %s", exc)
+    return out
 
 
 @mcp.tool()
