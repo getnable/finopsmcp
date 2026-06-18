@@ -387,6 +387,20 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
 .agent-send svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .agent-note{font-size:11px;color:var(--fg3);text-align:center;padding:10px 4px;line-height:1.5;width:100%}
 .agent-disclaimer{font-size:11px;color:var(--fg3);text-align:center;margin-top:12px;line-height:1.5}
+
+/* Agent-built cost cards (moldable views) */
+.cost-card{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:2px;align-self:stretch;max-width:100%}
+.cc-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:12px}
+.cc-title{font-size:13px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
+.cc-sub{font-family:var(--mono);font-size:11px;color:var(--fg3);white-space:nowrap}
+.cc-chart{position:relative;height:240px}
+.cc-kpi{font-family:var(--mono);font-size:34px;font-weight:600;letter-spacing:-.03em;color:var(--fg);line-height:1}
+.cc-kpi-sub{font-size:12px;color:var(--fg3);margin-top:6px}
+.cc-table{width:100%;border-collapse:collapse;font-size:13px}
+.cc-table th{text-align:left;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);padding:6px 10px;border-bottom:1px solid var(--line)}
+.cc-table td{padding:7px 10px;border-bottom:1px solid var(--line);color:var(--fg2)}
+.cc-table td.num,.cc-table th.num{text-align:right;font-family:var(--mono);color:var(--fg)}
+.cc-table tr:last-child td{border-bottom:none}
 </style>
 </head>
 <body>
@@ -1090,6 +1104,61 @@ function appendMsg(role,text,opts){
   return wrap;
 }
 
+// ── Agent-built cost cards (the moldable view) ───────────────────────────────
+function appendCard(card,data){
+  if(!card) return;
+  const log=document.getElementById('agent-log');
+  const empty=document.getElementById('agent-empty'); if(empty) empty.style.display='none';
+  log.appendChild(renderAgentCard(card,data||{}));
+  log.scrollTop=log.scrollHeight;
+}
+function renderAgentCard(card,data){
+  const wrap=document.createElement('div'); wrap.className='cost-card';
+  const rows=(data&&data.rows)||[]; const dims=card.dimensions||[];
+  const hdr=document.createElement('div'); hdr.className='cc-hdr';
+  hdr.innerHTML='<span class="cc-title">'+esc(card.title||'Cost slice')+'</span>'+
+    (card.period?'<span class="cc-sub">'+esc(card.period.start)+' → '+esc(card.period.end)+'</span>':'');
+  wrap.appendChild(hdr);
+  const body=document.createElement('div'); body.className='cc-body'; wrap.appendChild(body);
+  const tmpl=card.template||'table';
+  if(tmpl==='kpi'){
+    const v=document.createElement('div'); v.className='cc-kpi'; v.textContent=fmt((data&&data.total)||0); body.appendChild(v);
+    const s=document.createElement('div'); s.className='cc-kpi-sub';
+    s.textContent=(card.metric||'EffectiveCost')+' · '+((data&&data.record_count)||0)+' line items'; body.appendChild(s);
+  }else if(tmpl==='table'||!rows.length){
+    body.appendChild(buildCardTable(rows,dims,card.metric));
+  }else{
+    const cw=document.createElement('div'); cw.className='cc-chart';
+    const cv=document.createElement('canvas'); cw.appendChild(cv); body.appendChild(cw);
+    drawCardChart(cv,card,rows,dims);
+  }
+  return wrap;
+}
+function drawCardChart(canvas,card,rows,dims){
+  const dim=dims[0]; const isDark=html.getAttribute('data-theme')==='dark';
+  const tick=isDark?'#8fa3ae':'#4b5563', grid=isDark?'rgba(255,255,255,.05)':'rgba(0,0,0,.06)';
+  const labels=rows.map(r=>String(r[dim]==null?'':r[dim])); const vals=rows.map(r=>r.metric);
+  const type=card.template==='line'?'line':'bar';
+  new Chart(canvas.getContext('2d'),{
+    type:type,
+    data:{labels:labels,datasets:[{label:card.metric,data:vals,
+      backgroundColor:type==='bar'?labels.map((_,i)=>i===0?'#4db8d4':'rgba(77,184,212,.5)'):'rgba(77,184,212,.1)',
+      borderColor:'#4db8d4',borderWidth:type==='line'?2.5:0,borderRadius:3,tension:.3,pointRadius:3,pointBackgroundColor:'#4db8d4',fill:type==='line'}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
+      scales:{x:{ticks:{color:tick,font:{size:11},maxRotation:0,autoSkip:true},grid:{display:false},border:{color:'transparent'}},
+              y:{ticks:{color:tick,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},grid:{color:grid},border:{color:'transparent'}}}}
+  });
+}
+function buildCardTable(rows,dims,metric){
+  const t=document.createElement('table'); t.className='cc-table';
+  if(!rows.length){t.innerHTML='<tbody><tr><td style="color:var(--fg3)">No matching cost data.</td></tr></tbody>';return t;}
+  const head='<tr>'+dims.map(d=>'<th>'+esc(d)+'</th>').join('')+'<th class="num">'+esc(metric||'Cost')+'</th></tr>';
+  const tb=rows.map(r=>'<tr>'+dims.map(d=>'<td>'+esc(String(r[d]==null?'':r[d]))+'</td>').join('')+'<td class="num">'+fmt(r.metric)+'</td></tr>').join('');
+  t.innerHTML='<thead>'+head+'</thead><tbody>'+tb+'</tbody>';
+  return t;
+}
+
 let agentBusy=false;
 function setAgentBusy(b){agentBusy=b;const s=document.getElementById('agent-send');if(s)s.disabled=b;}
 
@@ -1105,8 +1174,9 @@ async function askAgent(q){
     const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
     const data=await r.json().catch(()=>({}));
     thinking.remove();
-    if(r.ok && data && data.answer){
-      appendMsg('agent',data.answer);
+    if(r.ok && data && (data.answer || (data.cards && data.cards.length))){
+      if(data.answer) appendMsg('agent',data.answer);
+      (data.cards||[]).forEach((card,i)=>appendCard(card,(data.cardData||[])[i]));
     }else if(r.status===401){
       appendMsg('agent','Your session expired. Reload the page and sign in again to ask.',{err:true});
     }else{

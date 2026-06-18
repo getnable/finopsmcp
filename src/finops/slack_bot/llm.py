@@ -20,6 +20,7 @@ the worker thread before any tool runs.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -149,6 +150,17 @@ def _run_agent_loop_sync(
         max_tool_calls = _MAX_TOOL_CALLS
 
     side_effects: list[dict] = []
+
+    def _append_cost_card(result_str: str, sinks: list[dict]) -> None:
+        """When slice_costs runs, surface its renderable card on side_effects so the
+        web Ask tab can draw the chart and offer 'Pin to dashboard'. Read-only."""
+        try:
+            data = json.loads(result_str)
+        except (ValueError, TypeError):
+            return
+        if isinstance(data, dict) and data.get("card"):
+            sinks.append({"type": "cost_card", "card": data["card"], "data": data.get("result")})
+
     client = anthropic.Anthropic(api_key=api_key)
     messages: list[dict] = list(history or []) + [{"role": "user", "content": user_message}]
     model = model_for_tier(tier)
@@ -177,6 +189,8 @@ def _run_agent_loop_sync(
                 )
             else:
                 result_str = execute_bridge_tool(block.name, block.input or {}, role=role)
+                if block.name == "slice_costs":
+                    _append_cost_card(result_str, side_effects)
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": block.id, "content": result_str}
             )
