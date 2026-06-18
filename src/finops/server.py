@@ -9415,6 +9415,7 @@ async def slice_costs(
     end_date: str | None = None,
     provider: str | None = None,
     title: str | None = None,
+    via: str = "auto",
 ) -> dict:
     """
     Slice cloud cost any way you want. This is the flexible, moldable cost query:
@@ -9426,7 +9427,9 @@ async def slice_costs(
     RegionId, RegionName, SubAccountId, SubAccountName, ResourceId, ResourceName,
     ResourceType, ChargeCategory, ChargeDescription, CommitmentDiscountId,
     CommitmentDiscountType, plus "date" (a time series, use granularity) and
-    "Tags[<key>]" for any tag (e.g. "Tags[team]").
+    "Tags[<key>]" for any tag (e.g. "Tags[team]"). For line-item detail (AWS only,
+    needs CUR + Athena set up): "usage_type", "instance_type", "resource_id" — using
+    any of these auto-routes the query to the CUR pushdown.
 
     filters / exclusions: each is {dimension, op, values}. op is one of eq, in, neq,
     not_in, contains, regex. filters keep matching rows; exclusions drop matching rows.
@@ -9438,6 +9441,7 @@ async def slice_costs(
     granularity: TOTAL | DAILY | MONTHLY (only matters when "date" is a dimension).
     order_by: "metric" (default, descending) or a dimension name.
     start_date / end_date: YYYY-MM-DD (default last 30 days). provider: aws|azure|gcp (default all).
+    via: "auto" (default; CUR only when a line-item dimension is requested), "focus", or "cur".
 
     This is read-only: it slices and charts cost data. It never changes anything.
     """
@@ -9471,6 +9475,33 @@ async def slice_costs(
             ed = date.fromisoformat(end_date)
         except ValueError:
             return {"error": f"Invalid end_date: {end_date!r}. Use YYYY-MM-DD."}
+
+    # Route to the CUR/Athena pushdown for line-item dimensions (usage_type etc.).
+    from .slice.spec import needs_cur
+    via = (via or "auto").lower()
+    if via not in ("auto", "focus", "cur"):
+        via = "auto"
+    if via == "focus" and needs_cur(spec):
+        return {"error": "usage_type / instance_type / resource_id need the CUR path; drop via='focus'."}
+    if via == "cur" or (via == "auto" and needs_cur(spec)):
+        from .connectors.cur import is_configured as _cur_ok
+        if not _cur_ok():
+            return {"error": ("Slicing by usage_type / instance_type / resource_id needs the CUR + "
+                              "Athena integration (AWS). Set CUR_S3_BUCKET, CUR_ATHENA_DATABASE, "
+                              "CUR_ATHENA_TABLE, CUR_ATHENA_RESULTS_BUCKET.")}
+        from .slice import cur_engine
+        try:
+            result = await asyncio.to_thread(cur_engine.run_slice_cur, spec, sd, ed)
+        except Exception as exc:
+            log.error("CUR slice failed: %s", exc)
+            return {"error": f"CUR slice failed: {exc}"}
+        card = derive_card(spec, result, title=title)
+        period = {"start": sd.isoformat(), "end": ed.isoformat()}
+        return {
+            "result": {**result.to_dict(), "period": period, "providers": ["aws"], "via": "cur"},
+            "card": {**card.to_dict(), "period": period, "days": (ed - sd).days, "via": "cur"},
+            "metric_note": cur_engine.METRIC_NOTE,
+        }
 
     records, errors, providers = await _fetch_focus_records(sd, ed, provider)
     if not records:
