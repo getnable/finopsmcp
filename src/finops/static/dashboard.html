@@ -292,6 +292,18 @@ html,body{
   border-radius:var(--r);padding:11px 16px;color:var(--alert);
   font-size:13px;margin-bottom:14px;display:none;
 }
+.loading-banner{
+  display:flex;align-items:center;gap:11px;
+  background:rgba(77,184,212,.07);border:1px solid rgba(77,184,212,.22);
+  border-radius:var(--r);padding:11px 16px;color:var(--fg2);
+  font-size:13px;margin-bottom:14px;
+}
+.lb-spin{
+  width:13px;height:13px;flex-shrink:0;border-radius:50%;
+  border:2px solid var(--line2);border-top-color:var(--accent);
+  animation:lbspin .7s linear infinite;
+}
+@keyframes lbspin{to{transform:rotate(360deg)}}
 .bizctx{border:1px solid var(--line2);border-radius:var(--r);padding:16px 18px;margin-bottom:16px;display:none}
 .bizctx .bc-row{display:flex;gap:32px;flex-wrap:wrap;align-items:baseline}
 .bizctx .bc-item{display:flex;flex-direction:column;gap:3px}
@@ -444,6 +456,11 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
 
 <div class="page" id="view-dashboard">
   <div id="err-banner" class="err-banner"></div>
+
+  <div id="loading-banner" class="loading-banner">
+    <span class="lb-spin"></span>
+    <span>Loading your cost data. The first load pulls fresh numbers from your cloud provider and can take up to ~15 seconds.</span>
+  </div>
 
   <div id="bizctx" class="bizctx"></div>
 
@@ -722,6 +739,7 @@ async function loadData(){
 // wrong. A reachable server that errors returns 200 with an error field, which
 // render() surfaces instead.
 function showLoadError(e){
+  const lb=document.getElementById('loading-banner'); if(lb) lb.style.display='none';
   document.querySelectorAll('.skeleton').forEach(s=>s.remove());
   ['stat-mtd','stat-proj','stat-savings'].forEach(id=>{
     const el=document.getElementById(id); if(el&&!el.textContent.trim()) el.textContent='—';
@@ -747,6 +765,8 @@ function showLoadError(e){
 
 // ── Render ───────────────────────────────────────────────────────────────────
 function render(d){
+  // First-load banner is done once data arrives
+  const lb=document.getElementById('loading-banner'); if(lb) lb.style.display='none';
   // Error
   const banner=document.getElementById('err-banner');
   if(d.error){banner.textContent=d.error;banner.style.display='block';}
