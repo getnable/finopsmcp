@@ -251,13 +251,17 @@ def _ri_coverage(
         return 0.0
 
 
-def _uncovered_on_demand(
+def _uncovered_on_demand_monthly(
     ce_client: Any,
     start: str,
     end: str,
     tag_filter: dict | None = None,
-) -> float:
-    """On-demand EC2 + Fargate spend not covered by any commitment."""
+) -> list[float]:
+    """Per-month on-demand EC2 + Fargate spend not covered by any commitment.
+
+    The per-month series is what lets us size a commitment to the CONSISTENT
+    BASELINE (the floor uncovered every month) instead of a single average or peak.
+    """
     try:
         base_filter: dict = {
             "And": [
@@ -279,14 +283,23 @@ def _uncovered_on_demand(
             Filter=base_filter,
             Metrics=["UnblendedCost"],
         )
-        total = sum(
+        return [
             float(p["Total"]["UnblendedCost"]["Amount"])
             for p in resp.get("ResultsByTime", [])
-        )
-        return total
+        ]
     except Exception as e:
         log.warning("On-demand cost fetch failed: %s", e)
-        return 0.0
+        return []
+
+
+def _uncovered_on_demand(
+    ce_client: Any,
+    start: str,
+    end: str,
+    tag_filter: dict | None = None,
+) -> float:
+    """On-demand EC2 + Fargate spend not covered by any commitment (period total)."""
+    return round(sum(_uncovered_on_demand_monthly(ce_client, start, end, tag_filter)), 6)
 
 
 def _build_recommendations(
@@ -294,29 +307,50 @@ def _build_recommendations(
     uncovered_od: float,
     sp_util: float,
     ri_util: float,
+    monthly_uncovered_series: list[float] | None = None,
 ) -> list[dict[str, Any]]:
     recs: list[dict[str, Any]] = []
-    monthly_uncovered = uncovered_od / 3  # 3-month average
 
-    # Recommend Compute Savings Plan if coverage < 60% and meaningful on-demand spend
-    if sp_coverage < 60 and monthly_uncovered > 500:
-        commitment_to_add = monthly_uncovered * 0.4 * _COMPUTE_SP_DISCOUNT
-        monthly_savings = monthly_uncovered * 0.4 * (1 - _COMPUTE_SP_DISCOUNT)
+    # Size to the CONSISTENT BASELINE: the floor of monthly uncovered on-demand (what
+    # is uncovered EVERY month), not the 3-month average or a peak. Committing to the
+    # floor is the safe amount, a quiet month never leaves you over-committed. Falls
+    # back to the 3-month average when no monthly series is available.
+    series = [m for m in (monthly_uncovered_series or []) if m and m > 0]
+    if len(series) >= 2:
+        baseline = min(series)
+        peak = max(series)
+        basis = "your consistent monthly baseline (uncovered every month)"
+    else:
+        baseline = uncovered_od / 3
+        peak = baseline
+        basis = "your 3-month average uncovered on-demand"
+
+    # Recommend a Compute SP sized to the baseline when coverage is low and it's meaningful
+    if sp_coverage < 60 and baseline > 500:
+        commitment_to_add = baseline * _COMPUTE_SP_DISCOUNT
+        monthly_savings = baseline * (1 - _COMPUTE_SP_DISCOUNT)
+        spiky = peak > baseline * 1.5
+        desc = (
+            f"Your SP coverage is {sp_coverage:.0f}%. A 1-year no-upfront Compute SP at "
+            f"${commitment_to_add:,.0f}/mo hourly commitment covers {basis} "
+            f"(${baseline:,.0f}/mo of on-demand)."
+        )
+        if spiky:
+            desc += (f" Sized to the floor, not your ${peak:,.0f}/mo peak, so a slow month "
+                     f"won't leave you paying for commitment you can't use.")
         recs.append({
             "type": "savings_plan",
             "title": "Purchase Compute Savings Plan",
-            "description": (
-                f"Your SP coverage is {sp_coverage:.0f}%. Adding a 1-year no-upfront "
-                f"Compute SP at ${commitment_to_add:,.0f}/mo hourly commitment "
-                f"covers ~40% of your uncovered on-demand spend."
-            ),
+            "description": desc,
             "commitment_per_month": round(commitment_to_add, 2),
             "monthly_savings": round(monthly_savings, 2),
             "annual_savings": round(monthly_savings * 12, 2),
+            "baseline_monthly_uncovered_usd": round(baseline, 2),
+            "sizing_basis": basis,
             "payback_months": 0,  # no-upfront has no payback period
             "term": "1-year",
             "payment": "no-upfront",
-            "confidence": "high" if monthly_uncovered > 5000 else "medium",
+            "confidence": "high" if baseline > 5000 else "medium",
         })
 
     # Warn about over-commitment (low utilization = waste)
@@ -492,13 +526,15 @@ def analyze_commitments(
         # Coverage and on-demand CAN be filtered by tag
         sp_coverage  = _savings_plan_coverage(ce, start, end, tag_filter)
         ri_coverage  = _ri_coverage(ce, start, end, tag_filter)
-        uncovered_od = _uncovered_on_demand(ce, start, end, tag_filter)
+        uncovered_monthly = _uncovered_on_demand_monthly(ce, start, end, tag_filter)
+        uncovered_od = round(sum(uncovered_monthly), 2)
 
         recs = _build_recommendations(
             sp_coverage,
             uncovered_od,
             sp_util_data["utilization_pct"],
             ri_util_data["utilization_pct"],
+            monthly_uncovered_series=uncovered_monthly,
         )
 
         return CommitmentAnalysis(
