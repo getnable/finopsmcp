@@ -9440,9 +9440,153 @@ async def slice_costs(
     period = {"start": sd.isoformat(), "end": ed.isoformat()}
     return {
         "result": {**result.to_dict(), "period": period, "providers": providers},
-        "card": {**card.to_dict(), "period": period},
+        "card": {**card.to_dict(), "period": period, "days": (ed - sd).days},
         **({"partial_errors": errors} if errors else {}),
     }
+
+
+async def _run_stored_slice(slice_dict: dict, days: int, title: str, template: str) -> dict:
+    """Re-run a pinned view's stored SliceSpec over a rolling `days` window ending
+    today, so pinned cards always show fresh data. Read-only."""
+    from datetime import timedelta
+    from .slice import parse_spec, run_slice
+    from .slice.engine import derive_card
+    from .slice.spec import SliceSpecError
+
+    try:
+        spec = parse_spec(slice_dict)
+    except SliceSpecError as exc:
+        return {"error": str(exc)}
+    ed = date.today()
+    sd = _clamp_start_date(ed - timedelta(days=max(1, int(days or 30))))
+    records, errors, providers = await _fetch_focus_records(sd, ed)
+    if not records:
+        return {"error": "No cost data for this view", **({"details": errors} if errors else {})}
+    result = run_slice(spec, records)
+    cd = derive_card(spec, result, title=title).to_dict()
+    if template:
+        cd["template"] = template
+    period = {"start": sd.isoformat(), "end": ed.isoformat()}
+    return {
+        "result": {**result.to_dict(), "period": period, "providers": providers},
+        "card": {**cd, "period": period, "days": int(days or 30)},
+    }
+
+
+async def rerun_pinned_views(pins: list[dict]) -> list[dict]:
+    """Re-run many pinned views over a SINGLE FOCUS fetch (the widest window across
+    pins), then slice each in memory to its own rolling window. One network fetch
+    instead of one per card. Read-only. Used by the web /api/views GET."""
+    from datetime import timedelta
+    from .slice import parse_spec, run_slice
+    from .slice.engine import derive_card
+    from .slice.spec import SliceSpecError
+
+    if not pins:
+        return []
+    def _days(p):
+        return max(1, min(int((p.get("card") or {}).get("days", 30) or 30), 365))
+    max_days = max(_days(p) for p in pins)
+    ed = date.today()
+    sd = _clamp_start_date(ed - timedelta(days=max_days))
+    records, _errors, providers = await _fetch_focus_records(sd, ed)
+
+    out: list[dict] = []
+    for p in pins:
+        try:
+            spec = parse_spec(p.get("slice") or {})
+        except SliceSpecError:
+            continue
+        days = _days(p)
+        if days < max_days:
+            cutoff = ed - timedelta(days=days)
+            recs = [r for r in records if r.ChargePeriodStart.date() >= cutoff]
+        else:
+            recs = records
+        result = run_slice(spec, recs)
+        cd = derive_card(spec, result, title=p.get("title") or "Cost view").to_dict()
+        cd["template"] = p.get("template") or cd["template"]
+        cd["id"] = p["id"]
+        cd["period"] = {"start": (ed - timedelta(days=days)).isoformat(), "end": ed.isoformat()}
+        cd["days"] = days
+        out.append({"id": p["id"], "card": cd, "data": result.to_dict()})
+    return out
+
+
+@mcp.tool()
+async def pin_view(
+    title: str,
+    dimensions: list[str] | None = None,
+    filters: list[dict] | None = None,
+    exclusions: list[dict] | None = None,
+    metric: str = "EffectiveCost",
+    granularity: str = "TOTAL",
+    order_by: str = "metric",
+    limit: int = 50,
+    days: int = 30,
+    scope: str = "instance",
+) -> dict:
+    """
+    Pin a cost slice to the dashboard as a saved card. Takes the same slicing
+    arguments as slice_costs (dimensions / filters / exclusions / metric / etc.),
+    plus a title and a rolling lookback `days`. The pinned card re-runs its slice
+    live on each dashboard load over the trailing `days`, so it always shows fresh
+    numbers. scope: "instance" (shared on this nable) or "me". Read-only on the cloud:
+    this only saves a view definition locally.
+    """
+    require_role("viewer")
+    from .slice import parse_spec
+    from .slice.engine import derive_card
+    from .slice.spec import SliceResult, SliceSpecError
+    from .slice.views import pin_view as _pin
+
+    try:
+        spec = parse_spec({
+            "dimensions": dimensions or [], "filters": filters or [],
+            "exclusions": exclusions or [], "metric": metric,
+            "granularity": granularity, "order_by": order_by, "limit": limit,
+        })
+    except SliceSpecError as exc:
+        return {"error": str(exc)}
+    empty = SliceResult(rows=[], total=0.0, metric=spec.metric, dimensions=spec.dimensions)
+    card = derive_card(spec, empty, title=title).to_dict()
+    card["days"] = max(1, int(days or 30))
+    vid = _pin(card, owner="instance", scope=scope)
+    return {"pinned": True, "id": vid, "title": card["title"]}
+
+
+@mcp.tool()
+async def list_pinned_views() -> dict:
+    """List the cost cards pinned to the dashboard (the views you have saved)."""
+    require_role("viewer")
+    from .slice.views import list_pinned_views as _list
+    views = _list(owner="instance")
+    return {"count": len(views), "views": [
+        {"id": v["id"], "title": v["title"], "template": v["template"],
+         "metric": v["slice"].get("metric"), "dimensions": v["slice"].get("dimensions")}
+        for v in views
+    ]}
+
+
+@mcp.tool()
+async def get_pinned_view(view_id: int) -> dict:
+    """Re-run a pinned view by id and return fresh data plus its card. Read-only."""
+    require_role("viewer")
+    from .slice.views import get_pinned_view as _get
+    v = _get(int(view_id), owner="instance")
+    if not v:
+        return {"error": f"No pinned view with id {view_id}."}
+    out = await _run_stored_slice(v["slice"], v["card"].get("days", 30), v["title"], v["template"])
+    out["id"] = v["id"]
+    return out
+
+
+@mcp.tool()
+async def unpin_view(view_id: int) -> dict:
+    """Remove a pinned cost card from the dashboard by id."""
+    require_role("viewer")
+    from .slice.views import unpin_view as _unpin
+    return {"unpinned": _unpin(int(view_id), owner="instance"), "id": int(view_id)}
 
 
 # ── AWS service-specific analyzers ───────────────────────────────────────────

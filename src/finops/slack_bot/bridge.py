@@ -34,6 +34,10 @@ ALLOWED_TOOLS: dict[str, str] = {
     "what_can_nable_do": "viewer",
     # Core cost queries
     "slice_costs": "viewer",
+    "pin_view": "viewer",
+    "list_pinned_views": "viewer",
+    "get_pinned_view": "viewer",
+    "unpin_view": "viewer",
     "get_cost_summary": "viewer",
     "get_costs_by_service": "viewer",
     "get_top_cost_drivers": "viewer",

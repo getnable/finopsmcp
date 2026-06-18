@@ -2154,6 +2154,42 @@ button:hover{{filter:brightness(1.1)}}
                 self._send(200, "application/json", json.dumps({"answer": None, "error": "agent error"}).encode())
             return
 
+        # Pinned views: save / remove / reorder moldable cost cards. Full-access
+        # cookie only; these only touch the local dashboard_views table.
+        if path in ("/api/views", "/api/views/delete", "/api/views/reorder"):
+            if not self._cookie_valid():
+                self._send(401, "application/json", b'{"error":"Unauthorized"}')
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8") or "{}") if length else {}
+            except (ValueError, TypeError):
+                self._send(400, "application/json", b'{"error":"Invalid JSON"}')
+                return
+            try:
+                from .slice.views import pin_view as _pin, unpin_view as _unpin, reorder_views as _reorder
+                if path == "/api/views":
+                    card = body.get("card") or {}
+                    if not card.get("slice"):
+                        self._send(400, "application/json", b'{"error":"missing card with a slice"}')
+                        return
+                    vid = _pin(card, owner="instance", scope=(body.get("scope") or "instance"))
+                    self._send(200, "application/json", json.dumps({"pinned": True, "id": vid}).encode())
+                elif path == "/api/views/delete":
+                    try:
+                        vid = int(body.get("id"))
+                    except (TypeError, ValueError):
+                        self._send(400, "application/json", b'{"error":"missing id"}')
+                        return
+                    self._send(200, "application/json", json.dumps({"unpinned": _unpin(vid, owner="instance")}).encode())
+                else:  # /api/views/reorder
+                    _reorder([int(x) for x in (body.get("order") or [])], owner="instance")
+                    self._send(200, "application/json", b'{"reordered":true}')
+            except Exception as exc:
+                log.error("views write failed: %s", exc, exc_info=True)
+                self._send(500, "application/json", b'{"error":"views error"}')
+            return
+
         if path != "/login":
             self._send(404, "text/plain", b"Not found")
             return
@@ -2348,6 +2384,28 @@ button:hover{{filter:brightness(1.1)}}
                 loop.close()
             body = json.dumps(data).encode()
             self._send(200, "application/json", body)
+
+        # Pinned views: re-run each saved card over its rolling window (one FOCUS
+        # fetch for all of them) so the dashboard shows fresh numbers.
+        elif path == "/api/views":
+            from .slice.views import list_pinned_views as _list
+            pins = _list(owner="instance")
+            cards = []
+            if pins:
+                loop = asyncio.new_event_loop()
+                try:
+                    from .server import rerun_pinned_views
+                    cards = loop.run_until_complete(
+                        asyncio.wait_for(rerun_pinned_views(pins), timeout=30.0)
+                    )
+                except asyncio.TimeoutError:
+                    cards = [{"id": p["id"], "card": p.get("card"), "data": None, "error": "timed out"} for p in pins]
+                except Exception as exc:
+                    log.error("rerun pinned views failed: %s", exc, exc_info=True)
+                    cards = []
+                finally:
+                    loop.close()
+            self._send(200, "application/json", json.dumps({"views": cards}, default=str).encode())
 
         # Tableau WDC connector page
         elif path == "/tableau":
