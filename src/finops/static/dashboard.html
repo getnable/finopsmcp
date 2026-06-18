@@ -687,7 +687,35 @@ async function loadData(){
     const r=await fetch('/api/data?days='+selectedDays+'&provider='+selectedProvider);
     if(!r.ok) throw new Error('HTTP '+r.status);
     render(await r.json());
-  }catch(e){console.error('Dashboard load failed:',e)}
+  }catch(e){console.error('Dashboard load failed:',e);showLoadError(e);}
+}
+
+// When /api/data can't be reached at all (server down, wrong port, opened as a
+// file), stop the skeletons spinning forever on "CONNECTING" and say what's
+// wrong. A reachable server that errors returns 200 with an error field, which
+// render() surfaces instead.
+function showLoadError(e){
+  document.querySelectorAll('.skeleton').forEach(s=>s.remove());
+  ['stat-mtd','stat-proj','stat-savings'].forEach(id=>{
+    const el=document.getElementById(id); if(el&&!el.textContent.trim()) el.textContent='—';
+  });
+  const score=document.getElementById('score-pct');
+  if(score&&!score.textContent.trim()){score.textContent='—';score.style.color='var(--fg3)';}
+  const pb=document.getElementById('prov-badge'),pl=document.getElementById('prov-label');
+  if(pb&&pl){pb.className='prov-badge prov-badge-red';pl.textContent='DISCONNECTED';}
+  const lh=document.getElementById('loading-hint'); if(lh) lh.style.display='none';
+  const scList=document.getElementById('sc-list');
+  if(scList&&/Loading/.test(scList.textContent)) scList.innerHTML='<li class="sc-item"><span style="color:var(--fg3);font-size:13px">No data, the server could not be reached.</span></li>';
+  const oppList=document.getElementById('opp-list');
+  if(oppList&&/Loading/.test(oppList.textContent)) oppList.innerHTML='<li class="opp-item"><span style="color:var(--fg3);font-size:13px">No data, the server could not be reached.</span></li>';
+  const banner=document.getElementById('err-banner');
+  if(banner){
+    const isNet=(e instanceof TypeError); // fetch network failure vs HTTP status
+    banner.textContent=isNet
+      ? "Can't reach the nable server. Make sure finops serve is running, then refresh this page."
+      : "Couldn't load cost data ("+((e&&e.message)||'error')+"). Make sure finops serve is running and a provider is connected, then refresh.";
+    banner.style.display='block';
+  }
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
