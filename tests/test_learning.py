@@ -178,3 +178,40 @@ def test_signal_for_unknown_source_returns_cold_default():
     s = signal_for({"by_source": []}, "brand_new_source")
     assert s["coverage"] == "COLD" and s["verdict"] == "neutral"
     assert s["act_rate"] == 0.4
+
+
+# ── hardening (from the adversarial review) ───────────────────────────────────
+
+def test_boost_requires_warm_not_warming(ledger):
+    """High act-rate + perfect accuracy but only WARMING (< WARM_FLOOR resolved)
+    stays neutral; boost only fires in WARM, symmetric with suppress."""
+    from finops.recommendations.learning.signal import customer_signal
+    _seed("rightsizing", "verified", est=100, ver=100, n=5)  # 5 resolved -> WARMING
+    s = _by_source(customer_signal())["rightsizing"]
+    assert s["coverage"] == "WARMING"
+    assert s["act_rate"] >= 0.5 and s["accuracy"] == 1.0
+    assert s["verdict"] == "neutral"
+
+
+def test_accuracy_uses_median_not_outlier_dominated(ledger):
+    """One huge misprediction can't tank a source that is otherwise accurate."""
+    from finops.recommendations.learning.signal import customer_signal
+    _seed("commitment", "verified", est=100, ver=100, n=9)    # 9 perfect
+    _seed("commitment", "verified", est=10000, ver=50, n=1)   # 1 huge miss
+    s = _by_source(customer_signal())["commitment"]
+    assert s["accuracy"] == 1.0   # median, not sum-ratio (~0.1)
+
+
+def test_negative_verified_savings_clamped(ledger):
+    """A negative 'verified' value clamps to 0, never negative accuracy."""
+    from finops.recommendations.learning.signal import customer_signal
+    _seed("idle", "verified", est=100, ver=-50, n=3)
+    s = _by_source(customer_signal())["idle"]
+    assert s["accuracy"] == 0.0
+    assert s["confidence_multiplier"] >= 0.001
+
+
+def test_confidence_multiplier_never_zero():
+    from finops.recommendations.learning.signal import _confidence_multiplier
+    assert _confidence_multiplier(0.0001, 0.2) >= 0.001
+    assert _confidence_multiplier(0.0, None) >= 0.001

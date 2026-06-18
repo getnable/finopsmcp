@@ -19,6 +19,7 @@ ever reads this install's own DB; nothing crosses a customer boundary.
 """
 from __future__ import annotations
 
+import statistics
 from typing import Any
 
 from sqlalchemy import func, select
@@ -54,9 +55,13 @@ def _shrunk_act_rate(acted: int, resolved: int) -> float:
 
 
 def _verdict(coverage: str, shrunk: float, resolved: int, accuracy: float | None) -> str:
-    if coverage == "WARM" and shrunk < SUPPRESS_ACT_RATE:
+    # Both suppress and boost require WARM (>= WARM_FLOOR resolved). Below that a
+    # source stays neutral (blanket behavior), so sparse data never flips a verdict.
+    if coverage != "WARM":
+        return "neutral"
+    if shrunk < SUPPRESS_ACT_RATE:
         return "suppress"
-    if resolved >= BOOST_FLOOR and shrunk >= BOOST_ACT_RATE and (
+    if shrunk >= BOOST_ACT_RATE and (
         accuracy is None or ACCURACY_OK[0] <= accuracy <= ACCURACY_OK[1]
     ):
         return "boost"
@@ -69,7 +74,8 @@ def _confidence_multiplier(shrunk: float, accuracy: float | None) -> float:
     acc_factor = 1.0
     if accuracy is not None and accuracy < 1.0:
         acc_factor = max(0.3, accuracy)
-    return round(shrunk * acc_factor, 3)
+    # Floor so a sparse/low-accuracy source is ranked low, never erased to 0.
+    return max(0.001, round(shrunk * acc_factor, 3))
 
 
 def _why(source: str, coverage: str, verdict: str, acted: int, resolved: int,
@@ -101,31 +107,44 @@ def customer_signal() -> dict[str, Any]:
             select(
                 sr.c.source, sr.c.status,
                 func.count().label("cnt"),
-                func.sum(sr.c.estimated_monthly_savings_usd).label("sum_est"),
                 func.sum(sr.c.verified_monthly_savings_usd).label("sum_ver"),
             ).group_by(sr.c.source, sr.c.status)
         ).fetchall()
+        # Per-rec accuracy among verified recs. Median (not a sum-ratio) so one big
+        # misprediction can't dominate many good estimates; negatives clamp to 0 (a
+        # "verified" loss means the rec failed, not negative accuracy).
+        vrows = conn.execute(
+            select(sr.c.source,
+                   sr.c.estimated_monthly_savings_usd,
+                   sr.c.verified_monthly_savings_usd).where(sr.c.status == "verified")
+        ).fetchall()
+
+    acc_samples: dict[str, list[float]] = {}
+    for r in vrows:
+        est = float(r.estimated_monthly_savings_usd or 0.0)
+        ver = max(0.0, float(r.verified_monthly_savings_usd or 0.0))
+        if est > 0:
+            acc_samples.setdefault(r.source or "unknown", []).append(ver / est)
 
     agg: dict[str, dict] = {}
     for r in rows:
         d = agg.setdefault(r.source or "unknown", {
             "open": 0, "acted_on": 0, "verified": 0, "dismissed": 0, "expired": 0,
-            "realized": 0.0, "predicted_of_verified": 0.0,
+            "realized": 0.0,
         })
         cnt = int(r.cnt or 0)
         if r.status in d:
             d[r.status] += cnt
         if r.status == "verified":
-            d["realized"] += float(r.sum_ver or 0.0)
-            d["predicted_of_verified"] += float(r.sum_est or 0.0)
+            d["realized"] += max(0.0, float(r.sum_ver or 0.0))
 
     by_source = []
     total_realized = 0.0
     for src, d in sorted(agg.items()):
         acted = d["acted_on"] + d["verified"]
         resolved = acted + d["dismissed"] + d["expired"]
-        pov = d["predicted_of_verified"]
-        accuracy = round(d["realized"] / pov, 3) if pov > 0 else None
+        samples = acc_samples.get(src)
+        accuracy = round(statistics.median(samples), 3) if samples else None
         shrunk = round(_shrunk_act_rate(acted, resolved), 3)
         coverage = _coverage(resolved)
         verdict = _verdict(coverage, shrunk, resolved, accuracy)

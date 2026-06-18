@@ -136,6 +136,8 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
         "anomalies_open": 0,
         "budget_pct_used": 0.0,
         "recent_opportunities": [],
+        "suppressed_opportunities": [],
+        "learning_active": False,
         "recent_savings": [],
         "error": None,
         "connected_providers": [],
