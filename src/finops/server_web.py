@@ -508,6 +508,7 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
                 "monthly_saving": saving,
                 "resource": r["resource_name"] or r["resource_id"],
                 "service": r["source"],
+                "environment_bucket": r.get("environment_bucket"),
                 "effort": _effort_from_source(r["source"]),
                 "impact": _impact_from_saving(saving),
             }

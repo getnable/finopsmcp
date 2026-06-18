@@ -98,72 +98,92 @@ def _why(source: str, coverage: str, verdict: str, acted: int, resolved: int,
     return base
 
 
+def _new_counts() -> dict:
+    return {"open": 0, "acted_on": 0, "verified": 0, "dismissed": 0, "expired": 0, "realized": 0.0}
+
+
+def _entry(source: str, bucket: str | None, c: dict, acc_list: list[float]) -> dict:
+    """Build one signal entry (the same math for a per-source or a per-(source,bucket)
+    grouping). accuracy is the median per-rec ratio; act-rate is Bayesian-shrunk."""
+    acted = c["acted_on"] + c["verified"]
+    resolved = acted + c["dismissed"] + c["expired"]
+    accuracy = round(statistics.median(acc_list), 3) if acc_list else None
+    shrunk = round(_shrunk_act_rate(acted, resolved), 3)
+    coverage = _coverage(resolved)
+    verdict = _verdict(coverage, shrunk, resolved, accuracy)
+    e = {
+        "source": source,
+        "open": c["open"], "acted": acted, "verified": c["verified"],
+        "dismissed": c["dismissed"], "expired": c["expired"], "resolved": resolved,
+        "act_rate": shrunk,
+        "act_rate_raw": round(acted / resolved, 3) if resolved else None,
+        "accuracy": accuracy, "coverage": coverage, "verdict": verdict,
+        "confidence_multiplier": _confidence_multiplier(shrunk, accuracy),
+        "why": _why(source, coverage, verdict, acted, resolved, accuracy),
+        "realized_monthly_usd": round(c["realized"], 2),
+    }
+    if bucket is not None:
+        e["bucket"] = bucket
+    return e
+
+
 def customer_signal() -> dict[str, Any]:
-    """Per-source learning signal for this install. See module docstring."""
+    """Per-source AND per-(source, bucket) learning signal for this install. The bucket
+    breakdown lets the loop learn e.g. spot is fine for nonprod-batch but not prod-steady.
+    See module docstring."""
     sr = savings_recommendations
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
             select(
-                sr.c.source, sr.c.status,
+                sr.c.source, sr.c.environment_bucket, sr.c.status,
                 func.count().label("cnt"),
                 func.sum(sr.c.verified_monthly_savings_usd).label("sum_ver"),
-            ).group_by(sr.c.source, sr.c.status)
+            ).group_by(sr.c.source, sr.c.environment_bucket, sr.c.status)
         ).fetchall()
-        # Per-rec accuracy among verified recs. Median (not a sum-ratio) so one big
-        # misprediction can't dominate many good estimates; negatives clamp to 0 (a
-        # "verified" loss means the rec failed, not negative accuracy).
+        # Per-rec accuracy among verified recs; median (not a sum-ratio) so one big
+        # miss can't dominate; negatives clamp to 0 (a "verified" loss = a failed rec).
         vrows = conn.execute(
-            select(sr.c.source,
+            select(sr.c.source, sr.c.environment_bucket,
                    sr.c.estimated_monthly_savings_usd,
                    sr.c.verified_monthly_savings_usd).where(sr.c.status == "verified")
         ).fetchall()
 
-    acc_samples: dict[str, list[float]] = {}
+    source_counts: dict[str, dict] = {}
+    bucket_counts: dict[tuple, dict] = {}
+    for r in rows:
+        src = r.source or "unknown"
+        bkt = r.environment_bucket or "unknown|other"
+        cnt = int(r.cnt or 0)
+        ver = max(0.0, float(r.sum_ver or 0.0))
+        for store, key in ((source_counts, src), (bucket_counts, (src, bkt))):
+            d = store.setdefault(key, _new_counts())
+            if r.status in d:
+                d[r.status] += cnt
+            if r.status == "verified":
+                d["realized"] += ver
+
+    source_acc: dict[str, list[float]] = {}
+    bucket_acc: dict[tuple, list[float]] = {}
     for r in vrows:
         est = float(r.estimated_monthly_savings_usd or 0.0)
-        ver = max(0.0, float(r.verified_monthly_savings_usd or 0.0))
-        if est > 0:
-            acc_samples.setdefault(r.source or "unknown", []).append(ver / est)
+        if est <= 0:
+            continue
+        ratio = max(0.0, float(r.verified_monthly_savings_usd or 0.0)) / est
+        src = r.source or "unknown"
+        bkt = r.environment_bucket or "unknown|other"
+        source_acc.setdefault(src, []).append(ratio)
+        bucket_acc.setdefault((src, bkt), []).append(ratio)
 
-    agg: dict[str, dict] = {}
-    for r in rows:
-        d = agg.setdefault(r.source or "unknown", {
-            "open": 0, "acted_on": 0, "verified": 0, "dismissed": 0, "expired": 0,
-            "realized": 0.0,
-        })
-        cnt = int(r.cnt or 0)
-        if r.status in d:
-            d[r.status] += cnt
-        if r.status == "verified":
-            d["realized"] += max(0.0, float(r.sum_ver or 0.0))
-
-    by_source = []
-    total_realized = 0.0
-    for src, d in sorted(agg.items()):
-        acted = d["acted_on"] + d["verified"]
-        resolved = acted + d["dismissed"] + d["expired"]
-        samples = acc_samples.get(src)
-        accuracy = round(statistics.median(samples), 3) if samples else None
-        shrunk = round(_shrunk_act_rate(acted, resolved), 3)
-        coverage = _coverage(resolved)
-        verdict = _verdict(coverage, shrunk, resolved, accuracy)
-        total_realized += d["realized"]
-        by_source.append({
-            "source": src,
-            "open": d["open"], "acted": acted, "verified": d["verified"],
-            "dismissed": d["dismissed"], "expired": d["expired"], "resolved": resolved,
-            "act_rate": shrunk,
-            "act_rate_raw": round(acted / resolved, 3) if resolved else None,
-            "accuracy": accuracy,
-            "coverage": coverage,
-            "verdict": verdict,
-            "confidence_multiplier": _confidence_multiplier(shrunk, accuracy),
-            "why": _why(src, coverage, verdict, acted, resolved, accuracy),
-        })
+    by_source = [_entry(src, None, c, source_acc.get(src, [])) for src, c in sorted(source_counts.items())]
+    by_source.sort(key=lambda s: s["realized_monthly_usd"], reverse=True)
+    by_bucket = [_entry(src, bkt, c, bucket_acc.get((src, bkt), []))
+                 for (src, bkt), c in sorted(bucket_counts.items())]
+    total_realized = sum(c["realized"] for c in source_counts.values())
 
     return {
         "by_source": by_source,
+        "by_bucket": by_bucket,
         "verified_monthly_usd": round(total_realized, 2),
         "verified_annual_run_rate_usd": round(total_realized * 12, 2),
         "params": {
@@ -171,21 +191,27 @@ def customer_signal() -> dict[str, Any]:
             "warm_floor": WARM_FLOOR, "suppress_act_rate": SUPPRESS_ACT_RATE,
             "boost_act_rate": BOOST_ACT_RATE, "accuracy_ok": list(ACCURACY_OK),
         },
-        "note": ("Per recommendation source: act-rate (acted vs all you decided on, "
-                 "Bayesian-shrunk) and accuracy (measured vs predicted savings among "
-                 "verified recs). Sources stay on blanket behavior until they have "
-                 f">= {WARM_FLOOR} resolved recs; only then can they be suppressed for you."),
+        "note": ("Per recommendation source (and per environment bucket): act-rate "
+                 "(acted vs all you decided on, Bayesian-shrunk) and accuracy (measured "
+                 "vs predicted savings among verified recs). A source/bucket stays on "
+                 f"blanket behavior until it has >= {WARM_FLOOR} resolved recs; only "
+                 "then can it be suppressed for you."),
     }
 
 
-def signal_for(signal: dict, source: str) -> dict:
-    """Look up one source's entry in a customer_signal() result, or a COLD default."""
+def signal_for(signal: dict, source: str, bucket: str | None = None) -> dict:
+    """Look up the signal for a source (and bucket if given). Prefers a bucket-level
+    entry with real signal, falls back to the source aggregate, then a COLD default."""
+    if bucket:
+        for s in signal.get("by_bucket", []):
+            if s["source"] == source and s.get("bucket") == bucket and s["resolved"] > 0:
+                return s
     for s in signal.get("by_source", []):
-        if s["source"] == source:
+        if s["source"] == source and s["resolved"] > 0:
             return s
     return {
-        "source": source, "resolved": 0, "acted": 0, "act_rate": PRIOR_ACT_RATE,
-        "accuracy": None, "coverage": "COLD", "verdict": "neutral",
+        "source": source, "bucket": bucket, "resolved": 0, "acted": 0,
+        "act_rate": PRIOR_ACT_RATE, "accuracy": None, "coverage": "COLD", "verdict": "neutral",
         "confidence_multiplier": _confidence_multiplier(PRIOR_ACT_RATE, None),
         "why": f"No decisions on {source} recs yet, using the standard ranking (global default).",
     }

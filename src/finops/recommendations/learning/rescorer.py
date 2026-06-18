@@ -26,6 +26,7 @@ def rescore(
     *,
     savings_key: str = "estimated_monthly_savings_usd",
     source_key: str = "source",
+    bucket_key: str = "environment_bucket",
 ) -> dict[str, Any]:
     """Reorder + annotate + suppress recommendations for this customer. Propose-only.
 
@@ -38,7 +39,7 @@ def rescore(
 
     for i, rec in enumerate(recs):
         src = rec.get(source_key) or "unknown"
-        s = signal_for(signal, src)
+        s = signal_for(signal, src, bucket=rec.get(bucket_key))
         try:
             savings = float(rec.get(savings_key, 0) or 0)
         except (TypeError, ValueError):
@@ -48,6 +49,7 @@ def rescore(
         annotated = dict(rec)  # copy: never mutate the caller's recommendation
         annotated["learned"] = {
             "source_verdict": s["verdict"],
+            "bucket": s.get("bucket"),
             "coverage": s["coverage"],
             "act_rate": s["act_rate"],
             "accuracy": s["accuracy"],

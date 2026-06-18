@@ -28,7 +28,7 @@ def ledger(monkeypatch):
 _seq = [0]
 
 
-def _seed(source, status, est=100.0, ver=None, n=1):
+def _seed(source, status, est=100.0, ver=None, n=1, bucket=None):
     from finops.storage.db import get_engine, savings_recommendations
     now = datetime.now(timezone.utc)
     with get_engine().begin() as conn:
@@ -38,6 +38,7 @@ def _seed(source, status, est=100.0, ver=None, n=1):
                 source=source, provider="aws", status=status,
                 estimated_monthly_savings_usd=est, verified_monthly_savings_usd=ver,
                 generated_at=now, dedup_key=f"k{_seq[0]}", resource_id=f"r{_seq[0]}",
+                environment_bucket=bucket,
             ))
 
 
@@ -215,3 +216,50 @@ def test_confidence_multiplier_never_zero():
     from finops.recommendations.learning.signal import _confidence_multiplier
     assert _confidence_multiplier(0.0001, 0.2) >= 0.001
     assert _confidence_multiplier(0.0, None) >= 0.001
+
+
+# ── environment buckets (#2) ──────────────────────────────────────────────────
+
+def test_bucket_for_is_coarse():
+    from finops.recommendations.learning.bucket import bucket_for
+    assert bucket_for("ec2", "prod") == "prod|ec2"
+    assert bucket_for("k8s_workload", "staging") == "nonprod|k8s"
+    assert bucket_for("rds", None) == "unknown|rds"
+    assert bucket_for(None, None) == "unknown|other"
+
+
+def test_signal_learns_per_bucket_same_source(ledger):
+    """The headline of #2: spot is suppressed for prod but fine for nonprod, same source."""
+    from finops.recommendations.learning.signal import customer_signal, signal_for
+    _seed("spot", "dismissed", n=12, bucket="prod|ec2")     # WARM, never acted -> suppress
+    _seed("spot", "acted_on", n=10, bucket="nonprod|ec2")   # WARM, always acted -> not suppressed
+    sig = customer_signal()
+    prod = signal_for(sig, "spot", bucket="prod|ec2")
+    nonprod = signal_for(sig, "spot", bucket="nonprod|ec2")
+    assert prod["verdict"] == "suppress"
+    assert nonprod["verdict"] != "suppress" and nonprod["act_rate"] >= 0.5
+
+
+def test_signal_for_falls_back_to_source_then_cold(ledger):
+    from finops.recommendations.learning.signal import customer_signal, signal_for
+    _seed("rightsizing", "acted_on", n=10, bucket="prod|ec2")  # source-level signal exists
+    sig = customer_signal()
+    # a bucket with no recs falls back to the source aggregate (which has signal)
+    fb = signal_for(sig, "rightsizing", bucket="nonprod|lambda")
+    assert fb["resolved"] == 10 and fb["coverage"] == "WARM"
+    # an entirely unseen source is COLD
+    cold = signal_for(sig, "never_seen", bucket="prod|ec2")
+    assert cold["coverage"] == "COLD"
+
+
+def test_record_recommendation_stores_bucket(ledger):
+    """End-to-end: record_recommendation derives + stores the bucket, signal sees it."""
+    from finops.recommendations.savings_tracker import record_recommendation
+    from finops.recommendations.learning.signal import customer_signal
+    record_recommendation(
+        source="rightsizing", provider="aws", resource_id="i-1", resource_type="ec2",
+        resource_name="web", current_config={}, recommended_config={"x": 1},
+        description="d", estimated_monthly_savings_usd=100.0, environment="prod",
+    )
+    buckets = {b["bucket"] for b in customer_signal()["by_bucket"]}
+    assert "prod|ec2" in buckets

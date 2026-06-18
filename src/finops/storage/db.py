@@ -383,6 +383,9 @@ savings_recommendations = Table(
     Column("dismiss_reason", Text, nullable=True),
     # Dedup
     Column("dedup_key", String(64), nullable=False),   # SHA256 of source+resource_id+recommended_config
+    # Learning loop: coarse env/workload bucket so the signal can roll up per
+    # (source, bucket), e.g. spot is fine for nonprod-batch but not prod-steady.
+    Column("environment_bucket", String(64), nullable=True),
 )
 
 # ── Moldable dashboard — pinned views (agent-built cost cards) ────────────────
@@ -606,6 +609,8 @@ def _run_sqlite_migrations(engine: Engine) -> None:
         ("business_metrics", "last_raise_amount_usd", "ALTER TABLE business_metrics ADD COLUMN last_raise_amount_usd REAL"),
         ("business_metrics", "last_raise_date",       "ALTER TABLE business_metrics ADD COLUMN last_raise_date TEXT"),
         ("business_metrics", "monthly_opex_usd",      "ALTER TABLE business_metrics ADD COLUMN monthly_opex_usd REAL"),
+        # Learning loop: per-(source, bucket) signal
+        ("savings_recommendations", "environment_bucket", "ALTER TABLE savings_recommendations ADD COLUMN environment_bucket VARCHAR(64)"),
     ]
 
     with engine.connect() as conn:
