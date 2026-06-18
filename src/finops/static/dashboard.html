@@ -401,6 +401,16 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
 .cc-table td{padding:7px 10px;border-bottom:1px solid var(--line);color:var(--fg2)}
 .cc-table td.num,.cc-table th.num{text-align:right;font-family:var(--mono);color:var(--fg)}
 .cc-table tr:last-child td{border-bottom:none}
+.cc-hdr-l{display:flex;align-items:baseline;gap:10px;min-width:0}
+.cc-pin,.cc-unpin{flex-shrink:0;font-family:var(--font);cursor:pointer;border-radius:6px;transition:background .15s,color .15s,border-color .15s}
+.cc-pin{font-size:11px;font-weight:600;color:var(--accent);background:rgba(77,184,212,.1);border:1px solid rgba(77,184,212,.3);padding:4px 10px}
+.cc-pin:hover:not(:disabled){background:rgba(77,184,212,.2)}
+.cc-pin.done{color:var(--success);background:rgba(59,186,122,.1);border-color:rgba(59,186,122,.3)}
+.cc-pin:disabled{cursor:default}
+.cc-unpin{font-size:16px;line-height:1;color:var(--fg3);background:transparent;border:1px solid var(--line2);width:24px;height:24px;display:flex;align-items:center;justify-content:center}
+.cc-unpin:hover{color:var(--alert);border-color:var(--alert)}
+.pv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:800px){.pv-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -556,6 +566,9 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
       </div>
     </div>
   </div>
+
+  <!-- Pinned views: cards you saved from the Ask tab -->
+  <div id="pinned-views" style="display:none;margin-top:18px"></div>
 
 </div>
 
@@ -1109,15 +1122,25 @@ function appendCard(card,data){
   if(!card) return;
   const log=document.getElementById('agent-log');
   const empty=document.getElementById('agent-empty'); if(empty) empty.style.display='none';
-  log.appendChild(renderAgentCard(card,data||{}));
+  log.appendChild(renderAgentCard(card,data||{},{pinnable:!window._READONLY}));
   log.scrollTop=log.scrollHeight;
 }
-function renderAgentCard(card,data){
+function renderAgentCard(card,data,opts){
+  opts=opts||{};
   const wrap=document.createElement('div'); wrap.className='cost-card';
   const rows=(data&&data.rows)||[]; const dims=card.dimensions||[];
   const hdr=document.createElement('div'); hdr.className='cc-hdr';
-  hdr.innerHTML='<span class="cc-title">'+esc(card.title||'Cost slice')+'</span>'+
+  const left=document.createElement('div'); left.className='cc-hdr-l';
+  left.innerHTML='<span class="cc-title">'+esc(card.title||'Cost slice')+'</span>'+
     (card.period?'<span class="cc-sub">'+esc(card.period.start)+' → '+esc(card.period.end)+'</span>':'');
+  hdr.appendChild(left);
+  if(opts.pinnable){
+    const b=document.createElement('button'); b.className='cc-pin'; b.textContent='Pin';
+    b.onclick=()=>pinCard(card,b); hdr.appendChild(b);
+  }else if(opts.unpinnable&&card.id){
+    const b=document.createElement('button'); b.className='cc-unpin'; b.title='Unpin'; b.textContent='×';
+    b.onclick=()=>unpinCard(card.id,wrap); hdr.appendChild(b);
+  }
   wrap.appendChild(hdr);
   const body=document.createElement('div'); body.className='cc-body'; wrap.appendChild(body);
   const tmpl=card.template||'table';
@@ -1157,6 +1180,33 @@ function buildCardTable(rows,dims,metric){
   const tb=rows.map(r=>'<tr>'+dims.map(d=>'<td>'+esc(String(r[d]==null?'':r[d]))+'</td>').join('')+'<td class="num">'+fmt(r.metric)+'</td></tr>').join('');
   t.innerHTML='<thead>'+head+'</thead><tbody>'+tb+'</tbody>';
   return t;
+}
+async function pinCard(card,btn){
+  if(!card||!card.slice){return;}
+  btn.disabled=true; btn.textContent='…';
+  try{
+    const r=await fetch('/api/views',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({card:card})});
+    if(r.ok){btn.textContent='Pinned ✓'; btn.classList.add('done'); loadPinnedViews();}
+    else{btn.textContent='Pin'; btn.disabled=false;}
+  }catch{btn.textContent='Pin'; btn.disabled=false;}
+}
+async function unpinCard(id,el){
+  try{
+    const r=await fetch('/api/views/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+    if(r.ok&&el){el.style.transition='opacity .25s';el.style.opacity='0';setTimeout(()=>el.remove(),260);}
+  }catch{}
+}
+async function loadPinnedViews(){
+  const wrap=document.getElementById('pinned-views'); if(!wrap) return;
+  try{
+    const r=await fetch('/api/views'); if(!r.ok){wrap.style.display='none';return;}
+    const d=await r.json(); const views=(d&&d.views)||[];
+    if(!views.length){wrap.style.display='none';wrap.innerHTML='';return;}
+    wrap.style.display='block';
+    wrap.innerHTML='<div class="section-label" style="margin-bottom:12px">Pinned views</div><div class="pv-grid" id="pv-grid"></div>';
+    const grid=document.getElementById('pv-grid');
+    views.forEach(v=>grid.appendChild(renderAgentCard(Object.assign({},v.card,{id:v.id}),v.data||{},{unpinnable:!window._READONLY})));
+  }catch{wrap.style.display='none';}
 }
 
 let agentBusy=false;
@@ -1215,6 +1265,7 @@ initDate();
 initRangeControls();
 initAgent();
 loadData();
+loadPinnedViews();
 setInterval(loadData,60000);
 </script>
 </body>

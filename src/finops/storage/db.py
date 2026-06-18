@@ -385,6 +385,27 @@ savings_recommendations = Table(
     Column("dedup_key", String(64), nullable=False),   # SHA256 of source+resource_id+recommended_config
 )
 
+# ── Moldable dashboard — pinned views (agent-built cost cards) ────────────────
+# A pinned view stores the SliceSpec that regenerates its data, not the data
+# itself, so each card re-runs live on load. owner is a local identity or
+# "instance" for shared team pins (single-tenant / local-first; never a
+# multi-tenant tenant id).
+dashboard_views = Table(
+    "dashboard_views", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("owner", String(128), nullable=False, default="instance"),
+    Column("scope", String(16), nullable=False, default="instance"),   # me | instance
+    Column("title", String(256), nullable=False, default=""),
+    Column("template", String(32), nullable=False, default="bar"),     # line|bar|stacked_bar|table|kpi|heatmap
+    Column("slice_spec", Text, nullable=False, default="{}"),          # JSON SliceSpec that regenerates the data
+    Column("card_spec", Text, nullable=False, default="{}"),           # JSON CardSpec (title/dims/days/refresh)
+    Column("position", Integer, nullable=False, default=0),
+    Column("refresh_secs", Integer, nullable=False, default=43200),
+    Column("created_at", DateTime, nullable=False),
+    Column("updated_at", DateTime, nullable=False),
+    Column("created_by", String(128), nullable=False, default=""),
+)
+
 # ── Slack bot — thread conversation memory + remediation approvals ───────────
 
 slack_threads = Table(
