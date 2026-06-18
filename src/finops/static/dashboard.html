@@ -266,6 +266,16 @@ html,body{
 }
 .opp-total-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3)}
 .opp-total-value{font-size:15px;font-weight:700;font-family:var(--mono);color:var(--success)}
+/* Learning annotations */
+.opp-learn{display:inline-block;margin-top:4px;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:rgba(77,184,212,.1);border:1px solid rgba(77,184,212,.25);border-radius:3px;padding:1px 5px}
+.opp-suppressed{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.sup-details summary{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);cursor:pointer;list-style:none;user-select:none}
+.sup-details summary::-webkit-details-marker{display:none}
+.sup-details summary::before{content:'▸';margin-right:6px;color:var(--fg3)}
+.sup-details[open] summary::before{content:'▾'}
+.sup-details .opp-list{margin-top:8px}
+.opp-sup{opacity:.65}
+.opp-why{font-size:11px;color:var(--fg3);margin-top:3px;line-height:1.4}
 
 /* ── Loading skeleton ────────────────────────────────────────────────────── */
 .skeleton{
@@ -581,6 +591,7 @@ footer a{color:var(--accent);text-decoration:none;font-weight:500}
         <span class="opp-total-label">Total Potential</span>
         <span class="opp-total-value" id="opp-total-value">$0/mo</span>
       </div>
+      <div class="opp-suppressed" id="opp-suppressed" style="display:none"></div>
     </div>
   </div>
 
@@ -899,7 +910,7 @@ function render(d){
   renderScorecard(d.scorecard||{});
 
   // Opportunities
-  renderOpps(d.recent_opportunities||[],oppCount,oppTotal);
+  renderOpps(d.recent_opportunities||[],oppCount,oppTotal,d.suppressed_opportunities||[],d.learning_active);
 
   // Ledger row
   renderLedgerRow(ledger,oppCount);
@@ -998,12 +1009,13 @@ function renderScorecard(sc){
 }
 
 // ── Savings opportunities ──────────────────────────────────────────────────────
-function renderOpps(opps,count,totalSaving){
+function renderOpps(opps,count,totalSaving,suppressed,learningActive){
   document.getElementById('opp-badge').textContent=(count||opps.length)+' OPEN';
   const el=document.getElementById('opp-list');
   if(!opps||opps.length===0){
     el.innerHTML='<li class="opp-item"><span style="color:var(--fg3);font-size:13px">No open opportunities. Run a waste audit to surface savings.</span></li>';
     document.getElementById('opp-total').style.display='none';
+    renderSuppressed(suppressed||[]);
     return;
   }
   el.innerHTML=opps.map(o=>{
@@ -1022,9 +1034,14 @@ function renderOpps(opps,count,totalSaving){
       savingStr=fmt(o.monthly_saving||0)+'/mo';
     }
     const idAttr=o.id?`data-rec-id="${o.id}"`:'';
-    return `<li class="opp-item" ${idAttr}>
+    // Learning annotation: only when this rec type has real signal (not COLD).
+    const L=o.learned;
+    const tailored=L&&L.coverage&&L.coverage!=='COLD';
+    const whyAttr=(tailored&&L.why_ranked)?` title="${esc(L.why_ranked)}"`:'';
+    const tag=(tailored&&L.source_verdict==='boost')?'<span class="opp-learn">ranked for you</span>':'';
+    return `<li class="opp-item" ${idAttr}${whyAttr}>
       <span class="opp-dot ${dotClass}"></span>
-      <div class="opp-body"><div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div></div>
+      <div class="opp-body"><div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div>${tag}</div>
       <div class="opp-right">
         <span class="opp-saving">${savingStr}</span>
         <span class="effort-chip ${eClass}">${effort} EFFORT</span>
@@ -1042,6 +1059,24 @@ function renderOpps(opps,count,totalSaving){
   }else{
     totalEl.style.display='none';
   }
+  renderSuppressed(suppressed||[]);
+}
+
+// "Suppressed for you" — recs the learning loop ranked out because you don't act
+// on that type. Collapsed by default; nothing is deleted, you can always expand it.
+function renderSuppressed(suppressed){
+  const box=document.getElementById('opp-suppressed');
+  if(!box) return;
+  if(!suppressed||!suppressed.length){box.style.display='none';box.innerHTML='';return;}
+  const items=suppressed.map(o=>{
+    const why=(o.learned&&o.learned.why_ranked)?esc(o.learned.why_ranked):'';
+    return `<li class="opp-item opp-sup">
+      <div class="opp-body"><div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div>${why?`<div class="opp-why">${why}</div>`:''}</div>
+      <span class="opp-saving">${fmt(o.monthly_saving||0)}/mo</span>
+    </li>`;
+  }).join('');
+  box.innerHTML=`<details class="sup-details"><summary>Suppressed for you (${suppressed.length})</summary><ul class="opp-list">${items}</ul></details>`;
+  box.style.display='block';
 }
 
 // ── Ledger row ────────────────────────────────────────────────────────────────
