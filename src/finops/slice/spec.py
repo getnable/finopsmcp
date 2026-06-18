@@ -24,6 +24,10 @@ FOCUS_DIMENSIONS: set[str] = {
 # The time pseudo-dimension and tag pseudo-dimensions are also groupable/filterable.
 TIME_DIMENSION = "date"
 
+# CUR-only dimensions: line-item granularity the normalized FOCUS feed can't reach.
+# Using any of these routes the slice to the CUR/Athena pushdown (requires CUR set up).
+CUR_DIMENSIONS: set[str] = {"usage_type", "instance_type", "resource_id"}
+
 METRICS: set[str] = {"BilledCost", "EffectiveCost", "ListCost"}
 GRANULARITIES: set[str] = {"TOTAL", "DAILY", "MONTHLY"}
 FILTER_OPS: set[str] = {"eq", "in", "neq", "not_in", "contains", "regex"}
@@ -42,7 +46,16 @@ def is_tag_dim(dim: str) -> bool:
 
 
 def is_valid_dimension(dim: str) -> bool:
-    return dim == TIME_DIMENSION or dim in FOCUS_DIMENSIONS or is_tag_dim(dim)
+    return (dim == TIME_DIMENSION or dim in FOCUS_DIMENSIONS
+            or dim in CUR_DIMENSIONS or is_tag_dim(dim))
+
+
+def needs_cur(spec) -> bool:
+    """True if a slice uses a CUR-only dimension anywhere (group, filter, exclude)."""
+    dims = set(spec.dimensions)
+    for c in list(spec.filters) + list(spec.exclusions):
+        dims.add(c.dimension)
+    return bool(dims & CUR_DIMENSIONS)
 
 
 @dataclass
