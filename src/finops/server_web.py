@@ -534,11 +534,24 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
             opps_deduped.append(_build_opp(r))
         # Sort highest saving first, prefer entries with ranges
         opps_deduped.sort(key=lambda o: o.get("monthly_saving", 0), reverse=True)
-        result["recent_opportunities"] = opps_deduped
-        result["opportunities_count"] = len(opps_deduped)
-        result["opportunities_total_saving"] = round(
-            sum(o["monthly_saving"] for o in opps_deduped), 2
-        )
+        # Learning loop: reorder + suppress per what this customer actually acts on.
+        # A no-op until the ledger has signal (cold sources keep the savings-desc
+        # order, nothing is suppressed), so a fresh install sees no change. Propose-only.
+        try:
+            from .recommendations.learning import customer_signal, rescore
+            sig = customer_signal()
+            rs = rescore(opps_deduped, sig, savings_key="monthly_saving", source_key="service")
+            shown = rs["ranked"]
+            result["recent_opportunities"] = shown
+            result["suppressed_opportunities"] = rs["suppressed_for_you"]
+            result["opportunities_count"] = len(shown)
+            result["opportunities_total_saving"] = round(sum(o.get("monthly_saving", 0) for o in shown), 2)
+            result["learning_active"] = any(s.get("coverage") != "COLD" for s in sig.get("by_source", []))
+        except Exception as exc:
+            log.debug("learning rescore skipped: %s", exc)
+            result["recent_opportunities"] = opps_deduped
+            result["opportunities_count"] = len(opps_deduped)
+            result["opportunities_total_saving"] = round(sum(o["monthly_saving"] for o in opps_deduped), 2)
     except Exception as exc:
         log.debug("Could not read open recs: %s", exc)
         result["opportunities_count"] = 0
