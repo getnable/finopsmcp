@@ -33,6 +33,7 @@ ALLOWED_TOOLS: dict[str, str] = {
     "whoami": "viewer",
     "what_can_nable_do": "viewer",
     # Core cost queries
+    "slice_costs": "viewer",
     "get_cost_summary": "viewer",
     "get_costs_by_service": "viewer",
     "get_top_cost_drivers": "viewer",

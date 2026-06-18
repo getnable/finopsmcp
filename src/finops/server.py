@@ -9328,6 +9328,123 @@ async def get_focus_costs(
     }
 
 
+async def _fetch_focus_records(sd: date, ed: date, provider: str | None = None):
+    """Fan out get_costs_as_focus across active cloud connectors. Returns
+    (records, errors, provider_names). Shared by get_focus_costs and slice_costs."""
+    active_cloud = await _active(subset=_CLOUD_CONNECTORS)
+    if provider:
+        p = provider.lower()
+        if p in active_cloud:
+            active_cloud = {p: active_cloud[p]}
+        elif p in _CLOUD_CONNECTORS:
+            return [], {p: "not configured"}, []
+        else:
+            return [], {p: "unknown provider"}, []
+
+    records: list = []
+    errors: dict[str, str] = {}
+
+    async def _one(name: str, connector: Any):
+        try:
+            return name, await connector.get_costs_as_focus(sd, ed), None
+        except Exception as exc:  # pragma: no cover - network failure path
+            log.error("FOCUS fetch failed: provider=%s error=%s", name, exc)
+            return name, None, str(exc)
+
+    for name, recs, err in await asyncio.gather(*[_one(n, c) for n, c in active_cloud.items()]):
+        if err is not None:
+            errors[name] = err
+        elif recs:
+            records.extend(recs)
+    return records, errors, sorted(active_cloud.keys())
+
+
+@mcp.tool()
+async def slice_costs(
+    dimensions: list[str] | None = None,
+    filters: list[dict] | None = None,
+    exclusions: list[dict] | None = None,
+    metric: str = "EffectiveCost",
+    granularity: str = "TOTAL",
+    order_by: str = "metric",
+    limit: int = 50,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    provider: str | None = None,
+    title: str | None = None,
+) -> dict:
+    """
+    Slice cloud cost any way you want. This is the flexible, moldable cost query:
+    group and filter by ANY combination of dimensions, over any date range, instead
+    of a fixed set of canned reports. Returns both the numbers and a `card` describing
+    how to chart them (which the UI can render and pin to the dashboard).
+
+    Dimensions (group by, up to 3): ServiceName, ServiceCategory, ProviderName,
+    RegionId, RegionName, SubAccountId, SubAccountName, ResourceId, ResourceName,
+    ResourceType, ChargeCategory, ChargeDescription, CommitmentDiscountId,
+    CommitmentDiscountType, plus "date" (a time series, use granularity) and
+    "Tags[<key>]" for any tag (e.g. "Tags[team]").
+
+    filters / exclusions: each is {dimension, op, values}. op is one of eq, in, neq,
+    not_in, contains, regex. filters keep matching rows; exclusions drop matching rows.
+    Example "EC2 by region last 90 days, excluding Savings Plan credits":
+      dimensions=["RegionId"], filters=[{"dimension":"ServiceName","op":"eq","values":["Amazon EC2"]}],
+      exclusions=[{"dimension":"ChargeCategory","op":"in","values":["Credit"]}], metric="EffectiveCost"
+
+    metric: BilledCost | EffectiveCost (amortized, default) | ListCost.
+    granularity: TOTAL | DAILY | MONTHLY (only matters when "date" is a dimension).
+    order_by: "metric" (default, descending) or a dimension name.
+    start_date / end_date: YYYY-MM-DD (default last 30 days). provider: aws|azure|gcp (default all).
+
+    This is read-only: it slices and charts cost data. It never changes anything.
+    """
+    require_role("viewer")
+    from .slice import parse_spec, run_slice
+    from .slice.engine import derive_card
+    from .slice.spec import SliceSpecError
+
+    try:
+        spec = parse_spec({
+            "dimensions": dimensions or [],
+            "filters": filters or [],
+            "exclusions": exclusions or [],
+            "metric": metric,
+            "granularity": granularity,
+            "order_by": order_by,
+            "limit": limit,
+        })
+    except SliceSpecError as exc:
+        return {"error": str(exc)}
+
+    sd, ed = _default_dates()
+    if start_date:
+        try:
+            sd = date.fromisoformat(start_date)
+        except ValueError:
+            return {"error": f"Invalid start_date: {start_date!r}. Use YYYY-MM-DD."}
+    sd = _clamp_start_date(sd)
+    if end_date:
+        try:
+            ed = date.fromisoformat(end_date)
+        except ValueError:
+            return {"error": f"Invalid end_date: {end_date!r}. Use YYYY-MM-DD."}
+
+    records, errors, providers = await _fetch_focus_records(sd, ed, provider)
+    if not records:
+        if errors:
+            return {"error": "Could not fetch cost data", "details": errors}
+        return {"error": "No cost data for that range. Connect a provider with 'finops setup', or widen the dates."}
+
+    result = run_slice(spec, records)
+    card = derive_card(spec, result, title=title)
+    period = {"start": sd.isoformat(), "end": ed.isoformat()}
+    return {
+        "result": {**result.to_dict(), "period": period, "providers": providers},
+        "card": {**card.to_dict(), "period": period},
+        **({"partial_errors": errors} if errors else {}),
+    }
+
+
 # ── AWS service-specific analyzers ───────────────────────────────────────────
 
 @mcp.tool()

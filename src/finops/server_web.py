@@ -2143,7 +2143,12 @@ button:hover{{filter:brightness(1.1)}}
             try:
                 from .slack_bot.llm import ask
                 result = ask(question, tier="chat")
-                self._send(200, "application/json", json.dumps({"answer": result.answer}).encode())
+                cards = [se["card"] for se in (result.side_effects or [])
+                         if isinstance(se, dict) and se.get("type") == "cost_card" and se.get("card")]
+                payload = {"answer": result.answer, "cards": cards,
+                           "cardData": [se.get("data") for se in (result.side_effects or [])
+                                        if isinstance(se, dict) and se.get("type") == "cost_card"]}
+                self._send(200, "application/json", json.dumps(payload, default=str).encode())
             except Exception as exc:
                 log.error("agent query failed: %s", exc, exc_info=True)
                 self._send(200, "application/json", json.dumps({"answer": None, "error": "agent error"}).encode())
