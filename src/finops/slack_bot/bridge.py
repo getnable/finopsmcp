@@ -75,6 +75,7 @@ ALLOWED_TOOLS: dict[str, str] = {
     "mark_recommendation_acted_on": "analyst",
     "dismiss_recommendation": "analyst",
     "get_nable_roi": "viewer",
+    "get_recommendation_learning": "viewer",
     # Commitments
     "get_commitment_analysis": "viewer",
     "get_commitment_coverage_by_tag": "viewer",

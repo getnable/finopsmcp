@@ -2553,6 +2553,32 @@ async def get_recommendation_quality() -> dict:
 
 
 @mcp.tool()
+async def get_recommendation_learning() -> dict:
+    """
+    What nable has learned about how YOU use recommendations, and how it adapts.
+
+    Per recommendation type (rightsizing, commitment, idle, spot, ...): your act-rate
+    (how often you act on that type, vs blanket assumptions), how accurate the past
+    savings estimates were, a COLD/WARMING/WARM confidence state, and the resulting
+    verdict (boosted, suppressed-for-you, or neutral) with a plain-English reason.
+
+    This is the adaptive moat: instead of blanket advice, recommendations are ranked
+    and filtered to fit your environment and your track record. It is propose-only,
+    it changes what you see and in what order, never the cloud.
+
+    Use when:
+        - "Why am I seeing this recommendation?" / "Why did this rank high?"
+        - "What recommendation types did you stop showing me?"
+        - "How is nable tailoring recommendations to us?"
+    """
+    try:
+        from .recommendations.learning import customer_signal
+        return customer_signal()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def list_profiles() -> str:
     """
     List all configured nable profiles (for multi-account or multi-client setups).
