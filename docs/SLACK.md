@@ -51,19 +51,67 @@ Two safety defaults to know:
 Investigate buttons, hourly budget checks, scheduled reports. These ride on the
 same bot process.
 
-## Setup (one engineer, about 5 minutes)
+## Add nable to your Slack (about 2 minutes)
+
+**1. Create the app from a manifest.** Open https://api.slack.com/apps → **Create
+New App** → **From a manifest** → pick your workspace, paste the manifest below
+(also at [`docs/slack-app-manifest.yaml`](slack-app-manifest.yaml)), Create.
+
+```yaml
+display_information:
+  name: nable
+  description: Cloud cost intelligence. Ask your bill anything.
+  background_color: "#0d0f10"
+features:
+  bot_user:
+    display_name: nable
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+      - im:history
+      - im:read
+      - im:write
+      - reactions:read
+      - reactions:write
+      - users:read
+      - users:read.email
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+```
+
+**2. Get the two tokens.** Basic Information → App-Level Tokens → Generate one
+with scope `connections:write` (that is your `xapp-...` App Token). Then Install
+to Workspace; OAuth & Permissions shows your `xoxb-...` Bot Token.
+
+**3. Run it locally** (nothing is hosted; the bot runs on your machine, your
+tokens stay in your OS keyring):
 
 ```
 pip install "finops-mcp[slack]"
-finops setup slack          # choose option 3: conversational bot
+finops setup slack          # paste the two tokens + your Anthropic key when prompted
 finops-slack                # start the bot
 ```
 
-The wizard prints a Slack app manifest to paste at https://api.slack.com/apps,
-collects the two Slack tokens and your Anthropic API key, validates them, and
-stores everything in your OS keyring. No .env file.
+`finops setup slack` also prints this exact manifest, so you can run it first and
+copy from the terminal instead. Connect a cloud account first if you have not:
+`finops setup aws` (or azure/gcp).
 
-Connect cloud accounts first if you have not: `finops setup aws` (or azure/gcp).
+> Why this and not the Slack Marketplace: nable's bot runs in Socket Mode on your
+> own machine, so your tokens and bill never leave it. Marketplace apps must be
+> publicly hosted OAuth apps that hold every workspace's tokens, which is the
+> opposite of local-first. The manifest install is the same two minutes without
+> handing your workspace to a third party.
 
 ## Access control
 
