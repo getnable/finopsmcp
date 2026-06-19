@@ -26,6 +26,28 @@ Deep GCP audits, plus a round of security hardening.
   is pinned and SHA256-verified before it runs, and the trial clock signs with a
   dedicated key.
 
+### Install and onboarding
+- **Python 3.10+ is explicit now.** The README, SLACK.md, DEPLOY.md and the plugin
+  and editor READMEs state the requirement and decode the cryptic
+  `No matching distribution found` pip error (it means your Python is older than
+  3.10). A stdlib preflight guard fails every console entry point with a clear
+  message on an older interpreter, and `finops doctor` reports the running Python.
+- **`finops serve` is secure by default.** It binds `127.0.0.1` instead of
+  `0.0.0.0`, so a laptop run never opens a LAN port unprompted; add `--host 0.0.0.0`
+  (still password-protected) to share it with your team. It flushes the
+  auto-generated password before blocking, so it is visible under a pipe or process
+  manager, and skips the LAN-IP probe on a local run.
+- **The dashboard tells the truth.** A connected provider whose fetch fails (expired
+  token, AccessDenied) now surfaces the error instead of showing a green badge over
+  $0.
+- **Slack bot tier surfaces before setup.** `finops setup slack` shows your
+  Team/trial status up front (the conversational bot is Team-only, with a trial),
+  checks the `slack_bolt` dependency instead of letting `finops-slack` crash, and
+  every printed `finops-mcp[slack]` install command is quoted so it works in zsh.
+- **Brand and font.** The dashboard and login page now use Bricolage Grotesque,
+  self-hosted with no external font request, and the MCP server self-reports as
+  `nable`.
+
 ## 0.8.76
 
 Onboarding instrumentation and a faster ambient connect, aimed at the activation
