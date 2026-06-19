@@ -203,6 +203,10 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
         last_month_end = mtd_start - timedelta(days=1)
         last_month_start = last_month_end.replace(day=1)
 
+        # Collect per-connector fetch failures so an expired token or AccessDenied
+        # surfaces as a banner instead of a silent $0 under a green "connected" badge.
+        provider_errors: list[str] = []
+
         async def _sum_costs(start: date, end: date) -> tuple[float, dict[str, float], str]:
             """Returns (total, by_service, account_id)."""
             total = 0.0
@@ -211,13 +215,14 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
 
             _t = int(os.getenv("FINOPS_PROVIDER_TIMEOUT_S", "90"))
 
-            async def _one(connector):
+            async def _one(pname, connector):
                 try:
                     return await asyncio.wait_for(connector.get_costs(start, end), timeout=_t)
-                except Exception:
+                except Exception as e:
+                    provider_errors.append(f"{pname}: {e}")
                     return None
 
-            for summary in await asyncio.gather(*[_one(c) for c in configured.values()]):
+            for summary in await asyncio.gather(*[_one(n, c) for n, c in configured.items()]):
                 if summary is None:
                     continue
                 total += summary.total_usd
@@ -229,6 +234,15 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
 
         mtd_total, mtd_services, account_id = await _sum_costs(mtd_start, today)
         last_total, _, _ = await _sum_costs(last_month_start, last_month_end)
+
+        # Providers are connected but a fetch failed (expired token, AccessDenied):
+        # surface the real reason instead of showing a green badge over $0.
+        if provider_errors and not result.get("error"):
+            seen: list[str] = []
+            for e in provider_errors:
+                if e not in seen:
+                    seen.append(e)
+            result["error"] = "Some connected providers returned no data: " + "; ".join(seen)
 
         result["account_id"] = account_id
         result["total_spend_mtd"] = round(mtd_total, 2)

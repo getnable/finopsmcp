@@ -2183,9 +2183,11 @@ def _inject_license_into_claude_config(key: str) -> None:
         else:
             print("  →  Add to your Claude Desktop config manually:")
             print(f'       "FINOPS_LICENSE_KEY": "{key}"')
+            _warn("This is your license key. Keep it private: not in screen-shares or public gists.")
     except Exception:
         print("  →  Add to your Claude Desktop config manually:")
         print(f'       "FINOPS_LICENSE_KEY": "{key}"')
+        _warn("This is your license key. Keep it private: not in screen-shares or public gists.")
 
 
 def _inject_aws_into_claude_config(access_key: str, secret_key: str, region: str) -> None:
@@ -2764,6 +2766,9 @@ def _print_manual_config(mcp_entry: dict) -> None:
     for line in snippet.splitlines():
         print(f"    {line}")
     print()
+    if "FINOPS_LICENSE_KEY" in snippet:
+        _warn("This block contains your license key. Treat it as a secret: "
+              "keep it out of screen-shares, public gists, and tickets.")
 
 
 if __name__ == "__main__":
