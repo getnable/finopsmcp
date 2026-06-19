@@ -19,6 +19,9 @@ Usage:
 """
 from __future__ import annotations
 
+from ._preflight import require_python
+require_python()
+
 import getpass
 import os
 import sys
@@ -1071,6 +1074,29 @@ settings:
 def setup_slack_bot() -> None:
     """Configure the conversational Slack bot (Socket Mode, two-way)."""
     _section("Slack: Conversational Bot (questions, RCA, draft PRs and tickets)")
+
+    # Surface the tier up front so the user learns it BEFORE the 2-minute OAuth
+    # setup, not on the first @mention. Cost queries, anomalies and one-way
+    # alerts are free; the two-way @nable bot is Team-only (trial passes).
+    try:
+        from .license import check_license
+        st = check_license()
+        if st.is_team:
+            if getattr(st, "mode", "") == "trial" and st.days_remaining > 0:
+                _ok(f"Team trial active ({st.days_remaining} day"
+                    f"{'s' if st.days_remaining != 1 else ''} left). The @nable bot is unlocked.")
+            else:
+                _ok("Team plan active. The @nable bot is unlocked.")
+        else:
+            _warn("The conversational @nable bot is a nable Team feature "
+                  "($1,000/mo flat, unlimited seats), with a 7-day free trial.")
+            print("    Cost queries, anomalies and one-way alerts are free. The two-way bot is not.")
+            print("    Start a trial or activate a key:  finops setup license")
+            print("    Plans:  https://getnable.com/#pricing")
+        print()
+    except Exception:
+        pass
+
     print("""  One-time Slack app creation (about 2 minutes):
     1. Open https://api.slack.com/apps  ->  Create New App  ->  From a manifest
     2. Pick your workspace, paste the manifest below, click Create
@@ -1134,6 +1160,14 @@ def setup_slack_bot() -> None:
   Access control: set FINOPS_REQUIRE_AUTH=1 to map Slack users to nable
   roles (viewer/analyst/admin) by email. Drafting and approving PRs or
   tickets requires analyst or above.""")
+
+    # The bot won't start without the [slack] extra, and configuring tokens does
+    # not install it. Warn now instead of letting finops-slack crash on import.
+    import importlib.util
+    if importlib.util.find_spec("slack_bolt") is None:
+        _warn('The bot needs the [slack] extra, which is not installed in this '
+              'environment.')
+        print('    Install it before running finops-slack:  pip install "finops-mcp[slack]"')
 
 
 def setup_slack() -> None:

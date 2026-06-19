@@ -1051,14 +1051,13 @@ _TABLEAU_WDC_HTML = """\
 <head>
 <meta charset="utf-8">
 <title>nable - Tableau Web Data Connector</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/fonts/fonts.css">
 <script src="https://connectors.tableau.com/libs/tableauwdc-2.3.latest.js" type="text/javascript"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{
   background:#0d0f10;color:#e8ecef;
-  font-family:'Instrument Sans',system-ui,sans-serif;
+  font-family:'Bricolage Grotesque',system-ui,sans-serif;
   font-size:15px;line-height:1.5;
   display:flex;align-items:center;justify-content:center;min-height:100vh;
   padding:24px;
@@ -1263,12 +1262,11 @@ _POWERBI_GUIDE_HTML = """\
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>nable - Power BI Connector</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&display=swap">
+<link rel="stylesheet" href="/static/fonts/fonts.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.3.0/dist/fonts/geist-mono/style.css">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d0f10;color:#f0f2f3;font-family:'Instrument Sans',system-ui,sans-serif;padding:40px 24px}
+body{background:#0d0f10;color:#f0f2f3;font-family:'Bricolage Grotesque',system-ui,sans-serif;padding:40px 24px}
 .wrap{max-width:720px;margin:0 auto}
 .logo{display:flex;align-items:center;gap:10px;margin-bottom:40px}
 .logo svg{flex-shrink:0}
@@ -1395,9 +1393,7 @@ _DASHBOARD_HTML = """\
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>nable | Cost Dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/fonts/fonts.css">
 <script src="/static/chart.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -1422,7 +1418,7 @@ _DASHBOARD_HTML = """\
   --r-md:6px;
   --r-lg:8px;
   --r-xl:12px;
-  --font:'Instrument Sans',system-ui,sans-serif;
+  --font:'Bricolage Grotesque',system-ui,sans-serif;
   --mono:'Geist Mono','JetBrains Mono',monospace;
 }
 html,body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:15px;line-height:1.5;min-height:100vh}
@@ -1827,7 +1823,7 @@ function renderServicesChart(services){
       plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
       scales:{
         x:{ticks:{color:'#56656d',font:{family:"'Geist Mono',monospace",size:11},callback:v=>fmt(v)},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}},
-        y:{ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},padding:4},grid:{display:false},border:{color:'transparent'}}
+        y:{ticks:{color:'#94a3ab',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12},padding:4},grid:{display:false},border:{color:'transparent'}}
       }
     }
   });
@@ -1854,11 +1850,11 @@ function renderTrendChart(trend){
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{
-        legend:{labels:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},boxWidth:16,usePointStyle:true,pointStyle:'line'}},
+        legend:{labels:{color:'#94a3ab',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12},boxWidth:16,usePointStyle:true,pointStyle:'line'}},
         tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.raw)}}
       },
       scales:{
-        x:{ticks:{color:'#94a3ab',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12}},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}},
+        x:{ticks:{color:'#94a3ab',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12}},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}},
         y:{ticks:{color:'#56656d',font:{family:"'Geist Mono',monospace",size:11},callback:v=>fmt(v)},grid:{color:'rgba(255,255,255,.04)'},border:{color:'transparent'}}
       }
     }
@@ -2064,11 +2060,10 @@ class _Handler(BaseHTTPRequestHandler):
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>nable Dashboard</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&display=swap"/>
+<link rel="stylesheet" href="/static/fonts/fonts.css"/>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#0d0f10;color:#f0f2f3;font-family:'Instrument Sans',system-ui,sans-serif;
+body{{background:#0d0f10;color:#f0f2f3;font-family:'Bricolage Grotesque',system-ui,sans-serif;
   display:flex;align-items:center;justify-content:center;min-height:100vh}}
 .card{{background:#111416;border:1px solid #242a2e;border-radius:12px;padding:40px;width:360px}}
 .logo{{display:flex;align-items:center;gap:10px;margin-bottom:32px}}
@@ -2588,7 +2583,7 @@ def _start_finance_services() -> list[str]:
             # up front so the status line tells the truth.
             import importlib.util
             if importlib.util.find_spec("slack_bolt") is None:
-                raise RuntimeError("slack_bolt not installed (pip install finops-mcp[slack])")
+                raise RuntimeError('slack_bolt not installed (pip install "finops-mcp[slack]")')
             from .slack_bot.app import main as _slack_main
             threading.Thread(target=_slack_main, name="nable-slack-bot", daemon=True).start()
             status.append("Slack bot:  ON  (finance asks in Slack, no install needed)")

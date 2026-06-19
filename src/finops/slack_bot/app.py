@@ -19,6 +19,9 @@ Optional:
 """
 from __future__ import annotations
 
+from .._preflight import require_python
+require_python()
+
 import asyncio
 import collections
 import json
@@ -378,7 +381,7 @@ def main() -> None:
         from slack_bolt import App
         from slack_bolt.adapter.socket_mode import SocketModeHandler
     except ImportError:
-        print("Error: slack_bolt not installed. Run: pip install finops-mcp[slack]")
+        print('Error: slack_bolt not installed. Run: pip install "finops-mcp[slack]"')
         raise SystemExit(1)
 
     # Fall back to the credential vault for anything not in the environment,

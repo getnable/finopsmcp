@@ -302,6 +302,39 @@ def test_doctor_license_check_reports_tier(monkeypatch):
     assert res["ok"] is False
 
 
+def test_doctor_python_version_check(monkeypatch):
+    """finops doctor reports the running Python and hard-fails below 3.10, so a user
+    on a stale interpreter sees the real reason rather than the cryptic pip error
+    'No matching distribution found for finops-mcp'."""
+    import finops.doctor as D
+
+    monkeypatch.setattr(D.sys, "version_info", (3, 9, 18, "final", 0))
+    res = D._check_python_version()
+    assert res["ok"] is False
+    assert "3.9" in res["detail"] and "3.10" in res["detail"]
+    assert res["recommendation"]
+
+    monkeypatch.setattr(D.sys, "version_info", (3, 12, 1, "final", 0))
+    res = D._check_python_version()
+    assert res["ok"] is True
+    assert "3.12" in res["detail"]
+    assert res["recommendation"] is None
+
+
+def test_preflight_require_python_exits_below_floor(monkeypatch):
+    """The shared entry-point guard exits with a clear message on old Python and is
+    a no-op on supported Python."""
+    import finops._preflight as P
+    import pytest
+
+    monkeypatch.setattr(P.sys, "version_info", (3, 8, 10, "final", 0))
+    with pytest.raises(SystemExit):
+        P.require_python()
+
+    monkeypatch.setattr(P.sys, "version_info", (3, 11, 5, "final", 0))
+    assert P.require_python() is None
+
+
 def test_normalize_and_check_key_strips_and_validates():
     """A pasted key with quotes/whitespace must be cleaned before storing, and a
     wrong-prefix paste (wrong provider, or an org id in the key field) must warn,

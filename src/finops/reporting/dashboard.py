@@ -172,7 +172,7 @@ def _build_html(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>nable · Account Dashboard · {account_label}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@300;400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@300;400;500;600&display=swap">
 <style>
   :root {{
     --bg:        #0d0f10;
@@ -193,7 +193,7 @@ def _build_html(
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
   body {{
-    font-family: 'Instrument Sans', system-ui, sans-serif;
+    font-family: 'Bricolage Grotesque', system-ui, sans-serif;
     background: var(--bg);
     color: var(--fg);
     font-size: 14px;

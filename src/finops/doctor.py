@@ -15,6 +15,9 @@ Usage:
 """
 from __future__ import annotations
 
+from ._preflight import require_python
+require_python()
+
 import json
 import os
 import sys
@@ -23,6 +26,32 @@ from pathlib import Path
 
 
 # ── Check helpers ─────────────────────────────────────────────────────────────
+
+def _check_python_version() -> dict:
+    """Report the running Python and hard-fail below nable's 3.10 floor.
+
+    On too-old Python, pip refuses to install finops-mcp at all (the cryptic
+    "No matching distribution found"), so most users never reach this check.
+    It exists for source runs and to make the active interpreter visible.
+    """
+    v = sys.version_info
+    ver = f"{v[0]}.{v[1]}.{v[2]}"
+    ok = (v[0], v[1]) >= (3, 10)
+    if ok:
+        detail = f"Python {ver} at {sys.executable}"
+        rec = None
+    else:
+        detail = f"Python {ver} at {sys.executable}, nable requires Python 3.10 or newer"
+        rec = ("Reinstall on Python 3.10+, e.g. "
+               "uvx --python 3.12 --from finops-mcp finops welcome")
+    return {
+        "name": "Python version",
+        "ok": ok,
+        "detail": detail,
+        "warnings": [],
+        "recommendation": rec,
+    }
+
 
 def _check_keyring_storage() -> dict:
     """Verify credentials are in the OS keyring, not plain env vars."""
@@ -545,6 +574,7 @@ def run_doctor(as_json: bool = False) -> int:
     Returns exit code: 0 = all ok, 1 = warnings/failures.
     """
     checks = [
+        _check_python_version(),
         _check_path_and_install(),
         _check_license(),
         _check_keyring_storage(),

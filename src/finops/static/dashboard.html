@@ -30,7 +30,7 @@
   --shadow:    0 1px 3px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.2);
   --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
   --r:         12px;
-  --font:      'Instrument Sans',system-ui,sans-serif;
+  --font:      'Bricolage Grotesque',system-ui,sans-serif;
   --mono:      'Geist Mono','JetBrains Mono',monospace;
 }
 
@@ -935,7 +935,7 @@ function renderSvcChart(svcs){
       scales:{
         x:{ticks:{color:tickColor,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},
            grid:{color:gridColor},border:{color:'transparent'}},
-        y:{ticks:{color:isDark?'#8fa3ae':'#4b5563',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},padding:4},
+        y:{ticks:{color:isDark?'#8fa3ae':'#4b5563',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12},padding:4},
            grid:{display:false},border:{color:'transparent'}}
       }
     }
@@ -967,12 +967,12 @@ function renderTrendChart(trend){
       responsive:true,maintainAspectRatio:false,
       plugins:{
         legend:{labels:{color:isDark?'#8fa3ae':'#4b5563',
-          font:{family:"'Instrument Sans',system-ui,sans-serif",size:12},
+          font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12},
           boxWidth:16,usePointStyle:true,pointStyle:'line'}},
         tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.raw)}}
       },
       scales:{
-        x:{ticks:{color:isDark?'#8fa3ae':'#4b5563',font:{family:"'Instrument Sans',system-ui,sans-serif",size:12}},
+        x:{ticks:{color:isDark?'#8fa3ae':'#4b5563',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12}},
            grid:{color:gridColor},border:{color:'transparent'}},
         y:{ticks:{color:tickColor,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},
            grid:{color:gridColor},border:{color:'transparent'}}

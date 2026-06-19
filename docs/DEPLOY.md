@@ -18,6 +18,8 @@ interfaces, none of which require an install:
 - Docker and Docker Compose.
 - Cloud read credentials (AWS Cost Explorer at minimum). The same ones you would
   give the local install.
+- Python 3.10 or newer on any machine that runs the per-engineer local install.
+  Check with `python3 --version`. The Docker path does not need a host Python.
 - Optional but recommended for finance: a Slack app and an SMTP account.
 
 ## 1. Configure
@@ -101,8 +103,10 @@ nable servers are involved at any point.
 
 ### Per-engineer install (5 minutes each, or one MDM policy)
 
-1. Pin the version. Install with `uvx --from finops-mcp==X.Y.Z finops welcome`
-   or ship it via your existing tooling (Homebrew/pip mirror, MDM script).
+1. Pin the version. Install with `uvx --python 3.12 --from finops-mcp==X.Y.Z finops welcome`
+   or ship it via your existing tooling (Homebrew/pip mirror, MDM script). The
+   `--python 3.12` flag fetches a matching interpreter; a pip-mirror or MDM path
+   on a stale system Python below 3.10 fails with `No matching distribution found`.
    The setup wizard writes editor config automatically; `finops upgrade`
    moves a machine forward deliberately, never silently.
 2. Issue scoped credentials, not personal keys. Your platform team creates
