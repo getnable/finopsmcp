@@ -1680,7 +1680,7 @@ def main(args: list[str] | None = None) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     serve_p.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
-    serve_p.add_argument("--host", default="0.0.0.0", help="Host to bind (default: 0.0.0.0 for network access)")
+    serve_p.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1, local only; use 0.0.0.0 to let your team reach it on the LAN)")
     serve_p.add_argument("--open", action="store_true", help="Open browser on start")
 
     welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect Claude + your first cloud account")
@@ -1906,7 +1906,7 @@ def main(args: list[str] | None = None) -> None:
             "gcp": GCPConnector(),
         })
         run_server(
-            host=getattr(parsed, "host", "0.0.0.0"),
+            host=getattr(parsed, "host", "127.0.0.1"),
             port=getattr(parsed, "port", 8080),
             open_browser=getattr(parsed, "open", False),
         )
@@ -1968,7 +1968,7 @@ def main(args: list[str] | None = None) -> None:
     print("  Want a visual dashboard?")
     print("    finops serve")
     print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
-    print("    → Share the URL and password with your manager or exec team")
+    print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
     print()
     print("  To add more providers: finops setup")
     print("  Full docs: https://getnable.com/docs\n")

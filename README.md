@@ -100,7 +100,7 @@ Once you see a real cost breakdown, you're live. Also works with Cursor, Windsur
 finops serve
 ```
 
-Opens a password-protected web dashboard at `http://localhost:8080` your whole team can view in a browser, no Claude required. Share the URL and password with your manager or exec team.
+Serves a password-protected web dashboard at `http://localhost:8080`, local to your machine by default. To let your team or manager view it in a browser (no Claude required), add `--host 0.0.0.0` so it binds your network. It stays password-protected; share the URL and password with them.
 
 **7-day free trial, all features unlocked. No credit card required.**
 
@@ -192,7 +192,7 @@ Or add manually to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "finops": { "command": "/usr/local/bin/finops-mcp" }
+    "nable": { "command": "/usr/local/bin/finops-mcp" }
   }
 }
 ```
