@@ -1967,7 +1967,7 @@ def main(args: list[str] | None = None) -> None:
     print()
     print("  Want a visual dashboard?")
     print("    finops serve")
-    print("    → Opens a web dashboard at http://localhost:8080")
+    print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
     print("    → Share the URL and password with your manager or exec team")
     print()
     print("  To add more providers: finops setup")

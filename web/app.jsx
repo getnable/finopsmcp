@@ -936,7 +936,7 @@ const EDITOR_TABS = [
     { k:"p", t:'  "mcpServers": {' },
     { k:"p", t:'    "nable": {' },
     { k:"p", t:'      "command": "uvx",' },
-    { k:"p", t:'      "args": ["finops-mcp"]' },
+    { k:"p", t:'      "args": ["--python", "3.12", "finops-mcp"]' },
     { k:"p", t:"    }" },
     { k:"p", t:"  }" },
     { k:"p", t:"}" },
@@ -944,7 +944,7 @@ const EDITOR_TABS = [
   { id:"cursor", label:"Cursor", bar:"~/.cursor/mcp.json", lines:[
     { k:"p", t:"{" },
     { k:"p", t:'  "mcpServers": {' },
-    { k:"p", t:'    "nable": { "command": "uvx", "args": ["finops-mcp"] }' },
+    { k:"p", t:'    "nable": { "command": "uvx", "args": ["--python", "3.12", "finops-mcp"] }' },
     { k:"p", t:"  }" },
     { k:"p", t:"}" },
   ]},
