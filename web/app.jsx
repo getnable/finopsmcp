@@ -1583,6 +1583,87 @@ function Tweaks(){
 }
 
 /* App */
+/* see it work — real product output (proof, not testimonials) */
+function SeeItWork(){
+  const proofs = [
+    {
+      tag: "Plain English",
+      q: "just downloaded nable — what are my costs?",
+      lead: ["You're spending ", "$13,642/mo", " on AWS. Top of the bill:"],
+      rows: [
+        ["Amazon Textract", "$5,361"],
+        ["Claude Sonnet 4.5 (Bedrock)", "$3,537"],
+        ["Amazon DocumentDB", "$2,034"],
+      ],
+      foot: "Top three are 80% of the bill. No dashboard, no setup.",
+    },
+    {
+      tag: "What Claude can't",
+      q: "what can you tell me that Claude can't on its own?",
+      bullets: [
+        ["alert", "Bedrock Sonnet 4.6 spiked +282% on Jun 17", "A $7.47/day baseline jumped to $28.57 in a single day. 2.8× normal."],
+        ["win", "58 non-prod callers on Textract, $2,360/mo", "Gate Textract to prod and it's the single biggest quick win on the account."],
+      ],
+      foot: "Live account data, run before the model answers. A chat window can't reach this.",
+    },
+    {
+      tag: "Propose-only",
+      q: "can you open a PR to fix the Textract waste?",
+      lead: ["Point me at the repo and I'll find the 58 call sites, gate Textract when ", "ENV != production", ", and open the PR for you to review. Or file the ticket now."],
+      leadCode: true,
+      foot: "It proposes and opens PRs. It never makes a change on its own.",
+    },
+  ];
+  return (
+    <section id="proof" style={{borderTop:"1px solid var(--line)"}}>
+      <div className="wrap">
+        <div className="section-head">
+          <div className="label">See it work</div>
+          <h2>Real questions.<br/><em>Real answers from your bill.</em></h2>
+          <p>Unedited sessions on a live AWS account. nable reads the bill, finds the waste, and proposes the fix, all from your editor.</p>
+        </div>
+        <div className="proof-grid">
+          {proofs.map((pf, i) => (
+            <div className="proof-card" key={i}>
+              <div className="proof-bar">
+                <span className="proof-dot" />
+                <span className="proof-src">nable · live AWS account</span>
+                <span className="proof-tag">{pf.tag}</span>
+              </div>
+              <div className="proof-q"><span className="proof-caret">›</span>{pf.q}</div>
+              <div className="proof-a">
+                {pf.lead && (
+                  <p className="proof-line">
+                    {pf.lead[0]}
+                    {pf.leadCode
+                      ? <code className="proof-code">{pf.lead[1]}</code>
+                      : <span className="proof-num">{pf.lead[1]}</span>}
+                    {pf.lead[2]}
+                  </p>
+                )}
+                {pf.rows && (
+                  <div className="proof-rows">
+                    {pf.rows.map((r, j) => (
+                      <div className="proof-row" key={j}><span>{r[0]}</span><span className="proof-num">{r[1]}</span></div>
+                    ))}
+                  </div>
+                )}
+                {pf.bullets && pf.bullets.map((b, j) => (
+                  <div className={"proof-bullet proof-" + b[0]} key={j}>
+                    <div className="proof-bh">{b[1]}</div>
+                    <div className="proof-bp">{b[2]}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="proof-foot">{pf.foot}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function App(){
   const [t, setT] = useState(TWEAK_DEFAULTS);
   const [version, setVersion] = useState(null);
@@ -1605,6 +1686,7 @@ function App(){
       <Nav />
       <Hero layout={t.layout} interaction={t.interaction} />
       <HowItWorks />
+      <SeeItWork />
       <EveryEditor />
       <AiCost />
       <Connectors />
