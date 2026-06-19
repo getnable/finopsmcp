@@ -1089,38 +1089,6 @@ function Tweaks() {
     }
   )));
 }
-function SeeItWork() {
-  const proofs = [
-    {
-      tag: "Plain English",
-      q: "just downloaded nable \u2014 what are my costs?",
-      lead: ["You're spending ", "$13,642/mo", " on AWS. Top of the bill:"],
-      rows: [
-        ["Amazon Textract", "$5,361"],
-        ["Claude Sonnet 4.5 (Bedrock)", "$3,537"],
-        ["Amazon DocumentDB", "$2,034"]
-      ],
-      foot: "Top three are 80% of the bill. No dashboard, no setup."
-    },
-    {
-      tag: "What Claude can't",
-      q: "what can you tell me that Claude can't on its own?",
-      bullets: [
-        ["alert", "Bedrock Sonnet 4.6 spiked +282% on Jun 17", "A $7.47/day baseline jumped to $28.57 in a single day. 2.8\xD7 normal."],
-        ["win", "58 non-prod callers on Textract, $2,360/mo", "Gate Textract to prod and it's the single biggest quick win on the account."]
-      ],
-      foot: "Live account data, run before the model answers. A chat window can't reach this."
-    },
-    {
-      tag: "Propose-only",
-      q: "can you open a PR to fix the Textract waste?",
-      lead: ["Point me at the repo and I'll find the 58 call sites, gate Textract when ", "ENV != production", ", and open the PR for you to review. Or file the ticket now."],
-      leadCode: true,
-      foot: "It proposes and opens PRs. It never makes a change on its own."
-    }
-  ];
-  return /* @__PURE__ */ React.createElement("section", { id: "proof", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "See it work"), /* @__PURE__ */ React.createElement("h2", null, "Real questions.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Real answers from your bill.")), /* @__PURE__ */ React.createElement("p", null, "Unedited sessions on a live AWS account. nable reads the bill, finds the waste, and proposes the fix, all from your editor.")), /* @__PURE__ */ React.createElement("div", { className: "proof-grid" }, proofs.map((pf, i) => /* @__PURE__ */ React.createElement("div", { className: "proof-card", key: i }, /* @__PURE__ */ React.createElement("div", { className: "proof-bar" }, /* @__PURE__ */ React.createElement("span", { className: "proof-dot" }), /* @__PURE__ */ React.createElement("span", { className: "proof-src" }, "nable \xB7 live AWS account"), /* @__PURE__ */ React.createElement("span", { className: "proof-tag" }, pf.tag)), /* @__PURE__ */ React.createElement("div", { className: "proof-q" }, /* @__PURE__ */ React.createElement("span", { className: "proof-caret" }, "\u203A"), pf.q), /* @__PURE__ */ React.createElement("div", { className: "proof-a" }, pf.lead && /* @__PURE__ */ React.createElement("p", { className: "proof-line" }, pf.lead[0], pf.leadCode ? /* @__PURE__ */ React.createElement("code", { className: "proof-code" }, pf.lead[1]) : /* @__PURE__ */ React.createElement("span", { className: "proof-num" }, pf.lead[1]), pf.lead[2]), pf.rows && /* @__PURE__ */ React.createElement("div", { className: "proof-rows" }, pf.rows.map((r, j) => /* @__PURE__ */ React.createElement("div", { className: "proof-row", key: j }, /* @__PURE__ */ React.createElement("span", null, r[0]), /* @__PURE__ */ React.createElement("span", { className: "proof-num" }, r[1])))), pf.bullets && pf.bullets.map((b, j) => /* @__PURE__ */ React.createElement("div", { className: "proof-bullet proof-" + b[0], key: j }, /* @__PURE__ */ React.createElement("div", { className: "proof-bh" }, b[1]), /* @__PURE__ */ React.createElement("div", { className: "proof-bp" }, b[2])))), /* @__PURE__ */ React.createElement("div", { className: "proof-foot" }, pf.foot))))));
-}
 function App() {
   const [t, setT] = useState(TWEAK_DEFAULTS);
   const [version, setVersion] = useState(null);
@@ -1139,6 +1107,6 @@ function App() {
     }).catch(() => {
     });
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(HowItWorks, null), /* @__PURE__ */ React.createElement(SeeItWork, null), /* @__PURE__ */ React.createElement(EveryEditor, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { layout: t.layout, interaction: t.interaction }), /* @__PURE__ */ React.createElement(HowItWorks, null), /* @__PURE__ */ React.createElement(EveryEditor, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
 }
 ReactDOM.createRoot(document.getElementById("app")).render(/* @__PURE__ */ React.createElement(App, null));
