@@ -2641,6 +2641,13 @@ def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = Fal
 
     print("\n  Press Ctrl+C to stop.\n")
 
+    # Drain the startup banner (including the auto-generated password) before we
+    # block forever in serve_forever. A non-TTY stdout (pipe, file, process
+    # manager) is block-buffered, so without this flush the password never
+    # appears and you are locked out of your own dashboard.
+    import sys
+    sys.stdout.flush()
+
     if open_browser:
         import webbrowser
         webbrowser.open(f"http://127.0.0.1:{actual_port}")
