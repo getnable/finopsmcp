@@ -116,7 +116,7 @@ def _run_agent_loop_sync(
     try:
         import anthropic
     except ImportError:
-        log.error("anthropic package not installed; install finops-mcp[slack]")
+        log.error('anthropic package not installed; install "finops-mcp[slack]"')
         return LoopResult("nable isn't fully set up yet. Ask whoever installed me to finish configuring it.")
 
     api_key = os.getenv("ANTHROPIC_API_KEY")

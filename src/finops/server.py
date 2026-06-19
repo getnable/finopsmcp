@@ -7,6 +7,9 @@ Run via:  finops-mcp  or  python -m finops.server
 
 from __future__ import annotations
 
+from ._preflight import require_python
+require_python()
+
 import asyncio
 import logging
 import os

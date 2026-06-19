@@ -4,6 +4,12 @@ A conversational FinOps teammate in your workspace. Once an engineer sets it up,
 anyone on the team can ask cost questions, run root cause analysis, and kick off
 fixes without leaving Slack.
 
+> **Plan:** the conversational `@nable` bot is part of nable Team ($1,000/mo
+> flat, unlimited seats), with a 7-day free trial. The free tier already covers
+> cost queries, anomaly detection, rightsizing, and one-way Slack alerts; the
+> two-way bot needs Team or an active trial. Start one with `finops setup
+> license`. Plans: [getnable.com/#pricing](https://getnable.com/#pricing).
+
 ## What it does
 
 **Ask anything.** Mention `@nable` in a channel or DM it. The bot answers with
@@ -95,7 +101,9 @@ with scope `connections:write` (that is your `xapp-...` App Token). Then Install
 to Workspace; OAuth & Permissions shows your `xoxb-...` Bot Token.
 
 **3. Run it locally** (nothing is hosted; the bot runs on your machine, your
-tokens stay in your OS keyring):
+tokens stay in your OS keyring). Requires Python 3.10 or newer, check with
+`python3 --version`. On older Python, pip reports `No matching distribution
+found for finops-mcp`:
 
 ```
 pip install "finops-mcp[slack]"

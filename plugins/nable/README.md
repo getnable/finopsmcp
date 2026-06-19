@@ -34,10 +34,10 @@ It checks what nable can already see (AWS often works with zero setup, it reuses
 
 ## Connect your cloud
 
-The plugin wires up the runtime. To link your accounts and see your first cost number, run the setup wizard once:
+The plugin wires up the runtime. To link your accounts and see your first cost number, run the setup wizard once. Requires Python 3.10 or newer, check with `python3 --version`:
 
 ```
-uvx --from finops-mcp finops welcome
+uvx --python 3.12 --from finops-mcp finops welcome
 ```
 
 It writes your config, stores credentials in your OS keychain, and runs a read-only scan. Want to see it on sample data first:

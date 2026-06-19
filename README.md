@@ -39,6 +39,8 @@ Most spend is concentrated in us-east-1 ($5,841 of the $7,284 AWS total).
 
 ## Quick start
 
+Requires Python 3.10 or newer. The `uvx` command below fetches a matching Python for you. If you take the `pip` path instead, check yours first with `python --version` (or `python3 --version`). On older Python, pip reports `No matching distribution found for finops-mcp`.
+
 **Step 1: Install and run the setup wizard**
 
 Need `uv`? It is not preinstalled on macOS or most Linux:
@@ -290,6 +292,7 @@ finops setup claude    # re-run Claude Desktop configuration only
 | Tools don't appear in Claude | Switch to uvx config or use absolute path |
 | `command not found: finops-mcp` | Re-install with `pip install finops-mcp` or use `uvx` |
 | AWS returns no data | Run `finops setup aws`. The wizard writes credentials to your editor config automatically. |
+| `No matching distribution found for finops-mcp` | Your Python is older than 3.10. Check with `python --version`, then install on 3.10+ (`uvx --python 3.12 --from finops-mcp finops welcome`, or `python3.10 -m pip install finops-mcp`). |
 | Python 3.8/3.9 errors | nable requires Python 3.10+: `python3.10 -m pip install finops-mcp` |
 | Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
 | Permission denied | Install to user: `pip install --user finops-mcp` or use `uvx` |
