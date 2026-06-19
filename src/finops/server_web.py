@@ -2541,7 +2541,7 @@ def _make_server(host: str, port: int) -> HTTPServer:
     raise OSError(f"Could not bind to any port in range {port}-{port + 9}")
 
 
-def start_server_background(host: str = "0.0.0.0", port: int = 8080) -> tuple[HTTPServer, int]:
+def start_server_background(host: str = "127.0.0.1", port: int = 8080) -> tuple[HTTPServer, int]:
     """Start the dashboard server in a daemon background thread."""
     server = _make_server(host, port)
     actual_port = server.server_address[1]
@@ -2610,15 +2610,19 @@ def _start_finance_services() -> list[str]:
     return status
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8080, open_browser: bool = False) -> None:
+def run_server(host: str = "127.0.0.1", port: int = 8080, open_browser: bool = False) -> None:
     """Run the dashboard server in the foreground (blocking)."""
     server = _make_server(host, port)
     actual_port = server.server_address[1]
-    local_ip = _local_ip()
+    # Only probe the LAN IP (which opens a socket toward 8.8.8.8) when actually
+    # binding all interfaces; the default localhost run stays fully offline.
+    local_ip = _local_ip() if host == "0.0.0.0" else host
 
     print(f"\n  nable dashboard running at http://{host}:{actual_port}")
     if host == "0.0.0.0":
         print(f"  Share this URL with your team: http://{local_ip}:{actual_port}")
+    else:
+        print(f"  Local only. To let your team reach it on the LAN: finops serve --host 0.0.0.0")
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(
             "\n  Note: this is plain HTTP. The password and session cookie travel "

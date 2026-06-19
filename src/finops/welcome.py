@@ -540,6 +540,7 @@ def run_welcome_flow(demo: bool = False) -> None:
     # ~/.aws, SSO, instance profile). If so, the fastest path to value is a
     # read-only scan with those creds: no menu, no stored secrets. Ask first,
     # one keystroke. Never touch their account unprompted.
+    _line(dim("  Checking for cloud credentials in your environment..."))
     aws_ambient = False
     try:
         import asyncio as _aio
@@ -654,7 +655,7 @@ def run_welcome_flow(demo: bool = False) -> None:
     # show nable on sample data so the value lands before they ever leave.
     if not shown:
         _blank()
-        _line(bold("Here's nable on a sample bill") + dim("  ·  connect an account to see your own"))
+        _line(bold("Here's nable on a sample bill") + dim("  (example numbers · connect an account to see your own)"))
         _show_value_moment(demo=True)
         _line(dim("  Ready for real numbers?  ") + cyan("finops setup aws") + dim("  (read-only, ~1 min)"))
         _oneclick = _oneclick_aws_url()
