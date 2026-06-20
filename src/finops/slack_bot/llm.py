@@ -30,8 +30,8 @@ log = logging.getLogger(__name__)
 
 TIER_DEFAULTS = {
     "simple": "claude-haiku-4-5",
-    "chat": "claude-sonnet-4-5",
-    "rca": "claude-opus-4-5",
+    "chat": "claude-sonnet-4-6",
+    "rca": "claude-opus-4-8",
 }
 
 _QUERY_TIMEOUT = int(os.getenv("FINOPS_QUERY_TIMEOUT", "60"))
