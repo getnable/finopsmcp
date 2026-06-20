@@ -199,6 +199,11 @@ class AWSConnector(BaseConnector):
             entries=[],
         )
 
+        # True once any account's Cost Explorer query returns ResultsByTime rows.
+        # Separates "connected, data present, genuinely $0 spend" from an error
+        # path that returns nothing at all.
+        had_results = False
+
         for role_arn in targets:
             ce = self._make_client(role_arn)
             account_id = self._account_id(role_arn)
@@ -250,14 +255,8 @@ class AWSConnector(BaseConnector):
                     ) from exc
                 raise
 
-            # If CE returned rows but all costs are zero, this is a free/new account
-            # with no actual spend. Flag it so callers can give a clear message
-            # instead of misdiagnosing it as a config error.
-            if results and all(
-                float(r.get("Total", {}).get("UnblendedCost", {}).get("Amount", 0)) == 0.0
-                for r in results
-            ):
-                merged._zero_spend_account = True
+            if results:
+                had_results = True
 
             summary = self._build_summary(
                 account_id, start_date, end_date, {"ResultsByTime": results}
@@ -271,6 +270,14 @@ class AWSConnector(BaseConnector):
             for k, v in summary.by_region.items():
                 merged.by_region[k] = merged.by_region.get(k, 0.0) + v
             merged.entries.extend(summary.entries)
+
+        # A grouped Cost Explorer query reports each row's costs under Groups[];
+        # the per-period Total field comes back empty, so it cannot be used to
+        # detect zero spend. The old check read that empty Total and flagged
+        # every grouped query as zero-spend, including $14k accounts. Decide from
+        # the real merged total, which sums the groups, and only when CE actually
+        # returned rows (an error path returning nothing must not look like $0).
+        merged._zero_spend_account = had_results and merged.total_usd == 0.0
 
         # Store a copy so later mutation of the returned object cannot reach the cache.
         _cache.set(_ck, _copy.deepcopy(merged), _cache.COST_TTL)
