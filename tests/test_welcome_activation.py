@@ -22,16 +22,28 @@ import finops.welcome as w
 
 
 @pytest.fixture(autouse=True)
-def _clean_demo_env():
-    """The value moment sets FINOPS_DEMO on os.environ; keep tests isolated."""
-    keys = ("FINOPS_DEMO", "FINOPS_DEMO_MODE")
-    before = {k: os.environ.get(k) for k in keys}
-    yield
-    for k, v in before.items():
-        if v is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = v
+def _isolate_welcome_env(monkeypatch):
+    """Keep these tests hermetic regardless of suite order.
+
+    Two leak vectors: (1) the value moment sets FINOPS_DEMO on os.environ; (2)
+    run_welcome_flow probes for an ambient model provider via the LLM env keys and
+    the vault (_any_llm_configured / _llm_ambient_provider), so an earlier test that
+    leaves an OpenAI/Anthropic credential in the vault would steer the flow down the
+    LLM branch and break the AWS/demo-path assertions here. These tests cover the
+    cloud/demo path only, so clear the demo + provider env keys and neutralize the
+    LLM probe; tests that want the LLM branch can override.
+    """
+    for k in ("FINOPS_DEMO", "FINOPS_DEMO_MODE",
+              "OPENAI_API_KEY", "OPENAI_ADMIN_KEY",
+              "ANTHROPIC_API_KEY", "ANTHROPIC_ADMIN_KEY",
+              "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+
+    async def _no_ambient_llm():
+        return False
+
+    monkeypatch.setattr(w, "_any_llm_configured", _no_ambient_llm, raising=False)
+    monkeypatch.setattr(w, "_llm_ambient_provider", lambda: None, raising=False)
 
 
 @pytest.fixture()
