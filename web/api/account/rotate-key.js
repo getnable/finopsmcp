@@ -188,7 +188,7 @@ async function sendRotationEmail(to, licenseKey, resendKey) {
   <hr style="border:none;border-top:1px solid #e6e2d6;margin:28px 0 20px;"/>
   <p style="font-size:12px;color:#8b8879;margin:0;line-height:1.6;">
     <a href="https://getnable.com" style="color:#1a1915;">getnable.com</a> &middot;
-    <a href="https://billing.stripe.com/p/login/eVq3cY8qQ" style="color:#8b8879;">Manage billing</a>
+    <a href="https://getnable.com/account" style="color:#8b8879;">Manage billing</a>
   </p>
 </div>
 </body>

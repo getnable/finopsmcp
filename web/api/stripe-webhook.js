@@ -272,8 +272,8 @@ async function sendLicenseEmail(to, licenseKey, plan) {
   <p style="font-size:12px;color:#8b8879;margin:0;line-height:1.6;">
     Questions? Reply here or email
     <a href="mailto:hello@getnable.com" style="color:#1a1915;">hello@getnable.com</a>.
-    You can manage your subscription at any time via
-    <a href="https://billing.stripe.com/p/login/eVq3cY8qQ" style="color:#1a1915;">the billing portal</a>.
+    You can manage your subscription at any time from
+    <a href="https://getnable.com/account" style="color:#1a1915;">your account</a>.
   </p>
 </div>
 </body>
