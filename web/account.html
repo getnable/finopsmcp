@@ -29,6 +29,7 @@
     --alert:#e05c4b;
     --warn:#e6a840;
     --success:#3cba7a;
+    --hl:var(--success);
     --mono:'Geist Mono',ui-monospace,monospace;
     --r:8px;
   }
@@ -49,7 +50,7 @@
   .nav .right{display:flex;gap:10px;align-items:center}
 
   /* buttons */
-  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:6px;font-size:13.5px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:.15s;letter-spacing:-.005em;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;font-size:13.5px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:.15s;letter-spacing:-.005em;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif}
   .btn-primary{background:var(--fg);color:var(--bg);border-color:var(--fg)}
   .btn-primary:hover{background:#fff;border-color:#fff}
   .btn-primary:disabled{opacity:.45;cursor:not-allowed}
@@ -57,11 +58,13 @@
   .btn-ghost:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
   .btn-ghost:disabled{opacity:.45;cursor:not-allowed}
   .btn-sm{padding:5px 10px;font-size:12.5px}
+  /* keyboard focus ring (a11y; never strip the indicator for :focus-visible) */
+  .btn:focus-visible,.copy-btn:focus-visible,.host-card:focus-visible,.field-input:focus-visible,.quick-link:focus-visible,.resend-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   /* type */
   h1,h2,h3,h4{font-weight:500;letter-spacing:-.025em;color:var(--fg)}
   p{color:var(--fg-2);line-height:1.6}
-  .label{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);letter-spacing:.02em}
+  .label{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);letter-spacing:.02em}
 
   /* main content area */
   main{min-height:calc(100vh - 60px);padding:64px 0 96px}
@@ -74,16 +77,16 @@
 
   /* form elements */
   .field-group{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
-  .field-label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase}
-  .field-input{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:14px;color:var(--fg);outline:none;transition:.15s}
+  .field-label{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase}
+  .field-input{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:14px;color:var(--fg);outline:none;transition:.15s}
   .field-input:focus{border-color:var(--fg-2)}
   .field-input.code-input{font-family:var(--mono);font-size:24px;letter-spacing:.18em;text-align:center;padding:14px 12px}
-  .field-input::placeholder{color:var(--fg-4)}
+  .field-input::placeholder{color:var(--fg-3)}
   .btn-full{width:100%;justify-content:center;padding:10px 14px;font-size:14px;margin-top:8px}
   .form-action{margin-top:20px}
 
   /* inline error */
-  .inline-error{font-size:12.5px;color:var(--alert);font-family:var(--mono);margin-top:8px;display:none}
+  .inline-error{font-size:12.5px;color:var(--alert);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin-top:8px;display:none}
   .inline-error.show{display:block}
 
   /* resend link */
@@ -98,16 +101,16 @@
 
   .acct-section{border-top:1px solid var(--line);padding:28px 0}
   .acct-section:last-child{border-bottom:1px solid var(--line)}
-  .acct-section .sect-label{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:16px}
+  .acct-section .sect-label{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:16px}
 
   /* license key block */
   .key-block{background:var(--fg);border-radius:8px;padding:16px 20px;margin-bottom:12px;position:relative}
   .key-block code{font-family:var(--mono);font-size:12px;color:var(--accent-ink);word-break:break-all;line-height:1.7;display:block}
   .key-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .copy-btn{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-2);background:transparent;border:1px solid var(--line);border-radius:5px;padding:5px 10px;cursor:pointer;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;transition:.15s}
+  .copy-btn{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-2);background:transparent;border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;transition:.15s}
   .copy-btn:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
   .copy-btn.copied{color:var(--hl);border-color:var(--hl)}
-  .free-plan-note{font-size:13px;color:var(--fg-3);font-family:var(--mono);margin-top:4px}
+  .free-plan-note{font-size:13px;color:var(--fg-3);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin-top:4px}
   .free-plan-note a{color:var(--fg-2);border-bottom:1px solid var(--line)}
   .free-plan-note a:hover{color:var(--fg)}
 
@@ -115,11 +118,30 @@
   .plan-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:12px}
   .plan-info{}
   .plan-name{font-size:16px;font-weight:500;color:var(--fg);letter-spacing:-.01em}
-  .plan-status{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);margin-top:3px}
+  .plan-status{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);margin-top:3px}
   .plan-status .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:6px;vertical-align:1px}
   .plan-status .dot.active{background:var(--hl)}
   .plan-status .dot.free{background:var(--fg-4)}
-  .billing-note{font-size:12.5px;color:var(--fg-3);font-family:var(--mono);margin-top:8px}
+  .billing-note{font-size:12.5px;color:var(--fg-3);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin-top:8px}
+
+  /* account substat + hosting choice */
+  .acct-substat{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);margin-top:8px}
+  .host-choices{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 6px}
+  .host-card{text-align:left;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:14px 15px;cursor:pointer;transition:.15s;font-family:inherit;color:inherit}
+  .host-card:hover{border-color:var(--line-2);background:var(--bg-3)}
+  .host-card.selected{border-color:var(--accent);background:var(--bg-3)}
+  .host-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+  .host-card-title{font-size:14px;font-weight:500;color:var(--fg);letter-spacing:-.01em}
+  .host-badge{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--fg-3);border:1px solid var(--line-2);border-radius:2px;padding:2px 6px}
+  .host-card.selected .host-badge{color:var(--accent);border-color:var(--accent-dim)}
+  .host-card p{font-size:12.5px;color:var(--fg-2);line-height:1.55;margin:0}
+  .host-detail{margin-top:8px}
+  .host-cmd{background:var(--fg);border-radius:6px;padding:10px 14px;margin-bottom:10px}
+  .host-cmd code{font-family:var(--mono);font-size:11.5px;color:var(--accent-ink);display:block;white-space:pre-wrap;word-break:break-all}
+  .host-detail>p{font-size:12.5px;color:var(--fg-2);margin:0}
+  .host-detail>p a{color:var(--fg);border-bottom:1px solid var(--line-2)}
+  .host-confirm{font-size:13px;color:var(--success);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin-top:10px}
+  select.field-input{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2356656d' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px}
 
   /* quick links */
   .links-grid{display:flex;flex-direction:column;gap:0}
@@ -139,7 +161,7 @@
 
   /* footer */
   footer{border-top:1px solid var(--line);padding:28px 0}
-  .foot-inner{display:flex;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:11.5px;color:var(--fg-3)}
+  .foot-inner{display:flex;align-items:center;justify-content:space-between;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3)}
 
   /* states */
   #state-email, #state-code, #state-account{display:none}
@@ -152,6 +174,7 @@
     .auth-card .card-head h1{font-size:22px}
     .key-block code{font-size:11px}
     .plan-row{flex-direction:column;align-items:flex-start}
+    .host-choices{grid-template-columns:1fr}
   }
 </style>
 </head>
@@ -192,7 +215,7 @@
           <label class="field-label" for="email-input">Email address</label>
           <input class="field-input" type="email" id="email-input" name="email" placeholder="you@company.com" autocomplete="email" required />
         </div>
-        <div class="inline-error" id="email-error"></div>
+        <div class="inline-error" role="alert" id="email-error"></div>
         <div class="form-action">
           <button type="submit" class="btn btn-primary btn-full" id="email-submit-btn">Send code</button>
         </div>
@@ -210,13 +233,13 @@
           <label class="field-label" for="code-input">6-digit code</label>
           <input class="field-input code-input" type="text" id="code-input" name="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code" />
         </div>
-        <div class="inline-error" id="code-error"></div>
+        <div class="inline-error" role="alert" id="code-error"></div>
         <div class="form-action">
           <button type="submit" class="btn btn-primary btn-full" id="code-submit-btn">Verify</button>
         </div>
       </form>
-      <span class="resend-link" id="resend-link">Resend code</span>
-      <div class="inline-error" id="resend-error" style="margin-top:8px"></div>
+      <span class="resend-link" id="resend-link" role="button" tabindex="0">Resend code</span>
+      <div class="inline-error" role="alert" id="resend-error" style="margin-top:8px"></div>
       <p style="text-align:center;margin-top:14px"><button type="button" onclick="showState('email')" style="background:none;border:none;color:var(--fg-3);font-size:13px;cursor:pointer;text-decoration:underline;font-family:inherit">Wrong email? Go back</button></p>
     </div>
 
@@ -248,17 +271,17 @@
               <button class="btn btn-ghost btn-sm" id="rotate-cancel-btn">Cancel</button>
             </div>
           </div>
-          <div class="inline-error" id="rotate-error" style="margin-top:10px"></div>
+          <div class="inline-error" role="alert" id="rotate-error" style="margin-top:10px"></div>
           <div style="margin-top:20px;padding:16px;background:var(--bg-2);border-radius:8px;border:1px solid var(--line)">
             <p style="font-size:12.5px;font-weight:600;color:var(--fg);margin:0 0 10px;">How to activate</p>
             <ol style="margin:0;padding-left:18px;font-size:12.5px;color:var(--fg-2);line-height:1.8">
               <li>Copy your key above.</li>
-              <li>Open <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">~/Library/Application Support/Claude/claude_desktop_config.json</code><br/>On Windows: <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">%APPDATA%\Claude\claude_desktop_config.json</code></li>
-              <li>Add <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">FINOPS_LICENSE_KEY</code> to the <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:3px">env</code> block for the finops server:</li>
+              <li>Open <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:2px">~/Library/Application Support/Claude/claude_desktop_config.json</code><br/>On Windows: <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:2px">%APPDATA%\Claude\claude_desktop_config.json</code></li>
+              <li>Add <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:2px">FINOPS_LICENSE_KEY</code> to the <code style="font-family:var(--mono);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:2px">env</code> block for the finops server:</li>
             </ol>
             <div style="background:var(--fg);border-radius:6px;padding:10px 14px;margin-top:10px">
               <code style="font-family:var(--mono);font-size:11.5px;color:var(--accent-ink);line-height:1.7;display:block;white-space:pre">"env": {
-  "FINOPS_LICENSE_KEY": "FINOPS-1-..."
+  "FINOPS_LICENSE_KEY": "FINOPS-2-..."
 }</code>
             </div>
             <p style="font-size:12.5px;color:var(--fg-2);margin:10px 0 0">Restart Claude Desktop after saving. Team features unlock immediately. <a href="/docs#activate-license" style="color:var(--fg)">Full instructions</a></p>
@@ -282,10 +305,63 @@
           <button id="manage-billing-btn" class="btn btn-ghost btn-sm">Manage billing</button>
         </div>
         <p class="billing-note">Update card, download invoices, or cancel.</p>
-        <div class="inline-error" id="billing-error"></div>
+        <p class="acct-substat" id="member-since"></p>
+        <div class="inline-error" role="alert" id="billing-error"></div>
       </div>
 
-      <!-- Section C: Quick links -->
+      <!-- Section C: Hosting -->
+      <div class="acct-section">
+        <div class="sect-label">Hosting</div>
+        <p style="font-size:13px;color:var(--fg-2);margin:0">Run nable yourself, or let us run an isolated instance for your team. <span id="host-current" class="acct-substat" style="margin:0"></span></p>
+        <div class="host-choices">
+          <button type="button" class="host-card" data-choice="self" id="host-card-self" aria-pressed="false">
+            <div class="host-card-head"><span class="host-card-title">Run it yourself</span><span class="host-badge">Free</span></div>
+            <p>Run <code style="font-family:var(--mono);font-size:11px">finops serve</code> on a box you control. Credentials never leave your environment.</p>
+          </button>
+          <button type="button" class="host-card" data-choice="hosted" id="host-card-hosted" aria-pressed="false">
+            <div class="host-card-head"><span class="host-card-title">Let us host it</span><span class="host-badge">Managed</span></div>
+            <p>We run a single-tenant instance for your team. Your raw bill stays in your connector, never pooled.</p>
+          </button>
+        </div>
+        <div class="inline-error" role="alert" id="host-msg" style="margin-top:6px"></div>
+
+        <div class="host-detail" id="host-self-detail" style="display:none">
+          <div class="host-cmd"><code>pip install finops-mcp &amp;&amp; finops serve</code></div>
+          <p>Opens a password-protected dashboard your team reaches by URL. <a href="/docs#quickstart">Setup guide</a></p>
+        </div>
+
+        <div class="host-detail" id="host-managed-detail" style="display:none">
+          <form id="host-form" novalidate>
+            <div class="field-group">
+              <label class="field-label" for="host-cloud">Which cloud</label>
+              <select class="field-input" id="host-cloud">
+                <option value="aws">AWS</option>
+                <option value="azure">Azure</option>
+                <option value="gcp">GCP</option>
+                <option value="multiple">Multiple</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="host-idp">SSO / identity provider (optional)</label>
+              <input class="field-input" id="host-idp" placeholder="Okta, Azure AD, Google" />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="host-team">Team size (optional)</label>
+              <input class="field-input" id="host-team" placeholder="e.g. 12" />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="host-notes">Anything else (optional)</label>
+              <input class="field-input" id="host-notes" placeholder="Timeline, requirements, security review" />
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm" id="host-submit" style="margin-top:4px">Request managed hosting</button>
+          </form>
+          <p class="host-confirm" id="host-confirm" style="display:none">Got it. We'll reach out to set up your isolated instance.</p>
+          <div class="inline-error" role="alert" id="host-error" style="margin-top:8px"></div>
+        </div>
+      </div>
+
+      <!-- Section D: Quick links -->
       <div class="acct-section">
         <div class="sect-label">Quick links</div>
         <div class="links-grid">
@@ -307,7 +383,7 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </span>
           </a>
-          <span class="quick-link signout" id="signout-link">
+          <span class="quick-link signout" id="signout-link" role="button" tabindex="0">
             <span>Sign out</span>
             <span class="ql-arrow">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
@@ -390,22 +466,24 @@
     const plan = (data.plan || 'free').toLowerCase();
     const isPro = plan === 'pro';
     const isTrial = plan === 'trial';
+    const isTeam = plan === 'team';
+    const hasLicense = isPro || isTrial || isTeam; // pro, team, and trial all get a key
 
     // License key section
-    document.getElementById('key-pro-view').style.display = (isPro || isTrial) ? '' : 'none';
-    document.getElementById('key-free-view').style.display = (!isPro && !isTrial) ? '' : 'none';
-    if ((isPro || isTrial) && data.license_key) {
+    document.getElementById('key-pro-view').style.display = hasLicense ? '' : 'none';
+    document.getElementById('key-free-view').style.display = hasLicense ? 'none' : '';
+    if (hasLicense && data.license_key) {
       document.getElementById('license-key-display').textContent = data.license_key;
     }
 
     // Plan display
-    const planLabel = data.plan === 'team' ? 'Team' : isPro ? 'Pro' : isTrial ? 'Trial' : 'Free';
+    const planLabel = isTeam ? 'Team' : isPro ? 'Pro' : isTrial ? 'Trial' : 'Free';
     document.getElementById('plan-name-display').textContent = planLabel;
     const statusEl = document.getElementById('plan-status-display');
-    if (isPro) {
-      statusEl.innerHTML = '<span class="dot active"></span>Active';
-    } else if (isTrial) {
+    if (isTrial) {
       statusEl.innerHTML = '<span class="dot active"></span>Trial active';
+    } else if (hasLicense) {
+      statusEl.innerHTML = '<span class="dot active"></span>Active';
     } else {
       statusEl.innerHTML = '<span class="dot free"></span>Free tier';
     }
@@ -414,6 +492,7 @@
     document.getElementById('nav-signout-wrap').style.display = '';
 
     showState('account');
+    loadHosting();
   }
 
   // ── API helpers ────────────────────────────────────────────────────────────
@@ -600,6 +679,103 @@
     }
   });
 
+  // ── Hosting choice ───────────────────────────────────────────────────────────
+
+  function fmtDate(unixSeconds) {
+    if (!unixSeconds) return '';
+    try {
+      return new Date(unixSeconds * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch (e) { return ''; }
+  }
+
+  function selectHostCard(choice) {
+    var selfCard = document.getElementById('host-card-self');
+    var hostedCard = document.getElementById('host-card-hosted');
+    selfCard.classList.toggle('selected', choice === 'self');
+    hostedCard.classList.toggle('selected', choice === 'hosted');
+    selfCard.setAttribute('aria-pressed', String(choice === 'self'));
+    hostedCard.setAttribute('aria-pressed', String(choice === 'hosted'));
+    document.getElementById('host-self-detail').style.display = choice === 'self' ? '' : 'none';
+    document.getElementById('host-managed-detail').style.display = choice === 'hosted' ? '' : 'none';
+  }
+
+  function setHostingCurrent(hosting) {
+    const el = document.getElementById('host-current');
+    if (!hosting || !hosting.mode) { el.textContent = ''; return; }
+    if (hosting.mode === 'hosted') {
+      el.textContent = hosting.status === 'requested' ? 'Managed setup requested.' : 'Managed.';
+    } else {
+      el.textContent = 'Currently self-hosted.';
+    }
+  }
+
+  async function loadHosting() {
+    const sess = loadSession();
+    if (!sess || !sess.token) return;
+    try {
+      const data = await apiFetch('/api/account/hosting', { token: sess.token });
+      if (data.member_since) {
+        document.getElementById('member-since').textContent = 'Member since ' + fmtDate(data.member_since);
+      }
+      if (data.hosting) {
+        setHostingCurrent(data.hosting);
+        if (data.hosting.mode) { selectHostCard(data.hosting.mode); _hostingMode = data.hosting.mode; }
+      }
+    } catch (e) {
+      // non-fatal: the hosting panel just stays at its defaults
+    }
+  }
+
+  function saveHosting(choice, extra) {
+    const sess = loadSession();
+    if (!sess || !sess.token) return Promise.reject(new Error('Not signed in'));
+    return apiFetch('/api/account/hosting', Object.assign({ token: sess.token, choice: choice }, extra || {}));
+  }
+
+  let _savingHosting = false, _hostingMode = null;
+  document.getElementById('host-card-self').addEventListener('click', function () {
+    if (_savingHosting) return;  // re-entrancy guard: don't race saves on rapid clicks
+    selectHostCard('self');
+    clearError('host-msg');
+    _savingHosting = true;
+    saveHosting('self').then(function (d) {
+      if (d && d.hosting) { setHostingCurrent(d.hosting); _hostingMode = 'self'; }
+    }).catch(function (err) {
+      // Surface the failure and revert the optimistic selection to the last
+      // persisted mode, so the card never claims a choice that was not saved.
+      showError('host-msg', (err && err.message) || 'Could not save your choice. Try again.');
+      selectHostCard(_hostingMode);
+    }).finally(function () { _savingHosting = false; });
+  });
+
+  document.getElementById('host-card-hosted').addEventListener('click', function () {
+    selectHostCard('hosted');
+  });
+
+  document.getElementById('host-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    clearError('host-error');
+    const btn = document.getElementById('host-submit');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    try {
+      const data = await saveHosting('hosted', {
+        cloud: document.getElementById('host-cloud').value,
+        idp: document.getElementById('host-idp').value.trim(),
+        team_size: document.getElementById('host-team').value.trim(),
+        notes: document.getElementById('host-notes').value.trim(),
+      });
+      if (data && data.hosting) setHostingCurrent(data.hosting);
+      _hostingMode = 'hosted';
+      document.getElementById('host-confirm').style.display = '';
+    } catch (err) {
+      showError('host-error', err.message || 'Could not send the request. Try again.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Request managed hosting';
+    }
+  });
+
   // ── Sign out ───────────────────────────────────────────────────────────────
 
   function doSignOut() {
@@ -613,6 +789,20 @@
 
   document.getElementById('signout-link').addEventListener('click', doSignOut);
   document.getElementById('nav-signout-btn').addEventListener('click', doSignOut);
+
+  // Keyboard activation for the role="button" spans (resend code, sign out), so
+  // keyboard-only users can trigger them with Enter/Space.
+  function keyActivate(el) {
+    if (!el) return;
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+        e.preventDefault();
+        el.click();
+      }
+    });
+  }
+  keyActivate(document.getElementById('signout-link'));
+  keyActivate(document.getElementById('resend-link'));
 
   // ── Init ───────────────────────────────────────────────────────────────────
 
