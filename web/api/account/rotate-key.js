@@ -61,7 +61,9 @@ function b64url(str) {
 function b64urlDecode(str) {
   const padded = str.replace(/-/g, "+").replace(/_/g, "/");
   const pad = padded.length % 4;
-  return atob(pad ? padded + "=".repeat(4 - pad) : padded);
+  const bin = atob(pad ? padded + "=".repeat(4 - pad) : padded);
+  // Decode UTF-8 to mirror the TextEncoder-based encoder (non-ASCII emails).
+  return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
 }
 
 function timingSafeEqual(a, b) {
