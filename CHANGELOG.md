@@ -2,6 +2,19 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.78
+
+One command to install.
+
+### Install and onboarding
+- **`uvx finops-mcp` is the whole command now.** Run it in a terminal and it
+  launches the onboarding wizard; an MCP client (Claude Desktop, Cursor) running
+  it over stdio still gets the server. Any subcommand routes to the CLI too, so
+  `uvx finops-mcp setup`, `uvx finops-mcp doctor`, and `uvx finops-mcp welcome
+  --demo` all work. No more `uvx --python 3.12 --from finops-mcp finops welcome`.
+  The site, docs, and README now lead with the short command; the MCP config the
+  wizard writes keeps its pinned managed Python for reproducibility.
+
 ## 0.8.77
 
 Deep GCP audits, plus a round of security hardening.

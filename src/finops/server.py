@@ -6999,31 +6999,24 @@ def main() -> None:
     import logging
     import sys
 
-    # `uvx finops-mcp setup`, route to the setup wizard instead of starting the server.
-    if len(sys.argv) > 1 and sys.argv[1] == "setup":
+    # `finops-mcp` is the MCP server entry, normally launched by an MCP client
+    # (Claude Desktop, Cursor) over a stdio pipe with no args. But a human can run
+    # `uvx finops-mcp [subcommand]` in a terminal, so make one short command do
+    # everything by routing the human cases to the CLI wizard:
+    #   - any subcommand or flag (welcome, setup, doctor, --version, ...) -> wizard
+    #   - a bare interactive run (a TTY, no args)                         -> onboarding
+    #   - no args + piped stdio (an MCP client)                           -> the server
+    argv = sys.argv[1:]
+    if argv:
         from .setup_wizard import main as setup_main
-        setup_main(sys.argv[2:])
+        setup_main(argv)
         return
-
-    # When run directly from a terminal (not piped by Claude Desktop), stdin is a TTY.
-    # The MCP server communicates over stdio, running it interactively makes no sense
-    # and just hangs. Show a helpful message and redirect to the setup wizard instead.
     if sys.stdin.isatty():
-        print()
-        print("  nable MCP server  |  https://getnable.com")
-        print()
-        print("  This command is called automatically by Claude Desktop.")
-        print("  To configure providers and connect Claude Desktop, run:")
-        print()
-        print("    finops setup")
-        print()
-        print("  Or with uvx:")
-        print()
-        print("    uvx finops-mcp setup")
-        print()
-        print("  Setup guide: https://getnable.com/docs")
-        print()
-        sys.exit(0)
+        # Bare `uvx finops-mcp` in a terminal: launch onboarding rather than a stdio
+        # server that would just hang waiting for an MCP client.
+        from .setup_wizard import main as setup_main
+        setup_main(["welcome"])
+        return
 
     logging.basicConfig(level=logging.INFO)
     # Silence APScheduler's noisy "Adding job tentatively" lines, they fire once per
