@@ -279,9 +279,10 @@
               <span class="dot free"></span>Free tier
             </div>
           </div>
-          <a href="https://billing.stripe.com/p/login/eVq3cY8qQ" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Manage billing</a>
+          <button id="manage-billing-btn" class="btn btn-ghost btn-sm">Manage billing</button>
         </div>
         <p class="billing-note">Update card, download invoices, or cancel.</p>
+        <div class="inline-error" id="billing-error"></div>
       </div>
 
       <!-- Section C: Quick links -->
@@ -573,6 +574,29 @@
     } finally {
       btn.disabled = false;
       btn.textContent = 'Yes, rotate';
+    }
+  });
+
+  // ── Manage billing (Stripe customer portal session) ──────────────────────────
+
+  document.getElementById('manage-billing-btn').addEventListener('click', async function () {
+    clearError('billing-error');
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Opening...';
+    try {
+      const sess = loadSession();
+      const data = await apiFetch('/api/account/billing-portal', { token: sess ? sess.token : '' });
+      if (data.url) {
+        window.location.href = data.url;
+        return;  // leave the button disabled while we navigate away
+      }
+      showError('billing-error', 'Could not open billing. Please try again.');
+    } catch (err) {
+      showError('billing-error', err.message || 'Could not open billing. Please try again.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Manage billing';
     }
   });
 
