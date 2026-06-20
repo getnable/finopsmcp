@@ -680,35 +680,6 @@ function Console({ interaction }){
           </div>
         )}
       </div>
-      <div className="console-foot">
-        <div className="ask-hint">
-          <span className="ask-live"></span>
-          Live demo data · no install, no signup
-        </div>
-        {(!asked || offTopic) && (
-          <div className="ask-chips">
-            {CHIPS.map((c,i) => (
-              <button key={i} type="button" onClick={() => pickChip(c)}>{c.label}</button>
-            ))}
-          </div>
-        )}
-        <form className="console-ask" onSubmit={(e) => { e.preventDefault(); ask(input); }}>
-          <input className="console-input" value={input}
-            placeholder="Ask about this demo bill…"
-            onChange={(e) => setInput(e.target.value)}
-            onFocus={() => setFocused(true)}
-            aria-label="Ask nable about the demo account" />
-          <button type="submit" className="console-send" aria-label="Ask nable">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M7 11V3.5M7 3.5L3.7 6.8M7 3.5l3.3 3.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
-        </form>
-        {asked && phase === "answered" && !isGate && !offTopic && (
-          <div className="console-convert">
-            <span>Demo data · run it on your own bill:</span>
-            <CopyCmd cmd="uvx --python 3.12 --from finops-mcp finops welcome" />
-          </div>
-        )}
-      </div>
     </div>
   );
 }
