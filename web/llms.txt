@@ -25,7 +25,7 @@ nable is an MCP server you install locally. It answers cost questions, detects a
 - [About](https://getnable.com/about): who builds nable and why
 
 ## Install
-uvx finops-mcp
+uvx nable
 
 ## Pricing summary
 - Free: $0, no credit card, no expiry. Cost queries, anomaly detection, rightsizing, LLM spend tracking, every connector.

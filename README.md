@@ -50,7 +50,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
 ```
 Then:
 ```bash
-uvx finops-mcp
+uvx nable
 ```
 
 No `uv` and don't want it? On Python 3.10+, `pip install -U finops-mcp && finops welcome` works too.
@@ -67,7 +67,7 @@ Then run `finops setup` once to connect a cloud account.
 
 **On Anaconda?** Use uvx (isolated, won't touch your Anaconda environment):
 ```bash
-brew install uv && uvx finops-mcp setup
+brew install uv && uvx nable setup
 ```
 
 **Step 2: Connect AWS (usually one keystroke)**
@@ -292,7 +292,7 @@ finops setup claude    # re-run Claude Desktop configuration only
 | Tools don't appear in Claude | Switch to uvx config or use absolute path |
 | `command not found: finops-mcp` | Re-install with `pip install finops-mcp` or use `uvx` |
 | AWS returns no data | Run `finops setup aws`. The wizard writes credentials to your editor config automatically. |
-| `No matching distribution found for finops-mcp` | Your Python is older than 3.10. Check with `python --version`, then install on 3.10+ (`uvx finops-mcp`, or `python3.10 -m pip install finops-mcp`). |
+| `No matching distribution found for finops-mcp` | Your Python is older than 3.10. Check with `python --version`, then install on 3.10+ (`uvx nable`, or `python3.10 -m pip install finops-mcp`). |
 | Python 3.8/3.9 errors | nable requires Python 3.10+: `python3.10 -m pip install finops-mcp` |
 | Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
 | Permission denied | Install to user: `pip install --user finops-mcp` or use `uvx` |
