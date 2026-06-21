@@ -258,7 +258,7 @@ function Nav() {
 function Hero() {
   return /* @__PURE__ */ React.createElement("header", { className: "hero hero-centered", id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-c" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Stop guessing why cloud costs went up. ", /* @__PURE__ */ React.createElement("span", { className: "h1-ask" }, "Ask.")), /* @__PURE__ */ React.createElement("div", { className: "hero-actions" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" }), /* @__PURE__ */ React.createElement("a", { className: "btn btn-primary", href: "/docs.html", onClick: () => {
     if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "start_free" });
-  } }, "Get started free ", /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192"))), /* @__PURE__ */ React.createElement("p", { className: "hero-trustline" }, "Local-first \xB7 17 providers \xB7 ", /* @__PURE__ */ React.createElement("b", null, "0 bytes"), " on our servers \xB7 free for solo use"))));
+  } }, "Get started free ", /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192"))), /* @__PURE__ */ React.createElement("p", { className: "hero-trustline" }, "Every cloud + AI bill in ", /* @__PURE__ */ React.createElement("b", null, "one place"), " \xB7 works in any editor \xB7 free for solo use"))));
 }
 const CURSOR_DEEPLINK = "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLXB5dGhvbiIsICIzLjEyIiwgImZpbm9wcy1tY3AiXX0=";
 const INSTALL_POPUPS = {

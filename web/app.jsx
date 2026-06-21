@@ -255,7 +255,7 @@ function Hero(){
               Get started free <span className="arr">→</span>
             </a>
           </div>
-          <p className="hero-trustline">Local-first · 17 providers · <b>0 bytes</b> on our servers · free for solo use</p>
+          <p className="hero-trustline">Every cloud + AI bill in <b>one place</b> · works in any editor · free for solo use</p>
         </div>
       </div>
     </header>
