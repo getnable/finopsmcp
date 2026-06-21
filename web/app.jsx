@@ -1568,6 +1568,26 @@ function App(){
 
   return (
     <>
+      <div className="page-atmos" aria-hidden="true">
+        <svg className="atmos-svg" width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <pattern id="natmos" width="260" height="260" patternUnits="userSpaceOnUse">
+              <g stroke="#ffffff" strokeOpacity="0.05" strokeWidth="1" fill="none">
+                <path d="M0 70 H160 V260"/>
+                <path d="M260 188 H104 V0"/>
+                <path d="M0 214 H48 V128 H132"/>
+              </g>
+              <g fill="#4db8d4" fillOpacity="0.45">
+                <circle cx="160" cy="70" r="2.1"/>
+                <circle cx="104" cy="188" r="2.1"/>
+                <circle cx="132" cy="128" r="1.8"/>
+              </g>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#natmos)"/>
+        </svg>
+      </div>
+      <div className="page-content">
       <Nav />
       <Hero />
       <SeeItWork interaction={t.interaction} />
@@ -1578,6 +1598,7 @@ function App(){
       <FootCta />
       <Footer version={version} />
       <Tweaks />
+      </div>
     </>
   );
 }
