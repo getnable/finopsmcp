@@ -348,23 +348,48 @@ function InstallPopup({ id, onClose }) {
 }
 const _CHEV = /* @__PURE__ */ React.createElement("svg", { className: "chev", width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.6", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M3 4.5l3 3 3-3", strokeLinecap: "round", strokeLinejoin: "round" }));
 function InstallRow() {
-  const [open, setOpen] = useState(null);
-  const toggle = (id) => {
-    setOpen((o) => o === id ? null : id);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [popup, setPopup] = useState(null);
+  const openPopup = (id) => {
+    setPopup(id);
+    setMenuOpen(false);
     if (window.posthog) posthog.capture("install_opened", { client: id });
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "installer", id: "install" }, /* @__PURE__ */ React.createElement("span", { className: "install-cmdlabel" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3", strokeLinecap: "round", strokeLinejoin: "round" })), "Run this in your terminal"), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" }), /* @__PURE__ */ React.createElement("div", { className: "install-row" }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "installer", id: "install" }, /* @__PURE__ */ React.createElement("span", { className: "install-cmdlabel" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3", strokeLinecap: "round", strokeLinejoin: "round" })), "Run this in your terminal"), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" }), /* @__PURE__ */ React.createElement("div", { className: "install-editor" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      className: "iclient" + (menuOpen ? " is-open" : ""),
+      "aria-expanded": menuOpen,
+      "aria-haspopup": "true",
+      onClick: () => setMenuOpen((o) => !o)
+    },
+    /* @__PURE__ */ React.createElement("span", null, "Install in your editor"),
+    _CHEV
+  ), menuOpen && /* @__PURE__ */ React.createElement("div", { className: "editor-menu", role: "menu" }, /* @__PURE__ */ React.createElement(
     "a",
     {
-      className: "iclient is-primary",
+      className: "editor-opt",
+      role: "menuitem",
       href: CURSOR_DEEPLINK,
       onClick: () => {
+        setMenuOpen(false);
         if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "add_to_cursor" });
       }
     },
-    /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "Cursor")),
-    /* @__PURE__ */ React.createElement("svg", { className: "ic", width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.6", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M4 8l4-4m0 0H4.5M8 4v3.5", strokeLinecap: "round", strokeLinejoin: "round" }))
-  ), /* @__PURE__ */ React.createElement("button", { className: "iclient" + (open === "claude" ? " is-open" : ""), "aria-expanded": open === "claude", onClick: () => toggle("claude") }, /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "Claude")), _CHEV), /* @__PURE__ */ React.createElement("button", { className: "iclient" + (open === "openai" ? " is-open" : ""), "aria-expanded": open === "openai", onClick: () => toggle("openai") }, /* @__PURE__ */ React.createElement("span", null, "Install in ", /* @__PURE__ */ React.createElement("b", null, "OpenAI")), _CHEV)), open && /* @__PURE__ */ React.createElement(InstallPopup, { id: open, onClose: () => setOpen(null) }));
+    /* @__PURE__ */ React.createElement("span", null, "Cursor"),
+    /* @__PURE__ */ React.createElement("span", { className: "eo-tag" }, "one click")
+  ), /* @__PURE__ */ React.createElement("button", { className: "editor-opt", role: "menuitem", onClick: () => openPopup("claude") }, /* @__PURE__ */ React.createElement("span", null, "Claude Desktop"), _CHEV), /* @__PURE__ */ React.createElement("button", { className: "editor-opt", role: "menuitem", onClick: () => openPopup("openai") }, /* @__PURE__ */ React.createElement("span", null, "OpenAI Codex"), _CHEV), /* @__PURE__ */ React.createElement(
+    "a",
+    {
+      className: "editor-opt eo-more",
+      role: "menuitem",
+      href: "/docs.html#install",
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs_install" });
+      }
+    },
+    "VS Code, Zed, Windsurf and more"
+  ))), popup && /* @__PURE__ */ React.createElement(InstallPopup, { id: popup, onClose: () => setPopup(null) }));
 }
 function fmtNum(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";

@@ -264,6 +264,13 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .iclient.is-primary{border-color:var(--accent)}
 .iclient.is-primary .ic{color:var(--accent);opacity:1}
 .iclient.is-primary:hover{box-shadow:0 0 24px -6px var(--accent);background:var(--bg-1);border-color:var(--accent)}
+.install-editor{position:relative;display:inline-flex;margin-top:14px}
+.editor-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:30;display:flex;flex-direction:column;min-width:230px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:var(--r-lg);padding:5px;box-shadow:0 14px 36px -14px rgba(0,0,0,.75)}
+.editor-opt{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:9px 11px;border:none;background:none;border-radius:var(--r-md);font-family:'Bricolage Grotesque',system-ui,sans-serif;font-size:13.5px;color:var(--fg-2);text-align:left;text-decoration:none;cursor:pointer;transition:background .12s,color .12s}
+.editor-opt:hover{background:var(--bg-3);color:var(--fg)}
+.editor-opt .eo-tag{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:10px;letter-spacing:.04em;color:var(--accent)}
+.editor-opt .chev{opacity:.5;transform:rotate(-90deg)}
+.editor-opt.eo-more{font-size:12px;color:var(--fg-3);border-top:1px solid var(--line);margin-top:3px;padding-top:11px}
 .install-pop{margin-top:14px;border:1px solid var(--line-2);border-radius:var(--r-xl);background:var(--bg-1);padding:16px 18px 14px;max-width:520px;animation:popin .18s ease}
 @keyframes popin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 .install-pop-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
