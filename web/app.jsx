@@ -249,16 +249,13 @@ function Hero({ interaction }){
         <div className="hero-inner">
           <div className="hero-left">
             <h1 className="display">
-              Stop guessing why cloud costs went up. Ask.
+              Stop guessing why cloud costs went up. <span className="h1-ask">Ask.</span>
             </h1>
             <p className="lede">
               Connect AWS, Azure, GCP, Datadog, Snowflake, and more. Get answers, anomalies, and savings opportunities, without sending your billing data to another vendor.
             </p>
             <InstallRow />
             <div className="hero-cta-row">
-              <a className="btn btn-primary" href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
-                Start free <span className="arr">→</span>
-              </a>
               <a className="btn btn-ghost" href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'book_demo' }); }}>Book a demo</a>
             </div>
             <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a></p>
