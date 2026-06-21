@@ -8,7 +8,13 @@ off-by-default gating.
 """
 from __future__ import annotations
 
+import http.client
 import json
+import socket
+import threading
+import time
+
+import pytest
 
 import finops.auth.control_plane as cp
 
@@ -134,3 +140,88 @@ def test_verify_request_token_disabled_returns_none(monkeypatch):
     t = cp.mint_token(SECRET, email="a@acme.com", instance_id=INSTANCE, role="admin",
                       jti="env-jti-disabled", now=1000)
     assert cp.verify_request_token(t, now=1000) is None
+
+
+# ── /auth/cp HTTP route (the dashboard endpoint that consumes the token) ──────
+
+def _start_dashboard():
+    """Start the dashboard server on a free port in a background thread."""
+    from finops.server_web import _make_server
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    server = _make_server("127.0.0.1", port)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    time.sleep(0.1)
+    return server, port
+
+
+def _route_get(port: int, path: str):
+    """GET without following redirects, so the 302 and Set-Cookie stay visible."""
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    c.request("GET", path)
+    r = c.getresponse()
+    out = (r.status, r.getheader("Location"), r.getheader("Set-Cookie"), r.read().decode())
+    c.close()
+    return out
+
+
+@pytest.fixture()
+def cp_dashboard():
+    server, port = _start_dashboard()
+    yield port
+    server.shutdown()
+
+
+def test_route_disabled_returns_404(cp_dashboard, monkeypatch):
+    monkeypatch.delenv("FINOPS_CONTROL_PLANE_SECRET", raising=False)
+    monkeypatch.delenv("FINOPS_INSTANCE_ID", raising=False)
+    status, _loc, _cookie, _body = _route_get(cp_dashboard, "/auth/cp?token=anything")
+    assert status == 404
+
+
+def test_route_valid_admin_token_mints_full_session(cp_dashboard, monkeypatch):
+    monkeypatch.setenv("FINOPS_CONTROL_PLANE_SECRET", "sekret")
+    monkeypatch.setenv("FINOPS_INSTANCE_ID", "inst1")
+    token = cp.mint_token("sekret", email="a@x.com", instance_id="inst1", role="admin")
+    status, location, cookie, _body = _route_get(cp_dashboard, f"/auth/cp?token={token}")
+    assert status == 302
+    assert location == "/"
+    assert cookie and cookie.startswith("nable_session=")
+
+
+def test_route_viewer_token_mints_readonly_session(cp_dashboard, monkeypatch):
+    monkeypatch.setenv("FINOPS_CONTROL_PLANE_SECRET", "sekret")
+    monkeypatch.setenv("FINOPS_INSTANCE_ID", "inst1")
+    token = cp.mint_token("sekret", email="v@x.com", instance_id="inst1", role="viewer")
+    status, _loc, cookie, _body = _route_get(cp_dashboard, f"/auth/cp?token={token}")
+    assert status == 302
+    assert cookie and cookie.startswith("nable_view=")
+
+
+def test_route_bad_token_shows_login_no_cookie(cp_dashboard, monkeypatch):
+    monkeypatch.setenv("FINOPS_CONTROL_PLANE_SECRET", "sekret")
+    monkeypatch.setenv("FINOPS_INSTANCE_ID", "inst1")
+    _status, _loc, cookie, body = _route_get(cp_dashboard, "/auth/cp?token=garbage.deadbeef")
+    assert cookie is None
+    assert "invalid or expired" in body.lower()
+
+
+# ── Managed instance never serves demo data ──────────────────────────────────
+
+def test_managed_instance_forces_demo_off(monkeypatch):
+    import finops.demo_data as dd
+    monkeypatch.setattr(dd, "DEMO_MODE", True)  # pretend FINOPS_DEMO was on
+    monkeypatch.setenv("FINOPS_CONTROL_PLANE_SECRET", "s")
+    monkeypatch.setenv("FINOPS_INSTANCE_ID", "i")
+    assert dd.is_demo() is False
+
+
+def test_demo_mode_honored_when_not_managed(monkeypatch):
+    import finops.demo_data as dd
+    monkeypatch.setattr(dd, "DEMO_MODE", True)
+    monkeypatch.delenv("FINOPS_CONTROL_PLANE_SECRET", raising=False)
+    monkeypatch.delenv("FINOPS_INSTANCE_ID", raising=False)
+    assert dd.is_demo() is True

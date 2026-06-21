@@ -28,7 +28,22 @@ DEMO_MODE = (
 )
 
 
+def _managed_instance() -> bool:
+    """True when this process is a managed (control-plane) hosted instance, i.e.
+    getnable.com control-plane login is configured (both the per-instance secret
+    and the instance id are set). Such an instance serves a real paying customer."""
+    return bool(
+        os.environ.get("FINOPS_CONTROL_PLANE_SECRET", "").strip()
+        and os.environ.get("FINOPS_INSTANCE_ID", "").strip()
+    )
+
+
 def is_demo() -> bool:
+    # A managed hosted instance never serves demo data, even if FINOPS_DEMO is set
+    # by a stray env. A paying customer must get real numbers and the real model,
+    # never the canned demo_data stubs.
+    if _managed_instance():
+        return False
     return DEMO_MODE
 
 
