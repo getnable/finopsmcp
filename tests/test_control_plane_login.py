@@ -8,9 +8,14 @@ off-by-default gating.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import http.client
 import json
+import shutil
 import socket
+import subprocess
+import textwrap
 import threading
 import time
 
@@ -207,6 +212,114 @@ def test_route_bad_token_shows_login_no_cookie(cp_dashboard, monkeypatch):
     _status, _loc, cookie, body = _route_get(cp_dashboard, "/auth/cp?token=garbage.deadbeef")
     assert cookie is None
     assert "invalid or expired" in body.lower()
+
+
+# ── Control-plane mint interop (web/api/account/dashboard-login.js) ───────────
+#
+# The getnable.com endpoint mints these tokens in JavaScript (Vercel edge). This
+# proves the JS mint path round-trips through the Python verifier: it runs the
+# SAME crypto the endpoint uses (derive the per-instance secret from a master
+# secret, then sign the payload) in Node, then verifies the token here. If the
+# two ever drift, this fails. Skips cleanly when Node is not on the runner.
+
+# The mint logic copied verbatim from dashboard-login.js (hmacHex, b64url, the
+# nable-instance derivation, and the {email,instance_id,role,exp,jti} payload).
+_NODE_MINT = textwrap.dedent(
+    """
+    import { webcrypto as crypto } from "node:crypto";
+
+    async function hmacHex(secret, message) {
+      const enc = new TextEncoder();
+      const key = await crypto.subtle.importKey(
+        "raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+      );
+      const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
+      return Array.from(new Uint8Array(sig))
+        .map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    function b64url(str) {
+      const bytes = new TextEncoder().encode(str);
+      let binary = "";
+      bytes.forEach((b) => (binary += String.fromCharCode(b)));
+      return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+    }
+    function freshJti() {
+      const raw = new Uint8Array(16);
+      crypto.getRandomValues(raw);
+      let binary = "";
+      raw.forEach((b) => (binary += String.fromCharCode(b)));
+      return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+    }
+    async function deriveInstanceSecret(master, instanceId) {
+      return hmacHex(master, "nable-instance:" + instanceId);
+    }
+    async function mintControlPlaneToken(secret, { email, instanceId, role }) {
+      const payload = {
+        email, instance_id: instanceId, role,
+        exp: Math.floor(Date.now() / 1000) + 60, jti: freshJti(),
+      };
+      const payloadB64 = b64url(JSON.stringify(payload));
+      const sig = await hmacHex(secret, payloadB64);
+      return `${payloadB64}.${sig}`;
+    }
+
+    // With `node --input-type=module -e`, user args start at argv[1] (there is no
+    // script-name slot), so slice(1), not slice(2).
+    const [master, instanceId, email, role] = process.argv.slice(1);
+    const secret = await deriveInstanceSecret(master, instanceId);
+    const token = await mintControlPlaneToken(secret, { email, instanceId, role });
+    process.stdout.write(JSON.stringify({ derived_secret: secret, token }));
+    """
+)
+
+
+def _node_mint(master: str, instance_id: str, email: str, role: str) -> dict:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not available; skipping JS interop")
+    proc = subprocess.run(
+        [node, "--input-type=module", "-e", _NODE_MINT,
+         master, instance_id, email, role],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, f"node mint failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def test_js_minted_token_verifies_in_python():
+    """The exact JS mint path produces a token Python accepts. This is the gate:
+    if the JS and Python token formats ever diverge, this fails."""
+    master = "test-master-secret-not-real"
+    instance_id = "inst_interop"
+    out = _node_mint(master, instance_id, "owner@acme.com", "admin")
+
+    payload = cp.verify_token(out["derived_secret"], out["token"], instance_id)
+    assert payload is not None, "JS-minted token did not verify in Python"
+    assert payload["email"] == "owner@acme.com"
+    assert payload["role"] == "admin"
+    assert payload["instance_id"] == instance_id
+
+
+def test_js_derivation_matches_python():
+    """The per-instance secret the JS derives equals the one Python derives from
+    the same master, so provisioning can set the JS-derived hex on the instance."""
+    master = "test-master-secret-not-real"
+    instance_id = "inst_interop"
+    out = _node_mint(master, instance_id, "owner@acme.com", "viewer")
+
+    expected = hmac.new(
+        master.encode("utf-8"),
+        ("nable-instance:" + instance_id).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    assert out["derived_secret"] == expected
+
+
+def test_js_token_rejected_for_wrong_instance():
+    """A token minted for one instance cannot open another (no shared key)."""
+    master = "test-master-secret-not-real"
+    out = _node_mint(master, "inst_a", "owner@acme.com", "admin")
+    assert cp.verify_token(out["derived_secret"], out["token"], "inst_b") is None
 
 
 # ── Managed instance never serves demo data ──────────────────────────────────
