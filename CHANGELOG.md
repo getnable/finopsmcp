@@ -2,6 +2,19 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.85
+
+Easier AWS connect: one-click CloudFormation in the setup wizard.
+
+### CLI
+- **One-click read-only AWS key.** The wizard's AWS step now offers "One-click
+  CloudFormation" alongside paste-a-key and SSO. It opens the AWS console with a
+  read-only stack pre-loaded; you click Create, copy the access key from the
+  stack Outputs, and paste it back. Collapses the credential step (the spot most
+  people abandoned) from a dozen console clicks to two copy-pastes, and it works
+  even with no AWS credentials configured locally. The wizard also records which
+  connect method you pick (`aws_connect_method`) so we can see which one converts.
+
 ## 0.8.84
 
 Fix: no more telemetry log noise in the setup wizard.
