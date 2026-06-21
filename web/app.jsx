@@ -379,9 +379,10 @@ function InstallPopup({ id, onClose }){
 const _CHEV = <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M3 4.5l3 3 3-3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 
 function InstallRow(){
-  const [open, setOpen] = useState(null);
-  const toggle = (id) => {
-    setOpen(o => o === id ? null : id);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [popup, setPopup] = useState(null);
+  const openPopup = (id) => {
+    setPopup(id); setMenuOpen(false);
     if(window.posthog) posthog.capture('install_opened', { client: id });
   };
   return (
@@ -391,20 +392,31 @@ function InstallRow(){
         Run this in your terminal
       </span>
       <CopyCmd cmd="uvx nable" />
-      <div className="install-row">
-        <a className="iclient is-primary" href={CURSOR_DEEPLINK}
-          onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'add_to_cursor' }); }}>
-          <span>Install in <b>Cursor</b></span>
-          <svg className="ic" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="M4 8l4-4m0 0H4.5M8 4v3.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-        </a>
-        <button className={"iclient" + (open === 'claude' ? " is-open" : "")} aria-expanded={open === 'claude'} onClick={() => toggle('claude')}>
-          <span>Install in <b>Claude</b></span>{_CHEV}
+      <div className="install-editor">
+        <button className={"iclient" + (menuOpen ? " is-open" : "")} aria-expanded={menuOpen} aria-haspopup="true"
+          onClick={() => setMenuOpen(o => !o)}>
+          <span>Install in your editor</span>{_CHEV}
         </button>
-        <button className={"iclient" + (open === 'openai' ? " is-open" : "")} aria-expanded={open === 'openai'} onClick={() => toggle('openai')}>
-          <span>Install in <b>OpenAI</b></span>{_CHEV}
-        </button>
+        {menuOpen && (
+          <div className="editor-menu" role="menu">
+            <a className="editor-opt" role="menuitem" href={CURSOR_DEEPLINK}
+              onClick={() => { setMenuOpen(false); if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'add_to_cursor' }); }}>
+              <span>Cursor</span><span className="eo-tag">one click</span>
+            </a>
+            <button className="editor-opt" role="menuitem" onClick={() => openPopup('claude')}>
+              <span>Claude Desktop</span>{_CHEV}
+            </button>
+            <button className="editor-opt" role="menuitem" onClick={() => openPopup('openai')}>
+              <span>OpenAI Codex</span>{_CHEV}
+            </button>
+            <a className="editor-opt eo-more" role="menuitem" href="/docs.html#install"
+              onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>
+              VS Code, Zed, Windsurf and more
+            </a>
+          </div>
+        )}
       </div>
-      {open && <InstallPopup id={open} onClose={() => setOpen(null)} />}
+      {popup && <InstallPopup id={popup} onClose={() => setPopup(null)} />}
     </div>
   );
 }
