@@ -249,9 +249,6 @@ function Hero(){
           <h1 className="display">
             Stop guessing why cloud costs went up. <span className="h1-ask">Ask.</span>
           </h1>
-          <p className="lede">
-            Connect AWS, Azure, GCP, Datadog, Snowflake, and more. Get answers, anomalies, and savings opportunities, without sending your billing data to another vendor.
-          </p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
             <a className="btn btn-primary" href="/docs.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
@@ -695,9 +692,6 @@ function SeeItWork({ interaction }){
         </div>
         <div className="console-stage">
           <Console interaction={interaction} />
-        </div>
-        <div className="demo-foot">
-          <a href="/demo.html" className="demo-link" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'demo_sec', cta:'live_demo' }); }}>Ask your own question in the live demo <span className="arr">→</span></a>
         </div>
       </div>
     </section>
@@ -1271,31 +1265,19 @@ function MidCta(){
 function FootCta(){
   return (
     <section className="foot-cta" id="cta">
-      <div className="foot-cta-grid"></div>
-      <div className="wrap" style={{position:"relative"}}>
-        <div className="eyebrow" style={{marginBottom:32,display:"inline-flex"}}><span className="d"></span> Free tier · no credit card</div>
+      <div className="wrap">
+        <div className="foot-label"><span className="foot-dash"></span>Get started</div>
         <h2 className="display">
-          Your whole cloud and AI bill.<br/>
-          <em>One question away.</em>
+          One command.<br/>
+          <em>Then just ask.</em>
         </h2>
-        <div style={{marginTop:44,display:"flex",flexDirection:"column",alignItems:"center",gap:22}}>
+        <div className="foot-cta-actions">
           <div className="foot-install"><CopyCmd cmd="uvx nable" /></div>
-          <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap",justifyContent:"center"}}>
-            <a href="/docs.html#install" className="btn btn-primary" style={{padding:"14px 22px",fontSize:14}}
-               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'}); }}>
-              Get started free <span className="arr">→</span>
-            </a>
-            <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8"
-               target="_blank" rel="noopener noreferrer"
-               className="btn btn-ghost" style={{padding:"14px 22px",fontSize:14}}
-               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'book_demo'}); }}>
-              Book a live demo
-            </a>
-          </div>
+          <a href="/docs.html#quickstart" className="foot-quicklink"
+             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'quickstart'}); }}>
+            or read the quickstart <span className="arr">→</span>
+          </a>
         </div>
-        <p style={{marginTop:32,fontSize:13,color:"var(--fg-3)"}}>
-          Building something? <a href="/about" style={{color:"var(--accent-dim)"}}>Read the founder note and investor thesis →</a>
-        </p>
       </div>
     </section>
   );
