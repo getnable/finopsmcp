@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from .auth import sso as _sso
+from .auth import control_plane as _cp
 
 # ── Dashboard authentication ─────────────────────────────────────────────────
 # Password is required by default. If FINOPS_DASHBOARD_PASSWORD is not set,
@@ -2357,6 +2358,35 @@ button:hover{{filter:brightness(1.1)}}
             except Exception as exc:
                 log.warning("SSO callback failed: %s", exc)
                 self._serve_login_page(sso_error=f"Sign-in failed: {exc}")
+            return
+
+        if path == "/auth/cp":
+            # Control-plane login: getnable.com signs a short-lived, single-use
+            # token scoped to this instance; we verify it and mint a normal
+            # session. Off unless the instance is configured for it (both the
+            # secret and the instance id). See auth/control_plane.py.
+            if not _cp.is_enabled():
+                self._send(404, "text/plain", b"Control-plane login not configured")
+                return
+            token = qs.get("token", [""])[0]
+            payload = _cp.verify_request_token(token)
+            if not payload:
+                log.warning("Control-plane login rejected (invalid, expired, or replayed token)")
+                self._serve_login_page(
+                    sso_error="That sign-in link is invalid or expired. Open your dashboard from getnable.com again.")
+                return
+            # Least privilege: a viewer gets a read-only session, everyone else a
+            # full session. Same two-tier model the read-only share links use.
+            if payload["role"] == "viewer":
+                cookie = f"nable_view={_create_ro_session()}; {self._cookie_attrs()}"
+            else:
+                cookie = f"nable_session={_create_session()}; {self._cookie_attrs()}"
+            log.info("Control-plane login: %s (role=%s)", payload["email"], payload["role"])
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", cookie)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
             return
 
         # Auth check — skip for health, login, and SSO paths (handled above).
