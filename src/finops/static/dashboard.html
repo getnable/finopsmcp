@@ -422,6 +422,10 @@ footer a:hover{color:var(--accent)}
 }
 .starter::before{content:"$ ";color:var(--accent-dim)}
 .starter:hover{background:var(--bg3);color:var(--fg);border-color:var(--line2)}
+/* The build-a-view starter leads: accent wash, "+" prompt instead of "$ ". */
+.starter-build{color:var(--accent);background:var(--accent-w);border-color:var(--accent-b)}
+.starter-build::before{content:"+ ";color:var(--accent)}
+.starter-build:hover{background:var(--accent-w);color:var(--accent);border-color:var(--accent)}
 
 /* Terminal rows: not chat bubbles. Each turn is a left-aligned record with a
    mono prompt marker. User question and agent answer share the same gutter. */
@@ -505,8 +509,24 @@ footer a:hover{color:var(--accent)}
 .cc-pin:disabled{cursor:default}
 .cc-unpin{font-size:16px;line-height:1;color:var(--fg3);background:transparent;border:1px solid var(--line2);width:24px;height:24px;display:flex;align-items:center;justify-content:center}
 .cc-unpin:hover{color:var(--alert);border-color:var(--alert-b)}
+/* Inline "pinned to your dashboard" confirmation in the Ask log. */
+.pin-confirm{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 4px;padding:10px 14px;
+  font-size:12.5px;color:var(--success);background:var(--success-w);border:1px solid var(--success-b);border-radius:var(--r-md)}
+.pin-confirm-go{font-family:var(--font);font-size:11.5px;font-weight:600;cursor:pointer;color:var(--accent);
+  background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-sm);padding:4px 11px;
+  transition:background .15s,color .15s,border-color .15s}
+.pin-confirm-go:hover{background:var(--accent);color:var(--bg);border-color:var(--accent)}
 .pv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media(max-width:800px){.pv-grid{grid-template-columns:1fr}}
+/* A card the agent just pinned slides in and the accent border fades out, so the
+   user sees the live add land without a reload. */
+.cc-justpinned{animation:ccpin 1.8s ease-out 1}
+@keyframes ccpin{
+  0%{opacity:0;transform:translateY(6px);border-color:var(--accent)}
+  18%{opacity:1;transform:translateY(0);border-color:var(--accent)}
+  100%{border-color:var(--line)}
+}
+@media(prefers-reduced-motion:reduce){.cc-justpinned{animation:none}}
 </style>
 </head>
 <body>
@@ -687,6 +707,7 @@ footer a:hover{color:var(--accent)}
           <div class="ae-mark">n</div>
           <p>Ask anything about your cloud bill. nable reads your live cost data to answer.</p>
           <div class="agent-starters" id="agent-starters">
+            <button class="starter starter-build">Build a view: spend by team this quarter and keep it on my dashboard</button>
             <button class="starter">What did we spend this month?</button>
             <button class="starter">What changed since last month?</button>
             <button class="starter">Where can we cut waste right now?</button>
@@ -1254,6 +1275,18 @@ function appendCard(card,data){
   log.appendChild(renderAgentCard(card,data||{},{pinnable:!window._READONLY}));
   log.scrollTop=log.scrollHeight;
 }
+// The agent pinned a view itself (ask-to-build-a-view). Confirm inline and offer a
+// one-click jump to the dashboard, where the new card has already been added live.
+function appendPinnedConfirm(){
+  const log=document.getElementById('agent-log');
+  const empty=document.getElementById('agent-empty'); if(empty) empty.style.display='none';
+  const wrap=document.createElement('div'); wrap.className='pin-confirm';
+  const txt=document.createElement('span'); txt.textContent='Pinned to your dashboard.';
+  const btn=document.createElement('button'); btn.className='pin-confirm-go'; btn.textContent='View on dashboard';
+  btn.onclick=()=>switchView('dashboard');
+  wrap.appendChild(txt); wrap.appendChild(btn);
+  log.appendChild(wrap); log.scrollTop=log.scrollHeight;
+}
 function renderAgentCard(card,data,opts){
   opts=opts||{};
   const wrap=document.createElement('div'); wrap.className='cost-card';
@@ -1325,7 +1358,10 @@ async function unpinCard(id,el){
     if(r.ok&&el){el.style.transition='opacity .25s';el.style.opacity='0';setTimeout(()=>el.remove(),260);}
   }catch{}
 }
-async function loadPinnedViews(){
+async function loadPinnedViews(highlightIds){
+  // highlightIds: optional array of view ids that were just pinned this turn. Those
+  // cards animate in (cc-justpinned) so a live add lands visibly without a reload.
+  const hl=new Set((highlightIds||[]).map(Number));
   const wrap=document.getElementById('pinned-views'); if(!wrap) return;
   try{
     const r=await fetch('/api/views'); if(!r.ok){wrap.style.display='none';return;}
@@ -1334,7 +1370,13 @@ async function loadPinnedViews(){
     wrap.style.display='block';
     wrap.innerHTML='<div class="section-label" style="margin-bottom:12px">Pinned views</div><div class="pv-grid" id="pv-grid"></div>';
     const grid=document.getElementById('pv-grid');
-    views.forEach(v=>grid.appendChild(renderAgentCard(Object.assign({},v.card,{id:v.id}),v.data||{},{unpinnable:!window._READONLY})));
+    let firstNew=null;
+    views.forEach(v=>{
+      const el=renderAgentCard(Object.assign({},v.card,{id:v.id}),v.data||{},{unpinnable:!window._READONLY});
+      if(hl.has(Number(v.id))){el.classList.add('cc-justpinned'); if(!firstNew) firstNew=el;}
+      grid.appendChild(el);
+    });
+    if(firstNew) firstNew.scrollIntoView({behavior:'smooth',block:'nearest'});
   }catch{wrap.style.display='none';}
 }
 
@@ -1353,9 +1395,16 @@ async function askAgent(q){
     const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
     const data=await r.json().catch(()=>({}));
     thinking.remove();
-    if(r.ok && data && (data.answer || (data.cards && data.cards.length))){
+    if(r.ok && data && (data.answer || (data.cards && data.cards.length) || data.views_changed)){
       if(data.answer) appendMsg('agent',data.answer);
       (data.cards||[]).forEach((card,i)=>appendCard(card,(data.cardData||[])[i]));
+      // The agent pinned a view this turn: re-render the pinned-views grid in place
+      // (no full reload) and confirm inline. The grid lives on the dashboard tab, so
+      // it's ready the moment the user switches back.
+      if(data.views_changed){
+        loadPinnedViews(data.new_view_ids||[]);
+        appendPinnedConfirm();
+      }
     }else if(r.status===401){
       appendMsg('agent','Your session expired. Reload the page and sign in again to ask.',{err:true});
     }else{

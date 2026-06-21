@@ -101,6 +101,38 @@ def pick_tier(text: str) -> str:
 class LoopResult:
     answer: str
     side_effects: list[dict] = field(default_factory=list)  # e.g. approval cards to post
+    input_tokens: int = 0   # summed across every model call in the loop
+    output_tokens: int = 0  # summed across every model call in the loop
+
+
+def record_managed_ai_usage(
+    *,
+    surface: str,
+    tier: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    requested_by: str = "",
+) -> None:
+    """Emit one structured usage event per agent turn so credit billing can meter
+    managed AI later. This is the metering seam: today it only writes a single
+    parseable log line. A hosted control plane can tail these, or swap the body for
+    a real ledger write, without touching the agent loop. Never raises into the
+    caller: a metering failure must not break a user's answer."""
+    try:
+        event = {
+            "event": "managed_ai_usage",
+            "surface": surface,
+            "tier": tier,
+            "model": model,
+            "input_tokens": int(input_tokens or 0),
+            "output_tokens": int(output_tokens or 0),
+            "total_tokens": int(input_tokens or 0) + int(output_tokens or 0),
+            "requested_by": requested_by or "",
+        }
+        log.info("managed_ai_usage %s", json.dumps(event, default=str))
+    except Exception as exc:
+        log.debug("record_managed_ai_usage failed: %s", exc)
 
 
 def _run_agent_loop_sync(
@@ -150,6 +182,9 @@ def _run_agent_loop_sync(
         max_tool_calls = _MAX_TOOL_CALLS
 
     side_effects: list[dict] = []
+    # Token totals for the managed-AI metering hook. Summed across every model
+    # call this turn makes (tool-use loops can be several round-trips).
+    usage = {"input": 0, "output": 0}
 
     def _append_cost_card(result_str: str, sinks: list[dict]) -> None:
         """When slice_costs runs, surface its renderable card on side_effects so the
@@ -160,6 +195,29 @@ def _run_agent_loop_sync(
             return
         if isinstance(data, dict) and data.get("card"):
             sinks.append({"type": "cost_card", "card": data["card"], "data": data.get("result")})
+
+    def _append_pinned_view(result_str: str, sinks: list[dict]) -> None:
+        """When pin_view runs, flag that the pinned-views set changed so the web
+        dashboard can re-fetch /api/views and slide the new card in live, without a
+        full reload. Read-only on the cloud: pin_view only writes the local
+        dashboard_views table. Carries the new view id so the UI can highlight it."""
+        try:
+            data = json.loads(result_str)
+        except (ValueError, TypeError):
+            return
+        if isinstance(data, dict) and data.get("pinned") and data.get("id") is not None:
+            sinks.append({
+                "type": "view_pinned",
+                "id": data.get("id"),
+                "title": data.get("title", ""),
+            })
+
+    def _accumulate_usage(response: Any) -> None:
+        u = getattr(response, "usage", None)
+        if u is None:
+            return
+        usage["input"] += int(getattr(u, "input_tokens", 0) or 0)
+        usage["output"] += int(getattr(u, "output_tokens", 0) or 0)
 
     client = anthropic.Anthropic(api_key=api_key)
     messages: list[dict] = list(history or []) + [{"role": "user", "content": user_message}]
@@ -173,11 +231,14 @@ def _run_agent_loop_sync(
             tools=tools,
             messages=messages,
         )
+        _accumulate_usage(response)
         text_parts = [b.text for b in response.content if hasattr(b, "text")]
         if response.stop_reason == "end_turn":
-            return LoopResult("\n".join(text_parts).strip(), side_effects)
+            return LoopResult("\n".join(text_parts).strip(), side_effects,
+                              usage["input"], usage["output"])
         if response.stop_reason != "tool_use":
-            return LoopResult("\n".join(text_parts).strip() or "No response.", side_effects)
+            return LoopResult("\n".join(text_parts).strip() or "No response.", side_effects,
+                              usage["input"], usage["output"])
 
         tool_results = []
         for block in response.content:
@@ -191,6 +252,8 @@ def _run_agent_loop_sync(
                 result_str = execute_bridge_tool(block.name, block.input or {}, role=role)
                 if block.name == "slice_costs":
                     _append_cost_card(result_str, side_effects)
+                elif block.name == "pin_view":
+                    _append_pinned_view(result_str, side_effects)
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": block.id, "content": result_str}
             )
@@ -198,7 +261,8 @@ def _run_agent_loop_sync(
         messages.append({"role": "user", "content": tool_results})
 
     return LoopResult(
-        "Reached maximum tool call depth. Please try a more specific question.", side_effects
+        "Reached maximum tool call depth. Please try a more specific question.", side_effects,
+        usage["input"], usage["output"]
     )
 
 
