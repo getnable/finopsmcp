@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.80
+
+Fix: the visual dashboard was missing from pip and uvx installs.
+
+### Dashboard
+- **`finops serve` / `nable serve` now actually renders.** The bundled dashboard
+  template (`static/dashboard.html`) was matched by an over-broad `.gitignore`
+  rule, so hatchling's VCS file selection dropped it from the wheel. Every pip or
+  uvx install got the fallback "Dashboard template missing" page instead of the
+  dashboard. The template is now force-included in the wheel, with a build check
+  so it cannot silently drop again.
+
 ## 0.8.79
 
 Faster cold start.
