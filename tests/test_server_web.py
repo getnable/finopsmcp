@@ -516,3 +516,129 @@ def test_api_agent_degrades_when_loop_errors(running_server):
     data = json.loads(body)
     assert data["answer"] is None
     assert "error" in data
+
+
+# ── Tests: ask-to-build-a-view (live pin loop + metering) ────────────────────
+
+def test_api_agent_signals_views_changed_when_view_pinned(running_server):
+    """When the agent pins a view this turn (a 'view_pinned' side effect), the
+    /api/agent response sets views_changed=true and carries the new view id, so the
+    dashboard JS knows to re-fetch /api/views and slide the new card in live."""
+    _, port = running_server
+    from finops.slack_bot.llm import LoopResult
+    result = LoopResult(
+        "Pinned spend by team for this quarter.",
+        side_effects=[{"type": "view_pinned", "id": 42, "title": "Spend by team"}],
+        input_tokens=1200, output_tokens=300,
+    )
+    with patch("finops.slack_bot.llm.ask", return_value=result):
+        status, body = _post(
+            f"http://127.0.0.1:{port}/api/agent",
+            {"question": "show me spend by team this quarter and keep it on my dashboard"},
+        )
+    assert status == 200
+    data = json.loads(body)
+    assert data["views_changed"] is True
+    assert data["new_view_ids"] == [42]
+
+
+def test_api_agent_no_views_changed_when_nothing_pinned(running_server):
+    """A plain question that pins nothing must report views_changed=false with no
+    ids, so the dashboard never re-renders the pinned grid for no reason."""
+    _, port = running_server
+    from finops.slack_bot.llm import LoopResult
+    with patch("finops.slack_bot.llm.ask",
+               return_value=LoopResult("You spent $1,234 this month.")):
+        status, body = _post(
+            f"http://127.0.0.1:{port}/api/agent",
+            {"question": "what did we spend this month?"},
+        )
+    assert status == 200
+    data = json.loads(body)
+    assert data["views_changed"] is False
+    assert data["new_view_ids"] == []
+
+
+def test_api_agent_records_managed_ai_usage(running_server):
+    """Every /api/agent turn fires the managed-AI metering hook with the loop's
+    input/output token counts, so credit billing can consume it later."""
+    _, port = running_server
+    from finops.slack_bot.llm import LoopResult
+    result = LoopResult("ok", input_tokens=900, output_tokens=120)
+    with patch("finops.slack_bot.llm.ask", return_value=result), \
+         patch("finops.slack_bot.llm.record_managed_ai_usage") as meter:
+        status, _ = _post(f"http://127.0.0.1:{port}/api/agent", {"question": "hi"})
+    assert status == 200
+    assert meter.called
+    kwargs = meter.call_args.kwargs
+    assert kwargs["surface"] == "dashboard_ask"
+    assert kwargs["input_tokens"] == 900
+    assert kwargs["output_tokens"] == 120
+
+
+def test_loop_flags_pin_side_effect_and_sums_tokens():
+    """Unit test of the agent loop's plumbing: a pin_view tool call produces a
+    'view_pinned' side effect carrying the new id, and token usage is summed across
+    model calls. The LLM and the bridge tools are mocked, no cloud is touched."""
+    import finops.slack_bot.llm as llm
+
+    class _Usage:
+        def __init__(self, i, o):
+            self.input_tokens, self.output_tokens = i, o
+
+    class _Block:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    # Turn 1: model asks to call pin_view. Turn 2: model ends the turn.
+    pin_call = _Block(type="tool_use", id="t1", name="pin_view", input={"title": "Spend by team"})
+    resp1 = _Block(stop_reason="tool_use", content=[pin_call], usage=_Usage(1000, 50))
+    resp2 = _Block(stop_reason="end_turn",
+                   content=[_Block(type="text", text="Pinned it.")], usage=_Usage(200, 30))
+
+    fake_client = MagicMock()
+    fake_client.messages.create.side_effect = [resp1, resp2]
+    fake_anthropic = MagicMock()
+    fake_anthropic.Anthropic.return_value = fake_client
+
+    with patch.dict("sys.modules", {"anthropic": fake_anthropic}), \
+         patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}), \
+         patch("finops.slack_bot.bridge.get_bridge_tools", return_value=[]), \
+         patch("finops.slack_bot.bridge.execute_bridge_tool",
+               return_value='{"pinned": true, "id": 7, "title": "Spend by team"}'), \
+         patch("finops.slack_bot.remediation.role_can_draft", return_value=False):
+        result = llm._run_agent_loop_sync("pin spend by team", tier="chat")
+
+    pinned = [se for se in result.side_effects if se.get("type") == "view_pinned"]
+    assert pinned and pinned[0]["id"] == 7
+    # Tokens summed across both model calls.
+    assert result.input_tokens == 1200
+    assert result.output_tokens == 80
+
+
+def test_record_managed_ai_usage_logs_structured_event(caplog):
+    """The metering hook writes one parseable managed_ai_usage log line that credit
+    billing can tail. It never raises into the caller."""
+    import logging
+    import finops.slack_bot.llm as llm
+    with caplog.at_level(logging.INFO, logger="finops.slack_bot.llm"):
+        llm.record_managed_ai_usage(
+            surface="dashboard_ask", tier="chat", model="claude-sonnet-4-6",
+            input_tokens=500, output_tokens=80,
+        )
+    line = next((r.getMessage() for r in caplog.records if "managed_ai_usage" in r.getMessage()), "")
+    assert line
+    payload = json.loads(line.split("managed_ai_usage ", 1)[1])
+    assert payload["surface"] == "dashboard_ask"
+    assert payload["total_tokens"] == 580
+
+
+def test_dashboard_html_has_build_a_view_starter(running_server):
+    """The Ask tab leads with a 'Build a view' starter chip and the JS re-renders
+    the pinned grid live when views_changed is signaled."""
+    _, port = running_server
+    _, body = _get(f"http://127.0.0.1:{port}/")
+    assert "Build a view:" in body
+    assert "views_changed" in body
+    assert "starter-build" in body
+    assert "cc-justpinned" in body

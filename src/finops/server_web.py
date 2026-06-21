@@ -2167,13 +2167,29 @@ button:hover{{filter:brightness(1.1)}}
                 self._send(400, "application/json", b'{"error":"empty question"}')
                 return
             try:
-                from .slack_bot.llm import ask
+                from .slack_bot.llm import ask, model_for_tier, record_managed_ai_usage
                 result = ask(question, tier="chat")
-                cards = [se["card"] for se in (result.side_effects or [])
+                side = result.side_effects or []
+                cards = [se["card"] for se in side
                          if isinstance(se, dict) and se.get("type") == "cost_card" and se.get("card")]
+                # When the agent pinned a view this turn, signal it so the dashboard
+                # re-fetches /api/views and slides the new card in live (no reload).
+                pinned = [se for se in side
+                          if isinstance(se, dict) and se.get("type") == "view_pinned" and se.get("id") is not None]
                 payload = {"answer": result.answer, "cards": cards,
-                           "cardData": [se.get("data") for se in (result.side_effects or [])
-                                        if isinstance(se, dict) and se.get("type") == "cost_card"]}
+                           "cardData": [se.get("data") for se in side
+                                        if isinstance(se, dict) and se.get("type") == "cost_card"],
+                           "views_changed": bool(pinned),
+                           "new_view_ids": [se.get("id") for se in pinned]}
+                # Managed-AI metering: record this turn's token usage so credit
+                # billing can consume it later. Best-effort; never blocks the answer.
+                record_managed_ai_usage(
+                    surface="dashboard_ask",
+                    tier="chat",
+                    model=model_for_tier("chat"),
+                    input_tokens=getattr(result, "input_tokens", 0),
+                    output_tokens=getattr(result, "output_tokens", 0),
+                )
                 self._send(200, "application/json", json.dumps(payload, default=str).encode())
             except Exception as exc:
                 log.error("agent query failed: %s", exc, exc_info=True)
