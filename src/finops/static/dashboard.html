@@ -10,14 +10,16 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
 /* ── Design tokens ─────────────────────────────────────────────────────────── */
-/* Cold Graphite, per DESIGN.md. Dark is the primary and default surface. */
+/* True black, per DESIGN.md (2026-06-20). Dark only; there is no light mode.
+   Surfaces are near-black and depth comes from spacing and a whisper of
+   elevation, not hard borders. */
 :root{
-  --bg:        #0d0f10;  /* near-black, cool neutral */
-  --bg1:       #111416;  /* default surface */
-  --bg2:       #181c1f;  /* elevated surface */
-  --bg3:       #1e2327;  /* highest / hover surface */
-  --line:      #242a2e;  /* hairline separator */
-  --line2:     #2e3539;  /* active / hover border */
+  --bg:        #000000;  /* true black */
+  --bg1:       #0a0a0c;  /* default surface, near-black */
+  --bg2:       #121214;  /* elevated surface */
+  --bg3:       #1a1a1d;  /* highest / hover surface */
+  --line:      #232327;  /* hairline separator */
+  --line2:     #2d2d32;  /* active / hover border */
   --fg:        #f0f2f3;  /* primary, cool white */
   --fg2:       #94a3ab;  /* secondary / body */
   --fg3:       #56656d;  /* tertiary / labels */
@@ -26,20 +28,22 @@
   --accent2:   #38a8c4;  /* accent hover */
   --accent-dim:#2c7d91;  /* section-label decorator */
   --accent-w:  rgba(77,184,212,.10);  /* accent wash */
-  --accent-b:  rgba(77,184,212,.28);  /* accent border */
+  --accent-b:  rgba(77,184,212,.26);  /* accent border */
   --success:   #3cba7a;
   --success-w: rgba(60,186,122,.10);
-  --success-b: rgba(60,186,122,.28);
+  --success-b: rgba(60,186,122,.26);
   --warn:      #e6a840;
   --warn-w:    rgba(230,168,64,.10);
-  --warn-b:    rgba(230,168,64,.28);
+  --warn-b:    rgba(230,168,64,.26);
   --alert:     #e05c4b;
   --alert-w:   rgba(224,92,75,.10);
-  --alert-b:   rgba(224,92,75,.28);
-  /* Depth comes from borders and a thin top sheen, not soft drop shadows. */
-  --sheen:     inset 0 1px 0 rgba(255,255,255,.025);
-  --shadow:    0 1px 0 rgba(0,0,0,.5);
-  --shadow-sm: 0 1px 0 rgba(0,0,0,.4);
+  --alert-b:   rgba(224,92,75,.26);
+  /* Elevation is a faint top sheen plus a soft, low shadow against the black.
+     Used sparingly: panels float, they are not boxed. */
+  --sheen:     inset 0 1px 0 rgba(255,255,255,.02);
+  --shadow:    0 1px 2px rgba(0,0,0,.6);
+  --shadow-sm: 0 1px 0 rgba(0,0,0,.5);
+  --lift:      0 1px 0 rgba(255,255,255,.015), 0 10px 34px rgba(0,0,0,.55);
   /* Radii, per DESIGN.md */
   --r-xs:      2px;
   --r-sm:      4px;
@@ -52,31 +56,11 @@
   --mono:      'Geist Mono','JetBrains Mono',ui-monospace,monospace;
 }
 
-/* Optional light read-only mode. Dark stays the default; nothing auto-flips to
-   light. Kept intentional rather than basic, but it is never the primary view. */
-[data-theme="light"]{
-  --bg:        #f4f5f7;
-  --bg1:       #ffffff;
-  --bg2:       #f0f1f3;
-  --bg3:       #e8eaed;
-  --line:      #e3e6ea;
-  --line2:     #d3d8de;
-  --fg:        #0d1117;
-  --fg2:       #44505a;
-  --fg3:       #6a7681;
-  --fg4:       #9aa6b0;
-  --accent-w:  rgba(44,125,145,.10);
-  --accent-b:  rgba(44,125,145,.30);
-  --sheen:     inset 0 1px 0 rgba(255,255,255,.6);
-  --shadow:    0 1px 0 rgba(0,0,0,.06);
-  --shadow-sm: 0 1px 0 rgba(0,0,0,.05);
-}
-
 /* ── Base ──────────────────────────────────────────────────────────────────── */
 html,body{
   background:var(--bg);color:var(--fg);
   font-family:var(--font);font-size:15px;line-height:1.5;
-  min-height:100vh;transition:background .2s,color .2s;
+  min-height:100vh;
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
   font-feature-settings:'ss01' on,'cv01' on;
 }
@@ -84,13 +68,12 @@ html,body{
 
 /* ── Top nav ───────────────────────────────────────────────────────────────── */
 .topbar{
-  background:rgba(13,15,16,.78);border-bottom:1px solid var(--line);
+  background:rgba(0,0,0,.72);border-bottom:1px solid var(--line);
   padding:0 28px;height:54px;
   display:flex;align-items:center;justify-content:space-between;
   position:sticky;top:0;z-index:40;
-  backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);
+  backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%);
 }
-[data-theme="light"] .topbar{background:rgba(244,245,247,.78)}
 .topbar-left{display:flex;align-items:center;gap:18px}
 .logo{
   font-size:17px;font-weight:700;letter-spacing:-.03em;
@@ -115,17 +98,8 @@ html,body{
 /* Date */
 .nav-date{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--fg3);letter-spacing:.02em}
 
-/* Theme toggle */
-.theme-btn{
-  width:30px;height:30px;border-radius:var(--r-md);border:1px solid var(--line);
-  background:var(--bg2);cursor:pointer;display:flex;align-items:center;justify-content:center;
-  transition:background .15s,border-color .15s;
-}
-.theme-btn:hover{background:var(--bg3);border-color:var(--line2)}
-.theme-btn svg{width:14px;height:14px;fill:none;stroke:var(--fg2);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-
 /* ── Layout ───────────────────────────────────────────────────────────────── */
-.page{max-width:1440px;margin:0 auto;padding:26px 28px 64px}
+.page{max-width:1320px;margin:0 auto;padding:30px 28px 72px}
 
 /* Section label */
 .section-label{
@@ -135,8 +109,8 @@ html,body{
 }
 .section-label::before{content:"";width:5px;height:5px;border-radius:1px;background:var(--accent-dim);transform:rotate(45deg)}
 
-/* Top bar: label + controls */
-.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+/* Top bar: label + controls. No bottom rule, the spacing carries it. */
+.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
 
 /* Range controls */
 .range-group{display:inline-flex;align-items:center;background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-md);padding:2px;gap:2px}
@@ -162,28 +136,33 @@ html,body{
 .controls-row{display:flex;align-items:center;gap:0}
 
 /* ── Stat cards ────────────────────────────────────────────────────────────── */
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
-@media(max-width:960px){.cards{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:520px){.cards{grid-template-columns:1fr}}
+/* Flowing rhythm: the first card is the dominant hero metric and spans two
+   columns; the rest are satellites. They float on the black with a hairline
+   only on hover, not a permanent box. */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:18px 28px;margin-bottom:8px}
+.cards .card:first-child{grid-column:span 2}
+@media(max-width:960px){.cards{grid-template-columns:repeat(2,1fr)}.cards .card:first-child{grid-column:span 2}}
+@media(max-width:520px){.cards{grid-template-columns:1fr}.cards .card:first-child{grid-column:span 1}}
 
 .card{
-  position:relative;background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);
-  padding:18px 20px 20px;box-shadow:var(--sheen);overflow:hidden;
-  transition:border-color .2s,background .2s;
+  position:relative;background:transparent;border:1px solid transparent;border-radius:var(--r-lg);
+  padding:18px 22px 20px 24px;overflow:hidden;
+  transition:background .2s,border-color .2s;
 }
-.card::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:2px;border-radius:2px;background:var(--line2);transition:background .2s}
-.card:hover{border-color:var(--line2)}
+.card::before{content:"";position:absolute;left:6px;top:20px;bottom:20px;width:2px;border-radius:2px;background:var(--line2);transition:background .2s}
+.card:hover{background:var(--bg1);border-color:var(--line)}
 .card-label{
   font-size:10.5px;font-weight:600;letter-spacing:.1em;
   text-transform:uppercase;color:var(--fg3);margin-bottom:16px;
 }
 .card-value{
-  font-size:33px;font-weight:500;line-height:1;
+  font-size:38px;font-weight:500;line-height:1;
   letter-spacing:-.035em;color:var(--fg);font-family:var(--mono);
   font-variant-numeric:tabular-nums;
 }
+.cards .card:first-child .card-value{font-size:54px;letter-spacing:-.04em}
 .card-sub{
-  font-size:11.5px;color:var(--fg3);margin-top:11px;line-height:1.4;
+  font-size:11.5px;color:var(--fg3);margin-top:12px;line-height:1.4;
   display:inline-flex;align-items:center;gap:6px;
 }
 .card-sub.up,.card-sub.down{
@@ -192,30 +171,35 @@ html,body{
 }
 .card-sub.up{color:var(--alert);background:var(--alert-w);border:1px solid var(--alert-b)}
 .card-sub.down{color:var(--success);background:var(--success-w);border:1px solid var(--success-b)}
-/* Tint the rails to the metric each card carries: savings green, score blue. */
+/* Tint the rails to the metric each card carries: spend white, savings green, score blue. */
 .cards .card:nth-child(3)::before{background:var(--success)}
 .cards .card:nth-child(4)::before{background:var(--accent)}
 
 /* Score card (percentage only, no letter grades) */
 .score-pct{
-  font-size:44px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums;
+  font-size:46px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums;
   line-height:1;letter-spacing:-.04em;margin-bottom:8px;
 }
 .score-label{font-size:10.5px;font-weight:600;margin-top:2px;text-transform:uppercase;letter-spacing:.08em}
 .score-gaps{font-size:11px;color:var(--fg3);margin-top:5px;line-height:1.45}
 
 /* Ledger mini */
-.ledger-mini{display:none;flex-direction:column;gap:4px;margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
+.ledger-mini{display:none;flex-direction:column;gap:4px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
 .lm-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--fg3)}
 .lm-row span:first-of-type,.lm-row #lm-acted,.lm-row #lm-verified{font-family:var(--mono);color:var(--fg2)}
 .lm-dot{width:5px;height:5px;border-radius:1px;transform:rotate(45deg);flex-shrink:0}
 
+/* Hairline divider used to separate flowing sections instead of boxing them. */
+.flow-rule{height:1px;background:var(--line);border:0;margin:26px 0}
+
 /* ── Panels ────────────────────────────────────────────────────────────────── */
+/* Panels float on the black. No hard border by default: a faint surface lift and
+   generous padding define them. A hairline appears only on the header rule. */
 .panel{
-  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);
-  padding:16px 20px 20px;box-shadow:var(--sheen);
+  background:var(--bg1);border:1px solid transparent;border-radius:var(--r-xl);
+  padding:20px 24px 24px;box-shadow:var(--lift);
 }
-.panel-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.panel-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--line)}
 .panel-title{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--fg2)}
 .panel-title span{color:var(--fg);font-family:var(--mono);font-weight:500}
 .panel-chip{
@@ -226,27 +210,29 @@ html,body{
 .panel-chip-accent{background:var(--accent-w);color:var(--accent);border-color:var(--accent-b)}
 
 /* ── Charts ───────────────────────────────────────────────────────────────── */
-.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+/* The trend chart leads (wider) and the breakdown rides alongside, so the row
+   breathes instead of reading as two equal boxes. */
+.charts-row{display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-bottom:8px}
 @media(max-width:800px){.charts-row{grid-template-columns:1fr}}
-.chart-wrap{position:relative;height:264px}
+.chart-wrap{position:relative;height:280px}
 
 /* ── Bottom row ───────────────────────────────────────────────────────────── */
-.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:8px}
 .bottom-row .panel{min-height:320px}
 @media(max-width:800px){.bottom-row{grid-template-columns:1fr}}
 
 /* ── Savings pipeline ledger ─────────────────────────────────────────────── */
 .ledger-row{
-  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);
-  padding:18px 26px;display:none;
+  background:var(--bg1);border:1px solid transparent;border-radius:var(--r-xl);
+  padding:22px 28px;display:none;
   grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;
-  box-shadow:var(--sheen);margin-bottom:12px;
+  box-shadow:var(--lift);margin-bottom:8px;
 }
 .ls-stage{padding:0 22px}
 .ls-stage:first-child{padding-left:0}
 .ls-stage:last-child{padding-right:0}
 .ls-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);margin-bottom:6px}
-.ls-value{font-size:25px;font-weight:500;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.03em;line-height:1}
+.ls-value{font-size:26px;font-weight:500;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.03em;line-height:1}
 .ls-identified{color:var(--fg)}
 .ls-acted{color:var(--warn)}
 .ls-verified{color:var(--success)}
@@ -254,7 +240,7 @@ html,body{
 .ledger-arrow{color:var(--fg4);font-size:16px;padding:0 6px;flex-shrink:0;font-family:var(--mono)}
 
 /* ── Efficiency scorecard ─────────────────────────────────────────────────── */
-.sc-list{list-style:none;display:flex;flex-direction:column;gap:14px}
+.sc-list{list-style:none;display:flex;flex-direction:column;gap:16px}
 .sc-item{display:flex;flex-direction:column;gap:7px}
 .sc-hdr{display:flex;align-items:baseline;justify-content:space-between}
 .sc-name{font-size:13px;color:var(--fg2);font-weight:500;letter-spacing:-.005em}
@@ -266,7 +252,7 @@ html,body{
 .opp-list{list-style:none;display:flex;flex-direction:column}
 .opp-item{
   display:flex;align-items:center;gap:11px;
-  padding:11px 0;border-bottom:1px solid var(--line);
+  padding:12px 0;border-bottom:1px solid var(--line);
 }
 .opp-item:first-child{padding-top:2px}
 .opp-item:last-child{border-bottom:none}
@@ -303,7 +289,7 @@ html,body{
 /* TOTAL POTENTIAL row */
 .opp-total{
   display:flex;align-items:center;justify-content:space-between;
-  padding:13px 0 2px;border-top:1px solid var(--line2);margin-top:4px;
+  padding:14px 0 2px;border-top:1px solid var(--line2);margin-top:4px;
 }
 .opp-total-label{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--fg3)}
 .opp-total-value{font-size:16px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--success)}
@@ -320,15 +306,15 @@ html,body{
 
 /* ── Loading skeleton ────────────────────────────────────────────────────── */
 .skeleton{
-  background:linear-gradient(90deg,var(--bg3) 25%,var(--bg2) 50%,var(--bg3) 75%);
+  background:linear-gradient(90deg,var(--bg2) 25%,var(--bg3) 50%,var(--bg2) 75%);
   background-size:200% 100%;
   animation:shimmer 1.5s infinite;
   border-radius:4px;
   display:inline-block;
 }
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-.sk-val{height:36px;width:80px}
-.sk-sub{height:12px;width:140px;margin-top:10px}
+.sk-val{height:40px;width:90px}
+.sk-sub{height:12px;width:140px;margin-top:12px}
 .sk-chart{height:100%;width:100%;border-radius:8px}
 .sk-row{height:14px;width:100%;margin-bottom:10px}
 .loading-hint{
@@ -341,13 +327,13 @@ html,body{
 .err-banner{
   background:var(--alert-w);border:1px solid var(--alert-b);
   border-radius:var(--r-md);padding:11px 15px;color:var(--alert);
-  font-size:13px;margin-bottom:14px;display:none;
+  font-size:13px;margin-bottom:18px;display:none;
 }
 .loading-banner{
   display:flex;align-items:center;gap:11px;
   background:var(--accent-w);border:1px solid var(--accent-b);
   border-radius:var(--r-md);padding:11px 15px;color:var(--fg2);
-  font-size:13px;margin-bottom:14px;
+  font-size:13px;margin-bottom:18px;
 }
 .lb-spin{
   width:13px;height:13px;flex-shrink:0;border-radius:50%;
@@ -355,7 +341,7 @@ html,body{
   animation:lbspin .7s linear infinite;
 }
 @keyframes lbspin{to{transform:rotate(360deg)}}
-.bizctx{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 20px;margin-bottom:14px;display:none;box-shadow:var(--sheen)}
+.bizctx{background:var(--bg1);border:1px solid transparent;border-radius:var(--r-xl);padding:20px 24px;margin-bottom:8px;display:none;box-shadow:var(--lift)}
 .bizctx .bc-row{display:flex;gap:0;flex-wrap:wrap;align-items:stretch}
 .bizctx .bc-item{display:flex;flex-direction:column;gap:6px;padding:2px 28px;border-left:1px solid var(--line)}
 .bizctx .bc-item:first-child{padding-left:0;border-left:none}
@@ -366,7 +352,7 @@ html,body{
 .bizctx .bc-prompt code{font-family:var(--mono,monospace);font-size:12px;color:var(--accent);background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-xs);padding:1px 5px}
 
 /* ── Footer ──────────────────────────────────────────────────────────────── */
-footer{text-align:center;padding:24px 0 8px;font-size:11px;color:var(--fg3);letter-spacing:.02em}
+footer{text-align:center;padding:28px 0 8px;font-size:11px;color:var(--fg3);letter-spacing:.02em}
 footer a{color:var(--fg2);text-decoration:none;font-weight:600}
 footer a:hover{color:var(--accent)}
 
@@ -384,117 +370,129 @@ footer a:hover{color:var(--accent)}
 .nav-tab:hover{color:var(--fg2)}
 .nav-tab.active{color:var(--fg);background:var(--bg3);border-color:var(--line2)}
 
-/* ── Ask: terminal-style cost console ─────────────────────────────────────── */
-.agent-wrap{max-width:920px;margin:0 auto}
-.agent-head{margin-bottom:16px}
-.agent-head h1{font-size:21px;font-weight:600;letter-spacing:-.025em;color:var(--fg);margin-bottom:6px}
-.agent-head p{font-size:13px;color:var(--fg2);line-height:1.55;max-width:680px}
-.agent-panel{
-  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);
-  box-shadow:var(--sheen);display:flex;flex-direction:column;overflow:hidden;
+/* ── Ask: a full-screen AI console ────────────────────────────────────────── */
+/* The Ask tab owns the whole viewport beneath the nav, like a real AI product.
+   The conversation fills the height and width; the composer is pinned full-width
+   at the bottom; the empty state is spacious. Not a small boxed panel. */
+.agent-screen{
+  display:flex;flex-direction:column;
+  height:calc(100vh - 54px);max-width:100%;margin:0;
 }
-/* Console chrome bar */
-.agent-panel::before{
-  content:"nable://ask  ·  cost console";
-  display:block;font-family:var(--mono);font-size:11px;letter-spacing:.02em;color:var(--fg3);
-  padding:10px 18px;border-bottom:1px solid var(--line);background:var(--bg2);
-}
-.agent-log{
-  padding:18px 22px;overflow-y:auto;min-height:340px;
-  max-height:calc(100vh - 360px);display:flex;flex-direction:column;gap:4px;
+.agent-stream{
+  flex:1;min-height:0;overflow-y:auto;
   scrollbar-width:thin;scrollbar-color:var(--line2) transparent;
 }
-.agent-log::-webkit-scrollbar{width:8px}
-.agent-log::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px}
-.agent-empty{margin:auto;max-width:520px;padding:26px 4px;text-align:center}
-.agent-empty .ae-mark{
-  width:38px;height:38px;border-radius:var(--r-lg);background:var(--accent-w);
-  border:1px solid var(--accent-b);display:flex;align-items:center;justify-content:center;
-  margin:0 auto 16px;color:var(--accent);font-size:19px;font-weight:700;
+.agent-stream::-webkit-scrollbar{width:10px}
+.agent-stream::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px;border:3px solid var(--bg)}
+.agent-stream::-webkit-scrollbar-thumb:hover{background:var(--fg4)}
+/* A comfortable reading column centered in the wide stream. */
+.agent-log{
+  max-width:780px;margin:0 auto;padding:36px 28px 24px;
+  display:flex;flex-direction:column;gap:2px;min-height:100%;
 }
-.agent-empty p{font-size:13px;color:var(--fg3);line-height:1.55;margin-bottom:18px}
-.agent-starters{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+
+/* Empty state: calm and spacious, biased toward upper-center like a real AI
+   console rather than pinned dead-center. */
+.agent-empty{margin:14vh auto auto;max-width:660px;padding:24px 4px 32px;text-align:center}
+.agent-empty .ae-mark{
+  width:52px;height:52px;border-radius:var(--r-xl);background:var(--accent-w);
+  border:1px solid var(--accent-b);display:flex;align-items:center;justify-content:center;
+  margin:0 auto 22px;color:var(--accent);font-size:26px;font-weight:700;
+}
+.agent-empty h2{
+  font-size:27px;font-weight:500;letter-spacing:-.03em;color:var(--fg);
+  margin-bottom:12px;line-height:1.1;
+}
+.agent-empty p{font-size:14px;color:var(--fg3);line-height:1.6;margin:0 auto 26px;max-width:520px}
+.agent-starters{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
 .starter{
-  font-family:var(--mono);font-size:11.5px;color:var(--fg2);
-  background:var(--bg2);border:1px solid var(--line);border-radius:var(--r-md);
-  padding:7px 12px;cursor:pointer;transition:background .15s,border-color .15s,color .15s;
+  font-family:var(--mono);font-size:12px;color:var(--fg2);
+  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:9px 14px;cursor:pointer;transition:background .15s,border-color .15s,color .15s,transform .15s;
   text-align:left;
 }
 .starter::before{content:"$ ";color:var(--accent-dim)}
-.starter:hover{background:var(--bg3);color:var(--fg);border-color:var(--line2)}
-/* The build-a-view starter leads: accent wash, "+" prompt instead of "$ ". */
-.starter-build{color:var(--accent);background:var(--accent-w);border-color:var(--accent-b)}
+.starter:hover{background:var(--bg2);color:var(--fg);border-color:var(--line2);transform:translateY(-1px)}
+/* The build-a-view starter leads: accent wash, "+" prompt, full-width on its row. */
+.starter-build{color:var(--accent);background:var(--accent-w);border-color:var(--accent-b);flex-basis:100%;text-align:center}
 .starter-build::before{content:"+ ";color:var(--accent)}
 .starter-build:hover{background:var(--accent-w);color:var(--accent);border-color:var(--accent)}
 
-/* Terminal rows: not chat bubbles. Each turn is a left-aligned record with a
-   mono prompt marker. User question and agent answer share the same gutter. */
-.msg{display:flex;max-width:100%;justify-content:flex-start}
+/* Message rows: crisp records, not chat bubbles. User and nable share a gutter,
+   distinguished by a mono prompt marker and weight. New rows enter with a gentle
+   ease-out rise. */
+.msg{display:flex;max-width:100%;justify-content:flex-start;animation:msgin .32s cubic-bezier(.16,1,.3,1) both}
+@keyframes msgin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.msg{animation:none}}
 .msg-bubble{
-  position:relative;font-size:14px;line-height:1.62;
-  padding:9px 0 9px 28px;max-width:100%;
+  position:relative;font-size:15px;line-height:1.65;
+  padding:11px 0 11px 30px;max-width:100%;
   word-wrap:break-word;overflow-wrap:anywhere;color:var(--fg);
 }
 .msg-bubble::before{
-  position:absolute;left:0;top:9px;font-family:var(--mono);font-size:13px;line-height:1.62;
+  position:absolute;left:0;top:11px;font-family:var(--mono);font-size:14px;line-height:1.65;
 }
 .msg-user .msg-bubble{
   color:var(--fg);font-weight:500;letter-spacing:-.005em;
-  margin-top:10px;padding-bottom:11px;border-bottom:1px solid var(--line);
+  margin-top:16px;padding-bottom:14px;border-bottom:1px solid var(--line);
 }
 .msg-user .msg-bubble::before{content:">";color:var(--accent);font-weight:600}
 .msg-user+.msg-agent .msg-bubble,.msg-agent .msg-bubble{color:var(--fg2)}
-.msg-agent .msg-bubble{padding-top:11px}
-.msg-agent .msg-bubble::before{content:"n";color:var(--accent);font-weight:700;top:11px}
+.msg-agent .msg-bubble{padding-top:14px}
+.msg-agent .msg-bubble::before{content:"n";color:var(--accent);font-weight:700;top:14px}
 .msg-err .msg-bubble{color:var(--alert)}
 .msg-err .msg-bubble::before{content:"!";color:var(--alert);font-weight:700}
 .msg-bubble strong{font-weight:650;color:var(--fg)}
 .agent-code{font-family:var(--mono);font-size:12.5px;background:var(--bg2);border:1px solid var(--line);border-radius:var(--r-xs);padding:1px 5px;color:var(--accent)}
-.agent-pre{font-family:var(--mono);font-size:12.5px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;margin:10px 0;overflow-x:auto;white-space:pre;color:var(--fg2);line-height:1.5}
-.dots{display:inline-flex;gap:4px;align-items:center;height:20px}
-.dots i{width:6px;height:6px;border-radius:1px;background:var(--accent);opacity:.4;animation:blink 1.2s infinite both}
+.agent-pre{font-family:var(--mono);font-size:12.5px;background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-md);padding:13px 15px;margin:12px 0;overflow-x:auto;white-space:pre;color:var(--fg2);line-height:1.55}
+.dots{display:inline-flex;gap:5px;align-items:center;height:22px}
+.dots i{width:6px;height:6px;border-radius:1px;background:var(--accent);opacity:.4;animation:blink 1.3s infinite both}
 .dots i:nth-child(2){animation-delay:.2s}
 .dots i:nth-child(3){animation-delay:.4s}
-@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+@keyframes blink{0%,80%,100%{opacity:.22}40%{opacity:1}}
 
-/* Composer: a console input line with an accent prompt caret */
+/* Composer: pinned full-width at the bottom, an accent prompt caret, a refined
+   input that sits on a near-black bar with a soft top edge against the black. */
+.agent-dock{
+  flex-shrink:0;border-top:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(0,0,0,0),var(--bg) 22px);
+}
 .agent-composer{
-  display:flex;gap:10px;align-items:flex-end;padding:12px 14px;
-  border-top:1px solid var(--line);background:var(--bg2);
-  position:sticky;bottom:0;
+  display:flex;gap:12px;align-items:flex-end;
+  max-width:780px;margin:0 auto;padding:16px 28px 10px;
+  position:relative;
 }
 .agent-input{
-  flex:1;font-family:var(--mono);font-size:13.5px;line-height:1.5;color:var(--fg);
-  background:var(--bg);border:1px solid var(--line);border-radius:var(--r-md);
-  padding:11px 13px 11px 30px;resize:none;max-height:140px;min-height:44px;
-  transition:border-color .15s,box-shadow .15s;
+  flex:1;font-family:var(--mono);font-size:14px;line-height:1.55;color:var(--fg);
+  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:13px 15px 13px 32px;resize:none;max-height:200px;min-height:50px;
+  transition:border-color .15s,box-shadow .15s,background .15s;
 }
-.agent-composer{position:sticky}
 .agent-composer::before{
-  content:">";position:absolute;left:28px;bottom:25px;
+  content:">";position:absolute;left:40px;bottom:24px;
   font-family:var(--mono);font-size:14px;color:var(--accent);font-weight:600;pointer-events:none;z-index:1;
 }
-.agent-input:focus{outline:none;border-color:var(--accent-b);box-shadow:0 0 0 3px var(--accent-w)}
+.agent-input:focus{outline:none;border-color:var(--accent-b);box-shadow:0 0 0 3px var(--accent-w);background:var(--bg2)}
 .agent-input::placeholder{color:var(--fg3)}
 .agent-send{
-  flex-shrink:0;width:44px;height:44px;border-radius:var(--r-md);border:1px solid var(--accent-b);cursor:pointer;
+  flex-shrink:0;width:50px;height:50px;border-radius:var(--r-lg);border:1px solid var(--accent-b);cursor:pointer;
   background:var(--accent-w);color:var(--accent);display:flex;align-items:center;justify-content:center;
   transition:background .15s,border-color .15s,opacity .15s;
 }
 .agent-send:hover:not(:disabled){background:var(--accent);border-color:var(--accent)}
 .agent-send:hover:not(:disabled) svg{stroke:var(--bg)}
 .agent-send:disabled{opacity:.4;cursor:default}
-.agent-send svg{width:17px;height:17px;fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:stroke .15s}
+.agent-send svg{width:18px;height:18px;fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:stroke .15s}
 .agent-note{font-family:var(--mono);font-size:11px;color:var(--fg3);text-align:center;padding:11px 4px;line-height:1.5;width:100%}
-.agent-disclaimer{font-family:var(--mono);font-size:10.5px;color:var(--fg3);text-align:center;margin-top:14px;line-height:1.5;letter-spacing:.01em}
+.agent-disclaimer{font-family:var(--mono);font-size:10.5px;color:var(--fg3);text-align:center;max-width:780px;margin:0 auto;padding:0 28px 14px;line-height:1.5;letter-spacing:.01em}
 
 /* Agent-built cost cards (moldable views) */
-.cost-card{background:var(--bg);border:1px solid var(--line);border-radius:var(--r-lg);padding:15px 17px;margin:8px 0 4px;align-self:stretch;max-width:100%;box-shadow:var(--sheen)}
-.cc-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:14px;padding-bottom:11px;border-bottom:1px solid var(--line)}
+.cost-card{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:18px 20px;margin:10px 0 4px;align-self:stretch;max-width:100%;box-shadow:var(--lift)}
+.cc-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:16px;padding-bottom:13px;border-bottom:1px solid var(--line)}
 .cc-title{font-size:13px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
 .cc-sub{font-family:var(--mono);font-size:11px;color:var(--fg3);white-space:nowrap}
 .cc-chart{position:relative;height:240px}
-.cc-kpi{font-family:var(--mono);font-size:34px;font-weight:500;font-variant-numeric:tabular-nums;letter-spacing:-.035em;color:var(--fg);line-height:1}
+.cc-kpi{font-family:var(--mono);font-size:36px;font-weight:500;font-variant-numeric:tabular-nums;letter-spacing:-.035em;color:var(--fg);line-height:1}
 .cc-kpi-sub{font-family:var(--mono);font-size:11.5px;color:var(--fg3);margin-top:8px}
 .cc-table{width:100%;border-collapse:collapse;font-size:13px}
 .cc-table th{text-align:left;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);padding:6px 10px;border-bottom:1px solid var(--line)}
@@ -510,13 +508,13 @@ footer a:hover{color:var(--accent)}
 .cc-unpin{font-size:16px;line-height:1;color:var(--fg3);background:transparent;border:1px solid var(--line2);width:24px;height:24px;display:flex;align-items:center;justify-content:center}
 .cc-unpin:hover{color:var(--alert);border-color:var(--alert-b)}
 /* Inline "pinned to your dashboard" confirmation in the Ask log. */
-.pin-confirm{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 4px;padding:10px 14px;
+.pin-confirm{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 4px;padding:11px 15px;
   font-size:12.5px;color:var(--success);background:var(--success-w);border:1px solid var(--success-b);border-radius:var(--r-md)}
 .pin-confirm-go{font-family:var(--font);font-size:11.5px;font-weight:600;cursor:pointer;color:var(--accent);
   background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-sm);padding:4px 11px;
   transition:background .15s,color .15s,border-color .15s}
 .pin-confirm-go:hover{background:var(--accent);color:var(--bg);border-color:var(--accent)}
-.pv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pv-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
 @media(max-width:800px){.pv-grid{grid-template-columns:1fr}}
 /* A card the agent just pinned slides in and the accent border fades out, so the
    user sees the live add land without a reload. */
@@ -549,12 +547,6 @@ footer a:hover{color:var(--accent)}
       <span id="prov-label">CONNECTING</span>
     </span>
     <div class="nav-date" id="nav-date"></div>
-    <button class="theme-btn" id="theme-btn" aria-label="Toggle light/dark mode" title="Toggle theme">
-      <!-- sun icon (shown in dark mode) -->
-      <svg id="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-      <!-- moon icon (shown in light mode) -->
-      <svg id="icon-moon" viewBox="0 0 24 24" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-    </button>
   </div>
 </nav>
 
@@ -614,6 +606,8 @@ footer a:hover{color:var(--accent)}
     </div>
   </div>
 
+  <hr class="flow-rule">
+
   <!-- Savings pipeline ledger -->
   <div class="ledger-row" id="ledger-row">
     <div class="ls-stage">
@@ -639,16 +633,6 @@ footer a:hover{color:var(--accent)}
   <div class="charts-row">
     <div class="panel">
       <div class="panel-hdr">
-        <div class="panel-title">Spend by Service: Last <span id="chart-days">30</span> Days</div>
-        <span class="panel-chip" id="svc-badge">AWS ONLY</span>
-      </div>
-      <div class="chart-wrap" style="position:relative">
-        <canvas id="chart-svc"></canvas>
-        <div class="skeleton sk-chart" id="sk-svc" style="position:absolute;inset:0"></div>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-hdr">
         <div class="panel-title">Cost Trend</div>
         <span class="panel-chip">MONTHLY</span>
       </div>
@@ -656,6 +640,16 @@ footer a:hover{color:var(--accent)}
         <canvas id="chart-trend"></canvas>
         <div class="skeleton sk-chart" id="sk-trend" style="position:absolute;inset:0"></div>
         <div class="loading-hint" id="loading-hint">Fetching AWS cost data... first load takes ~15s</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-hdr">
+        <div class="panel-title">Spend by Service: Last <span id="chart-days">30</span> Days</div>
+        <span class="panel-chip" id="svc-badge">AWS ONLY</span>
+      </div>
+      <div class="chart-wrap" style="position:relative">
+        <canvas id="chart-svc"></canvas>
+        <div class="skeleton sk-chart" id="sk-svc" style="position:absolute;inset:0"></div>
       </div>
     </div>
   </div>
@@ -690,22 +684,19 @@ footer a:hover{color:var(--accent)}
   </div>
 
   <!-- Pinned views: cards you saved from the Ask tab -->
-  <div id="pinned-views" style="display:none;margin-top:18px"></div>
+  <div id="pinned-views" style="display:none;margin-top:26px"></div>
 
 </div>
 
-<!-- Ask (agent) view -->
-<div class="page" id="view-agent" style="display:none">
-  <div class="agent-wrap">
-    <div class="agent-head">
-      <h1>Ask nable</h1>
-      <p>A FinOps analyst with read access to your connected accounts. Ask about spend, what changed, anomalies, or where to cut waste. It proposes, it never executes on its own.</p>
-    </div>
-    <div class="agent-panel">
+<!-- Ask (agent) view: full-screen AI console -->
+<div id="view-agent" style="display:none">
+  <div class="agent-screen">
+    <div class="agent-stream" id="agent-stream">
       <div class="agent-log" id="agent-log">
         <div class="agent-empty" id="agent-empty">
           <div class="ae-mark">n</div>
-          <p>Ask anything about your cloud bill. nable reads your live cost data to answer.</p>
+          <h2>Ask nable</h2>
+          <p>A FinOps analyst with read access to your connected accounts. Ask about spend, what changed, anomalies, or where to cut waste. It proposes, it never executes on its own.</p>
           <div class="agent-starters" id="agent-starters">
             <button class="starter starter-build">Build a view: spend by team this quarter and keep it on my dashboard</button>
             <button class="starter">What did we spend this month?</button>
@@ -715,14 +706,16 @@ footer a:hover{color:var(--accent)}
           </div>
         </div>
       </div>
+    </div>
+    <div class="agent-dock">
       <div class="agent-composer" id="agent-composer">
         <textarea class="agent-input" id="agent-input" rows="1" placeholder="Ask about your cloud spend…" autocomplete="off"></textarea>
         <button class="agent-send" id="agent-send" aria-label="Send" title="Send">
           <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>
       </div>
+      <div class="agent-disclaimer">nable can read your cost data and propose changes. It will not make changes on its own.</div>
     </div>
-    <div class="agent-disclaimer">nable can read your cost data and propose changes. It will not make changes on its own.</div>
   </div>
 </div>
 
@@ -751,37 +744,11 @@ let selectedProvider=localStorage.getItem('nable_provider')||'all';
 let svcChart=null,trendChart=null;
 
 // ── Theme ────────────────────────────────────────────────────────────────────
+// Dark only, locked. No toggle, no light mode, no prefers-color-scheme. The
+// document is pinned to data-theme="dark" so any reader of that attribute (the
+// chart helpers below) always renders the dark palette.
 const html=document.documentElement;
-const sunIcon=document.getElementById('icon-sun');
-const moonIcon=document.getElementById('icon-moon');
-
-function applyTheme(theme){
-  html.setAttribute('data-theme',theme);
-  localStorage.setItem('nable_theme',theme);
-  sunIcon.style.display=theme==='dark'?'':'none';
-  moonIcon.style.display=theme==='light'?'':'none';
-  if(svcChart) updateChartTheme(svcChart);
-  if(trendChart) updateChartTheme(trendChart);
-}
-function toggleTheme(){
-  applyTheme(html.getAttribute('data-theme')==='dark'?'light':'dark');
-}
-function updateChartTheme(chart){
-  const isDark=html.getAttribute('data-theme')==='dark';
-  const gridColor=isDark?'rgba(46,53,57,.55)':'rgba(0,0,0,.06)';
-  const tickColor=isDark?'#56656d':'#6b7280';
-  if(chart.options.scales){
-    Object.values(chart.options.scales).forEach(sc=>{
-      if(sc.ticks) sc.ticks.color=tickColor;
-      if(sc.grid) sc.grid.color=gridColor;
-    });
-    chart.update('none');
-  }
-}
-
-// Init theme from storage
-applyTheme(localStorage.getItem('nable_theme')||'dark');
-document.getElementById('theme-btn').addEventListener('click',toggleTheme);
+html.setAttribute('data-theme','dark');
 
 // ── Header date ──────────────────────────────────────────────────────────────
 function initDate(){
@@ -1013,9 +980,8 @@ function render(d){
 
 // ── Service chart ─────────────────────────────────────────────────────────────
 function renderSvcChart(svcs){
-  const isDark=html.getAttribute('data-theme')==='dark';
-  const gridColor=isDark?'rgba(46,53,57,.55)':'rgba(0,0,0,.06)';
-  const tickColor=isDark?'#56656d':'#6b7280';
+  const gridColor='rgba(45,45,50,.55)';
+  const tickColor='#56656d';
   const labels=svcs.map(s=>s.service);
   const amounts=svcs.map(s=>s.amount);
   const colors=svcs.map((_,i)=>i===0?'#e05c4b':i===1?'#4db8d4':'rgba(86,101,109,.45)');
@@ -1030,7 +996,7 @@ function renderSvcChart(svcs){
       scales:{
         x:{ticks:{color:tickColor,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},
            grid:{color:gridColor},border:{color:'transparent'}},
-        y:{ticks:{color:isDark?'#94a3ab':'#44505a',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12},padding:4},
+        y:{ticks:{color:'#94a3ab',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12},padding:4},
            grid:{display:false},border:{color:'transparent'}}
       }
     }
@@ -1040,9 +1006,8 @@ function renderSvcChart(svcs){
 // ── Trend chart ───────────────────────────────────────────────────────────────
 function renderTrendChart(trend){
   if(!trend||trend.length===0) return;
-  const isDark=html.getAttribute('data-theme')==='dark';
-  const gridColor=isDark?'rgba(46,53,57,.55)':'rgba(0,0,0,.06)';
-  const tickColor=isDark?'#56656d':'#6b7280';
+  const gridColor='rgba(45,45,50,.55)';
+  const tickColor='#56656d';
   const labels=trend.map(t=>t.month);
   const actual=trend.map(t=>t.actual);
   const projected=trend.map(t=>t.projected);
@@ -1061,13 +1026,13 @@ function renderTrendChart(trend){
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{
-        legend:{labels:{color:isDark?'#94a3ab':'#44505a',
+        legend:{labels:{color:'#94a3ab',
           font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12},
           boxWidth:16,usePointStyle:true,pointStyle:'line'}},
         tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.raw)}}
       },
       scales:{
-        x:{ticks:{color:isDark?'#94a3ab':'#44505a',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12}},
+        x:{ticks:{color:'#94a3ab',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12}},
            grid:{color:gridColor},border:{color:'transparent'}},
         y:{ticks:{color:tickColor,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},
            grid:{color:gridColor},border:{color:'transparent'}}
@@ -1217,12 +1182,6 @@ if(window._READONLY){
   document.body.appendChild(banner);
 }
 
-// In read-only mode the Done button is not rendered (gated in renderOpps), and
-// the theme toggle is hidden. No re-render wrapper needed.
-if(window._READONLY){
-  document.querySelectorAll('.theme-btn').forEach(b=>b.style.display='none');
-}
-
 // ── Ask (agent) tab ───────────────────────────────────────────────────────────
 function switchView(view){
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.toggle('active',t.dataset.view===view));
@@ -1263,8 +1222,15 @@ function appendMsg(role,text,opts){
   else{bubble.innerHTML=role==='agent'?fmtAnswer(text):esc(text);}
   wrap.appendChild(bubble);
   log.appendChild(wrap);
-  log.scrollTop=log.scrollHeight;
+  scrollStream();
   return wrap;
+}
+
+// Keep the conversation pinned to the latest row. The scroll container is the
+// full-height stream that wraps the reading column.
+function scrollStream(){
+  const s=document.getElementById('agent-stream');
+  if(s) s.scrollTop=s.scrollHeight;
 }
 
 // ── Agent-built cost cards (the moldable view) ───────────────────────────────
@@ -1273,7 +1239,7 @@ function appendCard(card,data){
   const log=document.getElementById('agent-log');
   const empty=document.getElementById('agent-empty'); if(empty) empty.style.display='none';
   log.appendChild(renderAgentCard(card,data||{},{pinnable:!window._READONLY}));
-  log.scrollTop=log.scrollHeight;
+  scrollStream();
 }
 // The agent pinned a view itself (ask-to-build-a-view). Confirm inline and offer a
 // one-click jump to the dashboard, where the new card has already been added live.
@@ -1285,7 +1251,7 @@ function appendPinnedConfirm(){
   const btn=document.createElement('button'); btn.className='pin-confirm-go'; btn.textContent='View on dashboard';
   btn.onclick=()=>switchView('dashboard');
   wrap.appendChild(txt); wrap.appendChild(btn);
-  log.appendChild(wrap); log.scrollTop=log.scrollHeight;
+  log.appendChild(wrap); scrollStream();
 }
 function renderAgentCard(card,data,opts){
   opts=opts||{};
@@ -1320,8 +1286,8 @@ function renderAgentCard(card,data,opts){
   return wrap;
 }
 function drawCardChart(canvas,card,rows,dims){
-  const dim=dims[0]; const isDark=html.getAttribute('data-theme')==='dark';
-  const tick=isDark?'#94a3ab':'#44505a', grid=isDark?'rgba(46,53,57,.55)':'rgba(0,0,0,.06)';
+  const dim=dims[0];
+  const tick='#94a3ab', grid='rgba(45,45,50,.55)';
   const labels=rows.map(r=>String(r[dim]==null?'':r[dim])); const vals=rows.map(r=>r.metric);
   const type=card.template==='line'?'line':'bar';
   new Chart(canvas.getContext('2d'),{
@@ -1429,7 +1395,7 @@ function initAgent(){
     input.addEventListener('keydown',e=>{
       if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();askAgent(input.value);}
     });
-    input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,140)+'px';});
+    input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,200)+'px';});
   }
   document.querySelectorAll('.starter').forEach(b=>b.addEventListener('click',()=>askAgent(b.textContent)));
   // A view-only link can't drive the agent (it can propose actions), so disable input there.
