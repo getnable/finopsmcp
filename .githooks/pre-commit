@@ -1,5 +1,8 @@
 #!/bin/sh
-# Auto-rebuild JSX before commit if source files changed
+# Auto-rebuild JSX before commit if source files changed.
+# Runs from the repo root with explicit web/ paths so staging never depends on
+# the current directory (an earlier version cd'd into web/ first, which made the
+# `git add` cwd-fragile).
 
 CHANGED=$(git diff --cached --name-only | grep -E "^web/(app|tweaks-panel)\.jsx$")
 if [ -z "$CHANGED" ]; then
@@ -8,19 +11,17 @@ fi
 
 echo "JSX changed — rebuilding..."
 
-cd web
-
 if command -v npx >/dev/null 2>&1; then
   ESBUILD="npx esbuild"
-elif command -v ~/.bun/bin/bun >/dev/null 2>&1; then
-  ESBUILD="~/.bun/bin/bun x esbuild"
+elif [ -x "$HOME/.bun/bin/bun" ]; then
+  ESBUILD="$HOME/.bun/bin/bun x esbuild"
 else
   echo "Error: esbuild not found. Install with: npm install -g esbuild"
   exit 1
 fi
 
-$ESBUILD app.jsx --jsx=transform --outfile=app.js --log-level=warning
-$ESBUILD tweaks-panel.jsx --jsx=transform --outfile=tweaks-panel.js --log-level=warning
+$ESBUILD web/app.jsx --jsx=transform --outfile=web/app.js --log-level=warning
+$ESBUILD web/tweaks-panel.jsx --jsx=transform --outfile=web/tweaks-panel.js --log-level=warning
 
-git add app.js tweaks-panel.js
+git add web/app.js web/tweaks-panel.js
 echo "Done. Built files staged."
