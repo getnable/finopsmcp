@@ -1586,10 +1586,11 @@ def main(args: list[str] | None = None) -> None:
 
     import argparse
     import logging
-    # Silence noisy third-party loggers during interactive setup
-    logging.getLogger("botocore").setLevel(logging.WARNING)
-    logging.getLogger("boto3").setLevel(logging.WARNING)
-    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+    # Silence noisy third-party loggers during interactive setup. httpx/httpcore
+    # are included so the telemetry POSTs don't print "HTTP Request: POST
+    # .../capture/" INFO lines into the middle of the interactive prompts.
+    for _noisy in ("botocore", "boto3", "apscheduler", "httpx", "httpcore", "urllib3", "posthog"):
+        logging.getLogger(_noisy).setLevel(logging.WARNING)
 
     parser = argparse.ArgumentParser(
         prog="finops",
