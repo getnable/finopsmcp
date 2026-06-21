@@ -2,6 +2,23 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.83
+
+The dashboard, reborn: full-screen, true black, and it builds views for you.
+
+### Dashboard
+- **Full-screen, advanced-AI redesign.** The Ask tab now fills the screen like a
+  real AI console (composer pinned at the bottom, a calm thinking state, crisp
+  message rows). The palette is true black, dark-only, and the rigid card grid
+  gives way to a flowing layout where panels float on the black with varied
+  rhythm.
+- **Ask to build a view.** Ask the cost console for a slice ("spend by team this
+  quarter") and it pins a live card to your dashboard with no reload, plus a
+  managed-AI usage meter per turn for credit billing.
+- **Sleek copilot voice.** The chat (and the Slack bot) drop the emoji bullets,
+  "TL;DR" headers, and em dashes for a sharp senior-analyst voice: severity in
+  plain words, resource ids in backticks.
+
 ## 0.8.82
 
 Fix: the dashboard Ask tab works on a default install.
