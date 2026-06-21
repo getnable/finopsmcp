@@ -98,6 +98,25 @@ def test_plugin_pin_matches_package_version():
     assert plugin["version"] == pkg_version
 
 
+def test_server_json_version_matches_package():
+    """server.json feeds the MCP Registry publish, which rejects a duplicate or
+    stale version. If a release bumps pyproject but forgets server.json, the
+    registry leg fails (0.8.78 and 0.8.79 both did, silently, with no test here).
+    This fails the suite at release time instead."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    pyproject = (root / "pyproject.toml").read_text()
+    pkg_version = re.search(r'^version = "([^"]+)"', pyproject, re.M).group(1)
+
+    server = json.loads((root / "server.json").read_text())
+    # The registry version and the PyPI package it points at must both track the
+    # package version, or registry-discovered installs pin to a stale release.
+    assert server["version"] == pkg_version
+    assert server["packages"][0]["version"] == pkg_version
+
+
 def test_upgrade_preserves_other_args(tmp_path, monkeypatch):
     """Only the finops-mcp token moves; any other args stay put."""
     cfg = _fake_config(tmp_path, ["--python", "3.12", "finops-mcp==0.8.50"])
