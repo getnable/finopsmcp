@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.84
+
+Fix: no more telemetry log noise in the setup wizard.
+
+### CLI
+- **Quieter `uvx nable` setup.** The interactive wizard silenced the AWS SDK and
+  the scheduler but not the HTTP client, so `httpx` logged every anonymous
+  telemetry POST ("HTTP Request: POST .../capture/") straight into the prompts,
+  including on top of "Write config?". The wizard now lowers `httpx`/`httpcore`/
+  `urllib3`/`posthog` to WARNING the way `finops welcome` already did. Telemetry
+  is unchanged; only the stray log line is gone.
+
 ## 0.8.83
 
 The dashboard, reborn: full-screen, true black, and it builds views for you.
