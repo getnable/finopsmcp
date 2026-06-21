@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.78"
+version = "0.8.79"
 description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
 readme = "README.md"
 license = { text = "Elastic-2.0" }
@@ -36,14 +36,12 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.3.0",
-    # cloud providers
+    # cloud providers. AWS ships in core (the common path); the Azure and Google
+    # Cloud SDKs are optional extras (finops-mcp[azure] / [gcp]) so the default
+    # install stays small and the first cold `uvx` launch is fast. They are imported
+    # lazily inside the Azure/GCP connectors, and is_configured() is env-var-only,
+    # so an AWS-only install never needs them.
     "boto3>=1.34.0",
-    "azure-mgmt-costmanagement>=4.0.0",
-    "azure-identity>=1.15.0",
-    "google-cloud-billing>=1.13.0",
-    "google-cloud-bigquery>=3.17.0",
-    "google-cloud-compute>=1.19.0",     # resource enumeration for GCP waste audit
-    "google-cloud-monitoring>=2.21.0",  # CPU utilization join for idle-VM detection
     # storage + scheduling
     "sqlalchemy>=2.0.0",
     "apscheduler>=3.10.0",
@@ -60,6 +58,16 @@ dependencies = [
 [project.optional-dependencies]
 snowflake = ["snowflake-connector-python>=3.6.0"]
 azure-oauth = ["msal>=1.28.0"]
+azure = [
+    "azure-mgmt-costmanagement>=4.0.0",
+    "azure-identity>=1.15.0",
+]
+gcp = [
+    "google-cloud-billing>=1.13.0",
+    "google-cloud-bigquery>=3.17.0",
+    "google-cloud-compute>=1.19.0",
+    "google-cloud-monitoring>=2.21.0",
+]
 keyring = ["keyring>=25.0.0"]
 pdf = ["pdfplumber>=0.10.0"]
 slack = [
@@ -92,6 +100,12 @@ all = [
     "kubernetes>=29.0.0",
     "psycopg2-binary>=2.9.0",
     "croniter>=2.0.0",
+    "azure-mgmt-costmanagement>=4.0.0",
+    "azure-identity>=1.15.0",
+    "google-cloud-billing>=1.13.0",
+    "google-cloud-bigquery>=3.17.0",
+    "google-cloud-compute>=1.19.0",
+    "google-cloud-monitoring>=2.21.0",
 ]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
 

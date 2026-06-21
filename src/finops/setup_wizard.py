@@ -2345,15 +2345,41 @@ def _uvx_args(target: str = "") -> list:
     return ["--python", _MANAGED_PYTHON, _pinned_package(target)]
 
 
+def _connected_extras() -> str:
+    """Optional install extras the MCP launch needs, based on connected providers.
+
+    Azure and GCP SDKs are optional (kept out of the default install so the first
+    cold `uvx` launch stays small and fast), so the launch command must request
+    them only when those providers are actually connected. AWS-only stays slim.
+    """
+    try:
+        from .security.vault import Vault
+
+        keys = [k.upper() for k in Vault.default().list_keys()]
+    except Exception:
+        return ""
+    extras = []
+    if any(k.startswith("AZURE") for k in keys):
+        extras.append("azure")
+    if any(k.startswith("GCP") or k.startswith("GOOGLE") for k in keys):
+        extras.append("gcp")
+    return ",".join(extras)
+
+
 def _pinned_package(target: str = "") -> str:
     """The uvx target written into client configs, pinned to one version.
 
     Unpinned, every PyPI release makes the next cold launch re-resolve and
     download, which can exceed an MCP client's startup timeout. Pinned, a
     release changes nothing for existing installs until `finops upgrade`.
+
+    Connected-provider extras (azure/gcp) are folded in so their SDKs install on
+    the next launch; an AWS-only setup stays on the slim default package.
     """
     v = target or _installed_version()
-    return f"finops-mcp=={v}" if v else "finops-mcp"
+    extras = _connected_extras()
+    base = f"finops-mcp[{extras}]" if extras else "finops-mcp"
+    return f"{base}=={v}" if v else base
 
 
 def _claude_config_file() -> "Path | None":

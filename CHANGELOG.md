@@ -2,6 +2,21 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.79
+
+Faster cold start.
+
+### Install and onboarding
+- **Slimmer default install.** The Azure and Google Cloud SDKs (and Google's
+  grpcio/protobuf chain) are no longer core dependencies. They moved to
+  `finops-mcp[azure]` and `finops-mcp[gcp]` extras, so an AWS-only install (the
+  common path) downloads far fewer packages and the first cold `uvx` launch is
+  much faster. The SDKs are imported lazily and provider detection is env-var
+  only, so the AWS path never touches them. The setup wizard folds the right
+  extra into the launch command automatically when you connect Azure or GCP, and
+  `finops-mcp[all]` still pulls everything. Also synced the Claude Code plugin
+  pin (it had lagged at 0.8.77).
+
 ## 0.8.78
 
 One command to install.
