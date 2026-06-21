@@ -1,0 +1,14 @@
+# Caddy terminates TLS for the nable dashboard. It fetches and auto-renews a
+# Let's Encrypt certificate for $DOMAIN, then reverse-proxies to the dashboard
+# over the internal compose network. Caddy sets X-Forwarded-Proto: https, which
+# nable reads to mark its session cookies Secure.
+#
+# Requirements: $DOMAIN resolves (DNS A or AAAA) to this host, and ports 80 and
+# 443 are reachable from the internet so Let's Encrypt can validate the domain.
+#
+# Driven by the `tls` profile in docker-compose.yml:
+#   docker compose --profile tls up -d
+
+{$DOMAIN} {
+	reverse_proxy nable:8080
+}

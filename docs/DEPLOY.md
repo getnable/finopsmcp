@@ -69,6 +69,32 @@ Finance interfaces (non-engineers consume nable here):
   Slack bot:  ON  (finance asks in Slack, no install needed)
 ```
 
+## Put it on the internet over HTTPS
+
+Steps 1 and 2 give you a dashboard on `http://<host>:8080`, which is fine on a
+trusted internal network. To let people log in from anywhere, including SSO, you
+need HTTPS. nable ships a one-command TLS front door (Caddy) that fetches and
+renews a Let's Encrypt certificate for you.
+
+1. Point a DNS record (for example `finops.yourcompany.com`) at the host, and
+   open ports 80 and 443 to the internet. Let's Encrypt validates over those.
+2. In `.env`, set `DOMAIN` to that hostname. If you use SSO, also set
+   `FINOPS_SSO_REDIRECT_URI=https://finops.yourcompany.com/sso/callback` and add
+   the same URL to your identity provider.
+3. Start with the `tls` profile:
+
+   ```bash
+   docker compose --profile tls up -d
+   ```
+
+Caddy gets the certificate on first boot (a few seconds) and renews it on its
+own. The dashboard is now at `https://finops.yourcompany.com` with a valid
+certificate, and session cookies are marked Secure. Close port 8080 at your
+firewall or security group so the only public entry is 443.
+
+This stays single-tenant and local-first: the certificate and every credential
+live on your host. nable runs no shared service in this path.
+
 ## 3. Onboard the non-engineers
 
 - **Slack**: invite the nable bot to a channel, or have people DM it. They ask.
