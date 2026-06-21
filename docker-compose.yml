@@ -58,6 +58,28 @@ services:
       timeout: 5s
       retries: 3
 
+  # Optional TLS front door (opt in with `--profile tls`). Puts the dashboard on
+  # the public internet at https://$DOMAIN with an auto-renewing Let's Encrypt
+  # certificate, and sets X-Forwarded-Proto so nable marks session cookies Secure.
+  # Without this profile nable serves plain HTTP on 8080 for local or LAN use,
+  # unchanged. When this is on, close port 8080 at your firewall so the only
+  # public entry is 443. See DEPLOY.md.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["tls"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN:?Set DOMAIN in .env to use the tls profile}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - nable
+    restart: unless-stopped
+
   # Optional: Postgres for shared team mode.
   # Remove this service (and depends_on above) if using SQLite or an external DB.
   postgres:
@@ -78,3 +100,5 @@ services:
 volumes:
   nable-data:
   pg-data:
+  caddy-data:
+  caddy-config:
