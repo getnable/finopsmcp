@@ -7,11 +7,16 @@ savings landed to MEASURED realized savings, then turns that into a verdict
 (boost / suppress / neutral) and a confidence multiplier the rescorer uses to
 re-rank proposals.
 
-Two things keep it honest on sparse data (we have ~no ledger yet):
+Three things keep it honest on sparse data (we have ~no ledger yet):
   - Bayesian shrinkage: act-rate is a Beta-posterior pulled toward a global prior,
     so a single dismissal can't nuke a rec type.
   - A COLD/WARMING/WARM ladder: a source is only ever SUPPRESSED once it has enough
     resolved recs (>= WARM_FLOOR); below that it keeps blanket behavior.
+  - Reason-aware act-rate: dismissals tagged with a business reason (reserved for
+    peak, SLA-sensitive, another team's resource) are kept OUT of the denominator.
+    They mean "I chose to keep this", not "your rec was bad", so they never train a
+    good source down. Quality dismissals (wrong estimate) and uncategorized ones do
+    count. See _BUSINESS_DISMISS_REASONS.
 
 This is deterministic math over the ledger (like quality_signal already is). No ML
 training, no model files, fully reproducible and explainable. Single-tenant: it only
@@ -39,6 +44,14 @@ ACCURACY_OK = (0.8, 1.2)  # predicted/realized within this band counts as "accur
 
 _RESOLVED = ("acted_on", "verified", "dismissed", "expired")
 _ACTED = ("acted_on", "verified")
+
+# Dismiss categories that are a deliberate business choice, NOT evidence that the
+# recommendation was low quality. We record them and show them in the `why`, but we
+# keep them OUT of the act-rate denominator so they can't suppress a good source. A
+# customer who keeps capacity for peak / SLA / another team's resource is not telling
+# us the rec was bad, only that they chose not to act on it. Quality dismissals
+# (wrong_estimate) and uncategorized ones (other / none) still count fully.
+_BUSINESS_DISMISS_REASONS = frozenset({"reserved_for_peak", "sla_sensitive", "not_our_resource"})
 
 
 def _coverage(resolved: int) -> str:
@@ -79,7 +92,7 @@ def _confidence_multiplier(shrunk: float, accuracy: float | None) -> float:
 
 
 def _why(source: str, coverage: str, verdict: str, acted: int, resolved: int,
-         accuracy: float | None) -> str:
+         accuracy: float | None, business_dismissed: int = 0) -> str:
     if coverage == "COLD":
         return f"No decisions on {source} recs yet, using the standard ranking (global default)."
     acc_txt = ""
@@ -91,6 +104,9 @@ def _why(source: str, coverage: str, verdict: str, acted: int, resolved: int,
         else:
             acc_txt = f" and past {source} savings landed within ~{round(accuracy*100)}% of estimate"
     base = f"You acted on {acted}/{resolved} {source} recs you decided on{acc_txt}."
+    if business_dismissed:
+        base += (f" {business_dismissed} more dismissed for a business reason "
+                 f"(peak/SLA/another team), not counted against {source}.")
     if verdict == "suppress":
         return base + " So these are suppressed for you (still here if you want them)."
     if verdict == "boost":
@@ -99,14 +115,23 @@ def _why(source: str, coverage: str, verdict: str, acted: int, resolved: int,
 
 
 def _new_counts() -> dict:
-    return {"open": 0, "acted_on": 0, "verified": 0, "dismissed": 0, "expired": 0, "realized": 0.0}
+    # business_dismissed is a SUBSET of dismissed: dismissals tagged with a business
+    # reason (peak / SLA / not-ours). Tracked separately so it can be excluded from the
+    # act-rate denominator without losing it from the user-facing counts.
+    return {"open": 0, "acted_on": 0, "verified": 0, "dismissed": 0,
+            "business_dismissed": 0, "expired": 0, "realized": 0.0}
 
 
 def _entry(source: str, bucket: str | None, c: dict, acc_list: list[float]) -> dict:
     """Build one signal entry (the same math for a per-source or a per-(source,bucket)
     grouping). accuracy is the median per-rec ratio; act-rate is Bayesian-shrunk."""
     acted = c["acted_on"] + c["verified"]
-    resolved = acted + c["dismissed"] + c["expired"]
+    business_dismissed = c["business_dismissed"]
+    # Business-reason dismissals (peak/SLA/not-ours) are a choice, not a quality
+    # signal, so they don't count toward resolved. Only quality + uncategorized
+    # dismissals do. clamp guards a malformed count where business > total dismissed.
+    quality_dismissed = max(0, c["dismissed"] - business_dismissed)
+    resolved = acted + quality_dismissed + c["expired"]
     accuracy = round(statistics.median(acc_list), 3) if acc_list else None
     shrunk = round(_shrunk_act_rate(acted, resolved), 3)
     coverage = _coverage(resolved)
@@ -114,12 +139,13 @@ def _entry(source: str, bucket: str | None, c: dict, acc_list: list[float]) -> d
     e = {
         "source": source,
         "open": c["open"], "acted": acted, "verified": c["verified"],
-        "dismissed": c["dismissed"], "expired": c["expired"], "resolved": resolved,
+        "dismissed": c["dismissed"], "business_dismissed": business_dismissed,
+        "expired": c["expired"], "resolved": resolved,
         "act_rate": shrunk,
         "act_rate_raw": round(acted / resolved, 3) if resolved else None,
         "accuracy": accuracy, "coverage": coverage, "verdict": verdict,
         "confidence_multiplier": _confidence_multiplier(shrunk, accuracy),
-        "why": _why(source, coverage, verdict, acted, resolved, accuracy),
+        "why": _why(source, coverage, verdict, acted, resolved, accuracy, business_dismissed),
         "realized_monthly_usd": round(c["realized"], 2),
     }
     if bucket is not None:
@@ -137,9 +163,11 @@ def customer_signal() -> dict[str, Any]:
         rows = conn.execute(
             select(
                 sr.c.source, sr.c.environment_bucket, sr.c.status,
+                sr.c.dismiss_reason_category,
                 func.count().label("cnt"),
                 func.sum(sr.c.verified_monthly_savings_usd).label("sum_ver"),
-            ).group_by(sr.c.source, sr.c.environment_bucket, sr.c.status)
+            ).group_by(sr.c.source, sr.c.environment_bucket, sr.c.status,
+                       sr.c.dismiss_reason_category)
         ).fetchall()
         # Per-rec accuracy among verified recs; median (not a sum-ratio) so one big
         # miss can't dominate; negatives clamp to 0 (a "verified" loss = a failed rec).
@@ -156,10 +184,16 @@ def customer_signal() -> dict[str, Any]:
         bkt = r.environment_bucket or "unknown|other"
         cnt = int(r.cnt or 0)
         ver = max(0.0, float(r.sum_ver or 0.0))
+        is_business_dismiss = (
+            r.status == "dismissed"
+            and getattr(r, "dismiss_reason_category", None) in _BUSINESS_DISMISS_REASONS
+        )
         for store, key in ((source_counts, src), (bucket_counts, (src, bkt))):
             d = store.setdefault(key, _new_counts())
             if r.status in d:
                 d[r.status] += cnt
+            if is_business_dismiss:
+                d["business_dismissed"] += cnt
             if r.status == "verified":
                 d["realized"] += ver
 
@@ -193,10 +227,21 @@ def customer_signal() -> dict[str, Any]:
         },
         "note": ("Per recommendation source (and per environment bucket): act-rate "
                  "(acted vs all you decided on, Bayesian-shrunk) and accuracy (measured "
-                 "vs predicted savings among verified recs). A source/bucket stays on "
-                 f"blanket behavior until it has >= {WARM_FLOOR} resolved recs; only "
-                 "then can it be suppressed for you."),
+                 "vs predicted savings among verified recs). Dismissals for a business "
+                 "reason (reserved for peak, SLA-sensitive, another team's resource) are "
+                 "recorded but kept out of the act-rate, so a valid 'keep it' never trains "
+                 "a good source down. A source/bucket stays on blanket behavior until it "
+                 f"has >= {WARM_FLOOR} resolved recs; only then can it be suppressed for you."),
     }
+
+
+def _has_signal(entry: dict) -> bool:
+    """An entry carries real signal if the customer has resolved any recs OR has
+    dismissed some for a business reason. The latter has resolved == 0 (business
+    dismissals are out of the denominator) but is still a learned 'keep it for this
+    source/bucket', so it should win over a fall-through to a possibly-suppressed
+    source aggregate or a COLD default."""
+    return entry.get("resolved", 0) > 0 or entry.get("business_dismissed", 0) > 0
 
 
 def signal_for(signal: dict, source: str, bucket: str | None = None) -> dict:
@@ -204,13 +249,14 @@ def signal_for(signal: dict, source: str, bucket: str | None = None) -> dict:
     entry with real signal, falls back to the source aggregate, then a COLD default."""
     if bucket:
         for s in signal.get("by_bucket", []):
-            if s["source"] == source and s.get("bucket") == bucket and s["resolved"] > 0:
+            if s["source"] == source and s.get("bucket") == bucket and _has_signal(s):
                 return s
     for s in signal.get("by_source", []):
-        if s["source"] == source and s["resolved"] > 0:
+        if s["source"] == source and _has_signal(s):
             return s
     return {
         "source": source, "bucket": bucket, "resolved": 0, "acted": 0,
+        "business_dismissed": 0,
         "act_rate": PRIOR_ACT_RATE, "accuracy": None, "coverage": "COLD", "verdict": "neutral",
         "confidence_multiplier": _confidence_multiplier(PRIOR_ACT_RATE, None),
         "why": f"No decisions on {source} recs yet, using the standard ranking (global default).",

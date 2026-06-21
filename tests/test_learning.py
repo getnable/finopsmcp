@@ -28,7 +28,7 @@ def ledger(monkeypatch):
 _seq = [0]
 
 
-def _seed(source, status, est=100.0, ver=None, n=1, bucket=None):
+def _seed(source, status, est=100.0, ver=None, n=1, bucket=None, reason_category=None):
     from finops.storage.db import get_engine, savings_recommendations
     now = datetime.now(timezone.utc)
     with get_engine().begin() as conn:
@@ -38,7 +38,7 @@ def _seed(source, status, est=100.0, ver=None, n=1, bucket=None):
                 source=source, provider="aws", status=status,
                 estimated_monthly_savings_usd=est, verified_monthly_savings_usd=ver,
                 generated_at=now, dedup_key=f"k{_seq[0]}", resource_id=f"r{_seq[0]}",
-                environment_bucket=bucket,
+                environment_bucket=bucket, dismiss_reason_category=reason_category,
             ))
 
 
@@ -263,3 +263,84 @@ def test_record_recommendation_stores_bucket(ledger):
     )
     buckets = {b["bucket"] for b in customer_signal()["by_bucket"]}
     assert "prod|ec2" in buckets
+
+
+# ── reason-aware act-rate (business dismissals don't suppress a good source) ───
+
+def test_business_dismissals_excluded_from_act_rate(ledger):
+    """The headline fix: 12 dismissals for a business reason (peak/SLA/not-ours) leave a
+    source WARMING with 0 resolved instead of WARM-and-suppressed. A valid 'keep it'
+    never trains a good source down."""
+    from finops.recommendations.learning.signal import customer_signal
+    _seed("spot", "dismissed", n=12, reason_category="reserved_for_peak")
+    s = _by_source(customer_signal())["spot"]
+    assert s["dismissed"] == 12          # still counted and visible
+    assert s["business_dismissed"] == 12
+    assert s["resolved"] == 0            # but out of the act-rate denominator
+    assert s["coverage"] == "COLD"
+    assert s["verdict"] != "suppress"    # NOT suppressed: the recs were fine
+
+
+def test_quality_dismissals_still_suppress(ledger):
+    """A wrong-estimate dismissal IS a quality signal and still counts, so a source the
+    customer keeps rejecting on quality grounds is suppressed exactly as before."""
+    from finops.recommendations.learning.signal import customer_signal
+    _seed("spot", "dismissed", n=12, reason_category="wrong_estimate")
+    s = _by_source(customer_signal())["spot"]
+    assert s["business_dismissed"] == 0
+    assert s["resolved"] == 12 and s["coverage"] == "WARM"
+    assert s["act_rate"] < 0.15 and s["verdict"] == "suppress"
+
+
+def test_uncategorized_dismissal_counts_as_quality(ledger):
+    """A dismissal with no business category (other / NULL) is conservative: it counts
+    toward resolved, so we never silently ignore a real signal."""
+    from finops.recommendations.learning.signal import customer_signal
+    _seed("idle", "dismissed", n=10, reason_category="other")
+    _seed("idle", "dismissed", n=2, reason_category=None)
+    s = _by_source(customer_signal())["idle"]
+    assert s["business_dismissed"] == 0
+    assert s["resolved"] == 12 and s["coverage"] == "WARM"
+
+
+def test_mixed_business_and_quality_dismissals(ledger):
+    """Business and quality dismissals coexist on one source: only the quality ones
+    (plus acted) drive the verdict; business ones are reported but excluded."""
+    from finops.recommendations.learning.signal import customer_signal
+    _seed("spot", "acted_on", n=6)                                       # acted
+    _seed("spot", "dismissed", n=8, reason_category="sla_sensitive")     # business -> excluded
+    _seed("spot", "dismissed", n=2, reason_category="wrong_estimate")    # quality -> counts
+    s = _by_source(customer_signal())["spot"]
+    assert s["business_dismissed"] == 8
+    assert s["resolved"] == 8            # 6 acted + 2 quality dismissed
+    assert s["act_rate_raw"] == round(6 / 8, 3)
+    assert "business reason" in s["why"]
+
+
+def test_mark_dismissed_classifies_and_stores_category(ledger):
+    """End-to-end: mark_dismissed runs the classifier and persists the category, and the
+    signal then excludes it without any manual tagging."""
+    from finops.recommendations.savings_tracker import (
+        record_recommendation, mark_dismissed, list_recommendations,
+    )
+    from finops.recommendations.learning.signal import customer_signal
+    rid = record_recommendation(
+        source="spot", provider="aws", resource_id="i-9", resource_type="ec2",
+        resource_name="batch", current_config={}, recommended_config={"spot": True},
+        description="move to spot", estimated_monthly_savings_usd=200.0, environment="prod",
+    )
+    assert mark_dismissed(rid, "reserved for our Black Friday peak") is True
+    row = list_recommendations()[0]
+    assert row["dismiss_reason_category"] == "reserved_for_peak"
+    s = _by_source(customer_signal())["spot"]
+    assert s["business_dismissed"] == 1 and s["resolved"] == 0
+
+
+def test_business_dismissals_excluded_per_bucket(ledger):
+    """Reason-awareness holds at the (source, bucket) grain too: a prod source dismissed
+    only for SLA reasons is not suppressed for prod."""
+    from finops.recommendations.learning.signal import customer_signal, signal_for
+    _seed("spot", "dismissed", n=12, bucket="prod|ec2", reason_category="sla_sensitive")
+    prod = signal_for(customer_signal(), "spot", bucket="prod|ec2")
+    assert prod["business_dismissed"] == 12
+    assert prod["resolved"] == 0 and prod["verdict"] != "suppress"

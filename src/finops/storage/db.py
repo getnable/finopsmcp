@@ -381,6 +381,10 @@ savings_recommendations = Table(
     Column("verified_at", DateTime, nullable=True),
     Column("dismissed_at", DateTime, nullable=True),
     Column("dismiss_reason", Text, nullable=True),
+    # Canonical dismiss category (classify_dismiss_reason), set at dismiss time so the
+    # learning signal can tell a quality miss ("estimate is wrong") apart from a
+    # business reason ("reserved for peak") without re-parsing free text on every query.
+    Column("dismiss_reason_category", String(32), nullable=True),
     # Dedup
     Column("dedup_key", String(64), nullable=False),   # SHA256 of source+resource_id+recommended_config
     # Learning loop: coarse env/workload bucket so the signal can roll up per
@@ -611,6 +615,9 @@ def _run_sqlite_migrations(engine: Engine) -> None:
         ("business_metrics", "monthly_opex_usd",      "ALTER TABLE business_metrics ADD COLUMN monthly_opex_usd REAL"),
         # Learning loop: per-(source, bucket) signal
         ("savings_recommendations", "environment_bucket", "ALTER TABLE savings_recommendations ADD COLUMN environment_bucket VARCHAR(64)"),
+        # Learning loop: canonical dismiss category, so business-reason dismissals don't
+        # count against a source's act-rate the way a quality miss does.
+        ("savings_recommendations", "dismiss_reason_category", "ALTER TABLE savings_recommendations ADD COLUMN dismiss_reason_category VARCHAR(32)"),
     ]
 
     with engine.connect() as conn:

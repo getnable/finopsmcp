@@ -97,6 +97,7 @@ def record_recommendation(
                         verified_at=None,
                         dismissed_at=None,
                         dismiss_reason=None,
+                        dismiss_reason_category=None,
                         verified_monthly_savings_usd=None,
                     )
                 )
@@ -156,6 +157,12 @@ def mark_verified(rec_id: int, actual_monthly_savings_usd: float) -> bool:
 
 
 def mark_dismissed(rec_id: int, reason: str = "") -> bool:
+    # Canonicalize the free-text reason once, at dismiss time, so the learning signal
+    # can separate a quality miss ("estimate is wrong" -> counts against the source)
+    # from a business reason ("reserved for peak" -> a choice, not a quality signal).
+    # The raw text is always kept; the category is only a hint.
+    from .learning.reasons import classify_dismiss_reason
+    category = classify_dismiss_reason(reason)
     engine = get_engine()
     with engine.begin() as conn:
         r = conn.execute(
@@ -168,6 +175,7 @@ def mark_dismissed(rec_id: int, reason: str = "") -> bool:
                 status="dismissed",
                 dismissed_at=datetime.now(timezone.utc),
                 dismiss_reason=reason or None,
+                dismiss_reason_category=category,
             )
         )
         return r.rowcount > 0
@@ -380,6 +388,7 @@ def list_recommendations(
             "acted_on_at": r.acted_on_at.isoformat() if r.acted_on_at else None,
             "verified_at": r.verified_at.isoformat() if r.verified_at else None,
             "dismiss_reason": r.dismiss_reason,
+            "dismiss_reason_category": getattr(r, "dismiss_reason_category", None),
             "environment_bucket": getattr(r, "environment_bucket", None),
         })
     return result
