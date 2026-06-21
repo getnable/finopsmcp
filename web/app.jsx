@@ -310,7 +310,7 @@ const INSTALL_POPUPS = {
       <>Restart Claude Desktop. nable connects as a local MCP server.</>,
     ],
     cmdLabel: "In your terminal",
-    cmd: "uvx finops-mcp",
+    cmd: "uvx nable",
     altCmd: "pip install -U finops-mcp && finops welcome",
     note: "uv installs a matching Python for you, so this works on any setup. No uv? brew install uv. Runs on your machine, no nable backend.",
   },
@@ -321,7 +321,7 @@ const INSTALL_POPUPS = {
       <>Add nable to your Codex MCP config below, then restart Codex.</>,
     ],
     cmdLabel: "In your terminal",
-    cmd: "uvx finops-mcp",
+    cmd: "uvx nable",
     altCmd: "pip install -U finops-mcp && finops welcome",
     toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["--python", "3.12", "finops-mcp"]',
     tomlPath: "~/.codex/config.toml",
@@ -392,7 +392,7 @@ function InstallRow(){
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3" strokeLinecap="round" strokeLinejoin="round"/></svg>
         Run this in your terminal
       </span>
-      <CopyCmd cmd="uvx finops-mcp" />
+      <CopyCmd cmd="uvx nable" />
       <div className="install-row">
         <a className="iclient is-primary" href={CURSOR_DEEPLINK}
           onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'add_to_cursor' }); }}>
@@ -562,7 +562,7 @@ const GATE = (
   <>
     <p>That's exactly the kind of question nable answers against your <b>own</b> account, with your real numbers. This demo only knows the sample account above.</p>
     <p style={{marginTop:12}}>Connect it in about a minute, then ask away on your real bill. It runs on your machine, nothing leaves it:</p>
-    <div className="gate-cmd"><CopyCmd cmd="uvx finops-mcp" /></div>
+    <div className="gate-cmd"><CopyCmd cmd="uvx nable" /></div>
     <p className="gate-sub">Free for solo use, no signup. Runs on your machine.</p>
   </>
 );
@@ -770,7 +770,7 @@ function Depth(){
 /* AI cost */
 function AiCost(){
   const copy = () => {
-    if(navigator.clipboard) navigator.clipboard.writeText("uvx finops-mcp");
+    if(navigator.clipboard) navigator.clipboard.writeText("uvx nable");
     if(window.posthog) posthog.capture('cta_clicked',{location:'ai_cost',cta:'copy_install'});
   };
   return (
@@ -802,7 +802,7 @@ function AiCost(){
               <div className="aicost-foot">From an early user's first scan. Real numbers, name withheld for now.</div>
               <div className="aicost-cta">
                 <span className="aicost-cta-l">This is a small account. See your own number, free:</span>
-                <code className="aicost-cmd" onClick={copy}>uvx finops-mcp</code>
+                <code className="aicost-cmd" onClick={copy}>uvx nable</code>
               </div>
             </div>
           </div>
@@ -892,7 +892,7 @@ function HowItWorks(){
 /* One entry. Every editor. Tabbed runtime config */
 const EDITOR_TABS = [
   { id:"terminal", label:"Terminal", bar:"bash", lines:[
-    { k:"cmd", t:"$ uvx finops-mcp" },
+    { k:"cmd", t:"$ uvx nable" },
     { k:"dim", t:"  fetching finops-mcp + a matching python…" },
     { k:"ok",  t:"✓ runtime registered · ask nable in your editor" },
   ]},
@@ -1246,7 +1246,7 @@ function MidCta(){
           </div>
           <div style={{display:"inline-flex",alignItems:"stretch",background:"var(--bg-1)",border:"1px solid var(--line-2)",borderRadius:"var(--r-md)",fontFamily:"var(--mono)",fontSize:13.5,overflow:"hidden",maxWidth:"100%"}}>
             <span style={{padding:"12px 13px",color:"var(--fg-3)",background:"var(--bg-2)",borderRight:"1px solid var(--line)"}}>$</span>
-            <span style={{padding:"12px 16px",color:"var(--fg)",whiteSpace:"nowrap",overflowX:"auto"}}>uvx finops-mcp</span>
+            <span style={{padding:"12px 16px",color:"var(--fg)",whiteSpace:"nowrap",overflowX:"auto"}}>uvx nable</span>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",justifyContent:"center"}}>
             <a href="/docs.html#install" className="btn btn-primary"
@@ -1291,7 +1291,7 @@ function FootCta(){
           <EmailCapture source="footer" placeholder="drop your email, we'll send the setup guide" btnLabel="Send it" center={true} />
         </div>
         <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-3)",letterSpacing:".04em"}}>
-          $ uvx finops-mcp
+          $ uvx nable
         </p>
         <p style={{marginTop:24,fontSize:13,color:"var(--fg-3)"}}>
           Building something? <a href="/about" style={{color:"var(--accent-dim)"}}>Read the founder note and investor thesis →</a>
@@ -1394,7 +1394,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How long does setup take?",
-    a: "A few minutes. Run `uvx finops-mcp` (uv fetches a matching Python and runs the setup wizard, no PATH setup needed), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. The wizard connects Claude, connects your cloud, and shows your first cost number right in the terminal. Want to see it first? `uvx finops-mcp welcome --demo` runs it on sample data."
+    a: "A few minutes. Run `uvx nable` (uv fetches a matching Python and runs the setup wizard, no PATH setup needed), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. The wizard connects Claude, connects your cloud, and shows your first cost number right in the terminal. Want to see it first? `uvx nable welcome --demo` runs it on sample data."
   },
   {
     q: "Is the free tier actually free?",
