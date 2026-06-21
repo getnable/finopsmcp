@@ -395,41 +395,21 @@ def list_recommendations(
 
 
 # ── Verification: check if changes were actually made ────────────────────────
-
-def verify_ec2_change(resource_id: str, recommended_config: dict) -> float | None:
-    """
-    Check if an EC2 instance was actually resized.
-    Returns the estimated monthly savings if changed, None if not changed yet.
-    """
-    try:
-        import boto3
-        ec2 = boto3.client("ec2")
-        resp = ec2.describe_instances(InstanceIds=[resource_id])
-        reservations = resp.get("Reservations", [])
-        if not reservations:
-            return None
-        instance = reservations[0]["Instances"][0]
-        current_type = instance.get("InstanceType", "")
-        target_type = recommended_config.get("instance_type", "")
-
-        if current_type == target_type:
-            # Change confirmed — estimate savings from type difference
-            from ..connectors.terraform_estimate import _EC2_HOURLY
-            old_type = recommended_config.get("from_instance_type", "")
-            old_hourly = _EC2_HOURLY.get(old_type, 0.0)
-            new_hourly = _EC2_HOURLY.get(target_type, 0.0)
-            from ..connectors.terraform_estimate import HOURS_PER_MONTH
-            return round((old_hourly - new_hourly) * HOURS_PER_MONTH, 2)
-        return None
-    except Exception as e:
-        log.debug("verify_ec2_change error: %s", e)
-        return None
+# The actual verifiers live in verifiers.py, keyed by (source, resource_type) in
+# a small registry, so auto_verify_acted_on dispatches instead of hard-coding
+# EC2. verify_ec2_change is re-exported here for backward compatibility with any
+# caller that imported it from this module before the registry existed.
+from .verifiers import get_verifier, verify_ec2_change  # noqa: E402,F401
 
 
 def auto_verify_acted_on() -> list[dict]:
     """
-    For all acted_on recommendations, attempt to verify the change was made.
-    Returns list of newly-verified records with their actual savings.
+    For every acted_on recommendation, dispatch to the registered verifier for
+    its (source, resource_type) and confirm the change actually landed. A source
+    with no registered verifier is a no-op: the row stays acted_on, nothing
+    crashes, and it gets another chance once a verifier ships.
+
+    Returns the list of newly-verified records with their measured savings.
     """
     engine = get_engine()
     with engine.connect() as conn:
@@ -441,12 +421,14 @@ def auto_verify_acted_on() -> list[dict]:
     newly_verified = []
     for r in rows:
         try:
-            rec_config = json.loads(r.recommended_config or "{}")
-            actual_savings = None
+            verifier = get_verifier(r.source, r.resource_type)
+            if verifier is None:
+                # No verifier for this source yet. Leave it acted_on so it can
+                # be picked up later without losing the realized saving.
+                continue
 
-            if r.source == "rightsizing" and r.resource_type == "ec2":
-                actual_savings = verify_ec2_change(r.resource_id, rec_config)
-            # Future: RDS, K8s, etc.
+            rec_config = json.loads(r.recommended_config or "{}")
+            actual_savings = verifier(r.resource_id, rec_config, r)
 
             if actual_savings is not None:
                 mark_verified(r.id, actual_savings)
