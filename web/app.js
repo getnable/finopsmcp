@@ -86,7 +86,7 @@ function applyPalette(name) {
 function useScrollTracking() {
   useEffect(() => {
     if (!window.posthog) return;
-    const sections = ["connectors", "depth", "architecture", "pricing", "faq", "foot-cta"];
+    const sections = ["demo", "connectors", "architecture", "pricing", "foot-cta"];
     const seen = /* @__PURE__ */ new Set();
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
@@ -176,10 +176,7 @@ function Nav() {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
     setOpen(false);
   }
-  return /* @__PURE__ */ React.createElement("nav", { className: "nav" }, /* @__PURE__ */ React.createElement("div", { className: "nav-inner" }, /* @__PURE__ */ React.createElement("a", { href: "/", className: "logo" }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--accent)" } }, "n"), "able")), /* @__PURE__ */ React.createElement("ul", null, /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("button", { className: "nav-link", onClick: () => scrollTo("connectors") }, "Connectors")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("button", { className: "nav-link", onClick: () => scrollTo("pricing") }, "Pricing")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("button", { className: "nav-link", onClick: () => {
-    scrollTo("faq");
-    if (window.posthog) posthog.capture("nav_clicked", { item: "faq" });
-  } }, "FAQ")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/docs.html", onClick: () => {
+  return /* @__PURE__ */ React.createElement("nav", { className: "nav" }, /* @__PURE__ */ React.createElement("div", { className: "nav-inner" }, /* @__PURE__ */ React.createElement("a", { href: "/", className: "logo" }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--accent)" } }, "n"), "able")), /* @__PURE__ */ React.createElement("ul", null, /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("button", { className: "nav-link", onClick: () => scrollTo("connectors") }, "Connectors")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("button", { className: "nav-link", onClick: () => scrollTo("demo") }, "Demo")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("button", { className: "nav-link", onClick: () => scrollTo("pricing") }, "Pricing")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/docs.html", onClick: () => {
     if (window.posthog) posthog.capture("docs_clicked", { location: "nav" });
   } }, "Docs")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement(
     "a",
@@ -224,13 +221,10 @@ function Nav() {
       onClick: () => setOpen((o) => !o)
     },
     open ? /* @__PURE__ */ React.createElement("svg", { width: "20", height: "20", viewBox: "0 0 20 20", fill: "none", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M4 4L16 16M16 4L4 16", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" })) : /* @__PURE__ */ React.createElement("svg", { width: "20", height: "20", viewBox: "0 0 20 20", fill: "none", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M3 5h14M3 10h14M3 15h14", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" }))
-  )), open && /* @__PURE__ */ React.createElement("div", { className: "nav-mobile-menu" }, /* @__PURE__ */ React.createElement("button", { className: "nav-mobile-item", onClick: () => scrollTo("connectors") }, "Connectors"), /* @__PURE__ */ React.createElement("button", { className: "nav-mobile-item", onClick: () => {
+  )), open && /* @__PURE__ */ React.createElement("div", { className: "nav-mobile-menu" }, /* @__PURE__ */ React.createElement("button", { className: "nav-mobile-item", onClick: () => scrollTo("connectors") }, "Connectors"), /* @__PURE__ */ React.createElement("button", { className: "nav-mobile-item", onClick: () => scrollTo("demo") }, "Demo"), /* @__PURE__ */ React.createElement("button", { className: "nav-mobile-item", onClick: () => {
     scrollTo("pricing");
     if (window.posthog) posthog.capture("nav_clicked", { item: "pricing" });
-  } }, "Pricing"), /* @__PURE__ */ React.createElement("button", { className: "nav-mobile-item", onClick: () => {
-    scrollTo("faq");
-    if (window.posthog) posthog.capture("nav_clicked", { item: "faq" });
-  } }, "FAQ"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/docs.html", onClick: () => {
+  } }, "Pricing"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/docs.html", onClick: () => {
     setOpen(false);
     if (window.posthog) posthog.capture("docs_clicked", { location: "nav_mobile" });
   } }, "Docs"), /* @__PURE__ */ React.createElement(
@@ -261,47 +255,10 @@ function Nav() {
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   ))));
 }
-function Hero({ interaction }) {
-  return /* @__PURE__ */ React.createElement("header", { className: "hero", id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid-bg" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-inner" }, /* @__PURE__ */ React.createElement("div", { className: "hero-left" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Stop guessing why cloud costs went up. ", /* @__PURE__ */ React.createElement("span", { className: "h1-ask" }, "Ask.")), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Connect AWS, Azure, GCP, Datadog, Snowflake, and more. Get answers, anomalies, and savings opportunities, without sending your billing data to another vendor."), /* @__PURE__ */ React.createElement(InstallRow, null), /* @__PURE__ */ React.createElement("div", { className: "hero-cta-row" }, /* @__PURE__ */ React.createElement("a", { className: "btn btn-ghost", href: "https://calendar.app.google/2duYBqjLXaTmX5xC8", target: "_blank", rel: "noopener noreferrer", onClick: () => {
-    if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "book_demo" });
-  } }, "Book a demo")), /* @__PURE__ */ React.createElement("p", { className: "install-note" }, "Free for solo use, no credit card \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/docs.html#install", onClick: () => {
-    if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs_install" });
-  } }, "VS Code, Windsurf, Zed and more")), /* @__PURE__ */ React.createElement(TrustStrip, null), /* @__PURE__ */ React.createElement("div", { className: "hero-mobile-cta" }, /* @__PURE__ */ React.createElement("div", { className: "mini-console", "aria-label": "Example: nable answering a cost question" }, /* @__PURE__ */ React.createElement("div", { className: "mc-bar" }, /* @__PURE__ */ React.createElement("span", { className: "mc-dots" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)), /* @__PURE__ */ React.createElement("span", { className: "mc-title" }, "claude \xB7 mcp[nable]")), /* @__PURE__ */ React.createElement("div", { className: "mc-body" }, /* @__PURE__ */ React.createElement("div", { className: "mc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mc-who" }, "YOU"), /* @__PURE__ */ React.createElement("span", null, "What's our compute cost across AWS and GCP?")), /* @__PURE__ */ React.createElement("div", { className: "mc-row" }, /* @__PURE__ */ React.createElement("span", { className: "mc-who mc-n" }, "NABLE"), /* @__PURE__ */ React.createElement("span", null, "$24,530 this month, up 12.9%. Most of the jump is three new instances in us-east-1, about ", /* @__PURE__ */ React.createElement("b", { className: "mc-save" }, "$1,890"), ". Want them tagged?")))), /* @__PURE__ */ React.createElement("p", { className: "hmc-lead" }, "nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide."), /* @__PURE__ */ React.createElement(EmailCapture, { source: "hero_mobile", placeholder: "your@email.com", btnLabel: "Get the guide" }), /* @__PURE__ */ React.createElement("div", { className: "hmc-links" }, /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      href: "/demo.html",
-      className: "hmc-pro",
-      onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "full_demo" });
-      }
-    },
-    "Ask the live demo ",
-    /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  ), /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      href: "#pricing",
-      className: "hmc-pro",
-      onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "pricing" });
-      }
-    },
-    "See Team \xB7 $100/mo flat ",
-    /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  ), /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
-      target: "_blank",
-      rel: "noopener noreferrer",
-      className: "hmc-book",
-      onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "hero_mobile", cta: "book_demo" });
-      }
-    },
-    "Book a live demo ",
-    /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  )))), /* @__PURE__ */ React.createElement("div", { className: "hero-right" }, /* @__PURE__ */ React.createElement(Console, { interaction })))));
+function Hero() {
+  return /* @__PURE__ */ React.createElement("header", { className: "hero hero-centered", id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-c" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Stop guessing why cloud costs went up. ", /* @__PURE__ */ React.createElement("span", { className: "h1-ask" }, "Ask.")), /* @__PURE__ */ React.createElement("p", { className: "lede" }, "Connect AWS, Azure, GCP, Datadog, Snowflake, and more. Get answers, anomalies, and savings opportunities, without sending your billing data to another vendor."), /* @__PURE__ */ React.createElement("div", { className: "hero-actions" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" }), /* @__PURE__ */ React.createElement("a", { className: "btn btn-primary", href: "/docs.html", onClick: () => {
+    if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "start_free" });
+  } }, "Get started free ", /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192"))), /* @__PURE__ */ React.createElement("p", { className: "hero-trustline" }, "Local-first \xB7 17 providers \xB7 ", /* @__PURE__ */ React.createElement("b", null, "0 bytes"), " on our servers \xB7 free for solo use"))));
 }
 const CURSOR_DEEPLINK = "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLXB5dGhvbiIsICIzLjEyIiwgImZpbm9wcy1tY3AiXX0=";
 const INSTALL_POPUPS = {
@@ -530,6 +487,11 @@ function Console({ interaction }) {
     if (window.posthog) posthog.capture("hero_demo_chip", { idx: c.idx });
   }
   return /* @__PURE__ */ React.createElement("div", { className: "console", id: "runtime" }, /* @__PURE__ */ React.createElement("div", { className: "console-bar" }, /* @__PURE__ */ React.createElement("div", { className: "dots" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)), /* @__PURE__ */ React.createElement("span", { className: "title" }, "claude \xB7 mcp[nable] \xB7 ~/projects/platform-infra"), /* @__PURE__ */ React.createElement("span", { className: "status" }, "runtime active")), /* @__PURE__ */ React.createElement("div", { className: "console-body" }, /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av you" }, "you"), /* @__PURE__ */ React.createElement("div", { className: "bubble user" }, /* @__PURE__ */ React.createElement("p", null, typed, /* @__PURE__ */ React.createElement("span", { className: "cursor" })))), phase === "thinking" && /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av ai" }, "nable"), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, /* @__PURE__ */ React.createElement("div", { className: "thinking" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)))), phase === "answered" && /* @__PURE__ */ React.createElement("div", { className: "msg" }, /* @__PURE__ */ React.createElement("div", { className: "av ai" }, "nable"), /* @__PURE__ */ React.createElement("div", { className: "bubble" }, answer))));
+}
+function SeeItWork({ interaction }) {
+  return /* @__PURE__ */ React.createElement("section", { id: "demo", className: "demo-sec" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head center" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "See it work"), /* @__PURE__ */ React.createElement("h2", null, "Ask your bill like you'd", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "ask a teammate.")), /* @__PURE__ */ React.createElement("p", null, "nable pulls every connected provider, normalizes to USD, and answers in plain English. Watch it run through real questions, or ask your own.")), /* @__PURE__ */ React.createElement("div", { className: "console-stage" }, /* @__PURE__ */ React.createElement(Console, { interaction })), /* @__PURE__ */ React.createElement("div", { className: "demo-foot" }, /* @__PURE__ */ React.createElement("a", { href: "/demo.html", className: "demo-link", onClick: () => {
+    if (window.posthog) posthog.capture("cta_clicked", { location: "demo_sec", cta: "live_demo" });
+  } }, "Ask your own question in the live demo ", /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")))));
 }
 function Thesis() {
   const cards = [
@@ -876,7 +838,7 @@ function FounderNote() {
   return /* @__PURE__ */ React.createElement("section", { id: "founder", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { maxWidth: 680, paddingTop: 80, paddingBottom: 80 } }, /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Bricolage Grotesque',system-ui,sans-serif", fontWeight: 500, fontSize: 11, color: "var(--accent-dim)", letterSpacing: ".08em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 10, marginBottom: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 24, height: 1, background: "var(--accent-dim)", display: "inline-block" } }), "Why I built this"), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 28 } }, "I built this because I spent most of my day bouncing between dashboards that barely showed what I actually needed, the AWS console, and Claude. I'd ask Claude a question, manually paste in numbers, get an answer, then go back and repeat the whole thing."), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 28 } }, "A lot of FinOps tools are shipping MCP integrations now. But they're all built for enterprise, priced for enterprise, and none of them fit the way I actually work. They give you visibility. They don't help you think."), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 36 } }, "nable solves the problems I actually had. The recommendations go deeper than anything I've seen out of the box, and for the first time I can actually reason through my own optimization opportunities instead of just staring at a graph."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 40, height: 40, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: "var(--bg)" } }, "CB")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 500, color: "var(--fg)" } }, "Chandan Bukkapatnam"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: "var(--fg-3)" } }, "Founder \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "mailto:chandan@getnable.com", target: "_blank", rel: "noopener noreferrer", style: { color: "var(--accent)" } }, "chandan@getnable.com"))))));
 }
 function Footer({ version }) {
-  return /* @__PURE__ */ React.createElement("footer", null, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "foot" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("a", { href: "#top", className: "logo", style: { marginBottom: 18 } }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, "nable")), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-3)", fontSize: 13, maxWidth: "34ch", lineHeight: 1.55, marginTop: 10 } }, "Your cloud and AI bill, answered. Made in Austin, TX.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Product"), /* @__PURE__ */ React.createElement("a", { href: "#connectors" }, "Connectors"), /* @__PURE__ */ React.createElement("a", { href: "#pricing" }, "Pricing"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("footer", null, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "foot" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("a", { href: "#top", className: "logo", style: { marginBottom: 18 } }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, "nable")), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-3)", fontSize: 13, maxWidth: "34ch", lineHeight: 1.55, marginTop: 10 } }, "Your cloud and AI bill, answered. Made in Austin, TX.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Product"), /* @__PURE__ */ React.createElement("a", { href: "#demo" }, "Demo"), /* @__PURE__ */ React.createElement("a", { href: "#connectors" }, "Connectors"), /* @__PURE__ */ React.createElement("a", { href: "#pricing" }, "Pricing"), /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
@@ -887,7 +849,7 @@ function Footer({ version }) {
       }
     },
     "Book a demo"
-  ), /* @__PURE__ */ React.createElement("a", { href: "#faq" }, "FAQ")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Resources"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html" }, "Docs"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html#quickstart" }, "Quickstart"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html#iam" }, "IAM templates"), /* @__PURE__ */ React.createElement("a", { href: "/security" }, "Security")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Company"), /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About"), /* @__PURE__ */ React.createElement("a", { href: "/about#investors" }, "Investors"), /* @__PURE__ */ React.createElement("a", { href: "mailto:hello@getnable.com", target: "_blank", rel: "noopener noreferrer" }, "Contact"), /* @__PURE__ */ React.createElement("a", { href: "https://github.com/chaandannn/finopsmcp", target: "_blank", rel: "noopener noreferrer" }, "GitHub"), /* @__PURE__ */ React.createElement("a", { href: "https://www.linkedin.com/company/getnable/", target: "_blank", rel: "noopener noreferrer" }, "LinkedIn"))), /* @__PURE__ */ React.createElement("div", { className: "foot-meta" }, /* @__PURE__ */ React.createElement("span", null, "2026 nable \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/privacy", style: { color: "var(--fg-3)" } }, "Privacy"), " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/terms", style: { color: "var(--fg-3)" } }, "Terms")), /* @__PURE__ */ React.createElement("span", null, "nable \xB7 runtime healthy"))));
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Resources"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html" }, "Docs"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html#quickstart" }, "Quickstart"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html#iam" }, "IAM templates"), /* @__PURE__ */ React.createElement("a", { href: "/security" }, "Security")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Company"), /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About"), /* @__PURE__ */ React.createElement("a", { href: "/about#investors" }, "Investors"), /* @__PURE__ */ React.createElement("a", { href: "mailto:hello@getnable.com", target: "_blank", rel: "noopener noreferrer" }, "Contact"), /* @__PURE__ */ React.createElement("a", { href: "https://github.com/chaandannn/finopsmcp", target: "_blank", rel: "noopener noreferrer" }, "GitHub"), /* @__PURE__ */ React.createElement("a", { href: "https://www.linkedin.com/company/getnable/", target: "_blank", rel: "noopener noreferrer" }, "LinkedIn"))), /* @__PURE__ */ React.createElement("div", { className: "foot-meta" }, /* @__PURE__ */ React.createElement("span", null, "2026 nable \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/privacy", style: { color: "var(--fg-3)" } }, "Privacy"), " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/terms", style: { color: "var(--fg-3)" } }, "Terms")), /* @__PURE__ */ React.createElement("span", null, "nable \xB7 runtime healthy"))));
 }
 const FAQ_ITEMS = [
   {
@@ -1059,6 +1021,6 @@ function App() {
     }).catch(() => {
     });
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, { interaction: t.interaction }), /* @__PURE__ */ React.createElement(HowItWorks, null), /* @__PURE__ */ React.createElement(EveryEditor, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(MidCta, null), /* @__PURE__ */ React.createElement(FAQ, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, null), /* @__PURE__ */ React.createElement(SeeItWork, { interaction: t.interaction }), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null));
 }
 ReactDOM.createRoot(document.getElementById("app")).render(/* @__PURE__ */ React.createElement(App, null));

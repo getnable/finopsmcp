@@ -53,7 +53,7 @@ function applyPalette(name){
 function useScrollTracking() {
   useEffect(() => {
     if (!window.posthog) return;
-    const sections = ['connectors', 'depth', 'architecture', 'pricing', 'faq', 'foot-cta'];
+    const sections = ['demo', 'connectors', 'architecture', 'pricing', 'foot-cta'];
     const seen = new Set();
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
@@ -184,8 +184,8 @@ function Nav(){
         </a>
         <ul>
           <li><button className="nav-link" onClick={()=>scrollTo('connectors')}>Connectors</button></li>
+          <li><button className="nav-link" onClick={()=>scrollTo('demo')}>Demo</button></li>
           <li><button className="nav-link" onClick={()=>scrollTo('pricing')}>Pricing</button></li>
-          <li><button className="nav-link" onClick={()=>{ scrollTo('faq'); if(window.posthog) posthog.capture('nav_clicked',{item:'faq'}); }}>FAQ</button></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
           <li><a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer"
                  onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a></li>
@@ -219,8 +219,8 @@ function Nav(){
       {open && (
         <div className="nav-mobile-menu">
           <button className="nav-mobile-item" onClick={()=>scrollTo('connectors')}>Connectors</button>
+          <button className="nav-mobile-item" onClick={()=>scrollTo('demo')}>Demo</button>
           <button className="nav-mobile-item" onClick={()=>{ scrollTo('pricing'); if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</button>
-          <button className="nav-mobile-item" onClick={()=>{ scrollTo('faq'); if(window.posthog) posthog.capture('nav_clicked',{item:'faq'}); }}>FAQ</button>
           <a className="nav-mobile-item" href="/docs.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
           <a className="nav-mobile-item" href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer"
              onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a>
@@ -241,54 +241,24 @@ function Nav(){
 // The hero is always the split layout: copy left, live console right (per
 // DESIGN.md). The centered "editorial" variant was retired, so layout is
 // accepted for compatibility but no longer switches the arrangement.
-function Hero({ interaction }){
+function Hero(){
   return (
-    <header className="hero" id="top">
-      <div className="hero-grid-bg"></div>
+    <header className="hero hero-centered" id="top">
       <div className="wrap">
-        <div className="hero-inner">
-          <div className="hero-left">
-            <h1 className="display">
-              Stop guessing why cloud costs went up. <span className="h1-ask">Ask.</span>
-            </h1>
-            <p className="lede">
-              Connect AWS, Azure, GCP, Datadog, Snowflake, and more. Get answers, anomalies, and savings opportunities, without sending your billing data to another vendor.
-            </p>
-            <InstallRow />
-            <div className="hero-cta-row">
-              <a className="btn btn-ghost" href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'book_demo' }); }}>Book a demo</a>
-            </div>
-            <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a></p>
-            <TrustStrip />
-            <div className="hero-mobile-cta">
-              <div className="mini-console" aria-label="Example: nable answering a cost question">
-                <div className="mc-bar"><span className="mc-dots"><i/><i/><i/></span><span className="mc-title">claude · mcp[nable]</span></div>
-                <div className="mc-body">
-                  <div className="mc-row"><span className="mc-who">YOU</span><span>What's our compute cost across AWS and GCP?</span></div>
-                  <div className="mc-row"><span className="mc-who mc-n">NABLE</span><span>$24,530 this month, up 12.9%. Most of the jump is three new instances in us-east-1, about <b className="mc-save">$1,890</b>. Want them tagged?</span></div>
-                </div>
-              </div>
-              <p className="hmc-lead">nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide.</p>
-              <EmailCapture source="hero_mobile" placeholder="your@email.com" btnLabel="Get the guide" />
-              <div className="hmc-links">
-                <a href="/demo.html" className="hmc-pro"
-                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'full_demo'}); }}>
-                  Ask the live demo <span className="arr">→</span>
-                </a>
-                <a href="#pricing" className="hmc-pro"
-                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing'}); }}>
-                  See Team · $100/mo flat <span className="arr">→</span>
-                </a>
-                <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" className="hmc-book"
-                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'book_demo'}); }}>
-                  Book a live demo <span className="arr">→</span>
-                </a>
-              </div>
-            </div>
+        <div className="hero-c">
+          <h1 className="display">
+            Stop guessing why cloud costs went up. <span className="h1-ask">Ask.</span>
+          </h1>
+          <p className="lede">
+            Connect AWS, Azure, GCP, Datadog, Snowflake, and more. Get answers, anomalies, and savings opportunities, without sending your billing data to another vendor.
+          </p>
+          <div className="hero-actions">
+            <CopyCmd cmd="uvx nable" />
+            <a className="btn btn-primary" href="/docs.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
+              Get started free <span className="arr">→</span>
+            </a>
           </div>
-          <div className="hero-right">
-            <Console interaction={interaction} />
-          </div>
+          <p className="hero-trustline">Local-first · 17 providers · <b>0 bytes</b> on our servers · free for solo use</p>
         </div>
       </div>
     </header>
@@ -710,6 +680,27 @@ function Console({ interaction }){
         )}
       </div>
     </div>
+  );
+}
+
+/* See it work (console demo, relocated out of the hero) */
+function SeeItWork({ interaction }){
+  return (
+    <section id="demo" className="demo-sec">
+      <div className="wrap">
+        <div className="section-head center">
+          <div className="label">See it work</div>
+          <h2>Ask your bill like you'd<br/><em>ask a teammate.</em></h2>
+          <p>nable pulls every connected provider, normalizes to USD, and answers in plain English. Watch it run through real questions, or ask your own.</p>
+        </div>
+        <div className="console-stage">
+          <Console interaction={interaction} />
+        </div>
+        <div className="demo-foot">
+          <a href="/demo.html" className="demo-link" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'demo_sec', cta:'live_demo' }); }}>Ask your own question in the live demo <span className="arr">→</span></a>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1356,11 +1347,11 @@ function Footer({ version }){
           </div>
           <div>
             <h5>Product</h5>
+            <a href="#demo">Demo</a>
             <a href="#connectors">Connectors</a>
             <a href="#pricing">Pricing</a>
             <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_nav',cta:'book_demo'}); }}>Book a demo</a>
-            <a href="#faq">FAQ</a>
           </div>
           <div>
             <h5>Resources</h5>
@@ -1578,15 +1569,12 @@ function App(){
   return (
     <>
       <Nav />
-      <Hero interaction={t.interaction} />
-      <HowItWorks />
-      <EveryEditor />
+      <Hero />
+      <SeeItWork interaction={t.interaction} />
       <AiCost />
       <Connectors />
       <Architecture version={version} />
       <Pricing />
-      <MidCta />
-      <FAQ />
       <FootCta />
       <Footer version={version} />
       <Tweaks />
