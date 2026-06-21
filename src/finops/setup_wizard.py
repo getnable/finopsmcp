@@ -147,15 +147,38 @@ def setup_aws() -> None:
     except (KeyboardInterrupt, EOFError):
         print()
 
-    print("  Choose authentication method:")
-    print("  1) IAM Access Key (simple, works for personal accounts)")
-    print("  2) IAM Identity Center / SSO (recommended for teams)")
-    choice = _prompt("  Choice", default="1")
+    from .security import iam_setup as _iam
+    _oneclick = _iam.quick_create_available()
+    print("  Choose how to connect:")
+    if _oneclick:
+        print("  1) One-click CloudFormation  (easiest: opens AWS, creates a read-only key for you)")
+        print("  2) Paste an existing IAM access key")
+        print("  3) IAM Identity Center / SSO (for teams)")
+        choice = _prompt("  Choice", default="1")
+        _method = "sso" if choice == "3" else ("key" if choice == "2" else "oneclick")
+    else:
+        print("  1) IAM Access Key (simple, works for personal accounts)")
+        print("  2) IAM Identity Center / SSO (recommended for teams)")
+        choice = _prompt("  Choice", default="1")
+        _method = "sso" if choice == "2" else "key"
+
+    # The credential step is the activation cliff; record which path users pick so
+    # we can see which one converts. Threaded so the POST never blocks the prompt.
+    try:
+        from . import telemetry as _tel
+        import threading as _th
+        _th.Thread(
+            target=_tel._send_event,
+            args=(_tel._get_install_id(), "aws_connect_method", {"method": _method}),
+            daemon=True,
+        ).start()
+    except Exception:
+        pass
 
     from .security.vault import Vault
     vault = Vault.default()
 
-    if choice == "2":
+    if _method == "sso":
         start_url = _prompt("  SSO Start URL (e.g. https://myco.awsapps.com/start)")
         region = _prompt("  SSO region", default="us-east-1")
         account_id = _prompt("  AWS account ID to use")
@@ -185,7 +208,31 @@ def setup_aws() -> None:
             _err(f"Failed to store SSO credentials: {e}")
             return
     else:
-        print("""
+        if _method == "oneclick":
+            url = _iam.quick_create_url()
+            print("""
+  One-click read-only key via CloudFormation:
+    1. We open the AWS console with a read-only stack pre-loaded.
+    2. Tick the "I acknowledge that AWS CloudFormation might create IAM
+       resources" box, click "Create stack", and wait ~30 seconds.
+    3. Open the stack's "Outputs" tab. Copy AccessKeyId and SecretAccessKey.
+    4. Paste them below. Delete the stack any time to revoke the key.
+""")
+            try:
+                import webbrowser
+                _opened = webbrowser.open(url)
+            except Exception:
+                _opened = False
+            if _opened:
+                print(f"  Opened AWS in your browser. If nothing opened, use this link:\n    {url}\n")
+            else:
+                print(f"  Open this link in your browser:\n    {url}\n")
+            try:
+                input("  Press Enter once the stack shows CREATE_COMPLETE → ")
+            except (KeyboardInterrupt, EOFError):
+                print()
+        else:
+            print("""
   Create an access key:
     1. IAM → Users → your user → Security credentials
     2. Access keys → Create access key → choose "Other" → Create
