@@ -2,6 +2,19 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.81
+
+The dashboard, rebuilt.
+
+### Dashboard
+- **Full visual redesign of `finops serve` / `nable serve`.** Rebuilt on the Cold
+  Graphite design system: dark locked by default, Geist Mono tabular numbers as
+  the hero of every metric, ice-blue accents, hairline borders, the proper radius
+  scale. KPI cards, charts, the efficiency scorecard, and savings opportunities
+  are now instrument-grade, and the Ask tab is a terminal-style cost console with
+  a proposed-action card (Approve / Dismiss) instead of generic chat bubbles. All
+  data binding is unchanged: this is a restyle, not a behavior change.
+
 ## 0.8.80
 
 Fix: the visual dashboard was missing from pip and uvx installs.
