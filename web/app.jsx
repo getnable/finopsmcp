@@ -17,8 +17,8 @@ const PALETTES = {
     "--grid":"rgba(255,255,255,.03)"
   },
   graphite: {
-    "--bg":"#0d0f10","--bg-1":"#111416","--bg-2":"#181c1f","--bg-3":"#1e2327",
-    "--line":"#242a2e","--line-2":"#2e3539",
+    "--bg":"#000000","--bg-1":"#0a0a0c","--bg-2":"#121214","--bg-3":"#1a1a1d",
+    "--line":"#232327","--line-2":"#2d2d32",
     "--fg":"#f0f2f3","--fg-2":"#94a3ab","--fg-3":"#56656d","--fg-4":"#2d3a40",
     "--accent":"#4db8d4","--accent-dim":"#2c7d91",
     "--warn":"#e6a840","--alert":"#e05c4b",
@@ -136,7 +136,7 @@ function LogoMark(){
         <stop offset="0" stopColor="#5cc1da"/><stop offset="1" stopColor="#3a9ab6"/>
       </linearGradient></defs>
       <rect width="120" height="120" rx="27" fill="url(#nmg)"/>
-      <path d="M44 80 L44 56 A16 16 0 0 1 76 56 L76 80" fill="none" stroke="#0d0f10" strokeWidth="13" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M44 80 L44 56 A16 16 0 0 1 76 56 L76 80" fill="none" stroke="#000000" strokeWidth="13" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
@@ -1148,28 +1148,13 @@ function Pricing(){
           <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
           <p>Solo is free forever. Pro adds the remediation layer: PRs, tickets, alerts, dashboards. Team adds the conversational Slack bot and managed AI. Enterprise adds SSO, audit logs, and an SLA.</p>
 
-          {/* Billing toggle */}
-          <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center",marginTop:24}}>
-            <span style={{fontSize:13,color:annual?"var(--fg-3)":"var(--fg)",fontWeight:annual?400:500,transition:"color .15s"}}>Monthly</span>
-            <button
-              onClick={()=>setAnnual(a=>!a)}
-              style={{
-                width:44,height:24,borderRadius:6,border:"1px solid var(--line-2)",
-                background:annual?"var(--accent)":"var(--bg-2)",
-                position:"relative",cursor:"pointer",transition:"background .2s",flexShrink:0,
-              }}
-              aria-label="Toggle annual billing"
-            >
-              <span style={{
-                position:"absolute",top:3,left:annual?20:3,width:16,height:16,
-                borderRadius:"50%",background:annual?"var(--bg)":"var(--fg-3)",
-                transition:"left .2s, background .2s",display:"block",
-              }}/>
-            </button>
-            <span style={{display:"flex",alignItems:"center",gap:6}}>
-              <span style={{fontSize:13,color:annual?"var(--fg)":"var(--fg-3)",fontWeight:annual?500:400,transition:"color .15s"}}>Annual</span>
-              <span style={{fontSize:11,fontWeight:500,color:"var(--success)",background:"rgba(60,186,122,.12)",padding:"2px 7px",borderRadius:2,letterSpacing:".03em"}}>SAVE 17%</span>
-            </span>
+          {/* Billing toggle: segmented control, matched to the dashboard range group. */}
+          <div className="bill-toggle" role="group" aria-label="Billing period">
+            <div className="seg">
+              <button className={"seg-btn" + (annual ? "" : " active")} onClick={()=>setAnnual(false)} aria-pressed={!annual}>Monthly</button>
+              <button className={"seg-btn" + (annual ? " active" : "")} onClick={()=>setAnnual(true)} aria-label="Toggle annual billing" aria-pressed={annual}>Annual</button>
+            </div>
+            <span className="seg-save">SAVE 17%</span>
           </div>
         </div>
 
@@ -1498,7 +1483,7 @@ function FAQ(){
 /* Tweaks panel */
 const PALETTE_OPTIONS = [
   {value:"onyx",     label:"Onyx",     swatch:["#0a0a0c","#5fe8a0","#15151a"]},
-  {value:"graphite", label:"Graphite", swatch:["#0d0f10","#4db8d4","#181c1f"]},
+  {value:"graphite", label:"Graphite", swatch:["#000000","#4db8d4","#121214"]},
   {value:"paper",    label:"Paper",    swatch:["#fbfaf7","#1f8a5b","#e3dfcf"]},
   {value:"mono",     label:"Mono",     swatch:["#ffffff","#0a0a0a","#e6e6e3"]},
 ];

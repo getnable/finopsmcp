@@ -26,12 +26,12 @@ const PALETTES = {
     "--grid": "rgba(255,255,255,.03)"
   },
   graphite: {
-    "--bg": "#0d0f10",
-    "--bg-1": "#111416",
-    "--bg-2": "#181c1f",
-    "--bg-3": "#1e2327",
-    "--line": "#242a2e",
-    "--line-2": "#2e3539",
+    "--bg": "#000000",
+    "--bg-1": "#0a0a0c",
+    "--bg-2": "#121214",
+    "--bg-3": "#1a1a1d",
+    "--line": "#232327",
+    "--line-2": "#2d2d32",
     "--fg": "#f0f2f3",
     "--fg-2": "#94a3ab",
     "--fg-3": "#56656d",
@@ -165,7 +165,7 @@ function EmailCapture({ source = "hero", placeholder = "email", btnLabel = "Get 
   );
 }
 function LogoMark() {
-  return /* @__PURE__ */ React.createElement("svg", { width: "26", height: "26", viewBox: "0 0 120 120", className: "mark-img", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "nmg", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0", stopColor: "#5cc1da" }), /* @__PURE__ */ React.createElement("stop", { offset: "1", stopColor: "#3a9ab6" }))), /* @__PURE__ */ React.createElement("rect", { width: "120", height: "120", rx: "27", fill: "url(#nmg)" }), /* @__PURE__ */ React.createElement("path", { d: "M44 80 L44 56 A16 16 0 0 1 76 56 L76 80", fill: "none", stroke: "#0d0f10", strokeWidth: "13", strokeLinecap: "round", strokeLinejoin: "round" }));
+  return /* @__PURE__ */ React.createElement("svg", { width: "26", height: "26", viewBox: "0 0 120 120", className: "mark-img", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "nmg", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0", stopColor: "#5cc1da" }), /* @__PURE__ */ React.createElement("stop", { offset: "1", stopColor: "#3a9ab6" }))), /* @__PURE__ */ React.createElement("rect", { width: "120", height: "120", rx: "27", fill: "url(#nmg)" }), /* @__PURE__ */ React.createElement("path", { d: "M44 80 L44 56 A16 16 0 0 1 76 56 L76 80", fill: "none", stroke: "#000000", strokeWidth: "13", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
 function Ticker({ installs, version }) {
   return /* @__PURE__ */ React.createElement("div", { className: "ticker" }, /* @__PURE__ */ React.createElement("div", { className: "ticker-inner" }, /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("span", { className: "dot" }), /* @__PURE__ */ React.createElement("b", null, "nable"), /* @__PURE__ */ React.createElement("span", null, "runtime healthy")), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, "4k+ PyPI downloads / mo"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, "17 connectors \xB7 AWS \xB7 Azure \xB7 GCP +14"), /* @__PURE__ */ React.createElement("span", { className: "sep" }, "\xB7"), /* @__PURE__ */ React.createElement("span", { className: "seg" }, /* @__PURE__ */ React.createElement("a", { href: "/about", style: { color: "var(--accent)", textDecoration: "none", fontWeight: 500 } }, "About & investors \u2192"))));
@@ -760,35 +760,7 @@ function Pricing() {
   const teamSub = annual ? "$833 / mo \xB7 2 months free" : "7-day free trial";
   const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan = annual ? "team_annual" : "team_monthly";
-  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Pro adds the remediation layer: PRs, tickets, alerts, dashboards. Team adds the conversational Slack bot and managed AI. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, justifyContent: "center", marginTop: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg-3)" : "var(--fg)", fontWeight: annual ? 400 : 500, transition: "color .15s" } }, "Monthly"), /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      onClick: () => setAnnual((a) => !a),
-      style: {
-        width: 44,
-        height: 24,
-        borderRadius: 6,
-        border: "1px solid var(--line-2)",
-        background: annual ? "var(--accent)" : "var(--bg-2)",
-        position: "relative",
-        cursor: "pointer",
-        transition: "background .2s",
-        flexShrink: 0
-      },
-      "aria-label": "Toggle annual billing"
-    },
-    /* @__PURE__ */ React.createElement("span", { style: {
-      position: "absolute",
-      top: 3,
-      left: annual ? 20 : 3,
-      width: 16,
-      height: 16,
-      borderRadius: "50%",
-      background: annual ? "var(--bg)" : "var(--fg-3)",
-      transition: "left .2s, background .2s",
-      display: "block"
-    } })
-  ), /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 13, color: annual ? "var(--fg)" : "var(--fg-3)", fontWeight: annual ? 500 : 400, transition: "color .15s" } }, "Annual"), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, fontWeight: 500, color: "var(--success)", background: "rgba(60,186,122,.12)", padding: "2px 7px", borderRadius: 2, letterSpacing: ".03em" } }, "SAVE 17%")))), /* @__PURE__ */ React.createElement("div", { className: "ptable-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ptable" }, /* @__PURE__ */ React.createElement("div", { className: "ph ph-corner" }), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Solo"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "forever")), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Pro adds the remediation layer: PRs, tickets, alerts, dashboards. Team adds the conversational Slack bot and managed AI. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { className: "bill-toggle", role: "group", "aria-label": "Billing period" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? "" : " active"), onClick: () => setAnnual(false), "aria-pressed": !annual }, "Monthly"), /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? " active" : ""), onClick: () => setAnnual(true), "aria-label": "Toggle annual billing", "aria-pressed": annual }, "Annual")), /* @__PURE__ */ React.createElement("span", { className: "seg-save" }, "SAVE 17%"))), /* @__PURE__ */ React.createElement("div", { className: "ptable-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ptable" }, /* @__PURE__ */ React.createElement("div", { className: "ph ph-corner" }), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Solo"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "forever")), /* @__PURE__ */ React.createElement(
     "a",
     {
       className: "btn btn-ghost pt-cta",
@@ -1015,7 +987,7 @@ function FAQ() {
 }
 const PALETTE_OPTIONS = [
   { value: "onyx", label: "Onyx", swatch: ["#0a0a0c", "#5fe8a0", "#15151a"] },
-  { value: "graphite", label: "Graphite", swatch: ["#0d0f10", "#4db8d4", "#181c1f"] },
+  { value: "graphite", label: "Graphite", swatch: ["#000000", "#4db8d4", "#121214"] },
   { value: "paper", label: "Paper", swatch: ["#fbfaf7", "#1f8a5b", "#e3dfcf"] },
   { value: "mono", label: "Mono", swatch: ["#ffffff", "#0a0a0a", "#e6e6e3"] }
 ];
