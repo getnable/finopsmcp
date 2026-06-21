@@ -231,8 +231,9 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 @media(max-width:880px){.hero-inner{grid-template-columns:1fr;gap:40px}.hero-right{display:none}.hero-left{display:flex;flex-direction:column;align-items:flex-start;text-align:left}.lede{max-width:52ch}.hero-cta-row{display:none}.hero-mobile-cta{display:block;width:100%;max-width:420px;margin-top:36px}.install-note{text-align:left}}
 @media(min-width:881px){.hero-mobile-cta{display:none}}
 /* Centered hero (stripped to one promise) */
-.hero-centered{padding:108px 0 100px;text-align:center}
-.hero-centered .wrap{display:flex;justify-content:center}
+.hero-centered{min-height:calc(100vh - 64px);display:flex;align-items:center;padding:48px 0 72px;text-align:center;position:relative;background:radial-gradient(ellipse 70% 56% at 50% 40%, rgba(77,184,212,.055), transparent 66%)}
+.hero-centered::after{content:"";position:absolute;left:0;right:0;bottom:0;height:280px;pointer-events:none;z-index:0;background:radial-gradient(ellipse 54% 100% at 50% 108%, rgba(77,184,212,.07), transparent 72%)}
+.hero-centered .wrap{display:flex;justify-content:center;width:100%;position:relative;z-index:1}
 .hero-c{width:100%;max-width:800px;display:flex;flex-direction:column;align-items:center}
 .hero-centered .display{text-align:center}
 .hero-centered .lede{margin:26px auto 0;text-align:center;max-width:58ch}
