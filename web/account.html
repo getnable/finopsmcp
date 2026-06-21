@@ -67,7 +67,11 @@
   .label{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);letter-spacing:.02em}
 
   /* main content area */
-  main{min-height:calc(100vh - 60px);padding:64px 0 96px}
+  main{min-height:calc(100vh - 60px);padding:64px 0 96px;position:relative;z-index:1;background:radial-gradient(ellipse 86% 42% at 50% -6%, rgba(77,184,212,.05), transparent 58%)}
+  /* page atmosphere — matches the main site */
+  .page-atmos{position:fixed;inset:0;z-index:0;pointer-events:none}
+  .page-atmos svg{display:block;width:100%;height:100%}
+  footer{position:relative;z-index:1}
 
   /* centered card for auth states */
   .auth-card{max-width:480px;margin:0 auto}
@@ -101,7 +105,8 @@
 
   .acct-section{border-top:1px solid var(--line);padding:28px 0}
   .acct-section:last-child{border-bottom:1px solid var(--line)}
-  .acct-section .sect-label{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:16px}
+  .acct-section .sect-label{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--accent-dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:18px;display:flex;align-items:center;gap:11px}
+  .acct-section .sect-label::before{content:"";width:24px;height:1px;background:var(--accent-dim);opacity:.55}
 
   /* license key block */
   .key-block{background:var(--fg);border-radius:8px;padding:16px 20px;margin-bottom:12px;position:relative}
@@ -186,6 +191,26 @@
 </style>
 </head>
 <body>
+
+<div class="page-atmos" aria-hidden="true">
+  <svg width="100%" height="100%" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <pattern id="natmos" width="260" height="260" patternUnits="userSpaceOnUse">
+        <g stroke="#ffffff" stroke-opacity="0.05" stroke-width="1" fill="none">
+          <path d="M0 70 H160 V260"/>
+          <path d="M260 188 H104 V0"/>
+          <path d="M0 214 H48 V128 H132"/>
+        </g>
+        <g fill="#4db8d4" fill-opacity="0.45">
+          <circle cx="160" cy="70" r="2.1"/>
+          <circle cx="104" cy="188" r="2.1"/>
+          <circle cx="132" cy="128" r="1.8"/>
+        </g>
+      </pattern>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#natmos)"/>
+  </svg>
+</div>
 
 <nav class="nav">
   <div class="wrap nav-inner">
