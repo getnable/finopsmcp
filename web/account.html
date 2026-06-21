@@ -126,6 +126,13 @@
 
   /* account substat + hosting choice */
   .acct-substat{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);margin-top:8px}
+
+  /* open hosted dashboard */
+  .dash-open{margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .dash-open .btn-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .dash-open .btn-primary:hover{background:#5cc1da;border-color:#5cc1da}
+  .dash-note{font-size:12.5px;color:var(--fg-3);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin:0}
+  .dash-open .inline-error{margin-top:0;flex-basis:100%}
   .host-choices{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 6px}
   .host-card{text-align:left;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:14px 15px;cursor:pointer;transition:.15s;font-family:inherit;color:inherit}
   .host-card:hover{border-color:var(--line-2);background:var(--bg-3)}
@@ -313,6 +320,14 @@
       <div class="acct-section">
         <div class="sect-label">Hosting</div>
         <p style="font-size:13px;color:var(--fg-2);margin:0">Run nable yourself, or let us run an isolated instance for your team. <span id="host-current" class="acct-substat" style="margin:0"></span></p>
+
+        <!-- Open hosted dashboard: shown only once a managed instance exists. -->
+        <div class="dash-open" id="dash-open">
+          <button type="button" class="btn btn-primary btn-sm" id="dash-open-btn">Open my dashboard</button>
+          <p class="dash-note" id="dash-note" style="display:none">No hosted instance yet.</p>
+          <div class="inline-error" role="alert" id="dash-error"></div>
+        </div>
+
         <div class="host-choices">
           <button type="button" class="host-card" data-choice="self" id="host-card-self" aria-pressed="false">
             <div class="host-card-head"><span class="host-card-title">Run it yourself</span><span class="host-badge">Free</span></div>
@@ -773,6 +788,33 @@
     } finally {
       btn.disabled = false;
       btn.textContent = 'Request managed hosting';
+    }
+  });
+
+  // ── Open hosted dashboard (control-plane login) ──────────────────────────────
+
+  document.getElementById('dash-open-btn').addEventListener('click', async function () {
+    clearError('dash-error');
+    const note = document.getElementById('dash-note');
+    note.style.display = 'none';
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Opening...';
+    try {
+      const sess = loadSession();
+      const data = await apiFetch('/api/account/dashboard-login', { token: sess ? sess.token : '' });
+      if (data && data.hosted && data.url) {
+        window.location.href = data.url;
+        return; // leave the button disabled while we navigate away
+      }
+      // No managed instance provisioned yet: show the note, not an error.
+      note.textContent = 'No hosted instance yet.';
+      note.style.display = '';
+    } catch (err) {
+      showError('dash-error', err.message || 'Could not open your dashboard. Try again.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Open my dashboard';
     }
   });
 
