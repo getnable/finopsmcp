@@ -877,7 +877,7 @@ function Architecture({ version }){
           <div className="host-opt">
             <span className="host-tag">Or let us host it</span>
             <h4>Managed, single-tenant</h4>
-            <p>Want it always on without running it yourself? We deploy and manage a single-tenant instance for your org: your own runtime, your own store, isolated from every other customer. Same connectors, same analysis, plus the dashboard with SSO, RBAC, and share links. Single-tenant by design, never a shared pool.</p>
+            <p>Want it always on without running it yourself? We deploy and manage a single-tenant instance for your org: your own runtime, your own store, isolated from every other customer. Same connectors, same analysis, plus the dashboard with SSO (Okta, Entra ID, Google Workspace), RBAC, and share links. Single-tenant by design, never a shared pool.</p>
             <a className="btn btn-ghost host-cta" href={BOOK_CALL_LINK} target="_blank" rel="noopener noreferrer"
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'architecture',cta:'hosted_demo'}); }}>
               Talk to us about hosting <span className="arr">→</span>
@@ -1109,7 +1109,7 @@ const PRICE_ROWS = [
   { label: "Slack bot: ask cost questions, no editor needed", solo: false,      team: true,       ent: true },
   { label: "RCA + chat remediation: drafts the fix, a human approves", solo: false, team: true,    ent: true },
   { label: "Managed AI included (or bring your own key)",    solo: false,       team: true,       ent: true },
-  { label: "SSO + audit logs",                               solo: false,       team: false,      ent: true },
+  { label: "SSO (Okta, Entra, Google) + audit logs",                               solo: false,       team: false,      ent: true },
   { label: "Support",                                        solo: "Slack",     team: "Slack",     ent: "Slack + SLA" },
 ];
 
