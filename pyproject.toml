@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.81"
+version = "0.8.82"
 description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
 readme = "README.md"
 license = { text = "Elastic-2.0" }
@@ -53,6 +53,10 @@ dependencies = [
     "httpx>=0.27.0",
     "pydantic>=2.0.0",
     "pyyaml>=6.0.0",
+    # The dashboard Ask tab (and the Slack bot) call the Anthropic SDK directly,
+    # so it is core: without it `finops serve` chat returns "not set up" even with
+    # ANTHROPIC_API_KEY set. Light, pure Python on httpx + pydantic (both core).
+    "anthropic>=0.25.0",
 ]
 
 [project.optional-dependencies]

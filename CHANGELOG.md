@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.82
+
+Fix: the dashboard Ask tab works on a default install.
+
+### Dashboard
+- **The in-browser cost copilot no longer needs an extra.** The Ask tab calls the
+  Anthropic SDK directly, but `anthropic` was only in the `slack` and
+  `pr-comments` extras, so a plain `uvx nable serve` returned "nable isn't fully
+  set up yet" even with `ANTHROPIC_API_KEY` set. The SDK is now a core dependency
+  (it is light: pure Python on httpx and pydantic, both already core), so the chat
+  works out of the box once you pass your key.
+
 ## 0.8.81
 
 The dashboard, rebuilt.
