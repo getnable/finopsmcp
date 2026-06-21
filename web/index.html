@@ -44,8 +44,7 @@
       "description": "Local-first, AI-native FinOps. Ask your whole cloud and AI bill anything inside Claude, Cursor and other MCP editors. Connects to AWS, Azure, GCP and 10+ SaaS and AI providers, and your credentials never leave your machine.",
       "offers": [
         { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD", "description": "Solo use. Cost queries, anomaly detection, rightsizing, LLM spend tracking, every connector. No credit card, no expiry." },
-        { "@type": "Offer", "name": "Pro", "price": "100", "priceCurrency": "USD", "description": "$100 per month flat, unlimited seats. Adds Terraform remediation PRs, ticket creation, Slack and Teams alerts, digests, budgets and commitment recommendations. $1,000 per year billed annually." },
-        { "@type": "Offer", "name": "Team", "price": "1000", "priceCurrency": "USD", "description": "$1,000 per month flat, unlimited seats. Everything in Pro plus the conversational Slack bot, root cause analysis and chat remediation, and managed AI. $10,000 per year billed annually." }
+        { "@type": "Offer", "name": "Team", "price": "100", "priceCurrency": "USD", "description": "$100 per month flat for your whole team, not per seat. Adds Terraform remediation PRs, ticket creation, Slack and Teams alerts, digests, budgets, commitment recommendations, the conversational Slack bot, root cause analysis with chat remediation, and managed AI. $1,000 per year billed annually." }
       ]
     },
     {
@@ -55,9 +54,9 @@
         { "@type": "Question", "name": "Where do my credentials and billing data go?", "acceptedAnswer": { "@type": "Answer", "text": "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data is cached in a local SQLite database on your machine. nable has no backend, so we never see your cost data or credentials, and there is no vendor data lake to breach. When you ask a question in your AI editor, the cost figures nable returns are sent to your editor's own AI model to answer the question, the same as anything else in that chat, not to a nable server. For zero AI exposure you can use the local dashboard or CLI, which never touch a model." } },
         { "@type": "Question", "name": "What editors does it work with?", "acceptedAnswer": { "@type": "Answer", "text": "Claude Desktop, Cursor, Windsurf, Zed, and anything that supports MCP. The setup wizard configures your editor automatically. If you use multiple editors, run the wizard once per editor." } },
         { "@type": "Question", "name": "How long does setup take?", "acceptedAnswer": { "@type": "Answer", "text": "A few minutes. Run uvx nable (uv fetches a matching Python and runs the setup wizard, no PATH setup needed), or pip install -U finops-mcp && finops welcome if you are already on Python 3.10 or newer. The wizard connects Claude, connects your cloud, and shows your first cost number right in the terminal. To see it on sample data first, run uvx nable welcome --demo." } },
-        { "@type": "Question", "name": "Is the free tier actually free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and every connector. Pro adds remediation PRs, tickets, alerts and commitment analysis. Team adds the conversational Slack bot." } },
+        { "@type": "Question", "name": "Is the free tier actually free?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and every connector. Team, one flat $100 a month, adds remediation PRs, tickets, alerts, commitment analysis, dashboards, and the conversational Slack bot." } },
         { "@type": "Question", "name": "I only have one AWS account. Is this worth it?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Rightsizing and anomaly detection alone are usually worth it. They run against your real data on the first scan. You can add more providers later." } },
-        { "@type": "Question", "name": "Do you support multiple AWS accounts or organizations?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Run finops setup aws --add to connect additional accounts. You can query across all of them in a single conversation. Org-wide rollups across accounts are included in Pro." } },
+        { "@type": "Question", "name": "Do you support multiple AWS accounts or organizations?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Run finops setup aws --add to connect additional accounts. You can query across all of them in a single conversation. Org-wide rollups across accounts are included in Team." } },
         { "@type": "Question", "name": "Does it work in AWS GovCloud?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. nable runs entirely on your machine and queries your cloud provider APIs directly. There are no nable servers in the middle, no data lake, and no SaaS authorization required. It works with GovCloud regions (us-gov-west-1, us-gov-east-1) the same as commercial regions." } }
       ]
     }
@@ -442,6 +441,16 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .arch-row > div:nth-child(4) .line::after{animation-delay:1.2s}
 @keyframes archflow{0%{left:-20px;opacity:0}12%{opacity:1}88%{opacity:1}100%{left:100%;opacity:0}}
 .arch-node.center{box-shadow:0 0 0 1px var(--accent-dim),0 0 34px -10px rgba(77,184,212,.55)}
+/* hosting options: run it yourself / let us host it */
+.host-opts{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:24px;border:1px solid var(--line);border-radius:var(--r-xl);overflow:hidden;background:var(--bg-1)}
+.host-opt{padding:32px 30px;display:flex;flex-direction:column;gap:12px;border-right:1px solid var(--line)}
+.host-opt:last-child{border-right:0;background:var(--bg-2)}
+.host-tag{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:10.5px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-dim)}
+.host-opt h4{font-family:'Bricolage Grotesque',system-ui,sans-serif;font-size:19px;font-weight:400;letter-spacing:-.02em;line-height:1.2;color:var(--fg)}
+.host-opt p{font-size:14px;color:var(--fg-2);line-height:1.65;margin:0}
+.host-opt .gate-cmd{margin-top:6px;max-width:340px}
+.host-cta{margin-top:6px;align-self:flex-start}
+@media(max-width:760px){.host-opts{grid-template-columns:1fr}.host-opt{border-right:0;border-bottom:1px solid var(--line)}.host-opt:last-child{border-bottom:0}}
 /* connector logo marquee */
 .logo-marquee{margin-top:38px;overflow:hidden;position:relative;-webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)}
 .logo-track{display:flex;align-items:center;gap:58px;width:max-content;animation:logomarq 40s linear infinite}
@@ -550,6 +559,7 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 
 .ptable-wrap{max-width:1060px;margin:44px auto 0;overflow-x:auto}
 .ptable{display:grid;grid-template-columns:1.15fr 1fr 1fr 1fr 1fr;min-width:860px;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;background:var(--bg-1);box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}
+.ptable-3{grid-template-columns:1.5fr 1fr 1fr 1fr;min-width:680px}
 .ph{padding:22px 20px 18px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line);position:relative}
 .ph-corner{border-bottom:1px solid var(--line)}
 .pt-rec{position:absolute;top:14px;right:16px;display:inline-flex;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:9px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:rgba(77,184,212,.10);border:1px solid rgba(77,184,212,.28);padding:3px 6px;border-radius:var(--r-xs);line-height:1}
@@ -619,6 +629,8 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .foot-cta-grid{display:none}
 .foot-cta h2{font-size:clamp(48px,6vw,84px);line-height:.98;letter-spacing:-.04em;font-weight:300}
 .foot-cta h2 em{font-style:italic;color:var(--accent);font-weight:400}
+.foot-install{width:max-content;max-width:100%;margin:0 auto}
+.foot-install .copycmd{font-size:13.5px}
 footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-1)}
 .foot{display:grid;grid-template-columns:1.6fr repeat(3,1fr);gap:48px}
 .foot h5{font-family:'Bricolage Grotesque',system-ui,sans-serif;font-size:10.5px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:18px;font-weight:500}

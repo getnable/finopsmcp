@@ -238,10 +238,12 @@ function Nav(){
 }
 
 /* Hero */
-function Hero({ layout, interaction }){
-  const [showInstall, setShowInstall] = useState(false);
+// The hero is always the split layout: copy left, live console right (per
+// DESIGN.md). The centered "editorial" variant was retired, so layout is
+// accepted for compatibility but no longer switches the arrangement.
+function Hero({ interaction }){
   return (
-    <header className={"hero " + (layout === "editorial" ? "editorial" : "")} id="top">
+    <header className="hero" id="top">
       <div className="hero-grid-bg"></div>
       <div className="wrap">
         <div className="hero-inner">
@@ -252,25 +254,21 @@ function Hero({ layout, interaction }){
             <p className="lede">
               Connect AWS, Azure, GCP, Datadog, Snowflake, and more. Get answers, anomalies, and savings opportunities, without sending your billing data to another vendor.
             </p>
+            <InstallRow />
             <div className="hero-cta-row">
-              <button className="btn btn-primary" onClick={() => { setShowInstall(true); if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
+              <a className="btn btn-primary" href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
                 Start free <span className="arr">→</span>
-              </button>
+              </a>
               <a className="btn btn-ghost" href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'book_demo' }); }}>Book a demo</a>
             </div>
-            {showInstall && (
-              <div className="hero-install-reveal">
-                <InstallRow />
-                <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a> · <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'book_demo' }); }}>or book a live demo</a></p>
-              </div>
-            )}
+            <p className="install-note">Free for solo use, no credit card · <a href="/docs.html#install" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'docs_install' }); }}>VS Code, Windsurf, Zed and more</a></p>
             <TrustStrip />
             <div className="hero-mobile-cta">
               <div className="mini-console" aria-label="Example: nable answering a cost question">
                 <div className="mc-bar"><span className="mc-dots"><i/><i/><i/></span><span className="mc-title">claude · mcp[nable]</span></div>
                 <div className="mc-body">
-                  <div className="mc-row"><span className="mc-who">YOU</span><span>Where are we wasting money on EC2?</span></div>
-                  <div className="mc-row"><span className="mc-who mc-n">NABLE</span><span>11 instances under 15% CPU for 14 days. Rightsizing them saves <b className="mc-save">$1,840/mo</b>. Want the PR?</span></div>
+                  <div className="mc-row"><span className="mc-who">YOU</span><span>What's our compute cost across AWS and GCP?</span></div>
+                  <div className="mc-row"><span className="mc-who mc-n">NABLE</span><span>$24,530 this month, up 12.9%. Most of the jump is three new instances in us-east-1, about <b className="mc-save">$1,890</b>. Want them tagged?</span></div>
                 </div>
               </div>
               <p className="hmc-lead">nable sets up in your terminal, so do it on your laptop. Drop your email and we'll send the 60-second setup guide.</p>
@@ -281,8 +279,8 @@ function Hero({ layout, interaction }){
                   Ask the live demo <span className="arr">→</span>
                 </a>
                 <a href="#pricing" className="hmc-pro"
-                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing_40'}); }}>
-                  See Team · $1,000/mo flat <span className="arr">→</span>
+                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'pricing'}); }}>
+                  See Team · $100/mo flat <span className="arr">→</span>
                 </a>
                 <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" className="hmc-book"
                   onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'hero_mobile',cta:'book_demo'}); }}>
@@ -437,35 +435,68 @@ function TrustStrip(){
 /* Console (interactive demo terminal) */
 const QUERIES = [
   {
-    q: "Where are we wasting money on EC2?",
+    q: "How much are we spending on databases?",
     response: (
       <>
-        <p>Cross-referenced CloudWatch metrics with Compute Optimizer. 11 instances are sustained below 15% CPU over 14 days. Top four by savings:</p>
+        <p>Pulled every managed database across your clouds and normalized to USD. This month so far:</p>
         <div className="ttable">
-          <div className="r hd"><span>Instance / current</span><span>Recommended</span><span>Save / mo</span></div>
-          <div className="r"><span>i-0a3f · m5.4xlarge</span><span className="v num">m6i.xlarge</span><span className="d down num">$412</span></div>
-          <div className="r"><span>i-0c91 · r5.2xlarge</span><span className="v num">r6i.large</span><span className="d down num">$298</span></div>
-          <div className="r"><span>i-0e7d · m5.2xlarge</span><span className="v num">m6i.large</span><span className="d down num">$201</span></div>
-          <div className="r"><span>i-0b44 · c5.4xlarge</span><span className="v num">c6i.xlarge</span><span className="d down num">$184</span></div>
-          <div className="r total"><span>11 instances</span><span className="v num">-</span><span className="d down num">$1,840 / mo</span></div>
+          <div className="r hd"><span>Provider · service</span><span>Spend</span><span>delta MoM</span></div>
+          <div className="r"><span>AWS · RDS + Aurora</span><span className="v num">$9,240</span><span className="d up num">+11.4%</span></div>
+          <div className="r"><span>GCP · Cloud SQL</span><span className="v num">$3,180</span><span className="d up num">+6.2%</span></div>
+          <div className="r"><span>MongoDB · Atlas</span><span className="v num">$2,460</span><span className="d down num">-2.1%</span></div>
+          <div className="r"><span>Snowflake · compute</span><span className="v num">$1,910</span><span className="d up num">+18.7%</span></div>
+          <div className="r total"><span>Total databases</span><span className="v num">$16,790</span><span className="d up num">+9.8%</span></div>
         </div>
-        <p style={{marginTop:12}}>Net annualized savings: <span style={{color:"var(--accent)"}}>$22,080</span>. Generate PRs against your IaC repo?</p>
+        <p style={{marginTop:12}}>Two Aurora instances sit below 20% utilization. Rightsizing them saves about <span style={{color:"var(--accent)"}}>$640 / mo</span>. Want the breakdown?</p>
       </>
     )
   },
   {
-    q: "Compute spend across all providers, April vs March.",
+    q: "What's our compute cost across AWS and GCP?",
     response: (
       <>
-        <p>Normalized to USD across the three clouds. Pulled from each provider's billing API just now.</p>
+        <p>Normalized to USD and pulled from each provider's billing API just now. This month:</p>
         <div className="ttable">
-          <div className="r hd"><span>Provider · service</span><span>April</span><span>delta MoM</span></div>
+          <div className="r hd"><span>Provider · service</span><span>Spend</span><span>delta MoM</span></div>
           <div className="r"><span>AWS · EC2 + Fargate</span><span className="v num">$18,420</span><span className="d up num">+18.6%</span></div>
-          <div className="r"><span>Azure · Virtual Machines</span><span className="v num">$6,310</span><span className="d up num">+4.2%</span></div>
           <div className="r"><span>GCP · Compute Engine</span><span className="v num">$4,870</span><span className="d down num">-3.4%</span></div>
-          <div className="r total"><span>Total compute</span><span className="v num">$29,600</span><span className="d up num">+12.0%</span></div>
+          <div className="r"><span>GCP · Cloud Run</span><span className="v num">$1,240</span><span className="d up num">+7.1%</span></div>
+          <div className="r total"><span>Total compute</span><span className="v num">$24,530</span><span className="d up num">+12.9%</span></div>
         </div>
-        <p style={{marginTop:14}}>Three new <span className="mono" style={{color:"var(--fg)"}}>c6i.4xlarge</span> in <span className="mono" style={{color:"var(--fg)"}}>us-east-1</span> account for $1,890 of the AWS delta. Want me to tag them and open an audit ticket?</p>
+        <p style={{marginTop:14}}>Most of the AWS jump is three new instances in <span className="mono" style={{color:"var(--fg)"}}>us-east-1</span>, about $1,890. Want me to tag them and open an audit ticket?</p>
+      </>
+    )
+  },
+  {
+    q: "Where is our AI spend going this month?",
+    response: (
+      <>
+        <p>Token spend across your model providers this month, normalized to USD:</p>
+        <div className="ttable">
+          <div className="r hd"><span>Provider · model</span><span>Spend</span><span>delta MoM</span></div>
+          <div className="r"><span>OpenAI · gpt-4o</span><span className="v num">$4,120</span><span className="d up num">+34%</span></div>
+          <div className="r"><span>Anthropic · Claude</span><span className="v num">$2,880</span><span className="d up num">+21%</span></div>
+          <div className="r"><span>AWS · Bedrock</span><span className="v num">$1,610</span><span className="d up num">+12%</span></div>
+          <div className="r total"><span>Total AI / LLM</span><span className="v num">$8,610</span><span className="d up num">+26%</span></div>
+        </div>
+        <p style={{marginTop:12}}>Your token bill is up <span style={{color:"var(--alert)"}}>26%</span> even as per-token prices fell. A gpt-4o classifier is the driver; route it to a cheaper model to save about <span style={{color:"var(--accent)"}}>$1,400 / mo</span>.</p>
+      </>
+    )
+  },
+  {
+    q: "Which provider grew fastest this month?",
+    response: (
+      <>
+        <p>Ranked every connected provider by month-over-month growth, normalized to USD:</p>
+        <div className="ttable">
+          <div className="r hd"><span>Provider</span><span>Spend</span><span>delta MoM</span></div>
+          <div className="r"><span>OpenAI</span><span className="v num">$4,120</span><span className="d up num">+34%</span></div>
+          <div className="r"><span>Snowflake</span><span className="v num">$1,910</span><span className="d up num">+18.7%</span></div>
+          <div className="r"><span>AWS</span><span className="v num">$28,400</span><span className="d up num">+12.4%</span></div>
+          <div className="r"><span>GCP</span><span className="v num">$9,300</span><span className="d up num">+3.1%</span></div>
+          <div className="r total"><span>Fastest grower</span><span className="v num">OpenAI</span><span className="d up num">+34%</span></div>
+        </div>
+        <p style={{marginTop:12}}>OpenAI grew fastest in percent, but AWS added the most dollars: <span style={{color:"var(--alert)"}}>+$3,130</span>. Want either one traced to the team that caused it?</p>
       </>
     )
   },
@@ -516,42 +547,30 @@ const QUERIES = [
       </>
     )
   },
-  {
-    q: "What's our AI and LLM bill?",
-    response: (
-      <>
-        <p>Token spend across your model providers this month, normalized to USD:</p>
-        <div className="ttable">
-          <div className="r hd"><span>Provider · model</span><span>Spend</span><span>delta MoM</span></div>
-          <div className="r"><span>OpenAI · gpt-4o</span><span className="v num">$4,120</span><span className="d up num">+34%</span></div>
-          <div className="r"><span>Anthropic · Claude</span><span className="v num">$2,880</span><span className="d up num">+21%</span></div>
-          <div className="r"><span>AWS · Bedrock</span><span className="v num">$1,610</span><span className="d up num">+12%</span></div>
-          <div className="r total"><span>Total AI / LLM</span><span className="v num">$8,610</span><span className="d up num">+26%</span></div>
-        </div>
-        <p style={{marginTop:12}}>Your token bill is up <span style={{color:"var(--alert)"}}>26%</span> even as per-token prices fell. A gpt-4o classifier is the driver; route it to a cheaper model to save about <span style={{color:"var(--accent)"}}>$1,400 / mo</span>.</p>
-      </>
-    )
-  },
 ];
 
-// Match a typed question to one of the six canned answers above. Tight on
-// purpose: only answer when the topic is clearly one of these, otherwise
-// return -1 and hit the GATE, the "ask that on your real bill" moment. The
-// fuller /demo.html experience is for visitors who want to go deeper.
+// Match a typed question to one of the canned answers above. Tight on purpose:
+// only answer when the topic is clearly one of these, otherwise return -1 and
+// hit the GATE, the "ask that on your real bill" moment. The fuller /demo.html
+// experience is for visitors who want to go deeper.
 function matchQuery(text){
   const t = (text || "").toLowerCase();
   // Capabilities ("what can you do").
-  if(/what can|capabilit|what do you do|what does nable|use case|everything you|all the tools|how does (this|it) work|what should i ask/.test(t)) return 4;
+  if(/what can|capabilit|what do you do|what does nable|use case|everything you|all the tools|how does (this|it) work|what should i ask/.test(t)) return 6;
   // AI / LLM spend.
-  if(/\bai\b|llm|token|openai|anthropic|claude|bedrock|\bgpt|inference|model (spend|cost|bill)/.test(t)) return 5;
+  if(/\bai\b|llm|token|openai|anthropic|claude|bedrock|\bgpt|inference|model (spend|cost|bill)/.test(t)) return 2;
   // Commitment / discount coverage.
-  if(/discount|savings ?plan|reserved|reservation|\bri\b|commitment|coverage|effective (rate|discount)|\bcud/.test(t)) return 3;
+  if(/discount|savings ?plan|reserved|reservation|\bri\b|commitment|coverage|effective (rate|discount)|\bcud/.test(t)) return 5;
   // Anomalies / spikes.
-  if(/anomal|spike|spiking|surge|unusual|datadog|went up|going up|jump/.test(t)) return 2;
-  // Multi-cloud compute comparison (needs a cross-provider or month-over-month signal).
-  if(/across (all )?(provider|cloud)|all providers|multi-?cloud|aws.*(vs|versus|and).*(azure|gcp)|month.?over.?month|\bmom\b|april.*march|march.*april|compute.*(across|provider|month|vs|versus)/.test(t)) return 1;
-  // EC2 waste / rightsizing / concrete savings.
-  if(/ec2|wast|idle|rightsiz|right-?siz|over-?provision|low cpu|cut (cost|spend)|save money|saving money|where can i save|trim/.test(t)) return 0;
+  if(/anomal|spike|spiking|surge|unusual|datadog|went up|going up|jump/.test(t)) return 4;
+  // Which provider grew fastest / biggest mover.
+  if(/grew fastest|grow(ing)? fastest|fastest grow|biggest (mover|grow|increase|jump)|which provider|who grew|ranked? by growth/.test(t)) return 3;
+  // Databases across providers.
+  if(/database|\brds\b|aurora|cloud ?sql|postgres|mysql|mongo|snowflake|warehouse|\bdb\b/.test(t)) return 0;
+  // Cross-provider compute comparison.
+  if(/across (all )?(provider|cloud)|all providers|multi-?cloud|aws.*(vs|versus|and).*(azure|gcp)|gcp.*(vs|versus|and).*aws|month.?over.?month|\bmom\b|compute.*(across|provider|month|vs|versus|cost)|ec2|fargate|compute engine/.test(t)) return 1;
+  // Generic waste / rightsizing / concrete savings -> the databases breakdown leads with a rightsizing hook.
+  if(/wast|idle|rightsiz|right-?siz|over-?provision|low cpu|cut (cost|spend)|save money|saving money|where can i save|trim/.test(t)) return 0;
   return -1;
 }
 
@@ -580,11 +599,11 @@ const OFFTOPIC = (
 const FINANCE_RE = /cost|spend|bill|budget|forecast|sav(e|ing)|money|cheap|expensive|pric(e|ing)|discount|invoice|usage|waste|idle|optimi[sz]e|rightsiz|reserved|reservation|commitment|anomal|cloud|aws|azure|gcp|ec2|\bs3\b|rds|lambda|fargate|eks|kubernetes|k8s|container|cluster|instance|\bvm\b|server|database|storage|snowflake|databricks|datadog|gpu|\bai\b|llm|token|openai|anthropic|claude|bedrock|gpt|\bmodel\b|provider|region|account|\btag|dollar|\$/;
 
 const CHIPS = [
-  { label: "What can you do?", idx: 4 },
-  { label: "Where's the EC2 waste?", idx: 0 },
-  { label: "What's our AI bill?", idx: 5 },
-  { label: "Any anomalies this week?", idx: 2 },
-  { label: "Effective discount rate?", idx: 3 },
+  { label: "What can you do?", idx: 6 },
+  { label: "Spend on databases?", idx: 0 },
+  { label: "Compute across AWS and GCP?", idx: 1 },
+  { label: "Where's our AI spend going?", idx: 2 },
+  { label: "Which provider grew fastest?", idx: 3 },
 ];
 
 function Console({ interaction }){
@@ -602,7 +621,6 @@ function Console({ interaction }){
   const [isGate, setIsGate] = useState(false);
   const [offTopic, setOffTopic] = useState(false);
   const timers = useRef([]);
-  const firstRun = useRef(true);
 
   function clearTimers(){ timers.current.forEach(clearTimeout); timers.current = []; }
 
@@ -621,9 +639,11 @@ function Console({ interaction }){
     })();
   }
 
-  // Auto-cycle the canned proof until the visitor engages.
+  // Auto-cycle the canned proof until the visitor engages. The console mounts on
+  // the first answer (phase "answered"); this schedules the next question, and
+  // each answered phase re-arms it, so the hero keeps rotating through the
+  // library. It pauses the moment the visitor types or focuses the input.
   useEffect(() => {
-    if(firstRun.current){ firstRun.current = false; return; }
     if(interaction !== "cycling" || asked || focused) return;
     if(phase !== "answered") return;
     const t = setTimeout(() => {
@@ -819,8 +839,8 @@ function Architecture({ version }){
       <div className="wrap">
         <div className="section-head">
           <div className="label">Architecture</div>
-          <h2>No vendor backend,<br/><em>by design.</em></h2>
-          <p>nable is not SaaS. It runs on your own machine, holds credentials in the OS keyring, queries provider APIs directly, and surfaces tools to whichever AI editor is open. Your credentials never leave your machine, and your cost data never touches a nable server, there is no backend or data lake to breach. The figures you ask about go to your editor's own AI to answer the question, the same as any prompt, and nowhere else.</p>
+          <h2>Run it yourself,<br/><em>or let us host it.</em></h2>
+          <p>Same runtime, your choice of where it runs. Point it at your providers, ask in your editor, and the same analysis runs either way. The connector holds the credentials and pulls the bills directly; nothing is pooled across customers.</p>
         </div>
         <div className="arch">
           <div className="arch-grid"></div>
@@ -835,10 +855,10 @@ function Architecture({ version }){
             </div>
             <div className="arch-arrow"><span>stdio</span><span className="line"></span><span>jsonrpc</span></div>
             <div className="arch-col">
-              <span className="lab">runtime · local</span>
+              <span className="lab">runtime · local or hosted</span>
               <div className="arch-node center">
                 <h4>nable runtime</h4>
-                <span className="sub">nable</span>
+                <span className="sub">your machine or a single-tenant host</span>
                 <div className="chips"><span>keyring</span><span>fernet</span><span>read-only</span><span>audit-log</span></div>
               </div>
             </div>
@@ -851,6 +871,23 @@ function Architecture({ version }){
                 <div className="chips"><span>AWS CE/CUR</span><span>Azure CM</span><span>GCP BQ</span><span>+14</span></div>
               </div>
             </div>
+          </div>
+        </div>
+        <div className="host-opts">
+          <div className="host-opt">
+            <span className="host-tag">Run it yourself</span>
+            <h4>Local-first, on your machine</h4>
+            <p>Install with one command. Credentials live in your OS keyring, cost data caches in a local SQLite file, and queries hit your provider APIs directly. There is no nable backend in the path and no data lake to breach. For zero AI exposure, use the local dashboard or CLI, which never call a model.</p>
+            <div className="gate-cmd"><CopyCmd cmd="uvx nable" /></div>
+          </div>
+          <div className="host-opt">
+            <span className="host-tag">Or let us host it</span>
+            <h4>Managed, single-tenant</h4>
+            <p>Want it always on without running it yourself? We deploy and manage a single-tenant instance for your org: your own runtime, your own store, isolated from every other customer. Same connectors, same analysis, plus the dashboard with SSO, RBAC, and share links. Single-tenant by design, never a shared pool.</p>
+            <a className="btn btn-ghost host-cta" href={BOOK_CALL_LINK} target="_blank" rel="noopener noreferrer"
+               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'architecture',cta:'hosted_demo'}); }}>
+              Talk to us about hosting <span className="arr">→</span>
+            </a>
           </div>
         </div>
       </div>
@@ -1060,28 +1097,26 @@ function CheckIcon(){
   );
 }
 
-// Pro checkout: $100/mo or $1,000/yr (the renamed previous "team" product).
-const PRO_MONTHLY_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
-const PRO_ANNUAL_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
-// Team checkout: $1,000/mo or $10,000/yr (2 months free). Adds the Slack bot.
-const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
-const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
+// Team checkout: $100/mo flat or $1,000/yr (2 months free). The single paid
+// tier, merging the old Pro and Team into one.
+const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
+const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
 
 const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 
 // Comparison rows. value true -> check, false -> dash, string -> mono text.
 const PRICE_ROWS = [
-  { label: "Users",                                          solo: "Just you",  pro: "Your whole team", team: "Your whole team", ent: "Your whole org" },
-  { label: "Core FinOps: cost queries, anomalies, rightsizing, AI/LLM tracking, 17 connectors, local-first", solo: true, pro: true, team: true, ent: true },
-  { label: "AWS cost data",                                  solo: "Cost Explorer", pro: "Explorer + CUR", team: "Explorer + CUR", ent: "Explorer + CUR" },
-  { label: "Terraform remediation: patch + open the PR",     solo: false,       pro: true,         team: true,       ent: true },
-  { label: "Slack / Teams alerts, digests + tickets (Jira, Linear, GitHub)", solo: false, pro: true, team: true,     ent: true },
-  { label: "Budgets, commitments + BI dashboards",           solo: false,       pro: true,         team: true,       ent: true },
-  { label: "Slack bot: ask cost questions, no editor needed", solo: false,      pro: false,        team: true,       ent: true },
-  { label: "RCA + chat remediation: drafts the fix, a human approves", solo: false, pro: false,    team: true,       ent: true },
-  { label: "Managed AI included (or bring your own key)",    solo: false,       pro: false,        team: true,       ent: true },
-  { label: "SSO + audit logs",                               solo: false,       pro: false,        team: false,      ent: true },
-  { label: "Support",                                        solo: "Slack",     pro: "Slack",      team: "Slack",     ent: "Slack + SLA" },
+  { label: "Users",                                          solo: "Just you",  team: "Your whole team", ent: "Your whole org" },
+  { label: "Core FinOps: cost queries, anomalies, rightsizing, AI/LLM tracking, 17 connectors, local-first", solo: true, team: true, ent: true },
+  { label: "AWS cost data",                                  solo: "Cost Explorer", team: "Explorer + CUR", ent: "Explorer + CUR" },
+  { label: "Terraform remediation: patch + open the PR",     solo: false,       team: true,       ent: true },
+  { label: "Slack / Teams alerts, digests + tickets (Jira, Linear, GitHub)", solo: false, team: true, ent: true },
+  { label: "Budgets, commitments + BI dashboards",           solo: false,       team: true,       ent: true },
+  { label: "Slack bot: ask cost questions, no editor needed", solo: false,      team: true,       ent: true },
+  { label: "RCA + chat remediation: drafts the fix, a human approves", solo: false, team: true,    ent: true },
+  { label: "Managed AI included (or bring your own key)",    solo: false,       team: true,       ent: true },
+  { label: "SSO + audit logs",                               solo: false,       team: false,      ent: true },
+  { label: "Support",                                        solo: "Slack",     team: "Slack",     ent: "Slack + SLA" },
 ];
 
 function PCell({ v }){
@@ -1091,12 +1126,10 @@ function PCell({ v }){
 }
 
 // Mobile-only: stack the tiers into cards (the comparison table is unreadable on a phone).
-function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, teamPrice, teamPer, teamSub, teamLink, teamPlan }){
+function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }){
   const tiers = [
     { key:"solo", name:"Solo", price:"Free", per:"forever", sub:null, rec:false, primary:false,
       cta:"Start free", href:"/docs.html", plan:"solo", ext:false },
-    { key:"pro", name:"Pro", price:proPrice, per:proPer, sub:proSub, rec:false, primary:false,
-      cta:annual?"Get annual":"Get Pro", href:proLink, plan:proPlan, ext:true },
     { key:"team", name:"Team", price:teamPrice, per:teamPer, sub:teamSub, rec:true, primary:true,
       cta:annual?"Get annual":"Get Team", href:teamLink, plan:teamPlan, ext:true },
     { key:"ent", name:"Enterprise", price:"Custom", per:"", sub:null, rec:false, primary:false,
@@ -1128,15 +1161,9 @@ function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, team
 function Pricing(){
   const [annual, setAnnual] = useState(false);
 
-  const proPrice  = annual ? "$1,000" : "$100";
-  const proPer    = annual ? "/ yr flat" : "/ mo flat";
-  const proSub    = annual ? "$83 / mo · 2 months free" : "7-day free trial";
-  const proLink   = annual ? PRO_ANNUAL_LINK : PRO_MONTHLY_LINK;
-  const proPlan   = annual ? "pro_annual" : "pro_monthly";
-
-  const teamPrice = annual ? "$10,000" : "$1,000";
+  const teamPrice = annual ? "$1,000" : "$100";
   const teamPer   = annual ? "/ yr flat" : "/ mo flat";
-  const teamSub   = annual ? "$833 / mo · 2 months free" : "7-day free trial";
+  const teamSub   = annual ? "$83 / mo · 2 months free" : "flat, not per-seat · 7-day free trial";
   const teamLink  = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
   const teamPlan  = annual ? "team_annual" : "team_monthly";
 
@@ -1146,7 +1173,7 @@ function Pricing(){
         <div className="section-head">
           <div className="label">Pricing</div>
           <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
-          <p>Solo is free forever. Pro adds the remediation layer: PRs, tickets, alerts, dashboards. Team adds the conversational Slack bot and managed AI. Enterprise adds SSO, audit logs, and an SLA.</p>
+          <p>Solo is free forever. Team is one flat $100 a month for your whole team: remediation PRs, tickets, alerts, dashboards, the Slack bot and managed AI. Enterprise adds SSO, audit logs, and an SLA.</p>
 
           {/* Billing toggle: segmented control, matched to the dashboard range group. */}
           <div className="bill-toggle" role="group" aria-label="Billing period">
@@ -1159,7 +1186,7 @@ function Pricing(){
         </div>
 
         <div className="ptable-wrap">
-          <div className="ptable">
+          <div className="ptable ptable-3">
             {/* header row */}
             <div className="ph ph-corner"></div>
             <div className="ph">
@@ -1167,14 +1194,6 @@ function Pricing(){
               <div className="pt-price"><span className="pt-amt">Free</span><span className="pt-per">forever</span></div>
               <a className="btn btn-ghost pt-cta" href="/docs.html"
                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'}); }}>Start free</a>
-            </div>
-            <div className="ph">
-              <div className="pt-name">Pro</div>
-              <div className="pt-price"><span className="pt-amt">{proPrice}</span><span className="pt-per">{proPer}</span></div>
-              <div className="pt-sub">{proSub}</div>
-              <a className="btn btn-ghost pt-cta" href={proLink} target="_blank" rel="noopener noreferrer"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:proPlan,billing:annual?'annual':'monthly'}); }}>
-                {annual ? "Get annual" : "Get Pro"}</a>
             </div>
             <div className="ph pcol-team">
               <div className="pt-rec">Recommended</div>
@@ -1197,7 +1216,6 @@ function Pricing(){
               <React.Fragment key={i}>
                 <div className="pr pr-label">{r.label}</div>
                 <div className="pr pr-cell"><PCell v={r.solo} /></div>
-                <div className="pr pr-cell"><PCell v={r.pro} /></div>
                 <div className="pr pr-cell pcol-team"><PCell v={r.team} /></div>
                 <div className="pr pr-cell"><PCell v={r.ent} /></div>
               </React.Fragment>
@@ -1205,7 +1223,7 @@ function Pricing(){
           </div>
         </div>
 
-        <PricingCards annual={annual} proPrice={proPrice} proPer={proPer} proSub={proSub} proLink={proLink} proPlan={proPlan} teamPrice={teamPrice} teamPer={teamPer} teamSub={teamSub} teamLink={teamLink} teamPlan={teamPlan} />
+        <PricingCards annual={annual} teamPrice={teamPrice} teamPer={teamPer} teamSub={teamSub} teamLink={teamLink} teamPlan={teamPlan} />
 
         <p className="pfoot">No credit card for Solo. Team trial requires a card, cancel any time.</p>
         <p className="pfoot pdemo">Weighing Team for your org?{" "}
@@ -1257,12 +1275,13 @@ function FootCta(){
       <div className="wrap" style={{position:"relative"}}>
         <div className="eyebrow" style={{marginBottom:32,display:"inline-flex"}}><span className="d"></span> Free tier · no credit card</div>
         <h2 className="display">
-          Stop staring at graphs.<br/>
-          <em>Start closing tickets.</em>
+          Your whole cloud and AI bill.<br/>
+          <em>One question away.</em>
         </h2>
-        <div style={{marginTop:48,display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
-          <div style={{display:"flex",alignItems:"center",gap:14}}>
-            <a href="/docs.html" className="btn btn-primary" style={{padding:"14px 22px",fontSize:14}}
+        <div style={{marginTop:44,display:"flex",flexDirection:"column",alignItems:"center",gap:22}}>
+          <div className="foot-install"><CopyCmd cmd="uvx nable" /></div>
+          <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap",justifyContent:"center"}}>
+            <a href="/docs.html#install" className="btn btn-primary" style={{padding:"14px 22px",fontSize:14}}
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'install'}); }}>
               Get started free <span className="arr">→</span>
             </a>
@@ -1273,12 +1292,8 @@ function FootCta(){
               Book a live demo
             </a>
           </div>
-          <EmailCapture source="footer" placeholder="drop your email, we'll send the setup guide" btnLabel="Send it" center={true} />
         </div>
-        <p className="mono" style={{marginTop:32,fontSize:12,color:"var(--fg-3)",letterSpacing:".04em"}}>
-          $ uvx nable
-        </p>
-        <p style={{marginTop:24,fontSize:13,color:"var(--fg-3)"}}>
+        <p style={{marginTop:32,fontSize:13,color:"var(--fg-3)"}}>
           Building something? <a href="/about" style={{color:"var(--accent-dim)"}}>Read the founder note and investor thesis →</a>
         </p>
       </div>
@@ -1383,7 +1398,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Is the free tier actually free?",
-    a: "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and all 17 connectors. Pro adds remediation PRs, tickets, digests and commitment analysis. Team adds the conversational Slack bot."
+    a: "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and all 17 connectors. Team, one flat $100 a month for your whole team, adds remediation PRs, tickets, digests, commitment analysis, dashboards and the conversational Slack bot."
   },
   {
     q: "I only have one AWS account. Is this worth it?",
@@ -1391,7 +1406,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Do you support multiple AWS accounts or organizations?",
-    a: "Yes. Run `finops setup aws --add` to connect additional accounts. You can query across all of them in a single conversation. Org-wide rollups across accounts are included in Pro."
+    a: "Yes. Run `finops setup aws --add` to connect additional accounts. You can query across all of them in a single conversation. Org-wide rollups across accounts are included in Team."
   },
   {
     q: "Does it work in AWS GovCloud?",
@@ -1524,11 +1539,6 @@ function Tweaks(){
       <TweakSection label="Theme">
         <PaletteSwatches value={t.palette} onChange={(v)=>setTweak("palette",v)} />
       </TweakSection>
-      <TweakSection label="Layout">
-        <TweakRadio label="Hero arrangement" value={t.layout}
-          options={[{value:"split",label:"Split"},{value:"editorial",label:"Editorial"}]}
-          onChange={(v)=>setTweak("layout",v)} />
-      </TweakSection>
       <TweakSection label="Interaction">
         <TweakRadio label="Console queries" value={t.interaction}
           options={[{value:"cycling",label:"Auto"},{value:"static",label:"Manual"}]}
@@ -1559,7 +1569,7 @@ function App(){
   return (
     <>
       <Nav />
-      <Hero layout={t.layout} interaction={t.interaction} />
+      <Hero interaction={t.interaction} />
       <HowItWorks />
       <EveryEditor />
       <AiCost />
