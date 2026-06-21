@@ -230,6 +230,25 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 @media(max-width:640px){.install{overflow-x:auto;width:100%}.install .cmd{font-size:11px;padding:0 10px}}
 @media(max-width:880px){.hero-inner{grid-template-columns:1fr;gap:40px}.hero-right{display:none}.hero-left{display:flex;flex-direction:column;align-items:flex-start;text-align:left}.lede{max-width:52ch}.hero-cta-row{display:none}.hero-mobile-cta{display:block;width:100%;max-width:420px;margin-top:36px}.install-note{text-align:left}}
 @media(min-width:881px){.hero-mobile-cta{display:none}}
+/* Centered hero (stripped to one promise) */
+.hero-centered{padding:108px 0 100px;text-align:center}
+.hero-centered .wrap{display:flex;justify-content:center}
+.hero-c{width:100%;max-width:800px;display:flex;flex-direction:column;align-items:center}
+.hero-centered .display{text-align:center}
+.hero-centered .lede{margin:26px auto 0;text-align:center;max-width:58ch}
+.hero-actions{margin-top:38px;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap}
+.hero-actions .copycmd{width:auto;min-width:190px;height:44px}
+.hero-actions .btn{min-height:44px}
+.hero-trustline{margin-top:26px;font-size:13px;color:var(--fg-3);letter-spacing:.01em}
+.hero-trustline b{color:var(--fg-2);font-weight:500}
+@media(max-width:560px){.hero-centered{padding:72px 0 64px}.hero-actions{flex-direction:column;width:100%}.hero-actions .copycmd,.hero-actions .btn{width:100%;min-width:0;justify-content:center}}
+/* See it work (console relocated out of the hero) */
+.demo-sec .section-head.center{max-width:680px;margin-left:auto;margin-right:auto;text-align:center;margin-bottom:48px}
+.demo-sec .section-head.center p{margin-left:auto;margin-right:auto;text-align:center}
+.console-stage{max-width:900px;margin:0 auto}
+.demo-foot{text-align:center;margin-top:32px}
+.demo-link{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-size:14px;font-weight:500;letter-spacing:-.005em}
+.demo-link:hover{text-decoration:underline}
 .mini-console{border:1px solid var(--line);border-radius:var(--r-xl);background:var(--bg-1);overflow:hidden;margin-bottom:18px;text-align:left}
 .mc-bar{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--bg-2)}
 .mc-dots{display:flex;gap:5px}
