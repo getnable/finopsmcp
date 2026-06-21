@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.79"
+version = "0.8.80"
 description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
 readme = "README.md"
 license = { text = "Elastic-2.0" }
@@ -125,6 +125,13 @@ Documentation = "https://getnable.com/docs"
 [tool.hatch.build.targets.wheel]
 packages = ["src/finops"]
 artifacts = ["templates/*.yaml", "templates/*.json"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# dashboard.html is matched by an over-broad ".gitignore" rule ("dashboard.html"),
+# so hatchling's VCS file selection drops it from the wheel even though the file
+# is tracked. Force it in: without it the served dashboard is just the fallback
+# "Dashboard template missing. Reinstall nable." on every pip/uvx install.
+"src/finops/static/dashboard.html" = "finops/static/dashboard.html"
 
 [tool.hatch.build]
 include = ["src/finops/**", "templates/**"]

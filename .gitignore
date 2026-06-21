@@ -60,6 +60,8 @@ package-lock.json
 COST_RESEARCH.md
 .design-audit/
 dashboard.html
+# but the bundled dashboard template is a real package asset, not scratch
+!src/finops/static/dashboard.html
 
 # Office temp files
 ~$*
