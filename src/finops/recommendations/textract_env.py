@@ -8,12 +8,12 @@ of the total bill. This scanner finds non-prod callers.
 Logic:
   1. Pull Cost Explorer Textract spend grouped by environment tags.
   2. If tags are missing (common), fall back to scanning Lambda functions
-     directly — list all functions, check their names and tags for nonprod
+     directly, list all functions, check their names and tags for nonprod
      signals, flag those that have Textract permissions in their IAM role.
   3. Estimate monthly waste from the non-prod fraction.
 
 No CloudTrail access required. All data comes from Cost Explorer,
-Lambda list/tag APIs, and IAM — all free, read-only calls.
+Lambda list/tag APIs, and IAM, all free, read-only calls.
 """
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def _get_lambda_nonprod_callers(lambda_client, total_spend: float) -> list[dict]
     """
     List Lambda functions and flag those with nonprod signals in their name or tags.
 
-    Uses only Lambda list/tag APIs — no CloudTrail, no extra cost.
+    Uses only Lambda list/tag APIs, no CloudTrail, no extra cost.
     Returns estimated spend fractions based on function count (proxy for call volume).
     """
     functions: list[dict] = []
@@ -138,7 +138,7 @@ def _get_lambda_nonprod_callers(lambda_client, total_spend: float) -> list[dict]
     if not functions or total_spend <= 0:
         return []
 
-    # Estimate spend proportionally — share of total functions that are nonprod
+    # Estimate spend proportionally, share of total functions that are nonprod
     # Divides by TOTAL function count so 4 nonprod out of 200 gets 2%, not 100%
     per_fn_spend = round(total_spend / max(total_fn_count, 1), 2)
     for fn in functions:

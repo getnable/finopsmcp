@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 try:
     import boto3
 except ImportError:
@@ -240,4 +242,74 @@ def audit_spot_diversification(
 
     _risk_order = {_RISK_HIGH: 0, _RISK_MEDIUM: 1, _RISK_OK: 2}
     all_results.sort(key=lambda r: _risk_order.get(r["risk_level"], 9))
+
+    # Classify the finding by the STRENGTH OF EVIDENCE behind it. We can MEASURE the
+    # instance-type count and allocation strategy off the ASG config, but this is a
+    # resilience signal, not a billed cost: too few spot pools means a capacity-pool
+    # tightening can interrupt the whole fleet at once. There is no dollar saving to
+    # measure (diversifying changes risk, not the bill directly), and the cost of an
+    # interruption depends on the workload. So this is an INFERRED investigation, and
+    # it ships with NO precise figure (rough_monthly stays None -> "unknown size").
+    # Attached to the top result so the returned list shape and keys are unchanged.
+    at_risk = [r for r in all_results
+               if r["risk_level"] in (_RISK_HIGH, _RISK_MEDIUM)
+               and not r["attribute_based_selection"]]
+    if at_risk:
+        top = at_risk[0]
+        n_high = sum(1 for r in at_risk if r["risk_level"] == _RISK_HIGH)
+        finding = Finding(
+            source="spot_diversification",
+            title="Let's check the spot interruption risk on under-diversified ASGs",
+            why=(
+                f"ASG '{top['asg_name']}' runs spot across only "
+                f"{top['instance_types_count']} instance type(s). Spot capacity is "
+                "per-type, per-AZ, so a single pool tightening can reclaim a large slice "
+                "of the fleet at once. Spreading across 5+ types and families cuts that "
+                f"correlated-interruption risk. I see {len(at_risk)} ASG(s) like this, "
+                f"{n_high} at high risk."
+            ),
+            evidence=INFERRED,
+            confidence="medium",
+            why_unsure=(
+                "This is a resilience signal from the ASG config, not a measured cost. "
+                "How much an interruption actually costs you depends on the workload, "
+                "and I have not observed any real interruption here, so I cannot attach "
+                "a dollar figure to it."
+            ),
+            assumptions=[
+                "The ASG runs an interruption-sensitive workload where correlated spot "
+                "reclaims would cause a real outage or backlog.",
+            ],
+            rough_monthly=None,  # resilience finding: no honest dollar figure to give
+            confirm_steps=[
+                "Review the ASG's recent spot interruption events and capacity-rebalance "
+                "history to gauge how exposed this fleet actually is.",
+                "Check whether the workload can absorb losing one capacity pool at once; "
+                "if not, treat the diversification gap as a live risk.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=(
+                "On Pro, nable watches your spot interruption and rebalance events over "
+                "time and tells you whether this ASG is actually getting reclaimed in "
+                "correlated waves, turning the config signal into an observed risk."
+            ),
+            remediation=[
+                "Add instance types via MixedInstancesPolicy overrides to reach 5+ types "
+                "across families (m5, m6i, c5, r5), and set price-capacity-optimized "
+                "allocation. This is a resilience change, not a direct cost cut. Roll it "
+                "out and watch interruption rates before relying on it.",
+            ],
+            resource_id=top["asg_name"],
+            metadata={
+                "region": top["region"],
+                "instance_types_count": top["instance_types_count"],
+                "allocation_strategy": top["allocation_strategy"],
+                "spot_pct": top["spot_pct"],
+                "risk_level": top["risk_level"],
+                "high_risk_count": n_high,
+                "at_risk_asgs_sampled": [r["asg_name"] for r in at_risk[:8]],
+            },
+        )
+        top["finding"] = finding.to_dict()
+
     return all_results

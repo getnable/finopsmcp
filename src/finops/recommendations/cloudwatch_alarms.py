@@ -18,6 +18,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, MEASURED, Finding
+
 log = logging.getLogger(__name__)
 
 STANDARD_ALARM_COST = 0.10   # USD per alarm per month
@@ -291,10 +293,90 @@ async def audit_cloudwatch_orphaned_alarms(
 
     total_monthly_waste = round(sum(a["monthly_cost"] for a in all_orphaned), 2)
 
+    # Trust envelope. Split the orphaned set by how hard the evidence is:
+    #   - confirmed_dead: we looked up the backing EC2 instance or SQS queue and it
+    #     is gone (resource_exists is False). The alarm can never recover and it
+    #     keeps billing at a published per-alarm rate. That is MEASURED -> a
+    #     recommendation with a precise dollar figure.
+    #   - stale_only: in INSUFFICIENT_DATA past the threshold but we could not (or did
+    #     not) verify a backing resource (resource_exists is None). That is a real
+    #     signal, but INSUFFICIENT_DATA can also be transient or a misconfigured
+    #     alarm, so it is INFERRED -> an investigation, not a precise claim.
+    confirmed_dead = [a for a in all_orphaned if a.get("resource_exists") is False]
+    stale_only = [a for a in all_orphaned if a.get("resource_exists") is None]
+    confirmed_waste = round(sum(a["monthly_cost"] for a in confirmed_dead), 2)
+
+    finding = None
+    if confirmed_dead:
+        sample = ", ".join(a["alarm_name"] for a in confirmed_dead[:5] if a["alarm_name"])
+        finding = Finding(
+            source="cloudwatch_alarms",
+            title="Delete CloudWatch alarms whose target resource is gone",
+            why=(f"{len(confirmed_dead)} alarm(s) point at an EC2 instance or SQS queue that no "
+                 "longer exists. They sit in INSUFFICIENT_DATA, can never recover, and still "
+                 "bill at $0.10/alarm/mo (standard) or $0.30/alarm/mo (composite). That is pure "
+                 "waste."),
+            evidence=MEASURED,
+            confidence="high",
+            est_monthly_savings=confirmed_waste,
+            remediation=[
+                "Confirm each alarm's resource is intentionally gone (not a paused or "
+                "soon-to-return instance/queue), then delete the alarm with "
+                "aws cloudwatch delete-alarms --alarm-names <name>.",
+                "Deleting an alarm is reversible only by recreating it, so keep the alarm "
+                "definition if the resource might come back.",
+            ],
+            resource_id=confirmed_dead[0]["alarm_name"] if len(confirmed_dead) == 1 else "",
+            metadata={
+                "confirmed_dead_count": len(confirmed_dead),
+                "sample_alarms": sample,
+                "by_region": {r: v for r, v in by_region.items() if v["orphaned_count"]},
+            },
+        )
+    elif stale_only:
+        finding = Finding(
+            source="cloudwatch_alarms",
+            title="Let's check these long-idle CloudWatch alarms",
+            why=(f"{len(stale_only)} alarm(s) have been in INSUFFICIENT_DATA for over "
+                 f"{_INSUFFICIENT_DATA_THRESHOLD_DAYS} days. That often means the resource they "
+                 "watch is gone and the alarm is quietly billing, but it can also be a "
+                 "misconfigured or rarely-triggered alarm."),
+            evidence=INFERRED,
+            confidence="medium",
+            why_unsure=("These alarms aren't on EC2 or SQS (or I couldn't verify the backing "
+                        "resource), so I can't confirm the target is actually gone. "
+                        "INSUFFICIENT_DATA alone doesn't prove waste, so I'm not putting a firm "
+                        "savings number on deleting them."),
+            assumptions=[
+                "A long INSUFFICIENT_DATA stretch usually, but not always, means an orphaned alarm.",
+            ],
+            rough_monthly=round(sum(a["monthly_cost"] for a in stale_only), 2),
+            confirm_steps=[
+                "For each alarm, check whether the metric it watches is still being published "
+                "(the namespace/dimensions point at a live resource).",
+                "If the resource is gone, delete the alarm; if it's just quiet, fix the alarm or "
+                "leave it.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, nable cross-checks each alarm's dimensions against the live "
+                        "resource inventory (and CloudTrail delete events) to confirm which "
+                        "targets are truly gone, then promotes the safe ones to a delete "
+                        "recommendation."),
+            remediation=[
+                "Confirm the target is gone before deleting (see steps above). Do not bulk-delete "
+                "on the INSUFFICIENT_DATA state alone.",
+            ],
+            metadata={
+                "stale_only_count": len(stale_only),
+                "by_region": {r: v for r, v in by_region.items() if v["orphaned_count"]},
+            },
+        )
+
     return {
         "total_alarms": grand_total_alarms,
         "total_orphaned": len(all_orphaned),
         "total_monthly_waste": total_monthly_waste,
         "orphaned_alarms": all_orphaned,
         "by_region": by_region,
+        "finding": finding.to_dict() if finding else None,
     }

@@ -15,6 +15,8 @@ import logging
 from collections import Counter
 from typing import Any
 
+from .envelope import MEASURED, Finding
+
 log = logging.getLogger(__name__)
 
 FREE_METRICS = 10_000
@@ -241,9 +243,69 @@ async def audit_cloudwatch_metric_cardinality(
     all_findings.sort(key=lambda f: f["metric_count"], reverse=True)
     estimated_monthly_cost = _estimate_cost(grand_total)
 
+    # Classify the finding by the STRENGTH OF EVIDENCE behind it. The metric counts
+    # come straight from list_metrics and the $0.30/metric/month rate above the
+    # 10,000 free tier is AWS's published price, so the billed cost is directly
+    # measured -> a recommendation with a precise number. The only judgment call is
+    # which dimension to drop, and that does not change the dollars already on the
+    # bill. We only build a finding when there is real billable spend.
+    finding = None
+    if estimated_monthly_cost > 0 and grand_total > FREE_METRICS:
+        top = all_findings[0] if all_findings else None
+        worst_dims = top.get("high_cardinality_dimensions", []) if top else []
+        if worst_dims:
+            dims_str = ", ".join(f'"{d}"' for d in worst_dims)
+            why = (
+                f"You are emitting {grand_total:,} custom CloudWatch metrics, "
+                f"{grand_total - FREE_METRICS:,} above the 10,000 free tier, billed at "
+                f"${METRIC_COST_PER_MONTH:.2f}/metric/month. The biggest namespace "
+                f"'{top['namespace']}' carries dimension(s) {dims_str} that look like "
+                "unique-per-request or unique-per-instance values, which is what blows "
+                "up the metric count."
+            )
+        else:
+            why = (
+                f"You are emitting {grand_total:,} custom CloudWatch metrics, "
+                f"{grand_total - FREE_METRICS:,} above the 10,000 free tier, billed at "
+                f"${METRIC_COST_PER_MONTH:.2f}/metric/month. Custom metric cost scales "
+                "with cardinality, so a high count usually means a dimension is carrying "
+                "unique-per-request or unique-per-instance values."
+            )
+        remediation = [
+            "Confirm which dimension is exploding the count by sampling the top "
+            "namespace, then drop or aggregate that dimension before emitting.",
+            "Move unique identifiers (request_id, pod_id, trace_id) out of metric "
+            "dimensions and into Embedded Metric Format logs or metric math.",
+            "Removing a high-cardinality dimension drops the metric count and the bill "
+            "with it, but verify your dashboards and alarms do not depend on that "
+            "dimension first.",
+        ]
+        finding = Finding(
+            source="cloudwatch_cardinality",
+            title="Custom CloudWatch metric cardinality is driving billable spend",
+            why=why,
+            evidence=MEASURED,
+            confidence="high",
+            est_monthly_savings=estimated_monthly_cost,
+            remediation=remediation,
+            resource_id=(top["namespace"] if top else ""),
+            metadata={
+                "total_custom_metrics": grand_total,
+                "billable_metrics": grand_total - FREE_METRICS,
+                "free_tier": FREE_METRICS,
+                "rate_per_metric_month": METRIC_COST_PER_MONTH,
+                "top_namespaces": [
+                    {"namespace": f["namespace"], "metric_count": f["metric_count"],
+                     "region": f["region"]}
+                    for f in all_findings[:5]
+                ],
+            },
+        )
+
     return {
         "total_custom_metrics": grand_total,
         "estimated_monthly_cost": estimated_monthly_cost,
         "high_cardinality_namespaces": all_findings,
         "by_region": by_region,
+        "finding": finding.to_dict() if finding else None,
     }

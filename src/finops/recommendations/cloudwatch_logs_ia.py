@@ -22,6 +22,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 # us-east-1 CloudWatch Logs ingestion: $0.50/GB Standard, $0.25/GB Infrequent Access.
@@ -254,10 +256,70 @@ async def audit_cloudwatch_logs_ia_opportunities(
     all_candidates.sort(key=lambda c: c["monthly_savings"], reverse=True)
     total_savings = round(sum(c["monthly_savings"] for c in all_candidates), 4)
 
+    # Trust envelope: this is an INVESTIGATION, not a recommendation.
+    #
+    # The ingestion volume (IncomingBytes) and the per-GB IA discount are both real,
+    # so the rough number is well grounded. But the saving is NOT something we can
+    # promise, for two reasons:
+    #   1. It only lands if the customer chooses to migrate, and the IA class is set
+    #      at creation: you must create a new group and repoint producers, not flip a
+    #      switch.
+    #   2. IA forbids metric filters, subscription filters, and live tail. This
+    #      scanner does NOT check for those, so some candidates simply cannot move
+    #      without losing functionality.
+    # So we size it as a band and lead with the confirm step.
+    finding = None
+    if all_candidates and total_savings >= 1.0:
+        top = all_candidates[0]
+        finding = Finding(
+            source="cloudwatch_logs_ia",
+            title="Let's check which log groups can move to the Infrequent Access class",
+            why=("CloudWatch Logs Infrequent Access costs 50% less to ingest ($0.25/GB vs "
+                 f"$0.50/GB). I found {len(all_candidates)} STANDARD-class group(s) older than "
+                 f"{_MIN_AGE_DAYS} days ingesting over {_MIN_INGESTION_GB:g} GB/mo, led by "
+                 f"'{top['log_group_name']}' at {top['monthly_ingestion_gb']:.1f} GB/mo."),
+            evidence=INFERRED,
+            confidence="medium",
+            why_unsure=("I measured the ingestion volume, so the size is solid, but I can't call "
+                        "this confirmed savings. The IA class blocks metric filters, subscription "
+                        "filters, and live tail, and I haven't checked whether these groups use "
+                        "them. Moving a group that depends on a metric filter would break alerting."),
+            assumptions=[
+                "Recent ingestion volume is representative of a normal month.",
+                "These groups have no metric filters, subscription filters, or live-tail dependency "
+                "(unverified).",
+                "The team is willing to recreate the group, since IA class can't be set in place.",
+            ],
+            rough_monthly=total_savings,
+            confirm_steps=[
+                "For each candidate, run aws logs describe-metric-filters --log-group-name <name> "
+                "and check for subscription filters. If either exists, the group cannot move to IA "
+                "without losing that feature.",
+                "Confirm nothing relies on live tail for the group.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, nable enumerates each group's metric and subscription filters and "
+                        "live-tail usage automatically, then promotes only the groups that can "
+                        "safely move to IA into a recommendation with a firm number."),
+            remediation=[
+                "Confirm no metric/subscription filters first (see steps above). The log class is "
+                "fixed at creation: create a replacement with "
+                "--log-group-class INFREQUENT_ACCESS, repoint producers, then delete the old group.",
+                "Migrate one low-risk group first and watch it before doing the rest.",
+            ],
+            resource_id=top["log_group_name"] if len(all_candidates) == 1 else "",
+            metadata={
+                "candidate_count": len(all_candidates),
+                "top_groups": [c["log_group_name"] for c in all_candidates[:8]],
+                "by_region": {r: v for r, v in by_region.items() if v["candidates_count"]},
+            },
+        )
+
     return {
         "total_groups_scanned": grand_total_groups,
         "total_candidates": len(all_candidates),
         "total_monthly_savings": total_savings,
         "candidates": all_candidates,
         "by_region": by_region,
+        "finding": finding.to_dict() if finding else None,
     }

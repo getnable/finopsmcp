@@ -17,6 +17,8 @@ import logging
 from datetime import date, timedelta
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 try:
@@ -128,6 +130,7 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                 "error": "Could not read RDS compute spend from Cost Explorer "
                          "(throttle, permissions, or outage). No recommendation made.",
                 "recommendation_type": "database_savings_plan_1yr_no_upfront",
+                "finding": None,
             }
         sp_coverage_pct = _get_database_sp_coverage(ce, start, end)
 
@@ -146,6 +149,71 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
         estimated_monthly_savings = uncovered_monthly * DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT
         estimated_annual_savings = estimated_monthly_savings * 12
 
+        # Classify the finding. The uncovered baseline and current coverage are measured
+        # from Cost Explorer, but a Savings Plan is a 1-year commitment, and the saving
+        # only lands if that RDS/Aurora baseline keeps running for the term. We have only
+        # looked at the last 30 days, so we cannot confirm the spend is stable enough to
+        # commit to. That makes this an investigation: a band plus the steps to confirm
+        # the baseline holds, not a precise promise. The discount rate is also a
+        # conservative published estimate, not your account's actual SP rate card.
+        finding = None
+        if uncovered_monthly > 50:
+            finding = Finding(
+                source="database_savings_plans",
+                title="Uncovered RDS/Aurora spend may be worth a Database Savings Plan",
+                why=("Database Savings Plans discount RDS and Aurora instance hours. About "
+                     f"${round(uncovered_monthly, 0):,.0f}/mo of your database compute is "
+                     f"running on demand with only {round(sp_coverage_pct, 0):.0f}% covered. "
+                     "Committing to a Savings Plan on the steady part of that would cut the "
+                     "rate."),
+                evidence=INFERRED,
+                confidence="medium" if sp_coverage_pct < 50 else "low",
+                why_unsure=("We measured the last 30 days of uncovered instance-hour spend, "
+                            "but a Savings Plan locks you in for a year. We have not confirmed "
+                            "this baseline is stable: if you are about to downsize, migrate "
+                            "off RDS, or move to Aurora Serverless, committing to it would "
+                            "strand the commitment. The discount is also a conservative "
+                            "published estimate, not your account's exact SP rate."),
+                assumptions=[
+                    "The uncovered RDS/Aurora baseline keeps running at this level for the "
+                    "1-year term.",
+                    "Saving uses a conservative 30% no-upfront discount; your actual SP rate "
+                    "may differ.",
+                    "Instance-hour line items were identified correctly (storage, IOPS, "
+                    "backups, and transfer are excluded, since Database SPs do not cover them).",
+                ],
+                rough_monthly=estimated_monthly_savings,
+                confirm_steps=[
+                    "Pull 3 to 6 months of RDS/Aurora instance-hour spend and confirm the "
+                    "uncovered baseline is flat or growing, not trending down.",
+                    "Check for planned migrations, downsizing, or a move to Aurora Serverless "
+                    "that would drop the baseline inside the next year.",
+                    "Size the commitment to the floor of that history, not the recent peak, so "
+                    "you do not over-commit.",
+                ],
+                pro_can_confirm=True,
+                pro_unlock=("On Pro, nable reads several months of your CUR to confirm the "
+                            "database baseline is stable, models the right commitment to the "
+                            "stable floor, and uses your account's actual Savings Plan rates "
+                            "instead of a conservative published estimate."),
+                remediation=[
+                    "Confirm first: verify the baseline holds over a longer window and rule out "
+                    "planned changes to the fleet.",
+                    "Then buy a 1-year no-upfront Database Savings Plan sized to the stable "
+                    f"floor, around ${round(recommended_hourly, 2):,.2f}/hr to start.",
+                    "Risk: an over-sized commitment on spend that later drops is wasted. "
+                    "Commit to the floor, not the peak, and consider laddering.",
+                ],
+                est_monthly_savings=None,
+                metadata={
+                    "current_monthly_rds_spend": round(monthly_rds_spend, 2),
+                    "current_sp_coverage_pct": round(sp_coverage_pct, 1),
+                    "uncovered_monthly_spend": round(uncovered_monthly, 2),
+                    "recommended_sp_hourly_commitment": round(recommended_hourly, 4),
+                    "lookback_days": 30,
+                },
+            )
+
         return {
             "current_monthly_rds_spend": round(monthly_rds_spend, 2),
             "current_sp_coverage_pct": round(sp_coverage_pct, 1),
@@ -155,6 +223,7 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
             "estimated_annual_savings": round(estimated_annual_savings, 2),
             "payback_days": 0,  # no-upfront has no upfront cost
             "recommendation_type": "database_savings_plan_1yr_no_upfront",
+            "finding": finding.to_dict() if finding else None,
         }
 
     except Exception as e:

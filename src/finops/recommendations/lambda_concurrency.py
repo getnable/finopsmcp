@@ -13,6 +13,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import MEASURED, Finding
+
 log = logging.getLogger(__name__)
 
 PROVISIONED_CONCURRENCY_PER_GB_SECOND: float = 0.0000041667
@@ -208,4 +210,53 @@ async def scan_lambda_concurrency_waste(
                 })
 
     findings.sort(key=lambda f: f["wasted_monthly_cost"], reverse=True)
+
+    # Classify the finding by the STRENGTH OF EVIDENCE behind it. We read the actual
+    # provisioned-concurrency allocation off the function config and 14 days of the
+    # ProvisionedConcurrencyUtilization metric, then apply AWS's published keep-warm
+    # rate. The idle spend is directly measured -> a recommendation with a precise
+    # number. The only judgment is whether to remove or reduce the allocation, and
+    # that does not change the dollars already being billed for idle capacity.
+    # Attached to the top finding so the returned list shape and keys are unchanged.
+    if findings:
+        top = findings[0]
+        if top["wasted_monthly_cost"] > 1.0:
+            util = top["avg_utilization_pct"]
+            action = (
+                "remove the provisioned concurrency" if util < 10
+                else "right-size the provisioned concurrency down to match real demand"
+            )
+            finding = Finding(
+                source="lambda_concurrency",
+                title="Provisioned concurrency is sitting idle on a Lambda function",
+                why=(
+                    f"Function '{top['function_name']}' (alias {top['qualifier']}) has "
+                    f"{top['provisioned_count']} provisioned-concurrency unit(s) of "
+                    f"{top['memory_mb']}MB each, but averaged only {util:.1f}% utilization "
+                    "over the last 14 days. Provisioned concurrency bills for the warm "
+                    "capacity whether or not it is used, so the idle share is pure waste."
+                ),
+                evidence=MEASURED,
+                confidence="high",
+                est_monthly_savings=round(top["wasted_monthly_cost"], 2),
+                remediation=[
+                    f"Confirm the 14-day utilization is representative (not a holiday or "
+                    f"freeze window), then {action}.",
+                    "If traffic is spiky but predictable, switch to scheduled scaling on "
+                    "provisioned concurrency instead of a flat allocation.",
+                    "Reducing provisioned concurrency can reintroduce cold starts for Java "
+                    "or large-package functions, so validate p99 latency after the change.",
+                ],
+                resource_id=f"{top['function_name']}:{top['qualifier']}",
+                metadata={
+                    "region": top["region"],
+                    "provisioned_count": top["provisioned_count"],
+                    "avg_utilization_pct": util,
+                    "memory_mb": top["memory_mb"],
+                    "monthly_cost": top["monthly_cost"],
+                    "lookback_days": _LOOKBACK_DAYS,
+                },
+            )
+            top["finding"] = finding.to_dict()
+
     return findings

@@ -16,6 +16,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+from .envelope import INFERRED, Finding
 from .graviton_prices import HOURLY_PRICE, HOURS_PER_MONTH, GRAVITON_SAVINGS_PCT
 
 # Mapping from common x86_64 instance types to their Graviton equivalents.
@@ -136,6 +137,78 @@ def _compute_savings(
     return 0.0, 0.0, round(GRAVITON_SAVINGS_PCT * 100, 1)
 
 
+def _graviton_finding(
+    instance_id: str,
+    current_type: str,
+    graviton_type: str,
+    current_cost: float,
+    savings: float,
+    savings_pct: float,
+    region: str,
+    name_tag: str,
+) -> Finding | None:
+    """Build the trust-envelope Finding for one Graviton candidate.
+
+    Always an investigation: the price gap between the x86 type and its arm64
+    equivalent is real, but whether the workload actually runs on arm64 is not
+    something we can see from the instance type alone, and the dollar figure uses
+    on-demand list price, not the rate you may already get from RIs or Savings
+    Plans. So we size it as a band with a confirm-first migration path."""
+    if savings <= 5:
+        return None
+    label = name_tag or instance_id
+    return Finding(
+        source="graviton",
+        title=f"{current_type} may have a cheaper Graviton equivalent",
+        why=(f"{label} runs on {current_type} (x86). The Graviton equivalent "
+             f"{graviton_type} lists about {savings_pct:.0f}% cheaper for equal or better "
+             "performance on most workloads. If this workload runs on arm64, moving it "
+             "would cut the bill."),
+        evidence=INFERRED,
+        confidence="medium" if savings >= 50 else "low",
+        why_unsure=("We matched the instance type to a Graviton equivalent, but we have not "
+                    "checked that this workload runs on arm64. Native binaries, container "
+                    "images, agents, or licensed software may be x86-only. The saving also "
+                    "uses on-demand list price, so if this instance is on a Reserved Instance "
+                    "or Savings Plan the real difference is smaller."),
+        assumptions=[
+            "The workload and its full dependency chain support arm64.",
+            "Cost is on-demand list price; an RI or Savings Plan on the current instance "
+            "would reduce the actual saving.",
+        ],
+        rough_monthly=savings,
+        confirm_steps=[
+            "Confirm the AMI, container images, and any third-party agents or licensed "
+            "software on this instance have arm64 builds.",
+            "Bring up the Graviton type in a test or staging copy and run the workload's "
+            "test suite or a canary before cutting over.",
+            "Check whether the current instance is under an RI or Savings Plan, which lowers "
+            "the real saving from migrating.",
+        ],
+        pro_can_confirm=True,
+        pro_unlock=("On Pro, nable cross-checks your AMI architecture, container image "
+                    "manifests, and CUR rate data to flag which of these instances are "
+                    "genuinely arm64-ready and prices the move at the rate you actually pay, "
+                    "instead of an on-demand list estimate."),
+        remediation=[
+            "Confirm first: verify arm64 support across the AMI, images, and agents, and "
+            "check for RI/SP coverage.",
+            f"Then launch {graviton_type} from an arm64 image, validate in a test copy, and "
+            "cut over behind a load balancer or blue/green swap.",
+            "Risk: an x86-only dependency fails to start or runs slower on arm64. Validate in "
+            "a non-prod copy first and keep the x86 instance until the new one is proven.",
+        ],
+        resource_id=instance_id,
+        metadata={
+            "current_type": current_type,
+            "graviton_equivalent": graviton_type,
+            "current_monthly_cost_estimate": current_cost,
+            "savings_pct": savings_pct,
+            "region": region,
+        },
+    )
+
+
 async def scan_graviton_opportunities(
     aws_client: Any,
     regions: list[str] | None = None,
@@ -195,6 +268,11 @@ async def scan_graviton_opportunities(
                             itype, graviton_type
                         )
 
+                        finding = _graviton_finding(
+                            iid, itype, graviton_type, current_cost, savings,
+                            savings_pct, region, name_tag,
+                        )
+
                         results.append(
                             {
                                 "instance_id": iid,
@@ -206,6 +284,7 @@ async def scan_graviton_opportunities(
                                 "region": region,
                                 "name_tag": name_tag,
                                 "account_id": account_id,
+                                "finding": finding.to_dict() if finding else None,
                             }
                         )
         except Exception as exc:

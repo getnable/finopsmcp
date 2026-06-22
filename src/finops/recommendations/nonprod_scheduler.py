@@ -17,6 +17,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 try:
@@ -217,6 +219,9 @@ async def identify_nonprod_resources(
             regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
     schedulable: list[dict] = []
+    # Track whether any instance's idle estimate came from the no-CloudWatch
+    # worst-case fallback rather than measured CPU, since that weakens the evidence.
+    assumed_idle_count = 0
 
     for region in regions:
         try:
@@ -269,6 +274,7 @@ async def identify_nonprod_resources(
                 total_samples = len(cpu_samples)
                 if total_samples == 0:
                     # No CloudWatch data: assume worst-case 70% idle (nights + weekends)
+                    assumed_idle_count += 1
                     idle_hrs_per_week = round(
                         (_TOTAL_HOURS_PER_WEEK - _BUSINESS_HOURS_PER_WEEK), 1
                     )
@@ -306,8 +312,74 @@ async def identify_nonprod_resources(
     schedulable.sort(key=lambda x: x["potential_monthly_savings"], reverse=True)
     total_waste = round(sum(r["potential_monthly_savings"] for r in schedulable), 2)
 
+    # Classify the finding. We tagged these as non-prod and saw idle hours, which is a
+    # real signal, but the saving rests on two things we have not confirmed: that these
+    # instances can be turned off nights and weekends (some run nightly jobs, hold
+    # state, or back other services), and the dollar figure uses on-demand list price,
+    # not the rate you actually pay (RIs, Savings Plans, or Spot make it lower). So
+    # this is an investigation: a band and a confirm-first path, not a precise claim.
+    finding = None
+    if schedulable and total_waste > 50:
+        top = schedulable[0]
+        all_assumed = assumed_idle_count >= len(schedulable)
+        _assumptions = [
+            "These non-prod instances can be safely stopped outside Mon-Fri 08:00-18:00 "
+            "UTC (no overnight jobs, no state that breaks on stop/start).",
+            "Cost is estimated at on-demand list price; your effective rate may be lower "
+            "under Reserved Instances, Savings Plans, or Spot, which shrinks the saving.",
+        ]
+        if assumed_idle_count > 0:
+            _assumptions.append(
+                f"{assumed_idle_count} instance(s) had no CloudWatch CPU data, so idle "
+                "time was assumed at the nights-plus-weekends worst case, not measured.")
+        finding = Finding(
+            source="nonprod_scheduler",
+            title="Non-prod instances may be schedulable to business hours",
+            why=("Dev, staging, and test instances usually only need to run during the "
+                 "workday, but these are tagged non-prod and running 24/7 with long idle "
+                 "stretches. Stopping them nights and weekends would cut their compute "
+                 "cost without touching production."),
+            evidence=INFERRED,
+            confidence="low" if all_assumed else "medium",
+            why_unsure=("Idle CPU shows the instances are quiet, but it does not prove they "
+                        "are safe to stop: some non-prod boxes run nightly builds, hold a "
+                        "database, or back a shared service. The dollar figure also assumes "
+                        "on-demand pricing, so if these are on RIs or Savings Plans the real "
+                        "saving is smaller. We have not confirmed either, so this is a range."),
+            assumptions=_assumptions,
+            rough_monthly=total_waste,
+            confirm_steps=[
+                "Confirm with the owning team that each instance can be off nights and "
+                "weekends. Exclude anything running scheduled jobs or holding state.",
+                "Check whether these instances are covered by Reserved Instances or Savings "
+                "Plans; if so, stopping them does not save the committed portion.",
+                "Stop one low-risk instance on the schedule for a week and confirm nothing "
+                "breaks before rolling it out wider.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, nable joins your CUR line items to each instance to use the "
+                        "rate you actually pay (RI/SP/Spot aware), reads a longer CloudWatch "
+                        "history to confirm the idle pattern is stable, and sizes the real "
+                        "schedulable saving instead of an on-demand estimate."),
+            remediation=[
+                "Confirm first: get owner sign-off that the instance is safe to stop off-hours "
+                "and check for RI/SP coverage.",
+                "Then set an EventBridge Scheduler start/stop pair (start cron(0 8 ? * MON-FRI *), "
+                "stop cron(0 18 ? * MON-FRI *)). The per-instance command is in the result.",
+                "Risk: stopping an instance that runs an overnight job or holds unsaved state "
+                "breaks that workload. Start with one instance and an easy manual override.",
+            ],
+            metadata={
+                "instances_flagged": len(schedulable),
+                "instances_with_assumed_idle": assumed_idle_count,
+                "top_instance": top["instance_id"],
+                "top_instance_type": top["instance_type"],
+            },
+        )
+
     return {
         "schedulable_instances": schedulable,
         "total_monthly_waste": total_waste,
         "total_instances": len(schedulable),
+        "finding": finding.to_dict() if finding else None,
     }

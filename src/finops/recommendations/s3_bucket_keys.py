@@ -15,6 +15,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 # $0.03 per 10,000 KMS API requests
@@ -24,7 +26,7 @@ BUCKET_KEY_REDUCTION_FACTOR: float = 0.99  # ~99% reduction in KMS calls
 _LOOKBACK_DAYS = 30
 # Estimated KMS calls per S3 PUT/GET when bucket key is disabled
 # Each PUT and each GET triggers a GenerateDataKey / Decrypt call respectively
-_ASSUMED_PUT_GET_RATIO = 0.5  # rough split — we count both as KMS calls
+_ASSUMED_PUT_GET_RATIO = 0.5  # rough split: we count both as KMS calls
 
 
 def _make_boto_session(aws_client: Any):
@@ -143,7 +145,7 @@ async def scan_s3_bucket_key_opportunities(aws_client: Any) -> list[dict]:
         except s3_client.exceptions.ClientError as exc:
             error_code = exc.response.get("Error", {}).get("Code", "")
             if error_code in ("ServerSideEncryptionConfigurationNotFound", "NoSuchBucketPolicy"):
-                # No encryption configured — not relevant
+                # No encryption configured, not relevant
                 continue
             log.debug("get_bucket_encryption failed for %s: %s", bucket_name, exc)
             continue
@@ -191,6 +193,62 @@ async def scan_s3_bucket_key_opportunities(aws_client: Any) -> list[dict]:
                     estimated_monthly_kms_cost * BUCKET_KEY_REDUCTION_FACTOR, 4)
                 note = None
 
+            # Trust envelope: this is an INVESTIGATION, not a recommendation.
+            #
+            # Two reasons we cannot stake a precise saved-dollar figure:
+            #   1. When request metrics are off (estimated_monthly_kms_calls is None)
+            #      we have no volume at all.
+            #   2. Even when AllRequests IS available, it counts EVERY S3 request
+            #      (LIST, HEAD, PUT, GET, ...). Only SSE-KMS object PUT/GETs trigger a
+            #      KMS GenerateDataKey/Decrypt, so treating the full request count as
+            #      KMS calls is an upper-bound proxy, not a measured KMS call count.
+            # Enabling a bucket key is a safe best practice either way, so we surface
+            # the bucket and offer to confirm the real KMS volume.
+            finding = None
+            if estimated_monthly_kms_calls is not None and estimated_savings >= 1.0:
+                finding = Finding(
+                    source="s3_bucket_keys",
+                    title="Let's confirm the KMS savings from enabling a bucket key",
+                    why=("This bucket uses SSE-KMS without an S3 Bucket Key, so it can call KMS "
+                         "on object reads and writes. A bucket key caches the data key and cuts "
+                         "those KMS calls by up to 99%. KMS bills $0.03 per 10,000 requests, and "
+                         f"this bucket saw about {estimated_monthly_kms_calls:,} S3 requests in "
+                         "the window."),
+                    evidence=INFERRED,
+                    confidence="low",
+                    why_unsure=("I sized this from the AllRequests CloudWatch metric, which counts "
+                                "every S3 request, not just the SSE-KMS PUT/GETs that actually hit "
+                                "KMS. So my call count is an upper bound and the dollar figure is "
+                                "an estimate, not your real KMS line item."),
+                    assumptions=[
+                        "Every counted S3 request triggers one KMS call (overcounts: LIST/HEAD do not).",
+                        "Request volume over the lookback window is representative of a normal month.",
+                    ],
+                    rough_monthly=estimated_savings,
+                    confirm_steps=[
+                        "Check the KMS cost for this key in Cost Explorer (filter SERVICE = Key "
+                        "Management Service), or read KMS request counts in CloudWatch, to see the "
+                        "real GenerateDataKey/Decrypt volume tied to this bucket.",
+                        "Enabling the bucket key is low risk regardless: it changes nothing about "
+                        "who can decrypt, only how often S3 asks KMS for the data key.",
+                    ],
+                    pro_can_confirm=True,
+                    pro_unlock=("On Pro, nable reads your Cost and Usage Report and CloudTrail to "
+                                "tie KMS GenerateDataKey/Decrypt calls to this bucket and key, then "
+                                "confirms the exact monthly KMS spend a bucket key would shave."),
+                    remediation=[
+                        "Confirm the KMS volume first (see steps above), then enable the bucket key. "
+                        "It is a safe, reversible setting and does not re-encrypt existing objects.",
+                        f"Fix: {_build_fix_command(bucket_name, kms_key_id)}",
+                    ],
+                    resource_id=bucket_name,
+                    metadata={
+                        "kms_key_id": kms_key_id,
+                        "estimated_monthly_kms_calls": estimated_monthly_kms_calls,
+                        "estimated_monthly_kms_cost": estimated_monthly_kms_cost,
+                    },
+                )
+
             findings.append({
                 "bucket_name": bucket_name,
                 "kms_key_id": kms_key_id,
@@ -200,6 +258,7 @@ async def scan_s3_bucket_key_opportunities(aws_client: Any) -> list[dict]:
                 "estimated_savings": estimated_savings,
                 "note": note,
                 "fix_command": _build_fix_command(bucket_name, kms_key_id),
+                "finding": finding.to_dict() if finding else None,
             })
             break  # one finding per bucket is enough
 

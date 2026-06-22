@@ -15,6 +15,8 @@ import asyncio
 import logging
 from typing import Any
 
+from .envelope import MEASURED, Finding
+
 log = logging.getLogger(__name__)
 
 # AWS pricing since Feb 1 2024. AWS bills a 730-hour average month (8760/12).
@@ -159,10 +161,64 @@ async def audit_public_ipv4(
     waste_count_total = len(unattached_eips) + len(stopped_instance_eips)
     total_monthly_waste = waste_count_total * IPV4_MONTHLY_RATE
 
+    # Classify by strength of evidence. Each address here is one we actually read
+    # back from describe_addresses: an Elastic IP that is either unassociated or
+    # sits on a stopped instance. The charge is AWS's published flat rate
+    # ($0.005/hr, a 730-hour month), so the dollar figure is measured, not a proxy.
+    # That makes this a recommendation with a precise number.
+    finding = None
+    if waste_count_total > 0:
+        n_unattached = len(unattached_eips)
+        n_stopped = len(stopped_instance_eips)
+        parts = []
+        if n_unattached:
+            parts.append(f"{n_unattached} unassociated Elastic IP(s)")
+        if n_stopped:
+            parts.append(f"{n_stopped} Elastic IP(s) held by stopped instances")
+        what = " and ".join(parts)
+
+        remediation = [
+            "For unassociated Elastic IPs, release them once you have confirmed nothing "
+            "still needs the address: aws ec2 release-address --allocation-id <id>. "
+            "Releasing returns the IP to the AWS pool, so you cannot get the same "
+            "address back.",
+        ]
+        if n_stopped:
+            remediation.append(
+                "For IPs on stopped instances, decide whether the instance is coming "
+                "back. If not, terminate it and release the address. If it is, you are "
+                "paying $3.65/mo per address to hold a static IP on something that is "
+                "off; consider releasing it and re-allocating on restart if the exact "
+                "address does not matter.")
+
+        single_id = ""
+        if waste_count_total == 1:
+            only = (unattached_eips or stopped_instance_eips)[0]
+            single_id = only.get("allocation_id") or only.get("public_ip", "")
+
+        finding = Finding(
+            source="public_ipv4",
+            title="Public IPv4 addresses are billing while doing nothing",
+            why=(f"Since Feb 1 2024 AWS charges $0.005/hr (about $3.65/mo) for every "
+                 f"public IPv4 address, even idle ones. You have {what}, none of which "
+                 f"is carrying traffic, so the charge is pure waste."),
+            evidence=MEASURED,
+            confidence="high",
+            est_monthly_savings=round(total_monthly_waste, 2),
+            remediation=remediation,
+            resource_id=single_id,
+            metadata={
+                "unattached_eips": n_unattached,
+                "stopped_instance_eips": n_stopped,
+                "monthly_rate_per_ip": round(IPV4_MONTHLY_RATE, 2),
+            },
+        )
+
     return {
         "unattached_eips": unattached_eips,
         "stopped_instance_eips": stopped_instance_eips,
         "total_monthly_waste": round(total_monthly_waste, 2),
         "total_ips_found": total_ips,
         "by_region": by_region,
+        "finding": finding.to_dict() if finding else None,
     }

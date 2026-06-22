@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 # EC2 inter-AZ data transfer is $0.01/GB per direction.
@@ -199,6 +201,62 @@ async def audit_efs_cross_az_mounts(
                 mt_io_gb = total_io_gb / max(len(mount_targets), 1)
                 max_monthly_cost = mt_io_gb * CROSS_AZ_COST_PER_GB
 
+                # Classify by strength of evidence. Two heuristics stack here, so this
+                # is an investigation, never a precise claim:
+                #   1. We infer "this instance mounts this EFS" from shared security
+                #      group membership, which is a proxy, not a confirmed NFS mount.
+                #   2. We bill 100% of filesystem I/O as cross-AZ and split it evenly
+                #      across mount targets, an upper bound on a number we cannot
+                #      actually measure from CloudWatch alone.
+                finding = None
+                if max_monthly_cost > 5.0:
+                    finding = Finding(
+                        source="efs_cross_az",
+                        title="Let's confirm whether this EFS file system is paying for cross-AZ traffic",
+                        why=("EFS reads and writes that cross an AZ boundary cost $0.01/GB "
+                             "per direction. This file system has running instances in a "
+                             "different AZ from its mount target, which is the usual sign of "
+                             "a cross-AZ mount silently adding transfer cost."),
+                        evidence=INFERRED,
+                        confidence="low",
+                        why_unsure=("I matched instances to this file system by shared security "
+                                    "group, not by an observed mount, so some of those instances "
+                                    "may not mount it at all. And I billed all of its I/O as "
+                                    "cross-AZ split evenly across mount targets, which overstates "
+                                    "the real figure: most I/O usually stays within the AZ."),
+                        assumptions=[
+                            "Instances sharing the mount target's security group actually mount "
+                            "this file system (a proxy, not a confirmed mount).",
+                            "All filesystem I/O crosses an AZ boundary, split evenly across "
+                            "mount targets (an upper bound).",
+                        ],
+                        rough_monthly=round(max_monthly_cost, 2),
+                        confirm_steps=[
+                            "On one of the listed instances, check the real mount: run "
+                            "'mount | grep nfs' (or inspect /etc/fstab) and confirm it targets "
+                            "this file system, then compare the instance AZ to the mount target AZ.",
+                            "Look at the EFS file system's per-AZ data transfer in Cost Explorer "
+                            "(EFS usage types) to see what cross-AZ transfer is actually billed.",
+                        ],
+                        pro_can_confirm=True,
+                        pro_unlock=("On Pro, nable reads your CUR line items for EFS transfer usage "
+                                    "types and confirms the real cross-AZ transfer cost per file "
+                                    "system, instead of the upper bound shown here."),
+                        remediation=[
+                            "Once you have confirmed a genuine cross-AZ mount, add an EFS mount "
+                            "target in each instance's AZ and point the instances at their local "
+                            "AZ endpoint. This is additive and safe: it routes traffic locally "
+                            "without changing the data.",
+                        ],
+                        resource_id=filesystem_id,
+                        metadata={
+                            "mount_target_id": mt_id,
+                            "mount_target_az": mt_az,
+                            "connected_instances_other_az": other_az_instances,
+                            "cost_is_upper_bound": True,
+                        },
+                    )
+
                 findings.append({
                     "efs_id": filesystem_id,
                     "efs_name": fs_name,
@@ -213,6 +271,7 @@ async def audit_efs_cross_az_mounts(
                         "Create an EFS mount target in each instance AZ "
                         "and update mount configurations to use the local AZ endpoint."
                     ),
+                    "finding": finding.to_dict() if finding else None,
                 })
 
     findings.sort(key=lambda f: f["estimated_monthly_cost"], reverse=True)

@@ -16,6 +16,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 try:
@@ -161,6 +163,7 @@ async def audit_s3_transfer_acceleration(aws_client: Any) -> dict:
             "findings": [],
             "total_monthly_ta_cost": 0.0,
             "potential_monthly_savings": 0.0,
+            "finding": None,
         }
 
     now = datetime.now(timezone.utc)
@@ -177,6 +180,7 @@ async def audit_s3_transfer_acceleration(aws_client: Any) -> dict:
             "findings": [],
             "total_monthly_ta_cost": 0.0,
             "potential_monthly_savings": 0.0,
+            "finding": None,
         }
 
     try:
@@ -188,6 +192,7 @@ async def audit_s3_transfer_acceleration(aws_client: Any) -> dict:
             "findings": [],
             "total_monthly_ta_cost": 0.0,
             "potential_monthly_savings": 0.0,
+            "finding": None,
         }
 
     findings: list[dict] = []
@@ -229,10 +234,67 @@ async def audit_s3_transfer_acceleration(aws_client: Any) -> dict:
     total_monthly_ta_cost = round(sum(f["monthly_ta_cost"] for f in findings), 2)
     potential_savings = round(sum(f["monthly_ta_cost"] for f in waste_findings), 2)
 
+    # Trust envelope: this is an INVESTIGATION, not a recommendation.
+    #
+    # We can directly observe that Transfer Acceleration is ON (a bucket setting) and
+    # that the bucket looks like a poor fit (us-east-1, behind CloudFront, or low
+    # measured transfer). But the SAVINGS number is soft on two counts:
+    #   - the surcharge is a flat assumed average ($0.04/GB) across a $0.04-$0.08 range, and
+    #   - bucket request metrics are off by default, so monthly_transfer_gb is usually
+    #     0.0 (no data) rather than a measured volume.
+    # So we flag the misconfiguration and band the savings, we do not claim a figure.
+    finding = None
+    if waste_findings:
+        top = waste_findings[0]
+        finding = Finding(
+            source="s3_transfer_acceleration",
+            title="Let's check whether Transfer Acceleration is earning its surcharge",
+            why=("Transfer Acceleration adds roughly $0.04 to $0.08 per GB on top of normal S3 "
+                 "transfer, in exchange for edge-routed uploads. "
+                 f"'{top['bucket_name']}' has it enabled but looks like a poor fit: "
+                 f"{top['reason']}. Teams often turn this on speculatively and forget it."),
+            evidence=INFERRED,
+            confidence="low",
+            why_unsure=("I can see TA is on and that the bucket fits a low-benefit pattern, but I "
+                        "can't price the waste precisely. Bucket request metrics are usually off, "
+                        "so I often have no real transfer volume, and the per-GB surcharge varies "
+                        "with destination, so my dollar figure would be a guess."),
+            assumptions=[
+                "TA surcharge approximated at a flat $0.04/GB (actual is $0.04-$0.08/GB).",
+                "When CloudWatch transfer metrics are missing, true accelerated volume is unknown.",
+            ],
+            rough_monthly=potential_savings if potential_savings > 0 else None,
+            confirm_steps=[
+                "Enable S3 request/transfer metrics on the bucket (or check the S3 Transfer "
+                "Acceleration usage line in your bill) to see how much data actually goes through "
+                "the accelerated endpoint.",
+                "If clients upload from far from the bucket region and the volume is real, TA may "
+                "be worth keeping. If the bucket is in us-east-1, served via CloudFront, or barely "
+                "used, it is almost certainly waste.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, nable reads your Cost and Usage Report and pulls the S3 "
+                        "Transfer-Acceleration usage type for each bucket, so it confirms the exact "
+                        "accelerated GB and surcharge instead of estimating from CloudWatch."),
+            remediation=[
+                "Confirm real accelerated volume first (see steps above). Suspending TA on a "
+                "bucket that genuinely needs it will slow distant uploads.",
+                f"If confirmed wasteful, suspend it: {_make_disable_command(top['bucket_name'])}",
+            ],
+            resource_id=top["bucket_name"],
+            metadata={
+                "likely_waste_buckets": len(waste_findings),
+                "region": top["region"],
+                "behind_cloudfront": top["behind_cloudfront"],
+                "monthly_transfer_gb": top["monthly_transfer_gb"],
+            },
+        )
+
     return {
         "findings": findings,
         "total_ta_enabled_buckets": len(findings),
         "likely_waste_buckets": len(waste_findings),
         "total_monthly_ta_cost": total_monthly_ta_cost,
         "potential_monthly_savings": potential_savings,
+        "finding": finding.to_dict() if finding else None,
     }
