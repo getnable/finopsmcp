@@ -1,13 +1,16 @@
-# nable: The FinOps copilot that runs on your machine
+# nable
 
-[![PyPI Downloads](https://img.shields.io/pypi/dm/finops-mcp?label=downloads%2Fmonth&color=brightgreen)](https://pypi.org/project/finops-mcp/)
-[![PyPI Version](https://img.shields.io/pypi/v/finops-mcp?color=blue)](https://pypi.org/project/finops-mcp/)
+**Open-source, local-first FinOps. Ask your whole cloud and AI bill anything, get the fix as a pull request you approve, and prove the savings on your next invoice.**
+
+[![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/finops-mcp?color=4db8d4)](https://pypi.org/project/finops-mcp/)
+[![Tests](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml/badge.svg)](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/chaandannn/finopsmcp/badge)](https://scorecard.dev/viewer/?uri=github.com/chaandannn/finopsmcp)
-[![Docs](https://img.shields.io/badge/docs-getnable.com-black)](https://getnable.com/docs)
+[![License: Elastic-2.0](https://img.shields.io/badge/license-Elastic--2.0-444)](LICENSE)
 
-**Connect Claude to your real AWS, Azure, GCP, and SaaS billing data. Ask your bill anything, answered in your editor.**
+nable is an MCP server that runs on **your machine** and connects to your real AWS, Azure, GCP, Kubernetes, and SaaS billing. It answers cost questions in your editor, finds waste, drafts the fix for your approval, and verifies the savings landed. Your credentials stay in your OS keychain and your bill never leaves your control, so the no-egress claim is something you can read in the code, not just take on faith. The local agent is open and auditable; a hosted platform is available for teams.
 
-**[getnable.com](https://getnable.com)** · quickstart guide, docs, and free tier
+**[getnable.com](https://getnable.com)** · docs, quickstart, and the hosted platform
 
 ![nable in Claude Desktop](docs/claude-cost-answer.png)
 
@@ -161,11 +164,13 @@ Light mode, dark mode, and 30/60/90-day lookback are built in.
 
 ---
 
-## How it works
+## Local-first and auditable
 
 Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine. Cost data is cached in a local SQLite database, and nable has no backend, so we never see your cost data or credentials. One honest caveat: when you ask a question in your AI editor, the figures nable returns go to your editor's own AI to answer it, the same as any prompt, never to a nable server. If you need zero AI exposure, use the local dashboard (`finops serve`) or CLI, which never touch a model. Teams share findings via Slack alerts, Notion publishing, and CSV exports. No shared database required.
 
 nable is read-only by default. It never writes to your AWS account unless you explicitly enable cleanup mode. Run `finops setup aws --iam-template` to generate a least-privilege IAM policy with exactly the permissions nable needs.
+
+None of this is take-our-word-for-it. Read the source, check the [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/chaandannn/finopsmcp), run `finops-doctor` to see exactly what nable touches, and set `NABLE_NO_TELEMETRY=1` (or `FINOPS_AIRGAP=1` to forbid every non-provider request) if you want it locked down.
 
 ---
 
@@ -252,31 +257,25 @@ az role assignment create --assignee <client-id> --role 'Monitoring Reader' --sc
 
 nable is not just a connector that pipes billing data into Claude. It runs active analysis on your infrastructure and surfaces findings as tools Claude can reason about and act on.
 
+Every finding is classified by how sure we are. A **recommendation** is something nable measured: a precise dollar figure, a safe fix, and a check that the savings actually landed on your next bill. An **investigation** is a signal worth confirming: an honest order-of-magnitude, never a fake-precise number, with the steps to confirm it. nable proposes, you approve, and it verifies. It never changes your infrastructure on its own.
+
 **AWS deep audit** goes well beyond Cost Explorer. It pulls CloudWatch metrics for every running resource and flags waste that never shows up on your bill: gp2 volumes that should be gp3 (20% cheaper, same performance), unattached EBS volumes, idle NAT Gateways costing $32/mo in base charges, RDS backup retention set way too high, CloudWatch Log Groups with no retention policy growing forever, and Lambda functions allocated 2x the memory they actually use. Think of it as Compute Optimizer plus the layer underneath it.
 
-**Anomaly detection** uses z-score, CUSUM drift, and day-of-week seasonal normalization. When something spikes, it drills into Cost Explorer by tag and tells you which team, environment, or service drove it. Anomaly findings and Slack/Teams alerts are free; Pro adds auto-ticketing.
+**Anomaly detection** uses z-score, CUSUM drift, and day-of-week seasonal normalization. When something spikes, it drills into Cost Explorer by tag and tells you which team, environment, or service drove it. Anomaly findings and Slack/Teams alerts are free; auto-ticketing is a paid feature.
 
-**Rightsizing** combines AWS Compute Optimizer with nable's own CloudWatch analysis. It gives you specific recommended instance types with estimated savings, not just a list of underutilized resources. Recommendations are free; Pro adds ticket auto-creation.
+**Rightsizing** combines AWS Compute Optimizer with nable's own CloudWatch analysis. It gives you specific recommended instance types with estimated savings, not just a list of underutilized resources. Recommendations are free; ticket auto-creation is a paid feature.
 
-**Commitment analysis** (Pro plan) models Savings Plans and Reserved Instance coverage against your actual usage. It shows your current effective discount rate, coverage gaps, and what you would save by purchasing additional commitments.
+**Commitment analysis** (a paid feature) models Savings Plans and Reserved Instance coverage against your actual usage. It shows your current effective discount rate, coverage gaps, and what you would save by purchasing additional commitments.
 
 ---
 
-## Plans
+## Open-core
 
-**Free** (solo): cost queries, anomaly detection with Slack/Teams alerts,
-rightsizing, AI/LLM spend tracking, every connector.
+The **local agent** is open-source and free: the MCP server, every connector, cost queries, anomaly detection, rightsizing, AI and LLM spend tracking, the local dashboard, and remediation drafts (the PRs and tickets you approve). Run it on your machine, audit it, fork the connectors.
 
-**Pro** ($100/mo flat): ticket auto-creation (Jira, Linear, GitHub), scheduled
-email reports, commitment purchase recommendations with ROI projections,
-org-wide multi-account rollup, line-item CUR and Azure resource detail, unit
-economics.
+A **hosted platform** is available for teams who would rather have it run for them: a managed, single-tenant workspace with dashboards anyone can use without a terminal, SSO and roles, scheduled reports, and a managed AI agent. Single-tenant by design, your bill is never pooled with anyone else's.
 
-**Team** ($1,000/mo flat, unlimited seats): everything in Pro, plus the
-conversational Slack bot: ask the bill anything in Slack, root cause analysis
-on spikes, chat remediation with human approval.
-
-**Pro $100/mo flat. Team $1,000/mo flat, unlimited seats. 7-day free trial, no credit card required.** Subscribe at [getnable.com](https://getnable.com).
+See [getnable.com](https://getnable.com) for the current plans and a free trial.
 
 ---
 
