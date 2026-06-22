@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import statistics
+import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -270,13 +271,30 @@ async def connection_status() -> str:
     return "\n".join(lines)
 
 
+# Which connectors are configured rarely changes within a process (creds load at
+# import), but is_configured() walks the credential chain (for AWS, an IMDS probe
+# that's seconds off-EC2) on EVERY tool call. Cache the configured set for a short
+# TTL so that probe fires about once per session, not once per tool call. Only
+# positive results are cached: an empty set (nothing configured, or a transient
+# probe failure) is re-checked next call so a hiccup can't hide a real provider.
+_ACTIVE_TTL = int(os.getenv("FINOPS_ACTIVE_TTL", "120"))
+_ACTIVE_CACHE: dict[frozenset, tuple[float, dict]] = {}
+
+
 async def _active(subset: dict | None = None) -> dict[str, Any]:
     pool = subset or _ALL_CONNECTORS
+    key = frozenset(pool.keys())
+    now = time.monotonic()
+    cached = _ACTIVE_CACHE.get(key)
+    if cached and cached[0] > now:
+        return cached[1]
     items = list(pool.items())
     flags = await asyncio.gather(
         *[c.is_configured() for _, c in items], return_exceptions=True
     )
     result = {n: c for (n, c), ok in zip(items, flags) if ok is True}
+    if result:
+        _ACTIVE_CACHE[key] = (now + _ACTIVE_TTL, result)
     return result
 
 
@@ -11075,20 +11093,13 @@ async def run_full_cost_audit(
     findings: list[dict] = []
     errors: list[str] = []
 
-    async def run(name: str, coro):
-        try:
-            return name, await coro
-        except Exception as exc:
-            log.warning("audit scanner %s failed: %s", name, exc)
-            return name, None
-
     from .recommendations.graviton import scan_graviton_opportunities
     from .recommendations.public_ipv4 import audit_public_ipv4
     from .recommendations.lambda_concurrency import scan_lambda_concurrency_waste as _lc
     from .recommendations.s3_bucket_keys import scan_s3_bucket_key_opportunities as _s3bk
     from .recommendations.nonprod_scheduler import identify_nonprod_resources
     from .recommendations.rds_snapshots import audit_rds_manual_snapshots as _rds_snap
-    from .recommendations.spot_adoption import scan_spot_adoption_opportunities
+    from .recommendations.spot_adoption import recommend_spot_adoption as _spot
     from .recommendations.cloudwatch_cardinality import audit_cloudwatch_metric_cardinality as _cw_card
     from .recommendations.cloudwatch_alarms import audit_cloudwatch_orphaned_alarms as _cw_alarms
     from .recommendations.cloudwatch_logs_ia import audit_cloudwatch_logs_ia_opportunities as _cw_logs
@@ -11102,29 +11113,55 @@ async def run_full_cost_audit(
     from .recommendations.bedrock_routing import recommend_bedrock_model_routing as _bedrock
     from .recommendations.commitments import analyze_commitments as _commitments
 
-    tasks = [
-        run("graviton",       scan_graviton_opportunities(aws_client=aws, regions=regions)),
-        run("ipv4",           audit_public_ipv4(aws_client=aws, regions=regions)),
-        run("lambda_pc",      _lc(aws_client=aws, regions=regions)),
-        run("s3_bucket_keys", _s3bk(aws_client=aws)),
-        run("nonprod",        identify_nonprod_resources(aws_client=aws, regions=regions)),
-        run("rds_snapshots",  _rds_snap(aws_client=aws, regions=regions)),
-        run("spot",           scan_spot_adoption_opportunities(aws_client=aws, regions=regions)),
-        run("cw_cardinality", _cw_card(aws_client=aws, regions=regions)),
-        run("cw_alarms",      _cw_alarms(aws_client=aws, regions=regions)),
-        run("cw_logs_ia",     _cw_logs(aws_client=aws, regions=regions)),
-        run("snapstart",      _snapstart(aws_client=aws, regions=regions)),
-        run("nlb",            _nlb(aws_client=aws, regions=regions)),
-        run("s3_it",          _s3it(aws_client=aws)),
-        run("s3_ta",          _s3ta(aws_client=aws)),
-        run("ebs_rep",        _ebs_rep(aws_client=aws, regions=regions)),
-        run("db_sp",          asyncio.to_thread(_dbsp)),
-        run("textract",       _textract(aws_client=aws)),
-        run("bedrock",        _bedrock(aws_client=aws)),
-        run("commitments",    asyncio.to_thread(_commitments)),
+    # Each scanner makes blocking boto3 calls. Gathered as bare coroutines they
+    # share one event loop and run back-to-back, so the audit takes the SUM of
+    # every scanner's time. Run each in its own thread instead, so the sweep is
+    # bounded by the SLOWEST scanner, not their sum (measured ~5x on a real
+    # account). A whole-audit deadline stops one stuck region or throttled API
+    # from hanging the sweep for minutes. Each spec is (name, fn, kwargs); fn may
+    # be sync or async (async runs on a fresh loop in its thread, which is safe
+    # because no scanner shares a main-loop asyncio primitive, the cost cache uses
+    # a threading.Lock).
+    def _call(name, fn, **kwargs):
+        try:
+            res = asyncio.run(fn(**kwargs)) if asyncio.iscoroutinefunction(fn) else fn(**kwargs)
+            return name, res
+        except Exception as exc:
+            log.warning("audit scanner %s failed: %s", name, exc)
+            return name, None
+
+    specs = [
+        ("graviton",       scan_graviton_opportunities, dict(aws_client=aws, regions=regions)),
+        ("ipv4",           audit_public_ipv4,           dict(aws_client=aws, regions=regions)),
+        ("lambda_pc",      _lc,                         dict(aws_client=aws, regions=regions)),
+        ("s3_bucket_keys", _s3bk,                       dict(aws_client=aws)),
+        ("nonprod",        identify_nonprod_resources,  dict(aws_client=aws, regions=regions)),
+        ("rds_snapshots",  _rds_snap,                   dict(aws_client=aws, regions=regions)),
+        ("spot",           _spot,                       dict(regions=regions)),
+        ("cw_cardinality", _cw_card,                    dict(aws_client=aws, regions=regions)),
+        ("cw_alarms",      _cw_alarms,                  dict(aws_client=aws, regions=regions)),
+        ("cw_logs_ia",     _cw_logs,                    dict(aws_client=aws, regions=regions)),
+        ("snapstart",      _snapstart,                  dict(aws_client=aws, regions=regions)),
+        ("nlb",            _nlb,                         dict(aws_client=aws, regions=regions)),
+        ("s3_it",          _s3it,                       dict(aws_client=aws)),
+        ("s3_ta",          _s3ta,                       dict(aws_client=aws)),
+        ("ebs_rep",        _ebs_rep,                    dict(aws_client=aws, regions=regions)),
+        ("db_sp",          _dbsp,                       dict()),
+        ("textract",       _textract,                   dict()),
+        ("bedrock",        _bedrock,                    dict()),
+        ("commitments",    _commitments,                dict()),
     ]
 
-    results = await asyncio.gather(*tasks)
+    deadline_s = int(os.getenv("FINOPS_AUDIT_TIMEOUT", "90"))
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*[asyncio.to_thread(_call, n, fn, **kw) for n, fn, kw in specs]),
+            timeout=deadline_s,
+        )
+    except asyncio.TimeoutError:
+        log.warning("run_full_cost_audit hit the %ss deadline; returning early", deadline_s)
+        return ("The audit took unusually long (a region or API may be slow). Try a single "
+                "scan such as get_rightsizing_recommendations, or pass a specific region.")
 
     # Normalize each scanner's output into {title, monthly_savings, detail, category}
     def norm(name, data) -> list[dict]:

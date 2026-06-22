@@ -519,14 +519,26 @@ def analyze_commitments(
         ce = boto3.client("ce", region_name="us-east-1")
         start, end = _get_date_range(months_back=3)
 
-        # Utilization is always account-level — AWS doesn't support tag filtering here
-        sp_util_data = _savings_plan_utilization(ce, start, end)
-        ri_util_data  = _ri_utilization(ce, start, end)
+        # These five Cost Explorer calls are independent. Run them concurrently
+        # rather than back-to-back: CE is 2-8s per call, so serial was 5x the
+        # latency. botocore low-level clients are thread-safe for concurrent
+        # operations, so one shared ce client across the pool is fine.
+        from concurrent.futures import ThreadPoolExecutor
 
-        # Coverage and on-demand CAN be filtered by tag
-        sp_coverage  = _savings_plan_coverage(ce, start, end, tag_filter)
-        ri_coverage  = _ri_coverage(ce, start, end, tag_filter)
-        uncovered_monthly = _uncovered_on_demand_monthly(ce, start, end, tag_filter)
+        with ThreadPoolExecutor(max_workers=5) as _pool:
+            # Utilization is always account-level: AWS can't filter it by tag.
+            f_sp_util = _pool.submit(_savings_plan_utilization, ce, start, end)
+            f_ri_util = _pool.submit(_ri_utilization, ce, start, end)
+            # Coverage and on-demand can be filtered by tag.
+            f_sp_cov = _pool.submit(_savings_plan_coverage, ce, start, end, tag_filter)
+            f_ri_cov = _pool.submit(_ri_coverage, ce, start, end, tag_filter)
+            f_unc = _pool.submit(_uncovered_on_demand_monthly, ce, start, end, tag_filter)
+
+        sp_util_data = f_sp_util.result()
+        ri_util_data = f_ri_util.result()
+        sp_coverage = f_sp_cov.result()
+        ri_coverage = f_ri_cov.result()
+        uncovered_monthly = f_unc.result()
         uncovered_od = round(sum(uncovered_monthly), 2)
 
         recs = _build_recommendations(
