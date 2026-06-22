@@ -21,6 +21,8 @@ import logging
 import re
 from datetime import date, timedelta
 
+from .envelope import INFERRED, MEASURED, Finding
+
 log = logging.getLogger(__name__)
 
 # Tag keys to inspect for environment labels
@@ -399,6 +401,90 @@ def scan_textract_environment_waste(
         fn_list = ", ".join(c["function_name"] for c in non_prod_callers[:5])
         actions.append(f"Review these functions flagged as non-prod callers: {fn_list}")
 
+    # Classify the finding by the STRENGTH OF EVIDENCE behind it. Tagged spend or
+    # CloudTrail call counts are measured -> a recommendation with a precise number.
+    # The Lambda name heuristic with an even per-function split is inferred -> an
+    # investigation with a magnitude band, never a precise dollar claim.
+    finding = None
+    used_cloudtrail = bool(non_prod_callers) and any(
+        c.get("source") == "cloudtrail" for c in non_prod_callers
+    )
+    if estimated_monthly_waste > 50 and total_spend > 0 and (has_useful_tags or used_cloudtrail):
+        # Tag-based attribution is direct; CloudTrail attributes by call count, which
+        # assumes a similar cost per call. Both are measured, but state the assumption
+        # and grade the call-count path slightly lower.
+        _assumptions: list[str] = []
+        if used_cloudtrail and not has_useful_tags:
+            _assumptions.append(
+                "Textract attributed by API call count (CloudTrail), which assumes a "
+                "similar cost per call.")
+        finding = Finding(
+            source="textract_env",
+            title="Textract is running in non-production environments",
+            why=("Textract bills per page. Your dev, QA, and staging environments are "
+                 "calling it, and non-prod usually processes test documents, so that "
+                 "spend has no production value."),
+            evidence=MEASURED,
+            confidence="high" if has_useful_tags else "medium",
+            assumptions=_assumptions,
+            est_monthly_savings=estimated_monthly_waste,
+            remediation=[
+                "Gate Textract behind an environment flag in non-prod. Do not hard-disable "
+                "it: that breaks any QA flow that legitimately tests document processing.",
+                "Return a mock Textract response in qa/staging pipelines.",
+            ],
+            metadata={
+                "basis": ("environment-tagged Textract spend" if has_useful_tags
+                          else "CloudTrail records of who actually called Textract"),
+                "non_prod_pct": round(non_prod_pct * 100, 1),
+            },
+        )
+    elif estimated_monthly_waste > 50 and total_spend > 0 and non_prod_callers:
+        finding = Finding(
+            source="textract_env",
+            title="Let's check whether Textract is running in non-production",
+            why=("Textract bills per page, and dev/QA/staging usually process test "
+                 "documents, so any Textract spend there is likely waste. I see "
+                 f"{len(non_prod_callers)} functions with non-prod names."),
+            evidence=INFERRED,
+            confidence="low",
+            why_unsure=("Your Textract spend isn't tagged by environment and CloudTrail "
+                        "wasn't available, so I flagged functions by name and split the bill "
+                        "evenly across them. I haven't confirmed these functions call Textract "
+                        "or how much, so I can't put a precise number on it yet."),
+            assumptions=["Each flagged function uses an equal share of Textract spend (a rough proxy)."],
+            rough_monthly=estimated_monthly_waste,
+            confirm_steps=[
+                "Add an Environment tag (prod/staging/qa) to your Textract-calling functions, "
+                "then I can size the non-prod share myself.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, give nable read-only CloudTrail access (plus CUR for line-item "
+                        "precision) and it attributes Textract to the exact calling functions and "
+                        "confirms the number automatically, no manual tagging needed."),
+            remediation=[
+                "Once confirmed, gate Textract behind an environment flag in non-prod. Don't "
+                "hard-disable it: that breaks QA flows that test document processing.",
+            ],
+            metadata={"non_prod_callers_sampled": [c["function_name"] for c in non_prod_callers[:8]]},
+        )
+    elif total_spend > 0 and not has_useful_tags and not non_prod_callers:
+        finding = Finding(
+            source="textract_env",
+            title="Let's get visibility into your Textract spend by environment",
+            why=("Textract is a sizable line item, but it isn't tagged by environment, "
+                 "so I can't yet tell how much is non-prod waste."),
+            evidence=INFERRED,
+            confidence="low",
+            why_unsure="No environment tags on Textract spend and CloudTrail wasn't available.",
+            rough_monthly=monthly_total,
+            confirm_steps=["Tag your Textract-calling functions with Environment=prod/staging/qa, "
+                           "then I can size any non-prod waste."],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, nable reads your CUR line items and CloudTrail directly and breaks "
+                        "down Textract spend by environment for you, no tagging required."),
+        )
+
     return {
         "total_textract_spend": round(total_spend, 2),
         "monthly_total_estimate": monthly_total,
@@ -410,4 +496,5 @@ def scan_textract_environment_waste(
         "non_prod_pct": round(non_prod_pct * 100, 1),
         "recommendation": recommendation,
         "actions": actions,
+        "finding": finding.to_dict() if finding else None,
     }
