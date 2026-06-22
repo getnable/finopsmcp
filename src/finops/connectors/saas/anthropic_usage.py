@@ -52,6 +52,9 @@ _MODEL_PRICING: dict[str, dict[str, float]] = {
 
 _API_BASE = "https://api.anthropic.com"
 _ANTHROPIC_VERSION = "2023-06-01"
+# Cost API pagination safety cap. 31 daily buckets per page, so 60 pages covers
+# ~5 years; beyond that we fall back rather than report a truncated total.
+_COST_PAGE_CAP = 60
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -219,8 +222,9 @@ def get_cost_report(
     daily: list[dict] = []
     page: str | None = None
 
+    truncated = False
     try:
-        for _ in range(24):  # pagination safety cap
+        for _ in range(_COST_PAGE_CAP):  # ~5y at 31 1d-buckets/page
             params: dict[str, Any] = {
                 "starting_at":  starting_at,
                 "ending_at":    ending_at,
@@ -239,6 +243,10 @@ def get_cost_report(
 
             for bucket in data.get("data", []):
                 day = (bucket.get("starting_at") or "")[:10]
+                if not day:
+                    # Undated bucket (not expected from the real API): skip it so
+                    # the daily breakdown and total_usd cannot diverge.
+                    continue
                 for item in bucket.get("results", []):
                     try:
                         usd = float(item.get("amount")) / 100.0  # amount is in cents
@@ -256,7 +264,7 @@ def get_cost_report(
                         existing["total_usd"] = round(existing["total_usd"] + usd, 4)
                         existing["by_model"][label] = round(
                             existing["by_model"].get(label, 0.0) + usd, 4)
-                    elif day:
+                    else:
                         daily.append({"date": day, "total_usd": round(usd, 4),
                                       "by_model": {label: round(usd, 4)}})
 
@@ -264,9 +272,22 @@ def get_cost_report(
                 page = data["next_page"]
             else:
                 break
+        else:
+            # Ran the full cap without breaking: the API still reports more pages.
+            truncated = True
     except Exception as e:
         log.debug("Anthropic Cost API unavailable, falling back: %s", e)
         return _empty("cost_api_unavailable")
+
+    if truncated:
+        # Never report a known-incomplete sum as authoritative billed dollars.
+        # Fall back to the usage/estimate path instead of undercounting silently.
+        log.warning(
+            "Anthropic Cost API pagination hit the %d-page cap for %s..%s; "
+            "falling back rather than reporting a truncated total.",
+            _COST_PAGE_CAP, start_date, end_date,
+        )
+        return _empty("cost_api_truncated")
 
     return {
         "total_usd":       round(total, 4),

@@ -2,6 +2,37 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.87
+
+Hardening from a full adversarial audit of the 0.8.86 work.
+
+### Connectors
+- **Anthropic Cost API never reports a truncated total as authoritative.** If
+  pagination hits the page cap it falls back to the estimate (and logs it) rather
+  than returning a partial sum as billed dollars. Undated cost buckets are skipped
+  so the daily breakdown and the total stay consistent.
+
+### AI KPIs
+- **No more fabricated "F, no cache hits".** A dollars-only Cost API result (no
+  token counts) now falls through to the honest "no token-level data" note instead
+  of being graded as zero cache usage.
+
+### Hosting and deploy (single-tenant)
+- **docker-compose:** persist data into the mounted volume (`FINOPS_DATA_DIR=/data`,
+  it was writing to the container home and losing everything on rebuild); bind the
+  raw app port to loopback by default so only Caddy's 443 is public; map the
+  operator-facing `FINOPS_DATABASE_URL` to the `DATABASE_URL` the app reads so
+  team/RBAC mode actually engages.
+- **server:** `FINOPS_REQUIRE_AUTH=1` now hard-forbids an unauthenticated dashboard
+  even when the password is set to "off".
+- **provisioning:** validate the slug/domain, force `chmod 600` on the tenant env
+  on every run, pin the EC2 deploy to a release tag (not main HEAD), and document
+  revoking the customer's cloud key on offboarding.
+
+### Wizard
+- Fix the AWS `provider_connected` telemetry that mislabeled the auth method after
+  the one-click menu was renumbered.
+
 ## 0.8.86
 
 Anthropic costs now come from the actual billed Cost API, not estimates.
@@ -14,6 +45,12 @@ Anthropic costs now come from the actual billed Cost API, not estimates.
   collects it) and falls back to the usage-based estimate otherwise. Token-based
   KPIs (cache hit rate, context-window use) keep working, enriched from the
   Usage API.
+
+### Deploy
+- **Single-tenant hosted provisioning (AWS EC2).** Hand-cranked runbook plus a
+  helper to stand up a managed single-tenant instance per customer, with
+  control-plane env wiring (`FINOPS_INSTANCE_ID`, `FINOPS_CONTROL_PLANE_SECRET`)
+  for one-click login from the getnable.com account. See docs/PROVISIONING.md.
 
 ## 0.8.85
 

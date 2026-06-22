@@ -862,7 +862,10 @@ def full_kpi_report(
     # so cache analysis now works for either. Prefer the richer Anthropic payload
     # when present, else compute from the combined token map if any provider
     # carries cache-read data.
-    if anthropic_data:
+    # Only take the Anthropic cache path when it actually carries token counts.
+    # The Cost API path reports dollars with by_model_tokens={}, which would
+    # otherwise grade an honest "no data" as a fabricated "F / no cache hits".
+    if anthropic_data and anthropic_data.get("by_model_tokens"):
         report["cache_hit_rate"] = cache_hit_rate(anthropic_data)
     elif any(t.get("cache_read_input_tokens", 0) or t.get("input_tokens", 0)
              for t in combined_tokens.values()):

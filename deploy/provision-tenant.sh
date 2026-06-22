@@ -30,6 +30,19 @@ if ! command -v openssl >/dev/null 2>&1; then
   exit 1
 fi
 
+# Validate inputs before they reach a filename or the .env body. A slug with "/"
+# or ".." would write the secret file outside tenants/ (dodging the gitignore),
+# and a newline in either arg would inject extra lines into the .env. Anchored
+# bash regex rejects both (the classes exclude "/", "." for the slug, and \n).
+if [[ ! "$SLUG" =~ ^[a-z0-9][a-z0-9-]{0,40}$ ]]; then
+  echo "error: slug must be lowercase letters, digits, hyphens (1-41 chars); got: $SLUG" >&2
+  exit 2
+fi
+if [[ ! "$DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$ ]]; then
+  echo "error: domain must be a valid hostname; got: $DOMAIN" >&2
+  exit 2
+fi
+
 # Stable, human-readable instance id. It must match what you register for this
 # customer in the getnable.com account so login routes to the right box.
 INSTANCE_ID="$SLUG"
@@ -72,6 +85,9 @@ FINOPS_ENABLE_SCHEDULER=1
 # AWS_SECRET_ACCESS_KEY=
 # AWS_DEFAULT_REGION=us-east-1
 ENV
+# umask only sets the mode on CREATION; an explicit chmod also locks down a
+# pre-existing file when re-provisioning (rotating the secret, fixing a domain).
+chmod 600 "$OUT"
 
 echo "Wrote ${OUT} (chmod 600)."
 echo
@@ -79,7 +95,7 @@ echo "1. Register this instance in the getnable.com account so login routes to i
 echo "     instance_id     = ${INSTANCE_ID}"
 echo "     instance_domain = ${DOMAIN}"
 echo "2. Launch the EC2 box and copy ${OUT} to it as .env (see docs/PROVISIONING.md)."
-echo "3. On the box:  docker compose --profile tls up -d"
+echo "3. On the box:  docker compose --profile tls up -d --build"
 echo
 echo "The customer then logs in at https://getnable.com/account -> Open my dashboard,"
 echo "which mints a one-click token into https://${DOMAIN}."

@@ -330,7 +330,9 @@ def setup_aws() -> None:
             _tel._send_event(_tel._get_install_id(), "provider_connected", {
                 "provider": "aws",
                 "ce_access": ce_ok,
-                "auth_method": "sso" if choice == "2" else "access_key",
+                # _method ("oneclick"/"key"/"sso") is the menu-renumber-safe value;
+                # deriving from the raw choice broke after the one-click menu shift.
+                "auth_method": _method,
             })
         except Exception:
             pass

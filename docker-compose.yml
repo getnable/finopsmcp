@@ -5,8 +5,16 @@ services:
     build: .
     image: nable/finops:latest
     ports:
-      - "${PORT:-8080}:8080"
+      # Bind the raw app port to loopback by default so it is never publicly
+      # exposed. Under the tls profile Caddy reaches nable over the compose
+      # network and serves 443; raw 8080 stays private with no auth bypass. For
+      # direct LAN access set FINOPS_BIND_HOST=0.0.0.0 (trusted networks only).
+      - "${FINOPS_BIND_HOST:-127.0.0.1}:${PORT:-8080}:8080"
     environment:
+      # Persist SQLite + the credential vault into the mounted volume (see
+      # volumes below), not the container's ephemeral home, so cost history,
+      # snapshots, and sessions survive a rebuild / `docker compose up --build`.
+      FINOPS_DATA_DIR: "${FINOPS_DATA_DIR:-/data}"
       # Dashboard auth
       FINOPS_DASHBOARD_PASSWORD: "${FINOPS_DASHBOARD_PASSWORD:-}"
       # SSO: set all three to replace password login with your IdP
@@ -16,8 +24,10 @@ services:
       FINOPS_SSO_CLIENT_SECRET: "${FINOPS_SSO_CLIENT_SECRET:-}"
       FINOPS_SSO_REDIRECT_URI: "${FINOPS_SSO_REDIRECT_URI:-http://localhost:8080/sso/callback}"
       FINOPS_SSO_ALLOWED_DOMAINS: "${FINOPS_SSO_ALLOWED_DOMAINS:-}"
-      # Team mode with shared Postgres (set FINOPS_DATABASE_URL to enable)
-      FINOPS_DATABASE_URL: "${FINOPS_DATABASE_URL:-}"
+      # Team mode with shared Postgres. The app reads DATABASE_URL; we accept the
+      # operator-facing FINOPS_DATABASE_URL and map it through, so setting it
+      # actually turns on shared Postgres + RBAC. Blank = single-node SQLite.
+      DATABASE_URL: "${FINOPS_DATABASE_URL:-}"
       FINOPS_REQUIRE_AUTH: "${FINOPS_REQUIRE_AUTH:-0}"
       # Hosted control-plane login (managed single-tenant). When BOTH are set, the
       # getnable.com account can mint a one-click login into this instance. Leave
