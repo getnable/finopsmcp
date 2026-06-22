@@ -176,6 +176,30 @@
   .btn.primary:disabled{opacity:.38;cursor:default}
   .btn.danger{color:#d98a8a;border-color:transparent}
   .btn.danger:hover{color:#f0a0a0;border-color:#4a2727}
+
+  /* Tutorial spotlight */
+  .helpbtn{width:23px;height:23px;border-radius:7px;border:1px solid var(--line-2);background:transparent;
+           color:var(--fg-3);cursor:pointer;display:grid;place-items:center;font-family:var(--mono);font-size:12px;transition:.15s}
+  .helpbtn:hover{color:var(--accent);border-color:var(--accent-dim)}
+  .tspot{position:fixed;z-index:60;border-radius:11px;pointer-events:none;display:none;
+         box-shadow:0 0 0 9999px rgba(0,0,0,.66),0 0 0 2px var(--accent),0 0 24px var(--accent-glow);
+         transition:top .22s,left .22s,width .22s,height .22s}
+  .tspot.show{display:block}
+  .tcard{position:fixed;z-index:62;width:304px;max-width:88vw;background:var(--raise);border:1px solid var(--line-2);
+         border-radius:14px;box-shadow:0 24px 60px -16px #000,0 0 0 1px #000;padding:16px 17px 14px;display:none}
+  .tcard.show{display:block}
+  .tcard .tt{font-size:15px;font-weight:600;letter-spacing:-.01em;margin:0 0 5px}
+  .tcard .tb{font-size:13px;color:var(--fg-2);line-height:1.5;margin:0 0 14px}
+  .tnav{display:flex;align-items:center;justify-content:space-between}
+  .tdots{display:flex;gap:5px}
+  .tdot{width:6px;height:6px;border-radius:50%;background:var(--line-2);transition:.15s}
+  .tdot.on{background:var(--accent)}
+  .tbtns{display:flex;gap:7px;align-items:center}
+  .tskip{font-size:11.5px;color:var(--fg-4);cursor:pointer;background:none;border:0;font-family:var(--font);padding:4px}
+  .tskip:hover{color:var(--fg-2)}
+  .tbtn{padding:6px 13px;border-radius:8px;font-size:12.5px;cursor:pointer;border:1px solid var(--line-2);background:transparent;color:var(--fg-2);transition:.15s}
+  .tbtn:hover{color:var(--fg);border-color:var(--fg-4)}
+  .tbtn.p{background:linear-gradient(180deg,var(--accent-2),var(--accent));color:#04181d;border:0;font-weight:500}
 </style>
 </head>
 <body>
@@ -244,6 +268,7 @@
     <div class="bar-top">
       <div class="mode"><span id="modeText">Ask anything</span><span class="pill" id="modePill" style="display:none"></span></div>
       <div class="right">
+        <button class="helpbtn" id="helpBtn" title="Quick tour">?</button>
         <span class="note">read-only · drafts need approval</span>
       </div>
     </div>
@@ -283,6 +308,16 @@
         <button class="btn danger" id="agDelete" style="visibility:hidden">Delete</button>
         <div style="display:flex;gap:8px"><button class="btn" id="agCancel">Cancel</button><button class="btn primary" id="agSave" disabled>Save agent</button></div>
       </div>
+    </div>
+  </div>
+
+  <div class="tspot" id="tspot"></div>
+  <div class="tcard" id="tcard">
+    <div class="tt" id="tt"></div>
+    <div class="tb" id="tb"></div>
+    <div class="tnav">
+      <div class="tdots" id="tdots"></div>
+      <div class="tbtns"><button class="tskip" id="tskip">Skip</button><button class="tbtn" id="tback">Back</button><button class="tbtn p" id="tnext">Next</button></div>
     </div>
   </div>
 
@@ -501,6 +536,63 @@
   }).catch(function(){});
 
   renderRail(); renderAgents(); paint(); inp.focus();
+
+  // ── built-in tutorial ──
+  var TOUR_KEY="nable_sandbox_tour_done";
+  var STEPS=[
+    {sel:".composer", place:"top", tt:"This is not a chatbot",
+     tb:"Ask anything about your cloud and AI bill in plain English. It runs on your real data with every tool and answers like an analyst, not a search box."},
+    {sel:".nav", place:"right", tt:"Your agents and toolkit",
+     tb:"Specialist agents (root-cause, recommendations, architecture), your own custom agents, saved chats, and scheduled reports all live here."},
+    {sel:".bar-top .right", place:"bottom", tt:"It acts, with your approval",
+     tb:"It finds waste and drafts the fix as a pull request. Nothing changes until you approve it, and it tells you when a number is proven versus only worth investigating."},
+    {sel:".dock", place:"right", tt:"Your budget, your data",
+     tb:"Managed AI runs on a budget you set and the credits roll over. Everything runs locally and read-only, so your bill never leaves your control."},
+    {sel:null, tt:"You are set",
+     tb:"The fastest way to feel it: ask the question that is on everyone's mind.",
+     cta:"Why did my bill go up this month?"}
+  ];
+  var tStep=0;
+  function tPlace(card,r,place){
+    var cw=card.offsetWidth||304, ch=card.offsetHeight||150, m=14, vw=window.innerWidth, vh=window.innerHeight, top, left;
+    if(place==='top'){ top=r.top-ch-m; left=r.left+r.width/2-cw/2; }
+    else if(place==='bottom'){ top=r.bottom+m; left=r.right-cw; }
+    else if(place==='left'){ left=r.left-cw-m; top=r.top; }
+    else { left=r.right+m; top=r.top; }
+    top=Math.max(10,Math.min(top,vh-ch-10)); left=Math.max(10,Math.min(left,vw-cw-10));
+    card.style.transform='none'; card.style.top=top+'px'; card.style.left=left+'px';
+  }
+  function tShow(i){
+    tStep=i; var s=STEPS[i], spot=$('tspot'), card=$('tcard');
+    $('tt').textContent=s.tt; $('tb').textContent=s.tb;
+    $('tback').style.visibility=i===0?'hidden':'visible';
+    $('tnext').textContent=i===STEPS.length-1?(s.cta?'Try it':'Done'):'Next';
+    $('tdots').innerHTML=STEPS.map(function(_,j){return '<div class="tdot'+(j===i?' on':'')+'"></div>';}).join('');
+    card.classList.add('show');
+    if(s.sel){
+      var el=document.querySelector(s.sel);
+      if(el){ var r=el.getBoundingClientRect();
+        spot.style.top=(r.top-6)+'px'; spot.style.left=(r.left-6)+'px';
+        spot.style.width=(r.width+12)+'px'; spot.style.height=(r.height+12)+'px';
+        spot.classList.add('show'); tPlace(card,r,s.place); return;
+      }
+    }
+    spot.style.top='50%'; spot.style.left='50%'; spot.style.width='0px'; spot.style.height='0px';
+    spot.classList.add('show');
+    card.style.top='50%'; card.style.left='50%'; card.style.transform='translate(-50%,-50%)';
+  }
+  function tEnd(){ $('tspot').classList.remove('show'); $('tcard').classList.remove('show'); try{localStorage.setItem(TOUR_KEY,'1');}catch(e){} }
+  $('tnext').addEventListener('click',function(){
+    var s=STEPS[tStep];
+    if(tStep===STEPS.length-1){ tEnd(); if(s.cta) ask(s.cta); return; }
+    tShow(tStep+1);
+  });
+  $('tback').addEventListener('click',function(){ if(tStep>0) tShow(tStep-1); });
+  $('tskip').addEventListener('click',tEnd);
+  $('helpBtn').addEventListener('click',function(){ tShow(0); });
+  window.addEventListener('resize',function(){ if($('tcard').classList.contains('show')) tShow(tStep); });
+  if(!localStorage.getItem(TOUR_KEY)){ setTimeout(function(){ tShow(0); },650); }
+
 })();
 </script>
 </body>
