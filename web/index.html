@@ -206,6 +206,14 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 /* Centered hero (stripped to one promise) */
 .hero-centered{min-height:calc(100vh - 64px);display:flex;align-items:center;padding:48px 0 72px;text-align:center;position:relative;background:radial-gradient(ellipse 70% 56% at 50% 40%, rgba(77,184,212,.055), transparent 66%)}
 .hero-centered::after{content:"";position:absolute;left:0;right:0;bottom:0;height:280px;pointer-events:none;z-index:0;background:radial-gradient(ellipse 54% 100% at 50% 108%, rgba(77,184,212,.07), transparent 72%)}
+/* hero: a soft light drifting across the circuit + nodes that breathe (techy, subtle) */
+.hero-centered::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(circle 300px at 50% 42%, rgba(77,184,212,.11), transparent 64%);animation:heroScan 11s ease-in-out infinite alternate;will-change:transform}
+@keyframes heroScan{0%{transform:translate3d(-18%,-9%,0)}100%{transform:translate3d(18%,11%,0)}}
+.page-atmos circle{animation:nodePulse 4.5s ease-in-out infinite}
+.page-atmos circle:nth-of-type(2){animation-delay:1.4s}
+.page-atmos circle:nth-of-type(3){animation-delay:2.9s}
+@keyframes nodePulse{0%,100%{opacity:.5}50%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.hero-centered::before,.page-atmos circle{animation:none}}
 .hero-centered .wrap{display:flex;justify-content:center;width:100%;position:relative;z-index:1}
 .hero-c{width:100%;max-width:800px;display:flex;flex-direction:column;align-items:center}
 .hero-centered .display{text-align:center}
@@ -328,8 +336,8 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 /* sections */
 section{padding:80px 0;position:relative}
 section.tight{padding:56px 0}
-section.alt{background:var(--bg-1)}
-section.alt+section:not(.alt){border-top-color:transparent;background:var(--bg)}
+section.alt{background:transparent}
+section.alt+section:not(.alt){border-top-color:transparent}
 section:not(.alt)+section.alt{border-top-color:transparent}
 .section-head{margin-bottom:64px;max-width:780px}
 .section-head .label{font-family:'Bricolage Grotesque',system-ui,sans-serif;font-size:11px;font-weight:500;color:var(--accent-dim);letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;gap:10px;margin-bottom:18px}
