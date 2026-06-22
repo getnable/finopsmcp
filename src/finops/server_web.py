@@ -1425,23 +1425,38 @@ def _load_sandbox_html() -> str:
 # (recommendation vs investigation) the scanners now emit.
 _SANDBOX_AGENTS = {
     "rca": (
-        "Act as a root-cause-analysis agent. The user wants to understand WHY a cost "
-        "changed. Start with explain_recent_cost_drivers, then drill into the top driver "
-        "with the relevant service or audit tool. Lead with the dollar impact, then the "
-        "cause in plain English, then the next step."
+        "You are a root-cause-analysis agent. Work it methodically:\n"
+        "1. Start with explain_recent_cost_drivers to find what actually moved.\n"
+        "2. Take the single biggest driver and drill in (get_costs_by_service, "
+        "get_cost_history, or the relevant audit tool), sliced by tag, team, or region.\n"
+        "3. Tie the increase to a concrete cause (a new resource, a config change, a usage "
+        "spike) and, where you can, the specific change or the day it started.\n"
+        "4. Quantify the dollar impact and whether it is one-off or ongoing.\n"
+        "Lead with the dollar impact, then the cause in plain English, then one next step. "
+        "Isolate the one driver that matters, do not list every service."
     ),
     "reco": (
-        "Act as a cost-recommendation agent. Find waste and savings with the audit and "
-        "recommendation tools. Honor each finding's envelope: present a 'recommendation' "
-        "with its precise number and the safe fix; present an 'investigation' as 'let's "
-        "look at this together' with its magnitude (never a precise number), the steps to "
-        "confirm it, and the Pro auto-confirm offer when present. Never overclaim a number."
+        "You are a cost-recommendation agent. Work it methodically:\n"
+        "1. Run the audits that fit (run_full_cost_audit, scan_waste_patterns, rightsizing, "
+        "commitment, idle-resource, and the AI-spend tools).\n"
+        "2. Classify every finding by its envelope: a 'recommendation' is measured (give the "
+        "precise number and the safe fix); an 'investigation' is unconfirmed (give a "
+        "magnitude, never a precise number, the steps to confirm it, and the Pro "
+        "auto-confirm offer when present).\n"
+        "3. Group the output: Recommendations first, ranked by dollars, then "
+        "Let's-investigate. Never inflate an investigation into a confident number.\n"
+        "You propose only; a human approves every change."
     ),
     "arch": (
-        "Act as a cloud-architecture cost agent. Help the user understand and reduce the "
-        "cost of their architecture: cross-cloud spend, data transfer and cross-AZ costs, "
-        "commitment coverage, and rightsizing. Explain the trade-offs, do not just list "
-        "numbers."
+        "You are a cloud-architecture cost agent. Sweep the architecture, do not just answer "
+        "one narrow question:\n"
+        "1. Data movement: get_data_transfer_costs and get_traffic_cost_breakdown, plus "
+        "audit_nlb_cross_zone_costs and audit_efs_cross_az_mounts for cross-AZ waste.\n"
+        "2. Commitments: get_commitment_analysis for coverage gaps on steady usage.\n"
+        "3. Shape: rightsizing and Graviton/spot opportunities, and compare_providers when a "
+        "workload could run cheaper elsewhere.\n"
+        "Synthesize the trade-offs (cost vs resilience vs effort). Flag what is a safe win "
+        "versus what needs an architecture decision, do not just list numbers."
     ),
 }
 
@@ -2259,7 +2274,10 @@ button:hover{{filter:brightness(1.1)}}
                 self._send(400, "application/json", b'{"error":"empty question"}')
                 return
             agent_key = (body.get("agent") or "").strip()
-            preset = _SANDBOX_AGENTS.get(agent_key, "")
+            # A user-created agent sends its own instruction as `system`; a built-in
+            # sends an `agent` key. Either becomes a preset prefixed to the question.
+            custom_system = (body.get("system") or "").strip()[:1200]
+            preset = custom_system or _SANDBOX_AGENTS.get(agent_key, "")
             prompt = (preset + "\n\n" + question) if preset else question
             hist = body.get("history")
             history = ([h for h in hist if isinstance(h, dict) and h.get("role") and h.get("content")]
