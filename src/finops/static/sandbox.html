@@ -217,7 +217,6 @@
     <div class="bar-top">
       <div class="mode"><span id="modeText">Ask anything</span><span class="pill" id="modePill" style="display:none"></span></div>
       <div class="right">
-        <div class="modelchip"><span class="d"></span>nable AI</div>
         <span class="note">read-only · drafts need approval</span>
       </div>
     </div>
@@ -242,7 +241,7 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </button>
       </div>
-      <div class="cfoot"><span id="cfootMode">nable AI · full tool access</span><span>runs locally · your data stays in your control</span></div>
+      <div class="cfoot"><span id="cfootMode">full tool access</span><span>runs locally · your data stays in your control</span></div>
     </div>
   </main>
 
@@ -293,8 +292,8 @@
   function setAgent(k){
     state.agent=k;
     document.querySelectorAll('.row[data-agent]').forEach(function(n){n.classList.toggle('on',n.getAttribute('data-agent')===k);});
-    if(k){ $('modeText').textContent=AGENTS[k].label+" agent"; $('modePill').style.display=''; $('modePill').textContent=k.toUpperCase(); $('cfootMode').textContent=AGENTS[k].label+" · nable AI · full tool access"; }
-    else { $('modeText').textContent="Ask anything"; $('modePill').style.display='none'; $('cfootMode').textContent="nable AI · full tool access"; }
+    if(k){ $('modeText').textContent=AGENTS[k].label+" agent"; $('modePill').style.display=''; $('modePill').textContent=k.toUpperCase(); $('cfootMode').textContent=AGENTS[k].label+" · full tool access"; }
+    else { $('modeText').textContent="Ask anything"; $('modePill').style.display='none'; $('cfootMode').textContent="full tool access"; }
   }
 
   // ── recents + reports rail ──
