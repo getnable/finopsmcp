@@ -246,8 +246,8 @@
         <div class="mhead">
           <div class="nm" style="font-size:13px;font-weight:600">Chandan</div>
           <div class="e">chandan@getnable.com</div>
-          <div class="credit">Managed AI <span style="color:var(--fg)">$17 of $50</span> this month
-            <div class="bar"><i></i></div>
+          <div class="credit" id="creditBox">Managed AI <span style="color:var(--fg)" id="creditAmt">$0</span> this month
+            <div class="bar" id="creditBarWrap"><i id="creditBar"></i></div>
             <span class="sm">credits roll over · or bring your own key</span>
           </div>
         </div>
@@ -535,7 +535,25 @@
     if(d&&(d.account||d.total!=null)){ var m=document.querySelector('.modelchip'); }
   }).catch(function(){});
 
-  renderRail(); renderAgents(); paint(); inp.focus();
+  // Managed-AI balance for the profile meter. Unmetered instances (no budget set)
+  // show spend with no cap and hide the bar; metered show "$spent of $total".
+  function loadCredits(){
+    fetch('/api/sandbox/credits').then(function(r){return r.ok?r.json():null;}).then(function(c){
+      if(!c) return;
+      var amt=$('creditAmt'), bar=$('creditBar'), wrap=$('creditBarWrap');
+      function d(n){ return '$'+(Math.round((n||0)*100)/100); }
+      if(c.metered){
+        if(amt) amt.textContent=d(c.spent)+' of '+d(c.total);
+        var pct=c.total>0?Math.min(100,Math.round(c.spent/c.total*100)):0;
+        if(bar) bar.style.width=pct+'%';
+        if(wrap) wrap.style.display='';
+      } else {
+        if(amt) amt.textContent=d(c.spent);
+        if(wrap) wrap.style.display='none';
+      }
+    }).catch(function(){});
+  }
+  renderRail(); renderAgents(); paint(); loadCredits(); inp.focus();
 
   // ── built-in tutorial ──
   var TOUR_KEY="nable_sandbox_tour_done";
