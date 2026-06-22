@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>nable</title>
+<style>
+  :root{
+    --bg:#000000; --side:#070708; --panel:#0c0d0f; --raise:#131417;
+    --line:#161719; --line-2:#212327; --hair:#0f1011;
+    --fg:#ebedef; --fg-2:#9aa1a6; --fg-3:#5b6166; --fg-4:#3a3f44;
+    --accent:#4db8d4; --accent-2:#7fd0e4; --accent-dim:#21505c; --accent-glow:rgba(77,184,212,.14);
+    --good:#54cf9c; --warn:#dcae3f;
+    --font:'Bricolage Grotesque',system-ui,-apple-system,sans-serif;
+    --mono:'Geist Mono','JetBrains Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  ::selection{background:rgba(77,184,212,.22)}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14.5px;line-height:1.55;
+       display:grid;grid-template-columns:270px 1fr;height:100vh;overflow:hidden;
+       -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  button{font-family:inherit}
+  .ic{width:16px;height:16px;flex:none;stroke-width:1.6}
+
+  /* ── Sidebar ─────────────────────────────────────────── */
+  .side{background:var(--side);border-right:1px solid var(--hair);display:flex;flex-direction:column;min-height:0;position:relative}
+  .side::after{content:"";position:absolute;inset:0 -1px 0 auto;width:1px;
+               background:linear-gradient(180deg,transparent,rgba(77,184,212,.06),transparent);pointer-events:none}
+  .s-top{padding:15px 16px 4px;display:flex;align-items:center;gap:9px}
+  .logo{width:25px;height:25px;border-radius:7px;background:radial-gradient(120% 120% at 30% 20%,#1b2024,#08090a);
+        border:1px solid var(--line-2);display:grid;place-items:center;font-family:var(--mono);
+        font-weight:600;color:var(--accent);font-size:13px;box-shadow:0 0 0 1px #000,0 2px 8px -2px rgba(77,184,212,.25)}
+  .wordmark{font-weight:600;letter-spacing:-.02em;font-size:15px}
+
+  .newbtn{margin:12px;padding:10px 12px;border:1px solid var(--line-2);border-radius:10px;
+          background:linear-gradient(180deg,var(--raise),var(--panel));color:var(--fg);font-size:13px;
+          cursor:pointer;display:flex;align-items:center;gap:9px;transition:.16s;font-weight:500}
+  .newbtn:hover{border-color:var(--accent-dim);box-shadow:0 0 0 3px var(--accent-glow)}
+  .newbtn .ic{color:var(--accent)}
+
+  .nav{flex:1;overflow-y:auto;padding:2px 8px 10px;scrollbar-width:thin}
+  .nav::-webkit-scrollbar{width:7px}.nav::-webkit-scrollbar-thumb{background:#16181b;border-radius:4px}
+  .nav::-webkit-scrollbar-thumb:hover{background:#202327}
+  .grp{margin:16px 8px 5px;font-family:var(--mono);font-size:9.5px;font-weight:500;letter-spacing:.14em;
+       text-transform:uppercase;color:var(--fg-4)}
+
+  .row{display:flex;align-items:center;gap:10px;padding:7px 9px;margin:1px 2px;border-radius:8px;
+       cursor:pointer;color:var(--fg-2);transition:.13s;position:relative;border:1px solid transparent}
+  .row:hover{background:var(--panel);color:var(--fg)}
+  .row.on{background:linear-gradient(90deg,var(--accent-glow),transparent 70%);color:var(--fg)}
+  .row.on::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:2px;border-radius:2px;background:var(--accent)}
+  .row .ic{color:var(--fg-3);transition:.13s}
+  .row:hover .ic,.row.on .ic{color:var(--accent)}
+  .row .lab{font-size:13px;font-weight:450;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .row .meta{font-family:var(--mono);font-size:9.5px;color:var(--fg-4);flex:none}
+  .row .x{opacity:0;color:var(--fg-4);font-size:14px;line-height:1;padding:2px;border-radius:4px;flex:none}
+  .row:hover .x{opacity:1}
+  .row .x:hover{color:var(--fg);background:var(--line-2)}
+
+  .agent .sub{font-size:11px;color:var(--fg-4);line-height:1.2;margin-top:1px}
+  .agent .lab{flex:none}
+  .agent{align-items:flex-start}
+  .agent>div{min-width:0}
+
+  .empty-line{padding:7px 11px;color:var(--fg-4);font-size:12px}
+
+  /* Profile dock */
+  .dock{border-top:1px solid var(--hair);padding:10px;position:relative}
+  .prof{display:flex;align-items:center;gap:10px;padding:8px;border-radius:10px;cursor:pointer;transition:.14s;border:1px solid transparent}
+  .prof:hover{background:var(--panel);border-color:var(--line)}
+  .av{width:28px;height:28px;border-radius:50%;flex:none;display:grid;place-items:center;
+      font-family:var(--mono);font-size:11px;font-weight:600;color:#04181d;
+      background:linear-gradient(150deg,var(--accent-2),var(--accent));box-shadow:0 0 0 1px #000}
+  .prof .nm{font-size:13px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .plan{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);
+        border:1px solid var(--accent-dim);border-radius:3px;padding:2px 5px;flex:none}
+  .prof .chev{color:var(--fg-3);flex:none}
+
+  .menu{position:absolute;left:10px;right:10px;bottom:64px;background:var(--raise);border:1px solid var(--line-2);
+        border-radius:12px;box-shadow:0 18px 50px -12px #000,0 0 0 1px #000;padding:8px;display:none;z-index:30}
+  .menu.show{display:block;animation:pop .14s ease}
+  @keyframes pop{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .menu .mhead{padding:8px 9px 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
+  .menu .mhead .e{font-size:12px;color:var(--fg-3);font-family:var(--mono)}
+  .credit{margin:2px 0 0;font-size:11.5px;color:var(--fg-2)}
+  .bar{height:5px;border-radius:3px;background:#15171a;margin:6px 0 2px;overflow:hidden}
+  .bar i{display:block;height:100%;width:34%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+  .credit .sm{font-family:var(--mono);font-size:9.5px;color:var(--fg-4)}
+  .mitem{display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:7px;color:var(--fg-2);font-size:13px;cursor:pointer}
+  .mitem:hover{background:var(--panel);color:var(--fg)}
+  .mitem .ic{color:var(--fg-3)}
+
+  /* ── Main ─────────────────────────────────────────── */
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0;background:
+        radial-gradient(120% 80% at 50% -10%, rgba(77,184,212,.04), transparent 60%), var(--bg)}
+  .bar-top{height:50px;border-bottom:1px solid var(--hair);display:flex;align-items:center;
+           justify-content:space-between;padding:0 20px;flex:none}
+  .mode{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--fg-2);font-weight:450}
+  .mode .pill{font-family:var(--mono);font-size:10px;color:var(--accent);border:1px solid var(--accent-dim);
+              border-radius:4px;padding:3px 8px;letter-spacing:.04em;background:var(--accent-glow)}
+  .bar-top .right{display:flex;align-items:center;gap:14px}
+  .modelchip{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--fg-2);
+             border:1px solid var(--line-2);border-radius:7px;padding:5px 9px;cursor:pointer;transition:.14s}
+  .modelchip:hover{border-color:var(--accent-dim);color:var(--fg)}
+  .modelchip .d{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .bar-top .note{font-family:var(--mono);font-size:10.5px;color:var(--fg-4)}
+
+  .scroll{flex:1;overflow-y:auto;min-height:0;scrollbar-width:thin}
+  .scroll::-webkit-scrollbar{width:10px}.scroll::-webkit-scrollbar-thumb{background:#141619;border-radius:5px;border:3px solid var(--bg)}
+  .thread{max-width:740px;margin:0 auto;padding:28px 24px 48px}
+
+  .hero{max-width:680px;margin:0 auto;padding:13vh 24px 40px;text-align:center}
+  .hero h1{font-size:29px;font-weight:300;letter-spacing:-.035em;margin:0 0 10px;line-height:1.12}
+  .hero h1 em{font-style:normal;color:var(--accent)}
+  .hero p{color:var(--fg-2);margin:0 auto 28px;max-width:44ch;font-size:14px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:600px;margin:0 auto}
+  .chip{padding:8px 13px;border:1px solid var(--line);border-radius:9px;background:var(--panel);cursor:pointer;
+        font-size:12.5px;color:var(--fg-2);transition:.15s}
+  .chip:hover{border-color:var(--accent-dim);color:var(--fg);box-shadow:0 0 0 3px var(--accent-glow)}
+
+  .msg{margin:0 0 24px;display:flex;gap:13px}
+  .msg .a{width:25px;height:25px;border-radius:7px;flex:none;display:grid;place-items:center;
+          font-family:var(--mono);font-size:10px;font-weight:600;margin-top:1px}
+  .msg.u .a{background:var(--raise);border:1px solid var(--line-2);color:var(--fg-2)}
+  .msg.b .a{background:radial-gradient(120% 120% at 30% 20%,#10262c,#0a0c0d);border:1px solid var(--accent-dim);color:var(--accent)}
+  .msg .bd{min-width:0;flex:1}
+  .msg .who{font-size:10px;color:var(--fg-4);font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
+  .bub{font-size:14.5px;color:var(--fg);white-space:pre-wrap;word-wrap:break-word}
+  .bub code{font-family:var(--mono);font-size:12.5px;background:var(--raise);border:1px solid var(--line);border-radius:5px;padding:1px 5px;color:var(--accent-2)}
+  .bub strong{font-weight:600;color:#fff}
+  .bub h4{margin:15px 0 6px;font-size:14px}
+  .bub ul{margin:7px 0;padding-left:19px}.bub li{margin:4px 0}
+  .typing{display:inline-flex;gap:4px;align-items:center}
+  .typing i{width:5px;height:5px;border-radius:50%;background:var(--fg-3);animation:bl 1.3s infinite}
+  .typing i:nth-child(2){animation-delay:.18s}.typing i:nth-child(3){animation-delay:.36s}
+  @keyframes bl{0%,65%,100%{opacity:.22}32%{opacity:.95}}
+
+  .card{margin:13px 0;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}
+  .card .ch{padding:9px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10px;
+            text-transform:uppercase;letter-spacing:.06em;color:var(--fg-4)}
+  .card .cb{padding:14px}
+  .card .big{font-family:var(--mono);font-size:25px;letter-spacing:-.02em;color:var(--accent)}
+
+  .composer{flex:none;padding:8px 24px 18px;background:linear-gradient(180deg,transparent,var(--bg) 30%)}
+  .cw{max-width:740px;margin:0 auto;border:1px solid var(--line-2);border-radius:16px;
+      background:linear-gradient(180deg,var(--raise),var(--panel));padding:9px 9px 9px 15px;
+      display:flex;align-items:flex-end;gap:9px;transition:.16s;box-shadow:0 8px 30px -14px #000}
+  .cw:focus-within{border-color:var(--accent-dim);box-shadow:0 0 0 3px var(--accent-glow),0 8px 30px -14px #000}
+  .cw textarea{flex:1;background:transparent;border:0;outline:0;color:var(--fg);font-family:var(--font);
+               font-size:14.5px;line-height:1.5;resize:none;max-height:170px;padding:6px 0}
+  .cw textarea::placeholder{color:var(--fg-4)}
+  .send{width:33px;height:33px;border-radius:10px;border:0;cursor:pointer;display:grid;place-items:center;flex:none;
+        background:linear-gradient(180deg,var(--accent-2),var(--accent));color:#04181d;transition:.15s}
+  .send:disabled{opacity:.32;cursor:default;background:var(--line-2);color:var(--fg-4)}
+  .cfoot{max-width:740px;margin:7px auto 0;display:flex;justify-content:space-between;font-size:10.5px;color:var(--fg-4);font-family:var(--mono)}
+</style>
+</head>
+<body>
+  <aside class="side">
+    <div class="s-top"><div class="logo">n</div><div class="wordmark">nable</div></div>
+    <button class="newbtn" id="newChat">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>
+      New chat
+    </button>
+
+    <nav class="nav" id="nav">
+      <div class="grp">Agents</div>
+      <div class="row agent" data-agent="rca">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="margin-top:1px"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <div><div class="lab">Root-cause</div><div class="sub">Why a cost moved</div></div>
+      </div>
+      <div class="row agent" data-agent="reco">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="margin-top:1px"><path d="M12 3v2M12 19v2M4 12H2M22 12h-2M6 6L4.5 4.5M18 6l1.5-1.5"/><circle cx="12" cy="12" r="4"/></svg>
+        <div><div class="lab">Recommendation</div><div class="sub">Waste and savings</div></div>
+      </div>
+      <div class="row agent" data-agent="arch">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="margin-top:1px"><rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><path d="M17.5 14v3.5M14 17.5h3.5"/></svg>
+        <div><div class="lab">Architecture</div><div class="sub">Design and transfer cost</div></div>
+      </div>
+
+      <div class="grp">Recents</div>
+      <div id="recents"></div>
+
+      <div class="grp">Reports</div>
+      <div id="reports"></div>
+      <div class="row" id="newReport">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>
+        <div class="lab" style="color:var(--fg-3)">New scheduled report</div>
+      </div>
+    </nav>
+
+    <div class="dock">
+      <div class="menu" id="menu">
+        <div class="mhead">
+          <div class="nm" style="font-size:13px;font-weight:600">Chandan</div>
+          <div class="e">chandan@getnable.com</div>
+          <div class="credit">Managed AI <span style="color:var(--fg)">$17 of $50</span> this month
+            <div class="bar"><i></i></div>
+            <span class="sm">credits roll over · or bring your own key</span>
+          </div>
+        </div>
+        <div class="mitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 00-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 00-1.7-1l-.4-2.6h-4l-.4 2.6a7 7 0 00-1.7 1l-2.3-1-2 3.4 2 1.5a7 7 0 000 2l-2 1.5 2 3.4 2.3-1a7 7 0 001.7 1l.4 2.6h4l.4-2.6a7 7 0 001.7-1l2.3 1 2-3.4-2-1.5a7 7 0 00.1-1z"/></svg> Settings</div>
+        <div class="mitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg> Billing and credits</div>
+        <div class="mitem"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 17l5-5-5-5M21 12H9M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/></svg> Sign out</div>
+      </div>
+      <div class="prof" id="prof">
+        <div class="av">CB</div>
+        <div class="nm">Chandan</div>
+        <span class="plan">Team</span>
+        <svg class="ic chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="bar-top">
+      <div class="mode"><span id="modeText">Ask anything</span><span class="pill" id="modePill" style="display:none"></span></div>
+      <div class="right">
+        <div class="modelchip"><span class="d"></span>Haiku</div>
+        <span class="note">read-only · drafts need approval</span>
+      </div>
+    </div>
+    <div class="scroll" id="scroll">
+      <div class="hero" id="hero">
+        <h1>Your whole cloud and AI bill,<br/><em>one conversation.</em></h1>
+        <p>Ask anything, or pick an agent. It runs on your real data with full tool access, and only ever drafts changes for you to approve.</p>
+        <div class="chips" id="chips">
+          <div class="chip" data-q="Why did my AWS bill go up this month?">Why did my bill go up?</div>
+          <div class="chip" data-q="Find my top cost-saving opportunities across cloud and AI.">Find me savings</div>
+          <div class="chip" data-q="Forecast my spend to month-end based on current usage.">Forecast month-end</div>
+          <div class="chip" data-q="What are my biggest data-transfer and cross-AZ costs?">Architecture costs</div>
+          <div class="chip" data-q="Set up a weekly cost digest emailed every Monday.">Schedule a report</div>
+        </div>
+      </div>
+      <div class="thread" id="thread" style="display:none"></div>
+    </div>
+    <div class="composer">
+      <div class="cw">
+        <textarea id="input" rows="1" placeholder="Ask about your costs, or set up an agent"></textarea>
+        <button class="send" id="send" title="Send" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+      <div class="cfoot"><span id="cfootMode">Haiku · full tool access</span><span>runs locally · your data stays in your control</span></div>
+    </div>
+  </main>
+
+<script>
+(function(){
+  var AGENTS={
+    rca:{label:"Root-cause",seed:"Investigate why my costs changed recently. Trace it to the specific driver and the change that caused it."},
+    reco:{label:"Recommendation",seed:"Audit my cloud and AI spend for waste and savings."},
+    arch:{label:"Architecture",seed:"Review the cost of my architecture: data transfer, cross-AZ, commitment coverage, and rightsizing."}
+  };
+  var LS_C="nable_sandbox_convos", LS_R="nable_sandbox_reports";
+  var $=function(i){return document.getElementById(i);};
+  var state={agent:null,busy:false,convoId:null,messages:[]};
+
+  function load(k,f){try{return JSON.parse(localStorage.getItem(k))||f;}catch(e){return f;}}
+  function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+  function uid(){return Math.random().toString(36).slice(2,9);}
+
+  // seed a little life on first run so the rail isn't empty
+  (function seed(){
+    if(localStorage.getItem(LS_C)===null){
+      var now=Date.now();
+      save(LS_C,[
+        {id:uid(),title:"Why did AWS jump 40% in May",updated:now-1*36e5,messages:[]},
+        {id:uid(),title:"Top savings across cloud and AI",updated:now-5*36e5,messages:[]},
+        {id:uid(),title:"Forecast to month-end",updated:now-30*36e5,messages:[]},
+        {id:uid(),title:"Cross-AZ transfer breakdown",updated:now-50*36e5,messages:[]}
+      ]);
+    }
+    if(localStorage.getItem(LS_R)===null){
+      save(LS_R,[{id:uid(),title:"Weekly cost digest",when:"Mon 9am"}]);
+    }
+  })();
+
+  function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  function md(s){
+    s=esc(s).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+    var out=[],inL=false;
+    s.split('\n').forEach(function(ln){
+      var m=ln.match(/^\s*[-*]\s+(.*)$/);
+      if(m){if(!inL){out.push('<ul>');inL=true;}out.push('<li>'+m[1]+'</li>');return;}
+      if(inL){out.push('</ul>');inL=false;}
+      var h=ln.match(/^#{2,4}\s+(.*)$/); out.push(h?'<h4>'+h[1]+'</h4>':ln);
+    });
+    if(inL)out.push('</ul>'); return out.join('\n');
+  }
+
+  function setAgent(k){
+    state.agent=k;
+    document.querySelectorAll('.row[data-agent]').forEach(function(n){n.classList.toggle('on',n.getAttribute('data-agent')===k);});
+    if(k){ $('modeText').textContent=AGENTS[k].label+" agent"; $('modePill').style.display=''; $('modePill').textContent=k.toUpperCase(); $('cfootMode').textContent=AGENTS[k].label+" · Haiku · full tool access"; }
+    else { $('modeText').textContent="Ask anything"; $('modePill').style.display='none'; $('cfootMode').textContent="Haiku · full tool access"; }
+  }
+
+  // ── recents + reports rail ──
+  function relTime(t){var d=(Date.now()-t)/36e5; if(d<24)return"today"; if(d<48)return"yesterday"; return Math.floor(d/24)+"d";}
+  function renderRail(){
+    var convos=load(LS_C,[]).sort(function(a,b){return b.updated-a.updated;});
+    var r=$('recents');
+    r.innerHTML = convos.length? convos.map(function(c){
+      return '<div class="row conv'+(c.id===state.convoId?' on':'')+'" data-id="'+c.id+'">'+
+             '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 11.5a8.4 8.4 0 01-9 8.4L3 21l1.1-3.6A8.4 8.4 0 1121 11.5z"/></svg>'+
+             '<div class="lab">'+esc(c.title)+'</div><div class="meta">'+relTime(c.updated)+'</div>'+
+             '<div class="x" data-del="'+c.id+'">&times;</div></div>';
+    }).join('') : '<div class="empty-line">No conversations yet</div>';
+
+    var reps=load(LS_R,[]);
+    $('reports').innerHTML = reps.length? reps.map(function(p){
+      return '<div class="row"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>'+
+             '<div class="lab">'+esc(p.title)+'</div><div class="meta">'+esc(p.when)+'</div></div>';
+    }).join('') : '<div class="empty-line">Nothing scheduled</div>';
+
+    document.querySelectorAll('.conv').forEach(function(n){
+      n.addEventListener('click',function(e){ if(e.target.getAttribute('data-del'))return; openConvo(n.getAttribute('data-id')); });
+    });
+    document.querySelectorAll('[data-del]').forEach(function(n){
+      n.addEventListener('click',function(e){ e.stopPropagation(); var id=n.getAttribute('data-del');
+        save(LS_C,load(LS_C,[]).filter(function(c){return c.id!==id;})); if(state.convoId===id)newChat(); renderRail(); });
+    });
+  }
+
+  function persist(){
+    if(!state.messages.length)return;
+    var convos=load(LS_C,[]); var c=convos.filter(function(x){return x.id===state.convoId;})[0];
+    var title=(state.messages[0]&&state.messages[0].content||'New chat').slice(0,42);
+    if(c){ c.title=title; c.updated=Date.now(); c.messages=state.messages; }
+    else { state.convoId=state.convoId||uid(); convos.push({id:state.convoId,title:title,updated:Date.now(),messages:state.messages}); }
+    save(LS_C,convos); renderRail();
+  }
+
+  function paint(){
+    var th=$('thread');
+    if(!state.messages.length){ $('hero').style.display=''; th.style.display='none'; th.innerHTML=''; return; }
+    $('hero').style.display='none'; th.style.display=''; th.innerHTML='';
+    state.messages.forEach(function(m){ addBubble(m.role==='user'?'u':'b', m.role==='user'?esc(m.content):md(m.content)); });
+    $('scroll').scrollTop=$('scroll').scrollHeight;
+  }
+  function addBubble(role,html){
+    var w=document.createElement('div'); w.className='msg '+role;
+    w.innerHTML='<div class="a">'+(role==='u'?'you':'n')+'</div><div class="bd"><div class="who">'+(role==='u'?'You':'nable')+'</div><div class="bub">'+html+'</div></div>';
+    $('thread').appendChild(w); $('scroll').scrollTop=$('scroll').scrollHeight; return w.querySelector('.bub');
+  }
+
+  function openConvo(id){
+    var c=load(LS_C,[]).filter(function(x){return x.id===id;})[0]; if(!c)return;
+    state.convoId=id; state.messages=c.messages||[]; setAgent(null); paint(); renderRail();
+  }
+  function newChat(){ state.convoId=null; state.messages=[]; setAgent(null); paint(); renderRail(); $('input').focus(); }
+
+  function setBusy(b){ state.busy=b; $('send').disabled=b||!$('input').value.trim(); }
+
+  async function ask(q){
+    if(state.busy||!q.trim())return;
+    state.messages.push({role:'user',content:q}); $('hero').style.display='none'; $('thread').style.display='';
+    addBubble('u',esc(q));
+    var bub=addBubble('b','<span class="typing"><i></i><i></i><i></i></span>');
+    setBusy(true);
+    try{
+      var r=await fetch('/api/sandbox/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({question:q,agent:state.agent,history:state.messages.slice(-9,-1)})});
+      var d=await r.json();
+      if(d&&d.answer){ bub.innerHTML=md(d.answer); (d.cards||[]).forEach(function(c){
+          var el=document.createElement('div'); el.className='card';
+          el.innerHTML='<div class="ch">'+esc(c.title||'cost')+'</div><div class="cb"><div class="big">'+esc(c.value||'')+'</div></div>'; bub.appendChild(el); });
+        state.messages.push({role:'assistant',content:d.answer});
+      } else { bub.innerHTML='<span style="color:var(--fg-4)">'+esc((d&&d.error)||'No answer. Is an account connected?')+'</span>'; }
+    }catch(e){ bub.innerHTML='<span style="color:var(--fg-4)">Could not reach the agent. Start the sandbox with finops serve.</span>'; }
+    $('scroll').scrollTop=$('scroll').scrollHeight; setBusy(false); persist(); $('input').focus();
+  }
+
+  var inp=$('input');
+  inp.addEventListener('input',function(){ inp.style.height='auto'; inp.style.height=Math.min(inp.scrollHeight,170)+'px'; $('send').disabled=state.busy||!inp.value.trim(); });
+  inp.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();fire();} });
+  function fire(){ var q=inp.value.trim(); if(!q)return; inp.value=''; inp.style.height='auto'; $('send').disabled=true; ask(q); }
+  $('send').addEventListener('click',fire);
+  $('newChat').addEventListener('click',newChat);
+
+  document.querySelectorAll('.row[data-agent]').forEach(function(n){
+    n.addEventListener('click',function(){ var k=n.getAttribute('data-agent'); setAgent(state.agent===k?null:k);
+      if(state.agent){ inp.value=AGENTS[k].seed; inp.dispatchEvent(new Event('input')); inp.focus(); } });
+  });
+  document.querySelectorAll('.chip').forEach(function(n){ n.addEventListener('click',function(){ ask(n.getAttribute('data-q')); }); });
+  $('newReport').addEventListener('click',function(){ inp.value="Set up a scheduled cost report. Ask me the cadence, recipients, and what it should cover, then confirm the schedule."; inp.dispatchEvent(new Event('input')); inp.focus(); });
+
+  // profile menu
+  $('prof').addEventListener('click',function(e){ e.stopPropagation(); $('menu').classList.toggle('show'); });
+  document.addEventListener('click',function(){ $('menu').classList.remove('show'); });
+  $('menu').addEventListener('click',function(e){e.stopPropagation();});
+
+  // connected account
+  fetch('/api/data?days=30').then(function(r){return r.ok?r.json():null;}).then(function(d){
+    if(d&&(d.account||d.total!=null)){ var m=document.querySelector('.modelchip'); }
+  }).catch(function(){});
+
+  renderRail(); paint(); inp.focus();
+})();
+</script>
+</body>
+</html>

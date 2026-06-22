@@ -1407,6 +1407,45 @@ def _load_dashboard_html() -> str:
         return "<h1>Dashboard template missing. Reinstall nable.</h1>"
 
 
+_SANDBOX_HTML_PATH = Path(__file__).parent / "static" / "sandbox.html"
+
+
+def _load_sandbox_html() -> str:
+    """Read the sandbox HTML from disk each request so edits show on reload."""
+    try:
+        return _SANDBOX_HTML_PATH.read_text(encoding="utf-8")
+    except Exception as exc:
+        log.warning("Could not read sandbox.html: %s", exc)
+        return "<h1>Sandbox template missing. Reinstall nable.</h1>"
+
+
+# Sandbox agent presets. Each is a short instruction prefixed to the user's message
+# so the one shared agent loop behaves as a focused specialist. All run on Haiku to
+# start (tier="simple"). The recommendation agent honors the finding envelope
+# (recommendation vs investigation) the scanners now emit.
+_SANDBOX_AGENTS = {
+    "rca": (
+        "Act as a root-cause-analysis agent. The user wants to understand WHY a cost "
+        "changed. Start with explain_recent_cost_drivers, then drill into the top driver "
+        "with the relevant service or audit tool. Lead with the dollar impact, then the "
+        "cause in plain English, then the next step."
+    ),
+    "reco": (
+        "Act as a cost-recommendation agent. Find waste and savings with the audit and "
+        "recommendation tools. Honor each finding's envelope: present a 'recommendation' "
+        "with its precise number and the safe fix; present an 'investigation' as 'let's "
+        "look at this together' with its magnitude (never a precise number), the steps to "
+        "confirm it, and the Pro auto-confirm offer when present. Never overclaim a number."
+    ),
+    "arch": (
+        "Act as a cloud-architecture cost agent. Help the user understand and reduce the "
+        "cost of their architecture: cross-cloud spend, data transfer and cross-AZ costs, "
+        "commitment coverage, and rightsizing. Explain the trade-offs, do not just list "
+        "numbers."
+    ),
+}
+
+
 _DASHBOARD_HTML = """\
 <!doctype html>
 <html lang="en">
@@ -2202,6 +2241,46 @@ button:hover{{filter:brightness(1.1)}}
                 self._send(200, "application/json", json.dumps({"answer": None, "error": "agent error"}).encode())
             return
 
+        if path == "/api/sandbox/chat":
+            # Haiku-backed sandbox chat. Same agent loop (full MCP access), at
+            # tier="simple" (Haiku) with an optional agent preset prefixed in, plus
+            # multi-turn history so the conversation has context.
+            if not self._cookie_valid():
+                self._send(401, "application/json", b'{"error":"Unauthorized"}')
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8") or "{}") if length else {}
+            except (ValueError, TypeError):
+                self._send(400, "application/json", b'{"error":"Invalid JSON"}')
+                return
+            question = (body.get("question") or "").strip()[:2000]
+            if not question:
+                self._send(400, "application/json", b'{"error":"empty question"}')
+                return
+            preset = _SANDBOX_AGENTS.get((body.get("agent") or "").strip(), "")
+            prompt = (preset + "\n\n" + question) if preset else question
+            hist = body.get("history")
+            history = ([h for h in hist if isinstance(h, dict) and h.get("role") and h.get("content")]
+                       if isinstance(hist, list) else None)
+            try:
+                from .slack_bot.llm import ask, model_for_tier, record_managed_ai_usage
+                result = ask(prompt, tier="simple", history=history)
+                side = result.side_effects or []
+                cards = [se["card"] for se in side
+                         if isinstance(se, dict) and se.get("type") == "cost_card" and se.get("card")]
+                record_managed_ai_usage(
+                    surface="sandbox_chat", tier="simple", model=model_for_tier("simple"),
+                    input_tokens=getattr(result, "input_tokens", 0),
+                    output_tokens=getattr(result, "output_tokens", 0),
+                )
+                self._send(200, "application/json",
+                           json.dumps({"answer": result.answer, "cards": cards}, default=str).encode())
+            except Exception as exc:
+                log.error("sandbox chat failed: %s", exc, exc_info=True)
+                self._send(200, "application/json", json.dumps({"answer": None, "error": "agent error"}).encode())
+            return
+
         # Pinned views: save / remove / reorder moldable cost cards. Full-access
         # cookie only; these only touch the local dashboard_views table.
         if path in ("/api/views", "/api/views/delete", "/api/views/reorder"):
@@ -2427,6 +2506,10 @@ button:hover{{filter:brightness(1.1)}}
         # Dashboard
         if path == "/" or path == "/index.html":
             self._send(200, "text/html; charset=utf-8", _load_dashboard_html().encode())
+
+        # Sandbox (Claude-wrapper chat UI for the hosted platform)
+        elif path == "/sandbox":
+            self._send(200, "text/html; charset=utf-8", _load_sandbox_html().encode())
 
         # Health
         elif path == "/health":
