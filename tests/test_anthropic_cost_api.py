@@ -5,7 +5,12 @@ from datetime import date
 
 import httpx
 
+from finops.analytics import ai_kpis
 from finops.connectors.saas import anthropic_usage as a
+
+# Minimal valid llm_costs_result for full_kpi_report (carries no tokens itself).
+_MIN_LLM = {"by_model": {}, "daily": [], "total_usd": 0.0,
+            "by_provider": {}, "by_model_tokens": {}}
 
 
 class _FakeResp:
@@ -129,3 +134,74 @@ def test_get_costs_prefers_cost_api_when_admin_key_present(monkeypatch):
     out = a.get_costs(date(2026, 6, 1), date(2026, 6, 2))
     assert out["source"] == "cost_api"
     assert out["total_usd"] == 42.0
+
+
+def test_cost_report_falls_back_when_pagination_cap_is_hit(monkeypatch):
+    # API that always reports more pages must NOT yield a truncated cost_api total;
+    # it falls back (source != cost_api) so get_costs uses the estimate instead.
+    forever = {"data": [{"starting_at": "2026-06-01T00:00:00Z",
+                         "results": [{"amount": "1000", "model": "m"}]}],
+               "has_more": True, "next_page": "NEXT"}
+    monkeypatch.setattr(httpx, "get", lambda *a_, **k_: _FakeResp(forever))
+    out = a.get_cost_report("sk-ant-admin-x", date(2020, 1, 1), date(2026, 6, 1))
+    assert out["source"] != "cost_api"          # truncation is never authoritative
+    assert out["total_usd"] == 0.0
+
+
+def test_cost_report_undated_bucket_keeps_total_and_daily_consistent(monkeypatch):
+    # A bucket with no starting_at is skipped entirely, so sum(daily) == total_usd.
+    payload = {
+        "data": [
+            {"starting_at": "2026-06-01T00:00:00Z",
+             "results": [{"amount": "1000", "model": "m"}]},
+            {"starting_at": "",  # undated: must not inflate total beyond daily
+             "results": [{"amount": "5000", "model": "m"}]},
+        ],
+        "has_more": False,
+    }
+    monkeypatch.setattr(httpx, "get", lambda *a_, **k_: _FakeResp(payload))
+    out = a.get_cost_report("sk-ant-admin-x", date(2026, 6, 1), date(2026, 6, 2))
+    assert out["total_usd"] == round(sum(d["total_usd"] for d in out["daily"]), 4)
+    assert out["total_usd"] == 10.0             # only the dated bucket counts
+
+
+def test_kpi_tokenless_cost_api_gives_honest_note_not_fabricated_F():
+    # Regression: a dollars-only Cost API result (by_model_tokens={}) must not be
+    # graded "F / no cache hits"; it should fall to the honest "no data" note.
+    cost_api = {"total_usd": 100.0, "by_model": {"claude-opus-4-6": 100.0},
+                "by_model_tokens": {}, "daily": [], "source": "cost_api"}
+    report = ai_kpis.full_kpi_report(_MIN_LLM, anthropic_data=cost_api)
+    chr_ = report["cache_hit_rate"]
+    assert "note" in chr_
+    assert chr_.get("grade") != "F"
+
+
+def test_kpi_uses_cache_path_when_tokens_present():
+    anth = {"total_usd": 100.0, "by_model": {"claude-opus-4-6": 100.0},
+            "by_model_tokens": {"claude-opus-4-6": {
+                "input_tokens": 1000, "output_tokens": 500,
+                "cache_read_input_tokens": 800, "cache_creation_input_tokens": 0,
+                "request_count": 10}},
+            "daily": [], "source": "api"}
+    report = ai_kpis.full_kpi_report(_MIN_LLM, anthropic_data=anth)
+    assert "grade" in report["cache_hit_rate"]   # real cache analysis ran
+
+
+def test_get_costs_cost_api_no_org_id_then_kpi_is_honest(monkeypatch):
+    # GAP 4 end to end: the exact promoted config (admin key, no org id) yields a
+    # token-less cost_api result, which must produce an honest KPI, not an F.
+    env = {"ANTHROPIC_ADMIN_KEY": "sk-ant-admin-x"}  # deliberately no ORGANIZATION_ID
+    monkeypatch.setattr("finops.security.env.get_env",
+                        lambda k, default=None: env.get(k, default))
+    payload = {"data": [{"starting_at": "2026-06-01T00:00:00Z",
+                         "results": [{"amount": "10000", "model": "claude-opus-4-6"}]}],
+               "has_more": False}
+    monkeypatch.setattr(httpx, "get", lambda *a_, **k_: _FakeResp(payload))
+
+    out = a.get_costs(date(2026, 6, 1), date(2026, 6, 2))
+    assert out["source"] == "cost_api"
+    assert out["by_model_tokens"] == {}
+
+    report = ai_kpis.full_kpi_report(_MIN_LLM, anthropic_data=out)
+    assert "note" in report["cache_hit_rate"]
+    assert report["cache_hit_rate"].get("grade") != "F"

@@ -108,7 +108,10 @@ sudo docker compose logs -f nable   # confirm the scheduler + dashboard came up
 ```
 
 Caddy fetches the Let's Encrypt cert on first boot. The dashboard is then live at
-`https://baptist.getnable.com` with session cookies marked Secure.
+`https://baptist.getnable.com` with session cookies marked Secure. The raw app
+port (8080) binds to loopback only (compose default), so 443 through Caddy is the
+single public entry and cookies are marked Secure on that path. To reach 8080
+directly on a trusted LAN instead, set `FINOPS_BIND_HOST=0.0.0.0`.
 
 ## 5. Give the instance read-only cloud access
 
@@ -153,15 +156,25 @@ through Okta / Entra / Google with no nable password at all.
 
 ```bash
 ssh ec2-user@<ip>
-cd /opt/nable && sudo git pull && sudo docker compose --profile tls up -d --build
+cd /opt/nable
+sudo git fetch --tags
+sudo git checkout "$(git describe --tags --abbrev=0)"   # latest release, not main HEAD
+sudo docker compose --profile tls up -d --build
 ```
 
 ## Offboarding
 
-Terminate the instance and remove the DNS record. Because the box was
-single-tenant, that one action destroys every credential and all derived data for
-that customer. Delete `tenants/<slug>.env` locally and clear the instance fields on
-their account record.
+Two parts, because one credential does not live on the box:
+
+1. **Revoke the customer's cloud key first.** The read-only key from step 5 lives
+   in the customer's AWS account, not on the EC2 box, so terminating the box does
+   NOT revoke it. Ask the customer to delete the read-only CloudFormation stack
+   (that removes the IAM user + key) or deactivate that access key. Same for any
+   Azure app registration / GCP service-account key handed over in step 5.
+2. **Destroy the box.** Terminate the instance and remove the DNS record. Because
+   the box was single-tenant, that destroys the box-side copy of the creds and all
+   derived data for that customer. Delete `tenants/<slug>.env` locally and clear
+   the `instance_id` / `instance_domain` fields on their Stripe customer metadata.
 
 ```bash
 aws ec2 terminate-instances --instance-ids <id>

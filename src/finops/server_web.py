@@ -39,12 +39,18 @@ from .auth import control_plane as _cp
 # Set FINOPS_DASHBOARD_PASSWORD=off to explicitly disable auth (not recommended).
 
 _DASHBOARD_PASSWORD: str = os.environ.get("FINOPS_DASHBOARD_PASSWORD", "").strip()
-_AUTH_DISABLED: bool = _DASHBOARD_PASSWORD.lower() == "off"
+# FINOPS_REQUIRE_AUTH=1 hard-forbids an unauthenticated dashboard. When it is set,
+# even FINOPS_DASHBOARD_PASSWORD=off is ignored and a strong password is generated,
+# so a hosted instance can never be opened by a stray "off". Hosted provisioning
+# sets this; see deploy/provision-tenant.sh.
+_REQUIRE_AUTH: bool = os.environ.get("FINOPS_REQUIRE_AUTH", "").strip() == "1"
+_AUTH_DISABLED: bool = _DASHBOARD_PASSWORD.lower() == "off" and not _REQUIRE_AUTH
 _PASSWORD_AUTO_GENERATED: bool = False
 if _AUTH_DISABLED:
     _DASHBOARD_PASSWORD = ""
-elif not _DASHBOARD_PASSWORD:
-    # Auto-generate a strong password rather than defaulting to open.
+elif not _DASHBOARD_PASSWORD or _DASHBOARD_PASSWORD.lower() == "off":
+    # No usable password (unset, or "off" overridden by FINOPS_REQUIRE_AUTH=1):
+    # auto-generate a strong one rather than defaulting to open.
     # Printed clearly at startup — user can override with FINOPS_DASHBOARD_PASSWORD.
     _DASHBOARD_PASSWORD = secrets.token_urlsafe(14)
     _PASSWORD_AUTO_GENERATED = True
