@@ -2228,6 +2228,13 @@ button:hover{{filter:brightness(1.1)}}
                 return
             try:
                 from .slack_bot.llm import ask, model_for_tier, record_managed_ai_usage
+                from .billing import credits
+                _bs = credits.budget_status()
+                if _bs.get("metered") and (_bs.get("remaining") or 0) <= 0:
+                    self._send(200, "application/json", json.dumps({
+                        "answer": "You're out of managed AI for this month. Add credits or "
+                                  "bring your own key to keep going.", "cards": []}).encode())
+                    return
                 result = ask(question, tier="chat")
                 side = result.side_effects or []
                 cards = [se["card"] for se in side
@@ -2284,11 +2291,15 @@ button:hover{{filter:brightness(1.1)}}
                        if isinstance(hist, list) else None)
             try:
                 from .slack_bot.llm import ask, route_request, record_managed_ai_usage
-                # Efficiency router: cheapest model that fits the task, clamped by
-                # budget. budget_* are None here (no managed-credit ledger yet), so it
-                # routes by difficulty without blocking. Pass the account's remaining
-                # credit once the ledger exists to enable the degrade and block.
-                decision = route_request(question, agent=(agent_key or None))
+                from .billing import credits
+                # Efficiency router: cheapest model that fits the task, clamped by the
+                # account's remaining managed-AI credit. When unmetered (no budget set)
+                # budget_status returns None/None and the router never degrades or blocks.
+                _bs = credits.budget_status()
+                decision = route_request(
+                    question, agent=(agent_key or None),
+                    budget_remaining=_bs.get("remaining"), budget_total=_bs.get("total"),
+                )
                 if decision.blocked:
                     self._send(200, "application/json", json.dumps({
                         "answer": "You're out of managed AI for this month. Add credits or "
@@ -2547,6 +2558,20 @@ button:hover{{filter:brightness(1.1)}}
             self._send(200, "application/json", body)
 
         # Dashboard data
+        elif path == "/api/sandbox/credits":
+            # Managed-AI balance for the sandbox profile meter. Behind the session
+            # cookie. Unmetered instances return metered:false so the UI hides the bar.
+            if not self._cookie_valid():
+                self._send(401, "application/json", b'{"error":"Unauthorized"}')
+                return
+            try:
+                from .billing import credits
+                body = json.dumps(credits.budget_status()).encode()
+            except Exception as exc:
+                log.debug("credits status failed: %s", exc)
+                body = b'{"metered": false}'
+            self._send(200, "application/json", body)
+
         elif path == "/api/data":
             try:
                 days_param = int(qs.get("days", ["30"])[0])

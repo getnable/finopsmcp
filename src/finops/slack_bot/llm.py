@@ -224,6 +224,21 @@ def record_managed_ai_usage(
         log.info("managed_ai_usage %s", json.dumps(event, default=str))
     except Exception as exc:
         log.debug("record_managed_ai_usage failed: %s", exc)
+    # Persist this turn's cost to the credit ledger so the router can clamp spend
+    # to the prepaid balance. Isolated from the log above and best-effort: a ledger
+    # failure must not break the answer or swallow the usage event.
+    try:
+        from ..billing import credits
+
+        credits.record_spend(
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            surface=surface,
+            requested_by=requested_by,
+        )
+    except Exception as exc:
+        log.debug("ledger write failed: %s", exc)
 
 
 def _run_agent_loop_sync(
