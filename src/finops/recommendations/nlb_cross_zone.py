@@ -15,6 +15,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 CROSS_AZ_COST_PER_GB: float = 0.01
@@ -172,6 +174,59 @@ async def audit_nlb_cross_zone_costs(
                           "disabling with uneven targets drops traffic to AZs that then "
                           "have no local targets.")
 
+            # Classify by strength of evidence. We confirm cross-zone is enabled and
+            # read real ProcessedBytes, but the cost rests on a flat 50% guess at how
+            # much traffic actually crosses an AZ. ProcessedBytes does not tell us the
+            # cross-AZ split, so the dollar figure is a heuristic, not a measurement.
+            # That makes this an investigation. We only attach a finding to the
+            # actionable case; the monitor cases are not a real finding.
+            finding = None
+            if recommendation == "review_disabling_cross_zone":
+                finding = Finding(
+                    source="nlb_cross_zone",
+                    title="Let's confirm how much this NLB's cross-zone traffic really costs",
+                    why=(f"NLB {nlb_name} has cross-zone load balancing on across {az_count} "
+                         "AZs, and cross-zone traffic bills at $0.01/GB. It moves enough "
+                         "volume that the cross-AZ portion is likely a meaningful line item."),
+                    evidence=INFERRED,
+                    confidence="low",
+                    why_unsure=("My estimate assumes half of the NLB's traffic crosses an AZ "
+                                "boundary. That is a placeholder, not a measurement: the real "
+                                "split depends on how clients and targets are spread across "
+                                "AZs, which ProcessedBytes does not reveal."),
+                    assumptions=[
+                        f"{CROSS_AZ_TRAFFIC_FRACTION:.0%} of processed traffic crosses an AZ "
+                        "boundary (a flat default, not measured for this NLB).",
+                    ],
+                    rough_monthly=round(estimated_cross_az_cost, 2),
+                    confirm_steps=[
+                        "Check the NLB's per-AZ ProcessedBytes in CloudWatch (the LoadBalancer "
+                        "and AvailabilityZone dimensions) to see the real cross-AZ share instead "
+                        "of assuming 50%.",
+                        "Count targets per AZ in each target group. Cross-zone only earns its "
+                        "cost when AZs are unevenly loaded; if every AZ has balanced targets, "
+                        "disabling it is the safe win.",
+                    ],
+                    pro_can_confirm=True,
+                    pro_unlock=("On Pro, nable reads your CUR data-transfer line items and the "
+                                "per-AZ NLB metrics to confirm the actual cross-AZ cost, replacing "
+                                "the 50% assumption with a measured number."),
+                    remediation=[
+                        "Only after confirming targets are balanced across all enabled AZs, "
+                        "disable cross-zone: " + _build_disable_command(nlb_arn) + ". "
+                        "Disabling it with uneven targets starves AZs that then have no local "
+                        "target, so verify per-AZ balance first.",
+                    ],
+                    resource_id=nlb_arn,
+                    metadata={
+                        "nlb_name": nlb_name,
+                        "region": region,
+                        "enabled_az_count": az_count,
+                        "monthly_processed_gb": round(total_gb, 2),
+                        "assumed_cross_az_fraction": CROSS_AZ_TRAFFIC_FRACTION,
+                    },
+                )
+
             findings.append({
                 "nlb_name": nlb_name,
                 "nlb_arn": nlb_arn,
@@ -184,6 +239,7 @@ async def audit_nlb_cross_zone_costs(
                 "recommendation": recommendation,
                 "availability_caveat": caveat,
                 "disable_command": _build_disable_command(nlb_arn),
+                "finding": finding.to_dict() if finding else None,
             })
 
     findings.sort(key=lambda f: f["estimated_cross_az_cost"], reverse=True)

@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import MEASURED, Finding
+
 log = logging.getLogger(__name__)
 
 try:
@@ -162,6 +164,64 @@ async def audit_rds_manual_snapshots(
     potential_savings = round(sum(r["monthly_cost"] for r in saveable), 2)
     total_size_gb = round(sum(r["size_gb"] for r in all_records), 1)
 
+    # Classify by strength of evidence. Each snapshot is one we read from
+    # describe_db_snapshots: it exists, with a known AllocatedStorage and AWS's
+    # published $0.095/GB-month rate. Orphaned status is directly verified (the
+    # source DB identifier is not in the live instance/cluster set we listed).
+    # That is measured, so this is a recommendation. We lead with orphaned
+    # snapshots because deleting them is unambiguously safe; old snapshots of a
+    # live DB may still be a deliberate retention copy, so the action there is
+    # "review then delete", not a blind delete.
+    finding = None
+    n_orphaned = len(orphaned)
+    n_old = len(old)
+    if potential_savings > 1.0 and (n_orphaned or n_old):
+        parts = []
+        if n_orphaned:
+            parts.append(f"{n_orphaned} orphaned snapshot(s) whose source DB is gone")
+        if n_old:
+            parts.append(f"{n_old} snapshot(s) older than {age_threshold_days} days "
+                         f"on a DB that still exists")
+        what = " and ".join(parts)
+
+        remediation = []
+        if n_orphaned:
+            remediation.append(
+                "Delete the orphaned snapshots. Their source database no longer exists, "
+                "so they are dead storage: aws rds delete-db-snapshot "
+                "--db-snapshot-identifier <id>. Snapshot deletion is irreversible, so "
+                "confirm you have no compliance or restore requirement first.")
+        if n_old:
+            remediation.append(
+                "For old snapshots of a live DB, confirm they are not a required "
+                "retention or compliance copy before deleting. If they are routine "
+                "backups, move retention to automated snapshots with a lifecycle policy "
+                "so they expire on their own instead of accumulating manually.")
+
+        single_id = ""
+        if potential_savings > 1.0 and (n_orphaned + n_old) == 1:
+            only = (orphaned or old)[0]
+            single_id = only.get("snapshot_id", "")
+
+        finding = Finding(
+            source="rds_snapshots",
+            title="Manual RDS snapshots are accumulating storage cost",
+            why=("Manual RDS snapshots never auto-expire and bill at $0.095/GB-month "
+                 f"until you delete them. You have {what}, which together cost about "
+                 f"${potential_savings:,.2f}/mo to keep."),
+            evidence=MEASURED,
+            confidence="high" if n_orphaned and not n_old else "medium",
+            est_monthly_savings=potential_savings,
+            remediation=remediation,
+            resource_id=single_id,
+            metadata={
+                "orphaned_count": n_orphaned,
+                "old_count": n_old,
+                "age_threshold_days": age_threshold_days,
+                "saveable_size_gb": round(sum(r["size_gb"] for r in saveable), 1),
+            },
+        )
+
     return {
         "orphaned_snapshots": orphaned,
         "old_snapshots": old,
@@ -169,4 +229,5 @@ async def audit_rds_manual_snapshots(
         "potential_monthly_savings": potential_savings,
         "total_snapshots": len(all_records),
         "total_size_gb": total_size_gb,
+        "finding": finding.to_dict() if finding else None,
     }

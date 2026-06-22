@@ -17,6 +17,8 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 try:
     import boto3
 except ImportError:
@@ -329,4 +331,81 @@ def recommend_spot_adoption(
             log.warning("Region %s failed: %s", region, exc)
 
     all_results.sort(key=lambda r: r["monthly_savings"], reverse=True)
+
+    # Classify the finding by the STRENGTH OF EVIDENCE behind it. We can MEASURE the
+    # on-demand instance and its type, but the saving rests on the customer adopting
+    # spot, which carries interruption risk. "Stateless" is inferred from env tags,
+    # the discount and interruption frequency are hardcoded public averages, and the
+    # real spot price moves by AZ and capacity pool. None of that is confirmed for
+    # this workload, so this is an INFERRED investigation with a magnitude band, never
+    # a precise dollar claim. Attached to the top result so the list shape is intact.
+    actionable = [r for r in all_results
+                  if r["recommendation"] in ("RECOMMENDED", "POSSIBLE")]
+    if actionable:
+        top = actionable[0]
+        rough = sum(r["monthly_savings"] for r in actionable)
+        n = len(actionable)
+        finding = Finding(
+            source="spot_adoption",
+            title="Let's check which on-demand instances can safely move to spot",
+            why=(
+                f"Instance {top['instance_id']} ({top['instance_type']}) runs on demand "
+                "and looks like a spot candidate: it sits in an Auto Scaling Group and "
+                "carries non-prod or stateless signals. Spot trades a steep discount for "
+                "the chance of interruption, so for tolerant workloads it is often a large "
+                f"saving. I see {n} candidate instance(s) like this."
+            ),
+            evidence=INFERRED,
+            confidence="medium" if top["recommendation"] == "RECOMMENDED" else "low",
+            why_unsure=(
+                "Whether spot is safe here depends on how the workload tolerates "
+                "interruption, which I infer from tags and ASG membership, not from "
+                "observed behavior. The discount and interruption frequency are public "
+                "AWS averages, and real spot prices vary by AZ and capacity pool, so I "
+                "cannot put a precise saving on it until spot is actually running."
+            ),
+            assumptions=[
+                "The workload tolerates a 2-minute interruption notice and can be "
+                "rescheduled by its ASG.",
+                "Env tags correctly indicate a stateless or non-prod instance.",
+                f"Spot discount of about {top['savings_pct']:.0f}% holds (public average; "
+                "actual price moves with capacity).",
+            ],
+            rough_monthly=round(rough, 2),
+            confirm_steps=[
+                "Confirm the workload is interruption-tolerant: stateless, checkpointed, "
+                "or behind a queue, and not holding a session or local state.",
+                "Run a small spot fraction first via a MixedInstancesPolicy "
+                "(OnDemandBaseCapacity for a safety floor) and watch interruption rates.",
+                "Check the live spot price and interruption frequency for these types in "
+                "your AZs in the Spot Advisor before sizing the saving.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=(
+                "On Pro, give nable read-only CloudTrail and CUR access and it confirms "
+                "the actual spot price you would pay, measures real interruption rates for "
+                "these instance types in your AZs, and reports the saving you can stand on "
+                "instead of a public-average estimate."
+            ),
+            remediation=[
+                "Confirm interruption tolerance first, then migrate via a Launch Template "
+                "mixed-instances policy with capacity-optimized allocation and 5+ instance "
+                "types. Keep an on-demand base capacity as a floor. Test in staging before "
+                "moving any production fleet: a capacity-pool tightening can reclaim spot "
+                "with two minutes notice.",
+            ],
+            resource_id=top["instance_id"],
+            metadata={
+                "region": top["region"],
+                "instance_type": top["instance_type"],
+                "in_asg": top["in_asg"],
+                "interruption_freq_pct": top["interruption_freq_pct"],
+                "monthly_ondemand_cost": top["monthly_ondemand_cost"],
+                "monthly_spot_estimate": top["monthly_spot_estimate"],
+                "candidate_count": n,
+                "candidates_sampled": [r["instance_id"] for r in actionable[:8]],
+            },
+        )
+        top["finding"] = finding.to_dict()
+
     return all_results

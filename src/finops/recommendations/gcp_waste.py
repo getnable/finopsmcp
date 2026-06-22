@@ -31,6 +31,8 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from .envelope import INFERRED, MEASURED, Finding
+
 log = logging.getLogger(__name__)
 
 # ── Pricing (GCP list-price estimates, us-central1-ish, USD/month) ─────────────
@@ -329,6 +331,154 @@ def _idle_vm_finding(project: str, inst: Any, avg_cpu: float) -> dict:
     }
 
 
+# ── trust envelope ────────────────────────────────────────────────────────────
+
+
+def _envelope_for(raw: dict) -> Finding | None:
+    """Wrap one raw GCP waste finding in the trust envelope.
+
+    Evidence depends on the check:
+      - unattached_disk / idle_ip: the resource config itself proves the waste (a
+        disk with no attachment, a reserved IP that is not in use) and GCP bills it
+        at a known flat rate. Measured -> recommendation with a precise figure.
+      - old_snapshot: the age and size are measured, but whether the snapshot is
+        still needed (retention, compliance, a restore point) is a judgment we
+        cannot make. Inferred -> investigation.
+      - idle_vm: the low CPU is measured from Monitoring, but the dollar figure is a
+        blended per-vCPU proxy, not the machine's real SKU rate, and stopping or
+        rightsizing depends on the workload. Inferred -> investigation.
+    """
+    category = raw.get("category", "")
+    monthly = float(raw.get("estimated_monthly_savings", 0) or 0)
+    rid = raw.get("resource_id", "")
+    region = raw.get("region", "")
+    detail = raw.get("detail", {}) or {}
+
+    if category == "unattached_disk":
+        if monthly <= 0:
+            return None
+        return Finding(
+            source="gcp_waste",
+            title=f"Unattached persistent disk '{rid}' is still billed",
+            why=("This disk has no instance attached but GCP keeps charging for its "
+                 "provisioned size every month. Detached disks rarely come back into use."),
+            evidence=MEASURED,
+            confidence="high",
+            est_monthly_savings=monthly,
+            remediation=[
+                "Confirm no one is keeping this disk for a planned restore, then snapshot it "
+                "if you want a cheap backup and delete the disk.",
+                "Snapshot storage costs a fraction of a live disk, so a snapshot-then-delete "
+                "keeps the data recoverable while stopping the disk charge.",
+            ],
+            resource_id=rid,
+            metadata={"region": region, **detail, "pricing_basis": PRICING_BASIS},
+        )
+
+    if category == "idle_ip":
+        if monthly <= 0:
+            return None
+        return Finding(
+            source="gcp_waste",
+            title=f"Reserved external IP '{rid}' is billed while idle",
+            why=("GCP charges for a reserved static external IP that is not attached to "
+                 "anything. This one is reserved but not in use, so the charge buys nothing."),
+            evidence=MEASURED,
+            confidence="high",
+            est_monthly_savings=monthly,
+            remediation=[
+                "Confirm the address is not being held for an imminent launch, then release "
+                "it. The charge stops as soon as it is released.",
+                "If you need to keep the exact address, attach it to the resource that needs "
+                "it instead of leaving it reserved and idle.",
+            ],
+            resource_id=rid,
+            metadata={"region": region, **detail},
+        )
+
+    if category == "old_snapshot":
+        if monthly <= 0:
+            return None
+        return Finding(
+            source="gcp_waste",
+            title=f"Old snapshot '{rid}' may no longer be needed",
+            why=("This snapshot is well past the age where most are still useful, and you "
+                 "pay for its storage every month. If nothing depends on it, deleting it "
+                 "stops the charge."),
+            evidence=INFERRED,
+            confidence="low",
+            why_unsure=("Age and size are clear, but age alone does not make a snapshot waste. "
+                        "It may be a deliberate restore point, a compliance retention copy, or "
+                        "the base for an image. We have not confirmed it is safe to delete."),
+            assumptions=["No retention policy, image, or restore plan depends on this snapshot."],
+            rough_monthly=monthly,
+            confirm_steps=[
+                "Check whether a retention or compliance policy requires keeping this snapshot.",
+                "Confirm no image or disk template was built from it and no team is holding it "
+                "as a restore point.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, nable reads your snapshot schedules, image dependencies, and "
+                        "billing export to flag which old snapshots are truly orphaned versus "
+                        "held by a policy, so you delete only the safe ones."),
+            remediation=[
+                "Confirm first: rule out any retention policy, image, or restore dependency.",
+                "Then delete the snapshot to stop the storage charge.",
+                "Risk: deleting a snapshot that backs a compliance requirement or a needed "
+                "restore point is not reversible. Confirm before deleting.",
+            ],
+            resource_id=rid,
+            metadata={"region": region, **detail},
+        )
+
+    if category == "idle_vm":
+        cpu = detail.get("avg_cpu_pct")
+        return Finding(
+            source="gcp_waste",
+            title=f"Instance '{rid}' looks idle and may be stoppable or smaller",
+            why=("This VM has been running with near-zero CPU over the window. An idle "
+                 "instance is either safe to stop or a candidate to rightsize down to a "
+                 "smaller machine type."),
+            evidence=INFERRED,
+            confidence="low",
+            why_unsure=("Low CPU is real, but it does not by itself mean the VM is wasted: it "
+                        "could be memory-bound, I/O-bound, a warm standby, or waiting on a "
+                        "queue. The dollar figure is a blended per-vCPU estimate, not this "
+                        "machine's actual SKU rate or any committed-use discount, so treat it "
+                        "as a rough size."),
+            assumptions=[
+                "Low CPU reflects genuine idleness, not a memory, I/O, or standby workload.",
+                "Cost is a blended per-vCPU estimate, not the machine's real SKU or CUD rate.",
+            ],
+            rough_monthly=monthly if monthly > 0 else None,
+            confirm_steps=[
+                "Check memory, disk, and network metrics, not just CPU, to confirm the VM is "
+                "truly idle and not standby or I/O-bound.",
+                "Ask the owning team whether it can be stopped or sized down.",
+                "If keeping it, rightsize to a smaller machine type rather than stopping it "
+                "outright.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, nable pulls the full Monitoring metric set (memory, disk, "
+                        "network) and joins your billing export for the real SKU rate, so it "
+                        "confirms genuine idleness and sizes the saving at the rate you "
+                        "actually pay."),
+            remediation=[
+                "Confirm first: verify idleness across all metrics and get owner sign-off.",
+                "Then stop the instance, or rightsize it to a smaller machine type if it is "
+                "still needed.",
+                "Risk: stopping a warm standby or a queue worker that is simply waiting breaks "
+                "that workload. Confirm the role before stopping.",
+            ],
+            resource_id=rid,
+            metadata={"region": region, "avg_cpu_pct": cpu,
+                      "machine_type": detail.get("machine_type"),
+                      "vcpus": detail.get("vcpus"), "pricing_basis": PRICING_BASIS},
+        )
+
+    return None
+
+
 # ── orchestrator ──────────────────────────────────────────────────────────────
 
 
@@ -415,6 +565,13 @@ async def audit_gcp_waste(
     await asyncio.gather(*[_scan_project(p) for p in projects])
 
     findings.sort(key=lambda f: f.get("estimated_monthly_savings", 0), reverse=True)
+
+    # Wrap each raw finding in the trust envelope. Unattached disks and idle IPs are
+    # measured -> recommendations; old snapshots and idle VMs are inferred ->
+    # investigations. Additive: the existing raw keys are untouched.
+    for f in findings:
+        env = _envelope_for(f)
+        f["finding"] = env.to_dict() if env else None
 
     by_category: dict[str, dict] = {}
     by_severity: dict[str, dict] = {}

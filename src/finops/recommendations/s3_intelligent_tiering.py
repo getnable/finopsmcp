@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 IT_MONITORING_COST_PER_1K_OBJECTS: float = 0.0025
@@ -266,6 +268,7 @@ async def audit_s3_intelligent_tiering(
             "net_monthly_cost": round(net_monthly_cost, 4) if net_monthly_cost is not None else None,
             "recommendation": recommendation,
             "roi_summary": roi_summary,
+            "finding": None,
         })
 
     # Sort by net_monthly_cost descending (None values last)
@@ -273,4 +276,70 @@ async def audit_s3_intelligent_tiering(
         key=lambda f: f["net_monthly_cost"] if f["net_monthly_cost"] is not None else float("-inf"),
         reverse=True,
     )
+
+    # Attach a trust-envelope Finding to the worst bucket, if any clears the bar.
+    #
+    # This is an INVESTIGATION, not a recommendation. The object count and
+    # monitoring fee are measured, but the verdict ("waste" vs "worth it") turns on
+    # estimated_storage_savings, which assumes EVERY object eventually moves to the
+    # Infrequent Access tier (_IA_SAVINGS_PER_GB). That is an upper bound, not an
+    # observed tier distribution, so we cannot put a precise saved-dollar figure on
+    # flipping the bucket off Intelligent-Tiering. We size it as a band and tell the
+    # user how to confirm.
+    worst = next(
+        (
+            f for f in findings
+            if f["monthly_monitoring_cost"] is not None
+            and f["recommendation"].startswith("LIKELY_WASTE")
+        ),
+        None,
+    )
+    if worst is not None and worst["monthly_monitoring_cost"] >= 1.0:
+        finding = Finding(
+            source="s3_intelligent_tiering",
+            title="Let's check whether Intelligent-Tiering is paying off on this bucket",
+            why=("Intelligent-Tiering bills $0.0025 per 1,000 objects every month just to "
+                 "monitor them. On a bucket full of small objects that monitoring fee can "
+                 f"outweigh the tiering savings. '{worst['bucket_name']}' pays "
+                 f"${worst['monthly_monitoring_cost']:.2f}/mo in monitoring and the tiering "
+                 "savings look thin."),
+            evidence=INFERRED,
+            confidence="low",
+            why_unsure=("The monitoring fee is real, but the savings side is an estimate: I "
+                        "assumed every object eventually lands in the Infrequent Access tier "
+                        "($0.0105/GB cheaper). I haven't seen the actual tier distribution or "
+                        "access pattern, so I can't say the exact dollars you'd save by "
+                        "switching off Intelligent-Tiering."),
+            assumptions=[
+                "All bytes settle in the Infrequent Access tier (an upper bound on savings).",
+                "Bucket-level CloudWatch metrics reflect the steady-state object count and size.",
+            ],
+            rough_monthly=worst["monthly_monitoring_cost"],
+            confirm_steps=[
+                "Open S3 Storage Lens (or the bucket's Intelligent-Tiering metrics) and read "
+                "the real split across the Frequent, Infrequent, and Archive tiers.",
+                "If most bytes never leave Frequent Access, the monitoring fee is buying you "
+                "nothing and S3 Standard (or Standard-IA with a lifecycle rule) is cheaper.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, nable reads your Cost and Usage Report line items for this "
+                        "bucket, sees the actual per-tier storage and the monitoring charge "
+                        "side by side, and confirms whether Intelligent-Tiering is net "
+                        "positive, no manual Storage Lens digging."),
+            remediation=[
+                "Confirm the tier split first (see steps above). Do not assume waste from the "
+                "monitoring fee alone.",
+                "If confirmed unhelpful, remove the Intelligent-Tiering configuration and set a "
+                "plain lifecycle policy. Existing objects keep their data, only the tiering "
+                "behavior changes.",
+            ],
+            resource_id=worst["bucket_name"],
+            metadata={
+                "monitoring_pct_of_savings": worst["monitoring_pct_of_savings"],
+                "avg_object_size_kb": worst["avg_object_size_kb"],
+                "object_count": worst["object_count"],
+            },
+        )
+        worst["finding"] = finding.to_dict()
+
     return findings

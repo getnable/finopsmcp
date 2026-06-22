@@ -20,6 +20,8 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 # Per 1M tokens pricing (input, output) as of 2026
@@ -366,9 +368,66 @@ def recommend_bedrock_model_routing(
             "or CloudWatch metrics were unavailable to assess token counts."
         )
 
+    # Classify the finding. Token counts are a real signal, but "this call is simple
+    # enough for Haiku" is a heuristic: average tokens do not tell us the call mix,
+    # and whether Haiku is good enough is a quality judgment only the customer can
+    # make. So this is an investigation, sized as a band, never a precise dollar
+    # claim. The 70%-eligible figure is an assumption, not a measurement.
+    finding = None
+    if routing_opportunities and total_monthly_savings > 50:
+        top = routing_opportunities[0]
+        models = ", ".join(o["current_model"] for o in routing_opportunities)
+        finding = Finding(
+            source="bedrock_routing",
+            title="Some Bedrock traffic may run fine on a cheaper model",
+            why=("Sonnet and Opus cost many times more per token than Haiku. Several of "
+                 "your high-cost models show short average inputs and outputs, the shape "
+                 "of classification, extraction, or lookup calls that Haiku often handles "
+                 "just as well. Routing those calls down would cut spend."),
+            evidence=INFERRED,
+            confidence="medium" if top["monthly_savings"] >= 500 else "low",
+            why_unsure=("Average token counts hint at simple calls, but an average hides "
+                        "the real mix: a model can average short while still serving hard "
+                        "calls that need Sonnet. We have not inspected actual prompts or "
+                        "measured quality on Haiku, so we cannot say which calls are safe "
+                        "to move or put a firm number on the saving."),
+            assumptions=[
+                "About 70% of the flagged invocations are simple enough to route to Haiku.",
+                "Haiku output quality is acceptable for those calls (a judgment you control).",
+                "Per-call cost holds steady after routing (no large prompt-size shift).",
+            ],
+            rough_monthly=total_monthly_savings,
+            confirm_steps=[
+                "Pick one flagged model and pull a sample of its real prompts, then sort "
+                "them into simple vs. reasoning-heavy. That gives the true eligible share.",
+                "Shadow-run the simple sample on Haiku and compare outputs against Sonnet "
+                "to confirm quality holds before you cut over.",
+                "Start with a small percentage routed to Haiku, watch your quality metrics, "
+                "then ramp.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, point nable at your Bedrock invocation logs (model invocation "
+                        "logging to S3/CloudWatch, plus CUR for line-item cost) and it measures "
+                        "the real simple-vs-complex mix per model and sizes the routable spend "
+                        "exactly, instead of inferring it from average token counts."),
+            remediation=[
+                "Confirm first: classify a real prompt sample and shadow-test Haiku quality.",
+                "Then wrap your Bedrock call in a router that sends only the confirmed-simple "
+                "calls to Haiku and keeps Sonnet for reasoning and long-context work.",
+                "Risk: routing too aggressively degrades answer quality. Roll out behind a "
+                "percentage flag and keep an easy path back to Sonnet.",
+            ],
+            metadata={
+                "models_flagged": models,
+                "top_model": top["current_model"],
+                "assumed_eligible_pct": top["eligible_invocations_pct"],
+            },
+        )
+
     return {
         "models_in_use": models_in_use,
         "routing_opportunities": routing_opportunities,
         "total_monthly_savings": round(total_monthly_savings, 2),
         "implementation_note": implementation_note,
+        "finding": finding.to_dict() if finding else None,
     }

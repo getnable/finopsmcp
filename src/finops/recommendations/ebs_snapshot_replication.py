@@ -17,6 +17,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .envelope import INFERRED, Finding
+
 log = logging.getLogger(__name__)
 
 try:
@@ -273,10 +275,83 @@ async def audit_ebs_snapshot_replication(
             per_region = _snapshot_monthly_cost(f["total_size_gb"], 1)
             saveable_cost += per_region
 
+    saveable_cost = round(saveable_cost, 2)
+
+    # Classify by strength of evidence. We genuinely see snapshots of one volume
+    # living in multiple regions, and orphaned status is checked against live
+    # volumes. But the dollar figure is an UPPER BOUND on purpose: it bills the
+    # full provisioned VolumeSize, while EBS snapshots are incremental (you pay
+    # only for changed blocks, often a small fraction of the volume). The real
+    # saving depends on actual snapshot storage, which describe_snapshots does not
+    # report. Because the number rests on that ceiling assumption, this is an
+    # investigation with a magnitude band, not a precise claim.
+    finding = None
+    saveable_findings = [
+        f for f in findings
+        if f["orphaned"] or f["excess_copies"] or f["has_old_copies"]
+    ]
+    if saveable_findings and saveable_cost > 5.0:
+        top = saveable_findings[0]
+        n_orphaned = sum(1 for f in saveable_findings if f["orphaned"])
+        n_excess = sum(1 for f in saveable_findings if f["excess_copies"] and not f["orphaned"])
+        reasons = []
+        if n_orphaned:
+            reasons.append(f"{n_orphaned} set(s) whose source volume no longer exists")
+        if n_excess:
+            reasons.append(f"{n_excess} set(s) copied into more than {_MAX_COPY_REGIONS} regions")
+        what = " and ".join(reasons) if reasons else "stale cross-region copies"
+
+        finding = Finding(
+            source="ebs_snapshot_replication",
+            title="Let's confirm how much your cross-region EBS snapshot copies actually cost",
+            why=("Some EBS snapshots are replicated across several regions and you pay "
+                 f"$0.05/GB-month for storage in each one. I see {what}, which look like "
+                 "DR copies that were never cleaned up."),
+            evidence=INFERRED,
+            confidence="medium",
+            why_unsure=("My cost figure bills the full provisioned volume size, but EBS "
+                        "snapshots are incremental: you are charged only for changed "
+                        "blocks, which is usually far less. So the real saving is somewhere "
+                        "between a fraction of this number and the full amount, and I can't "
+                        "size it exactly from the snapshot metadata alone."),
+            assumptions=[
+                "Snapshot storage is billed at the full provisioned VolumeSize (an upper "
+                "bound; real incremental storage is typically less).",
+                "Each extra region holds a full additional copy.",
+            ],
+            rough_monthly=saveable_cost,
+            confirm_steps=[
+                "Check the actual snapshot storage you are billed for per region in Cost "
+                "Explorer (filter to EBS snapshot usage type, group by region), then "
+                "compare against these volume sets.",
+                "For each orphaned set, confirm the source volume is truly gone in every "
+                "region before deleting the copies.",
+            ],
+            pro_can_confirm=True,
+            pro_unlock=("On Pro, nable reads your CUR line items and resolves the exact "
+                        "per-snapshot storage you are billed for in each region, so it can "
+                        "put a precise number on these copies instead of an upper bound."),
+            remediation=[
+                "Once you have confirmed the real cost, delete orphaned copies first "
+                "(their source volume is gone): aws ec2 delete-snapshot --snapshot-id <id> "
+                "in each region. Deletion is irreversible, so verify you have a current "
+                "copy of anything you still need before removing the extras.",
+            ],
+            resource_id=top.get("volume_id", ""),
+            metadata={
+                "top_volume_id": top.get("volume_id", ""),
+                "top_copy_regions": top.get("copy_regions", []),
+                "orphaned_sets": n_orphaned,
+                "excess_copy_sets": n_excess,
+                "cost_is_upper_bound": True,
+            },
+        )
+
     return {
         "cross_region_findings": findings,
         "total_cross_region_cost": total_cost,
-        "potential_monthly_savings": round(saveable_cost, 2),
+        "potential_monthly_savings": saveable_cost,
         "total_volume_sets": len(findings),
         "regions_scanned": regions,
+        "finding": finding.to_dict() if finding else None,
     }
