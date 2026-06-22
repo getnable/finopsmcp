@@ -2,8 +2,9 @@
 Anthropic API cost and usage connector.
 
 Tracks spend across Claude models via:
-  1. Anthropic Usage API (beta) — /v1/organizations/{org}/usage
-  2. Estimated from token counts × published prices (fallback)
+  1. Anthropic Cost API — /v1/organizations/cost_report (actual USD; needs an Admin key)
+  2. Anthropic Usage API (beta) — /v1/organizations/{org}/usage (token counts)
+  3. Estimated from token counts × published prices (fallback)
 
 Env vars:
   ANTHROPIC_API_KEY          — standard key
@@ -15,7 +16,7 @@ Published pricing (May 2026): https://www.anthropic.com/pricing
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -140,18 +141,37 @@ def get_costs(
     to their respective costs.
     """
     from ...security.env import get_env
-    api_key = get_env("ANTHROPIC_ADMIN_KEY") or get_env("ANTHROPIC_API_KEY")
-    org_id  = get_env("ANTHROPIC_ORGANIZATION_ID") or None
+    admin_key = get_env("ANTHROPIC_ADMIN_KEY")
+    api_key   = admin_key or get_env("ANTHROPIC_API_KEY")
+    org_id    = get_env("ANTHROPIC_ORGANIZATION_ID") or None
 
     if not api_key:
         return _empty("not_configured")
 
-    # Try org-level usage endpoint first
+    # Prefer the org Cost API: actual billed USD, not estimated. Requires an
+    # Admin key (sk-ant-admin...). When it works, the costs are authoritative.
+    if admin_key:
+        cost = get_cost_report(admin_key, start_date, end_date)
+        if cost.get("source") == "cost_api":
+            # The Cost API reports dollars, not token counts. Best-effort enrich
+            # by_model_tokens from the Usage API so the AI-KPI layer (cache hit
+            # rate, context-window utilisation) still has data; the dollar figures
+            # stay authoritative from the Cost API.
+            if org_id:
+                usage = _fetch_org_usage(admin_key, org_id, start_date, end_date)
+                if usage.get("by_model_tokens"):
+                    cost["by_model_tokens"] = usage["by_model_tokens"]
+                by_workspace = _fetch_by_workspace(admin_key, org_id, start_date, end_date)
+                if by_workspace:
+                    cost["by_workspace"] = by_workspace
+            return cost
+        # Cost API unavailable (not enterprise, missing permission, network):
+        # fall through to the usage/estimate path below.
+
+    # Org-level usage endpoint (estimated costs)
     if org_id:
         result = _fetch_org_usage(api_key, org_id, start_date, end_date)
         if result.get("source") == "api":
-            # Attempt to add workspace breakdown (enterprise only, silent fallback)
-            admin_key = get_env("ANTHROPIC_ADMIN_KEY")
             if admin_key:
                 by_workspace = _fetch_by_workspace(admin_key, org_id, start_date, end_date)
                 if by_workspace:
@@ -160,6 +180,102 @@ def get_costs(
 
     # Fall back to workspace-level token usage
     return _fetch_workspace_usage(api_key, start_date, end_date)
+
+
+def get_cost_report(
+    admin_key: str,
+    start_date: date,
+    end_date: date,
+) -> dict[str, Any]:
+    """
+    Fetch ACTUAL Anthropic costs (USD) from the organization Cost API:
+        GET /v1/organizations/cost_report
+
+    Returns the same shape as get_costs() (total_usd, by_model, daily) with
+    source="cost_api". Requires an Admin API key (sk-ant-admin...). The API
+    reports ``amount`` in the lowest currency unit (cents) as a decimal string,
+    so we divide by 100 for dollars. ``by_model_tokens`` is left empty here: the
+    Cost API reports dollars, not token counts (the Usage API path fills those).
+    Any HTTP/permission error returns an _empty() result so get_costs() can fall
+    back to the usage/estimate path.
+    """
+    try:
+        import httpx
+    except ImportError:
+        return _empty("httpx_missing")
+
+    # ending_at is exclusive (only buckets that END BEFORE it are returned), so
+    # add a day to include the full final day.
+    starting_at = f"{start_date.isoformat()}T00:00:00Z"
+    ending_at   = f"{(end_date + timedelta(days=1)).isoformat()}T00:00:00Z"
+    headers = {
+        "x-api-key": admin_key,
+        "anthropic-version": _ANTHROPIC_VERSION,
+        "content-type": "application/json",
+    }
+
+    total = 0.0
+    by_model: dict[str, float] = {}
+    daily: list[dict] = []
+    page: str | None = None
+
+    try:
+        for _ in range(24):  # pagination safety cap
+            params: dict[str, Any] = {
+                "starting_at":  starting_at,
+                "ending_at":    ending_at,
+                "bucket_width": "1d",
+                "group_by[]":   "description",  # per-model + token-type breakdown
+                "limit":        31,
+            }
+            if page:
+                params["page"] = page
+            resp = httpx.get(
+                f"{_API_BASE}/v1/organizations/cost_report",
+                params=params, headers=headers, timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            for bucket in data.get("data", []):
+                day = (bucket.get("starting_at") or "")[:10]
+                for item in bucket.get("results", []):
+                    try:
+                        usd = float(item.get("amount")) / 100.0  # amount is in cents
+                    except (TypeError, ValueError):
+                        continue
+                    if usd == 0.0:
+                        continue
+                    # model is null for non-token costs (web_search, etc.); fall
+                    # back to the cost_type so those still get a line item.
+                    label = item.get("model") or item.get("cost_type") or "other"
+                    total += usd
+                    by_model[label] = by_model.get(label, 0.0) + usd
+                    existing = next((d for d in daily if d["date"] == day), None)
+                    if existing:
+                        existing["total_usd"] = round(existing["total_usd"] + usd, 4)
+                        existing["by_model"][label] = round(
+                            existing["by_model"].get(label, 0.0) + usd, 4)
+                    elif day:
+                        daily.append({"date": day, "total_usd": round(usd, 4),
+                                      "by_model": {label: round(usd, 4)}})
+
+            if data.get("has_more") and data.get("next_page"):
+                page = data["next_page"]
+            else:
+                break
+    except Exception as e:
+        log.debug("Anthropic Cost API unavailable, falling back: %s", e)
+        return _empty("cost_api_unavailable")
+
+    return {
+        "total_usd":       round(total, 4),
+        "by_model":        {k: round(v, 4) for k, v in
+                            sorted(by_model.items(), key=lambda x: x[1], reverse=True)},
+        "by_model_tokens": {},
+        "daily":           sorted(daily, key=lambda d: d["date"]),
+        "source":          "cost_api",
+    }
 
 
 def _fetch_by_workspace(

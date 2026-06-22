@@ -1817,7 +1817,7 @@ def main(args: list[str] | None = None) -> None:
         ]),
         "anthropic": lambda: setup_saas_api_key("Anthropic", [
             ("ANTHROPIC_API_KEY", "API Key (sk-ant-...)", True),
-            ("ANTHROPIC_ADMIN_KEY", "Admin Key for org usage data (optional)", True),
+            ("ANTHROPIC_ADMIN_KEY", "Admin Key (sk-ant-admin-…) for actual billed costs via the Cost API + org usage (optional, recommended)", True),
             ("ANTHROPIC_ORGANIZATION_ID", "Organization ID (optional)", False),
         ]),
         "openrouter": lambda: setup_saas_api_key("OpenRouter", [
