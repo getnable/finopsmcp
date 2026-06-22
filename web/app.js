@@ -103,67 +103,6 @@ function useScrollTracking() {
     return () => observer.disconnect();
   }, []);
 }
-function EmailCapture({ source = "hero", placeholder = "email", btnLabel = "Get started", center = false }) {
-  const [email, setEmail] = useState("");
-  const [state, setState] = useState("idle");
-  async function submit(e) {
-    e.preventDefault();
-    if (!email || state === "loading" || state === "done") return;
-    setState("loading");
-    try {
-      const res = await fetch("/api/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, source })
-      });
-      if (!res.ok) throw new Error("subscribe failed");
-      if (window.posthog) posthog.capture("email_subscribed", { source });
-      setState("done");
-    } catch {
-      setState("error");
-      setTimeout(() => setState("idle"), 3e3);
-    }
-  }
-  if (state === "done") {
-    return /* @__PURE__ */ React.createElement("p", { style: {
-      fontFamily: "'Bricolage Grotesque',system-ui,sans-serif",
-      fontSize: 12,
-      color: "var(--accent)",
-      letterSpacing: ".02em",
-      textAlign: center ? "center" : "left",
-      marginTop: 8
-    } }, "Check your inbox. Setup guide on its way.");
-  }
-  return /* @__PURE__ */ React.createElement(
-    "form",
-    {
-      className: "email-capture" + (center ? " center" : ""),
-      onSubmit: submit,
-      style: { margin: center ? "0 auto" : "0" }
-    },
-    /* @__PURE__ */ React.createElement(
-      "input",
-      {
-        type: "email",
-        value: email,
-        onChange: (e) => setEmail(e.target.value),
-        placeholder,
-        required: true,
-        autoComplete: "email",
-        "aria-label": "Email"
-      }
-    ),
-    /* @__PURE__ */ React.createElement("button", { type: "submit", disabled: state === "loading" }, state === "loading" ? "..." : btnLabel, " ", /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")),
-    state === "error" && /* @__PURE__ */ React.createElement("span", { style: {
-      position: "absolute",
-      bottom: -20,
-      left: 0,
-      fontSize: 11,
-      color: "var(--alert)",
-      fontFamily: "'Bricolage Grotesque',system-ui,sans-serif"
-    } }, "Something went wrong. Try again.")
-  );
-}
 function LogoMark() {
   return /* @__PURE__ */ React.createElement("svg", { width: "26", height: "26", viewBox: "0 0 120 120", className: "mark-img", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("linearGradient", { id: "nmg", x1: "0", y1: "0", x2: "0", y2: "1" }, /* @__PURE__ */ React.createElement("stop", { offset: "0", stopColor: "#5cc1da" }), /* @__PURE__ */ React.createElement("stop", { offset: "1", stopColor: "#3a9ab6" }))), /* @__PURE__ */ React.createElement("rect", { width: "120", height: "120", rx: "27", fill: "url(#nmg)" }), /* @__PURE__ */ React.createElement("path", { d: "M44 80 L44 56 A16 16 0 0 1 76 56 L76 80", fill: "none", stroke: "#000000", strokeWidth: "13", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
@@ -260,33 +199,6 @@ function Hero() {
     if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "start_free" });
   } }, "Get started free ", /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192"))), /* @__PURE__ */ React.createElement("p", { className: "hero-trustline" }, "Every cloud + AI bill in ", /* @__PURE__ */ React.createElement("b", null, "one place"), " \xB7 works in any editor \xB7 free for solo use"))));
 }
-const CURSOR_DEEPLINK = "cursor://anysphere.cursor-deeplink/mcp/install?name=nable&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLXB5dGhvbiIsICIzLjEyIiwgImZpbm9wcy1tY3AiXX0=";
-const INSTALL_POPUPS = {
-  claude: {
-    title: "Install in Claude Desktop",
-    steps: [
-      /* @__PURE__ */ React.createElement(React.Fragment, null, "In your terminal, run the command below. ", /* @__PURE__ */ React.createElement("code", null, "finops welcome"), " writes your Claude Desktop config and stores credentials in your OS keychain."),
-      /* @__PURE__ */ React.createElement(React.Fragment, null, "Restart Claude Desktop. nable connects as a local MCP server.")
-    ],
-    cmdLabel: "In your terminal",
-    cmd: "uvx nable",
-    altCmd: "pip install -U finops-mcp && finops welcome",
-    note: "uv installs a matching Python for you, so this works on any setup. No uv? brew install uv. Runs on your machine, no nable backend."
-  },
-  openai: {
-    title: "Install in OpenAI Codex",
-    steps: [
-      /* @__PURE__ */ React.createElement(React.Fragment, null, "In your terminal, install nable and store credentials in your OS keychain:"),
-      /* @__PURE__ */ React.createElement(React.Fragment, null, "Add nable to your Codex MCP config below, then restart Codex.")
-    ],
-    cmdLabel: "In your terminal",
-    cmd: "uvx nable",
-    altCmd: "pip install -U finops-mcp && finops welcome",
-    toml: '[mcp_servers.nable]\ncommand = "uvx"\nargs = ["--python", "3.12", "finops-mcp"]',
-    tomlPath: "~/.codex/config.toml",
-    note: "uv installs a matching Python automatically. The ChatGPT app needs a hosted connector, on the roadmap."
-  }
-};
 function CopyCmd({ cmd }) {
   const [copied, setCopied] = useState(false);
   return /* @__PURE__ */ React.createElement("button", { className: "copycmd", onClick: () => {
@@ -296,67 +208,9 @@ function CopyCmd({ cmd }) {
     if (window.posthog) posthog.capture("install_copied");
   } }, /* @__PURE__ */ React.createElement("span", { className: "prompt" }, "$"), /* @__PURE__ */ React.createElement("span", { className: "cmd" }, cmd), /* @__PURE__ */ React.createElement("span", { className: "copylab" }, copied ? "copied" : "copy"));
 }
-function InstallPopup({ id, onClose }) {
-  const p = INSTALL_POPUPS[id];
-  if (!p) return null;
-  return /* @__PURE__ */ React.createElement("div", { className: "install-pop", role: "dialog", "aria-label": p.title }, /* @__PURE__ */ React.createElement("div", { className: "install-pop-head" }, /* @__PURE__ */ React.createElement("span", { className: "ipt" }, p.title), /* @__PURE__ */ React.createElement("button", { className: "ipx", onClick: onClose, "aria-label": "Close" }, "\xD7")), /* @__PURE__ */ React.createElement("ol", { className: "install-steps" }, p.steps.map((s, i) => /* @__PURE__ */ React.createElement("li", { key: i }, s))), p.cmdLabel && /* @__PURE__ */ React.createElement("span", { className: "install-cmdlabel" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3", strokeLinecap: "round", strokeLinejoin: "round" })), p.cmdLabel), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: p.cmd }), p.altCmd && /* @__PURE__ */ React.createElement("p", { className: "install-alt" }, "Already on Python 3.10+? ", /* @__PURE__ */ React.createElement("code", null, p.altCmd)), p.toml && /* @__PURE__ */ React.createElement("div", { className: "install-toml" }, /* @__PURE__ */ React.createElement("span", { className: "tomlpath" }, "Add to ", /* @__PURE__ */ React.createElement("code", null, p.tomlPath)), /* @__PURE__ */ React.createElement("pre", null, p.toml)), /* @__PURE__ */ React.createElement("p", { className: "install-pop-note" }, p.note));
-}
-const _CHEV = /* @__PURE__ */ React.createElement("svg", { className: "chev", width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.6", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M3 4.5l3 3 3-3", strokeLinecap: "round", strokeLinejoin: "round" }));
-function InstallRow() {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [popup, setPopup] = useState(null);
-  const openPopup = (id) => {
-    setPopup(id);
-    setMenuOpen(false);
-    if (window.posthog) posthog.capture("install_opened", { client: id });
-  };
-  return /* @__PURE__ */ React.createElement("div", { className: "installer", id: "install" }, /* @__PURE__ */ React.createElement("span", { className: "install-cmdlabel" }, /* @__PURE__ */ React.createElement("svg", { width: "12", height: "12", viewBox: "0 0 12 12", fill: "none", stroke: "currentColor", strokeWidth: "1.5", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M2.5 3.5L5 6l-2.5 2.5M6.5 8.5h3", strokeLinecap: "round", strokeLinejoin: "round" })), "Run this in your terminal"), /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" }), /* @__PURE__ */ React.createElement("div", { className: "install-editor" }, /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      className: "iclient" + (menuOpen ? " is-open" : ""),
-      "aria-expanded": menuOpen,
-      "aria-haspopup": "true",
-      onClick: () => setMenuOpen((o) => !o)
-    },
-    /* @__PURE__ */ React.createElement("span", null, "Install in your editor"),
-    _CHEV
-  ), menuOpen && /* @__PURE__ */ React.createElement("div", { className: "editor-menu", role: "menu" }, /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      className: "editor-opt",
-      role: "menuitem",
-      href: CURSOR_DEEPLINK,
-      onClick: () => {
-        setMenuOpen(false);
-        if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "add_to_cursor" });
-      }
-    },
-    /* @__PURE__ */ React.createElement("span", null, "Cursor"),
-    /* @__PURE__ */ React.createElement("span", { className: "eo-tag" }, "one click")
-  ), /* @__PURE__ */ React.createElement("button", { className: "editor-opt", role: "menuitem", onClick: () => openPopup("claude") }, /* @__PURE__ */ React.createElement("span", null, "Claude Desktop"), _CHEV), /* @__PURE__ */ React.createElement("button", { className: "editor-opt", role: "menuitem", onClick: () => openPopup("openai") }, /* @__PURE__ */ React.createElement("span", null, "OpenAI Codex"), _CHEV), /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      className: "editor-opt eo-more",
-      role: "menuitem",
-      href: "/docs.html#install",
-      onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "docs_install" });
-      }
-    },
-    "VS Code, Zed, Windsurf and more"
-  ))), popup && /* @__PURE__ */ React.createElement(InstallPopup, { id: popup, onClose: () => setPopup(null) }));
-}
 function fmtNum(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
   return String(n);
-}
-function TrustStrip() {
-  const items = [
-    { lab: "built-in tools", val: "160+", sub: "cost, anomaly, rightsizing" },
-    { lab: "providers", val: "17", sub: "AWS \xB7 Azure \xB7 GCP +" },
-    { lab: "on our servers", val: "0 bytes", sub: "nable has no backend" }
-  ];
-  return /* @__PURE__ */ React.createElement("div", { className: "trust" }, items.map((t, i) => /* @__PURE__ */ React.createElement("div", { className: "ti", key: i }, /* @__PURE__ */ React.createElement("span", { className: "lab" }, t.lab), /* @__PURE__ */ React.createElement("span", { className: "val mono" }, t.val))));
 }
 const QUERIES = [
   {
@@ -491,43 +345,6 @@ function Console({ interaction }) {
 function SeeItWork({ interaction }) {
   return /* @__PURE__ */ React.createElement("section", { id: "demo", className: "demo-sec" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head center" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "See it work"), /* @__PURE__ */ React.createElement("h2", null, "Ask your bill like you'd", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "ask a teammate.")), /* @__PURE__ */ React.createElement("p", null, "nable pulls every connected provider, normalizes to USD, and answers in plain English. Watch it run through real questions, or ask your own.")), /* @__PURE__ */ React.createElement("div", { className: "console-stage" }, /* @__PURE__ */ React.createElement(Console, { interaction }))));
 }
-function Thesis() {
-  const cards = [
-    { n: "01 \xB7 TAM", h: "Cloud spend is the #2 line item in modern software.", p: "$700B+ annual cloud + SaaS spend, growing 18% YoY. Every dollar is unaccountable until someone reconciles 8 dashboards and a CSV. That reconciliation work is the wedge." },
-    { n: "02 \xB7 Shift", h: "FinOps moved from a quarterly review to a real-time question.", p: 'AI editors made conversational access to live data the default interface. Asking "what spiked" is now cheaper than building a dashboard. The dashboard era is the legacy era.' },
-    { n: "03 \xB7 Moat", h: "Local-first compounds with every connector.", p: "Credentials in the OS keyring. No data lake. No SOC-2 surface area. Each new connector is a feature shipment, not a security review. Enterprise sells itself." }
-  ];
-  return /* @__PURE__ */ React.createElement("section", { id: "thesis" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Thesis"), /* @__PURE__ */ React.createElement("h2", null, "The dashboard ", /* @__PURE__ */ React.createElement("em", null, "was"), " the product.", /* @__PURE__ */ React.createElement("br", null), "The interface is the product now."), /* @__PURE__ */ React.createElement("p", null, "Three forces converge in 2026. nable is the runtime where they meet.")), /* @__PURE__ */ React.createElement("div", { className: "thesis" }, cards.map((c, i) => /* @__PURE__ */ React.createElement("div", { className: "thesis-card", key: i }, /* @__PURE__ */ React.createElement("span", { className: "n" }, c.n), /* @__PURE__ */ React.createElement("h3", null, c.h), /* @__PURE__ */ React.createElement("p", null, c.p))))));
-}
-function Depth() {
-  const cards = [
-    {
-      n: "01",
-      h: "Your biggest savings, in one question.",
-      p: "Ask 'where am I wasting money?' and get a ranked list of every opportunity across your infrastructure, sorted by dollar impact. No dashboard to configure. No report to schedule. No knowing what to look for. Just results.",
-      chips: ["ranked by $", "works day one", "no setup", "19 scanners"]
-    },
-    {
-      n: "02",
-      h: "From recommendation to merged PR.",
-      p: "Most tools stop at 'you should downsize that.' nable reads your Terraform, patches the file, and opens the pull request. After it merges, nable checks whether the saving actually landed and records the realized amount.",
-      chips: ["Terraform", "PR opened", "saving verified", "end-to-end"]
-    },
-    {
-      n: "03",
-      h: "AI spend tracked like a first-class cost.",
-      p: "Bedrock, OpenAI, Anthropic. These don't fit in the usual cost buckets. nable tracks AI spend by model and by team, so it shows up as a first-class line in every report instead of a mystery lump buried in the bill.",
-      chips: ["by model", "by team", "first-class", "AI-native"]
-    },
-    {
-      n: "04",
-      h: "Always-on, or on demand.",
-      p: "Ask in your editor whenever you want, or run `finops serve` for always-on monitoring that catches spikes 24/7. When spend jumps, nable attributes the anomaly to the team or service that caused it and alerts whoever owns it in Slack or Teams. Before finance notices.",
-      chips: ["always-on or on-demand", "team attribution", "Slack / Teams", "28-day baseline"]
-    }
-  ];
-  return /* @__PURE__ */ React.createElement("section", { id: "depth", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "What's under the hood"), /* @__PURE__ */ React.createElement("h2", null, "Not a pipe.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "An analyst.")), /* @__PURE__ */ React.createElement("p", null, "The value isn't connecting Claude to your bill. It's the analysis that runs before Claude ever responds.")), /* @__PURE__ */ React.createElement("div", { className: "depth-grid" }, cards.map((c, i) => /* @__PURE__ */ React.createElement("div", { className: "depth-card", key: i }, /* @__PURE__ */ React.createElement("span", { className: "depth-n" }, c.n), /* @__PURE__ */ React.createElement("h3", { className: "depth-h" }, c.h), /* @__PURE__ */ React.createElement("p", { className: "depth-p" }, c.p), /* @__PURE__ */ React.createElement("div", { className: "depth-chips" }, c.chips.map((ch, j) => /* @__PURE__ */ React.createElement("span", { key: j }, ch))))))));
-}
 function AiCost() {
   const copy = () => {
     if (navigator.clipboard) navigator.clipboard.writeText("uvx nable");
@@ -550,68 +367,6 @@ function Architecture({ version }) {
     "Talk to us about hosting ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   )))));
-}
-const STEPS = [
-  { n: "01", h: "Connect", p: "Point nable at AWS, Azure, GCP and 14 more sources. Credentials land in your OS keyring, never on our servers.", ex: "finops setup aws" },
-  { n: "02", h: "Ask", p: "Open Claude, Cursor, or any MCP editor and just ask. nable turns the question into live, read-only API calls.", ex: '"What drove our bill up last week?"' },
-  { n: "03", h: "Act", p: "Approve a rightsizing PR, open a ticket, post to Slack. Answers become actions, every one written to an audit log.", ex: '"Open a PR to downsize the idle instances."' }
-];
-function HowItWorks() {
-  return /* @__PURE__ */ React.createElement("section", { id: "how", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "How it works"), /* @__PURE__ */ React.createElement("h2", null, "Live in ", /* @__PURE__ */ React.createElement("em", null, "four minutes.")), /* @__PURE__ */ React.createElement("p", null, "No data pipeline. No dashboard to build. A single MCP entry turns any AI editor into a FinOps console.")), /* @__PURE__ */ React.createElement("div", { className: "steps" }, STEPS.map((s, i) => /* @__PURE__ */ React.createElement("div", { className: "step", key: i }, /* @__PURE__ */ React.createElement("div", { className: "step-n" }, s.n), /* @__PURE__ */ React.createElement("h3", { className: "step-h" }, s.h), /* @__PURE__ */ React.createElement("p", { className: "step-p" }, s.p), /* @__PURE__ */ React.createElement("div", { className: "step-ex" }, s.ex))))));
-}
-const EDITOR_TABS = [
-  { id: "terminal", label: "Terminal", bar: "bash", lines: [
-    { k: "cmd", t: "$ uvx nable" },
-    { k: "dim", t: "  fetching finops-mcp + a matching python\u2026" },
-    { k: "ok", t: "\u2713 runtime registered \xB7 ask nable in your editor" }
-  ] },
-  { id: "claudecode", label: "Claude Code", bar: "terminal claude cli \xB7 /plugin", lines: [
-    { k: "dim", t: "# in the terminal claude cli, run one at a time" },
-    { k: "cmd", t: "/plugin marketplace add chaandannn/finopsmcp" },
-    { k: "cmd", t: "/plugin install nable@nable" },
-    { k: "ok", t: "\u2713 nable installed \xB7 ask in your editor" }
-  ] },
-  { id: "claude", label: "Claude Desktop", bar: "claude_desktop_config.json", lines: [
-    { k: "p", t: "{" },
-    { k: "p", t: '  "mcpServers": {' },
-    { k: "p", t: '    "nable": {' },
-    { k: "p", t: '      "command": "uvx",' },
-    { k: "p", t: '      "args": ["--python", "3.12", "finops-mcp"]' },
-    { k: "p", t: "    }" },
-    { k: "p", t: "  }" },
-    { k: "p", t: "}" }
-  ] },
-  { id: "cursor", label: "Cursor", bar: "~/.cursor/mcp.json", lines: [
-    { k: "p", t: "{" },
-    { k: "p", t: '  "mcpServers": {' },
-    { k: "p", t: '    "nable": { "command": "uvx", "args": ["--python", "3.12", "finops-mcp"] }' },
-    { k: "p", t: "  }" },
-    { k: "p", t: "}" }
-  ] }
-];
-function EveryEditor() {
-  const [tab, setTab] = useState("terminal");
-  const active = EDITOR_TABS.find((t) => t.id === tab) || EDITOR_TABS[0];
-  const copy = () => {
-    if (navigator.clipboard) navigator.clipboard.writeText(active.lines.map((l) => l.t).join("\n"));
-    if (window.posthog) posthog.capture("cta_clicked", { location: "every_editor", cta: "copy_config", tab });
-  };
-  return /* @__PURE__ */ React.createElement("section", { id: "editors", className: "alt", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ee-grid" }, /* @__PURE__ */ React.createElement("div", { className: "ee-left" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Runtime"), /* @__PURE__ */ React.createElement("h2", null, "One entry.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Every editor.")), /* @__PURE__ */ React.createElement("p", { className: "ee-lede" }, "nable speaks the Model Context Protocol, so the same runtime works in whatever your team already uses. Drop in the config, restart, and ask."), /* @__PURE__ */ React.createElement("ul", { className: "ee-points" }, /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("span", { className: "ee-plus" }, "+"), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("b", null, "160+ tools"), " your AI can call, from a cost question to an open PR")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("span", { className: "ee-plus" }, "+"), /* @__PURE__ */ React.createElement("span", null, "Tracks ", /* @__PURE__ */ React.createElement("b", null, "AI spend by model"), " alongside cloud, Kubernetes, and SaaS")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("span", { className: "ee-plus" }, "+"), /* @__PURE__ */ React.createElement("span", null, "Real API integrations, with ", /* @__PURE__ */ React.createElement("b", null, "new connectors every month")))), /* @__PURE__ */ React.createElement("div", { className: "ee-runs" }, "RUNS IN ", /* @__PURE__ */ React.createElement("b", null, "CLAUDE"), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, "CURSOR"), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, "VS CODE"), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, "ZED"), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, "WINDSURF"), " \xB7 ", /* @__PURE__ */ React.createElement("b", null, "CLINE"))), /* @__PURE__ */ React.createElement("div", { className: "ee-right" }, /* @__PURE__ */ React.createElement("div", { className: "ee-panel" }, /* @__PURE__ */ React.createElement("div", { className: "ee-tabs" }, EDITOR_TABS.map((t) => /* @__PURE__ */ React.createElement("button", { key: t.id, className: "ee-tab" + (t.id === tab ? " on" : ""), onClick: () => setTab(t.id) }, t.label))), /* @__PURE__ */ React.createElement("div", { className: "ee-bar" }, /* @__PURE__ */ React.createElement("span", { className: "ee-dots" }, /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null), /* @__PURE__ */ React.createElement("i", null)), /* @__PURE__ */ React.createElement("span", { className: "ee-file" }, active.bar), /* @__PURE__ */ React.createElement("span", { className: "ee-copy", onClick: copy }, "copy")), /* @__PURE__ */ React.createElement("pre", { className: "ee-code" }, active.lines.map((l, i) => /* @__PURE__ */ React.createElement("div", { key: i, className: "ee-ln ee-" + l.k }, l.t))))))));
-}
-const QUESTIONS = [
-  "What drove our AWS bill up 40% last month?",
-  "Which Kubernetes namespace is over-provisioned?",
-  "Which EC2 instances should we downsize?",
-  "Compare our cloud spend vs SaaS spend.",
-  "Create a Jira ticket for any EC2 waste over $200/mo.",
-  "Which team is spending the most on Datadog?",
-  "What will our AWS bill look like next month?",
-  "Show me RDS instances with low CPU.",
-  "What's our effective discount rate from Savings Plans?",
-  "Find idle NAT Gateways and tag the owners."
-];
-function QMarquee() {
-  return /* @__PURE__ */ React.createElement("section", { className: "tight", style: { padding: "0", borderTop: "none" } }, /* @__PURE__ */ React.createElement("div", { className: "qmarq" }, /* @__PURE__ */ React.createElement("div", { className: "track" }, [...QUESTIONS, ...QUESTIONS].map((q, i) => /* @__PURE__ */ React.createElement("span", { className: "q", key: i }, q)))));
 }
 const CONNECTORS = [
   { nm: "AWS", px: "Cost Explorer \xB7 CUR via S3", tag: "live" },
@@ -780,30 +535,6 @@ function Pricing() {
     "Book a 20-min demo"
   ), " and we'll run it on your own bill.")));
 }
-function MidCta() {
-  return /* @__PURE__ */ React.createElement("section", { id: "mid-cta", style: { borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { paddingTop: 76, paddingBottom: 76 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", gap: 22, textAlign: "center" } }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h2", { style: { marginBottom: 12 } }, "Ready to stop guessing?"), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-2)", maxWidth: "38ch", margin: "0 auto", lineHeight: 1.55, textWrap: "balance" } }, "Minutes from install to your first real insight. Free forever for solo use.")), /* @__PURE__ */ React.createElement("div", { style: { display: "inline-flex", alignItems: "stretch", background: "var(--bg-1)", border: "1px solid var(--line-2)", borderRadius: "var(--r-md)", fontFamily: "var(--mono)", fontSize: 13.5, overflow: "hidden", maxWidth: "100%" } }, /* @__PURE__ */ React.createElement("span", { style: { padding: "12px 13px", color: "var(--fg-3)", background: "var(--bg-2)", borderRight: "1px solid var(--line)" } }, "$"), /* @__PURE__ */ React.createElement("span", { style: { padding: "12px 16px", color: "var(--fg)", whiteSpace: "nowrap", overflowX: "auto" } }, "uvx nable")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "center" } }, /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      href: "/docs.html#install",
-      className: "btn btn-primary",
-      onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "mid_cta", cta: "start_free" });
-      }
-    },
-    "Get started free ",
-    /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
-  ), /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      href: "/docs.html",
-      className: "btn btn-ghost",
-      onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "mid_cta", cta: "docs" });
-      }
-    },
-    "Read the docs"
-  )))));
-}
 function FootCta() {
   return /* @__PURE__ */ React.createElement("section", { className: "foot-cta", id: "cta" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "foot-label" }, /* @__PURE__ */ React.createElement("span", { className: "foot-dash" }), "Get started"), /* @__PURE__ */ React.createElement("h2", { className: "display" }, "One command.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Then just ask.")), /* @__PURE__ */ React.createElement("div", { className: "foot-cta-actions" }, /* @__PURE__ */ React.createElement("div", { className: "foot-install" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" })), /* @__PURE__ */ React.createElement(
     "a",
@@ -818,9 +549,6 @@ function FootCta() {
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   ))));
 }
-function FounderNote() {
-  return /* @__PURE__ */ React.createElement("section", { id: "founder", style: { borderTop: "1px solid var(--line)" } }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { maxWidth: 680, paddingTop: 80, paddingBottom: 80 } }, /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Bricolage Grotesque',system-ui,sans-serif", fontWeight: 500, fontSize: 11, color: "var(--accent-dim)", letterSpacing: ".08em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 10, marginBottom: 24 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 24, height: 1, background: "var(--accent-dim)", display: "inline-block" } }), "Why I built this"), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 28 } }, "I built this because I spent most of my day bouncing between dashboards that barely showed what I actually needed, the AWS console, and Claude. I'd ask Claude a question, manually paste in numbers, get an answer, then go back and repeat the whole thing."), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 28 } }, "A lot of FinOps tools are shipping MCP integrations now. But they're all built for enterprise, priced for enterprise, and none of them fit the way I actually work. They give you visibility. They don't help you think."), /* @__PURE__ */ React.createElement("p", { style: { fontSize: 17, lineHeight: 1.75, color: "var(--fg-2)", marginBottom: 36 } }, "nable solves the problems I actually had. The recommendations go deeper than anything I've seen out of the box, and for the first time I can actually reason through my own optimization opportunities instead of just staring at a graph."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement("div", { style: { width: 40, height: 40, borderRadius: "50%", background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600, color: "var(--bg)" } }, "CB")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 500, color: "var(--fg)" } }, "Chandan Bukkapatnam"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: "var(--fg-3)" } }, "Founder \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "mailto:chandan@getnable.com", target: "_blank", rel: "noopener noreferrer", style: { color: "var(--accent)" } }, "chandan@getnable.com"))))));
-}
 function Footer({ version }) {
   return /* @__PURE__ */ React.createElement("footer", null, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "foot" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("a", { href: "#top", className: "logo", style: { marginBottom: 18 } }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, "nable")), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-3)", fontSize: 13, maxWidth: "34ch", lineHeight: 1.55, marginTop: 10 } }, "Your cloud and AI bill, answered. Made in Austin, TX.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Product"), /* @__PURE__ */ React.createElement("a", { href: "#demo" }, "Demo"), /* @__PURE__ */ React.createElement("a", { href: "#connectors" }, "Connectors"), /* @__PURE__ */ React.createElement("a", { href: "#pricing" }, "Pricing"), /* @__PURE__ */ React.createElement(
     "a",
@@ -834,103 +562,6 @@ function Footer({ version }) {
     },
     "Book a demo"
   )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Resources"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html" }, "Docs"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html#quickstart" }, "Quickstart"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html#iam" }, "IAM templates"), /* @__PURE__ */ React.createElement("a", { href: "/security" }, "Security")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Company"), /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About"), /* @__PURE__ */ React.createElement("a", { href: "/about#investors" }, "Investors"), /* @__PURE__ */ React.createElement("a", { href: "mailto:hello@getnable.com", target: "_blank", rel: "noopener noreferrer" }, "Contact"), /* @__PURE__ */ React.createElement("a", { href: "https://github.com/chaandannn/finopsmcp", target: "_blank", rel: "noopener noreferrer" }, "GitHub"), /* @__PURE__ */ React.createElement("a", { href: "https://www.linkedin.com/company/getnable/", target: "_blank", rel: "noopener noreferrer" }, "LinkedIn"))), /* @__PURE__ */ React.createElement("div", { className: "foot-meta" }, /* @__PURE__ */ React.createElement("span", null, "2026 nable \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/privacy", style: { color: "var(--fg-3)" } }, "Privacy"), " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/terms", style: { color: "var(--fg-3)" } }, "Terms")), /* @__PURE__ */ React.createElement("span", null, "nable \xB7 runtime healthy"))));
-}
-const FAQ_ITEMS = [
-  {
-    q: "How is this different from just asking Claude?",
-    a: "Without nable, you copy numbers from dashboards and paste them into Claude. That works for simple questions. But Claude won't know to cross-reference CloudWatch metrics against Compute Optimizer, run Z-score detection against a 28-day baseline, model your Savings Plan coverage gap, or read your Terraform state to find which resource needs changing. nable ships all of that analysis pre-built. When it surfaces a rightsizing rec, it goes further: reads your Terraform state, patches the .tf file, and opens the PR. The finding and the fix happen in the same conversation."
-  },
-  {
-    q: "Where do my credentials and billing data go?",
-    a: "Your credentials are stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and never leave your machine. Cost data is cached in a local SQLite database on your machine. nable has no backend, so we never see your cost data or credentials, and there is no vendor data lake to breach. One honest caveat: when you ask a question in your AI editor, the cost figures nable returns are sent to your editor's own AI model to answer the question, the same as anything else you put in that chat. That is the editor's model, not a nable server, and if your org needs zero AI exposure you can use the local dashboard (finops serve) or CLI, which never touch a model. We also collect anonymous, opt-out usage telemetry (which tools you call, your plan tier, and how many providers you connect) via PostHog, never cost figures, account IDs, or credentials."
-  },
-  {
-    q: "What editors does it work with?",
-    a: "Claude Desktop, Cursor, Windsurf, Zed, and anything that supports MCP. The setup wizard configures your editor automatically. If you use multiple editors, run the wizard once per editor."
-  },
-  {
-    q: "How long does setup take?",
-    a: "A few minutes. Run `uvx nable` (uv fetches a matching Python and runs the setup wizard, no PATH setup needed), or `pip install -U finops-mcp && finops welcome` if you're already on Python 3.10+. The wizard connects Claude, connects your cloud, and shows your first cost number right in the terminal. Want to see it first? `uvx nable welcome --demo` runs it on sample data."
-  },
-  {
-    q: "Is the free tier actually free?",
-    a: "Yes. No credit card, no expiry. The free tier includes cost queries, anomaly detection, rightsizing recommendations, and all 17 connectors. Team, one flat $100 a month for your whole team, adds remediation PRs, tickets, digests, commitment analysis, dashboards and the conversational Slack bot."
-  },
-  {
-    q: "I only have one AWS account. Is this worth it?",
-    a: "Yes. Rightsizing and anomaly detection alone are usually worth it. Most people find savings in the first session. You can add more providers later."
-  },
-  {
-    q: "Do you support multiple AWS accounts or organizations?",
-    a: "Yes. Run `finops setup aws --add` to connect additional accounts. You can query across all of them in a single conversation. Org-wide rollups across accounts are included in Team."
-  },
-  {
-    q: "Does it work in AWS GovCloud?",
-    a: "Yes. nable runs entirely on your machine and queries your cloud provider APIs directly. There are no nable servers in the middle, no data lake, and no SaaS authorization required. It works with GovCloud regions (us-gov-west-1, us-gov-east-1) the same as commercial regions."
-  }
-];
-function FAQ() {
-  const [open, setOpen] = useState(null);
-  return /* @__PURE__ */ React.createElement("section", { id: "faq", className: "alt" }, /* @__PURE__ */ React.createElement("div", { className: "wrap", style: { maxWidth: 720, paddingTop: 80, paddingBottom: 80 } }, /* @__PURE__ */ React.createElement("div", { style: { fontFamily: "'Bricolage Grotesque',system-ui,sans-serif", fontWeight: 500, fontSize: 11, color: "var(--accent-dim)", letterSpacing: ".08em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 10, marginBottom: 18 } }, /* @__PURE__ */ React.createElement("span", { style: { width: 24, height: 1, background: "var(--accent-dim)", display: "inline-block" } }), "FAQ"), /* @__PURE__ */ React.createElement("h2", { style: { marginBottom: 48 } }, "Questions we actually get."), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexDirection: "column" } }, FAQ_ITEMS.map((item, i) => {
-    const isOpen = open === i;
-    return /* @__PURE__ */ React.createElement("div", { key: i, style: {
-      borderBottom: "1px solid var(--line)"
-    } }, /* @__PURE__ */ React.createElement(
-      "button",
-      {
-        className: "faq-q",
-        onClick: () => setOpen(isOpen ? null : i),
-        style: {
-          width: "100%",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "22px 0",
-          background: "none",
-          border: "none",
-          color: isOpen ? "var(--fg)" : "var(--fg-2)",
-          fontFamily: "'Bricolage Grotesque',system-ui,sans-serif",
-          fontSize: 16,
-          fontWeight: 500,
-          textAlign: "left",
-          cursor: "pointer",
-          gap: 16,
-          transition: "color .15s"
-        },
-        "aria-expanded": isOpen
-      },
-      /* @__PURE__ */ React.createElement("span", null, item.q),
-      /* @__PURE__ */ React.createElement("span", { className: "faq-plus", style: {
-        flexShrink: 0,
-        width: 22,
-        height: 22,
-        borderRadius: "50%",
-        border: "1px solid var(--line-2)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "var(--fg-3)",
-        fontSize: 16,
-        transition: "transform .2s",
-        transform: isOpen ? "rotate(45deg)" : "none"
-      } }, "+")
-    ), isOpen && /* @__PURE__ */ React.createElement("p", { style: {
-      fontSize: 15,
-      lineHeight: 1.7,
-      color: "var(--fg-2)",
-      paddingBottom: 20,
-      margin: 0
-    } }, item.a));
-  })), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 48, display: "flex", alignItems: "center", gap: 12 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14, color: "var(--fg-3)" } }, "Still have questions?"), /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      href: "mailto:hello@getnable.com?subject=nable%20question",
-      target: "_blank",
-      rel: "noopener noreferrer",
-      style: { fontSize: 14, color: "var(--accent)", textDecoration: "none", fontWeight: 500 }
-    },
-    "Email us directly \u2192"
-  ))));
 }
 const PALETTE_OPTIONS = [
   { value: "onyx", label: "Onyx", swatch: ["#0a0a0c", "#5fe8a0", "#15151a"] },
