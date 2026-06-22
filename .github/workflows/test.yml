@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# Least-privilege token: the test job only checks out and runs pytest, so it
+# needs read access and nothing else. Satisfies the Scorecard Token-Permissions
+# check and limits blast radius if a dependency in CI were ever compromised.
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref so a fast follow-up push doesn't
 # queue behind a stale one.
 concurrency:
