@@ -19,6 +19,13 @@ services:
       # Team mode with shared Postgres (set FINOPS_DATABASE_URL to enable)
       FINOPS_DATABASE_URL: "${FINOPS_DATABASE_URL:-}"
       FINOPS_REQUIRE_AUTH: "${FINOPS_REQUIRE_AUTH:-0}"
+      # Hosted control-plane login (managed single-tenant). When BOTH are set, the
+      # getnable.com account can mint a one-click login into this instance. Leave
+      # both blank for a self-hosted box (password/SSO login only). The secret is
+      # derived per instance: hmac_sha256_hex(CP_MASTER_SECRET, "nable-instance:"+id).
+      # See docs/PROVISIONING.md and deploy/provision-tenant.sh.
+      FINOPS_INSTANCE_ID: "${FINOPS_INSTANCE_ID:-}"
+      FINOPS_CONTROL_PLANE_SECRET: "${FINOPS_CONTROL_PLANE_SECRET:-}"
       # --- Finance interfaces (so non-engineers consume nable without installing) ---
       # Scheduler pushes snapshots, anomaly alerts, and daily/weekly digests.
       # On by default in the deploy: this is the always-on host, not a laptop.
