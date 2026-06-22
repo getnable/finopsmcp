@@ -20,6 +20,7 @@ env/
 *.env
 .env.local
 .env.*.local
+tenants/
 finops_vault.db
 finops.db
 *.db
