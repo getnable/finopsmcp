@@ -116,6 +116,78 @@ def pick_tier(text: str) -> str:
     return "chat"
 
 
+# ── Efficiency router ─────────────────────────────────────────────────────────
+# A cost tool must not default to an expensive model. The router picks the
+# CHEAPEST tier that fits the task and escalates only on a real signal, then
+# clamps by the account's remaining managed-AI credit so spend can never run past
+# what was prepaid. It chooses a difficulty TIER; model_for_tier resolves the
+# actual model, and the per-tier env overrides can repoint a tier at any vetted
+# provider (Anthropic direct, Bedrock, Vertex) without touching this logic.
+
+# Signals that a question is analytical enough to warrant the mid tier (Sonnet)
+# rather than the cheap tier (Haiku). RCA triggers (above) escalate further to Opus.
+_CHAT_SIGNALS = (
+    "compare", "optimi", "forecast", "break down", "breakdown", "recommend",
+    "audit", "across", "commitment", "savings plan", "reserved", "rightsiz",
+    "unit economic", "scenario", "trend", "by team", "by service", "by tag",
+    "should i", "how much would", "what if",
+)
+
+# Cheaper turns get tighter tool budgets: fewer tool calls means fewer tokens.
+_TIER_TOOL_CAP = {"simple": 6, "chat": 10, "rca": _MAX_TOOL_CALLS}
+
+
+@dataclass
+class RouteDecision:
+    tier: str
+    model: str
+    max_tool_calls: int
+    reason: str
+    blocked: bool = False
+
+
+def route_request(
+    message: str,
+    *,
+    agent: str | None = None,
+    budget_remaining: float | None = None,
+    budget_total: float | None = None,
+) -> RouteDecision:
+    """Pick the cheapest model that fits the task, then clamp by budget.
+
+    budget_remaining / budget_total are dollars of managed-AI credit for the
+    account. None means no managed budget applies (for example BYO-key), so the
+    router never blocks or degrades."""
+    text = (message or "").lower()
+
+    # 1. Out of credit: block. The surface offers a top-up or a BYO key.
+    if budget_remaining is not None and budget_remaining <= 0:
+        return RouteDecision("simple", model_for_tier("simple"), 4,
+                             "managed-AI budget exhausted", blocked=True)
+
+    # 2. Difficulty. Default to the cheap tier; escalate only on a real signal.
+    if any(t in text for t in _RCA_TRIGGERS) or agent == "rca":
+        tier = "rca"
+    elif (agent in ("reco", "arch") or len(text) > 220
+          or any(s in text for s in _CHAT_SIGNALS)):
+        tier = "chat"
+    else:
+        tier = "simple"
+    reason = f"matched {tier}"
+
+    # 3. Budget-aware degrade: as credit runs low, drop the expensive tiers so the
+    #    remaining budget stretches and the account stays margin-positive.
+    if budget_total and budget_remaining is not None and budget_total > 0:
+        frac = budget_remaining / budget_total
+        if frac < 0.15 and tier == "rca":
+            tier, reason = "chat", "downgraded rca to chat (low budget)"
+        if frac < 0.05 and tier in ("rca", "chat"):
+            tier, reason = "simple", "downgraded to simple (very low budget)"
+
+    return RouteDecision(tier, model_for_tier(tier),
+                         _TIER_TOOL_CAP.get(tier, _MAX_TOOL_CALLS), reason)
+
+
 @dataclass
 class LoopResult:
     answer: str

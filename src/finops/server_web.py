@@ -2258,19 +2258,31 @@ button:hover{{filter:brightness(1.1)}}
             if not question:
                 self._send(400, "application/json", b'{"error":"empty question"}')
                 return
-            preset = _SANDBOX_AGENTS.get((body.get("agent") or "").strip(), "")
+            agent_key = (body.get("agent") or "").strip()
+            preset = _SANDBOX_AGENTS.get(agent_key, "")
             prompt = (preset + "\n\n" + question) if preset else question
             hist = body.get("history")
             history = ([h for h in hist if isinstance(h, dict) and h.get("role") and h.get("content")]
                        if isinstance(hist, list) else None)
             try:
-                from .slack_bot.llm import ask, model_for_tier, record_managed_ai_usage
-                result = ask(prompt, tier="simple", history=history)
+                from .slack_bot.llm import ask, route_request, record_managed_ai_usage
+                # Efficiency router: cheapest model that fits the task, clamped by
+                # budget. budget_* are None here (no managed-credit ledger yet), so it
+                # routes by difficulty without blocking. Pass the account's remaining
+                # credit once the ledger exists to enable the degrade and block.
+                decision = route_request(question, agent=(agent_key or None))
+                if decision.blocked:
+                    self._send(200, "application/json", json.dumps({
+                        "answer": "You're out of managed AI for this month. Add credits or "
+                                  "bring your own key to keep going.", "cards": []}).encode())
+                    return
+                result = ask(prompt, tier=decision.tier, history=history,
+                             max_tool_calls=decision.max_tool_calls)
                 side = result.side_effects or []
                 cards = [se["card"] for se in side
                          if isinstance(se, dict) and se.get("type") == "cost_card" and se.get("card")]
                 record_managed_ai_usage(
-                    surface="sandbox_chat", tier="simple", model=model_for_tier("simple"),
+                    surface="sandbox_chat", tier=decision.tier, model=decision.model,
                     input_tokens=getattr(result, "input_tokens", 0),
                     output_tokens=getattr(result, "output_tokens", 0),
                 )
