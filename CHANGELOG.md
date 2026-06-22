@@ -2,6 +2,19 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.86
+
+Anthropic costs now come from the actual billed Cost API, not estimates.
+
+### Connectors
+- **Anthropic Cost API.** Anthropic released the organization Cost API
+  (`/v1/organizations/cost_report`). nable now pulls actual billed dollars from it
+  instead of estimating from token counts × list prices. It activates
+  automatically when an Anthropic Admin key is configured (the setup wizard
+  collects it) and falls back to the usage-based estimate otherwise. Token-based
+  KPIs (cache hit rate, context-window use) keep working, enriched from the
+  Usage API.
+
 ## 0.8.85
 
 Easier AWS connect: one-click CloudFormation in the setup wizard.
