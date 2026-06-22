@@ -113,6 +113,7 @@ def test_first_cost_query_success_not_fired_in_demo_mode(monkeypatch):
     # the demo dataset, never their own real cost number.
     import finops.demo_data as demo_data
     monkeypatch.setattr(demo_data, "DEMO_MODE", True)
+    monkeypatch.setattr(demo_data, "_real_provider_connected", lambda: False)
     server._first_cost_query_fired = False
     seen = _record_events(monkeypatch)
 

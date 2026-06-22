@@ -335,6 +335,41 @@ def test_managed_instance_forces_demo_off(monkeypatch):
 def test_demo_mode_honored_when_not_managed(monkeypatch):
     import finops.demo_data as dd
     monkeypatch.setattr(dd, "DEMO_MODE", True)
+    monkeypatch.setattr(dd, "_real_provider_connected", lambda: False)  # nothing connected
     monkeypatch.delenv("FINOPS_CONTROL_PLANE_SECRET", raising=False)
     monkeypatch.delenv("FINOPS_INSTANCE_ID", raising=False)
     assert dd.is_demo() is True
+
+
+def test_demo_yields_when_a_real_provider_is_connected(monkeypatch):
+    # The bug: demo data kept showing after the user connected a real account.
+    # Demo must step aside the moment a provider is connected, so they see their
+    # real numbers, not the canned dataset.
+    import finops.demo_data as dd
+    monkeypatch.setattr(dd, "DEMO_MODE", True)
+    monkeypatch.delenv("FINOPS_CONTROL_PLANE_SECRET", raising=False)
+    monkeypatch.delenv("FINOPS_INSTANCE_ID", raising=False)
+    monkeypatch.delenv("FINOPS_DEMO_FORCE", raising=False)
+    monkeypatch.setattr(dd, "_real_provider_connected", lambda: True)
+    assert dd.is_demo() is False
+
+
+def test_demo_force_overrides_a_connected_provider(monkeypatch):
+    # FINOPS_DEMO_FORCE keeps demo on even with a real account connected, for
+    # recording a demo on a machine that has real credentials.
+    import finops.demo_data as dd
+    monkeypatch.setattr(dd, "DEMO_MODE", True)
+    monkeypatch.delenv("FINOPS_CONTROL_PLANE_SECRET", raising=False)
+    monkeypatch.delenv("FINOPS_INSTANCE_ID", raising=False)
+    monkeypatch.setattr(dd, "_real_provider_connected", lambda: True)
+    monkeypatch.setenv("FINOPS_DEMO_FORCE", "1")
+    assert dd.is_demo() is True
+
+
+def test_real_provider_detected_from_env_credential(monkeypatch):
+    # The connect-then-restart path: a provider credential lands in os.environ at
+    # startup, so a cred in the env is enough to flip demo off.
+    import finops.demo_data as dd
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE")
+    monkeypatch.setattr(dd, "_real_provider_cache", None)  # bust the short cache
+    assert dd._real_provider_connected() is True

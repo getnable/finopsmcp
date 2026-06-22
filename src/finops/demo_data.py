@@ -16,6 +16,7 @@ names, and cost numbers appear across all tools so the demo flows naturally.
 from __future__ import annotations
 
 import os
+import time
 from datetime import date, timedelta
 from typing import Any
 
@@ -38,13 +39,61 @@ def _managed_instance() -> bool:
     )
 
 
+# Vault keys that mean a real cloud provider has been connected. setup stores AWS
+# under AWS_ACCESS_KEY_ID / AWS_ROLE_ARNS, Azure and GCP under theirs. If any is
+# present, the user connected a real account, so demo data must step aside.
+_PROVIDER_CRED_KEYS = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_ROLE_ARNS",
+    "AZURE_TENANT_ID",
+    "AZURE_SUBSCRIPTION_IDS",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "_GCP_SERVICE_ACCOUNT_JSON",
+    "GCP_BILLING_ACCOUNT_IDS",
+)
+
+_real_provider_cache: "tuple[float, bool] | None" = None
+
+
+def _real_provider_connected() -> bool:
+    """True once a real cloud provider is connected. Cheap and cached briefly so
+    is_demo stays free on the hot path. Fast path: a connect mirrors credentials
+    into os.environ at startup, so a cred already in the env means a real account
+    (covers the common connect-then-restart). Fallback: read the vault live, to
+    catch a provider connected mid-session before the process restarted."""
+    global _real_provider_cache
+    now = time.monotonic()
+    if _real_provider_cache is not None and _real_provider_cache[0] > now:
+        return _real_provider_cache[1]
+    found = any(os.environ.get(k) for k in _PROVIDER_CRED_KEYS)
+    if not found:
+        try:
+            from .security.vault import Vault
+
+            keys = set(Vault.default().list_keys())
+            found = any(k in keys for k in _PROVIDER_CRED_KEYS)
+        except Exception:
+            found = False
+    _real_provider_cache = (now + 30.0, found)
+    return found
+
+
 def is_demo() -> bool:
     # A managed hosted instance never serves demo data, even if FINOPS_DEMO is set
     # by a stray env. A paying customer must get real numbers and the real model,
     # never the canned demo_data stubs.
     if _managed_instance():
         return False
-    return DEMO_MODE
+    if not DEMO_MODE:
+        return False
+    # Demo yields to real data: the moment a real provider is connected, show the
+    # real numbers, not the canned demo. FINOPS_DEMO_FORCE=1 keeps demo on even
+    # then, for recording a demo on a machine that has a real account connected.
+    if os.environ.get("FINOPS_DEMO_FORCE", "").lower() in _TRUTHY:
+        return True
+    if _real_provider_connected():
+        return False
+    return True
 
 
 # ── Shared demo constants (internally consistent across all tools) ────────────
