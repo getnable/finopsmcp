@@ -345,6 +345,23 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .section-head h2{font-size:clamp(34px,4vw,52px);line-height:1.04;letter-spacing:-.035em;font-weight:300}
 .section-head h2 em{font-style:italic;font-weight:400;color:var(--accent)}
 .section-head p{margin-top:20px;color:var(--fg-2);font-size:16px;line-height:1.65;max-width:60ch}
+/* Hero agentic sub-line */
+.hero-sub{margin:22px auto 0;max-width:58ch;font-size:clamp(15px,1.5vw,18px);line-height:1.55;color:var(--fg-2);text-align:center}
+/* Generic centered section head (demo-sec already has its own) */
+.section-head.center{max-width:680px;margin-left:auto;margin-right:auto;text-align:center}
+.section-head.center .label{justify-content:center}
+.section-head.center p{margin-left:auto;margin-right:auto}
+/* The loop: propose -> verify -> learn */
+.loop-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.loop-step{padding:28px 26px;background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-xl);display:flex;flex-direction:column;gap:10px}
+.loop-n{font-family:var(--font-mono);font-size:12px;color:var(--accent);letter-spacing:.06em}
+.loop-step h3{font-size:19px;font-weight:500;letter-spacing:-.02em;margin:0;color:var(--fg)}
+.loop-step p{font-size:14px;line-height:1.6;color:var(--fg-2);margin:0}
+/* Verified-savings band */
+.proof-band{padding:104px 0;text-align:center;position:relative;background:radial-gradient(ellipse 70% 60% at 50% 50%, rgba(77,184,212,.05), transparent 70%)}
+.proof-line{max-width:900px;margin:0 auto;font-size:clamp(30px,4vw,50px);line-height:1.12;letter-spacing:-.03em;font-weight:300;color:var(--fg)}
+.proof-line em{font-style:italic;font-weight:400;color:var(--accent)}
+@media(max-width:760px){.loop-grid{grid-template-columns:1fr}}
 
 /* thesis */
 .thesis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0}

@@ -191,6 +191,7 @@ function Hero(){
           <h1 className="display">
             Stop guessing why cloud costs went up. <span className="h1-ask">Ask.</span>
           </h1>
+          <p className="hero-sub">Then it finds the waste, writes the fix for you to approve, and proves the savings on your next bill.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
             <a className="btn btn-primary" href="/docs.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
@@ -948,6 +949,49 @@ function Tweaks(){
 }
 
 /* App */
+/* The loop: what makes nable an agent, not a dashboard */
+function Loop(){
+  return (
+    <section id="loop" className="alt" style={{borderTop:"1px solid var(--line)"}}>
+      <div className="wrap">
+        <div className="section-head center">
+          <div className="label">How it works</div>
+          <h2>Most tools show you the problem.<br/><em>nable fixes it.</em></h2>
+          <p>Other cost tools just tell you the bill went up. nable finds what caused it, writes the fix, and proves the savings, getting smarter about your setup every time.</p>
+        </div>
+        <div className="loop-grid">
+          <div className="loop-step">
+            <div className="loop-n">01</div>
+            <h3>Find the cause</h3>
+            <p>It points to the exact change that drove your bill up, down to the day it happened, so you stop digging through dashboards.</p>
+          </div>
+          <div className="loop-step">
+            <div className="loop-n">02</div>
+            <h3>Fix it</h3>
+            <p>It writes the fix and waits for your go-ahead. nable never changes anything on its own. You're always in control.</p>
+          </div>
+          <div className="loop-step">
+            <div className="loop-n">03</div>
+            <h3>Prove it</h3>
+            <p>After you approve, it checks your next bill to confirm the money was really saved, then learns what works for you and gets smarter every time.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* The payoff: verified, learning savings (the differentiation people miss) */
+function ProofBand(){
+  return (
+    <section className="proof-band">
+      <div className="wrap">
+        <p className="proof-line">Every other tool claims a number. <em>nable proves it on your bill</em>, and gets smarter every week.</p>
+      </div>
+    </section>
+  );
+}
+
 function App(){
   const [t, setT] = useState(TWEAK_DEFAULTS);
   const [version, setVersion] = useState(null);
@@ -990,6 +1034,8 @@ function App(){
       <Nav />
       <Hero />
       <SeeItWork interaction={t.interaction} />
+      <Loop />
+      <ProofBand />
       <AiCost />
       <Connectors />
       <Architecture version={version} />
