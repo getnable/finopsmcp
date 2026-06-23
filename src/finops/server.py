@@ -1036,6 +1036,8 @@ async def compare_providers(
         - "Compare our SaaS tool spending"
         - "How does AWS compare to Azure and GCP?"
     """
+    if (err := require_pro("cross_cloud")):
+        return err
     sd, ed = _default_dates()
     if start_date:
         sd = date.fromisoformat(start_date)
@@ -1302,6 +1304,8 @@ async def get_total_spend_all_sources(
         - "How much are we spending on everything combined?"
         - "Give me our full cloud + software cost picture"
     """
+    if (err := require_pro("cross_cloud")):
+        return err
     sd, ed = _default_dates()
     if start_date:
         sd = date.fromisoformat(start_date)
@@ -1433,6 +1437,8 @@ async def set_alert_policy(
         - "Only alert on changes over $500, ignore tiny fluctuations"
         - "Set a 50% threshold for Support charges"
     """
+    if (err := require_pro("alerts")):
+        return err
     if err := require_role("analyst"):
         return err
     try:
@@ -1916,6 +1922,8 @@ async def send_digest_now() -> dict:
         - "Send the daily cost digest to Slack"
         - "Push the current cost summary to Teams"
     """
+    if (err := require_pro("alerts")):
+        return err
     if err := require_role("analyst"):
         return err
 
@@ -3089,6 +3097,8 @@ async def push_weekly_insight() -> dict:
         - "Push the weekly insight to the team channel"
         - "Send this week's cost intelligence to Slack now"
     """
+    if (err := require_pro("alerts")):
+        return err
     from datetime import date, timedelta
     from .notifications import slack
 
@@ -3233,6 +3243,8 @@ async def send_weekly_digest_now() -> dict:
         - "Send the weekly cost digest now"
         - "Trigger the weekly email report"
     """
+    if (err := require_pro("alerts")):
+        return err
     if err := require_pro("scheduled_email_digests"):
         return err
 
@@ -5468,6 +5480,8 @@ async def subscribe_to_report(
         - "Create a monthly rightsizing report emailed to cfo@company.com"
         - "Subscribe to a daily digest in #cost-alerts with spend, anomalies, and budgets"
     """
+    if (err := require_pro("alerts")):
+        return err
     if err := require_role("analyst"):
         return err
     try:
@@ -5564,6 +5578,8 @@ async def send_report_now(subscription_id: int) -> dict:
         - "Run the platform team report immediately"
         - "Trigger report subscription 1"
     """
+    if (err := require_pro("alerts")):
+        return err
     if err := require_role("analyst"):
         return err
     try:
@@ -6440,6 +6456,8 @@ async def forecast_azure_costs(
         - "Forecast Azure spend to month-end"
         - "Projected Azure costs for this subscription"
     """
+    if (err := require_pro("forecasting")):
+        return err
     try:
         from .connectors.azure_optimize import forecast_costs
         ed = date.fromisoformat(end_date) if end_date else None
@@ -6811,6 +6829,8 @@ async def open_terraform_tag_pr(
         - "Open a PR to fix the tagging gaps"
         - "Create the tag fix PR against main"
     """
+    if (err := require_pro("remediation")):
+        return err
     if err := require_role("analyst"):
         return err
 
@@ -6989,6 +7009,8 @@ async def open_rightsizing_pr(
         - "Open a rightsizing PR against acme/infra"
         - "Patch the Terraform files but don't create a PR, I'll handle the git flow"
     """
+    if (err := require_pro("remediation")):
+        return err
     if err := require_role("analyst"):
         return err
 
@@ -7137,6 +7159,8 @@ async def get_ai_engineering_report(days: int = 30, repos: list[str] | None = No
     Good triggers: "what has AI shipped", "AI engineering output", "which model
     wrote the most code", "cost per PR by model", "is our AI spend producing work".
     """
+    if (err := require_pro("ai_unit_economics")):
+        return err
     from .demo_data import is_demo, get_demo_response
     if is_demo():
         return get_demo_response("get_ai_engineering_report") or {"configured": False}
@@ -7416,6 +7440,8 @@ async def forecast_llm_costs(horizon_days: int = 90, balance_usd: float | None =
         - "When will our $100k in credits run out at this rate?"
         - "Is our token bill accelerating?"
     """
+    if (err := require_pro("forecasting")):
+        return err
     from .demo_data import is_demo, get_demo_response
     if is_demo():
         return get_demo_response("forecast_llm_costs") or {}
@@ -7445,6 +7471,8 @@ async def get_ai_spend_monitor(days: int = 30) -> dict:
         - "Did our token spend spike?"
         - "Is any AI commitment being wasted right now?"
     """
+    if (err := require_pro("ai_unit_economics")):
+        return err
     from .demo_data import is_demo, get_demo_response
     if is_demo():
         return get_demo_response("get_ai_spend_monitor") or {}
@@ -7563,6 +7591,8 @@ async def get_llm_unit_economics(
         - "We processed 50000 documents this month. What's our cost per doc?"
         - "Cost per active user for our AI features last 30 days, we had 1200 users"
     """
+    if (err := require_pro("ai_unit_economics")):
+        return err
     try:
         from datetime import date as _date, timedelta
         ed = _date.today()
@@ -7761,6 +7791,8 @@ async def forecast_costs(
     Returns forecast including method used, MAPE accuracy %, monthly projection,
     and day-by-day point/lower/upper estimates.
     """
+    if (err := require_pro("forecasting")):
+        return err
     try:
         from .ml.forecasting import Forecaster
         aws = _CLOUD_CONNECTORS.get("aws")
@@ -7929,6 +7961,8 @@ async def get_ai_kpis(
         - "How efficient are our AI prompts?"
         - "What AI cost optimisations should we prioritise?"
     """
+    if (err := require_pro("ai_unit_economics")):
+        return err
     try:
         from datetime import date as _date, timedelta
         ed = _date.today()
@@ -8068,6 +8102,8 @@ async def get_llm_unit_economics_full(
         - "Cost per API request for our AI features, we handled 2 million requests"
         - "Is our AI spend sustainable at our current scale?"
     """
+    if (err := require_pro("ai_unit_economics")):
+        return err
     try:
         from datetime import date as _date, timedelta
         ed = _date.today()
@@ -11609,6 +11645,8 @@ async def push_to_n8n(
         - "Push cost findings to my automation"
         - "Wire this into n8n"
     """
+    if (err := require_pro("alerts")):
+        return err
     import time
     from .connectors.saas.n8n import N8nConnector
 

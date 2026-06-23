@@ -85,14 +85,21 @@ _KR_USERNAME = "user.defaults"
 #
 PRO_FEATURES: set[str] = {
     "ticket_creation",           # auto-create Jira / Linear / GitHub Issues from any finding
-    "scheduled_email_digests",   # email delivery of scheduled reports (Slack delivery is free)
+    "scheduled_email_digests",   # email delivery of scheduled reports
     "commitment_recommendations", # RI / SP purchase recommendations with $ amounts + ROI
     "org_reports",               # full org-wide cost rollup across all accounts / OUs
     "cur_athena_detail",         # line-item CUR data via Athena (per-resource, RI waste, tag breakdown)
     "azure_detail",              # Azure resource-level cost detail and reservation utilization
     "business_metrics",          # unit economics: hosting % of MRR, cost per customer, "so what?" analysis
-    # anomaly_detection and rightsizing are intentionally FREE:
-    # users discover value → want Slack alerts + ticket auto-creation → upgrade to Team
+    # ── The pull/push line: free = ask on demand, Pro = it runs for you ───────────
+    "alerts",                    # proactive alert policies + scheduled push (set_alert_policy, weekly push)
+    "forecasting",               # forward projections: cost / Azure / LLM forecasts
+    "ai_unit_economics",         # cost per PR by model, AI KPIs, the GitHub engineering-attribution report
+    "remediation",               # drafting the fix: open rightsizing / terraform-tag PRs
+    "cross_cloud",               # the unified multi-cloud view: compare providers, total spend all sources
+    # Cost queries, anomaly detection, rightsizing findings, and single-provider
+    # views are intentionally FREE: users see the value on demand, then pay for it
+    # to run continuously, act for them, and unify across clouds.
 }
 
 # ── Team-only features ($1k/mo flat) ─────────────────────────────────────────
@@ -492,6 +499,15 @@ def require_pro(feature: str) -> dict | None:
         # Caller mistake — feature isn't in the pro set, allow it
         log.warning("require_pro called for non-pro feature %r — allowing", feature)
         return None
+
+    # Demo mode shows every feature (with synthetic data) so the product demos in
+    # full to anyone evaluating it. Gating only applies to real, free-tier accounts.
+    try:
+        from .demo_data import is_demo
+        if is_demo():
+            return None
+    except Exception:
+        pass
 
     s = get_status()
     if s.is_pro:

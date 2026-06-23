@@ -2,6 +2,27 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.88
+
+Tighten the free tier. Free was handing over the continuous, acting, cross-cloud,
+forecasting, and AI-unit-economics surface: the whole product minus a few buttons.
+This draws the pull/push line. Free answers when you ask. Pro runs for you.
+
+### Licensing
+- **Five new Pro gates** behind `require_pro`: `alerts` (proactive alert policies
+  and scheduled push), `forecasting` (cost, Azure, and LLM projections),
+  `ai_unit_economics` (cost per PR by model, AI KPIs, the GitHub
+  engineering-attribution report), `remediation` (drafting rightsizing and
+  terraform-tag PRs), and `cross_cloud` (the unified compare-providers and
+  total-spend-all-sources view). 19 tools gate on these.
+- **The first value moment stays free.** Cost queries, anomaly detection,
+  rightsizing findings, single-provider views, and AI spend totals are never
+  gated. Activation is the bottleneck, not generosity: free is connect, ask, see
+  a real dollar figure; Pro is it keeps watching, acts, and unifies across clouds.
+- **Demo mode unlocks everything.** `require_pro` short-circuits when `is_demo()`
+  is true, so the product still demos in full to anyone evaluating it. Gating only
+  bites real free-tier accounts.
+
 ## 0.8.87
 
 Hardening from a full adversarial audit of the 0.8.86 work.
