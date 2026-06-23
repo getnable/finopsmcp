@@ -1677,7 +1677,6 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("langfuse",     help="Connect Langfuse LLM observability costs")
     sub.add_parser("snowflake",    help="Connect Snowflake credit consumption")
     sub.add_parser("github",       help="Connect GitHub Actions minutes and Copilot seats")
-    sub.add_parser("stripe",       help="Connect Stripe fees via Balance Transactions API")
     sub.add_parser("mongodb",      help="Connect MongoDB Atlas invoice API")
     sub.add_parser("twilio",       help="Connect Twilio usage records")
     sub.add_parser("cloudflare",   help="Connect Cloudflare billing and subscriptions")
@@ -1790,9 +1789,6 @@ def main(args: list[str] | None = None) -> None:
         "github": lambda: setup_saas_api_key("GitHub", [
             ("GITHUB_TOKEN", "Personal Access Token (github_pat_...)", True),
             ("GITHUB_ORGS", "Organization names (comma-separated)", False),
-        ]),
-        "stripe": lambda: setup_saas_api_key("Stripe", [
-            ("STRIPE_SECRET_KEY", "Secret Key (sk_live_...)", True),
         ]),
         "mongodb": lambda: setup_saas_api_key("MongoDB Atlas", [
             ("MONGODB_ATLAS_PUBLIC_KEY", "Public Key", False),
@@ -1994,7 +1990,7 @@ def main(args: list[str] | None = None) -> None:
         # Interactive full setup
         _wizard_select_persona()
 
-        providers = ["aws", "azure", "gcp", "openai", "anthropic", "openrouter", "litellm", "modal", "together", "replicate", "datadog", "langfuse", "snowflake", "github", "stripe", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams", "notion", "n8n"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "openrouter", "litellm", "modal", "together", "replicate", "datadog", "langfuse", "snowflake", "github", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams", "notion", "n8n"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")

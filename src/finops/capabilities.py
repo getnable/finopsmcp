@@ -249,7 +249,7 @@ CATALOG: list[dict[str, Any]] = [
     {
         "id": "saas",
         "title": "SaaS & data platforms",
-        "gate": lambda c: _has(c, "datadog", "snowflake", "databricks", "stripe"),
+        "gate": lambda c: _has(c, "datadog", "snowflake", "databricks"),
         "count": 10,
         "blurb": "Datadog, Snowflake, Databricks, and more, in the same cost view.",
         "asks": [
@@ -306,7 +306,7 @@ def render_capabilities(
     # "Connected" only counts a real data source. A notification-only surface
     # (Slack/Notion) without any cloud, LLM, or SaaS spend has nothing to act on.
     has_data = has_cloud(connected) or has_llm(connected) or _has(
-        connected, "datadog", "snowflake", "databricks", "stripe")
+        connected, "datadog", "snowflake", "databricks")
     if not has_data:
         return "\n".join([
             "## What nable can do",

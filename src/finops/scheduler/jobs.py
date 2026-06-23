@@ -76,7 +76,6 @@ async def _snapshot_all() -> dict:
     from ..connectors.gcp import GCPConnector
     from ..connectors.saas.datadog import DatadogConnector
     from ..connectors.saas.mongodb_atlas import MongoDBAtlasConnector
-    from ..connectors.saas.stripe import StripeConnector
     from ..connectors.saas.twilio import TwilioConnector
     from ..storage.snapshots import store_snapshot
 
@@ -89,7 +88,6 @@ async def _snapshot_all() -> dict:
         "gcp": GCPConnector(),
         "datadog": DatadogConnector(),
         "mongodb_atlas": MongoDBAtlasConnector(),
-        "stripe": StripeConnector(),
         "twilio": TwilioConnector(),
     }
 
