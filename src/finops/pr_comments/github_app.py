@@ -28,6 +28,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -37,6 +38,10 @@ log = logging.getLogger(__name__)
 COST_GATE_USD   = float(os.environ.get("NABLE_COST_GATE_USD", "500"))
 COMMENT_TAG     = os.environ.get("NABLE_COMMENT_TAG", "nable-cost")
 GITHUB_API_BASE = "https://api.github.com"
+# GitHub only permits these characters in an owner or repo name. Validating before
+# interpolating a user-supplied owner/repo into an api.github.com path rejects
+# nothing real and neutralizes path injection (CodeQL py/partial-ssrf).
+_GH_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 # ── Auth helpers ───────────────────────────────────────────────────────────────
@@ -345,9 +350,16 @@ def handle_pull_request_event(payload: dict, installation_id: int | None = None)
     repo  = payload["repository"]
     owner = repo["owner"]["login"]
     repo_name = repo["name"]
-    pr_number = pr["number"]
+    # Validate path segments at the trust boundary, before any value reaches an
+    # api.github.com URL, and cast ids to int so they can't carry path text.
+    if not (_GH_SEGMENT.match(owner or "") and _GH_SEGMENT.match(repo_name or "")):
+        return {"status": "rejected", "reason": "invalid owner/repo"}
+    try:
+        pr_number = int(pr["number"])
+        inst_id = int(installation_id or payload.get("installation", {}).get("id"))
+    except (TypeError, ValueError):
+        return {"status": "rejected", "reason": "invalid pr/installation id"}
     head_sha  = pr["head"]["sha"]
-    inst_id   = installation_id or payload.get("installation", {}).get("id")
 
     headers = _headers(inst_id)
 
@@ -394,10 +406,14 @@ def make_webhook_app():
     async def github_webhook(request: Request):
         payload_bytes = await request.body()
 
-        if WEBHOOK_SECRET:
-            sig = request.headers.get("X-Hub-Signature-256", "")
-            if not verify_signature(payload_bytes, sig, WEBHOOK_SECRET):
-                raise HTTPException(status_code=401, detail="Invalid signature")
+        # Fail closed: a missing secret must reject, never process unauthenticated
+        # (webhook.py does the same). An unset secret would otherwise let anyone
+        # POST a forged pull_request payload and drive the GitHub API calls below.
+        if not WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="GITHUB_WEBHOOK_SECRET not configured")
+        sig = request.headers.get("X-Hub-Signature-256", "")
+        if not verify_signature(payload_bytes, sig, WEBHOOK_SECRET):
+            raise HTTPException(status_code=401, detail="Invalid signature")
 
         event   = request.headers.get("X-GitHub-Event", "")
         payload = json.loads(payload_bytes)

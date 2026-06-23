@@ -17,6 +17,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
@@ -31,6 +32,9 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "")
 COST_THRESHOLD = float(os.getenv("PR_COST_THRESHOLD_USD", "10"))
 COMMENT_TAG = "<!-- nable-cost-comment -->"
+# A GitHub full_name is owner/repo, each segment limited to [A-Za-z0-9._-]. Used to
+# validate the repo before it is interpolated into any api.github.com URL.
+_GH_REPO = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
 
 def _verify_github_signature(payload: bytes, sig_header: str) -> bool:
@@ -112,6 +116,18 @@ def _handle_pr_event(payload: dict) -> None:
     pr_number = pr.get("number")
 
     if not repo or not pr_number:
+        return
+
+    # Validate path segments before they reach any api.github.com URL: full_name is
+    # owner/repo (both [A-Za-z0-9._-]) and the PR number must be an int. Rejects
+    # nothing real, neutralizes path injection (CodeQL py/partial-ssrf), and a
+    # validated repo carries no CR/LF, so the log below cannot be forged either.
+    if not _GH_REPO.match(repo):
+        log.warning("Rejected webhook: invalid repository name")
+        return
+    try:
+        pr_number = int(pr_number)
+    except (TypeError, ValueError):
         return
 
     log.info("Processing PR #%d in %s", pr_number, repo)
