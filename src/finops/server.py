@@ -47,7 +47,6 @@ from .connectors.saas.mongodb_atlas import MongoDBAtlasConnector
 from .connectors.saas.new_relic import NewRelicConnector
 from .connectors.saas.pagerduty import PagerDutyConnector
 from .connectors.saas.snowflake import SnowflakeConnector
-from .connectors.saas.stripe import StripeConnector
 from .connectors.saas.twilio import TwilioConnector
 from .connectors.saas.vercel import VercelConnector
 from .connectors.databricks import DatabricksConnector
@@ -191,7 +190,6 @@ _SAAS_CONNECTORS: dict[str, Any] = {
     "langfuse": LangfuseConnector(),
     "snowflake": SnowflakeConnector(),
     "github": GitHubConnector(),
-    "stripe": StripeConnector(),
     "mongodb_atlas": MongoDBAtlasConnector(),
     "vercel": VercelConnector(),
     "cloudflare": CloudflareConnector(),
