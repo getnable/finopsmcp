@@ -7121,6 +7121,30 @@ def main() -> None:
 # ── AI / LLM cost tools ───────────────────────────────────────────────────────
 
 @mcp.tool()
+async def get_ai_engineering_report(days: int = 30, repos: list[str] | None = None) -> dict:
+    """What your AI coding tools actually shipped, by model, and what it cost.
+
+    Pulls merged GitHub pull requests over the window, attributes each to the AI
+    model or agent that wrote it (Claude Code names the exact model in its commit
+    trailer, so Claude work resolves to the model; Copilot, Codex, Cursor, and
+    Devin resolve to the tool), sizes each PR high/medium/low by diff, and joins
+    LLM spend by model. The line it produces: "Opus 4.8 was 49% of AI spend and
+    shipped 10 PRs: 3 high, 5 medium, 2 low, $X per PR."
+
+    Needs GITHUB_TOKEN and GITHUB_ORGS connected, or pass explicit repos like
+    ["owner/name"]. Read-only.
+
+    Good triggers: "what has AI shipped", "AI engineering output", "which model
+    wrote the most code", "cost per PR by model", "is our AI spend producing work".
+    """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_ai_engineering_report") or {"configured": False}
+    from .connectors.github_contributions import build_report
+    return await build_report(days=days, repos=repos)
+
+
+@mcp.tool()
 async def get_llm_costs(
     days: int = 30,
     start_date: str | None = None,

@@ -444,6 +444,48 @@ def bedrock_split() -> dict[str, Any]:
     }
 
 
+def ai_engineering_report() -> dict:
+    """Demo: what AI shipped this month, by model, joined to AI spend."""
+    return {
+        "configured": True,
+        "window_days": 30,
+        "total_pr_count": 23,
+        "ai_pr_count": 18,
+        "human_pr_count": 5,
+        "ai_share_pct": 78.3,
+        "total_llm_spend_usd": 1240.0,
+        "by_label": {
+            "Claude Opus 4.8": {
+                "label": "Claude Opus 4.8", "pr_count": 10, "high": 3, "medium": 5, "low": 2,
+                "lines_changed": 4200, "llm_spend_usd": 608.0, "spend_share_pct": 49.0,
+                "cost_per_pr_usd": 60.8,
+                "examples": [
+                    {"title": "Parallelize the cost audit", "magnitude": "high", "lines": 540, "url": "", "repo": "acme/infra"},
+                    {"title": "Add the managed-AI credit ledger", "magnitude": "high", "lines": 430, "url": "", "repo": "acme/platform"},
+                ],
+            },
+            "Claude Sonnet 4.6": {
+                "label": "Claude Sonnet 4.6", "pr_count": 6, "high": 0, "medium": 4, "low": 2,
+                "lines_changed": 910, "llm_spend_usd": 372.0, "spend_share_pct": 30.0,
+                "cost_per_pr_usd": 62.0,
+                "examples": [
+                    {"title": "Tighten the onboarding copy", "magnitude": "medium", "lines": 120, "url": "", "repo": "acme/web"},
+                ],
+            },
+            "OpenAI Codex": {
+                "label": "OpenAI Codex", "pr_count": 2, "high": 0, "medium": 1, "low": 1,
+                "lines_changed": 180, "llm_spend_usd": None, "spend_share_pct": None,
+                "cost_per_pr_usd": None, "examples": [],
+            },
+            "Human": {
+                "label": "Human", "pr_count": 5, "high": 1, "medium": 2, "low": 2,
+                "lines_changed": 1500, "examples": [],
+            },
+        },
+        "_demo_mode": True,
+    }
+
+
 DEMO_RESPONSES: dict[str, Any] = {
     "get_cost_summary":             cost_summary,
     "get_anomalies":                anomalies,
@@ -454,6 +496,7 @@ DEMO_RESPONSES: dict[str, Any] = {
     "get_llm_costs":                llm_costs,
     "get_llm_cost_by_model":        llm_costs,
     "explain_recent_cost_drivers":  cost_drivers,
+    "get_ai_engineering_report":    ai_engineering_report,
 }
 
 
