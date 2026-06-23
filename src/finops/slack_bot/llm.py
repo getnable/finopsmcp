@@ -398,7 +398,9 @@ def ask(
         try:
             return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
-            log.warning("Claude query timed out after %ds: %s", timeout, user_message[:100])
+            # Strip CR/LF so a crafted message can't forge log lines (log-injection).
+            _msg = user_message[:100].replace("\n", " ").replace("\r", " ")
+            log.warning("Claude query timed out after %ds: %s", timeout, _msg)
             return LoopResult(
                 f"Sorry, that took longer than {timeout} seconds and was stopped. "
                 "Try a more specific question or break it into smaller parts."
