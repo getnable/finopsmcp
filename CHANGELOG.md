@@ -2,6 +2,24 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.91
+
+AI engineering report now works for teams that commit straight to main.
+
+### AI unit economics
+- **`get_ai_engineering_report` attributes commits, not just merged PRs.** It only
+  looked at merged pull requests, so a repo that pushes directly to `main` (no PRs)
+  showed zero AI output even with hundreds of model-authored commits. The model
+  trailer ("Co-Authored-By: Claude Opus 4.8 ...") lives in the commit message, so
+  commits attribute exactly like PRs do, by model, sized high/medium/low, joined to
+  spend for a **cost per commit**.
+- **New `unit` argument**: `"pr"`, `"commit"`, or `"auto"` (default). Auto uses PRs
+  when the repo has any in the window, else commits, so PR-shops and commit-to-main
+  shops both work. The unit actually used comes back in the report's `unit` field.
+- Commit sizing uses the GitHub GraphQL history (message + additions/deletions +
+  author in one call per 100 commits), so every commit is counted and cost-per-commit
+  divides spend by the true count, not a truncated sample.
+
 ## 0.8.90
 
 Onboarding fixes from launch-day dogfooding.

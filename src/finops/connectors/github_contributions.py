@@ -1,7 +1,8 @@
 """GitHub AI engineering attribution.
 
-Not what AI cost, but what it did. Pulls merged pull requests from connected
-repos, attributes each to the model or agent that wrote it, sizes the change, and
+Not what AI cost, but what it did. Pulls merged pull requests (or commits, for
+teams that push straight to main with no PRs) from connected repos, attributes
+each to the model or agent that wrote it, sizes the change, and
 (joined with LLM spend by model) answers the question that makes AI spend legible:
 "Opus 4.8 was 49% of AI spend and shipped 10 PRs: 3 high, 5 medium, 2 low,
 $X per PR."
@@ -296,15 +297,172 @@ async def fetch_ai_contributions(*, days: int = 30, repos: list[str] | None = No
     return {"configured": True, "prs": prs, "window_days": days, "pr_count": len(prs)}
 
 
-async def build_report(*, days: int = 30, repos: list[str] | None = None) -> dict:
-    """The full report: fetch + attribute + aggregate, joined with LLM spend by
-    model so each AI model carries its share of spend and a cost per PR."""
-    fetched = await fetch_ai_contributions(days=days, repos=repos)
-    if not fetched.get("configured"):
-        return {"configured": False, "reason": fetched.get("reason", ""), "window_days": days}
+async def _list_owner_repos(client, token, owner: str, cap: int = 30) -> list[str]:
+    """Repo full-names for an org or user, most-recently-pushed first. Tries the
+    org endpoint then the user endpoint, so it works for both."""
+    for path in (f"/orgs/{owner}/repos", f"/users/{owner}/repos"):
+        data = await _get(client, token, path,
+                          {"per_page": min(100, cap), "sort": "pushed", "direction": "desc"})
+        if isinstance(data, list) and data:
+            return [r["full_name"] for r in data
+                    if isinstance(r, dict) and r.get("full_name")][:cap]
+    return []
 
-    report = summarize(fetched["prs"])
+
+# Commit sizing at scale: one GraphQL call returns 100 commits with their message
+# (where the model trailer lives), diff size, and author. The REST path needs a
+# detail fetch per commit, so it can't accurately count a busy repo's commits, and
+# an undercount would overstate cost-per-commit. GraphQL counts every commit.
+_GQL = "https://api.github.com/graphql"
+
+_HISTORY_Q = """
+query($owner:String!,$name:String!,$since:GitTimestamp!,$cursor:String){
+  repository(owner:$owner,name:$name){
+    defaultBranchRef{ target{ ... on Commit {
+      history(since:$since, first:100, after:$cursor){
+        pageInfo{ hasNextPage endCursor }
+        nodes{ oid message additions deletions committedDate author{ user{ login } } }
+      }
+    }}}
+  }
+}
+"""
+
+
+async def _gql(client: httpx.AsyncClient, token: str, query: str, variables: dict) -> dict | None:
+    r = await client.post(_GQL, headers=_headers(token), json={"query": query, "variables": variables})
+    if r.status_code >= 400:
+        return None
+    body = r.json()
+    return body.get("data") if isinstance(body, dict) else None
+
+
+async def _repo_commit_items(client, token, full: str, since_iso: str,
+                             max_commits: int, max_pages: int = 30) -> list[dict]:
+    """All default-branch commits for one repo over the window, attributed and
+    sized, via the GraphQL history (paginated 100 at a time)."""
+    try:
+        owner, name = full.split("/", 1)
+    except ValueError:
+        return []
+    items: list[dict] = []
+    cursor: str | None = None
+    for _ in range(max_pages):
+        if len(items) >= max_commits:
+            break
+        data = await _gql(client, token, _HISTORY_Q,
+                          {"owner": owner, "name": name, "since": since_iso, "cursor": cursor})
+        target = ((((data or {}).get("repository") or {}).get("defaultBranchRef") or {}).get("target") or {})
+        hist = target.get("history")
+        if not isinstance(hist, dict):
+            break
+        for n in hist.get("nodes", []):
+            if not isinstance(n, dict):
+                continue
+            msg = n.get("message", "") or ""
+            login = (((n.get("author") or {}).get("user") or {}).get("login")) or ""
+            lines = int(n.get("additions", 0) or 0) + int(n.get("deletions", 0) or 0)
+            items.append({
+                "label": attribute(
+                    author_login=login,
+                    author_is_bot=(_clean_login(login) in _AI_BOT_LOGINS or login.endswith("[bot]")),
+                    text=msg,
+                ),
+                "magnitude": magnitude(lines),
+                "lines": lines,
+                "repo": full,
+                "title": msg.splitlines()[0] if msg else "",
+                "url": f"https://github.com/{full}/commit/{n.get('oid', '')}",
+                "committed_at": n.get("committedDate", ""),
+            })
+        page = hist.get("pageInfo") or {}
+        if not page.get("hasNextPage"):
+            break
+        cursor = page.get("endCursor")
+    return items[:max_commits]
+
+
+async def fetch_ai_commits(*, days: int = 30, repos: list[str] | None = None,
+                           max_commits: int = 2000) -> dict:
+    """Pull every default-branch commit over the window and attribute each, for
+    teams that commit straight to main instead of opening PRs. Same attribution
+    and sizing as the PR path, so cost-per-commit divides spend by the true commit
+    count. Returns {configured, commits, window_days}. Never raises."""
+    token = os.getenv("GITHUB_TOKEN", "")
+    orgs = [o.strip() for o in os.getenv("GITHUB_ORGS", "").split(",") if o.strip()]
+    explicit = [r.strip() for r in (repos or []) if r.strip()]
+    if not token or not (explicit or orgs):
+        return {"configured": False, "reason": "Set GITHUB_TOKEN and GITHUB_ORGS (or pass repos)."}
+
+    since_iso = (date.today() - timedelta(days=max(1, days))).isoformat() + "T00:00:00Z"
+    async with httpx.AsyncClient(timeout=30) as client:
+        targets = list(explicit)
+        if not targets:
+            listed = await asyncio.gather(
+                *[_list_owner_repos(client, token, o) for o in orgs], return_exceptions=True)
+            for res in listed:
+                if isinstance(res, list):
+                    targets.extend(res)
+        if not targets:
+            return {"configured": False,
+                    "reason": "No repositories found for the connected GitHub account."}
+
+        per_repo = max(200, max_commits // max(1, len(targets)))
+        sem = asyncio.Semaphore(_CONCURRENCY)
+
+        async def _one(full: str) -> list[dict]:
+            async with sem:
+                try:
+                    return await _repo_commit_items(client, token, full, since_iso, per_repo)
+                except Exception:
+                    return []
+
+        gathered = await asyncio.gather(*[_one(r) for r in targets])
+    commits: list[dict] = []
+    for res in gathered:
+        commits.extend(res)
+    commits = commits[:max_commits]
+    return {"configured": True, "commits": commits, "window_days": days, "commit_count": len(commits)}
+
+
+async def build_report(*, days: int = 30, repos: list[str] | None = None,
+                       unit: str = "auto") -> dict:
+    """The full report: fetch + attribute + aggregate, joined with LLM spend by
+    model so each AI model carries its share of spend and a cost per unit.
+
+    unit selects the unit of work: "pr" (merged pull requests), "commit" (commits
+    on the default branch), or "auto" (PRs if the repo has any in the window, else
+    commits, so PR-shops and commit-to-main shops both work). The chosen unit is
+    returned in report["unit"]."""
+    unit = (unit or "auto").lower()
+    if unit not in ("auto", "pr", "commit"):
+        unit = "auto"
+
+    items: list[dict] | None = None
+    chosen: str | None = None
+
+    # Try PRs first unless commits are explicitly requested.
+    if unit in ("auto", "pr"):
+        prf = await fetch_ai_contributions(days=days, repos=repos)
+        if prf.get("configured"):
+            prs = prf.get("prs", [])
+            if prs or unit == "pr":          # use PRs if any exist, or if forced
+                items, chosen = prs, "pr"
+        elif unit == "pr":
+            return {"configured": False, "reason": prf.get("reason", ""),
+                    "window_days": days, "unit": "pr"}
+
+    # Fall back to commits: auto found no PRs, or commits were requested.
+    if items is None:
+        cf = await fetch_ai_commits(days=days, repos=repos)
+        if not cf.get("configured"):
+            return {"configured": False, "reason": cf.get("reason", ""),
+                    "window_days": days, "unit": "commit"}
+        items, chosen = cf.get("commits", []), "commit"
+
+    report = summarize(items)
     report["window_days"] = days
+    report["unit"] = chosen
 
     # Join LLM spend by model where we have it. Best-effort: the GitHub side is the
     # point, the spend join is the bonus that turns it into unit economics.

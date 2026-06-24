@@ -106,4 +106,59 @@ def test_build_report_joins_fetched_prs_with_llm_spend(monkeypatch):
         lambda **kw: {"by_model": {"claude-opus-4-8": 49.0}, "total_usd": 100.0},
     )
     rep = asyncio.run(gc.build_report(days=30))
+    assert rep["unit"] == "pr"
     assert rep["by_label"]["Claude Opus 4.8"]["spend_share_pct"] == 49.0
+
+
+# ── commit path (teams that push straight to main, no PRs) ────────────────────
+def test_fetch_ai_commits_is_not_configured_without_token(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_ORGS", raising=False)
+    out = asyncio.run(gc.fetch_ai_commits(days=30))
+    assert out["configured"] is False
+
+
+def test_build_report_falls_back_to_commits_when_there_are_no_prs(monkeypatch):
+    async def no_prs(*, days, repos=None):
+        return {"configured": True, "window_days": days, "prs": []}
+
+    async def some_commits(*, days, repos=None):
+        return {"configured": True, "window_days": days, "commits": [
+            {"label": "Claude Opus 4.8", "magnitude": "high", "lines": 400, "title": "c", "url": "", "repo": "o/r"},
+            {"label": "Human", "magnitude": "low", "lines": 5, "title": "h", "url": "", "repo": "o/r"},
+        ]}
+
+    monkeypatch.setattr(gc, "fetch_ai_contributions", no_prs)
+    monkeypatch.setattr(gc, "fetch_ai_commits", some_commits)
+    monkeypatch.setattr(
+        "finops.connectors.llm_costs.get_all_llm_costs",
+        lambda **kw: {"by_model": {"claude-opus-4-8": 40.0}, "total_usd": 100.0},
+    )
+    rep = asyncio.run(gc.build_report(days=30))
+    assert rep["unit"] == "commit"
+    assert rep["total_pr_count"] == 2 and rep["ai_pr_count"] == 1
+    assert rep["by_label"]["Claude Opus 4.8"]["cost_per_pr_usd"] == 40.0  # 40 / 1 commit
+
+
+def test_unit_commit_forces_commits_even_when_prs_exist(monkeypatch):
+    called = {"prs": False}
+
+    async def prs(*, days, repos=None):
+        called["prs"] = True
+        return {"configured": True, "window_days": days, "prs": [
+            {"label": "Human", "magnitude": "low", "lines": 1, "title": "p", "url": "", "repo": "o/r"}]}
+
+    async def commits(*, days, repos=None):
+        return {"configured": True, "window_days": days, "commits": [
+            {"label": "Claude Sonnet 4.6", "magnitude": "medium", "lines": 50, "title": "c", "url": "", "repo": "o/r"}]}
+
+    monkeypatch.setattr(gc, "fetch_ai_contributions", prs)
+    monkeypatch.setattr(gc, "fetch_ai_commits", commits)
+    monkeypatch.setattr(
+        "finops.connectors.llm_costs.get_all_llm_costs",
+        lambda **kw: {"by_model": {}, "total_usd": 0},
+    )
+    rep = asyncio.run(gc.build_report(days=30, unit="commit"))
+    assert rep["unit"] == "commit"
+    assert called["prs"] is False                      # PR path skipped entirely
+    assert "Claude Sonnet 4.6" in rep["by_label"]

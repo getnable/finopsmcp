@@ -7143,21 +7143,28 @@ def main() -> None:
 # ── AI / LLM cost tools ───────────────────────────────────────────────────────
 
 @mcp.tool()
-async def get_ai_engineering_report(days: int = 30, repos: list[str] | None = None) -> dict:
+async def get_ai_engineering_report(days: int = 30, repos: list[str] | None = None,
+                                    unit: str = "auto") -> dict:
     """What your AI coding tools actually shipped, by model, and what it cost.
 
-    Pulls merged GitHub pull requests over the window, attributes each to the AI
-    model or agent that wrote it (Claude Code names the exact model in its commit
-    trailer, so Claude work resolves to the model; Copilot, Codex, Cursor, and
-    Devin resolve to the tool), sizes each PR high/medium/low by diff, and joins
-    LLM spend by model. The line it produces: "Opus 4.8 was 49% of AI spend and
-    shipped 10 PRs: 3 high, 5 medium, 2 low, $X per PR."
+    Attributes each unit of work to the AI model or agent that wrote it (Claude
+    Code names the exact model in its commit trailer, so Claude work resolves to
+    the model; Copilot, Codex, Cursor, and Devin resolve to the tool), sizes each
+    high/medium/low by diff, and joins LLM spend by model. The line it produces:
+    "Opus 4.8 was 49% of AI spend and shipped 10 PRs: 3 high, 5 medium, 2 low,
+    $X per PR."
+
+    unit picks the unit of work: "pr" (merged pull requests), "commit" (commits on
+    the default branch, for teams that push straight to main with no PRs), or
+    "auto" (default: PRs if the repo has any in the window, else commits). The unit
+    actually used comes back in the "unit" field of the result.
 
     Needs GITHUB_TOKEN and GITHUB_ORGS connected, or pass explicit repos like
     ["owner/name"]. Read-only.
 
     Good triggers: "what has AI shipped", "AI engineering output", "which model
-    wrote the most code", "cost per PR by model", "is our AI spend producing work".
+    wrote the most code", "cost per PR by model", "cost per commit", "is our AI
+    spend producing work".
     """
     if (err := require_pro("ai_unit_economics")):
         return err
@@ -7165,7 +7172,7 @@ async def get_ai_engineering_report(days: int = 30, repos: list[str] | None = No
     if is_demo():
         return get_demo_response("get_ai_engineering_report") or {"configured": False}
     from .connectors.github_contributions import build_report
-    return await build_report(days=days, repos=repos)
+    return await build_report(days=days, repos=repos, unit=unit)
 
 
 @mcp.tool()
