@@ -26,7 +26,7 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 - Annual price: $10,000 per year, two months free
 - Trial: 7-day free trial
 - Runs: we host it for you, single-tenant. Dashboards anyone can use without a terminal. Your bill is never pooled with another customer's.
-- AI: managed AI agent included, with usage metered above the included monthly allowance. Prepaid credits roll over.
+- AI: 500 managed-AI credits a month included (about 500 questions or 100 deep root-cause investigations). A simple question is about 1 credit, a deep investigation about 5. Credits roll over. Top up at $0.50 per credit, or bring your own LLM key for unlimited use at no credit cost.
 - Includes: everything in Pro, plus single-tenant hosting and the managed AI agent
 - Buy monthly: https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08
 - Buy yearly: https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09

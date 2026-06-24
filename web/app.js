@@ -412,16 +412,10 @@ const STARTUP_ANNUAL_LINK = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 const PRICE_ROWS = [
   { label: "Users", dev: "Just you", pro: "Your team", startup: "Your team", ent: "Your org" },
-  { label: "Cost queries, anomalies, rightsizing", dev: true, pro: true, startup: true, ent: true },
-  { label: "AI / LLM spend tracking", dev: true, pro: true, startup: true, ent: true },
-  { label: "Connectors", dev: "17", pro: "17", startup: "17", ent: "17" },
-  { label: "AWS cost data", dev: "Cost Explorer", pro: "Explorer + CUR", startup: "Explorer + CUR", ent: "Explorer + CUR" },
-  { label: "Terraform remediation PRs", dev: false, pro: true, startup: true, ent: true },
-  { label: "Alerts, digests + tickets", dev: false, pro: true, startup: true, ent: true },
-  { label: "Budgets, commitments + dashboards", dev: false, pro: true, startup: true, ent: true },
-  { label: "Slack bot + RCA remediation", dev: false, pro: true, startup: true, ent: true },
+  { label: "Cost queries, anomalies, rightsizing, 17 connectors", dev: true, pro: true, startup: true, ent: true },
+  { label: "Remediation PRs, alerts, dashboards, Slack bot", dev: false, pro: true, startup: true, ent: true },
   { label: "Runs", dev: "Your machine", pro: "Your machine", startup: "Hosted, single-tenant", ent: "Hosted or self-host" },
-  { label: "AI", dev: "Your own key", pro: "Your own key", startup: "Managed + metered", ent: "Managed" },
+  { label: "Managed AI", dev: "Your own key", pro: "Your own key", startup: "500 credits / mo", ent: "Custom" },
   { label: "SSO + audit logs", dev: false, pro: false, startup: false, ent: true },
   { label: "Support", dev: "Slack", pro: "Slack", startup: "Slack", ent: "Slack + SLA" }
 ];
@@ -507,7 +501,7 @@ function Pricing() {
   const proPlan = annual ? "pro_annual" : "pro_monthly";
   const startupPrice = annual ? "$10,000" : "$1,000";
   const startupPer = annual ? "/ yr" : "/ mo";
-  const startupSub = annual ? "2 months free \xB7 hosted + managed AI" : "hosted single-tenant \xB7 managed AI + usage";
+  const startupSub = annual ? "2 months free \xB7 hosted + 500 credits/mo" : "hosted single-tenant \xB7 500 AI credits";
   const startupLink = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
   const startupPlan = annual ? "startups_annual" : "startups_monthly";
   return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Dev is free forever, local, your own LLM key. Pro is one flat $100 a month for your whole team: remediation PRs, tickets, alerts, dashboards, the Slack bot, still your key. Startups is $1,000 a month: we host it single-tenant and run a managed AI agent, with usage metered above the included allowance. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { className: "bill-toggle", role: "group", "aria-label": "Billing period" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? "" : " active"), onClick: () => setAnnual(false), "aria-pressed": !annual }, "Monthly"), /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? " active" : ""), onClick: () => setAnnual(true), "aria-label": "Toggle annual billing", "aria-pressed": annual }, "Annual")), /* @__PURE__ */ React.createElement("span", { className: "seg-save" }, "SAVE 17%"))), /* @__PURE__ */ React.createElement("div", { className: "ptable-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ptable ptable-4" }, /* @__PURE__ */ React.createElement("div", { className: "ph ph-corner" }), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Dev"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "forever")), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, "solo \xB7 no credit card"), /* @__PURE__ */ React.createElement(
@@ -556,7 +550,7 @@ function Pricing() {
       }
     },
     "Contact us"
-  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.dev })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.pro })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.startup })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement(PricingCards, { annual, proPrice, proPer, proSub, proLink, proPlan, startupPrice, startupPer, startupSub, startupLink, startupPlan }), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Dev. Pro and Startups trials require a card, cancel any time."), /* @__PURE__ */ React.createElement("p", { className: "pfoot pdemo" }, "Weighing Pro or Startups for your org?", " ", /* @__PURE__ */ React.createElement(
+  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.dev })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.pro })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.startup })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement(PricingCards, { annual, proPrice, proPer, proSub, proLink, proPlan, startupPrice, startupPer, startupSub, startupLink, startupPlan }), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "Startups includes 500 managed-AI credits a month, about 500 questions or 100 deep investigations. They roll over; top up anytime, or bring your own key."), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Dev. Pro and Startups trials require a card, cancel any time."), /* @__PURE__ */ React.createElement("p", { className: "pfoot pdemo" }, "Weighing Pro or Startups for your org?", " ", /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
