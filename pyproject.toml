@@ -26,7 +26,6 @@ classifiers = [
     "Topic :: Office/Business :: Financial",
     "Topic :: System :: Systems Administration",
     "Topic :: Internet",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "License :: Other/Proprietary License",
