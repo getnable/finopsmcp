@@ -117,18 +117,7 @@ function Nav() {
   }
   return /* @__PURE__ */ React.createElement("nav", { className: "nav" }, /* @__PURE__ */ React.createElement("div", { className: "nav-inner" }, /* @__PURE__ */ React.createElement("a", { href: "/", className: "logo" }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--accent)" } }, "n"), "able")), /* @__PURE__ */ React.createElement("ul", null, /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("button", { className: "nav-link", onClick: () => scrollTo("connectors") }, "Connectors")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("button", { className: "nav-link", onClick: () => scrollTo("demo") }, "Demo")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("button", { className: "nav-link", onClick: () => scrollTo("pricing") }, "Pricing")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/docs.html", onClick: () => {
     if (window.posthog) posthog.capture("docs_clicked", { location: "nav" });
-  } }, "Docs")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      href: "https://github.com/chaandannn/finopsmcp",
-      target: "_blank",
-      rel: "noopener noreferrer",
-      onClick: () => {
-        if (window.posthog) posthog.capture("nav_clicked", { item: "github" });
-      }
-    },
-    "GitHub"
-  ))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "nav-signin" }, "Sign in"), /* @__PURE__ */ React.createElement(
+  } }, "Docs"))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "nav-signin" }, "Sign in"), /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
@@ -166,20 +155,7 @@ function Nav() {
   } }, "Pricing"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/docs.html", onClick: () => {
     setOpen(false);
     if (window.posthog) posthog.capture("docs_clicked", { location: "nav_mobile" });
-  } }, "Docs"), /* @__PURE__ */ React.createElement(
-    "a",
-    {
-      className: "nav-mobile-item",
-      href: "https://github.com/chaandannn/finopsmcp",
-      target: "_blank",
-      rel: "noopener noreferrer",
-      onClick: () => {
-        setOpen(false);
-        if (window.posthog) posthog.capture("nav_clicked", { item: "github" });
-      }
-    },
-    "GitHub"
-  ), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 24, display: "flex", flexDirection: "column", gap: 10 } }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "btn btn-ghost", style: { justifyContent: "center" }, onClick: () => setOpen(false) }, "Sign in"), /* @__PURE__ */ React.createElement(
+  } }, "Docs"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 24, display: "flex", flexDirection: "column", gap: 10 } }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "btn btn-ghost", style: { justifyContent: "center" }, onClick: () => setOpen(false) }, "Sign in"), /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "/docs.html",
@@ -563,6 +539,43 @@ function Pricing() {
     "Book a 20-min demo"
   ), " and we'll run it on your own bill.")));
 }
+const FAQ_QA = [
+  [
+    "What is nable?",
+    "nable is a local-first, AI-native FinOps tool. It is an MCP server you install on your own machine to ask about your AWS, Azure, GCP, and AI or LLM spend right inside Claude, Cursor, or any MCP editor. Your credentials never leave your machine."
+  ],
+  [
+    "Is nable free?",
+    "Yes. The Dev tier is free with no credit card and no expiry: cost queries, anomaly detection, rightsizing, LLM spend tracking, and every connector. Paid tiers add remediation pull requests, alerts, scheduled digests, and single-tenant hosting."
+  ],
+  [
+    "Does nable see or store my cloud credentials?",
+    "No. nable runs on your machine. Credentials stay in your OS keyring and cost data caches in a local SQLite database. There is no nable backend that holds your data, and nothing is shipped to a vendor."
+  ],
+  [
+    "Can nable change my cloud infrastructure on its own?",
+    "No. nable is propose-only. It drafts a pull request or opens a ticket with the fix, and a human reviews and applies it. It never edits, deletes, or buys anything in your environment autonomously."
+  ],
+  [
+    "What clouds and tools does nable support?",
+    "AWS, Azure, GCP, and Kubernetes, plus more than ten SaaS and AI providers including Datadog, Snowflake, Databricks, Stripe, OpenAI, Anthropic, and Amazon Bedrock. It exposes 165+ read-only tools your editor can call."
+  ],
+  [
+    "How is nable different from Vantage, CloudHealth, or the AWS FinOps agent?",
+    "nable is local-first, your credentials and bills never leave your machine; AI-native, it lives in Claude or Cursor instead of a separate dashboard; and genuinely cross-cloud, including AI and LLM spend in the same answer. It proposes fixes as pull requests for human approval rather than acting on its own."
+  ],
+  [
+    "What is a FinOps MCP server?",
+    "MCP, the Model Context Protocol, lets AI editors call external tools. A FinOps MCP server exposes cloud-cost tools to your AI editor, so you ask about spend in your own words and the editor calls the right tool. nable is a local-first FinOps MCP server."
+  ],
+  [
+    "Can nable show what my AI coding costs?",
+    "Yes. nable attributes merged pull requests and commits to the AI model that wrote them and joins your LLM spend by model, so you can see what each model shipped and what it cost per pull request or per commit."
+  ]
+];
+function Faq() {
+  return /* @__PURE__ */ React.createElement("section", { className: "faq", id: "faq" }, /* @__PURE__ */ React.createElement("div", { className: "wrap faq-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "foot-label" }, /* @__PURE__ */ React.createElement("span", { className: "foot-dash" }), "FAQ"), /* @__PURE__ */ React.createElement("h2", { className: "faq-h" }, "Common questions"), /* @__PURE__ */ React.createElement("div", { className: "faq-list" }, FAQ_QA.map(([q, a], i) => /* @__PURE__ */ React.createElement("details", { className: "faq-item", key: i }, /* @__PURE__ */ React.createElement("summary", { className: "faq-q" }, q), /* @__PURE__ */ React.createElement("p", { className: "faq-a" }, a))))));
+}
 function FootCta() {
   return /* @__PURE__ */ React.createElement("section", { className: "foot-cta", id: "cta" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "foot-label" }, /* @__PURE__ */ React.createElement("span", { className: "foot-dash" }), "Get started"), /* @__PURE__ */ React.createElement("h2", { className: "display" }, "One command.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Then just ask.")), /* @__PURE__ */ React.createElement("div", { className: "foot-cta-actions" }, /* @__PURE__ */ React.createElement("div", { className: "foot-install" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" })), /* @__PURE__ */ React.createElement(
     "a",
@@ -670,6 +683,6 @@ function App() {
     }).catch(() => {
     });
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "page-atmos", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("svg", { className: "atmos-svg", width: "100%", height: "100%", preserveAspectRatio: "xMidYMid slice" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("pattern", { id: "natmos", width: "260", height: "260", patternUnits: "userSpaceOnUse" }, /* @__PURE__ */ React.createElement("g", { stroke: "#ffffff", strokeOpacity: "0.05", strokeWidth: "1", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M0 70 H160 V260" }), /* @__PURE__ */ React.createElement("path", { d: "M260 188 H104 V0" }), /* @__PURE__ */ React.createElement("path", { d: "M0 214 H48 V128 H132" })), /* @__PURE__ */ React.createElement("g", { fill: "#4db8d4", fillOpacity: "0.45" }, /* @__PURE__ */ React.createElement("circle", { cx: "160", cy: "70", r: "2.1" }), /* @__PURE__ */ React.createElement("circle", { cx: "104", cy: "188", r: "2.1" }), /* @__PURE__ */ React.createElement("circle", { cx: "132", cy: "128", r: "1.8" })))), /* @__PURE__ */ React.createElement("rect", { width: "100%", height: "100%", fill: "url(#natmos)" }))), /* @__PURE__ */ React.createElement("div", { className: "page-content" }, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, null), /* @__PURE__ */ React.createElement(SeeItWork, { interaction: t.interaction }), /* @__PURE__ */ React.createElement(Loop, null), /* @__PURE__ */ React.createElement(ProofBand, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null)));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "page-atmos", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("svg", { className: "atmos-svg", width: "100%", height: "100%", preserveAspectRatio: "xMidYMid slice" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("pattern", { id: "natmos", width: "260", height: "260", patternUnits: "userSpaceOnUse" }, /* @__PURE__ */ React.createElement("g", { stroke: "#ffffff", strokeOpacity: "0.05", strokeWidth: "1", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M0 70 H160 V260" }), /* @__PURE__ */ React.createElement("path", { d: "M260 188 H104 V0" }), /* @__PURE__ */ React.createElement("path", { d: "M0 214 H48 V128 H132" })), /* @__PURE__ */ React.createElement("g", { fill: "#4db8d4", fillOpacity: "0.45" }, /* @__PURE__ */ React.createElement("circle", { cx: "160", cy: "70", r: "2.1" }), /* @__PURE__ */ React.createElement("circle", { cx: "104", cy: "188", r: "2.1" }), /* @__PURE__ */ React.createElement("circle", { cx: "132", cy: "128", r: "1.8" })))), /* @__PURE__ */ React.createElement("rect", { width: "100%", height: "100%", fill: "url(#natmos)" }))), /* @__PURE__ */ React.createElement("div", { className: "page-content" }, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, null), /* @__PURE__ */ React.createElement(SeeItWork, { interaction: t.interaction }), /* @__PURE__ */ React.createElement(Loop, null), /* @__PURE__ */ React.createElement(ProofBand, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(Faq, null), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null)));
 }
 ReactDOM.createRoot(document.getElementById("app")).render(/* @__PURE__ */ React.createElement(App, null));
