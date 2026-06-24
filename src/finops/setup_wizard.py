@@ -1604,7 +1604,10 @@ def main(args: list[str] | None = None) -> None:
     if args is None:
         args = _sys.argv[1:]
 
-    # Allow `finops setup` and `finops setup aws` as aliases,    # strip the leading "setup" so both `finops aws` and `finops setup aws` work.
+    # Bare `finops` (what `uvx nable` runs) launches the guided welcome flow.
+    # `finops setup` / `finops setup aws` keep the explicit provider menu/flow, so
+    # strip the leading "setup" token but remember it was not a bare invocation.
+    _bare_invocation = not args
     if args and args[0] == "setup":
         args = args[1:]
 
@@ -1987,7 +1990,15 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd in dispatch:
         dispatch[parsed.cmd]()
     else:
-        # Interactive full setup
+        # Bare `finops` / `uvx nable`: launch the guided welcome flow (auto-wire
+        # the editor, ambient-credential scan, value moment, never dead-ends), so
+        # first-run value is never gated behind a persona quiz + 26-item menu.
+        if _bare_invocation:
+            from .welcome import run_welcome_flow
+            run_welcome_flow()
+            return
+
+        # Explicit `finops setup`: full interactive provider menu for power users.
         _wizard_select_persona()
 
         providers = ["aws", "azure", "gcp", "openai", "anthropic", "openrouter", "litellm", "modal", "together", "replicate", "datadog", "langfuse", "snowflake", "github", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams", "notion", "n8n"]

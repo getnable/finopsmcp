@@ -2,6 +2,34 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.89
+
+Onboarding seamlessness. The hero command finally launches the good flow, and the
+first run can no longer crash or dead-end.
+
+### Onboarding
+- **`uvx nable` now runs the guided welcome flow**, not a persona quiz plus a
+  26-provider menu. Bare `finops` routes to `finops welcome` (ambient-credential
+  scan, value moment, never dead-ends); the full provider menu stays behind the
+  explicit `finops setup`. The best onboarding was already built, new users just
+  weren't being pointed at it.
+- **The value moment can no longer crash the flow.** `_show_value_moment` now
+  swallows a failed import (for example a broken or arch-mismatched native
+  dependency) or any scan error and degrades to the demo number plus the setup
+  close, instead of a raw traceback at the moment the user expects their first
+  figure.
+- **Next-step hints match how you launched nable.** A `uvx nable` run is
+  ephemeral, so `finops doctor` would be "command not found". The welcome flow now
+  prints `uvx nable doctor` for uvx users and `finops doctor` for pip installs.
+- **No log noise on the first line.** The license status check dropped from INFO
+  to debug, so onboarding no longer opens with `INFO License: ... license.py:436`
+  before the banner.
+
+### Release hygiene
+- Sync `server.json` and the Claude Code plugin pin to the package version (they
+  drifted at 0.8.88), so registry and plugin installs never point at a stale
+  release. The suite fails if they drift again.
+
 ## 0.8.88
 
 Tighten the free tier. Free was handing over the continuous, acting, cross-cloud,
