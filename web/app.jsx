@@ -690,26 +690,30 @@ function CheckIcon(){
   );
 }
 
-// Team checkout: $100/mo flat or $1,000/yr (2 months free). The single paid
-// tier, merging the old Pro and Team into one.
-const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
-const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
+// Paid checkout links. Pro = $100/mo flat or $1,000/yr (2 months free): local,
+// bring your own LLM key. Startups = $1,000/mo or $10,000/yr: single-tenant
+// hosted with a managed AI agent, usage metered above the included allowance.
+const PRO_MONTHLY_LINK     = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
+const PRO_ANNUAL_LINK      = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
+const STARTUP_MONTHLY_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
+const STARTUP_ANNUAL_LINK  = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 
 const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 
 // Comparison rows. value true -> check, false -> dash, string -> mono text.
 const PRICE_ROWS = [
-  { label: "Users",                                          solo: "Just you",  team: "Your whole team", ent: "Your whole org" },
-  { label: "Core FinOps: cost queries, anomalies, rightsizing, AI/LLM tracking, 17 connectors, local-first", solo: true, team: true, ent: true },
-  { label: "AWS cost data",                                  solo: "Cost Explorer", team: "Explorer + CUR", ent: "Explorer + CUR" },
-  { label: "Terraform remediation: patch + open the PR",     solo: false,       team: true,       ent: true },
-  { label: "Slack / Teams alerts, digests + tickets (Jira, Linear, GitHub)", solo: false, team: true, ent: true },
-  { label: "Budgets, commitments + BI dashboards",           solo: false,       team: true,       ent: true },
-  { label: "Slack bot: ask cost questions, no editor needed", solo: false,      team: true,       ent: true },
-  { label: "RCA + chat remediation: drafts the fix, a human approves", solo: false, team: true,    ent: true },
-  { label: "Managed AI included (or bring your own key)",    solo: false,       team: true,       ent: true },
-  { label: "SSO (Okta, Entra, Google) + audit logs",                               solo: false,       team: false,      ent: true },
-  { label: "Support",                                        solo: "Slack",     team: "Slack",     ent: "Slack + SLA" },
+  { label: "Users",                                          dev: "Just you",  pro: "Your whole team", startup: "Your whole team", ent: "Your whole org" },
+  { label: "Core FinOps: cost queries, anomalies, rightsizing, AI/LLM tracking, 17 connectors, local-first", dev: true, pro: true, startup: true, ent: true },
+  { label: "AWS cost data",                                  dev: "Cost Explorer", pro: "Explorer + CUR", startup: "Explorer + CUR", ent: "Explorer + CUR" },
+  { label: "Terraform remediation: patch + open the PR",     dev: false,       pro: true,        startup: true,    ent: true },
+  { label: "Slack / Teams alerts, digests + tickets (Jira, Linear, GitHub)", dev: false, pro: true, startup: true, ent: true },
+  { label: "Budgets, commitments + BI dashboards",           dev: false,       pro: true,        startup: true,    ent: true },
+  { label: "Slack bot: ask cost questions, no editor needed", dev: false,      pro: true,        startup: true,    ent: true },
+  { label: "RCA + chat remediation: drafts the fix, a human approves", dev: false, pro: true,     startup: true,    ent: true },
+  { label: "Runs",                                           dev: "Your machine", pro: "Your machine", startup: "We host it, single-tenant", ent: "Single-tenant or self-host" },
+  { label: "AI",                                             dev: "Bring your own key", pro: "Bring your own key", startup: "Managed, included + metered", ent: "Managed" },
+  { label: "SSO (Okta, Entra, Google) + audit logs",        dev: false,       pro: false,       startup: false,   ent: true },
+  { label: "Support",                                        dev: "Slack",     pro: "Slack",     startup: "Slack", ent: "Slack + SLA" },
 ];
 
 function PCell({ v }){
@@ -719,12 +723,14 @@ function PCell({ v }){
 }
 
 // Mobile-only: stack the tiers into cards (the comparison table is unreadable on a phone).
-function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }){
+function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, startupPrice, startupPer, startupSub, startupLink, startupPlan }){
   const tiers = [
-    { key:"solo", name:"Solo", price:"Free", per:"forever", sub:null, rec:false, primary:false,
-      cta:"Start free", href:"/docs.html", plan:"solo", ext:false },
-    { key:"team", name:"Team", price:teamPrice, per:teamPer, sub:teamSub, rec:true, primary:true,
-      cta:annual?"Get annual":"Get Team", href:teamLink, plan:teamPlan, ext:true },
+    { key:"dev", name:"Dev", price:"Free", per:"forever", sub:null, rec:false, primary:false,
+      cta:"Start free", href:"/docs.html", plan:"dev", ext:false },
+    { key:"pro", name:"Pro", price:proPrice, per:proPer, sub:proSub, rec:true, primary:true,
+      cta:annual?"Get annual":"Get Pro", href:proLink, plan:proPlan, ext:true },
+    { key:"startup", name:"Startups", price:startupPrice, per:startupPer, sub:startupSub, rec:false, primary:false,
+      cta:"Get Startups", href:startupLink, plan:startupPlan, ext:true },
     { key:"ent", name:"Enterprise", price:"Custom", per:"", sub:null, rec:false, primary:false,
       cta:"Contact us", href:BOOK_CALL_LINK, plan:"enterprise", ext:true },
   ];
@@ -754,11 +760,17 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
 function Pricing(){
   const [annual, setAnnual] = useState(false);
 
-  const teamPrice = annual ? "$1,000" : "$100";
-  const teamPer   = annual ? "/ yr flat" : "/ mo flat";
-  const teamSub   = annual ? "$83 / mo · 2 months free" : "flat, not per-seat · 7-day free trial";
-  const teamLink  = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
-  const teamPlan  = annual ? "team_annual" : "team_monthly";
+  const proPrice = annual ? "$1,000" : "$100";
+  const proPer   = annual ? "/ yr flat" : "/ mo flat";
+  const proSub   = annual ? "$83 / mo · 2 months free" : "flat, not per-seat · 7-day free trial";
+  const proLink  = annual ? PRO_ANNUAL_LINK : PRO_MONTHLY_LINK;
+  const proPlan  = annual ? "pro_annual" : "pro_monthly";
+
+  const startupPrice = annual ? "$10,000" : "$1,000";
+  const startupPer   = annual ? "/ yr" : "/ mo";
+  const startupSub   = annual ? "2 months free · hosted + managed AI" : "hosted single-tenant · managed AI + usage";
+  const startupLink  = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
+  const startupPlan  = annual ? "startups_annual" : "startups_monthly";
 
   return (
     <section id="pricing">
@@ -766,7 +778,7 @@ function Pricing(){
         <div className="section-head">
           <div className="label">Pricing</div>
           <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
-          <p>Solo is free forever. Team is one flat $100 a month for your whole team: remediation PRs, tickets, alerts, dashboards, the Slack bot and managed AI. Enterprise adds SSO, audit logs, and an SLA.</p>
+          <p>Dev is free forever, local, your own LLM key. Pro is one flat $100 a month for your whole team: remediation PRs, tickets, alerts, dashboards, the Slack bot, still your key. Startups is $1,000 a month: we host it single-tenant and run a managed AI agent, with usage metered above the included allowance. Enterprise adds SSO, audit logs, and an SLA.</p>
 
           {/* Billing toggle: segmented control, matched to the dashboard range group. */}
           <div className="bill-toggle" role="group" aria-label="Billing period">
@@ -779,23 +791,31 @@ function Pricing(){
         </div>
 
         <div className="ptable-wrap">
-          <div className="ptable ptable-3">
+          <div className="ptable ptable-4">
             {/* header row */}
             <div className="ph ph-corner"></div>
             <div className="ph">
-              <div className="pt-name">Solo</div>
+              <div className="pt-name">Dev</div>
               <div className="pt-price"><span className="pt-amt">Free</span><span className="pt-per">forever</span></div>
               <a className="btn btn-ghost pt-cta" href="/docs.html"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'solo'}); }}>Start free</a>
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'dev'}); }}>Start free</a>
             </div>
             <div className="ph pcol-team">
               <div className="pt-rec">Recommended</div>
-              <div className="pt-name">Team</div>
-              <div className="pt-price"><span className="pt-amt">{teamPrice}</span><span className="pt-per">{teamPer}</span></div>
-              <div className="pt-sub">{teamSub}</div>
-              <a className="btn btn-primary pt-cta" href={teamLink} target="_blank" rel="noopener noreferrer"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:teamPlan,billing:annual?'annual':'monthly'}); }}>
-                {annual ? "Get annual" : "Get Team"}</a>
+              <div className="pt-name">Pro</div>
+              <div className="pt-price"><span className="pt-amt">{proPrice}</span><span className="pt-per">{proPer}</span></div>
+              <div className="pt-sub">{proSub}</div>
+              <a className="btn btn-primary pt-cta" href={proLink} target="_blank" rel="noopener noreferrer"
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:proPlan,billing:annual?'annual':'monthly'}); }}>
+                {annual ? "Get annual" : "Get Pro"}</a>
+            </div>
+            <div className="ph">
+              <div className="pt-name">Startups</div>
+              <div className="pt-price"><span className="pt-amt">{startupPrice}</span><span className="pt-per">{startupPer}</span></div>
+              <div className="pt-sub">{startupSub}</div>
+              <a className="btn btn-ghost pt-cta" href={startupLink} target="_blank" rel="noopener noreferrer"
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:startupPlan,billing:annual?'annual':'monthly'}); }}>
+                Get Startups</a>
             </div>
             <div className="ph">
               <div className="pt-name">Enterprise</div>
@@ -808,18 +828,19 @@ function Pricing(){
             {PRICE_ROWS.map((r,i) => (
               <React.Fragment key={i}>
                 <div className="pr pr-label">{r.label}</div>
-                <div className="pr pr-cell"><PCell v={r.solo} /></div>
-                <div className="pr pr-cell pcol-team"><PCell v={r.team} /></div>
+                <div className="pr pr-cell"><PCell v={r.dev} /></div>
+                <div className="pr pr-cell pcol-team"><PCell v={r.pro} /></div>
+                <div className="pr pr-cell"><PCell v={r.startup} /></div>
                 <div className="pr pr-cell"><PCell v={r.ent} /></div>
               </React.Fragment>
             ))}
           </div>
         </div>
 
-        <PricingCards annual={annual} teamPrice={teamPrice} teamPer={teamPer} teamSub={teamSub} teamLink={teamLink} teamPlan={teamPlan} />
+        <PricingCards annual={annual} proPrice={proPrice} proPer={proPer} proSub={proSub} proLink={proLink} proPlan={proPlan} startupPrice={startupPrice} startupPer={startupPer} startupSub={startupSub} startupLink={startupLink} startupPlan={startupPlan} />
 
-        <p className="pfoot">No credit card for Solo. Team trial requires a card, cancel any time.</p>
-        <p className="pfoot pdemo">Weighing Team for your org?{" "}
+        <p className="pfoot">No credit card for Dev. Pro and Startups trials require a card, cancel any time.</p>
+        <p className="pfoot pdemo">Weighing Pro or Startups for your org?{" "}
           <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',cta:'book_demo'}); }}>
             Book a 20-min demo</a> and we'll run it on your own bill.</p>

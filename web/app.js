@@ -405,32 +405,35 @@ function Connectors() {
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
-const MONTHLY_STRIPE_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
-const ANNUAL_STRIPE_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
+const PRO_MONTHLY_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
+const PRO_ANNUAL_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
+const STARTUP_MONTHLY_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
+const STARTUP_ANNUAL_LINK = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 const PRICE_ROWS = [
-  { label: "Users", solo: "Just you", team: "Your whole team", ent: "Your whole org" },
-  { label: "Core FinOps: cost queries, anomalies, rightsizing, AI/LLM tracking, 17 connectors, local-first", solo: true, team: true, ent: true },
-  { label: "AWS cost data", solo: "Cost Explorer", team: "Explorer + CUR", ent: "Explorer + CUR" },
-  { label: "Terraform remediation: patch + open the PR", solo: false, team: true, ent: true },
-  { label: "Slack / Teams alerts, digests + tickets (Jira, Linear, GitHub)", solo: false, team: true, ent: true },
-  { label: "Budgets, commitments + BI dashboards", solo: false, team: true, ent: true },
-  { label: "Slack bot: ask cost questions, no editor needed", solo: false, team: true, ent: true },
-  { label: "RCA + chat remediation: drafts the fix, a human approves", solo: false, team: true, ent: true },
-  { label: "Managed AI included (or bring your own key)", solo: false, team: true, ent: true },
-  { label: "SSO (Okta, Entra, Google) + audit logs", solo: false, team: false, ent: true },
-  { label: "Support", solo: "Slack", team: "Slack", ent: "Slack + SLA" }
+  { label: "Users", dev: "Just you", pro: "Your whole team", startup: "Your whole team", ent: "Your whole org" },
+  { label: "Core FinOps: cost queries, anomalies, rightsizing, AI/LLM tracking, 17 connectors, local-first", dev: true, pro: true, startup: true, ent: true },
+  { label: "AWS cost data", dev: "Cost Explorer", pro: "Explorer + CUR", startup: "Explorer + CUR", ent: "Explorer + CUR" },
+  { label: "Terraform remediation: patch + open the PR", dev: false, pro: true, startup: true, ent: true },
+  { label: "Slack / Teams alerts, digests + tickets (Jira, Linear, GitHub)", dev: false, pro: true, startup: true, ent: true },
+  { label: "Budgets, commitments + BI dashboards", dev: false, pro: true, startup: true, ent: true },
+  { label: "Slack bot: ask cost questions, no editor needed", dev: false, pro: true, startup: true, ent: true },
+  { label: "RCA + chat remediation: drafts the fix, a human approves", dev: false, pro: true, startup: true, ent: true },
+  { label: "Runs", dev: "Your machine", pro: "Your machine", startup: "We host it, single-tenant", ent: "Single-tenant or self-host" },
+  { label: "AI", dev: "Bring your own key", pro: "Bring your own key", startup: "Managed, included + metered", ent: "Managed" },
+  { label: "SSO (Okta, Entra, Google) + audit logs", dev: false, pro: false, startup: false, ent: true },
+  { label: "Support", dev: "Slack", pro: "Slack", startup: "Slack", ent: "Slack + SLA" }
 ];
 function PCell({ v }) {
   if (v === true) return /* @__PURE__ */ React.createElement("span", { className: "pcheck" }, /* @__PURE__ */ React.createElement(CheckIcon, null));
   if (v === false) return /* @__PURE__ */ React.createElement("span", { className: "pdash" }, "\u2013");
   return /* @__PURE__ */ React.createElement("span", { className: "pval" }, v);
 }
-function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }) {
+function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, startupPrice, startupPer, startupSub, startupLink, startupPlan }) {
   const tiers = [
     {
-      key: "solo",
-      name: "Solo",
+      key: "dev",
+      name: "Dev",
       price: "Free",
       per: "forever",
       sub: null,
@@ -438,20 +441,33 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
       primary: false,
       cta: "Start free",
       href: "/docs.html",
-      plan: "solo",
+      plan: "dev",
       ext: false
     },
     {
-      key: "team",
-      name: "Team",
-      price: teamPrice,
-      per: teamPer,
-      sub: teamSub,
+      key: "pro",
+      name: "Pro",
+      price: proPrice,
+      per: proPer,
+      sub: proSub,
       rec: true,
       primary: true,
-      cta: annual ? "Get annual" : "Get Team",
-      href: teamLink,
-      plan: teamPlan,
+      cta: annual ? "Get annual" : "Get Pro",
+      href: proLink,
+      plan: proPlan,
+      ext: true
+    },
+    {
+      key: "startup",
+      name: "Startups",
+      price: startupPrice,
+      per: startupPer,
+      sub: startupSub,
+      rec: false,
+      primary: false,
+      cta: "Get Startups",
+      href: startupLink,
+      plan: startupPlan,
       ext: true
     },
     {
@@ -483,33 +499,50 @@ function PricingCards({ annual, teamPrice, teamPer, teamSub, teamLink, teamPlan 
 }
 function Pricing() {
   const [annual, setAnnual] = useState(false);
-  const teamPrice = annual ? "$1,000" : "$100";
-  const teamPer = annual ? "/ yr flat" : "/ mo flat";
-  const teamSub = annual ? "$83 / mo \xB7 2 months free" : "flat, not per-seat \xB7 7-day free trial";
-  const teamLink = annual ? ANNUAL_STRIPE_LINK : MONTHLY_STRIPE_LINK;
-  const teamPlan = annual ? "team_annual" : "team_monthly";
-  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Solo is free forever. Team is one flat $100 a month for your whole team: remediation PRs, tickets, alerts, dashboards, the Slack bot and managed AI. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { className: "bill-toggle", role: "group", "aria-label": "Billing period" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? "" : " active"), onClick: () => setAnnual(false), "aria-pressed": !annual }, "Monthly"), /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? " active" : ""), onClick: () => setAnnual(true), "aria-label": "Toggle annual billing", "aria-pressed": annual }, "Annual")), /* @__PURE__ */ React.createElement("span", { className: "seg-save" }, "SAVE 17%"))), /* @__PURE__ */ React.createElement("div", { className: "ptable-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ptable ptable-3" }, /* @__PURE__ */ React.createElement("div", { className: "ph ph-corner" }), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Solo"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "forever")), /* @__PURE__ */ React.createElement(
+  const proPrice = annual ? "$1,000" : "$100";
+  const proPer = annual ? "/ yr flat" : "/ mo flat";
+  const proSub = annual ? "$83 / mo \xB7 2 months free" : "flat, not per-seat \xB7 7-day free trial";
+  const proLink = annual ? PRO_ANNUAL_LINK : PRO_MONTHLY_LINK;
+  const proPlan = annual ? "pro_annual" : "pro_monthly";
+  const startupPrice = annual ? "$10,000" : "$1,000";
+  const startupPer = annual ? "/ yr" : "/ mo";
+  const startupSub = annual ? "2 months free \xB7 hosted + managed AI" : "hosted single-tenant \xB7 managed AI + usage";
+  const startupLink = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
+  const startupPlan = annual ? "startups_annual" : "startups_monthly";
+  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Dev is free forever, local, your own LLM key. Pro is one flat $100 a month for your whole team: remediation PRs, tickets, alerts, dashboards, the Slack bot, still your key. Startups is $1,000 a month: we host it single-tenant and run a managed AI agent, with usage metered above the included allowance. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { className: "bill-toggle", role: "group", "aria-label": "Billing period" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? "" : " active"), onClick: () => setAnnual(false), "aria-pressed": !annual }, "Monthly"), /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? " active" : ""), onClick: () => setAnnual(true), "aria-label": "Toggle annual billing", "aria-pressed": annual }, "Annual")), /* @__PURE__ */ React.createElement("span", { className: "seg-save" }, "SAVE 17%"))), /* @__PURE__ */ React.createElement("div", { className: "ptable-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ptable ptable-4" }, /* @__PURE__ */ React.createElement("div", { className: "ph ph-corner" }), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Dev"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "forever")), /* @__PURE__ */ React.createElement(
     "a",
     {
       className: "btn btn-ghost pt-cta",
       href: "/docs.html",
       onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: "solo" });
+        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: "dev" });
       }
     },
     "Start free"
-  )), /* @__PURE__ */ React.createElement("div", { className: "ph pcol-team" }, /* @__PURE__ */ React.createElement("div", { className: "pt-rec" }, "Recommended"), /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Team"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, teamPrice), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, teamPer)), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, teamSub), /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { className: "ph pcol-team" }, /* @__PURE__ */ React.createElement("div", { className: "pt-rec" }, "Recommended"), /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Pro"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, proPrice), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, proPer)), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, proSub), /* @__PURE__ */ React.createElement(
     "a",
     {
       className: "btn btn-primary pt-cta",
-      href: teamLink,
+      href: proLink,
       target: "_blank",
       rel: "noopener noreferrer",
       onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: teamPlan, billing: annual ? "annual" : "monthly" });
+        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: proPlan, billing: annual ? "annual" : "monthly" });
       }
     },
-    annual ? "Get annual" : "Get Team"
+    annual ? "Get annual" : "Get Pro"
+  )), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Startups"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, startupPrice), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, startupPer)), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, startupSub), /* @__PURE__ */ React.createElement(
+    "a",
+    {
+      className: "btn btn-ghost pt-cta",
+      href: startupLink,
+      target: "_blank",
+      rel: "noopener noreferrer",
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: startupPlan, billing: annual ? "annual" : "monthly" });
+      }
+    },
+    "Get Startups"
   )), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Enterprise"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Custom")), /* @__PURE__ */ React.createElement(
     "a",
     {
@@ -522,7 +555,7 @@ function Pricing() {
       }
     },
     "Contact us"
-  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.solo })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.team })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement(PricingCards, { annual, teamPrice, teamPer, teamSub, teamLink, teamPlan }), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Solo. Team trial requires a card, cancel any time."), /* @__PURE__ */ React.createElement("p", { className: "pfoot pdemo" }, "Weighing Team for your org?", " ", /* @__PURE__ */ React.createElement(
+  )), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.dev })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.pro })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.startup })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent })))))), /* @__PURE__ */ React.createElement(PricingCards, { annual, proPrice, proPer, proSub, proLink, proPlan, startupPrice, startupPer, startupSub, startupLink, startupPlan }), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Dev. Pro and Startups trials require a card, cancel any time."), /* @__PURE__ */ React.createElement("p", { className: "pfoot pdemo" }, "Weighing Pro or Startups for your org?", " ", /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
