@@ -2,6 +2,27 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.90
+
+Onboarding fixes from launch-day dogfooding.
+
+### Install
+- **`uvx nable` no longer dies on a missing cryptography wheel.** Python 3.10 is the
+  one supported version without a prebuilt `cryptography` wheel, so on a 3.10-default
+  machine (an Anaconda base, an old system Python) uv fell back to compiling it from
+  source and crashed on any arch or toolchain mismatch. Bump `requires-python` to
+  `>=3.11` so uv resolves to a 3.11+ interpreter that has wheels. If Python downloads
+  are disabled in your uv config, `uvx --python 3.12 nable` forces a good interpreter.
+
+### Setup wizard
+- **The closing message now matches the provider you just connected.** It was
+  hardcoded to "ask what are my AWS costs" after every connector; connect GitHub and
+  it now suggests "what has my AI coding shipped, by model?", connect Slack and it
+  says alerts will post to Slack, and so on.
+- **Next-step command hints adapt to how you launched nable.** `serve` and `setup`
+  hints print as `uvx nable …` for a uvx run (no `finops` on PATH) and `finops …`
+  for a pip install.
+
 ## 0.8.89
 
 Onboarding seamlessness. The hero command finally launches the good flow, and the
