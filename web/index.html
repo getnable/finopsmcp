@@ -559,6 +559,20 @@ section:not(.alt)+section.alt{border-top-color:transparent}
   .pcard-val{color:var(--fg-3);font-style:normal;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:11.5px;letter-spacing:.01em}
 }
 
+/* Startups credit draw-down meter: how each action type spends the 500 credits */
+.credit-meter{max-width:580px;margin:30px auto 0;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--bg-1);padding:18px 22px;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}
+.credit-meter-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:15px}
+.cm-title{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-2)}
+.cm-sub{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-3);font-family:'Geist Mono','JetBrains Mono',monospace}
+.cm-rows{display:flex;flex-direction:column;gap:11px}
+.cm-row{display:grid;grid-template-columns:152px 1fr 72px;align-items:center;gap:14px}
+.cm-label{font-size:12.5px;color:var(--fg-2);text-align:left}
+.cm-track{height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden}
+.cm-fill{display:block;height:100%;background:var(--accent);border-radius:3px}
+.cm-n{font-size:11px;color:var(--fg-3);font-family:'Geist Mono','JetBrains Mono',monospace;text-align:right;font-variant-numeric:tabular-nums}
+.cm-foot{margin-top:15px;padding-top:13px;border-top:1px solid var(--line);font-size:11.5px;color:var(--fg-3);text-align:center;line-height:1.55}
+@media(max-width:760px){.cm-row{grid-template-columns:108px 1fr 56px;gap:10px}.cm-label{font-size:12px}.credit-meter{padding:16px 16px}}
+
 /* bento (telemetry) */
 .bento{display:grid;grid-template-columns:1.4fr 1fr 1fr;grid-template-rows:auto auto;gap:0;border:1px solid var(--line);border-radius:var(--r-xl);overflow:hidden;background:var(--bg-1)}
 .bento-cell{padding:24px 26px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px;position:relative}
