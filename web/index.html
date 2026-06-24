@@ -560,18 +560,19 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 }
 
 /* Startups credit draw-down meter: how each action type spends the 500 credits */
-.credit-meter{max-width:580px;margin:30px auto 0;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--bg-1);padding:18px 22px;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}
-.credit-meter-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:15px}
-.cm-title{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-2)}
-.cm-sub{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-3);font-family:'Geist Mono','JetBrains Mono',monospace}
-.cm-rows{display:flex;flex-direction:column;gap:11px}
-.cm-row{display:grid;grid-template-columns:152px 1fr 72px;align-items:center;gap:14px}
-.cm-label{font-size:12.5px;color:var(--fg-2);text-align:left}
-.cm-track{height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden}
-.cm-fill{display:block;height:100%;background:var(--accent);border-radius:3px}
-.cm-n{font-size:11px;color:var(--fg-3);font-family:'Geist Mono','JetBrains Mono',monospace;text-align:right;font-variant-numeric:tabular-nums}
-.cm-foot{margin-top:15px;padding-top:13px;border-top:1px solid var(--line);font-size:11.5px;color:var(--fg-3);text-align:center;line-height:1.55}
-@media(max-width:760px){.cm-row{grid-template-columns:108px 1fr 56px;gap:10px}.cm-label{font-size:12px}.credit-meter{padding:16px 16px}}
+.credit-meter{max-width:640px;margin:36px auto 0;border:1px solid var(--line);border-radius:var(--r-xl);background:var(--bg-1);padding:26px 30px}
+.credit-meter-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:24px}
+.cm-amount{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:24px;font-weight:500;color:var(--fg);letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
+.cm-amount-unit{font-family:'Bricolage Grotesque',system-ui,sans-serif;font-size:12px;font-weight:400;color:var(--fg-3);margin-left:9px;letter-spacing:0}
+.cm-sub{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--fg-4);font-family:'Geist Mono','JetBrains Mono',monospace}
+.cm-rows{display:flex;flex-direction:column;gap:15px}
+.cm-row{display:grid;grid-template-columns:170px 1fr 30px;align-items:center;gap:18px}
+.cm-label{font-size:12.5px;color:var(--fg-2)}
+.cm-track{height:4px;background:var(--bg-3);border-radius:2px;overflow:hidden}
+.cm-fill{display:block;height:100%;background:var(--accent);border-radius:2px}
+.cm-n{font-size:12px;color:var(--fg-3);font-family:'Geist Mono','JetBrains Mono',monospace;text-align:right;font-variant-numeric:tabular-nums}
+.cm-foot{margin-top:22px;padding-top:16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--fg-3);text-align:center;letter-spacing:.01em}
+@media(max-width:760px){.cm-row{grid-template-columns:118px 1fr 26px;gap:12px}.cm-label{font-size:12px}.credit-meter{padding:20px 18px}.cm-foot{line-height:1.55}}
 
 /* bento (telemetry) */
 .bento{display:grid;grid-template-columns:1.4fr 1fr 1fr;grid-template-rows:auto auto;gap:0;border:1px solid var(--line);border-radius:var(--r-xl);overflow:hidden;background:var(--bg-1)}
