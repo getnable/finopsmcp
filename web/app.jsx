@@ -725,13 +725,13 @@ function PCell({ v }){
 // Mobile-only: stack the tiers into cards (the comparison table is unreadable on a phone).
 function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, startupPrice, startupPer, startupSub, startupLink, startupPlan }){
   const tiers = [
-    { key:"dev", name:"Dev", price:"Free", per:"forever", sub:null, rec:false, primary:false,
+    { key:"dev", name:"Dev", price:"Free", per:"forever", sub:"solo · no credit card", rec:false, primary:false,
       cta:"Start free", href:"/docs.html", plan:"dev", ext:false },
     { key:"pro", name:"Pro", price:proPrice, per:proPer, sub:proSub, rec:true, primary:true,
       cta:annual?"Get annual":"Get Pro", href:proLink, plan:proPlan, ext:true },
     { key:"startup", name:"Startups", price:startupPrice, per:startupPer, sub:startupSub, rec:false, primary:false,
       cta:"Get Startups", href:startupLink, plan:startupPlan, ext:true },
-    { key:"ent", name:"Enterprise", price:"Custom", per:"", sub:null, rec:false, primary:false,
+    { key:"ent", name:"Enterprise", price:"Custom", per:"annual", sub:"SSO, audit logs + SLA", rec:false, primary:false,
       cta:"Contact us", href:BOOK_CALL_LINK, plan:"enterprise", ext:true },
   ];
   return (
@@ -797,6 +797,7 @@ function Pricing(){
             <div className="ph">
               <div className="pt-name">Dev</div>
               <div className="pt-price"><span className="pt-amt">Free</span><span className="pt-per">forever</span></div>
+              <div className="pt-sub">solo · no credit card</div>
               <a className="btn btn-ghost pt-cta" href="/docs.html"
                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'dev'}); }}>Start free</a>
             </div>
@@ -819,7 +820,8 @@ function Pricing(){
             </div>
             <div className="ph">
               <div className="pt-name">Enterprise</div>
-              <div className="pt-price"><span className="pt-amt">Custom</span></div>
+              <div className="pt-price"><span className="pt-amt">Custom</span><span className="pt-per">annual</span></div>
+              <div className="pt-sub">SSO, audit logs + SLA</div>
               <a className="btn btn-ghost pt-cta" href={BOOK_CALL_LINK} target="_blank" rel="noopener noreferrer"
                  onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'enterprise'}); }}>Contact us</a>
             </div>
