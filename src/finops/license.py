@@ -436,11 +436,11 @@ def check_license() -> LicenseStatus:
     status = validate_key(key)
 
     if status.mode == "trial":
-        log.info("License: pro trial — %d days remaining", status.days_remaining)
+        log.debug("License: pro trial, %d days remaining", status.days_remaining)
     elif status.mode == "free":
-        log.info("License: free tier")
+        log.debug("License: free tier")
     elif status.mode in ("pro", "team", "enterprise"):
-        log.info("License: %s — %s", status.mode, status.email)
+        log.debug("License: %s, %s", status.mode, status.email)
     else:
         log.warning("License: invalid key — %s", status.message)
 

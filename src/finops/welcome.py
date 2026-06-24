@@ -35,6 +35,22 @@ def amber(t: str) -> str:  return _c("33", t)
 def white(t: str) -> str:  return _c("97", t)
 
 
+def _cli(cmd: str = "") -> str:
+    """The command to tell the user to run, matched to how they launched nable.
+
+    A `uvx nable ...` run is ephemeral: there is no persistent `finops` on PATH
+    after it exits, so hinting `finops doctor` gives the user 'command not found'.
+    uvx/uv runs live under the uv cache (sys.prefix like ~/.cache/uv/archive-...),
+    so detect that and hint `uvx nable <cmd>`; a pip install has `finops` on PATH.
+    """
+    prefix = (sys.prefix or "").replace("\\", "/").lower()
+    ephemeral = any(s in prefix for s in (
+        "/.cache/uv", "/uv/archive", "/uv/environments", "/share/uv/", "/uv/tools",
+    ))
+    base = "uvx nable" if ephemeral else "finops"
+    return f"{base} {cmd}".strip() if cmd else base
+
+
 # ── Telemetry ──────────────────────────────────────────────────────────────────
 
 def _app_version() -> str:
@@ -237,7 +253,14 @@ def _show_value_moment(demo: bool = False) -> bool:
         os.environ["FINOPS_DEMO"] = "1"
         os.environ["FINOPS_DEMO_MODE"] = "1"
     try:
-        return _value_moment_body(demo)
+        try:
+            return _value_moment_body(demo)
+        except Exception:
+            # Never let a failed import (e.g. a broken or arch-mismatched native
+            # dep), a slow scan, or any runtime error crash onboarding. Degrade to
+            # "no number" so the caller falls back to the demo + setup close. The
+            # docstring's "can never block or break onboarding" depends on this.
+            return False
     finally:
         if _demo_env_prev is not None:
             for _k, _v in _demo_env_prev.items():
@@ -452,12 +475,12 @@ def _llm_admin_key_hint(provider: str) -> None:
         _line(dim("  Key works, but no org billing data came back. OpenAI cost data needs an"))
         _line(dim("  ") + bold("admin key") + dim(" (sk-admin-...), not a regular key."))
         _line(dim("  Create one:  ") + cyan("https://platform.openai.com/settings/organization/admin-keys"))
-        _line(dim("  Then run:    ") + cyan("finops setup openai") + dim("  and paste it as the Admin key."))
+        _line(dim("  Then run:    ") + cyan(_cli("setup openai")) + dim("  and paste it as the Admin key."))
     elif provider == "Anthropic":
         _line(dim("  Key works, but no org usage data came back. Anthropic cost data needs an"))
         _line(dim("  ") + bold("admin key") + dim(" plus your Organization ID."))
         _line(dim("  Create one in the Anthropic Console under Settings -> Admin keys, then run:"))
-        _line(dim("  ") + cyan("finops setup anthropic") + dim("  and paste them."))
+        _line(dim("  ") + cyan(_cli("setup anthropic")) + dim("  and paste them."))
     _blank()
 
 
@@ -496,7 +519,7 @@ def run_welcome_flow(demo: bool = False) -> None:
         _blank()
         _line(bold(green("That is nable.")) + "  Run it on your own account:")
         _blank()
-        _line(f"  {bold(cyan('uvx --from finops-mcp finops welcome'))}")
+        _line(f"  {bold(cyan(_cli('welcome')))}")
         _blank()
         _line(f"  Docs  →  {cyan('https://getnable.com/docs')}")
         _blank()
@@ -522,9 +545,9 @@ def run_welcome_flow(demo: bool = False) -> None:
         from .setup_wizard import _configure_mcp_clients
         client_result = _configure_mcp_clients()
     except (KeyboardInterrupt, EOFError):
-        _line(dim("  Skipped. Run 'finops setup claude' later."))
+        _line(dim(f"  Skipped. Run '{_cli('setup claude')}' later."))
     except Exception:
-        _line(dim("  Could not auto-configure. Run 'finops setup claude' later."))
+        _line(dim(f"  Could not auto-configure. Run '{_cli('setup claude')}' later."))
     _blank()
     _line(_rule())
     _blank()
@@ -657,7 +680,7 @@ def run_welcome_flow(demo: bool = False) -> None:
         _blank()
         _line(bold("Here's nable on a sample bill") + dim("  (example numbers · connect an account to see your own)"))
         _show_value_moment(demo=True)
-        _line(dim("  Ready for real numbers?  ") + cyan("finops setup aws") + dim("  (read-only, ~1 min)"))
+        _line(dim("  Ready for real numbers?  ") + cyan(_cli("setup aws")) + dim("  (read-only, ~1 min)"))
         _oneclick = _oneclick_aws_url()
         if _oneclick:
             _line(dim("  Or one-click a read-only key:  ") + cyan(_oneclick))
@@ -681,7 +704,7 @@ def run_welcome_flow(demo: bool = False) -> None:
         _line(dim(f"  Using {_client}? Run:  ") + cyan(_cmd))
     if _manual:
         _blank()
-    _line(dim("  You should see nable in your editor's MCP tool list. Not there? Run 'finops doctor'."))
+    _line(dim(f"  You should see nable in your editor's MCP tool list. Not there? Run '{_cli('doctor')}'."))
     _blank()
     _line(f"  Docs    →  {cyan('https://getnable.com/docs')}")
     _line(f"  Support →  {cyan('hello@getnable.com')}")
