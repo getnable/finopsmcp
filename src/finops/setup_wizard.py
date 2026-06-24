@@ -1599,6 +1599,46 @@ def _print_tools_cheatsheet() -> None:
     print()
 
 
+# After connecting a provider, suggest a question relevant to *that* provider, so
+# the close is not always "ask about AWS" after connecting something else.
+_CONNECT_QUESTIONS = {
+    "github": "What has my AI coding shipped this month, by model?",
+    "openai": "What's my OpenAI spend, by model?",
+    "anthropic": "What's my Anthropic spend, by model?",
+    "openrouter": "What's my OpenRouter spend, by model?",
+    "litellm": "What's my LLM spend, by model?",
+    "langfuse": "What's my LLM spend, by model?",
+    "datadog": "What am I spending on Datadog?",
+    "snowflake": "What are my Snowflake credits costing me?",
+    "databricks": "What are my Databricks jobs costing?",
+    "mongodb": "What's my MongoDB Atlas bill?",
+    "twilio": "What am I spending on Twilio?",
+    "cloudflare": "What's my Cloudflare bill?",
+    "vercel": "What's my Vercel bill?",
+    "azure": "What are my Azure costs this month?",
+    "gcp": "What are my GCP costs this month?",
+    "modal": "What are my Modal GPU costs?",
+    "together": "What's my Together AI spend?",
+    "replicate": "What's my Replicate spend?",
+    "cohere": "What's my Cohere usage costing?",
+    "mistral": "What's my Mistral spend?",
+    "newrelic": "What am I spending on New Relic?",
+    "pagerduty": "What are my PagerDuty seats costing?",
+}
+_CONNECT_CHANNELS = {"slack": "Slack", "teams": "Microsoft Teams", "notion": "Notion", "n8n": "n8n"}
+
+
+def _post_connect_message(provider: str | None) -> str:
+    """The 'done, here's what to do' line, tailored to the provider just connected."""
+    p = (provider or "").lower()
+    if p in _CONNECT_CHANNELS:
+        return f"Done. Restart Claude Desktop, alerts and digests will post to {_CONNECT_CHANNELS[p]}."
+    if p == "sso":
+        return "Done. Restart Claude Desktop, SSO is wired up for the team dashboard."
+    q = _CONNECT_QUESTIONS.get(p, "What's driving my cloud and AI bill?")
+    return f'Done. Restart Claude Desktop, then ask:  "{q}"'
+
+
 def main(args: list[str] | None = None) -> None:
     import sys as _sys
     if args is None:
@@ -2020,14 +2060,15 @@ def main(args: list[str] | None = None) -> None:
     # Always offer to configure Claude Desktop at the end of setup
     _configure_claude_desktop()
 
-    print("\n  Done. Restart Claude Desktop and ask: 'What are my AWS costs this month?'")
+    from .welcome import _cli
+    print("\n  " + _post_connect_message(parsed.cmd))
     print()
     print("  Want a visual dashboard?")
-    print("    finops serve")
+    print(f"    {_cli('serve')}")
     print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
     print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
     print()
-    print("  To add more providers: finops setup")
+    print(f"  To add more providers: {_cli('setup')}")
     print("  Full docs: https://getnable.com/docs\n")
     _offer_email_signup()
 

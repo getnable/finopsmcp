@@ -56,7 +56,7 @@ Then:
 uvx nable
 ```
 
-No `uv` and don't want it? On Python 3.10+, `pip install -U finops-mcp && finops welcome` works too.
+No `uv` and don't want it? On Python 3.11+, `pip install -U finops-mcp && finops welcome` works too.
 
 First run downloads dependencies, so give it a moment before the welcome screen appears.
 
@@ -291,8 +291,9 @@ finops setup claude    # re-run Claude Desktop configuration only
 | Tools don't appear in Claude | Switch to uvx config or use absolute path |
 | `command not found: finops-mcp` | Re-install with `pip install finops-mcp` or use `uvx` |
 | AWS returns no data | Run `finops setup aws`. The wizard writes credentials to your editor config automatically. |
-| `No matching distribution found for finops-mcp` | Your Python is older than 3.10. Check with `python --version`, then install on 3.10+ (`uvx nable`, or `python3.10 -m pip install finops-mcp`). |
-| Python 3.8/3.9 errors | nable requires Python 3.10+: `python3.10 -m pip install finops-mcp` |
+| `No matching distribution found for finops-mcp` | Your Python is older than 3.11. Check with `python --version`, then install on 3.11+ (`uvx nable`, or `python3.11 -m pip install finops-mcp`). |
+| `cryptography` build error / `maturin failed` | uv tried to compile cryptography from source on Python 3.10, which has no prebuilt wheel. Use 3.11+: `uvx nable`, or force it with `uvx --python 3.12 nable`. |
+| Python 3.8 / 3.9 / 3.10 errors | nable requires Python 3.11+: `python3.11 -m pip install finops-mcp` |
 | Corporate SSL errors | `pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org finops-mcp` |
 | Permission denied | Install to user: `pip install --user finops-mcp` or use `uvx` |
 | Works at home, not at work | Use `uvx` (corporate IT often strips custom PATH entries) |
