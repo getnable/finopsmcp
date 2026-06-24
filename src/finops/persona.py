@@ -46,6 +46,17 @@ PERSONAS: dict[str, dict[str, str]] = {
             "and per-service cost ownership. Include infrastructure topology context."
         ),
     },
+    "agent": {
+        "label": "Agent / Automation",
+        "description": "concise structured output for an AI agent or automated caller",
+        "mcp_context": (
+            "You are being called by an automated agent, not a human reading prose. Be terse: "
+            "no preamble, no restating the question, no multi-paragraph explanations, no markdown "
+            "tables. Lead with the answer and the numbers. Pass through the tool's structured "
+            "fields and surface any machine-readable verdict/status field verbatim. Keep exact "
+            "identifiers (instance types, resource IDs, regions); the caller is a machine."
+        ),
+    },
 }
 
 _DEFAULT_PERSONA = "engineer"
@@ -78,7 +89,15 @@ def _write_config(data: dict[str, Any]) -> None:
 
 
 def get_persona() -> str:
-    """Return the current persona key. Defaults to 'engineer' if not set."""
+    """Return the current persona key. Defaults to 'engineer' if not set.
+
+    FINOPS_PERSONA in the environment wins over the config file, so an agent-driven
+    MCP deployment can select the concise 'agent' persona per-process without writing
+    config (e.g. FINOPS_PERSONA=agent in the server env)."""
+    import os
+    env = os.getenv("FINOPS_PERSONA", "").strip().lower()
+    if env in PERSONAS:
+        return env
     cfg = _read_config()
     persona = cfg.get("persona", _DEFAULT_PERSONA)
     if persona not in PERSONAS:
@@ -129,7 +148,7 @@ def format_instance_type(instance_type: str, persona: str | None = None) -> str:
 
 
 def is_technical_persona(persona: str | None = None) -> bool:
-    """Return True for engineer, finops, and platform personas."""
+    """Return True for engineer, finops, platform, and agent personas."""
     if persona is None:
         persona = get_persona()
-    return persona in {"engineer", "finops", "platform"}
+    return persona in {"engineer", "finops", "platform", "agent"}

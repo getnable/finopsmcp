@@ -2,6 +2,22 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.92
+
+The agent-native on-ramp: a cost preflight agents call before they act.
+
+### Agent-native
+- **New `estimate_change_cost` tool: cost preflight with a machine verdict.** Call it
+  before applying an infra change (a Terraform plan, a `helm diff`, or a known monthly
+  delta) to get `ok` / `warn` / `over_budget` / `no_budget` plus the monthly and annual
+  cost delta and the budget headroom. Read-only: it estimates and checks against your
+  budget, it never applies anything. Wraps the existing Terraform/Helm estimators and
+  the budget enforcer, and is the seed of the policy-bounded guardrail.
+- **New `agent` persona for concise, structured output.** Automated callers get terse,
+  machine-readable responses instead of human prose. Activate per-process with
+  `FINOPS_PERSONA=agent` in the server env (env wins over the config file) or
+  `finops config --persona agent`.
+
 ## 0.8.91
 
 AI engineering report now works for teams that commit straight to main.

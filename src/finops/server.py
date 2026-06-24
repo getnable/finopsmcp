@@ -7937,6 +7937,109 @@ async def estimate_terraform_cost(
 
 
 @mcp.tool()
+async def estimate_change_cost(
+    terraform_plan_json: str | None = None,
+    terraform_plan_file: str | None = None,
+    tf_dir: str | None = None,
+    helm_diff: str | None = None,
+    monthly_delta_usd: float | None = None,
+    budget_name: str = "",
+) -> dict:
+    """Cost preflight for a proposed change: what it costs and whether it fits budget.
+
+    Agent-native. Call this BEFORE applying an infrastructure change to get a machine
+    verdict (ok / warn / over_budget / no_budget) plus the monthly and annual cost
+    delta and the budget headroom. Read-only: it estimates and checks, it never applies
+    anything.
+
+    Describe the change one of these ways:
+      - terraform_plan_json / terraform_plan_file / tf_dir : a Terraform plan
+      - helm_diff : output of `helm diff upgrade` or a values.yaml diff
+      - monthly_delta_usd : a known monthly cost delta (escape hatch for any change the
+        estimators don't parse, e.g. "launch a db.r6g.4xlarge")
+
+    budget_name selects which budget to check against; default is the first active
+    budget. With no budget configured the verdict is "no_budget" and the cost delta is
+    still returned.
+
+    Good triggers: "will this fit my budget", "what will this terraform/helm change cost
+    before I apply it", "cost preflight", "can the agent afford this change".
+    """
+    from .preflight import evaluate_preflight
+
+    # 1. Resolve the monthly cost delta + a short breakdown from whichever input is given.
+    change_kind: str | None = None
+    breakdown: list = []
+    delta: float | None = None
+    try:
+        if terraform_plan_json or terraform_plan_file or tf_dir:
+            from .connectors.terraform_estimate import (
+                estimate_plan, estimate_from_file, estimate_from_dir)
+            import json as _json
+            if terraform_plan_json:
+                est = estimate_plan(_json.loads(terraform_plan_json))
+            elif terraform_plan_file:
+                safe = _resolve_safe_path(terraform_plan_file, must_exist=True)
+                if isinstance(safe, dict):
+                    return safe
+                est = estimate_from_file(safe)
+            else:
+                safe = _resolve_safe_path(tf_dir, must_exist=True)
+                if isinstance(safe, dict):
+                    return safe
+                est = estimate_from_dir(safe)
+            if isinstance(est, dict) and est.get("error"):
+                return est
+            delta = float(est.get("monthly_delta_usd", 0.0) or 0.0)
+            breakdown = (est.get("lines") or [])[:20]
+            change_kind = "terraform"
+        elif helm_diff:
+            from .connectors.helm import estimate_helm_diff
+            d = estimate_helm_diff(diff_text=helm_diff)
+            delta = float(d.delta_monthly_usd)
+            breakdown = list(d.changes)
+            change_kind = "helm"
+        elif monthly_delta_usd is not None:
+            delta = float(monthly_delta_usd)
+            change_kind = "manual"
+        else:
+            return {"error": "Describe the change: pass terraform_plan_json / "
+                             "terraform_plan_file / tf_dir, helm_diff, or monthly_delta_usd."}
+    except Exception as e:
+        return {"error": f"Could not estimate the change cost: {e}"}
+
+    # 2. Budget to check against (first active, or by name). Best-effort: no DB / no
+    #    budgets configured falls through to a "no_budget" verdict, never an error.
+    budget_for_eval = None
+    alert_pct = 80.0
+    try:
+        from .budget.enforcer import list_budgets, check_budget
+        budgets = list_budgets(active_only=True) or []
+        chosen = None
+        if budget_name:
+            chosen = next((b for b in budgets if b.get("name") == budget_name), None)
+        chosen = chosen or (budgets[0] if budgets else None)
+        if chosen:
+            alert_pct = float(chosen.get("alert_at_pct", 80.0) or 80.0)
+            status = check_budget(chosen)
+            budget_for_eval = {
+                "name": status.get("name", chosen.get("name", "")),
+                "limit_usd": status.get("limit", chosen.get("limit_usd", 0)),
+                "run_rate_usd": status.get("run_rate_monthly", 0.0),
+            }
+    except Exception:
+        budget_for_eval = None
+
+    # 3. Verdict.
+    result = evaluate_preflight(delta, budget=budget_for_eval, alert_pct=alert_pct)
+    result["change_kind"] = change_kind
+    if breakdown:
+        result["breakdown"] = breakdown
+    result["summary"] = result["reason"]
+    return result
+
+
+@mcp.tool()
 async def get_ai_kpis(
     days: int = 30,
     infra_total_usd: float | None = None,
