@@ -243,7 +243,21 @@ const INTEL = [];
 /* ── Overview: What nable does ── */
 INTEL.push({ id:'features', name:'What nable does', crumb:'Intelligence',
   blurb:'nable is not just a connector that pipes billing data into an AI. It runs active analysis — anomaly detection, CloudWatch-based rightsizing, waste-pattern scanning, commitment modeling, AI/token unit economics, and forecasting — and surfaces it as 160+ read-only MCP tools your editor can query, reason about, and act on. Everything runs on your machine.',
-  body:`<p class="body">You don’t call tools by name. You ask in plain language and nable picks the right one. The map below is grouped by what you’d actually ask, in 16 outcome areas. Each lights up as you connect the provider it needs.</p>
+  body:`<p class="body">You don’t call tools by name. You describe the outcome you want, and nable picks the right tool, runs the analysis, and where there’s a fix to make, <strong>drafts it for your approval</strong>. It proposes; you decide. It never changes your cloud on its own.</p>
+
+    <h3 class="sub-h" id="ask-to-act" data-toc>Ask nable to act</h3>
+    ${askCard([
+      ['Open a rightsizing PR for that idle RDS instance','drafts the PR with the change and the monthly savings, you review and merge'],
+      ['Alert me in Slack the moment spend spikes','the anomaly watcher posts the driver and a suggested fix to your channel'],
+      ['Open a Jira ticket for any EC2 waste over $200/mo','files the issue with the resource, the savings estimate, and the fix'],
+      ['What’s my Savings Plan coverage, and what should I buy?','coverage, effective rate, and ROI by term length'],
+      ['Comment the cost impact on this pull request','posts the monthly delta on the GitHub PR before it merges'],
+      ['Will this Terraform change blow my budget?','a cost preflight with an ok / warn / over-budget verdict before you apply'],
+    ])}
+    ${calloutHTML('note','<strong>Propose-only by design.</strong> nable drafts PRs, opens tickets, and raises alerts. A human approves every change. It never edits, deletes, or buys anything in your environment on its own. <a class="ilink" href="#fix">See how the loop closes →</a>')}
+
+    <h3 class="sub-h" id="full-map" data-toc>The full map</h3>
+    <p class="body">Grouped by what you’d actually ask, across 16 outcome areas. Each lights up as you connect the provider it needs.</p>
     <div class="cardgrid map-grid">
       <a class="ncard" href="#understand"><div class="nt">Understand your bill</div><div class="nd">Where the money goes, any provider.</div></a>
       <a class="ncard" href="#savings"><div class="nt">Find savings</div><div class="nd">Waste scanners + rightsizing, ranked by $/mo.</div></a>
@@ -262,7 +276,7 @@ INTEL.push({ id:'features', name:'What nable does', crumb:'Intelligence',
       <a class="ncard" href="#saas-intel"><div class="nt">SaaS &amp; data platforms</div><div class="nd">Datadog, Snowflake, Databricks.</div></a>
       <a class="ncard" href="#share"><div class="nt">Share &amp; automate</div><div class="nd">Dashboards, exports, tickets, digests.</div></a>
     </div>
-    <p class="body" style="font-size:13px;color:var(--fg-3)">Not sure what your stack unlocks? Ask <code class="ic">what can nable do</code> in your editor and it tailors the map to what you’ve connected.</p>` });
+    <p class="body" style="font-size:13px;color:var(--fg-3)">Not sure what your stack unlocks? Ask <code class="ic">what can nable do</code> in your editor and it tailors the map to what you’ve connected. New here? <a class="ilink" href="#quickstart">Connect a provider →</a></p>` });
 
 /* ── Understand your bill ── */
 INTEL.push({ id:'understand', name:'Understand your bill', crumb:'Intelligence',

@@ -129,8 +129,6 @@ function Nav(){
           <li><button className="nav-link" onClick={()=>scrollTo('demo')}>Demo</button></li>
           <li><button className="nav-link" onClick={()=>scrollTo('pricing')}>Pricing</button></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
-          <li><a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer"
-                 onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a></li>
         </ul>
         <div className="right">
           <a href="/account.html" className="nav-signin">Sign in</a>
@@ -164,8 +162,6 @@ function Nav(){
           <button className="nav-mobile-item" onClick={()=>scrollTo('demo')}>Demo</button>
           <button className="nav-mobile-item" onClick={()=>{ scrollTo('pricing'); if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</button>
           <a className="nav-mobile-item" href="/docs.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
-          <a className="nav-mobile-item" href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer"
-             onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'github'}); }}>GitHub</a>
           <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:10}}>
             <a href="/account.html" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
             <a href="/docs.html" className="btn btn-primary" style={{justifyContent:"center"}}
@@ -859,6 +855,42 @@ function Pricing(){
 }
 
 /* Foot CTA */
+const FAQ_QA = [
+  ["What is nable?",
+   "nable is a local-first, AI-native FinOps tool. It is an MCP server you install on your own machine to ask about your AWS, Azure, GCP, and AI or LLM spend right inside Claude, Cursor, or any MCP editor. Your credentials never leave your machine."],
+  ["Is nable free?",
+   "Yes. The Dev tier is free with no credit card and no expiry: cost queries, anomaly detection, rightsizing, LLM spend tracking, and every connector. Paid tiers add remediation pull requests, alerts, scheduled digests, and single-tenant hosting."],
+  ["Does nable see or store my cloud credentials?",
+   "No. nable runs on your machine. Credentials stay in your OS keyring and cost data caches in a local SQLite database. There is no nable backend that holds your data, and nothing is shipped to a vendor."],
+  ["Can nable change my cloud infrastructure on its own?",
+   "No. nable is propose-only. It drafts a pull request or opens a ticket with the fix, and a human reviews and applies it. It never edits, deletes, or buys anything in your environment autonomously."],
+  ["What clouds and tools does nable support?",
+   "AWS, Azure, GCP, and Kubernetes, plus more than ten SaaS and AI providers including Datadog, Snowflake, Databricks, Stripe, OpenAI, Anthropic, and Amazon Bedrock. It exposes 165+ read-only tools your editor can call."],
+  ["How is nable different from Vantage, CloudHealth, or the AWS FinOps agent?",
+   "nable is local-first, your credentials and bills never leave your machine; AI-native, it lives in Claude or Cursor instead of a separate dashboard; and genuinely cross-cloud, including AI and LLM spend in the same answer. It proposes fixes as pull requests for human approval rather than acting on its own."],
+  ["What is a FinOps MCP server?",
+   "MCP, the Model Context Protocol, lets AI editors call external tools. A FinOps MCP server exposes cloud-cost tools to your AI editor, so you ask about spend in your own words and the editor calls the right tool. nable is a local-first FinOps MCP server."],
+  ["Can nable show what my AI coding costs?",
+   "Yes. nable attributes merged pull requests and commits to the AI model that wrote them and joins your LLM spend by model, so you can see what each model shipped and what it cost per pull request or per commit."],
+];
+function Faq(){
+  return (
+    <section className="faq" id="faq">
+      <div className="wrap faq-wrap">
+        <div className="foot-label"><span className="foot-dash"></span>FAQ</div>
+        <h2 className="faq-h">Common questions</h2>
+        <div className="faq-list">
+          {FAQ_QA.map(([q,a],i)=>(
+            <details className="faq-item" key={i}>
+              <summary className="faq-q">{q}</summary>
+              <p className="faq-a">{a}</p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 function FootCta(){
   return (
     <section className="foot-cta" id="cta">
@@ -1070,6 +1102,7 @@ function App(){
       <Connectors />
       <Architecture version={version} />
       <Pricing />
+      <Faq />
       <FootCta />
       <Footer version={version} />
       <Tweaks />
