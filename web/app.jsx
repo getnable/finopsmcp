@@ -702,18 +702,19 @@ const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 
 // Comparison rows. value true -> check, false -> dash, string -> mono text.
 const PRICE_ROWS = [
-  { label: "Users",                                          dev: "Just you",  pro: "Your whole team", startup: "Your whole team", ent: "Your whole org" },
-  { label: "Core FinOps: cost queries, anomalies, rightsizing, AI/LLM tracking, 17 connectors, local-first", dev: true, pro: true, startup: true, ent: true },
-  { label: "AWS cost data",                                  dev: "Cost Explorer", pro: "Explorer + CUR", startup: "Explorer + CUR", ent: "Explorer + CUR" },
-  { label: "Terraform remediation: patch + open the PR",     dev: false,       pro: true,        startup: true,    ent: true },
-  { label: "Slack / Teams alerts, digests + tickets (Jira, Linear, GitHub)", dev: false, pro: true, startup: true, ent: true },
-  { label: "Budgets, commitments + BI dashboards",           dev: false,       pro: true,        startup: true,    ent: true },
-  { label: "Slack bot: ask cost questions, no editor needed", dev: false,      pro: true,        startup: true,    ent: true },
-  { label: "RCA + chat remediation: drafts the fix, a human approves", dev: false, pro: true,     startup: true,    ent: true },
-  { label: "Runs",                                           dev: "Your machine", pro: "Your machine", startup: "We host it, single-tenant", ent: "Single-tenant or self-host" },
-  { label: "AI",                                             dev: "Bring your own key", pro: "Bring your own key", startup: "Managed, included + metered", ent: "Managed" },
-  { label: "SSO (Okta, Entra, Google) + audit logs",        dev: false,       pro: false,       startup: false,   ent: true },
-  { label: "Support",                                        dev: "Slack",     pro: "Slack",     startup: "Slack", ent: "Slack + SLA" },
+  { label: "Users",                                  dev: "Just you",      pro: "Your team",     startup: "Your team",          ent: "Your org" },
+  { label: "Cost queries, anomalies, rightsizing",   dev: true,            pro: true,            startup: true,                 ent: true },
+  { label: "AI / LLM spend tracking",                dev: true,            pro: true,            startup: true,                 ent: true },
+  { label: "Connectors",                             dev: "17",            pro: "17",            startup: "17",                 ent: "17" },
+  { label: "AWS cost data",                          dev: "Cost Explorer", pro: "Explorer + CUR", startup: "Explorer + CUR",     ent: "Explorer + CUR" },
+  { label: "Terraform remediation PRs",              dev: false,           pro: true,            startup: true,                 ent: true },
+  { label: "Alerts, digests + tickets",              dev: false,           pro: true,            startup: true,                 ent: true },
+  { label: "Budgets, commitments + dashboards",      dev: false,           pro: true,            startup: true,                 ent: true },
+  { label: "Slack bot + RCA remediation",            dev: false,           pro: true,            startup: true,                 ent: true },
+  { label: "Runs",                                   dev: "Your machine",  pro: "Your machine",  startup: "Hosted, single-tenant", ent: "Hosted or self-host" },
+  { label: "AI",                                     dev: "Your own key",  pro: "Your own key",  startup: "Managed + metered",  ent: "Managed" },
+  { label: "SSO + audit logs",                       dev: false,           pro: false,           startup: false,                ent: true },
+  { label: "Support",                                dev: "Slack",         pro: "Slack",         startup: "Slack",              ent: "Slack + SLA" },
 ];
 
 function PCell({ v }){
