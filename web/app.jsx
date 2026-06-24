@@ -836,7 +836,18 @@ function Pricing(){
 
         <PricingCards annual={annual} proPrice={proPrice} proPer={proPer} proSub={proSub} proLink={proLink} proPlan={proPlan} startupPrice={startupPrice} startupPer={startupPer} startupSub={startupSub} startupLink={startupLink} startupPlan={startupPlan} />
 
-        <p className="pfoot">Startups includes 500 managed-AI credits a month, about 500 questions or 100 deep investigations. They roll over; top up anytime, or bring your own key.</p>
+        <div className="credit-meter">
+          <div className="credit-meter-head">
+            <span className="cm-title">What Startups' 500 credits buy</span>
+            <span className="cm-sub">credits roll over</span>
+          </div>
+          <div className="cm-rows">
+            <div className="cm-row"><span className="cm-label">Quick question</span><span className="cm-track"><span className="cm-fill" style={{width:"20%"}}></span></span><span className="cm-n">1 credit</span></div>
+            <div className="cm-row"><span className="cm-label">Anomaly explained</span><span className="cm-track"><span className="cm-fill" style={{width:"40%"}}></span></span><span className="cm-n">2 credits</span></div>
+            <div className="cm-row"><span className="cm-label">Root cause + drafted fix</span><span className="cm-track"><span className="cm-fill" style={{width:"100%"}}></span></span><span className="cm-n">~5 credits</span></div>
+          </div>
+          <div className="cm-foot">500 a month: about 500 questions or ~100 investigations. Top up at $0.50 a credit, or bring your own key.</div>
+        </div>
         <p className="pfoot">No credit card for Dev. Pro and Startups trials require a card, cancel any time.</p>
         <p className="pfoot pdemo">Weighing Pro or Startups for your org?{" "}
           <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
