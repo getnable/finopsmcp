@@ -436,7 +436,7 @@ function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, star
       name: "Dev",
       price: "Free",
       per: "forever",
-      sub: null,
+      sub: "solo \xB7 no credit card",
       rec: false,
       primary: false,
       cta: "Start free",
@@ -474,8 +474,8 @@ function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, star
       key: "ent",
       name: "Enterprise",
       price: "Custom",
-      per: "",
-      sub: null,
+      per: "annual",
+      sub: "SSO, audit logs + SLA",
       rec: false,
       primary: false,
       cta: "Contact us",
@@ -509,7 +509,7 @@ function Pricing() {
   const startupSub = annual ? "2 months free \xB7 hosted + managed AI" : "hosted single-tenant \xB7 managed AI + usage";
   const startupLink = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
   const startupPlan = annual ? "startups_annual" : "startups_monthly";
-  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Dev is free forever, local, your own LLM key. Pro is one flat $100 a month for your whole team: remediation PRs, tickets, alerts, dashboards, the Slack bot, still your key. Startups is $1,000 a month: we host it single-tenant and run a managed AI agent, with usage metered above the included allowance. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { className: "bill-toggle", role: "group", "aria-label": "Billing period" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? "" : " active"), onClick: () => setAnnual(false), "aria-pressed": !annual }, "Monthly"), /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? " active" : ""), onClick: () => setAnnual(true), "aria-label": "Toggle annual billing", "aria-pressed": annual }, "Annual")), /* @__PURE__ */ React.createElement("span", { className: "seg-save" }, "SAVE 17%"))), /* @__PURE__ */ React.createElement("div", { className: "ptable-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ptable ptable-4" }, /* @__PURE__ */ React.createElement("div", { className: "ph ph-corner" }), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Dev"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "forever")), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to remediate.")), /* @__PURE__ */ React.createElement("p", null, "Dev is free forever, local, your own LLM key. Pro is one flat $100 a month for your whole team: remediation PRs, tickets, alerts, dashboards, the Slack bot, still your key. Startups is $1,000 a month: we host it single-tenant and run a managed AI agent, with usage metered above the included allowance. Enterprise adds SSO, audit logs, and an SLA."), /* @__PURE__ */ React.createElement("div", { className: "bill-toggle", role: "group", "aria-label": "Billing period" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? "" : " active"), onClick: () => setAnnual(false), "aria-pressed": !annual }, "Monthly"), /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? " active" : ""), onClick: () => setAnnual(true), "aria-label": "Toggle annual billing", "aria-pressed": annual }, "Annual")), /* @__PURE__ */ React.createElement("span", { className: "seg-save" }, "SAVE 17%"))), /* @__PURE__ */ React.createElement("div", { className: "ptable-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ptable ptable-4" }, /* @__PURE__ */ React.createElement("div", { className: "ph ph-corner" }), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Dev"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "forever")), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, "solo \xB7 no credit card"), /* @__PURE__ */ React.createElement(
     "a",
     {
       className: "btn btn-ghost pt-cta",
@@ -543,7 +543,7 @@ function Pricing() {
       }
     },
     "Get Startups"
-  )), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Enterprise"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Custom")), /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Enterprise"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Custom"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "annual")), /* @__PURE__ */ React.createElement("div", { className: "pt-sub" }, "SSO, audit logs + SLA"), /* @__PURE__ */ React.createElement(
     "a",
     {
       className: "btn btn-ghost pt-cta",
