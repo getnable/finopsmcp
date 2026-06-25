@@ -8040,6 +8040,60 @@ async def estimate_change_cost(
 
 
 @mcp.tool()
+async def check_action_policy(
+    action_type: str,
+    terraform_plan_json: str | None = None,
+    terraform_plan_file: str | None = None,
+    tf_dir: str | None = None,
+    helm_diff: str | None = None,
+    monthly_delta_usd: float | None = None,
+    budget_name: str = "",
+) -> dict:
+    """Advisory policy gate: should a proposed remediation action proceed?
+
+    The request-path guardrail, advisory. Describe a remediation action you are
+    considering (action_type), optionally with the change to cost (a Terraform plan,
+    a helm diff, or a known monthly delta), and nable returns a machine verdict
+    against your human-authored policy:
+      - allow:    reversible, allowlisted, and within budget. A human can apply it.
+      - escalate: a one-way door (delete, terminate, buy a commitment) or an
+                  over-budget / large-cost change. A human must review it first.
+      - block:    the action type is not in your allowlist.
+
+    ADVICE ONLY. nable never applies the action, a human does. This is the
+    propose-only guardrail; nable does not auto-execute anything.
+
+    action_type examples: rightsizing, tag_fix, stop_idle, spot_migration, ticket
+    (reversible); idle_cleanup, purchase_commitment, terminate_instance, delete_resource
+    (one-way). Policy knobs via env: FINOPS_POLICY_MAX_AUTO_USD,
+    FINOPS_POLICY_ALLOWED_ACTIONS (comma-separated). Read-only.
+
+    Good triggers: "can the agent do X", "is this action within policy", "should I
+    apply this fix", "is it safe to auto-apply this".
+    """
+    from .policy import evaluate_action_gate, load_policy
+
+    cost = None
+    if any([terraform_plan_json, terraform_plan_file, tf_dir, helm_diff,
+            monthly_delta_usd is not None]):
+        cost = await estimate_change_cost(
+            terraform_plan_json=terraform_plan_json, terraform_plan_file=terraform_plan_file,
+            tf_dir=tf_dir, helm_diff=helm_diff, monthly_delta_usd=monthly_delta_usd,
+            budget_name=budget_name)
+        if isinstance(cost, dict) and cost.get("error"):
+            return cost
+
+    delta = (cost or {}).get("monthly_delta_usd", 0.0)
+    verdict = (cost or {}).get("verdict")
+    gate = evaluate_action_gate(action_type, delta, verdict, policy=load_policy())
+    if cost is not None:
+        gate["cost"] = cost
+    gate["policy_note"] = ("Advisory only. nable proposes, a human approves and applies. "
+                           "It never executes actions in your environment on its own.")
+    return gate
+
+
+@mcp.tool()
 async def get_ai_kpis(
     days: int = 30,
     infra_total_usd: float | None = None,
