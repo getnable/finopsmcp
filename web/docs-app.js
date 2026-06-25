@@ -241,8 +241,8 @@ const ALERTS = [
 const INTEL = [];
 
 /* ── Overview: What nable does ── */
-INTEL.push({ id:'features', name:'What nable does', crumb:'Intelligence',
-  blurb:'nable is not just a connector that pipes billing data into an AI. It runs active analysis — anomaly detection, CloudWatch-based rightsizing, waste-pattern scanning, commitment modeling, AI/token unit economics, and forecasting — and surfaces it as 160+ read-only MCP tools your editor can query, reason about, and act on. Everything runs on your machine.',
+INTEL.push({ id:'features', name:'All tools', crumb:'Tools',
+  blurb:'165+ read-only MCP tools, grouped by what you would actually ask. nable is not just a connector that pipes billing data into an AI: it runs active analysis (anomaly detection, CloudWatch-based rightsizing, waste-pattern scanning, commitment modeling, AI and token unit economics, forecasting) and surfaces it as tools your editor can query, reason about, and act on. Everything runs on your machine.',
   body:`<p class="body">You don’t call tools by name. You describe the outcome you want, and nable picks the right tool, runs the analysis, and where there’s a fix to make, <strong>drafts it for your approval</strong>. It proposes; you decide. It never changes your cloud on its own.</p>
 
     <h3 class="sub-h" id="ask-to-act" data-toc>Ask nable to act</h3>
@@ -279,7 +279,7 @@ INTEL.push({ id:'features', name:'What nable does', crumb:'Intelligence',
     <p class="body" style="font-size:13px;color:var(--fg-3)">Not sure what your stack unlocks? Ask <code class="ic">what can nable do</code> in your editor and it tailors the map to what you’ve connected. New here? <a class="ilink" href="#quickstart">Connect a provider →</a></p>` });
 
 /* ── Understand your bill ── */
-INTEL.push({ id:'understand', name:'Understand your bill', crumb:'Intelligence',
+INTEL.push({ id:'understand', name:'Understand your bill', crumb:'Tools',
   blurb:'Ask anything about where the money goes, across every connected provider. nable breaks spend down by service, team, tag, or provider and explains what changed and why. No SQL, no dashboards.',
   body: askCard([
       ['What’s driving our spend this month?','top cost drivers vs last month, with the why'],
@@ -303,7 +303,7 @@ INTEL.push({ id:'understand', name:'Understand your bill', crumb:'Intelligence',
     ], 230) });
 
 /* ── Find savings ── */
-INTEL.push({ id:'savings', name:'Find savings', crumb:'Intelligence',
+INTEL.push({ id:'savings', name:'Find savings', crumb:'Tools',
   blurb:'Dozens of waste scanners and rightsizing engines, ranked by dollar impact. nable runs every scanner, sorts by estimated monthly savings, and tracks each recommendation from found to acted-on to verified.',
   body: askCard([
       ['What are our biggest savings opportunities?','runs every scanner, ranked by $/mo'],
@@ -329,7 +329,7 @@ INTEL.push({ id:'savings', name:'Find savings', crumb:'Intelligence',
     calloutHTML('note','For the full AWS scanner catalog (gp2→gp3, idle NAT, orphaned snapshots, public IPv4, Lambda concurrency, and more) see <a class="ilink" href="#audit">Deep AWS audits</a>. To turn a recommendation into a PR see <a class="ilink" href="#fix">Fix it</a>.') });
 
 /* ── Commitment analysis ── */
-INTEL.push({ id:'commitments', name:'Commitment analysis', crumb:'Intelligence', pbadge:'Team',
+INTEL.push({ id:'commitments', name:'Commitment analysis', crumb:'Tools', pbadge:'Team',
   blurb:'Models Savings Plans and Reserved Instance coverage against your actual usage patterns. Shows your current effective discount rate, coverage gaps, and what you’d save by buying more, with ROI projections by term length.',
   body: fnCard([
       ['get_commitment_analysis','Current coverage, gaps, and purchase recommendations'],
@@ -346,7 +346,7 @@ INTEL.push({ id:'commitments', name:'Commitment analysis', crumb:'Intelligence',
     calloutHTML('note','Requires CUR delivery to S3 + Athena. Set <code>CUR_S3_BUCKET</code>, <code>CUR_ATHENA_DATABASE</code>, <code>CUR_ATHENA_TABLE</code>, and <code>CUR_ATHENA_RESULTS_BUCKET</code>.') });
 
 /* ── Catch surprises ── */
-INTEL.push({ id:'catch', name:'Catch surprises', crumb:'Intelligence',
+INTEL.push({ id:'catch', name:'Catch surprises', crumb:'Tools',
   blurb:'Anomaly detection and budgets so a spike never waits for the invoice. nable watches spend daily, attributes a spike to the team or service that drove it, and enforces budgets at two tiers. It also flags AI/Marketplace spend that AWS’s own anomaly detector cannot see.',
   body: askCard([
       ['Why did our bill spike?','anomaly detection with tag attribution'],
@@ -366,7 +366,7 @@ INTEL.push({ id:'catch', name:'Catch surprises', crumb:'Intelligence',
     calloutHTML('note','Detection internals (z-score, CUSUM drift, day-of-week seasonal normalisation) and ticket auto-filing are in <a class="ilink" href="#anomalies">Anomaly detection</a>. Slack/Teams alerts fire automatically; configure <code>SLACK_WEBHOOK_URL</code> or <code>TEAMS_WEBHOOK_URL</code>.') });
 
 /* ── Forecast ── */
-INTEL.push({ id:'forecast', name:'Forecast', crumb:'Intelligence',
+INTEL.push({ id:'forecast', name:'Forecast', crumb:'Tools',
   blurb:'Per-account projection so finance sees the curve early. nable forecasts cloud spend with Holt-Winters time-series modelling (trend plus seasonality), and uses Azure Cost Management’s native forecast for Azure.',
   body: askCard([
       ['Forecast our cloud spend next quarter','trend + seasonality, with confidence band'],
@@ -377,7 +377,7 @@ INTEL.push({ id:'forecast', name:'Forecast', crumb:'Intelligence',
     ], 200) });
 
 /* ── Credits & the cash cliff ── */
-INTEL.push({ id:'credits', name:'Credits & the cash cliff', crumb:'Intelligence',
+INTEL.push({ id:'credits', name:'Credits & the cash cliff', crumb:'Tools',
   blurb:'Track promo-credit burn and the day billing flips to real cash. AWS Activate credits hide cost pain until they run out, and AWS sends no native alert. nable estimates runway from observed burn (there is no API for the balance) and warns you before the cliff.',
   body: askCard([
       ['Are our AWS credits about to run out?','runway from observed burn, no API for balance'],
@@ -388,7 +388,7 @@ INTEL.push({ id:'credits', name:'Credits & the cash cliff', crumb:'Intelligence'
     ], 200) });
 
 /* ── AI / LLM cost ── */
-INTEL.push({ id:'ai-cost', name:'AI / LLM cost', crumb:'Intelligence',
+INTEL.push({ id:'ai-cost', name:'AI / LLM cost', crumb:'Tools',
   blurb:'The token bill almost nobody watches, by model, with unit economics. nable aggregates spend across OpenAI, Anthropic, AWS Bedrock, Azure OpenAI, Vertex, and LLM gateways, ties it to your business metrics for cost-per-customer and gross-margin impact, and gives you a ranked, dollar-quantified plan to cut it.',
   body: askCard([
       ['What are we spending on tokens, by model?','OpenAI, Anthropic, Bedrock, gateways'],
@@ -413,7 +413,7 @@ INTEL.push({ id:'ai-cost', name:'AI / LLM cost', crumb:'Intelligence',
     calloutHTML('note','Works once any LLM provider key is configured (OpenAI, Anthropic, OpenRouter, LiteLLM, Modal, Together, Replicate). Bedrock cost also works from an AWS connection alone. See <a class="ilink" href="#langfuse">Langfuse</a> for trace-level model costs.') });
 
 /* ── AI commitments & contracts ── */
-INTEL.push({ id:'ai-commitments', name:'AI commitments & contracts', crumb:'Intelligence',
+INTEL.push({ id:'ai-commitments', name:'AI commitments & contracts', crumb:'Tools',
   blurb:'Reserved-Instance analysis for tokens. nable prices your usage against your actual negotiated terms — prepaid credits, Azure OpenAI PTUs, AWS Bedrock Provisioned Throughput, enterprise rate cards — not list price, which a provider dashboard cannot do.',
   body: askCard([
       ['Are we utilizing our Azure PTUs?','utilization, effective $/Mtok vs on-demand'],
@@ -424,7 +424,7 @@ INTEL.push({ id:'ai-commitments', name:'AI commitments & contracts', crumb:'Inte
     ], 240) });
 
 /* ── AI forecast & monitor ── */
-INTEL.push({ id:'ai-forecast', name:'AI forecast & monitor', crumb:'Intelligence',
+INTEL.push({ id:'ai-forecast', name:'AI forecast & monitor', crumb:'Tools',
   blurb:'Project the token bill and get the credit/commitment exhaustion date. nable forecasts your daily token-cost series (Holt-Winters with linear and naive fallbacks by history length) and runs a daily monitor for spikes, drops, and commitments that need attention.',
   body: askCard([
       ['When will our credits run out at this rate?','exhaustion date from the token forecast'],
@@ -437,7 +437,7 @@ INTEL.push({ id:'ai-forecast', name:'AI forecast & monitor', crumb:'Intelligence
     calloutHTML('note','The monitor runs daily on the scheduler and alerts via Slack. This tool returns the same view on demand.') });
 
 /* ── Fix it ── */
-INTEL.push({ id:'fix', name:'Fix it (close the loop)', crumb:'Intelligence',
+INTEL.push({ id:'fix', name:'Fix it (close the loop)', crumb:'Tools',
   blurb:'Not just recommend, act. nable reads your Terraform state, patches the <code class="ic">.tf</code> source, and opens a GitHub PR that applies the fix. It can also estimate the cost of a Terraform plan or Helm diff before you merge.',
   body: askCard([
       ['Open a PR for the top rightsizing rec','reads tfstate, patches .tf, opens a GitHub PR'],
@@ -454,7 +454,7 @@ INTEL.push({ id:'fix', name:'Fix it (close the loop)', crumb:'Intelligence',
     calloutHTML('note','PR creation requires <code>GITHUB_TOKEN</code> and a configured github_repo remote. Tag requirements come from <code>FINOPS_REQUIRED_TAGS</code> (default: team,environment,service).') });
 
 /* ── AWS deep audit (leads with depth) ── */
-INTEL.push({ id:'audit', name:'AWS deep audit', crumb:'Intelligence',
+INTEL.push({ id:'audit', name:'AWS deep audit', crumb:'Tools',
   blurb:'Trusted Advisor and Compute Optimizer flag the obvious: low-CPU instances, unattached volumes, idle IPs. nable goes a layer deeper. It correlates multi-day CloudWatch time-series, live resource config, and current AWS pricing to find waste the billing API never itemizes and those tools never surface.',
   body:`<p class="body">The signals below the billing line: an NLB silently charged $0.01/GB because cross-zone is enabled, KMS API calls multiplying on every S3 request because Bucket Keys are off, a custom metric namespace exploding because someone keyed it by <code class="ic">pod_id</code>.</p>
     <p class="body">Every check is multi-signal. It does not flag a low-CPU instance and stop. It joins CPU percentiles (p95/p99) against network egress to skip batch jobs, checks <code class="ic">launch_time</code> so a two-day-old box is not called waste, verifies a backing resource still exists before calling an alarm orphaned, and reads RDS <code class="ic">DatabaseConnections</code> to separate a truly idle database from one merely over-provisioned. When a heuristic and Compute Optimizer both flag the same instance, you get one finding, not two. The whole sweep runs in parallel across every opted-in region (8-worker pool), sorted by estimated monthly savings.</p>
@@ -517,7 +517,7 @@ INTEL.push({ id:'audit', name:'AWS deep audit', crumb:'Intelligence',
     calloutHTML('note','Results are sorted by estimated monthly savings. Each finding includes resource ID, region, waste type, severity, and an explanation. The reconstructed costs (NLB cross-zone, EFS cross-AZ, snapshot replicas) are conservative upper bounds: AWS does not expose the exact per-AZ split, so each finding states its assumption.') });
 
 /* ── GCP deep audit ── */
-INTEL.push({ id:'gcp-audit', name:'GCP deep audit', crumb:'Intelligence',
+INTEL.push({ id:'gcp-audit', name:'GCP deep audit', crumb:'Tools',
   blurb:'The same idea as the AWS audit, for Google Cloud. The billing export tells you what you spent. It never tells you a persistent disk is unattached or a VM has been idle for two weeks. <code class="ic">audit_gcp_waste</code> enumerates Compute Engine across every zone and joins Cloud Monitoring to find it.',
   body: patternTable('Pattern','What it catches', [
       ['Unattached disks','Persistent disks with no instance attached, billed per provisioned GB'],
@@ -530,7 +530,7 @@ INTEL.push({ id:'gcp-audit', name:'GCP deep audit', crumb:'Intelligence',
     calloutHTML('note','Needs <code>GCP_PROJECT_IDS</code> set (the wizard prompts for it) plus <code>roles/compute.viewer</code> and <code>roles/monitoring.viewer</code>. See <a class="ilink" href="#iam">Least-privilege IAM</a>.') });
 
 /* ── Azure deep dives ── */
-INTEL.push({ id:'azure-intel', name:'Azure deep dives', crumb:'Intelligence',
+INTEL.push({ id:'azure-intel', name:'Azure deep dives', crumb:'Tools',
   blurb:'Advisor, VM rightsizing, and reservation utilization, native to Azure. nable reads Cost Management, Azure Monitor, and the Capacity API directly rather than approximating from the export.',
   body: askCard([
       ['Show Azure cost by dimension','resource group, service, tag'],
@@ -548,7 +548,7 @@ INTEL.push({ id:'azure-intel', name:'Azure deep dives', crumb:'Intelligence',
     calloutHTML('note','See <a class="ilink" href="#azure">Azure setup</a> for the service-principal and read-only role wiring.') });
 
 /* ── Kubernetes ── */
-INTEL.push({ id:'kubernetes', name:'Kubernetes', crumb:'Intelligence',
+INTEL.push({ id:'kubernetes', name:'Kubernetes', crumb:'Tools',
   blurb:'Cluster and namespace cost, efficiency, and waste, with no agent to install. nable attributes node costs to namespaces, workloads, and labels straight from your kubeconfig, scores efficiency, and finds the requested-vs-used waste gap.',
   body: askCard([
       ['Break down Kubernetes cost by namespace','and by workload'],
@@ -568,7 +568,7 @@ INTEL.push({ id:'kubernetes', name:'Kubernetes', crumb:'Intelligence',
     ], 240) });
 
 /* ── SaaS & data platforms ── */
-INTEL.push({ id:'saas-intel', name:'SaaS & data platforms', crumb:'Intelligence',
+INTEL.push({ id:'saas-intel', name:'SaaS & data platforms', crumb:'Tools',
   blurb:'Datadog, Snowflake, Databricks, and more, in the same cost view as your cloud. Fold the software-vendor bill into one total, and dig into DBU consumption by job and cluster.',
   body: askCard([
       ['What are our Databricks DBU costs?','by job and cluster, with efficiency'],
@@ -584,7 +584,7 @@ INTEL.push({ id:'saas-intel', name:'SaaS & data platforms', crumb:'Intelligence'
     calloutHTML('note','Each provider needs its connector configured. See the <a class="ilink" href="#datadog">SaaS tools</a> setup sections (Datadog, Snowflake, Databricks, and more).') });
 
 /* ── Anomaly detection (internals) ── */
-INTEL.push({ id:'anomalies', name:'Anomaly detection', crumb:'Intelligence',
+INTEL.push({ id:'anomalies', name:'Anomaly detection', crumb:'Tools',
   blurb:'Multi-signal detection using z-score, CUSUM drift, and day-of-week seasonal normalisation. When something spikes, nable drills into Cost Explorer by tag and tells you which team, environment, or service drove it, and by how much.',
   body: fnCard([
       ['get_anomalies','All anomalies across every connected provider, last 7-30 days'],
@@ -595,7 +595,7 @@ INTEL.push({ id:'anomalies', name:'Anomaly detection', crumb:'Intelligence',
     calloutHTML('note','Slack and Teams alerts fire automatically when a new anomaly is detected, no polling needed. Configure <code>SLACK_WEBHOOK_URL</code> or <code>TEAMS_WEBHOOK_URL</code> to enable.') });
 
 /* ── Rightsizing (internals) ── */
-INTEL.push({ id:'rightsizing', name:'Rightsizing', crumb:'Intelligence',
+INTEL.push({ id:'rightsizing', name:'Rightsizing', crumb:'Tools',
   blurb:'Combines AWS Compute Optimizer recommendations with nable’s own CloudWatch analysis. Surfaces instances where actual CPU / memory / connection utilization is consistently below the provisioned level, with a specific recommended type and estimated savings.',
   body: fnCard([
       ['get_rightsizing_recommendations','EC2, RDS, and Lambda rightsizing in one call'],
@@ -604,7 +604,7 @@ INTEL.push({ id:'rightsizing', name:'Rightsizing', crumb:'Intelligence',
     ], 200) });
 
 /* ── Share & automate ── */
-INTEL.push({ id:'share', name:'Share & automate', crumb:'Intelligence',
+INTEL.push({ id:'share', name:'Share & automate', crumb:'Tools',
   blurb:'Get findings out of chat: dashboards, exports, tickets, alerts, and digests. nable can stand up a browser dashboard, file a Jira/Linear/GitHub ticket, publish to Notion, push to n8n, and send scheduled digests, all without Claude in the loop once configured.',
   body: askCard([
       ['Export this to CSV','opens clean in Excel or Sheets'],
