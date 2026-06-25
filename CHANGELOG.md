@@ -2,6 +2,25 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.93
+
+The policy-bounded guardrail (advisory): an agent can ask "should I apply this?"
+
+### Agent-native
+- **New `check_action_policy` tool: an advisory allow / block / escalate gate.**
+  Describe a remediation action (rightsizing, idle_cleanup, purchase_commitment, and
+  the like) plus the cost change, and nable checks it against a human-authored policy.
+  Reversible, allowlisted, in-budget actions return `allow`; one-way doors (delete,
+  terminate, buy a commitment) and over-budget changes return `escalate`; disallowed
+  action types return `block`. It composes the cost preflight with the policy gate.
+- **Advisory only, propose-only intact.** nable returns advice; a human approves and
+  applies. It never auto-executes. The auto-execute relaxation (B2) is a separate,
+  explicit decision and is deliberately not built.
+- New `policy.py` (pure, tested): door classification (two-way vs one-way),
+  `evaluate_action_gate`, and `load_policy` with env overrides
+  (`FINOPS_POLICY_MAX_AUTO_USD`, `FINOPS_POLICY_ALLOWED_ACTIONS`). 16 new tests; full
+  suite 1091 passed.
+
 ## 0.8.92
 
 The agent-native on-ramp: a cost preflight agents call before they act.
