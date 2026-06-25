@@ -702,7 +702,7 @@ const PRICE_ROWS = [
   { label: "Cost queries, anomalies, rightsizing, 17 connectors", dev: true,     pro: true,           startup: true,                    ent: true },
   { label: "Remediation PRs, alerts, dashboards, Slack bot", dev: false,         pro: true,           startup: true,                    ent: true },
   { label: "Runs",                                          dev: "Your machine", pro: "Your machine", startup: "Hosted, single-tenant", ent: "Hosted or self-host" },
-  { label: "Managed AI",                                    dev: "Your own key", pro: "Your own key", startup: "500 credits / mo",      ent: "Custom" },
+  { label: "Managed AI",                                    dev: "Your own key", pro: "Your own key", startup: "At cost, no markup",     ent: "Custom" },
   { label: "SSO + audit logs",                              dev: false,          pro: false,          startup: false,                   ent: true },
   { label: "Support",                                       dev: "Slack",        pro: "Slack",        startup: "Slack",                 ent: "Slack + SLA" },
 ];
@@ -759,7 +759,7 @@ function Pricing(){
 
   const startupPrice = annual ? "$10,000" : "$1,000";
   const startupPer   = annual ? "/ yr" : "/ mo";
-  const startupSub   = annual ? "2 months free · hosted + 500 credits/mo" : "hosted single-tenant · 500 AI credits";
+  const startupSub   = annual ? "2 months free · hosted · AI at cost" : "hosted single-tenant · AI at cost";
   const startupLink  = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
   const startupPlan  = annual ? "startups_annual" : "startups_monthly";
 
@@ -834,15 +834,10 @@ function Pricing(){
 
         <div className="credit-meter">
           <div className="credit-meter-head">
-            <span className="cm-amount">500<span className="cm-amount-unit">managed-AI credits / mo</span></span>
-            <span className="cm-sub">resets monthly</span>
+            <span className="cm-amount">No markup<span className="cm-amount-unit">on managed AI</span></span>
+            <span className="cm-sub">Startups</span>
           </div>
-          <div className="cm-rows">
-            <div className="cm-row"><span className="cm-label">Quick question</span><span className="cm-track"><span className="cm-fill" style={{width:"20%"}}></span></span><span className="cm-n">1</span></div>
-            <div className="cm-row"><span className="cm-label">Anomaly explained</span><span className="cm-track"><span className="cm-fill" style={{width:"40%"}}></span></span><span className="cm-n">2</span></div>
-            <div className="cm-row"><span className="cm-label">Root cause + drafted fix</span><span className="cm-track"><span className="cm-fill" style={{width:"100%"}}></span></span><span className="cm-n">~5</span></div>
-          </div>
-          <div className="cm-foot">≈ 500 questions or 100 deep investigations a month · top up at $0.50, or bring your own key</div>
+          <p className="cm-explain">The AI agent we run for you is billed at the provider's own token price, with zero markup. An included monthly allowance covers everyday use; beyond it, usage is metered at cost and hard-capped per your plan, so it never surprises you. Prefer your own key? Bring it, free.</p>
         </div>
         <p className="pfoot">No credit card for Dev. Pro and Startups trials require a card, cancel any time.</p>
         <p className="pfoot pdemo">Weighing Pro or Startups for your org?{" "}
