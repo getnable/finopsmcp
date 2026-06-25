@@ -1,6 +1,6 @@
 # Pricing, nable
 
-nable is a local-first FinOps tool. It runs on your own machine as an MCP server and answers cloud and AI cost questions inside Claude, Cursor and other MCP editors. Paid plans are flat-rate with unlimited seats, never per-seat and never a percentage of your cloud spend. Last updated: 2026-06-23.
+nable is a local-first FinOps tool. It runs on your own machine as an MCP server and answers cloud and AI cost questions inside Claude, Cursor and other MCP editors. Paid plans are flat-rate with unlimited seats, never per-seat and never a percentage of your cloud spend. Managed AI is billed at provider cost with no markup. Last updated: 2026-06-24.
 
 ## Dev
 - Price: $0 per month
@@ -26,7 +26,7 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 - Annual price: $10,000 per year, two months free
 - Trial: 7-day free trial
 - Runs: we host it for you, single-tenant. Dashboards anyone can use without a terminal. Your bill is never pooled with another customer's.
-- AI: 500 managed-AI credits a month included (about 500 questions or 100 deep root-cause investigations). A simple question is about 1 credit, a deep investigation about 5. Credits reset each month (use it or lose it). Top up at $0.50 per credit, or bring your own LLM key for unlimited use at no credit cost.
+- AI: bring your own LLM key for free, or use the managed AI agent we run for you, billed at the provider's token price with no markup. An included monthly allowance covers everyday use; beyond it, usage is metered at cost and hard-capped per your plan, so it never surprises you.
 - Includes: everything in Pro, plus single-tenant hosting and the managed AI agent
 - Buy monthly: https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08
 - Buy yearly: https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09
@@ -38,6 +38,7 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 
 ## Notes
 - Flat fee, not a percentage of spend: nable never profits from your bill growing
+- Managed AI (Startups) is billed at provider cost with no markup; nable's margin is the flat platform fee, never your token spend
 - Local-first (Dev and Pro): credentials stay in your OS keyring, cost data caches in a local SQLite database on your machine, nable has no backend that holds your data
 - Hosted (Startups and Enterprise): single-tenant, your data is never pooled with another customer's
 - Install: `uvx nable` (uv fetches a matching Python and runs the setup wizard), or `pip install -U finops-mcp` on Python 3.10 or newer
