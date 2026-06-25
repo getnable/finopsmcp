@@ -37,7 +37,7 @@ uvx nable
 ## Pricing summary
 - Dev: $0, no credit card, no expiry. Cost queries, anomaly detection, rightsizing, LLM spend tracking, every connector. Bring your own LLM key.
 - Pro: $100 per month, flat for the whole team, not per seat. Adds Terraform remediation pull requests, ticket creation, Slack and Teams alerts, digests, budgets, commitment recommendations, the conversational Slack bot, and root-cause analysis.
-- Startups: $1,000 per month flat. Everything in Pro, plus single-tenant hosting we run for you and a managed AI agent billed at provider cost with no markup, usage metered above an included allowance and hard-capped.
+- Startups: $1,000 per month flat. Everything in Pro, plus single-tenant hosting we run for you and a managed AI agent, usage metered above an included allowance.
 
 ## Contact
 - Site: https://getnable.com

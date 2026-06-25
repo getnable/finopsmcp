@@ -702,7 +702,7 @@ const PRICE_ROWS = [
   { label: "Cost queries, anomalies, rightsizing, 17 connectors", dev: true,     pro: true,           startup: true,                    ent: true },
   { label: "Remediation PRs, alerts, dashboards, Slack bot", dev: false,         pro: true,           startup: true,                    ent: true },
   { label: "Runs",                                          dev: "Your machine", pro: "Your machine", startup: "Hosted, single-tenant", ent: "Hosted or self-host" },
-  { label: "Managed AI",                                    dev: "Your own key", pro: "Your own key", startup: "At cost, no markup",     ent: "Custom" },
+  { label: "Managed AI",                                    dev: "Your own key", pro: "Your own key", startup: "Included, metered",      ent: "Custom" },
   { label: "SSO + audit logs",                              dev: false,          pro: false,          startup: false,                   ent: true },
   { label: "Support",                                       dev: "Slack",        pro: "Slack",        startup: "Slack",                 ent: "Slack + SLA" },
 ];
@@ -759,7 +759,7 @@ function Pricing(){
 
   const startupPrice = annual ? "$10,000" : "$1,000";
   const startupPer   = annual ? "/ yr" : "/ mo";
-  const startupSub   = annual ? "2 months free · hosted · AI at cost" : "hosted single-tenant · AI at cost";
+  const startupSub   = annual ? "2 months free · hosted · managed AI" : "hosted single-tenant · managed AI";
   const startupLink  = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
   const startupPlan  = annual ? "startups_annual" : "startups_monthly";
 
@@ -832,13 +832,6 @@ function Pricing(){
 
         <PricingCards annual={annual} proPrice={proPrice} proPer={proPer} proSub={proSub} proLink={proLink} proPlan={proPlan} startupPrice={startupPrice} startupPer={startupPer} startupSub={startupSub} startupLink={startupLink} startupPlan={startupPlan} />
 
-        <div className="credit-meter">
-          <div className="credit-meter-head">
-            <span className="cm-amount">No markup<span className="cm-amount-unit">on managed AI</span></span>
-            <span className="cm-sub">Startups</span>
-          </div>
-          <p className="cm-explain">The AI agent we run for you is billed at the provider's own token price, with zero markup. An included monthly allowance covers everyday use; beyond it, usage is metered at cost and hard-capped per your plan, so it never surprises you. Prefer your own key? Bring it, free.</p>
-        </div>
         <p className="pfoot">No credit card for Dev. Pro and Startups trials require a card, cancel any time.</p>
         <p className="pfoot pdemo">Weighing Pro or Startups for your org?{" "}
           <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
