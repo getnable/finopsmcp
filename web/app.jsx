@@ -715,35 +715,29 @@ function PCell({ v }){
   return <span className="pval">{v}</span>;
 }
 
-// Mobile-only: stack the tiers into cards (the comparison table is unreadable on a phone).
-function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, startupPrice, startupPer, startupSub, startupLink, startupPlan }){
-  const tiers = [
-    { key:"dev", name:"Dev", price:"Free", per:"forever", sub:"solo · no credit card", rec:false, primary:false,
-      cta:"Start free", href:"/docs.html", plan:"dev", ext:false },
-    { key:"pro", name:"Pro", price:proPrice, per:proPer, sub:proSub, rec:true, primary:true,
-      cta:annual?"Get annual":"Get Pro", href:proLink, plan:proPlan, ext:true },
-    { key:"startup", name:"Startups", price:startupPrice, per:startupPer, sub:startupSub, rec:false, primary:false,
-      cta:"Get Startups", href:startupLink, plan:startupPlan, ext:true },
-    { key:"ent", name:"Enterprise", price:"Custom", per:"annual", sub:"SSO, audit logs + SLA", rec:false, primary:false,
-      cta:"Contact us", href:BOOK_CALL_LINK, plan:"enterprise", ext:true },
-  ];
+// Pricing cards, shown on every viewport. Each tier carries a readable name, a
+// benefit tagline, a big mono price, a divider, four short feature lines, and one
+// CTA pinned to the bottom so the buttons align across cards.
+function PricingCards({ tiers, annual }){
   return (
     <div className="pcards">
       {tiers.map(t => (
         <div className={"pcard" + (t.rec ? " pcard-rec" : "")} key={t.key}>
           {t.rec && <div className="pcard-badge">Recommended</div>}
           <div className="pcard-name">{t.name}</div>
-          <div className="pcard-price"><span className="pcard-amt">{t.price}</span>{t.per && <span className="pcard-per">{t.per}</span>}</div>
-          {t.sub && <div className="pcard-sub">{t.sub}</div>}
+          <div className="pcard-tag">{t.tag}</div>
+          <div className="pcard-price">
+            <span className="pcard-amt">{t.amt}</span>
+            {t.per && <span className="pcard-per">{t.per}</span>}
+          </div>
+          <div className="pcard-billed">{t.billed}</div>
+          <ul className="pcard-feats">
+            {t.feats.map((f,i) => (<li key={i}><CheckIcon /><span>{f}</span></li>))}
+          </ul>
           <a className={"btn " + (t.primary ? "btn-primary" : "btn-ghost") + " pcard-cta"}
              href={t.href} {...(t.ext ? {target:"_blank", rel:"noopener noreferrer"} : {})}
-             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing_mobile',plan:t.plan,billing:annual?'annual':'monthly'}); }}>
+             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:t.plan,billing:annual?'annual':'monthly'}); }}>
             {t.cta}</a>
-          <ul className="pcard-feats">
-            {PRICE_ROWS.filter(r => r[t.key] !== false).map((r,i) => (
-              <li key={i}><CheckIcon /><span>{r.label}{typeof r[t.key] === "string" ? <em className="pcard-val"> · {r[t.key]}</em> : null}</span></li>
-            ))}
-          </ul>
         </div>
       ))}
     </div>
@@ -753,17 +747,27 @@ function PricingCards({ annual, proPrice, proPer, proSub, proLink, proPlan, star
 function Pricing(){
   const [annual, setAnnual] = useState(false);
 
-  const proPrice = annual ? "$1,000" : "$100";
-  const proPer   = annual ? "/ yr flat" : "/ mo flat";
-  const proSub   = annual ? "$83 / mo · 2 months free" : "flat, not per-seat · 7-day free trial";
-  const proLink  = annual ? PRO_ANNUAL_LINK : PRO_MONTHLY_LINK;
-  const proPlan  = annual ? "pro_annual" : "pro_monthly";
-
+  const proPrice     = annual ? "$1,000" : "$100";
   const startupPrice = annual ? "$10,000" : "$1,000";
-  const startupPer   = annual ? "/ yr" : "/ mo";
-  const startupSub   = annual ? "$833 / mo · 2 months free" : "flat · hosting optional";
-  const startupLink  = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
-  const startupPlan  = annual ? "startups_annual" : "startups_monthly";
+  const per    = annual ? "/yr" : "/mo";
+  const billed = annual ? "Billed annually" : "Billed monthly";
+  const proLink     = annual ? PRO_ANNUAL_LINK : PRO_MONTHLY_LINK;
+  const startupLink = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
+
+  const tiers = [
+    { key:"dev", name:"Dev", tag:"Ask your bill anything", amt:"Free", per:"forever", billed:"No credit card",
+      feats:["Cost, anomaly + rightsizing","LLM spend by model","All 17 connectors","Your own LLM key"],
+      cta:"Start free", href:"/docs.html", plan:"dev", ext:false, primary:false, rec:false },
+    { key:"pro", name:"Pro", tag:"Find and fix the waste", amt:proPrice, per, billed,
+      feats:["Everything in Dev","Remediation PRs + tickets","Alerts, digests, budgets","Hosting add-on available"],
+      cta:annual ? "Get annual" : "Get Pro", href:proLink, plan:annual?"pro_annual":"pro_monthly", ext:true, primary:true, rec:true },
+    { key:"startup", name:"Startups", tag:"Scale to the whole org", amt:startupPrice, per, billed,
+      feats:["Everything in Pro","Org scale, more accounts","Priority support","10,000-credit hosting tier"],
+      cta:"Get Startups", href:startupLink, plan:annual?"startups_annual":"startups_monthly", ext:true, primary:false, rec:false },
+    { key:"ent", name:"Enterprise", tag:"Controls, SSO + an SLA", amt:"Custom", per:"", billed:"Talk to us",
+      feats:["Everything in Startups","SSO + audit logs","Dedicated SLA","Hosted or self-host"],
+      cta:"Contact us", href:BOOK_CALL_LINK, plan:"enterprise", ext:true, primary:false, rec:false },
+  ];
 
   return (
     <section id="pricing">
@@ -783,58 +787,54 @@ function Pricing(){
           </div>
         </div>
 
-        <div className="ptable-wrap">
-          <div className="ptable ptable-4">
-            {/* header row */}
-            <div className="ph ph-corner"></div>
-            <div className="ph">
-              <div className="pt-name">Dev</div>
-              <div className="pt-price"><span className="pt-amt">Free</span><span className="pt-per">forever</span></div>
-              <div className="pt-sub">solo · no credit card</div>
-              <a className="btn btn-ghost pt-cta" href="/docs.html"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'dev'}); }}>Start free</a>
-            </div>
-            <div className="ph pcol-team">
-              <div className="pt-rec">Recommended</div>
-              <div className="pt-name">Pro</div>
-              <div className="pt-price"><span className="pt-amt">{proPrice}</span><span className="pt-per">{proPer}</span></div>
-              <div className="pt-sub">{proSub}</div>
-              <a className="btn btn-primary pt-cta" href={proLink} target="_blank" rel="noopener noreferrer"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:proPlan,billing:annual?'annual':'monthly'}); }}>
-                {annual ? "Get annual" : "Get Pro"}</a>
-            </div>
-            <div className="ph">
-              <div className="pt-name">Startups</div>
-              <div className="pt-price"><span className="pt-amt">{startupPrice}</span><span className="pt-per">{startupPer}</span></div>
-              <div className="pt-sub">{startupSub}</div>
-              <a className="btn btn-ghost pt-cta" href={startupLink} target="_blank" rel="noopener noreferrer"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:startupPlan,billing:annual?'annual':'monthly'}); }}>
-                Get Startups</a>
-            </div>
-            <div className="ph">
-              <div className="pt-name">Enterprise</div>
-              <div className="pt-price"><span className="pt-amt">Custom</span><span className="pt-per">annual</span></div>
-              <div className="pt-sub">SSO, audit logs + SLA</div>
-              <a className="btn btn-ghost pt-cta" href={BOOK_CALL_LINK} target="_blank" rel="noopener noreferrer"
-                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:'enterprise'}); }}>Contact us</a>
-            </div>
+        <PricingCards tiers={tiers} annual={annual} />
 
-            {/* feature rows */}
-            {PRICE_ROWS.map((r,i) => (
-              <React.Fragment key={i}>
-                <div className="pr pr-label">{r.label}</div>
-                <div className="pr pr-cell"><PCell v={r.dev} /></div>
-                <div className="pr pr-cell pcol-team"><PCell v={r.pro} /></div>
-                <div className="pr pr-cell"><PCell v={r.startup} /></div>
-                <div className="pr pr-cell"><PCell v={r.ent} /></div>
-              </React.Fragment>
-            ))}
+        <div className="phost">
+          <div className="phost-label">Hosting add-on</div>
+          <p className="phost-body">Optional on Pro or Startups. We run nable single-tenant with a managed AI agent, billed on top of your plan in monthly credits that reset each month, use them or lose them.</p>
+          <div className="phost-rows">
+            <div className="phost-row"><span className="phost-tier">Pro</span><span className="phost-price">500 credits · $200/mo</span></div>
+            <div className="phost-row"><span className="phost-tier">Startups</span><span className="phost-price">10,000 credits · $4,000/mo</span></div>
           </div>
         </div>
 
-        <PricingCards annual={annual} proPrice={proPrice} proPer={proPer} proSub={proSub} proLink={proLink} proPlan={proPlan} startupPrice={startupPrice} startupPer={startupPer} startupSub={startupSub} startupLink={startupLink} startupPlan={startupPlan} />
+        <details className="pcompare">
+          <summary>Compare all features</summary>
+          <div className="ptable-wrap">
+            <div className="ptable ptable-4">
+              {/* header row */}
+              <div className="ph ph-corner"></div>
+              <div className="ph">
+                <div className="pt-name">Dev</div>
+                <div className="pt-price"><span className="pt-amt">Free</span><span className="pt-per">forever</span></div>
+              </div>
+              <div className="ph pcol-team">
+                <div className="pt-rec">Recommended</div>
+                <div className="pt-name">Pro</div>
+                <div className="pt-price"><span className="pt-amt">{proPrice}</span><span className="pt-per">{per}</span></div>
+              </div>
+              <div className="ph">
+                <div className="pt-name">Startups</div>
+                <div className="pt-price"><span className="pt-amt">{startupPrice}</span><span className="pt-per">{per}</span></div>
+              </div>
+              <div className="ph">
+                <div className="pt-name">Enterprise</div>
+                <div className="pt-price"><span className="pt-amt">Custom</span><span className="pt-per">annual</span></div>
+              </div>
 
-        <p className="pfoot">Hosting is optional and billed on top of your plan: a single-tenant instance and a managed AI agent we run, metered in monthly credits that reset each month, use them or lose them. 500 credits, $200 a month, on Pro; 10,000 credits, $4,000 a month, on Startups.</p>
+              {/* feature rows */}
+              {PRICE_ROWS.map((r,i) => (
+                <React.Fragment key={i}>
+                  <div className="pr pr-label">{r.label}</div>
+                  <div className="pr pr-cell"><PCell v={r.dev} /></div>
+                  <div className="pr pr-cell pcol-team"><PCell v={r.pro} /></div>
+                  <div className="pr pr-cell"><PCell v={r.startup} /></div>
+                  <div className="pr pr-cell"><PCell v={r.ent} /></div>
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        </details>
         <p className="pfoot">No credit card for Dev. Pro and Startups trials require a card, cancel any time.</p>
         <p className="pfoot pdemo">Weighing Pro or Startups for your org?{" "}
           <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
