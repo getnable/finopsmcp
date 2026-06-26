@@ -772,10 +772,9 @@ function Pricing(){
   return (
     <section id="pricing">
       <div className="wrap">
-        <div className="section-head">
+        <div className="section-head center">
           <div className="label">Pricing</div>
           <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
-          <p>Dev is free forever, local, your own LLM key. Pro is one flat $100 a month for your whole team: remediation PRs, tickets, alerts, dashboards, the Slack bot, still your key. Startups is $1,000 a month for org scale and priority support. Hosting is an optional add-on on either paid plan: we run nable single-tenant with a managed AI agent, billed in monthly credits you use or lose, $200 a month for Pro, $4,000 for Startups. Enterprise adds SSO, audit logs, and an SLA.</p>
 
           {/* Billing toggle: segmented control, matched to the dashboard range group. */}
           <div className="bill-toggle" role="group" aria-label="Billing period">
