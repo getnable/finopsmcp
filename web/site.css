@@ -590,3 +590,12 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 .faq-q::after{content:"+";color:var(--accent);font-size:20px;font-weight:400;line-height:1;flex-shrink:0}
 .faq-item[open] .faq-q::after{content:"\2212"}
 .faq-a{margin:0 0 20px;color:var(--fg-2);font-size:15px;line-height:1.65;max-width:720px}
+
+/* ── Scroll reveal (JS-gated so no-JS users see content immediately) ── */
+.js .reveal{opacity:0;transform:translateY(28px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);will-change:opacity,transform}
+.js .reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){.js .reveal{opacity:1 !important;transform:none !important;transition:none}}
+
+/* ── Demo video, front and center ── */
+.demo-video-frame{max-width:960px;margin:40px auto 0;border:1px solid var(--line-2);border-radius:var(--r-2xl);overflow:hidden;background:var(--bg-1);box-shadow:0 40px 120px -40px rgba(77,184,212,.40),0 0 0 1px rgba(77,184,212,.14)}
+.demo-video{display:block;width:100%;height:auto;background:#000}

@@ -1113,6 +1113,40 @@ function ProofBand(){
   );
 }
 
+// Scroll-reveal: fade + rise each wrapped block in as it enters the viewport.
+function Reveal({ children }){
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (!("IntersectionObserver" in window)) { el.classList.add("in"); return; }
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) { el.classList.add("in"); io.disconnect(); }
+    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return <div ref={ref} className="reveal">{children}</div>;
+}
+
+// The product, front and center: the recorded demo as the "see it work" moment.
+function DemoVideo(){
+  return (
+    <section id="demo" className="demo-sec">
+      <div className="wrap">
+        <div className="section-head center">
+          <div className="label">See it work</div>
+          <h2>Watch nable<br/><em>find the money.</em></h2>
+          <p>Ask in plain English. nable reads your real bill, finds what changed, and drafts the fix, live.</p>
+        </div>
+        <div className="demo-video-frame">
+          <video className="demo-video" src="/nablepreview.mp4" autoPlay loop muted playsInline preload="metadata" controls />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // The pricing page (/pricing): the homepage's Pricing + FAQ on their own route, so
 // the front page stays focused on what nable is.
 function PricingPage(){
@@ -1167,13 +1201,12 @@ function App(){
       <div className="page-content">
       <Nav />
       <Hero />
-      <SeeItWork interaction={t.interaction} />
-      <GetStarted />
-      <Loop />
-      <ProofBand />
-      <AiCost />
-      <Connectors />
-      <Architecture version={version} />
+      <Reveal><DemoVideo /></Reveal>
+      <Reveal><GetStarted /></Reveal>
+      <Reveal><Loop /></Reveal>
+      <Reveal><ProofBand /></Reveal>
+      <Reveal><Connectors /></Reveal>
+      <Reveal><Architecture version={version} /></Reveal>
       <FootCta />
       <Footer version={version} />
       <Tweaks />
@@ -1181,6 +1214,9 @@ function App(){
     </>
   );
 }
+
+// Enable scroll-reveal only when JS runs, so no-JS visitors see all content immediately.
+if (typeof document !== "undefined") document.documentElement.classList.add("js");
 
 // /pricing(.html) renders just the pricing view; every other path is the homepage.
 const _path = (typeof location !== "undefined" ? location.pathname : "/");
