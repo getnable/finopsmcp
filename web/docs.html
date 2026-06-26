@@ -330,6 +330,7 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
     </div>
 
     <div class="nav-group">Getting started</div>
+    <a href="#overview" class="nav-link" data-spy="overview">Overview</a>
     <a href="#quickstart" class="nav-link" data-spy="quickstart">Quick start</a>
     <a href="#install" class="nav-link" data-spy="install">Installation</a>
     <a href="#activate-license" class="nav-link" data-spy="activate-license">Activate Team license</a>
@@ -364,6 +365,29 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
     <div class="breadcrumb"><span>Docs</span><span class="sep">/</span><span>Getting started</span><span class="sep">/</span><span class="cur" id="crumbCur">Quick start</span></div>
 
     <!-- Quickstart -->
+    <section class="doc-section" id="overview" data-title="Overview" data-crumb="Getting started">
+      <span class="eyebrow">Start here</span>
+      <h1 class="doc-h1">What nable is, in one minute</h1>
+      <p class="lead">nable answers questions about your cloud and AI bill in plain English, right inside Claude or Cursor. Ask why a bill went up, it finds the cause, drafts the fix, and proves the savings. No SQL, no dashboards.</p>
+
+      <div class="card" style="margin-top:26px">
+        <div class="card-label">What you connect</div>
+        <ul class="checklist">
+          <li><span class="ck">✓</span><span><strong>Read-only</strong> access to one cloud account (AWS, Azure, or GCP) to start. nable only ever reads your bill.</span></li>
+          <li><span class="ck">✓</span><span>Your credentials stay in your <strong>OS keyring</strong>, on your machine. Nothing reaches our servers.</span></li>
+          <li><span class="ck">✓</span><span>It proposes, you approve. nable never changes anything in your cloud on its own.</span></li>
+        </ul>
+      </div>
+
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><div class="step-t">Install</div><p class="hint">One command, <code>uvx nable</code>, on your machine.</p></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><div class="step-t">Connect, read-only</div><p class="hint">Point it at AWS, Azure, or GCP. The setup wizard walks you through it.</p></div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><div class="step-t">Ask</div><p class="hint">In Claude or Cursor, ask why the bill went up. Get the cause, the cost, and the fix.</p></div></div>
+      </div>
+
+      <p class="lead" style="margin-top:26px">An engineer installs nable and connects the read-only access once. The IAM, CloudFormation, and SSO pages below are for them. After that, anyone on the team just asks questions, no setup, no terminal.</p>
+    </section>
+
     <section class="doc-section" id="quickstart" data-title="Quick start" data-crumb="Getting started">
       <span class="eyebrow">Quickstart</span>
       <h1 class="doc-h1">Quickstart</h1>
