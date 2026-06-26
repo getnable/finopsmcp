@@ -2,6 +2,24 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.94
+
+One-step Pro activation, and managed-AI credits that reset monthly.
+
+### Activation
+- **New `finops login` (and `finops logout`): sign in by email, no license key to
+  copy.** Enter the email you bought Pro with, paste the 6-digit code we send, and
+  nable stores the license locally so the server picks it up automatically. The key
+  never has to be copied, pasted, or remembered. `finops logout` removes it.
+- `check_license` now reads the license stored by `finops login` from the local
+  vault when `FINOPS_LICENSE_KEY` is unset; an explicit env var still wins (CI,
+  power users). Validation stays fully offline against the bundled public key.
+
+### Billing
+- **Managed-AI credits are use-it-or-lose-it.** The monthly allowance no longer
+  carries forward; the ledger resets each period. This backs the credit-based
+  hosting add-on (Pro 500 credits, Startups 10,000), billed on top of the flat plan.
+
 ## 0.8.93
 
 The policy-bounded guardrail (advisory): an agent can ask "should I apply this?"
