@@ -90,7 +90,9 @@ def test_logout_clears_the_stored_license(monkeypatch):
     L.clear_license()
     assert fake.d.get("FINOPS_LICENSE_KEY") is None
     L._status = None
-    assert not L.check_license().is_pro
+    # The stored paid license is gone. (A fresh machine may still have a 7-day
+    # trial, which reads is_pro True, so assert the paid plan specifically.)
+    assert L.check_license().mode != "pro"
 
 
 def test_store_license_never_persists_an_invalid_key(monkeypatch):
