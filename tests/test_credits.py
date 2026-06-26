@@ -75,14 +75,15 @@ def test_remaining_floors_at_zero(ledger, monkeypatch):
     assert credits.budget_status()["remaining"] == 0.0
 
 
-def test_rollover_carries_leftover_into_next_period(ledger, monkeypatch):
+def test_unused_credits_do_not_carry_forward(ledger, monkeypatch):
+    # Use-it-or-lose-it: the monthly allowance does not roll into the next period.
     monkeypatch.setenv("FINOPS_MANAGED_AI_BUDGET_USD", "50")
     credits.record_spend(
         model="claude-haiku-4-5", input_tokens=10_000_000, output_tokens=0, period="2026-05"
-    )  # $10 of $50
+    )  # $10 of $50, $40 unused
     s = credits.budget_status(period="2026-06")
-    assert s["rollover"] == pytest.approx(40.0)  # unused $40 carries
-    assert s["total"] == pytest.approx(90.0)     # 50 fresh + 40 rolled
+    assert s["rollover"] == 0.0               # nothing carries forward
+    assert s["total"] == pytest.approx(50.0)  # fresh allowance only, no rollover
     assert s["spent"] == 0.0
 
 

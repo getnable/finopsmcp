@@ -114,8 +114,8 @@ def _effective_budget(d: dict) -> float | None:
 
 def _advance(d: dict, period: str) -> bool:
     """Roll the ledger to ``period`` if it isn't there yet. Returns True if it
-    rolled (so the caller persists). Leftover balance carries forward; expiry on
-    rolled-over credit is a billing-policy TODO (see module docstring)."""
+    rolled (so the caller persists). Credits are use-it-or-lose-it: the monthly
+    allowance does not carry forward, so rollover resets to zero each period."""
     cur = d.get("current_period")
     if cur == period:
         return False
@@ -128,10 +128,10 @@ def _advance(d: dict, period: str) -> bool:
             "budget_usd": budget,
             "rollover_usd": round(roll, 6),
         }
-        if budget is not None:
-            d["rollover_usd"] = round(max(0.0, (budget + roll) - spent), 6)
-        else:
-            d["rollover_usd"] = 0.0
+        # Use-it-or-lose-it: the monthly allowance does not carry forward. The
+        # prior period's spend and budget are preserved in history above; the
+        # live rollover always resets to zero.
+        d["rollover_usd"] = 0.0
     d["current_period"] = period
     d["spent_usd"] = 0.0
     d["turns"] = 0

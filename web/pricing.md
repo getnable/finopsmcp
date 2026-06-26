@@ -1,6 +1,6 @@
 # Pricing, nable
 
-nable is a local-first FinOps tool. It runs on your own machine as an MCP server and answers cloud and AI cost questions inside Claude, Cursor and other MCP editors. Paid plans are flat-rate with unlimited seats, never per-seat and never a percentage of your cloud spend. Last updated: 2026-06-24.
+nable is a local-first FinOps tool. It runs on your own machine as an MCP server and answers cloud and AI cost questions inside Claude, Cursor and other MCP editors. Paid plans are flat-rate with unlimited seats, never per-seat and never a percentage of your cloud spend. Hosting is an optional credit-based add-on, billed on top. Last updated: 2026-06-26.
 
 ## Dev
 - Price: $0 per month
@@ -25,11 +25,18 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 - Price: $1,000 per month, unlimited seats, billed monthly
 - Annual price: $10,000 per year, two months free
 - Trial: 7-day free trial
-- Runs: we host it for you, single-tenant. Dashboards anyone can use without a terminal. Your bill is never pooled with another customer's.
-- AI: bring your own LLM key, or use the managed AI agent we run for you, with usage metered above an included monthly allowance.
-- Includes: everything in Pro, plus single-tenant hosting and the managed AI agent
+- Runs: local, on your own machine. Hosting is an optional add-on (see Hosting below).
+- AI: bring your own LLM key. The managed AI agent comes with the hosting add-on.
+- Includes: everything in Pro, plus org scale (your whole org, more accounts and connectors) and priority support
 - Buy monthly: https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08
 - Buy yearly: https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09
+
+## Hosting (optional add-on)
+- What: we run nable single-tenant for you, plus a managed AI agent. Dashboards anyone on your team can use without a terminal. Your bill and credentials are never pooled with another customer's.
+- Billed: on top of your plan, in monthly credits that reset each month, use them or lose them. A credit is a unit of managed-AI work: a question is about one credit, a root-cause analysis with a drafted fix about five.
+- Pro tier: 500 credits per month for $200 per month
+- Startups tier: 10,000 credits per month for $4,000 per month
+- Note: hosting is not included in the flat plan price, and nable never charges a percentage of your cloud spend
 
 ## Enterprise
 - Price: custom
@@ -38,8 +45,8 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 
 ## Notes
 - Flat fee, not a percentage of spend: nable never profits from your bill growing
-- Local-first (Dev and Pro): credentials stay in your OS keyring, cost data caches in a local SQLite database on your machine, nable has no backend that holds your data
-- Hosted (Startups and Enterprise): single-tenant, your data is never pooled with another customer's
+- Local-first (Dev, Pro, Startups): credentials stay in your OS keyring, cost data caches in a local SQLite database on your machine, nable has no backend that holds your data
+- Hosting (optional add-on on any paid plan): single-tenant, your data is never pooled with another customer's, billed in monthly use-it-or-lose-it credits on top of the plan
 - Install: `uvx nable` (uv fetches a matching Python and runs the setup wizard), or `pip install -U finops-mcp` on Python 3.10 or newer
 - Works with: Claude Desktop, Cursor, Windsurf, Zed and any MCP client
 - Site: https://getnable.com
