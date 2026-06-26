@@ -386,6 +386,12 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .start-step p code{font-family:var(--font-mono);font-size:12.5px;color:var(--accent);background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r-xs);padding:1px 6px}
 @media(max-width:760px){.start-grid{grid-template-columns:1fr;gap:24px}}
 /* Plain-language data guarantees (local vs hosted) */
+.arch-tabs{display:flex;width:fit-content;max-width:100%;margin:6px auto 34px;background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-lg);padding:3px;gap:3px}
+.arch-tab{padding:9px 18px;border:1px solid transparent;border-radius:var(--r-md);background:transparent;color:var(--fg-3);font-family:'Bricolage Grotesque',system-ui,sans-serif;font-size:13.5px;font-weight:500;cursor:pointer;transition:background .15s,color .15s,border-color .15s;white-space:nowrap}
+.arch-tab:hover:not(.active){color:var(--fg-2)}
+.arch-tab.active{background:var(--bg-3);color:var(--fg);border-color:var(--line-2)}
+.arch-panel>*{margin-top:0}
+@media(max-width:560px){.arch-tabs{width:100%}.arch-tab{flex:1;font-size:12px;padding:8px 8px}}
 .guarantees{margin:0 0 36px;border:1px solid var(--line);border-radius:var(--r-2xl);background:var(--bg-1);padding:30px 32px}
 .guarantees-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:12px;margin-bottom:22px;padding-bottom:18px;border-bottom:1px solid var(--line)}
 .guarantees-head h3{font-size:19px;font-weight:600;letter-spacing:-.02em;margin:0;color:var(--fg)}

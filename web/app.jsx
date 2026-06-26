@@ -557,14 +557,24 @@ function AiCost(){
 
 /* Architecture */
 function Architecture({ version }){
+  const [tab, setTab] = useState("flow");
   return (
     <section id="arch" className="alt">
       <div className="wrap">
         <div className="section-head center">
           <div className="label">Architecture</div>
-          <h2>Run it yourself,<br/><em>or let us host it.</em></h2>
-          <p>Same runtime, your choice of where it runs. Point it at your providers, ask in your editor, and the same analysis runs either way. The connector holds the credentials and pulls the bills directly; nothing is pooled across customers.</p>
+          <h2>How it works,<br/><em>and where your data lives.</em></h2>
+          <p>One runtime, local or hosted. Your editor talks to it over MCP; it reads your providers read-only, and never changes anything on its own.</p>
         </div>
+
+        <div className="arch-tabs" role="tablist">
+          <button role="tab" aria-selected={tab==="flow"} className={"arch-tab" + (tab==="flow"?" active":"")} onClick={()=>setTab("flow")}>The flow</button>
+          <button role="tab" aria-selected={tab==="data"} className={"arch-tab" + (tab==="data"?" active":"")} onClick={()=>setTab("data")}>Your data</button>
+          <button role="tab" aria-selected={tab==="run"} className={"arch-tab" + (tab==="run"?" active":"")} onClick={()=>setTab("run")}>Run it or host it</button>
+        </div>
+
+        <div className="arch-panel">
+          {tab==="data" && (
         <div className="guarantees">
           <div className="guarantees-head">
             <h3>Your data, in plain terms</h3>
@@ -592,6 +602,8 @@ function Architecture({ version }){
             </div>
           </div>
         </div>
+          )}
+          {tab==="flow" && (
         <div className="arch">
           <div className="arch-grid"></div>
           <div className="arch-row">
@@ -623,6 +635,8 @@ function Architecture({ version }){
             </div>
           </div>
         </div>
+          )}
+          {tab==="run" && (
         <div className="host-opts">
           <div className="host-opt">
             <span className="host-tag">Run it yourself</span>
@@ -639,6 +653,8 @@ function Architecture({ version }){
               Talk to us about hosting <span className="arr">→</span>
             </a>
           </div>
+        </div>
+          )}
         </div>
       </div>
     </section>
