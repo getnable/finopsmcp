@@ -9,8 +9,8 @@
     { "source": "/terms", "destination": "/terms.html" },
     { "source": "/iam", "destination": "/iam.html" },
     { "source": "/connectors", "destination": "/" },
-    { "source": "/pricing", "destination": "/" },
-    { "source": "/faq", "destination": "/" }
+    { "source": "/pricing", "destination": "/pricing.html" },
+    { "source": "/faq", "destination": "/pricing.html" }
   ],
   "redirects": [
     { "source": "/compare.html", "destination": "/finops-mcp-comparison", "permanent": true },
