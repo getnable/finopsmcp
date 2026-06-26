@@ -54,7 +54,7 @@ class PatternContext:
     @property
     def total_monthly_spend(self) -> float:
         return sum(
-            v[-30] if len(v) >= 30 else (sum(v) / max(len(v), 1) * 30)
+            sum(v[-30:]) if len(v) >= 30 else (sum(v) / max(len(v), 1) * 30)
             for v in self.daily_costs.values()
         )
 

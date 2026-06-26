@@ -256,6 +256,7 @@ async def _attribute_item(client, token, item: dict) -> dict | None:
         "title": detail.get("title", ""),
         "url": detail.get("html_url", ""),
         "merged_at": detail.get("merged_at", ""),
+        "at": detail.get("merged_at", ""),
     }
 
 
@@ -374,6 +375,7 @@ async def _repo_commit_items(client, token, full: str, since_iso: str,
                 "title": msg.splitlines()[0] if msg else "",
                 "url": f"https://github.com/{full}/commit/{n.get('oid', '')}",
                 "committed_at": n.get("committedDate", ""),
+                "at": n.get("committedDate", ""),
             })
         page = hist.get("pageInfo") or {}
         if not page.get("hasNextPage"):

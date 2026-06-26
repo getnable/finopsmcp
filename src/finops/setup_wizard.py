@@ -1651,11 +1651,16 @@ def main(args: list[str] | None = None) -> None:
     if args and args[0] == "setup":
         args = args[1:]
 
-    from .welcome import show_welcome
-    show_welcome()
+    # --help / --version must be side-effect-free: argparse handles them by exiting
+    # inside parse_args, so skip the welcome banner and PATH warning (and don't burn
+    # the one-time welcome event) when they are present.
+    _help_or_version = any(a in ("-h", "--help", "--version") for a in args)
 
-    # Check PATH early so users know if the command won't be available in new shells
-    _check_path_warning()
+    if not _help_or_version:
+        from .welcome import show_welcome
+        show_welcome()
+        # Check PATH early so users know if the command won't be available in new shells
+        _check_path_warning()
 
     # Track setup wizard start, fire-and-forget. A bare _send_event here blocks the
     # main thread on a network POST (up to ~5s on a captive-portal/filtered network)
@@ -2288,9 +2293,21 @@ def _run_login(email: str = "") -> None:
         return json.loads(raw)
 
     # 1) request a code (always returns ok, by design, to avoid email enumeration)
+    print("  Sending your code…", flush=True)
     try:
         _post("/api/account/send-code", {"email": email})
-    except Exception as e:  # network / DNS / 5xx
+    except urllib.error.HTTPError as e:  # 429 / 5xx from the server, not a network fault
+        msg = ""
+        try:
+            msg = json.loads(e.read().decode("utf-8")).get("error", "")
+        except Exception:
+            pass
+        if e.code == 429:
+            _err("Too many requests. Wait a few minutes, then try again.")
+        else:
+            _err(msg or f"Could not send the code ({e.code}).")
+        return
+    except Exception as e:  # genuine network / DNS / timeout
         _err(f"Could not reach getnable.com. Check your connection and try again. ({e})")
         return
     print(f"  ✓  Sent a 6-digit code to {email}. It expires in 10 minutes.\n")
