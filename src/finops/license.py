@@ -430,9 +430,50 @@ def validate_key(key: str) -> LicenseStatus:
 
 # ── Runtime helpers ───────────────────────────────────────────────────────────
 
+def _vault_license_key() -> str:
+    """A license key stored locally by `finops login` / `finops setup license`.
+    Lazy + guarded so a vault hiccup can never break gating (worst case: free)."""
+    try:
+        from .security.vault import Vault
+        return (Vault.default().get("FINOPS_LICENSE_KEY") or "").strip()
+    except Exception:
+        return ""
+
+
+def store_license(key: str) -> LicenseStatus:
+    """Validate a key and, if it is a paid plan, persist it to the local vault so
+    the server picks it up with no env var. Returns the validated status; an
+    invalid key is never stored. Used by `finops login`."""
+    global _status
+    key = (key or "").strip()
+    status = validate_key(key)
+    if status.mode in ("pro", "team", "enterprise"):
+        try:
+            from .security.vault import Vault
+            Vault.default().store("FINOPS_LICENSE_KEY", key)
+        except Exception:
+            pass
+        _status = None  # force a re-read on the next get_status()
+    return status
+
+
+def clear_license() -> None:
+    """Remove the locally stored license (used by `finops logout`). An explicit
+    FINOPS_LICENSE_KEY env var, if set, is left untouched."""
+    global _status
+    try:
+        from .security.vault import Vault
+        Vault.default().delete("FINOPS_LICENSE_KEY")
+    except Exception:
+        pass
+    _status = None
+
+
 def check_license() -> LicenseStatus:
-    """Read FINOPS_LICENSE_KEY from env and return validated status."""
-    key    = os.environ.get("FINOPS_LICENSE_KEY", "").strip()
+    """Validated license status. An explicit FINOPS_LICENSE_KEY env var wins (CI,
+    power users); otherwise the key stored locally by `finops login` is used.
+    Validation is always offline against the bundled public key."""
+    key    = os.environ.get("FINOPS_LICENSE_KEY", "").strip() or _vault_license_key()
     status = validate_key(key)
 
     if status.mode == "trial":
