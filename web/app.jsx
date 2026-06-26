@@ -1140,7 +1140,7 @@ function DemoVideo(){
           <p>Ask in plain English. nable reads your real bill, finds what changed, and drafts the fix, live.</p>
         </div>
         <div className="demo-video-frame">
-          <video className="demo-video" src="/nablepreview.mp4" autoPlay loop muted playsInline preload="metadata" controls />
+          <video className="demo-video" src="/nablepreview.mp4?v=2" autoPlay loop muted playsInline preload="auto" />
         </div>
       </div>
     </section>
