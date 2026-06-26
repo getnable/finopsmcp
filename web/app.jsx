@@ -128,6 +128,7 @@ function Nav(){
           <li><button className="nav-link" onClick={()=>scrollTo('connectors')}>Connectors</button></li>
           <li><button className="nav-link" onClick={()=>scrollTo('demo')}>Demo</button></li>
           <li><button className="nav-link" onClick={()=>scrollTo('pricing')}>Pricing</button></li>
+          <li><button className="nav-link" onClick={()=>scrollTo('arch')}>Security</button></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
         </ul>
         <div className="right">
@@ -161,6 +162,7 @@ function Nav(){
           <button className="nav-mobile-item" onClick={()=>scrollTo('connectors')}>Connectors</button>
           <button className="nav-mobile-item" onClick={()=>scrollTo('demo')}>Demo</button>
           <button className="nav-mobile-item" onClick={()=>{ scrollTo('pricing'); if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</button>
+          <button className="nav-mobile-item" onClick={()=>scrollTo('arch')}>Security</button>
           <a className="nav-mobile-item" href="/docs.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
           <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:10}}>
             <a href="/account.html" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
@@ -566,6 +568,33 @@ function Architecture({ version }){
           <div className="label">Architecture</div>
           <h2>Run it yourself,<br/><em>or let us host it.</em></h2>
           <p>Same runtime, your choice of where it runs. Point it at your providers, ask in your editor, and the same analysis runs either way. The connector holds the credentials and pulls the bills directly; nothing is pooled across customers.</p>
+        </div>
+        <div className="guarantees">
+          <div className="guarantees-head">
+            <h3>Your data, in plain terms</h3>
+            <a className="guarantees-link" href="/security">Full security model <span className="arr">→</span></a>
+          </div>
+          <div className="guarantees-cols">
+            <div className="guarantee-col">
+              <span className="guarantee-tag">Local · Dev and Pro</span>
+              <ul>
+                <li><CheckIcon /><span>Your credentials and cost data never reach our servers</span></li>
+                <li><CheckIcon /><span>We never sell, rent, or share your data</span></li>
+                <li><CheckIcon /><span>Nothing you connect is used to train models</span></li>
+                <li><CheckIcon /><span>You own your inputs and outputs</span></li>
+                <li><CheckIcon /><span>Propose-only: nable never changes your cloud on its own</span></li>
+              </ul>
+            </div>
+            <div className="guarantee-col">
+              <span className="guarantee-tag">Hosted · Startups and Enterprise</span>
+              <ul>
+                <li><CheckIcon /><span>Single-tenant: your data is never pooled with another customer's</span></li>
+                <li><CheckIcon /><span>Your own isolated runtime and store</span></li>
+                <li><CheckIcon /><span>Sub-processors: Anthropic for managed AI, the host, and Stripe</span></li>
+                <li><CheckIcon /><span>SSO, RBAC, and audit logs</span></li>
+              </ul>
+            </div>
+          </div>
         </div>
         <div className="arch">
           <div className="arch-grid"></div>
@@ -1033,6 +1062,39 @@ function Loop(){
   );
 }
 
+/* Non-technical bridge: the 3-step shape (install, connect read-only, ask) so a
+   buyer sees how simple setup is before the docs go deep on IAM and CloudFormation. */
+function GetStarted(){
+  return (
+    <section id="start" className="alt" style={{borderTop:"1px solid var(--line)"}}>
+      <div className="wrap">
+        <div className="section-head center">
+          <div className="label">Get started</div>
+          <h2>Two minutes, three steps,<br/><em>no SQL, no dashboards.</em></h2>
+          <p>Give nable read-only access to your bill, then ask questions in plain English. That is the whole setup.</p>
+        </div>
+        <div className="start-grid">
+          <div className="start-step">
+            <div className="start-n">1</div>
+            <h3>Install</h3>
+            <p>One command, <code>uvx nable</code>. It runs on your machine. No account, no signup.</p>
+          </div>
+          <div className="start-step">
+            <div className="start-n">2</div>
+            <h3>Connect, read-only</h3>
+            <p>Point it at AWS, Azure, or GCP. nable only ever reads your bill, and your credentials stay in your OS keyring, never on our servers.</p>
+          </div>
+          <div className="start-step">
+            <div className="start-n">3</div>
+            <h3>Ask</h3>
+            <p>In Claude or Cursor, ask why the bill went up. Get the cause, the cost, and the fix, in plain English.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* The payoff: verified, learning savings (the differentiation people miss) */
 function ProofBand(){
   return (
@@ -1086,6 +1148,7 @@ function App(){
       <Nav />
       <Hero />
       <SeeItWork interaction={t.interaction} />
+      <GetStarted />
       <Loop />
       <ProofBand />
       <AiCost />
