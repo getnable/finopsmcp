@@ -443,19 +443,32 @@ async def build_report(*, days: int = 30, repos: list[str] | None = None,
     items: list[dict] | None = None
     chosen: str | None = None
 
-    # Try PRs first unless commits are explicitly requested.
-    if unit in ("auto", "pr"):
+    if unit == "auto":
+        # Fetch PRs and commits concurrently, then prefer PRs if the repo has any.
+        # (The old code ran the PR search first and only fell back to commits when it
+        # found none, so a commit-to-main repo, the exact case this feature targets,
+        # paid for a full, serial PR Search API sweep before doing the real work.)
+        prf, cf = await asyncio.gather(
+            fetch_ai_contributions(days=days, repos=repos),
+            fetch_ai_commits(days=days, repos=repos),
+        )
+        if prf.get("configured") and prf.get("prs"):
+            items, chosen = prf.get("prs", []), "pr"
+        elif cf.get("configured"):
+            items, chosen = cf.get("commits", []), "commit"
+        elif prf.get("configured"):
+            items, chosen = [], "pr"          # configured, just no activity in the window
+        else:
+            return {"configured": False,
+                    "reason": cf.get("reason") or prf.get("reason", ""),
+                    "window_days": days, "unit": "auto"}
+    elif unit == "pr":
         prf = await fetch_ai_contributions(days=days, repos=repos)
-        if prf.get("configured"):
-            prs = prf.get("prs", [])
-            if prs or unit == "pr":          # use PRs if any exist, or if forced
-                items, chosen = prs, "pr"
-        elif unit == "pr":
+        if not prf.get("configured"):
             return {"configured": False, "reason": prf.get("reason", ""),
                     "window_days": days, "unit": "pr"}
-
-    # Fall back to commits: auto found no PRs, or commits were requested.
-    if items is None:
+        items, chosen = prf.get("prs", []), "pr"
+    else:  # commit
         cf = await fetch_ai_commits(days=days, repos=repos)
         if not cf.get("configured"):
             return {"configured": False, "reason": cf.get("reason", ""),
