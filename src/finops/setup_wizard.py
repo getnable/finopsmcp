@@ -1751,6 +1751,9 @@ def main(args: list[str] | None = None) -> None:
 
     lic_p = sub.add_parser("license",       help="Activate a Pro or Team license key (FINOPS-2-...)")
     lic_p.add_argument("key", nargs="?", default="", help="License key (FINOPS-2-...)")
+    login_p = sub.add_parser("login",       help="Sign in by email to activate Pro (no license key to copy)")
+    login_p.add_argument("email", nargs="?", default="", help="Account email (optional; prompts if omitted)")
+    sub.add_parser("logout",                help="Sign out and remove the stored license from this machine")
     sub.add_parser("license-status",        help="Check current license plan and expiry")
     infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
@@ -1978,6 +1981,12 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "license":
         _run_license_setup(getattr(parsed, "key", ""))
+        return
+    elif parsed.cmd == "login":
+        _run_login(getattr(parsed, "email", ""))
+        return
+    elif parsed.cmd == "logout":
+        _run_logout()
         return
     elif parsed.cmd == "license-status":
         _run_license_status()
@@ -2243,6 +2252,106 @@ def _run_license_status() -> None:
         print(f"\n  Upgrade before trial ends: {_UPGRADE_URL}\n")
     else:
         print()
+
+
+def _run_login(email: str = "") -> None:
+    """
+    Activate Pro by email, with no license key to copy or remember. Sends a
+    6-digit code to your inbox, verifies it, and stores the license locally so
+    the server picks it up automatically.
+    Called by: finops login [email]
+    """
+    import json
+    import urllib.request
+    import urllib.error
+    from .license import store_license, _UPGRADE_URL
+
+    base = os.environ.get("FINOPS_ACCOUNT_BASE", "https://getnable.com").rstrip("/")
+
+    print("\n  Sign in to nable\n")
+    email = (email or "").strip().lower()
+    if not email:
+        email = _prompt("  Email you used at checkout").strip().lower()
+    if "@" not in email or "." not in email:
+        _err("That does not look like an email address.")
+        return
+
+    def _post(path: str, payload: dict) -> dict:
+        req = urllib.request.Request(
+            f"{base}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw = r.read().decode("utf-8") or "{}"
+        return json.loads(raw)
+
+    # 1) request a code (always returns ok, by design, to avoid email enumeration)
+    try:
+        _post("/api/account/send-code", {"email": email})
+    except Exception as e:  # network / DNS / 5xx
+        _err(f"Could not reach getnable.com. Check your connection and try again. ({e})")
+        return
+    print(f"  ✓  Sent a 6-digit code to {email}. It expires in 10 minutes.\n")
+
+    # 2) verify the code -> the server returns the license for this email
+    code = _prompt("  Enter the code").strip()
+    if not code:
+        _warn("No code entered. Run 'finops login' again when it arrives.")
+        return
+    try:
+        data = _post("/api/account/verify-code", {"email": email, "code": code})
+    except urllib.error.HTTPError as e:
+        msg = ""
+        try:
+            msg = json.loads(e.read().decode("utf-8")).get("error", "")
+        except Exception:
+            pass
+        if e.code == 429:
+            _err("Too many attempts. Wait a few minutes, then try again.")
+        else:
+            _err(msg or f"Sign-in failed ({e.code}).")
+        return
+    except Exception as e:
+        _err(f"Could not verify the code: {e}")
+        return
+
+    plan = (data or {}).get("plan", "free")
+    key = (data or {}).get("license_key") or ""
+
+    if not key or plan == "free":
+        _warn(f"No active subscription found for {email}.")
+        print(f"\n  Get Pro at: {_UPGRADE_URL}")
+        print("  Subscribed with a different email? Run 'finops login' with that one.\n")
+        return
+
+    status = store_license(key)
+    if status.mode == "invalid":
+        _err(f"The license we received did not validate: {status.message}")
+        return
+    _inject_license_into_claude_config(key)
+
+    print(f"\n  ✓  Signed in as {status.email or email}")
+    print(f"  ✓  Plan: {status.mode.upper()}")
+    print("  ✓  License stored on this machine. Nothing to copy or remember.")
+    print()
+    print("  Restart Claude Desktop (or your MCP client) to pick up Pro.")
+    print()
+
+    try:
+        from . import telemetry as _tel
+        _tel._send_event(_tel._get_install_id(), "login_activated", {"plan": status.mode})
+    except Exception:
+        pass
+
+
+def _run_logout() -> None:
+    """Remove the stored license from this machine. Called by: finops logout"""
+    from .license import clear_license
+    clear_license()
+    print("\n  ✓  Signed out. Pro features are off on this machine.")
+    print("  Sign back in any time with: finops login\n")
 
 
 def _inject_license_into_claude_config(key: str) -> None:
