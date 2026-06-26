@@ -629,6 +629,29 @@ function GetStarted() {
 function ProofBand() {
   return /* @__PURE__ */ React.createElement("section", { className: "proof-band" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("p", { className: "proof-line" }, "Every other tool claims a number. ", /* @__PURE__ */ React.createElement("em", null, "nable proves it on your bill"), ", and gets smarter every week.")));
 }
+function Reveal({ children }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (!("IntersectionObserver" in window)) {
+      el.classList.add("in");
+      return;
+    }
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) {
+        el.classList.add("in");
+        io.disconnect();
+      }
+    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return /* @__PURE__ */ React.createElement("div", { ref, className: "reveal" }, children);
+}
+function DemoVideo() {
+  return /* @__PURE__ */ React.createElement("section", { id: "demo", className: "demo-sec" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head center" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "See it work"), /* @__PURE__ */ React.createElement("h2", null, "Watch nable", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "find the money.")), /* @__PURE__ */ React.createElement("p", null, "Ask in plain English. nable reads your real bill, finds what changed, and drafts the fix, live.")), /* @__PURE__ */ React.createElement("div", { className: "demo-video-frame" }, /* @__PURE__ */ React.createElement("video", { className: "demo-video", src: "/nablepreview.mp4", autoPlay: true, loop: true, muted: true, playsInline: true, preload: "metadata", controls: true }))));
+}
 function PricingPage() {
   return /* @__PURE__ */ React.createElement("div", { className: "page-content" }, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Pricing, null), /* @__PURE__ */ React.createElement(Faq, null), /* @__PURE__ */ React.createElement(Footer, { version: null }));
 }
@@ -650,8 +673,9 @@ function App() {
     }).catch(() => {
     });
   }, []);
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "page-atmos", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("svg", { className: "atmos-svg", width: "100%", height: "100%", preserveAspectRatio: "xMidYMid slice" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("pattern", { id: "natmos", width: "260", height: "260", patternUnits: "userSpaceOnUse" }, /* @__PURE__ */ React.createElement("g", { stroke: "#ffffff", strokeOpacity: "0.05", strokeWidth: "1", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M0 70 H160 V260" }), /* @__PURE__ */ React.createElement("path", { d: "M260 188 H104 V0" }), /* @__PURE__ */ React.createElement("path", { d: "M0 214 H48 V128 H132" })), /* @__PURE__ */ React.createElement("g", { fill: "#4db8d4", fillOpacity: "0.45" }, /* @__PURE__ */ React.createElement("circle", { cx: "160", cy: "70", r: "2.1" }), /* @__PURE__ */ React.createElement("circle", { cx: "104", cy: "188", r: "2.1" }), /* @__PURE__ */ React.createElement("circle", { cx: "132", cy: "128", r: "1.8" })))), /* @__PURE__ */ React.createElement("rect", { width: "100%", height: "100%", fill: "url(#natmos)" }))), /* @__PURE__ */ React.createElement("div", { className: "page-content" }, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, null), /* @__PURE__ */ React.createElement(SeeItWork, { interaction: t.interaction }), /* @__PURE__ */ React.createElement(GetStarted, null), /* @__PURE__ */ React.createElement(Loop, null), /* @__PURE__ */ React.createElement(ProofBand, null), /* @__PURE__ */ React.createElement(AiCost, null), /* @__PURE__ */ React.createElement(Connectors, null), /* @__PURE__ */ React.createElement(Architecture, { version }), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null)));
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "page-atmos", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("svg", { className: "atmos-svg", width: "100%", height: "100%", preserveAspectRatio: "xMidYMid slice" }, /* @__PURE__ */ React.createElement("defs", null, /* @__PURE__ */ React.createElement("pattern", { id: "natmos", width: "260", height: "260", patternUnits: "userSpaceOnUse" }, /* @__PURE__ */ React.createElement("g", { stroke: "#ffffff", strokeOpacity: "0.05", strokeWidth: "1", fill: "none" }, /* @__PURE__ */ React.createElement("path", { d: "M0 70 H160 V260" }), /* @__PURE__ */ React.createElement("path", { d: "M260 188 H104 V0" }), /* @__PURE__ */ React.createElement("path", { d: "M0 214 H48 V128 H132" })), /* @__PURE__ */ React.createElement("g", { fill: "#4db8d4", fillOpacity: "0.45" }, /* @__PURE__ */ React.createElement("circle", { cx: "160", cy: "70", r: "2.1" }), /* @__PURE__ */ React.createElement("circle", { cx: "104", cy: "188", r: "2.1" }), /* @__PURE__ */ React.createElement("circle", { cx: "132", cy: "128", r: "1.8" })))), /* @__PURE__ */ React.createElement("rect", { width: "100%", height: "100%", fill: "url(#natmos)" }))), /* @__PURE__ */ React.createElement("div", { className: "page-content" }, /* @__PURE__ */ React.createElement(Nav, null), /* @__PURE__ */ React.createElement(Hero, null), /* @__PURE__ */ React.createElement(Reveal, null, /* @__PURE__ */ React.createElement(DemoVideo, null)), /* @__PURE__ */ React.createElement(Reveal, null, /* @__PURE__ */ React.createElement(GetStarted, null)), /* @__PURE__ */ React.createElement(Reveal, null, /* @__PURE__ */ React.createElement(Loop, null)), /* @__PURE__ */ React.createElement(Reveal, null, /* @__PURE__ */ React.createElement(ProofBand, null)), /* @__PURE__ */ React.createElement(Reveal, null, /* @__PURE__ */ React.createElement(Connectors, null)), /* @__PURE__ */ React.createElement(Reveal, null, /* @__PURE__ */ React.createElement(Architecture, { version })), /* @__PURE__ */ React.createElement(FootCta, null), /* @__PURE__ */ React.createElement(Footer, { version }), /* @__PURE__ */ React.createElement(Tweaks, null)));
 }
+if (typeof document !== "undefined") document.documentElement.classList.add("js");
 const _path = typeof location !== "undefined" ? location.pathname : "/";
 const _isPricing = _path === "/pricing" || _path === "/pricing.html" || _path === "/pricing/";
 ReactDOM.createRoot(document.getElementById("app")).render(_isPricing ? /* @__PURE__ */ React.createElement(PricingPage, null) : /* @__PURE__ */ React.createElement(App, null));
