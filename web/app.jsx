@@ -523,35 +523,31 @@ function AiCost(){
   return (
     <section id="ai" className="alt" style={{borderTop:"1px solid var(--line)"}}>
       <div className="wrap">
-        <div className="ee-grid">
-          <div className="ee-left">
-            <div className="label">Your AI bill</div>
-            <h2>Tools chart your AI spend.<br/><em>nable finds the waste.</em></h2>
-            <p className="ee-lede">Most of an AI bill is input tokens billed at full price, plus calls sent to a frontier model a cheaper one would have answered the same way. nable reads the split from your real usage and shows you the cheapest way to get the same output. No caching guesswork.</p>
-            <ul className="ee-points">
-              <li><span className="ee-plus">+</span><span>Input, output and cache, <b>split from your actual bill</b></span></li>
-              <li><span className="ee-plus">+</span><span>Flags <b>frontier-model calls</b> a cheaper model handles the same</span></li>
-              <li><span className="ee-plus">+</span><span>Separates <b>what you can bank today</b> from what needs a closer look</span></li>
-            </ul>
+        <div className="section-head center">
+          <div className="label">Your AI bill</div>
+          <h2>Tools chart your AI spend.<br/><em>nable finds the waste.</em></h2>
+          <p>Most of an AI bill is input tokens billed at full price, plus calls sent to a frontier model a cheaper one would have answered the same way. nable reads the split from your real usage and shows you the cheapest way to get the same output. No caching guesswork.</p>
+        </div>
+        <ul className="ee-points ee-points-center">
+          <li><span className="ee-plus">+</span><span>Input, output and cache, <b>split from your actual bill</b></span></li>
+          <li><span className="ee-plus">+</span><span>Flags <b>frontier-model calls</b> a cheaper model handles the same</span></li>
+          <li><span className="ee-plus">+</span><span>Separates <b>what you can bank today</b> from what needs a closer look</span></li>
+        </ul>
+        <div className="aicost-panel aicost-panel-center">
+          <div className="aicost-tag">Real numbers · real dollars · first scan</div>
+          <div className="aicost-stat">
+            <div className="aicost-big">89<span className="aicost-unit">%</span></div>
+            <p>of an early user's Bedrock bill was input tokens, billed at full price with <b>no caching</b></p>
           </div>
-          <div className="ee-right">
-            <div className="aicost-panel">
-              <div className="aicost-tag">Real numbers · real dollars · first scan</div>
-              <div className="aicost-stat">
-                <div className="aicost-big">89<span className="aicost-unit">%</span></div>
-                <p>of an early user's Bedrock bill was input tokens, billed at full price with <b>no caching</b></p>
-              </div>
-              <div className="aicost-rule"></div>
-              <div className="aicost-stat">
-                <div className="aicost-big accent">$10.7k<span className="aicost-unit">/yr</span></div>
-                <p><b>= $896/mo</b> in prompt-caching savings, about a quarter of the AI bill, on the first scan</p>
-              </div>
-              <div className="aicost-foot">From an early user's first scan. Real numbers, name withheld for now.</div>
-              <div className="aicost-cta">
-                <span className="aicost-cta-l">This is a small account. See your own number, free:</span>
-                <code className="aicost-cmd" onClick={copy}>uvx nable</code>
-              </div>
-            </div>
+          <div className="aicost-rule"></div>
+          <div className="aicost-stat">
+            <div className="aicost-big accent">$10.7k<span className="aicost-unit">/yr</span></div>
+            <p><b>= $896/mo</b> in prompt-caching savings, about a quarter of the AI bill, on the first scan</p>
+          </div>
+          <div className="aicost-foot">From an early user's first scan. Real numbers, name withheld for now.</div>
+          <div className="aicost-cta">
+            <span className="aicost-cta-l">This is a small account. See your own number, free:</span>
+            <code className="aicost-cmd" onClick={copy}>uvx nable</code>
           </div>
         </div>
       </div>
@@ -564,7 +560,7 @@ function Architecture({ version }){
   return (
     <section id="arch" className="alt">
       <div className="wrap">
-        <div className="section-head">
+        <div className="section-head center">
           <div className="label">Architecture</div>
           <h2>Run it yourself,<br/><em>or let us host it.</em></h2>
           <p>Same runtime, your choice of where it runs. Point it at your providers, ask in your editor, and the same analysis runs either way. The connector holds the credentials and pulls the bills directly; nothing is pooled across customers.</p>
@@ -682,7 +678,7 @@ function Connectors(){
   return (
     <section id="connectors" className="alt">
       <div className="wrap">
-        <div className="section-head">
+        <div className="section-head center">
           <div className="label">Connectors</div>
           <h2>All 17 sources,<br/><em>one conversation.</em></h2>
           <p>Every connector is a real API integration, not a CSV export. New providers ship monthly.</p>
