@@ -64,7 +64,7 @@ _VALID_PLANS    = {"pro", "team", "trial", "enterprise"}
 _UPGRADE_URL    = "https://getnable.com/#pricing"
 _CHECKOUT_URL     = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08"   # Team $1,000/mo direct checkout
 _PRO_CHECKOUT_URL = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06"   # Pro $100/mo direct checkout
-_ACTIVATE_CMD   = "finops setup license"             # shown after purchase
+_ACTIVATE_CMD   = "finops login"                     # shown after purchase: one email + code, no key
 _TRIAL_DAYS  = 7
 _TRIAL_FILE  = Path.home() / ".finops-mcp" / "trial_start"
 
@@ -522,7 +522,7 @@ def require_team(feature: str) -> dict | None:
         "upgrade": (
             f"The conversational Slack bot and chat remediation are part of nable Team "
             f"($1,000/mo flat, unlimited seats). Start a free trial or see plans: {_UPGRADE_URL} "
-            f"Then activate with: {_ACTIVATE_CMD}"
+            f"Then sign in: {_ACTIVATE_CMD}"
         ),
     }
 
@@ -590,7 +590,7 @@ def require_pro(feature: str) -> dict | None:
         lines.append(f"  {marker} {desc}")
     lines.append(f"\n  You hit this because '{friendly}' requires Pro.")
     lines.append(f"\n  → 7-day free trial: {_PRO_CHECKOUT_URL}")
-    lines.append(f"  → Then activate:    {_ACTIVATE_CMD} <your-key>")
+    lines.append(f"  → Already subscribed? Sign in:  {_ACTIVATE_CMD}")
 
     return {
         "error": "pro_required",

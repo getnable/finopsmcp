@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.95
+
+Login-first activation everywhere.
+
+### Activation
+- **Pro-gated tools now point to `finops login`, not a license key.** When a free
+  account hits a Pro feature in Claude or Cursor, the upgrade prompt reads "already
+  subscribed? sign in: finops login" instead of asking for a key to paste.
+- The post-purchase email leads with `finops login` (enter your email, paste the
+  6-digit code), keeping manual key activation as a fallback.
+
 ## 0.8.94
 
 One-step Pro activation, and managed-AI credits that reset monthly.
