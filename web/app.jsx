@@ -125,10 +125,7 @@ function Nav(){
           <span><span style={{color:'var(--accent)'}}>n</span>able</span>
         </a>
         <ul>
-          <li><button className="nav-link" onClick={()=>scrollTo('connectors')}>Connectors</button></li>
-          <li><button className="nav-link" onClick={()=>scrollTo('demo')}>Demo</button></li>
-          <li><button className="nav-link" onClick={()=>scrollTo('pricing')}>Pricing</button></li>
-          <li><button className="nav-link" onClick={()=>scrollTo('arch')}>Security</button></li>
+          <li><a href="/pricing.html" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</a></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
         </ul>
         <div className="right">
@@ -159,10 +156,7 @@ function Nav(){
       </div>
       {open && (
         <div className="nav-mobile-menu">
-          <button className="nav-mobile-item" onClick={()=>scrollTo('connectors')}>Connectors</button>
-          <button className="nav-mobile-item" onClick={()=>scrollTo('demo')}>Demo</button>
-          <button className="nav-mobile-item" onClick={()=>{ scrollTo('pricing'); if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</button>
-          <button className="nav-mobile-item" onClick={()=>scrollTo('arch')}>Security</button>
+          <a className="nav-mobile-item" href="/pricing.html" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</a>
           <a className="nav-mobile-item" href="/docs.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
           <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:10}}>
             <a href="/account.html" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
@@ -957,9 +951,10 @@ function Footer({ version }){
           </div>
           <div>
             <h5>Product</h5>
-            <a href="#demo">Demo</a>
-            <a href="#connectors">Connectors</a>
-            <a href="#pricing">Pricing</a>
+            <a href="/#demo">Demo</a>
+            <a href="/#connectors">Connectors</a>
+            <a href="/pricing.html">Pricing</a>
+            <a href="/pricing.html#faq">FAQ</a>
             <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_nav',cta:'book_demo'}); }}>Book a demo</a>
           </div>
@@ -1118,6 +1113,19 @@ function ProofBand(){
   );
 }
 
+// The pricing page (/pricing): the homepage's Pricing + FAQ on their own route, so
+// the front page stays focused on what nable is.
+function PricingPage(){
+  return (
+    <div className="page-content">
+      <Nav />
+      <Pricing />
+      <Faq />
+      <Footer version={null} />
+    </div>
+  );
+}
+
 function App(){
   const [t, setT] = useState(TWEAK_DEFAULTS);
   const [version, setVersion] = useState(null);
@@ -1166,8 +1174,6 @@ function App(){
       <AiCost />
       <Connectors />
       <Architecture version={version} />
-      <Pricing />
-      <Faq />
       <FootCta />
       <Footer version={version} />
       <Tweaks />
@@ -1176,4 +1182,7 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById("app")).render(<App />);
+// /pricing(.html) renders just the pricing view; every other path is the homepage.
+const _path = (typeof location !== "undefined" ? location.pathname : "/");
+const _isPricing = _path === "/pricing" || _path === "/pricing.html" || _path === "/pricing/";
+ReactDOM.createRoot(document.getElementById("app")).render(_isPricing ? <PricingPage /> : <App />);
