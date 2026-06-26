@@ -412,19 +412,26 @@ def estimate_coverage_for_partial_tag(
         ce = boto3.client("ce", region_name="us-east-1")
         start, end = _get_date_range(months_back=3)
 
-        # ── Step 1: measure the tagged slice directly ─────────────────────────
-        tagged_sp_cov = _savings_plan_coverage(
-            ce, start, end, tag_filter={tag_key: tag_value}
-        )
-        tagged_ri_cov = _ri_coverage(
-            ce, start, end, tag_filter={tag_key: tag_value}
-        )
-        tagged_spend = _ec2_spend_for_tag(ce, start, end, tag_key, tag_value)
+        # ── Steps 1+2: the six Cost Explorer calls below are independent. Run them
+        # concurrently (CE is 2-8s per call, so serial was ~6x the latency); the
+        # botocore client is thread-safe for concurrent operations. Mirrors the pool
+        # already used in analyze_commitments.
+        from concurrent.futures import ThreadPoolExecutor
 
-        # ── Step 2: get account totals ────────────────────────────────────────
-        acct_sp_cov   = _savings_plan_coverage(ce, start, end)
-        acct_ri_cov   = _ri_coverage(ce, start, end)
-        total_spend   = _total_ec2_spend(ce, start, end)
+        with ThreadPoolExecutor(max_workers=6) as _pool:
+            f_tagged_sp    = _pool.submit(_savings_plan_coverage, ce, start, end, {tag_key: tag_value})
+            f_tagged_ri    = _pool.submit(_ri_coverage, ce, start, end, {tag_key: tag_value})
+            f_tagged_spend = _pool.submit(_ec2_spend_for_tag, ce, start, end, tag_key, tag_value)
+            f_acct_sp      = _pool.submit(_savings_plan_coverage, ce, start, end)
+            f_acct_ri      = _pool.submit(_ri_coverage, ce, start, end)
+            f_total        = _pool.submit(_total_ec2_spend, ce, start, end)
+
+        tagged_sp_cov = f_tagged_sp.result()
+        tagged_ri_cov = f_tagged_ri.result()
+        tagged_spend  = f_tagged_spend.result()
+        acct_sp_cov   = f_acct_sp.result()
+        acct_ri_cov   = f_acct_ri.result()
+        total_spend   = f_total.result()
 
         # ── Step 3: infer untagged portion via residual ───────────────────────
         # tagged_coverage_fraction  = tagged_sp_cov / 100
