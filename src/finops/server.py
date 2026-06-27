@@ -6897,6 +6897,13 @@ async def open_terraform_tag_pr(
             raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
         return result.stdout.strip()
 
+    # Reject branch names git would parse as options (argument-injection -> RCE).
+    _ref_ok = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-")
+    for _ref, _kind in ((branch, "branch"), (base_branch, "base_branch")):
+        if (not _ref or _ref[0] == "-" or ".." in _ref or _ref.endswith((".lock", "/"))
+                or len(_ref) > 200 or any(_c not in _ref_ok for _c in _ref)):
+            return {"error": f"Unsafe {_kind} {_ref!r}: refs may use [A-Za-z0-9._/-] and must not start with '-'."}
+
     try:
         _git("checkout", "-b", branch)
         _git("add", "--", *modified_files)
