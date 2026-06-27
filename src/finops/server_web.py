@@ -2860,9 +2860,27 @@ def run_server(host: str = "127.0.0.1", port: int = 8080, open_browser: bool = F
         import webbrowser
         webbrowser.open(f"http://127.0.0.1:{actual_port}")
 
+    # Graceful shutdown on both Ctrl+C (SIGINT) and SIGTERM. A hosted deploy is
+    # stopped/restarted with SIGTERM (docker stop, systemd, k8s), which by default
+    # hard-kills the process and any daily snapshot/digest job mid-run. Catch it
+    # and run the same clean shutdown as Ctrl+C. server.shutdown() blocks until
+    # serve_forever() returns, so it must come from another thread; serve_forever
+    # then returns normally and the finally block does the cleanup.
+    import signal
+
+    def _request_stop(*_a):
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    try:
+        signal.signal(signal.SIGTERM, _request_stop)
+    except ValueError:
+        pass  # not on the main thread (e.g. embedded in tests); Ctrl+C still works
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        pass
+    finally:
         print("\n  Stopping...")
         if _FINANCE_STATE.get("scheduler_started"):
             try:
@@ -2870,5 +2888,8 @@ def run_server(host: str = "127.0.0.1", port: int = 8080, open_browser: bool = F
                 stop_scheduler()
             except Exception as exc:  # noqa: BLE001
                 log.debug("Scheduler shutdown failed: %s", exc)
-        server.shutdown()
+        try:
+            server.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
         print("  Stopped.")
