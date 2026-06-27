@@ -155,9 +155,16 @@ def _get_tagged_env_breakdown(ce, start: str, end: str) -> dict[str, float]:
 
     Returns a dict mapping env bucket (prod/staging/qa/unknown) to spend.
     """
-    buckets: dict[str, float] = {"prod": 0.0, "staging": 0.0, "qa": 0.0, "unknown": 0.0}
+    # Each env tag key gets its OWN fresh buckets. CE's GroupBy=TAG returns a
+    # group for every resource and untagged ones fall into "unknown", so summing
+    # across multiple tag keys counts the same spend once per key and inflates
+    # "unknown" to N x the real total. Instead: return the first tag key that
+    # actually carries env tags; if none do, return a single all-unknown
+    # breakdown (which equals total spend, not N x it).
+    fallback: dict[str, float] = {"prod": 0.0, "staging": 0.0, "qa": 0.0, "unknown": 0.0}
 
     for tag_key in _ENV_TAG_KEYS:
+        buckets: dict[str, float] = {"prod": 0.0, "staging": 0.0, "qa": 0.0, "unknown": 0.0}
         try:
             resp = ce.get_cost_and_usage(
                 TimePeriod={"Start": start, "End": end},
@@ -188,11 +195,15 @@ def _get_tagged_env_breakdown(ce, start: str, end: str) -> dict[str, float]:
                 else:
                     buckets["unknown"] += amount
 
-        # Stop after the first tag key that returned data
+        # This tag key actually carries env tags -> use its breakdown as-is.
         if any(v > 0 for k, v in buckets.items() if k != "unknown"):
-            break
+            return buckets
+        # Otherwise keep the richest all-unknown result (= total spend) and try
+        # the next key.
+        if sum(buckets.values()) > sum(fallback.values()):
+            fallback = buckets
 
-    return buckets
+    return fallback
 
 
 def _get_total_textract_spend(ce, start: str, end: str) -> float:

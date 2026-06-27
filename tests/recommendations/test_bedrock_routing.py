@@ -104,19 +104,19 @@ def test_cost_per_invocation_formula():
 
 # ── integration helpers ───────────────────────────────────────────────────────
 
-def _make_ce_bedrock_response(usage_type: str, amount: float) -> dict:
-    return {
-        "ResultsByTime": [
-            {
-                "Groups": [
-                    {
-                        "Keys": [usage_type],
-                        "Metrics": {"UnblendedCost": {"Amount": str(amount)}},
-                    }
-                ]
-            }
-        ]
-    }
+def _ce_side_effect(usage_type: str, amount: float, service: str = "Amazon Bedrock"):
+    """CE side_effect answering SERVICE discovery and SERVICE+USAGE_TYPE detail,
+    matching the discover-then-filter query the routing code now issues."""
+    def _se(**kw):
+        keys = [g["Key"] for g in kw.get("GroupBy", [])]
+        if keys == ["SERVICE"]:
+            return {"ResultsByTime": [{"Groups": [
+                {"Keys": [service], "Metrics": {"UnblendedCost": {"Amount": str(amount)}}}
+            ]}]}
+        return {"ResultsByTime": [{"Groups": [
+            {"Keys": [service, usage_type], "Metrics": {"UnblendedCost": {"Amount": str(amount)}}}
+        ]}]}
+    return _se
 
 
 def _make_cw_metric_response(value: float) -> dict:
@@ -148,7 +148,7 @@ def test_recommend_flags_short_task_sonnet():
          patch("finops.recommendations.bedrock_routing._make_cw") as mock_cw_fn:
 
         ce = MagicMock()
-        ce.get_cost_and_usage.return_value = _make_ce_bedrock_response(
+        ce.get_cost_and_usage.side_effect = _ce_side_effect(
             "USE1-anthropic.claude-3-5-sonnet-20241022:input-tokens",
             300.0,
         )
@@ -183,7 +183,7 @@ def test_recommend_skips_complex_reasoning_tasks():
          patch("finops.recommendations.bedrock_routing._make_cw") as mock_cw_fn:
 
         ce = MagicMock()
-        ce.get_cost_and_usage.return_value = _make_ce_bedrock_response(
+        ce.get_cost_and_usage.side_effect = _ce_side_effect(
             "USE1-anthropic.claude-3-5-sonnet-20241022:input-tokens",
             500.0,
         )
@@ -215,7 +215,7 @@ def test_recommend_no_opportunity_for_haiku_only():
          patch("finops.recommendations.bedrock_routing._make_cw") as mock_cw_fn:
 
         ce = MagicMock()
-        ce.get_cost_and_usage.return_value = _make_ce_bedrock_response(
+        ce.get_cost_and_usage.side_effect = _ce_side_effect(
             "USE1-anthropic.claude-haiku-3-20240307:input-tokens",
             50.0,
         )
@@ -259,7 +259,7 @@ def test_routing_savings_are_positive_and_bounded():
          patch("finops.recommendations.bedrock_routing._make_cw") as mock_cw_fn:
 
         ce = MagicMock()
-        ce.get_cost_and_usage.return_value = _make_ce_bedrock_response(
+        ce.get_cost_and_usage.side_effect = _ce_side_effect(
             "USE1-anthropic.claude-3-5-sonnet-20241022:input-tokens",
             200.0,
         )

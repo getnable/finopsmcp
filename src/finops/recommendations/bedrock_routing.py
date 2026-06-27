@@ -128,6 +128,25 @@ def _normalize_model_id(raw: str) -> str:
     return raw
 
 
+def _discover_bedrock_services(ce, start: str, end: str) -> list[str]:
+    """Every CE service name AWS bills Bedrock under: plain "Amazon Bedrock" plus
+    per-model SKUs like "Claude Sonnet 4.5 (Amazon Bedrock Edition)". CE's SERVICE
+    filter is exact-match, so discover the names before filtering (filtering on
+    just "Amazon Bedrock" misses the per-model SKU spend and reports $0)."""
+    disc = ce.get_cost_and_usage(
+        TimePeriod={"Start": start, "End": end},
+        Granularity="MONTHLY",
+        Metrics=["UnblendedCost"],
+        GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+    )
+    return sorted({
+        g["Keys"][0]
+        for r in disc.get("ResultsByTime", [])
+        for g in r.get("Groups", [])
+        if "bedrock" in g["Keys"][0].lower()
+    })
+
+
 def _get_bedrock_ce_costs(ce, start: str, end: str) -> dict[str, dict[str, float]]:
     """
     Query Cost Explorer for Bedrock spend grouped by USAGE_TYPE.
@@ -136,12 +155,19 @@ def _get_bedrock_ce_costs(ce, start: str, end: str) -> dict[str, dict[str, float
     """
     model_costs: dict[str, dict[str, float]] = {}
 
+    services = _discover_bedrock_services(ce, start, end)
+    if not services:
+        return model_costs
+
     kwargs: dict[str, Any] = dict(
         TimePeriod={"Start": start, "End": end},
         Granularity="MONTHLY",
         Metrics=["UnblendedCost"],
-        Filter={"Dimensions": {"Key": "SERVICE", "Values": ["Amazon Bedrock"]}},
-        GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
+        Filter={"Dimensions": {"Key": "SERVICE", "Values": services}},
+        GroupBy=[
+            {"Type": "DIMENSION", "Key": "SERVICE"},
+            {"Type": "DIMENSION", "Key": "USAGE_TYPE"},
+        ],
     )
     while True:
         try:
@@ -152,12 +178,16 @@ def _get_bedrock_ce_costs(ce, start: str, end: str) -> dict[str, dict[str, float
 
         for period in resp.get("ResultsByTime", []):
             for group in period.get("Groups", []):
-                usage_type = group["Keys"][0]
+                service, usage_type = group["Keys"][0], group["Keys"][1]
                 amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
                 if amount == 0.0:
                     continue
 
                 raw_model = _parse_model_from_usage_type(usage_type)
+                # Per-model SKU services carry the model in the SERVICE name; fall
+                # back to it when the usage type has no real (dotted) model id.
+                if "." not in raw_model:
+                    raw_model = service.replace(" (Amazon Bedrock Edition)", "").strip() or service
                 model_id = _normalize_model_id(raw_model)
 
                 if model_id not in model_costs:
