@@ -58,6 +58,32 @@ def _git(tf_dir: str, *args: str) -> str:
     return result.stdout.strip()
 
 
+_GIT_REF_ALLOWED = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-"
+)
+
+
+def _validate_git_ref(name: str, kind: str) -> None:
+    """Reject branch/ref names that could be parsed as git options or inject.
+
+    A value beginning with '-' is read by git as a flag (e.g.
+    `--upload-pack=<cmd>`), which is an argument-injection -> RCE vector when
+    the ref is passed as a positional argv token.
+    """
+    if (
+        not name
+        or name[0] == "-"
+        or ".." in name
+        or name.endswith((".lock", "/"))
+        or len(name) > 200
+        or any(c not in _GIT_REF_ALLOWED for c in name)
+    ):
+        raise ValueError(
+            f"Unsafe {kind} {name!r}: git refs may use [A-Za-z0-9._/-], "
+            f"must not start with '-' or contain '..'."
+        )
+
+
 # ── PR body ───────────────────────────────────────────────────────────────────
 
 def _pr_body(recs: list[dict]) -> str:
@@ -321,6 +347,8 @@ def open_rightsizing_pr(
         }
 
     # 5. Git: create branch, stage, commit, push
+    _validate_git_ref(branch, "branch")
+    _validate_git_ref(base_branch, "base_branch")
     try:
         _git(tf_dir, "checkout", "-b", branch)
         _git(tf_dir, "add", "--", *modified_files)

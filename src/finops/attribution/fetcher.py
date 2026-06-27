@@ -167,11 +167,23 @@ def fetch_gcp_tagged_costs(
     client = bigquery.Client()
     results = []
 
+    # Attribution label keys come from local tag-rule config and get
+    # interpolated into BigQuery SQL. Allowlist them so a poisoned/shared
+    # tag_rules.yaml can't inject (defense-in-depth: this path isn't wired to
+    # an MCP tool yet, but it must be injection-safe the moment it is).
+    _allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_:@./-")
+    for _k in label_keys:
+        if not _k or len(_k) > 128 or any(_c not in _allowed for _c in _k):
+            raise ValueError(f"Unsafe attribution label key {_k!r}: allowed chars are [A-Za-z0-9_:@./-]")
+
+    def _label_alias(k: str) -> str:
+        return "label_" + "".join(c if (c.isalnum() or c == "_") else "_" for c in k)
+
     label_selects = ", ".join(
-        f"(SELECT value FROM UNNEST(labels) WHERE key = '{k}' LIMIT 1) AS label_{k.replace('-','_')}"
+        f"(SELECT value FROM UNNEST(labels) WHERE key = '{k}' LIMIT 1) AS {_label_alias(k)}"
         for k in label_keys
     )
-    label_cols = [f"label_{k.replace('-','_')}" for k in label_keys]
+    label_cols = [_label_alias(k) for k in label_keys]
 
     for billing_account_id in billing_account_ids:
         query = f"""
