@@ -75,15 +75,49 @@ def _display_name(model_id: str) -> str:
     return model_id.replace("-", " ").replace(".", " ").title()
 
 
+def _discover_bedrock_services(ce, start: str, end: str) -> list[str]:
+    """Every CE service name AWS bills Bedrock under.
+
+    Bedrock spend lands under plain "Amazon Bedrock" AND per-model SKUs like
+    "Claude Sonnet 4.5 (Amazon Bedrock Edition)". Cost Explorer's SERVICE filter
+    is exact-match (no contains), so we discover the names with a SERVICE-grouped
+    query first, then filter to them. Filtering on just ["Amazon Bedrock"] misses
+    all the per-model SKU spend and reports $0.
+    """
+    disc = ce.get_cost_and_usage(
+        TimePeriod={"Start": start, "End": end},
+        Granularity="MONTHLY",
+        Metrics=["UnblendedCost"],
+        GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+    )
+    return sorted({
+        g["Keys"][0]
+        for r in disc.get("ResultsByTime", [])
+        for g in r.get("Groups", [])
+        if "bedrock" in g["Keys"][0].lower()
+    })
+
+
 def _ce_query(ce, start: str, end: str) -> list[dict]:
-    """Query CE for Bedrock spend grouped by USAGE_TYPE."""
+    """Query CE for Bedrock spend grouped by SERVICE + USAGE_TYPE.
+
+    Grouped by SERVICE as well as USAGE_TYPE so per-model SKU spend can be
+    attributed to the model named in the service (the usage type is generic for
+    those SKUs).
+    """
+    services = _discover_bedrock_services(ce, start, end)
+    if not services:
+        return []
     results = []
     kwargs: dict[str, Any] = dict(
         TimePeriod={"Start": start, "End": end},
         Granularity="MONTHLY",
         Metrics=["UnblendedCost"],
-        Filter={"Dimensions": {"Key": "SERVICE", "Values": ["Amazon Bedrock"]}},
-        GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
+        Filter={"Dimensions": {"Key": "SERVICE", "Values": services}},
+        GroupBy=[
+            {"Type": "DIMENSION", "Key": "SERVICE"},
+            {"Type": "DIMENSION", "Key": "USAGE_TYPE"},
+        ],
     )
     while True:
         resp = ce.get_cost_and_usage(**kwargs)
@@ -110,13 +144,14 @@ class BedrockAnalyzer:
         current_rows = _ce_query(ce, start.isoformat(), end.isoformat())
         prior_rows = _ce_query(ce, prior_start.isoformat(), start.isoformat())
 
-        # Aggregate by usage type across all time periods
-        current_by_usage: dict[str, float] = {}
+        # Aggregate by (service, usage type) across all time periods. SERVICE is
+        # included so spend on per-model SKUs can be attributed to the model.
+        current_by_su: dict[tuple[str, str], float] = {}
         for period in current_rows:
             for group in period.get("Groups", []):
-                usage_type = group["Keys"][0]
+                service, usage_type = group["Keys"][0], group["Keys"][1]
                 amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
-                current_by_usage[usage_type] = current_by_usage.get(usage_type, 0.0) + amount
+                current_by_su[(service, usage_type)] = current_by_su.get((service, usage_type), 0.0) + amount
 
         prior_total = sum(
             float(group["Metrics"]["UnblendedCost"]["Amount"])
@@ -124,7 +159,7 @@ class BedrockAnalyzer:
             for group in period.get("Groups", [])
         )
 
-        total = sum(current_by_usage.values())
+        total = sum(current_by_su.values())
 
         if total == 0.0:
             return "No Amazon Bedrock spend found in the selected period."
@@ -135,10 +170,9 @@ class BedrockAnalyzer:
         model_output: dict[str, float] = {}
         model_other: dict[str, float] = {}
 
-        for usage_type, amount in current_by_usage.items():
+        for (service, usage_type), amount in current_by_su.items():
             if amount == 0.0:
                 continue
-            lower = usage_type.lower()
             # Strip region prefix (e.g. "USE1-", "USW2-")
             parts = usage_type.split("-", 1)
             rest = parts[1] if len(parts) > 1 else usage_type
@@ -150,8 +184,15 @@ class BedrockAnalyzer:
                 model_raw = rest
                 token_type = ""
 
-            # Normalize model ID
             model_id = model_raw.lower()
+            # Per-model SKU services carry the model in the SERVICE name, not the
+            # usage type, so fall back to the service when the usage type has no
+            # real (vendor-dotted) model id.
+            if "." not in model_id:
+                model_id = (
+                    service.replace(" (Amazon Bedrock Edition)", "").strip().lower()
+                    or service.lower()
+                )
             token_lower = token_type.lower()
 
             if "input" in token_lower:
