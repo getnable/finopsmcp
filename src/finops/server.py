@@ -782,7 +782,7 @@ async def get_cost_summary(
     Examples:
         - "How much did we spend last month?"
         - "Give me an AWS cost summary for January"
-        - "What did the anway account spend this month?"
+        - "What did the production account spend this month?"
     """
     from .demo_data import is_demo, get_demo_response
     if is_demo():
@@ -890,7 +890,7 @@ async def get_costs_by_service(
     Examples:
         - "How much did compute cost us?"
         - "Show me all Datadog product costs"
-        - "What did the easystreet account spend on EC2?"
+        - "What did the staging account spend on EC2?"
     """
     sd, ed = _default_dates()
     if start_date:
@@ -991,7 +991,7 @@ async def get_top_cost_drivers(
     Examples:
         - "What are our biggest cost drivers this month?"
         - "Top 5 most expensive things in AWS"
-        - "Top cost drivers in the easystreet account"
+        - "Top cost drivers in the staging account"
     """
     result = await get_costs_by_service(
         service_filter=None,
@@ -1216,7 +1216,7 @@ async def get_cost_summary_all_accounts(
     Examples:
         - "Show costs across all my AWS accounts"
         - "What is each client account spending this month?"
-        - "Compare spend across anway and easystreet accounts"
+        - "Compare spend across production and staging accounts"
     """
     from datetime import date, timedelta
     from .accounts import list_accounts as _list_accounts, get_boto3_session
@@ -1570,7 +1570,7 @@ async def get_anomalies(
         - "Are there any cost anomalies I should know about?"
         - "Show me high-severity cost spikes"
         - "What spiked in AWS this week?"
-        - "Any anomalies in the anway account?"
+        - "Any anomalies in the production account?"
 
     Note: Anomalies require at least 7 days of snapshot history.
           Run 'finops snapshot' or wait for the daily job to accumulate data.
