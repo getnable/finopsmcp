@@ -341,13 +341,14 @@ html,body{
   animation:lbspin .7s linear infinite;
 }
 @keyframes lbspin{to{transform:rotate(360deg)}}
-.getstarted{background:linear-gradient(180deg,rgba(77,184,212,.05),transparent 60%),var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:20px 24px;margin-bottom:16px}
-.gs-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
-.gs-title{font-size:15px;font-weight:600;color:var(--fg)}
-.gs-sub{font-size:12.5px;color:var(--fg3);margin-top:3px}
-.gs-x{background:none;border:none;color:var(--fg3);font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
-.gs-x:hover{color:var(--fg)}
-.gs-steps{display:flex;flex-direction:column}
+.getstarted{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:15px 20px;margin-bottom:26px}
+.gs-head{display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;cursor:pointer;color:var(--fg);font-family:inherit;padding:0;text-align:left}
+.gs-title{font-size:14px;font-weight:600;color:var(--fg)}
+.gs-progress{font-size:12px;font-weight:500;color:var(--accent)}
+.gs-chev{margin-left:auto;color:var(--fg3);font-size:11px;transition:transform .2s}
+.getstarted:not(.gs-collapsed) .gs-chev{transform:rotate(180deg)}
+.gs-collapsed .gs-steps{display:none}
+.gs-steps{display:flex;flex-direction:column;margin-top:14px}
 .gs-step{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line)}
 .gs-step:first-child{border-top:none}
 .gs-check{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--line2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--bg)}
@@ -621,14 +622,12 @@ footer a:hover{color:var(--accent)}
     <span>Loading your cost data. The first load pulls fresh numbers from your cloud provider and can take up to ~15 seconds.</span>
   </div>
 
-  <div id="getstarted" class="getstarted" style="display:none">
-    <div class="gs-head">
-      <div>
-        <div class="gs-title">Get started with nable</div>
-        <div class="gs-sub">A few steps to unlock cost-per-customer, runway, and alerts.</div>
-      </div>
-      <button class="gs-x" id="gs-x" aria-label="Dismiss">×</button>
-    </div>
+  <div id="getstarted" class="getstarted gs-collapsed" style="display:none">
+    <button class="gs-head" id="gs-toggle" type="button">
+      <span class="gs-title">Finish setting up nable</span>
+      <span class="gs-progress" id="gs-progress"></span>
+      <span class="gs-chev" aria-hidden="true">&#9662;</span>
+    </button>
     <div class="gs-steps" id="gs-steps"></div>
   </div>
 
@@ -637,7 +636,7 @@ footer a:hover{color:var(--accent)}
   <style>
   .logo{display:flex;align-items:center;gap:9px}
   .logo svg{flex-shrink:0;display:block}
-  .opp-hero{margin:0 0 22px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,rgba(77,184,212,.06),transparent 62%),var(--bg-1,#0f0f12);padding:22px 24px}
+  .opp-hero{margin:0 0 30px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,rgba(77,184,212,.06),transparent 62%),var(--bg-1,#0f0f12);padding:24px 26px}
   .opp-hero-top{display:flex;flex-wrap:wrap;align-items:flex-end;gap:26px}
   .opp-hero-found{flex:1;min-width:240px}
   .opp-hero-label{font-size:11.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-3);font-weight:500}
@@ -982,8 +981,9 @@ function render(d){
       if(!s.done){row.querySelector('.gs-act').addEventListener('click',function(){if(typeof switchView==='function')switchView('agent');if(s.prompt&&typeof window.askAgent==='function')window.askAgent(s.prompt);});}
       wrap.appendChild(row);
     });
-    const x=document.getElementById('gs-x');
-    if(x)x.onclick=function(){localStorage.setItem('nable-gs-dismissed','1');card.style.display='none';};
+    var done=steps.filter(function(s){return s.done;}).length;
+    var prog=document.getElementById('gs-progress'); if(prog) prog.textContent=done+' of '+steps.length+' done';
+    var tog=document.getElementById('gs-toggle'); if(tog) tog.onclick=function(){card.classList.toggle('gs-collapsed');};
     card.style.display='block'; return true;
   })();
 
