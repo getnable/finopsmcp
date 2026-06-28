@@ -2,6 +2,23 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.98
+
+The clean dashboard redesign goes live.
+
+### Dashboard
+- **The redesign is now the dashboard, not a mockup.** A left sidebar carries the
+  workspace: Dashboards (Cost overview, New view), an Agents group (cost investigation,
+  rightsizing, idle cleanup, anomalies, commitments), chat History, and a single-tenant
+  security card. The main view opens on a greeting that leads with what nable found
+  ("nable found $X/mo to save"), icon-tile metric cards with trend pills, a spend-trend
+  chart beside an Ask panel, and a savings-opportunities table.
+- **A favicon.** The browser tab showed a generic globe; it now carries the nable mark.
+- The agents, the Ask-panel suggestion chips, and New view each open a focused Ask
+  session. Review on an opportunity opens it in the agent to draft the change.
+- All of it rides the real /api/data wiring: charts, scorecard, opportunities, pinned
+  views, and in-session history are unchanged underneath the new design.
+
 ## 0.8.97
 
 The dashboard, rebuilt around the agent.

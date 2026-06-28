@@ -4,344 +4,175 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>nable | Cost Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234db8d4'/%3E%3Cpath d='M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z' fill='%230d0f10'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/fonts/fonts.css">
 <script src="/static/chart.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
-/* ── Design tokens ─────────────────────────────────────────────────────────── */
-/* True black, per DESIGN.md (2026-06-20). Dark only; there is no light mode.
-   Surfaces are near-black and depth comes from spacing and a whisper of
-   elevation, not hard borders. */
+/* ── Design tokens (true black, DESIGN.md) ─────────────────────────────────── */
 :root{
-  --bg:        #000000;  /* true black */
-  --bg1:       #0a0a0c;  /* default surface, near-black */
-  --bg2:       #121214;  /* elevated surface */
-  --bg3:       #1a1a1d;  /* highest / hover surface */
-  --line:      #232327;  /* hairline separator */
-  --line2:     #2d2d32;  /* active / hover border */
-  --fg:        #f0f2f3;  /* primary, cool white */
-  --fg2:       #94a3ab;  /* secondary / body */
-  --fg3:       #56656d;  /* tertiary / labels */
-  --fg4:       #2d3a40;  /* disabled */
-  --accent:    #4db8d4;  /* ice blue */
-  --accent2:   #38a8c4;  /* accent hover */
-  --accent-dim:#2c7d91;  /* section-label decorator */
-  --accent-w:  rgba(77,184,212,.10);  /* accent wash */
-  --accent-b:  rgba(77,184,212,.26);  /* accent border */
-  --success:   #3cba7a;
-  --success-w: rgba(60,186,122,.10);
-  --success-b: rgba(60,186,122,.26);
-  --warn:      #e6a840;
-  --warn-w:    rgba(230,168,64,.10);
-  --warn-b:    rgba(230,168,64,.26);
-  --alert:     #e05c4b;
-  --alert-w:   rgba(224,92,75,.10);
-  --alert-b:   rgba(224,92,75,.26);
-  /* Elevation is a faint top sheen plus a soft, low shadow against the black.
-     Used sparingly: panels float, they are not boxed. */
-  --sheen:     inset 0 1px 0 rgba(255,255,255,.02);
-  --shadow:    0 1px 2px rgba(0,0,0,.6);
-  --shadow-sm: 0 1px 0 rgba(0,0,0,.5);
-  --lift:      0 1px 0 rgba(255,255,255,.015), 0 10px 34px rgba(0,0,0,.55);
-  /* Radii, per DESIGN.md */
-  --r-xs:      2px;
-  --r-sm:      4px;
-  --r-md:      6px;
-  --r-lg:      8px;
-  --r-xl:      12px;
-  --r-2xl:     16px;
-  --r:         8px;  /* default card radius */
-  --font:      'Bricolage Grotesque',system-ui,sans-serif;
-  --mono:      'Geist Mono','JetBrains Mono',ui-monospace,monospace;
+  --bg:#000000; --bg1:#0a0a0c; --bg2:#121214; --bg3:#1a1a1d;
+  --line:#232327; --line2:#2d2d32;
+  --fg:#f0f2f3; --fg2:#94a3ab; --fg3:#56656d; --fg4:#2d3a40;
+  --accent:#4db8d4; --accent2:#38a8c4; --accent-dim:#2c7d91;
+  --accent-w:rgba(77,184,212,.10); --accent-b:rgba(77,184,212,.26);
+  --accent-soft:rgba(77,184,212,.12);
+  --success:#3cba7a; --success-w:rgba(60,186,122,.10); --success-b:rgba(60,186,122,.26); --success-soft:rgba(60,186,122,.12);
+  --warn:#e6a840; --warn-w:rgba(230,168,64,.10); --warn-b:rgba(230,168,64,.26); --warn-soft:rgba(230,168,64,.12);
+  --alert:#e05c4b; --alert-w:rgba(224,92,75,.10); --alert-b:rgba(224,92,75,.26);
+  --lift:0 1px 0 rgba(255,255,255,.015),0 10px 34px rgba(0,0,0,.55);
+  --r-xs:2px; --r-sm:4px; --r-md:6px; --r-lg:8px; --r-xl:12px; --r:12px;
+  --font:'Bricolage Grotesque',system-ui,sans-serif;
+  --mono:'Geist Mono','JetBrains Mono',ui-monospace,monospace;
+  --sidebar-w:236px;
 }
 
 /* ── Base ──────────────────────────────────────────────────────────────────── */
 html,body{
-  background:var(--bg);color:var(--fg);
-  font-family:var(--font);font-size:15px;line-height:1.5;
-  min-height:100vh;
+  background:var(--bg);color:var(--fg);font-family:var(--font);
+  font-size:15px;line-height:1.5;min-height:100vh;letter-spacing:-.01em;
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
   font-feature-settings:'ss01' on,'cv01' on;
 }
+body{padding-left:var(--sidebar-w)}
 ::selection{background:var(--accent-w);color:var(--fg)}
 
-/* ── Top nav ───────────────────────────────────────────────────────────────── */
-.topbar{
-  background:rgba(0,0,0,.72);border-bottom:1px solid var(--line);
-  padding:0 28px;height:54px;
-  display:flex;align-items:center;justify-content:space-between;
-  position:sticky;top:0;z-index:40;
-  backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%);
+/* ── Sidebar ───────────────────────────────────────────────────────────────── */
+.sidebar{
+  position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);z-index:60;
+  background:var(--bg1);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:20px 14px 16px;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--line2) transparent;
 }
-.topbar-left{display:flex;align-items:center;gap:18px}
-.logo{
-  font-size:17px;font-weight:700;letter-spacing:-.03em;
-  color:var(--fg);text-decoration:none;display:flex;align-items:center;
-}
-.logo .n{color:var(--accent)}
-.nav-sep{width:1px;height:16px;background:var(--line2)}
-.nav-title{font-size:12px;color:var(--fg2);font-weight:500;letter-spacing:.005em}
-.nav-title .acct-id{font-family:var(--mono);font-size:11px;color:var(--fg3);letter-spacing:0}
-.topbar-right{display:flex;align-items:center;gap:12px}
+.sidebar::-webkit-scrollbar{width:8px}
+.sidebar::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px;border:2px solid var(--bg1)}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px;margin-bottom:22px;text-decoration:none}
+.brand-mark{width:30px;height:30px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.brand-name{font-size:18px;font-weight:600;letter-spacing:-.02em;color:var(--fg)}
+.nav-cap{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--fg3);padding:0 10px;margin:0 0 8px}
+.nav{display:flex;flex-direction:column;gap:2px;margin-bottom:20px}
+.nav-item{display:flex;align-items:center;gap:11px;width:100%;padding:9px 11px;border-radius:9px;color:var(--fg2);font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;border:none;background:transparent;text-align:left;letter-spacing:-.01em;transition:background .15s,color .15s}
+.nav-item>svg{width:18px;height:18px;flex-shrink:0}
+.nav-item:hover{background:var(--bg2);color:var(--fg)}
+.nav-item.active{background:var(--bg3);color:var(--fg)}
+.nav-item.active>svg{color:var(--accent)}
+.nav-new{color:var(--fg3)}
+.nav-new>svg{color:var(--fg3)}
+.nav-new:hover,.nav-new:hover>svg{color:var(--accent)}
+.agent .ic{width:26px;height:26px;border-radius:7px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.agent .ic svg{width:14px;height:14px}
+.side-hist{font-size:13px;font-weight:450;color:var(--fg2)}
+.side-empty{font-size:12px;color:var(--fg3);padding:5px 11px;line-height:1.45}
+.side-foot{margin-top:auto;border:1px solid var(--line);border-radius:var(--r);padding:14px;background:var(--bg2)}
+.side-foot .t{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;color:var(--fg)}
+.side-foot .d{font-size:12px;color:var(--fg3);margin:6px 0 11px;line-height:1.5}
+.side-foot .cta{display:block;text-align:center;background:var(--accent);color:#04222b;font-weight:600;font-size:13px;padding:8px;border-radius:8px;text-decoration:none}
+.side-foot .cta:hover{background:var(--accent2)}
 
-/* Provider badge */
-.prov-badge{
-  display:inline-flex;align-items:center;gap:7px;
-  font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;
-  padding:4px 9px 4px 8px;border-radius:var(--r-sm);cursor:default;line-height:1;
-}
-.prov-badge-green{background:var(--success-w);color:var(--success);border:1px solid var(--success-b)}
-.prov-badge-red{background:var(--alert-w);color:var(--alert);border:1px solid var(--alert-b)}
-.prov-dot{width:5px;height:5px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px color-mix(in srgb,currentColor 18%,transparent)}
+/* ── Main ──────────────────────────────────────────────────────────────────── */
+.main{padding:26px 32px 44px;max-width:1340px}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:24px;flex-wrap:wrap}
+.hello{font-size:23px;font-weight:600;letter-spacing:-.025em;line-height:1.2}
+.hello .accent{color:var(--accent)}
+.sub{font-size:13px;color:var(--fg3);margin-top:5px;font-family:var(--mono);letter-spacing:0}
+.top-actions{display:flex;gap:10px;align-items:center}
+.pill{display:flex;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:9px;padding:9px 13px;font-size:13px;color:var(--fg2);background:var(--bg1)}
+.btn-ask{display:flex;align-items:center;gap:8px;background:var(--accent);color:#04222b;font-weight:600;font-size:13px;border:none;border-radius:9px;padding:10px 15px;cursor:pointer;font-family:inherit;transition:background .15s}
+.btn-ask:hover{background:var(--accent2)}
+.btn-ask svg{width:15px;height:15px}
 
-/* Date */
-.nav-date{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--fg3);letter-spacing:.02em}
-
-/* ── Layout ───────────────────────────────────────────────────────────────── */
-.page{max-width:1320px;margin:0 auto;padding:30px 28px 72px}
-
-/* Section label */
-.section-label{
-  font-size:11px;font-weight:600;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--accent-dim);
-  display:inline-flex;align-items:center;gap:8px;
-}
-.section-label::before{content:"";width:5px;height:5px;border-radius:1px;background:var(--accent-dim);transform:rotate(45deg)}
-
-/* Top bar: label + controls. No bottom rule, the spacing carries it. */
-.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
-
-/* Range controls */
-.range-group{display:inline-flex;align-items:center;background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-md);padding:2px;gap:2px}
-.range-btn{
-  padding:4px 12px;border:1px solid transparent;border-radius:var(--r-sm);
-  background:transparent;color:var(--fg3);
-  font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.01em;
-  cursor:pointer;transition:background .15s,color .15s,border-color .15s;line-height:1.4;
-}
-.range-btn.active{background:var(--bg3);color:var(--fg);border-color:var(--line2)}
-.range-btn:hover:not(.active){color:var(--fg2)}
-
-/* Provider filter */
-.pf-group{display:inline-flex;align-items:center;background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-md);padding:2px;gap:2px;margin-left:8px}
-.pf-btn{
-  padding:4px 12px;border:1px solid transparent;border-radius:var(--r-sm);
-  background:transparent;color:var(--fg3);
-  font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.02em;
-  cursor:pointer;transition:background .15s,color .15s,border-color .15s;line-height:1.4;
-}
-.pf-btn:hover:not(.active){color:var(--fg2)}
-.pf-btn.active{background:var(--accent-w);color:var(--accent);border-color:var(--accent-b)}
-.controls-row{display:flex;align-items:center;gap:0}
-
-/* ── Stat cards ────────────────────────────────────────────────────────────── */
-/* Flowing rhythm: the first card is the dominant hero metric and spans two
-   columns; the rest are satellites. They float on the black with a hairline
-   only on hover, not a permanent box. */
-.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:8px}
+/* ── Metric cards ──────────────────────────────────────────────────────────── */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}
 @media(max-width:960px){.cards{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:520px){.cards{grid-template-columns:1fr}}
-
-.card{
-  position:relative;background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);
-  padding:18px 20px;overflow:hidden;
-  transition:background .2s,border-color .2s;
-}
-.card::before{display:none}
+.card{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);padding:17px 18px;transition:border-color .2s}
 .card:hover{border-color:var(--line2)}
-.card-icon{width:36px;height:36px;border-radius:9px;background:rgba(77,184,212,.1);color:var(--accent);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
-.card-icon svg{width:18px;height:18px}
-.card-label{
-  font-size:10.5px;font-weight:600;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--fg3);margin-bottom:8px;
-}
-.card-value{
-  font-size:38px;font-weight:500;line-height:1;
-  letter-spacing:-.035em;color:var(--fg);font-family:var(--mono);
-  font-variant-numeric:tabular-nums;
-}
-.card-sub{
-  font-size:11.5px;color:var(--fg3);margin-top:12px;line-height:1.4;
-  display:inline-flex;align-items:center;gap:6px;
-}
-.card-sub.up,.card-sub.down{
-  font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.01em;
-  padding:2px 6px;border-radius:var(--r-xs);width:fit-content;
-}
-.card-sub.up{color:var(--alert);background:var(--alert-w);border:1px solid var(--alert-b)}
-.card-sub.down{color:var(--success);background:var(--success-w);border:1px solid var(--success-b)}
-/* Tint the rails to the metric each card carries: spend white, savings green, score blue. */
-.cards .card:nth-child(3)::before{background:var(--success)}
-.cards .card:nth-child(4)::before{background:var(--accent)}
-
-/* Score card (percentage only, no letter grades) */
-.score-pct{
-  font-size:46px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums;
-  line-height:1;letter-spacing:-.04em;margin-bottom:8px;
-}
-.score-label{font-size:10.5px;font-weight:600;margin-top:2px;text-transform:uppercase;letter-spacing:.08em}
-.score-gaps{font-size:11px;color:var(--fg3);margin-top:5px;line-height:1.45}
-
-/* Ledger mini */
-.ledger-mini{display:none;flex-direction:column;gap:4px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
-.lm-row{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--fg3)}
-.lm-row span:first-of-type,.lm-row #lm-acted,.lm-row #lm-verified{font-family:var(--mono);color:var(--fg2)}
-.lm-dot{width:5px;height:5px;border-radius:1px;transform:rotate(45deg);flex-shrink:0}
-
-/* Hairline divider used to separate flowing sections instead of boxing them. */
-.flow-rule{height:1px;background:var(--line);border:0;margin:26px 0}
+.card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.card-ic{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center}
+.card-ic svg{width:17px;height:17px}
+.card-ic.green{background:var(--success-soft);color:var(--success)}
+.trend{font-size:11.5px;font-weight:600;font-family:var(--mono);padding:3px 7px;border-radius:6px;display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.trend.up{color:var(--success);background:var(--success-soft)}
+.trend.warn{color:var(--warn);background:var(--warn-soft)}
+.trend.flat{color:var(--fg3);background:var(--bg3)}
+.card-label{font-size:12.5px;color:var(--fg2);margin-bottom:6px}
+.card-val{font-size:30px;font-weight:600;font-family:var(--mono);letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.card-val .u{font-size:.5em;color:var(--fg3);font-weight:500}
+.card-sub{font-size:11.5px;color:var(--fg3);margin-top:7px;line-height:1.4}
 
 /* ── Panels ────────────────────────────────────────────────────────────────── */
-/* Panels float on the black. No hard border by default: a faint surface lift and
-   generous padding define them. A hairline appears only on the header rule. */
-.panel{
-  background:var(--bg1);border:1px solid transparent;border-radius:var(--r-xl);
-  padding:20px 24px 24px;box-shadow:var(--lift);
-}
-.panel-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid var(--line)}
-.panel-title{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--fg2)}
-.panel-title span{color:var(--fg);font-family:var(--mono);font-weight:500}
-.panel-chip{
-  font-family:var(--mono);font-size:9.5px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;
-  padding:3px 7px;border-radius:var(--r-xs);line-height:1;
-  background:var(--bg2);color:var(--fg3);border:1px solid var(--line);
-}
-.panel-chip-accent{background:var(--accent-w);color:var(--accent);border-color:var(--accent-b)}
+.row{display:grid;grid-template-columns:1.7fr 1fr;gap:16px;margin-bottom:20px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+@media(max-width:860px){.row,.row2{grid-template-columns:1fr}}
+.panel{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px}
+.panel-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
+.panel-t{font-size:15px;font-weight:600;color:var(--fg)}
+.panel-s{font-size:12px;color:var(--fg3);margin-top:3px}
+.panel-chip{font-family:var(--mono);font-size:9.5px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;padding:3px 7px;border-radius:var(--r-xs);line-height:1;background:var(--bg2);color:var(--fg3);border:1px solid var(--line);white-space:nowrap}
+.range-group{display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:2px}
+.range-btn{font-family:var(--mono);font-size:11px;color:var(--fg3);padding:4px 10px;border-radius:6px;cursor:pointer;border:none;background:transparent;transition:background .15s,color .15s}
+.range-btn:hover:not(.active){color:var(--fg2)}
+.range-btn.active{background:var(--bg3);color:var(--fg)}
+.pf-group{display:inline-flex;align-items:center;gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:2px;margin-left:8px}
+.pf-btn{font-family:var(--mono);font-size:11px;color:var(--fg3);padding:4px 10px;border-radius:6px;cursor:pointer;border:none;background:transparent}
+.pf-btn:hover:not(.active){color:var(--fg2)}
+.pf-btn.active{background:var(--accent-w);color:var(--accent)}
+.chart-wrap{position:relative;height:240px}
 
-/* ── Charts ───────────────────────────────────────────────────────────────── */
-/* The trend chart leads (wider) and the breakdown rides alongside, so the row
-   breathes instead of reading as two equal boxes. */
-.charts-row{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:16px}
-@media(max-width:800px){.charts-row{grid-template-columns:1fr}}
-.chart-wrap{position:relative;height:280px}
+/* ── Ask panel (agentic preview) ───────────────────────────────────────────── */
+.ask{display:flex;flex-direction:column}
+.ask-hd{display:flex;align-items:center;gap:9px}
+.ask-dot{width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px var(--success-soft);flex-shrink:0}
+.ask-sugs{display:flex;flex-direction:column;gap:8px;margin:16px 0 14px}
+.sug{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px;color:var(--fg2);cursor:pointer;transition:border-color .15s,color .15s,background .15s}
+.sug:hover{border-color:var(--line2);color:var(--fg);background:var(--bg2)}
+.sug .q{color:var(--accent);font-family:var(--mono);font-size:12px;width:10px;flex-shrink:0}
+.ask-input{margin-top:auto;display:flex;align-items:center;gap:9px;border:1px solid var(--line2);border-radius:10px;padding:11px 13px;color:var(--fg3);font-size:13px;font-family:var(--mono);cursor:text}
+.ask-input:hover{border-color:var(--accent-b)}
+.ask-input .send{margin-left:auto;width:28px;height:28px;border-radius:7px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ask-input .send svg{width:14px;height:14px;color:#04222b}
 
-/* ── Bottom row ───────────────────────────────────────────────────────────── */
-.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
-.bottom-row .panel{min-height:320px}
-@media(max-width:800px){.bottom-row{grid-template-columns:1fr}}
+/* ── Opportunities table ───────────────────────────────────────────────────── */
+.opp-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
+.opp-found{font-size:12px;color:var(--accent);font-weight:600;background:var(--accent-soft);padding:4px 9px;border-radius:6px;white-space:nowrap;font-family:var(--mono)}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);padding:0 0 12px;border-bottom:1px solid var(--line)}
+th.r,td.r{text-align:right}
+td{padding:13px 0;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.opp-name{font-weight:500;color:var(--fg)}
+.opp-svc{font-family:var(--mono);font-size:11.5px;color:var(--fg3)}
+.tag{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:5px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.03em}
+.tag.low{color:var(--success);background:var(--success-soft)}
+.tag.med{color:var(--warn);background:var(--warn-soft)}
+.tag.high{color:var(--alert);background:var(--alert-w)}
+.amt{font-family:var(--mono);font-weight:600;color:var(--accent)}
+.review{font-size:12.5px;font-weight:600;color:var(--fg);border:1px solid var(--line2);background:var(--bg2);border-radius:7px;padding:6px 12px;cursor:pointer;font-family:inherit;transition:border-color .15s,color .15s}
+.review:hover{border-color:var(--accent);color:var(--accent)}
 
-/* ── Savings pipeline ledger ─────────────────────────────────────────────── */
-.ledger-row{
-  background:var(--bg1);border:1px solid transparent;border-radius:var(--r-xl);
-  padding:22px 28px;display:none;
-  grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;
-  box-shadow:var(--lift);margin-bottom:8px;
-}
-.ls-stage{padding:0 22px}
-.ls-stage:first-child{padding-left:0}
-.ls-stage:last-child{padding-right:0}
-.ls-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);margin-bottom:6px}
-.ls-value{font-size:26px;font-weight:500;font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.03em;line-height:1}
-.ls-identified{color:var(--fg)}
-.ls-acted{color:var(--warn)}
-.ls-verified{color:var(--success)}
-.ls-sub{font-size:11px;color:var(--fg3);margin-top:5px}
-.ledger-arrow{color:var(--fg4);font-size:16px;padding:0 6px;flex-shrink:0;font-family:var(--mono)}
-
-/* ── Efficiency scorecard ─────────────────────────────────────────────────── */
-.sc-list{list-style:none;display:flex;flex-direction:column;gap:16px}
+/* ── Efficiency scorecard ──────────────────────────────────────────────────── */
+.sc-list{list-style:none;display:flex;flex-direction:column;gap:15px}
 .sc-item{display:flex;flex-direction:column;gap:7px}
 .sc-hdr{display:flex;align-items:baseline;justify-content:space-between}
-.sc-name{font-size:13px;color:var(--fg2);font-weight:500;letter-spacing:-.005em}
+.sc-name{font-size:13px;color:var(--fg2);font-weight:500}
 .sc-score-text{font-size:11px;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--fg3)}
 .sc-bar-bg{height:4px;background:var(--bg3);border-radius:1px;overflow:hidden}
 .sc-bar-fill{height:100%;border-radius:1px;transition:width .6s cubic-bezier(.4,0,.2,1)}
 
-/* ── Savings opportunities ───────────────────────────────────────────────── */
-.opp-list{list-style:none;display:flex;flex-direction:column}
-.opp-item{
-  display:flex;align-items:center;gap:11px;
-  padding:12px 0;border-bottom:1px solid var(--line);
-}
-.opp-item:first-child{padding-top:2px}
-.opp-item:last-child{border-bottom:none}
-.opp-dot{width:6px;height:6px;border-radius:1px;transform:rotate(45deg);flex-shrink:0}
-.opp-dot-high{background:var(--alert)}
-.opp-dot-med{background:var(--warn)}
-.opp-dot-low{background:var(--success)}
-.opp-body{flex:1;min-width:0}
-.opp-desc{
-  font-size:13px;color:var(--fg);line-height:1.4;letter-spacing:-.005em;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
-.opp-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.opp-saving{font-size:13px;font-weight:500;color:var(--success);font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
-.effort-chip{
-  font-family:var(--mono);font-size:8.5px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;
-  padding:2px 6px;border-radius:var(--r-xs);white-space:nowrap;line-height:1;
-}
-.ec-zero{background:var(--accent-w);color:var(--accent);border:1px solid var(--accent-b)}
-.ec-low{background:var(--success-w);color:var(--success);border:1px solid var(--success-b)}
-.ec-medium{background:var(--warn-w);color:var(--warn);border:1px solid var(--warn-b)}
-.ec-high{background:var(--alert-w);color:var(--alert);border:1px solid var(--alert-b)}
-
-/* Done button */
-.done-btn{
-  font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
-  padding:3px 9px;border-radius:var(--r-sm);border:1px solid var(--line2);
-  background:var(--bg2);color:var(--fg3);cursor:pointer;
-  transition:background .15s,color .15s,border-color .15s;white-space:nowrap;
-}
-.done-btn:hover{background:var(--success-w);color:var(--success);border-color:var(--success-b)}
-.done-btn.marking{opacity:.4;pointer-events:none}
-
-/* TOTAL POTENTIAL row */
-.opp-total{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:14px 0 2px;border-top:1px solid var(--line2);margin-top:4px;
-}
-.opp-total-label{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--fg3)}
-.opp-total-value{font-size:16px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--success)}
-/* Learning annotations */
-.opp-learn{display:inline-block;margin-top:5px;font-family:var(--mono);font-size:8.5px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-xs);padding:2px 6px}
-.opp-suppressed{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
-.sup-details summary{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);cursor:pointer;list-style:none;user-select:none}
-.sup-details summary::-webkit-details-marker{display:none}
-.sup-details summary::before{content:'▸';margin-right:6px;color:var(--fg3)}
-.sup-details[open] summary::before{content:'▾'}
-.sup-details .opp-list{margin-top:8px}
-.opp-sup{opacity:.65}
-.opp-why{font-size:11px;color:var(--fg3);margin-top:3px;line-height:1.4}
-
-/* ── Loading skeleton ────────────────────────────────────────────────────── */
-.skeleton{
-  background:linear-gradient(90deg,var(--bg2) 25%,var(--bg3) 50%,var(--bg2) 75%);
-  background-size:200% 100%;
-  animation:shimmer 1.5s infinite;
-  border-radius:4px;
-  display:inline-block;
-}
-@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-.sk-val{height:40px;width:90px}
-.sk-sub{height:12px;width:140px;margin-top:12px}
-.sk-chart{height:100%;width:100%;border-radius:8px}
-.sk-row{height:14px;width:100%;margin-bottom:10px}
-.loading-hint{
-  font-size:11px;color:var(--fg3);
-  position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
-  white-space:nowrap;
-}
-
-/* ── Error banner ────────────────────────────────────────────────────────── */
-.err-banner{
-  background:var(--alert-w);border:1px solid var(--alert-b);
-  border-radius:var(--r-md);padding:11px 15px;color:var(--alert);
-  font-size:13px;margin-bottom:18px;display:none;
-}
-.loading-banner{
-  display:flex;align-items:center;gap:11px;
-  background:var(--accent-w);border:1px solid var(--accent-b);
-  border-radius:var(--r-md);padding:11px 15px;color:var(--fg2);
-  font-size:13px;margin-bottom:18px;
-}
-.lb-spin{
-  width:13px;height:13px;flex-shrink:0;border-radius:50%;
-  border:2px solid var(--line2);border-top-color:var(--accent);
-  animation:lbspin .7s linear infinite;
-}
+/* ── Banners + skeletons ───────────────────────────────────────────────────── */
+.err-banner{background:var(--alert-w);border:1px solid var(--alert-b);border-radius:var(--r-md);padding:11px 15px;color:var(--alert);font-size:13px;margin-bottom:18px;display:none}
+.loading-banner{display:flex;align-items:center;gap:11px;background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-md);padding:11px 15px;color:var(--fg2);font-size:13px;margin-bottom:18px}
+.lb-spin{width:13px;height:13px;flex-shrink:0;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--accent);animation:lbspin .7s linear infinite}
 @keyframes lbspin{to{transform:rotate(360deg)}}
-.getstarted{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:15px 20px;margin-bottom:26px}
+.skeleton{background:linear-gradient(90deg,var(--bg2) 25%,var(--bg3) 50%,var(--bg2) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:4px;display:inline-block}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.sk-val{height:30px;width:90px}
+.sk-chart{height:100%;width:100%;border-radius:8px}
+.loading-hint{font-size:11px;color:var(--fg3);position:absolute;bottom:10px;left:50%;transform:translateX(-50%);white-space:nowrap}
+
+/* ── Get-started + business context (conditional) ──────────────────────────── */
+.getstarted{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);padding:15px 20px;margin-bottom:20px}
 .gs-head{display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;cursor:pointer;color:var(--fg);font-family:inherit;padding:0;text-align:left}
 .gs-title{font-size:14px;font-weight:600;color:var(--fg)}
 .gs-progress{font-size:12px;font-weight:500;color:var(--accent)}
@@ -357,101 +188,44 @@ html,body{
 .gs-step.done .gs-label{color:var(--fg3)}
 .gs-act{font-size:12.5px;color:var(--accent);background:none;border:none;cursor:pointer;font-family:inherit;font-weight:500;white-space:nowrap;padding:0}
 .gs-act:hover{text-decoration:underline}
-.bizctx{background:var(--bg1);border:1px solid transparent;border-radius:var(--r-xl);padding:20px 24px;margin-bottom:8px;display:none;box-shadow:var(--lift)}
-.bizctx .bc-row{display:flex;gap:0;flex-wrap:wrap;align-items:stretch}
-.bizctx .bc-item{display:flex;flex-direction:column;gap:6px;padding:2px 28px;border-left:1px solid var(--line)}
+.bizctx{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:20px;display:none}
+.bizctx .bc-row{display:flex;flex-wrap:wrap;align-items:stretch}
+.bizctx .bc-item{display:flex;flex-direction:column;gap:6px;padding:2px 26px;border-left:1px solid var(--line)}
 .bizctx .bc-item:first-child{padding-left:0;border-left:none}
 .bizctx .bc-label{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3)}
-.bizctx .bc-value{font-family:var(--mono,monospace);font-size:22px;font-weight:500;font-variant-numeric:tabular-nums;letter-spacing:-.03em;color:var(--fg);line-height:1}
+.bizctx .bc-value{font-family:var(--mono);font-size:22px;font-weight:500;font-variant-numeric:tabular-nums;letter-spacing:-.03em;color:var(--fg);line-height:1}
 .bizctx .bc-note{font-size:12px;color:var(--fg3);margin-top:12px;padding-top:12px;border-top:1px solid var(--line);line-height:1.5}
 .bizctx .bc-prompt{font-size:13px;color:var(--fg2);line-height:1.55}
-.bizctx .bc-prompt code{font-family:var(--mono,monospace);font-size:12px;color:var(--accent);background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-xs);padding:1px 5px}
+.bizctx .bc-prompt code{font-family:var(--mono);font-size:12px;color:var(--accent);background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-xs);padding:1px 5px}
 
-/* ── Footer ──────────────────────────────────────────────────────────────── */
+/* ── Footer ────────────────────────────────────────────────────────────────── */
 footer{text-align:center;padding:28px 0 8px;font-size:11px;color:var(--fg3);letter-spacing:.02em}
 footer a{color:var(--fg2);text-decoration:none;font-weight:600}
 footer a:hover{color:var(--accent)}
 
-@media(prefers-reduced-motion:reduce){
-  *{transition:none!important;animation:none!important}
-}
-
-/* ── Nav tabs (Dashboard / Ask) ───────────────────────────────────────────── */
-.nav-tabs{display:flex;align-items:center;gap:2px;background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-md);padding:2px}
-.nav-tab{
-  font-family:var(--font);font-size:12.5px;font-weight:500;letter-spacing:.005em;
-  color:var(--fg3);background:transparent;border:1px solid transparent;cursor:pointer;
-  padding:4px 13px;border-radius:var(--r-sm);transition:background .15s,color .15s,border-color .15s;
-}
-.nav-tab:hover{color:var(--fg2)}
-.nav-tab.active{color:var(--fg);background:var(--bg3);border-color:var(--line2)}
-
-/* ── Ask: a full-screen AI console ────────────────────────────────────────── */
-/* The Ask tab owns the whole viewport beneath the nav, like a real AI product.
-   The conversation fills the height and width; the composer is pinned full-width
-   at the bottom; the empty state is spacious. Not a small boxed panel. */
-.agent-screen{
-  display:flex;flex-direction:column;
-  height:calc(100vh - 54px);max-width:100%;margin:0;
-}
-.agent-stream{
-  flex:1;min-height:0;overflow-y:auto;
-  scrollbar-width:thin;scrollbar-color:var(--line2) transparent;
-}
+/* ── Ask (agent) console ───────────────────────────────────────────────────── */
+.agent-screen{display:flex;flex-direction:column;height:100vh;max-width:100%}
+.agent-stream{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
 .agent-stream::-webkit-scrollbar{width:10px}
 .agent-stream::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px;border:3px solid var(--bg)}
 .agent-stream::-webkit-scrollbar-thumb:hover{background:var(--fg4)}
-/* A comfortable reading column centered in the wide stream. */
-.agent-log{
-  max-width:780px;margin:0 auto;padding:36px 28px 24px;
-  display:flex;flex-direction:column;gap:2px;min-height:100%;
-}
-
-/* Empty state: calm and spacious, biased toward upper-center like a real AI
-   console rather than pinned dead-center. */
-.agent-empty{margin:14vh auto auto;max-width:660px;padding:24px 4px 32px;text-align:center}
-.agent-empty .ae-mark{
-  width:52px;height:52px;border-radius:var(--r-xl);background:var(--accent-w);
-  border:1px solid var(--accent-b);display:flex;align-items:center;justify-content:center;
-  margin:0 auto 22px;color:var(--accent);font-size:26px;font-weight:700;
-}
-.agent-empty h2{
-  font-size:27px;font-weight:500;letter-spacing:-.03em;color:var(--fg);
-  margin-bottom:12px;line-height:1.1;
-}
+.agent-log{max-width:780px;margin:0 auto;padding:36px 28px 24px;display:flex;flex-direction:column;gap:2px;min-height:100%}
+.agent-empty{margin:13vh auto auto;max-width:660px;padding:24px 4px 32px;text-align:center}
+.agent-empty .ae-mark{width:52px;height:52px;border-radius:var(--r-xl);background:var(--accent-w);border:1px solid var(--accent-b);display:flex;align-items:center;justify-content:center;margin:0 auto 22px;color:var(--accent);font-size:26px;font-weight:700}
+.agent-empty h2{font-size:27px;font-weight:500;letter-spacing:-.03em;color:var(--fg);margin-bottom:12px;line-height:1.1}
 .agent-empty p{font-size:14px;color:var(--fg3);line-height:1.6;margin:0 auto 26px;max-width:520px}
 .agent-starters{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
-.starter{
-  font-family:var(--mono);font-size:12px;color:var(--fg2);
-  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);
-  padding:9px 14px;cursor:pointer;transition:background .15s,border-color .15s,color .15s,transform .15s;
-  text-align:left;
-}
+.starter{font-family:var(--mono);font-size:12px;color:var(--fg2);background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);padding:9px 14px;cursor:pointer;transition:background .15s,border-color .15s,color .15s,transform .15s;text-align:left}
 .starter::before{content:"$ ";color:var(--accent-dim)}
 .starter:hover{background:var(--bg2);color:var(--fg);border-color:var(--line2);transform:translateY(-1px)}
-/* The build-a-view starter leads: accent wash, "+" prompt, full-width on its row. */
 .starter-build{color:var(--accent);background:var(--accent-w);border-color:var(--accent-b);flex-basis:100%;text-align:center}
 .starter-build::before{content:"+ ";color:var(--accent)}
 .starter-build:hover{background:var(--accent-w);color:var(--accent);border-color:var(--accent)}
-
-/* Message rows: crisp records, not chat bubbles. User and nable share a gutter,
-   distinguished by a mono prompt marker and weight. New rows enter with a gentle
-   ease-out rise. */
 .msg{display:flex;max-width:100%;justify-content:flex-start;animation:msgin .32s cubic-bezier(.16,1,.3,1) both}
 @keyframes msgin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-@media(prefers-reduced-motion:reduce){.msg{animation:none}}
-.msg-bubble{
-  position:relative;font-size:15px;line-height:1.65;
-  padding:11px 0 11px 30px;max-width:100%;
-  word-wrap:break-word;overflow-wrap:anywhere;color:var(--fg);
-}
-.msg-bubble::before{
-  position:absolute;left:0;top:11px;font-family:var(--mono);font-size:14px;line-height:1.65;
-}
-.msg-user .msg-bubble{
-  color:var(--fg);font-weight:500;letter-spacing:-.005em;
-  margin-top:16px;padding-bottom:14px;border-bottom:1px solid var(--line);
-}
+.msg-bubble{position:relative;font-size:15px;line-height:1.65;padding:11px 0 11px 30px;max-width:100%;word-wrap:break-word;overflow-wrap:anywhere;color:var(--fg)}
+.msg-bubble::before{position:absolute;left:0;top:11px;font-family:var(--mono);font-size:14px;line-height:1.65}
+.msg-user .msg-bubble{color:var(--fg);font-weight:500;letter-spacing:-.005em;margin-top:16px;padding-bottom:14px;border-bottom:1px solid var(--line)}
 .msg-user .msg-bubble::before{content:">";color:var(--accent);font-weight:600}
 .msg-user+.msg-agent .msg-bubble,.msg-agent .msg-bubble{color:var(--fg2)}
 .msg-agent .msg-bubble{padding-top:14px}
@@ -466,35 +240,13 @@ footer a:hover{color:var(--accent)}
 .dots i:nth-child(2){animation-delay:.2s}
 .dots i:nth-child(3){animation-delay:.4s}
 @keyframes blink{0%,80%,100%{opacity:.22}40%{opacity:1}}
-
-/* Composer: pinned full-width at the bottom, an accent prompt caret, a refined
-   input that sits on a near-black bar with a soft top edge against the black. */
-.agent-dock{
-  flex-shrink:0;border-top:1px solid var(--line);
-  background:linear-gradient(180deg,rgba(0,0,0,0),var(--bg) 22px);
-}
-.agent-composer{
-  display:flex;gap:12px;align-items:flex-end;
-  max-width:780px;margin:0 auto;padding:16px 28px 10px;
-  position:relative;
-}
-.agent-input{
-  flex:1;font-family:var(--mono);font-size:14px;line-height:1.55;color:var(--fg);
-  background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);
-  padding:13px 15px 13px 32px;resize:none;max-height:200px;min-height:50px;
-  transition:border-color .15s,box-shadow .15s,background .15s;
-}
-.agent-composer::before{
-  content:">";position:absolute;left:40px;bottom:24px;
-  font-family:var(--mono);font-size:14px;color:var(--accent);font-weight:600;pointer-events:none;z-index:1;
-}
+.agent-dock{flex-shrink:0;border-top:1px solid var(--line);background:linear-gradient(180deg,rgba(0,0,0,0),var(--bg) 22px)}
+.agent-composer{display:flex;gap:12px;align-items:flex-end;max-width:780px;margin:0 auto;padding:16px 28px 10px;position:relative}
+.agent-input{flex:1;font-family:var(--mono);font-size:14px;line-height:1.55;color:var(--fg);background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);padding:13px 15px 13px 32px;resize:none;max-height:200px;min-height:50px;transition:border-color .15s,box-shadow .15s,background .15s}
+.agent-composer::before{content:">";position:absolute;left:40px;bottom:24px;font-family:var(--mono);font-size:14px;color:var(--accent);font-weight:600;pointer-events:none;z-index:1}
 .agent-input:focus{outline:none;border-color:var(--accent-b);box-shadow:0 0 0 3px var(--accent-w);background:var(--bg2)}
 .agent-input::placeholder{color:var(--fg3)}
-.agent-send{
-  flex-shrink:0;width:50px;height:50px;border-radius:var(--r-lg);border:1px solid var(--accent-b);cursor:pointer;
-  background:var(--accent-w);color:var(--accent);display:flex;align-items:center;justify-content:center;
-  transition:background .15s,border-color .15s,opacity .15s;
-}
+.agent-send{flex-shrink:0;width:50px;height:50px;border-radius:var(--r-lg);border:1px solid var(--accent-b);cursor:pointer;background:var(--accent-w);color:var(--accent);display:flex;align-items:center;justify-content:center;transition:background .15s,border-color .15s,opacity .15s}
 .agent-send:hover:not(:disabled){background:var(--accent);border-color:var(--accent)}
 .agent-send:hover:not(:disabled) svg{stroke:var(--bg)}
 .agent-send:disabled{opacity:.4;cursor:default}
@@ -502,7 +254,7 @@ footer a:hover{color:var(--accent)}
 .agent-note{font-family:var(--mono);font-size:11px;color:var(--fg3);text-align:center;padding:11px 4px;line-height:1.5;width:100%}
 .agent-disclaimer{font-family:var(--mono);font-size:10.5px;color:var(--fg3);text-align:center;max-width:780px;margin:0 auto;padding:0 28px 14px;line-height:1.5;letter-spacing:.01em}
 
-/* Agent-built cost cards (moldable views) */
+/* ── Agent-built cost cards (moldable views) ───────────────────────────────── */
 .cost-card{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:18px 20px;margin:10px 0 4px;align-self:stretch;max-width:100%;box-shadow:var(--lift)}
 .cc-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:16px;padding-bottom:13px;border-bottom:1px solid var(--line)}
 .cc-title{font-size:13px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
@@ -523,98 +275,60 @@ footer a:hover{color:var(--accent)}
 .cc-pin:disabled{cursor:default}
 .cc-unpin{font-size:16px;line-height:1;color:var(--fg3);background:transparent;border:1px solid var(--line2);width:24px;height:24px;display:flex;align-items:center;justify-content:center}
 .cc-unpin:hover{color:var(--alert);border-color:var(--alert-b)}
-/* Inline "pinned to your dashboard" confirmation in the Ask log. */
-.pin-confirm{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 4px;padding:11px 15px;
-  font-size:12.5px;color:var(--success);background:var(--success-w);border:1px solid var(--success-b);border-radius:var(--r-md)}
-.pin-confirm-go{font-family:var(--font);font-size:11.5px;font-weight:600;cursor:pointer;color:var(--accent);
-  background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-sm);padding:4px 11px;
-  transition:background .15s,color .15s,border-color .15s}
+.pin-confirm{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 4px;padding:11px 15px;font-size:12.5px;color:var(--success);background:var(--success-w);border:1px solid var(--success-b);border-radius:var(--r-md)}
+.pin-confirm-go{font-family:var(--font);font-size:11.5px;font-weight:600;cursor:pointer;color:var(--accent);background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-sm);padding:4px 11px;transition:background .15s,color .15s,border-color .15s}
 .pin-confirm-go:hover{background:var(--accent);color:var(--bg);border-color:var(--accent)}
 .pv-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-@media(max-width:800px){.pv-grid{grid-template-columns:1fr}}
-/* A card the agent just pinned slides in and the accent border fades out, so the
-   user sees the live add land without a reload. */
+@media(max-width:860px){.pv-grid{grid-template-columns:1fr}}
 .cc-justpinned{animation:ccpin 1.8s ease-out 1}
-@keyframes ccpin{
-  0%{opacity:0;transform:translateY(6px);border-color:var(--accent)}
-  18%{opacity:1;transform:translateY(0);border-color:var(--accent)}
-  100%{border-color:var(--line)}
-}
-@media(prefers-reduced-motion:reduce){.cc-justpinned{animation:none}}
+@keyframes ccpin{0%{opacity:0;transform:translateY(6px);border-color:var(--accent)}18%{opacity:1;transform:translateY(0);border-color:var(--accent)}100%{border-color:var(--line)}}
+
+@media(max-width:860px){body{padding-left:0}.sidebar{display:none}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
 
-<style>
-  :root{--sidebar-w:212px}
-  body{padding-left:var(--sidebar-w)}
-  .sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--bg1,#0f0f12);border-right:1px solid var(--line,#22222b);display:flex;flex-direction:column;padding:22px 14px 18px;z-index:60}
-  .side-logo{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:600;color:var(--fg,#f4f4f0);letter-spacing:-.01em;text-decoration:none;padding:4px 8px;margin-bottom:24px}
-  .side-logo svg{flex-shrink:0}
-  .side-cap{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3,#6e6e68);padding:0 11px;margin:0 0 8px}
-  .side-nav{display:flex;flex-direction:column;gap:3px}
-  .side-item{display:flex;align-items:center;gap:11px;width:100%;padding:9px 11px;border-radius:var(--r-md,6px);background:transparent;border:none;color:var(--fg2,#a8a8a2);font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;text-align:left;letter-spacing:-.01em;transition:background .15s,color .15s}
-  .side-item svg{flex-shrink:0;opacity:.8;transition:color .15s,opacity .15s}
-  .side-item:hover{background:var(--bg2,#15151a);color:var(--fg,#f4f4f0)}
-  .side-item.active{background:var(--bg3,#1d1d24);color:var(--fg,#f4f4f0)}
-  .side-item.active svg{color:var(--accent,#4db8d4);opacity:1}
-  .side-foot{margin-top:auto;font-size:11px;color:var(--fg3,#6e6e68);padding:10px 11px 0;border-top:1px solid var(--line,#22222b)}
-  .sidebar{overflow-y:auto}
-  .side-nav{margin-bottom:16px}
-  .side-empty{font-size:12px;color:var(--fg3,#6e6e68);padding:5px 11px;line-height:1.45}
-  .side-hist{color:var(--fg2,#a8a8a2);font-weight:450}
-  .side-agent svg{width:24px;height:24px;padding:5px;border-radius:7px;background:rgba(77,184,212,.1);color:var(--accent,#4db8d4);opacity:1;box-sizing:border-box}
-  .side-agent{padding-top:8px;padding-bottom:8px}
-  .side-item:hover svg{opacity:.95}
-  .topbar .logo,.topbar .nav-tabs,.topbar .nav-sep{display:none}
-  @media(max-width:820px){body{padding-left:0}.sidebar{display:none}.topbar .logo,.topbar .nav-tabs{display:flex}}
-</style>
+<!-- Sidebar -->
 <aside class="sidebar">
-  <a class="side-logo" href="/"><svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#4db8d4"/><path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#0d0f10"/></svg><span>nable</span></a>
-  <div class="side-cap">Workspace</div>
-  <nav class="side-nav">
-    <button class="nav-tab side-item active" data-view="dashboard"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>Dashboard</button>
-    <button class="nav-tab side-item" data-view="agent"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>Ask</button>
+  <a class="brand" href="/">
+    <div class="brand-mark"><svg width="18" height="18" viewBox="0 0 32 32" aria-hidden="true"><path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#04222b"/></svg></div>
+    <span class="brand-name">nable</span>
+  </a>
+
+  <nav class="nav" style="margin-bottom:18px">
+    <button class="nav-item nav-tab" data-view="agent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>Ask nable</button>
   </nav>
 
-  <div class="side-cap">Agents</div>
-  <nav class="side-nav">
-    <button class="side-item side-agent" data-prompt="What's driving our spend this month? Show the biggest movers."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Cost investigation</button>
-    <button class="side-item side-agent" data-prompt="Show me rightsizing recommendations and the monthly savings."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Rightsizing</button>
-    <button class="side-item side-agent" data-prompt="Find idle resources we can safely remove."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Idle cleanup</button>
-    <button class="side-item side-agent" data-prompt="Any cost anomalies this week? Explain the biggest one."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Anomalies</button>
-    <button class="side-item side-agent" data-prompt="Where are we under-committed? Show savings-plan opportunities."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Commitments</button>
+  <div class="nav-cap">Dashboards</div>
+  <nav class="nav">
+    <button class="nav-item nav-tab active" data-view="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>Cost overview</button>
+    <button class="nav-item nav-new side-agent" data-prompt="Build a view: spend by team this quarter and pin it to my dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New view</button>
   </nav>
 
-  <div class="side-cap">History</div>
-  <nav class="side-nav" id="side-history">
+  <div class="nav-cap">Agents</div>
+  <nav class="nav">
+    <button class="nav-item agent side-agent" data-prompt="What's driving our spend this month? Show the biggest movers."><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>Cost investigation</button>
+    <button class="nav-item agent side-agent" data-prompt="Show me rightsizing recommendations and the monthly savings."><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4"/></svg></span>Rightsizing</button>
+    <button class="nav-item agent side-agent" data-prompt="Find idle resources we can safely remove."><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></span>Idle cleanup</button>
+    <button class="nav-item agent side-agent" data-prompt="Any cost anomalies this week? Explain the biggest one."><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 20h20L12 2zM12 9v5M12 17.5v.5"/></svg></span>Anomalies</button>
+    <button class="nav-item agent side-agent" data-prompt="Where are we under-committed? Show savings-plan opportunities."><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg></span>Commitments</button>
+  </nav>
+
+  <div class="nav-cap">History</div>
+  <nav class="nav" id="side-history">
     <div class="side-empty" id="side-history-empty">Ask something to start</div>
   </nav>
-  <div class="side-foot">nable · single-tenant</div>
+
+  <div class="side-foot">
+    <div class="t"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 3l1.8 6.2L20 11l-6.2 1.8L12 19l-1.8-6.2L4 11l6.2-1.8z"/></svg>Single-tenant</div>
+    <div class="d">Your credentials and bill never leave this instance.</div>
+    <a class="cta" href="https://getnable.com/security" target="_blank" rel="noopener">View security</a>
+  </div>
 </aside>
 
-<!-- Top nav -->
-<nav class="topbar">
-  <div class="topbar-left">
-    <a class="logo" href="/"><svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#4db8d4"/><path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#0d0f10"/></svg><span>nable</span></a>
-    <div class="nav-sep"></div>
-    <div class="nav-tabs" role="tablist">
-      <button class="nav-tab active" data-view="dashboard">Dashboard</button>
-      <button class="nav-tab" data-view="agent">Ask</button>
-    </div>
-    <div class="nav-sep" id="title-sep"></div>
-    <div class="nav-title" id="hdr-title">Cost Dashboard</div>
-  </div>
-  <div class="topbar-right">
-    <span class="prov-badge prov-badge-green" id="prov-badge">
-      <span class="prov-dot"></span>
-      <span id="prov-label">CONNECTING</span>
-    </span>
-    <div class="nav-date" id="nav-date"></div>
-  </div>
-</nav>
-
-<div class="page" id="view-dashboard">
+<!-- Dashboard view -->
+<main class="main" id="view-dashboard">
   <div id="err-banner" class="err-banner"></div>
 
   <div id="loading-banner" class="loading-banner">
@@ -633,174 +347,113 @@ footer a:hover{color:var(--accent)}
 
   <div id="bizctx" class="bizctx"></div>
 
-  <style>
-  .logo{display:flex;align-items:center;gap:9px}
-  .logo svg{flex-shrink:0;display:block}
-  .opp-hero{margin:0 0 30px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,rgba(77,184,212,.06),transparent 62%),var(--bg-1,#0f0f12);padding:24px 26px}
-  .opp-hero-top{display:flex;flex-wrap:wrap;align-items:flex-end;gap:26px}
-  .opp-hero-found{flex:1;min-width:240px}
-  .opp-hero-label{font-size:11.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--fg-3);font-weight:500}
-  .opp-hero-value{font-size:clamp(34px,4vw,50px);font-weight:600;color:var(--accent);line-height:1.04;letter-spacing:-.02em;margin-top:7px;font-family:'Geist Mono',ui-monospace,monospace}
-  .opp-hero-value .opp-per{font-size:.4em;color:var(--fg-3);font-weight:500;margin-left:5px;letter-spacing:0}
-  .opp-hero-note{font-size:13px;color:var(--fg-2);margin-top:8px}
-  .opp-hero-realized{text-align:right;padding-left:26px;border-left:1px solid var(--line)}
-  .opp-hero-rvalue{font-size:23px;font-weight:600;font-family:'Geist Mono',ui-monospace,monospace;margin-top:7px}
-  .opp-hero-rsub{font-size:11px;color:var(--fg-3);margin-top:4px}
-  .opp-hero-list{margin-top:16px;border-top:1px solid var(--line);padding-top:6px}
-  .opp-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0}
-  .opp-row+.opp-row{border-top:1px solid var(--line)}
-  .opp-row-desc{font-size:13.5px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .opp-row-res{color:var(--fg-3);font-family:'Geist Mono',ui-monospace,monospace;font-size:11.5px}
-  .opp-row-amt{font-size:14px;font-weight:600;color:var(--accent);font-family:'Geist Mono',ui-monospace,monospace;white-space:nowrap}
-  @media(max-width:680px){.opp-hero-realized{text-align:left;padding-left:0;border-left:none;border-top:1px solid var(--line);margin-top:14px;padding-top:14px;width:100%}}
-  </style>
-  <div id="opp-hero" class="opp-hero" style="display:none">
-    <div class="opp-hero-top">
-      <div class="opp-hero-found">
-        <div class="opp-hero-label">Savings nable found</div>
-        <div class="opp-hero-value" id="opp-found">$0<span class="opp-per">/mo</span></div>
-        <div class="opp-hero-note" id="opp-note">review each before anything changes</div>
-      </div>
-      <div class="opp-hero-realized">
-        <div class="opp-hero-label">Realized this month</div>
-        <div class="opp-hero-rvalue" id="opp-realized">$0</div>
-        <div class="opp-hero-rsub" id="opp-rsub">verified on your bill</div>
-      </div>
+  <!-- Greeting -->
+  <div class="top">
+    <div>
+      <div class="hello" id="greet-hello">Loading your cost data&hellip;</div>
+      <div class="sub" id="greet-sub"></div>
     </div>
-    <div class="opp-hero-list" id="opp-hero-list"></div>
-  </div>
-
-  <!-- Overview + controls -->
-  <div class="top-bar">
-    <div class="section-label">Overview</div>
-    <div class="controls-row">
-      <div class="range-group" id="range-group">
-        <button class="range-btn active" data-days="30">30d</button>
-        <button class="range-btn" data-days="60">60d</button>
-        <button class="range-btn" data-days="90">90d</button>
-      </div>
-      <div class="pf-group" id="pf-group" style="display:none"></div>
+    <div class="top-actions">
+      <div class="pill">This month</div>
+      <button class="btn-ask" id="btn-ask-top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>Ask nable</button>
     </div>
   </div>
 
-  <!-- Stat cards -->
+  <!-- Metric cards -->
   <div class="cards">
-    <!-- MTD Spend -->
     <div class="card">
-      <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/><path d="M16 14.5h2"/></svg></div>
-      <div class="card-label">MTD Spend</div>
-      <div class="card-value" id="stat-mtd"><span class="skeleton sk-val"></span></div>
-      <div class="card-sub" id="stat-mtd-sub"><span class="skeleton sk-sub"></span></div>
+      <div class="card-top"><div class="card-ic green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></div><span class="trend up" id="stat-savings-pill">&mdash;</span></div>
+      <div class="card-label">Savings nable found</div>
+      <div class="card-val"><span id="stat-savings"><span class="skeleton sk-val"></span></span><span class="u" id="stat-savings-u" style="display:none">/mo</span></div>
+      <div class="card-sub" id="stat-savings-sub"></div>
     </div>
-    <!-- Projected -->
     <div class="card">
-      <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M16 7h5v5"/></svg></div>
-      <div class="card-label">Projected <span id="proj-month">Month</span> Total</div>
-      <div class="card-value" id="stat-proj"><span class="skeleton sk-val"></span></div>
-      <div class="card-sub" id="stat-proj-sub"><span class="skeleton sk-sub"></span></div>
+      <div class="card-top"><div class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/></svg></div><span class="trend flat" id="stat-mtd-pill">&mdash;</span></div>
+      <div class="card-label">Month-to-date spend</div>
+      <div class="card-val"><span id="stat-mtd"><span class="skeleton sk-val"></span></span></div>
+      <div class="card-sub" id="stat-mtd-sub"></div>
     </div>
-    <!-- Identified savings -->
     <div class="card">
-      <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6"/><path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg></div>
-      <div class="card-label">Identified Savings</div>
-      <div class="card-value down" id="stat-savings"><span class="skeleton sk-val"></span></div>
-      <div class="card-sub" id="stat-savings-sub"><span class="skeleton sk-sub"></span></div>
-      <div class="ledger-mini" id="ledger-mini">
-        <div class="lm-row"><span class="lm-dot" style="background:var(--warn)"></span><span id="lm-acted">$0</span> acted on</div>
-        <div class="lm-row"><span class="lm-dot" style="background:var(--success)"></span><span id="lm-verified">$0</span> verified</div>
-      </div>
+      <div class="card-top"><div class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-6 4 4 8-8"/><path d="M16 7h5v5"/></svg></div><span class="trend warn" id="stat-proj-pill">&mdash;</span></div>
+      <div class="card-label">Projected <span id="proj-month">month</span> total</div>
+      <div class="card-val"><span id="stat-proj"><span class="skeleton sk-val"></span></span></div>
+      <div class="card-sub" id="stat-proj-sub">vs last month run rate</div>
     </div>
-    <!-- FinOps Score -->
     <div class="card">
-      <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18a8 8 0 1 1 14 0"/><path d="M12 14l3.5-3"/><circle cx="12" cy="14" r="1.3" fill="currentColor" stroke="none"/></svg></div>
-      <div class="card-label">FinOps Score</div>
-      <div class="score-pct" id="score-pct" style="color:var(--fg3)"><span class="skeleton" style="height:48px;width:72px;border-radius:4px;display:inline-block"></span></div>
-      <div class="score-label" id="score-label"></div>
-      <div class="score-gaps" id="score-gaps"></div>
+      <div class="card-top"><div class="card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 18a8 8 0 1 1 14 0"/><path d="M12 14l3.5-3"/></svg></div><span class="trend flat" id="score-pill">&mdash;</span></div>
+      <div class="card-label">FinOps score</div>
+      <div class="card-val"><span id="score-pct">&mdash;</span><span class="u">/100</span></div>
+      <div class="card-sub" id="score-gaps"></div>
     </div>
   </div>
 
-  <hr class="flow-rule">
-
-  <!-- Savings pipeline ledger -->
-  <div class="ledger-row" id="ledger-row">
-    <div class="ls-stage">
-      <div class="ls-label">Identified</div>
-      <div class="ls-value ls-identified" id="ls-id">$0</div>
-      <div class="ls-sub" id="ls-id-sub">0 open</div>
-    </div>
-    <div class="ledger-arrow">›</div>
-    <div class="ls-stage">
-      <div class="ls-label">Acted On</div>
-      <div class="ls-value ls-acted" id="ls-acted">$0</div>
-      <div class="ls-sub" id="ls-acted-sub">no actions yet</div>
-    </div>
-    <div class="ledger-arrow">›</div>
-    <div class="ls-stage">
-      <div class="ls-label">Verified Savings</div>
-      <div class="ls-value ls-verified" id="ls-verified">$0</div>
-      <div class="ls-sub" id="ls-verified-sub">pending</div>
-    </div>
-  </div>
-
-  <!-- Charts -->
-  <div class="charts-row">
+  <!-- Spend trend + Ask -->
+  <div class="row">
     <div class="panel">
-      <div class="panel-hdr">
-        <div class="panel-title">Cost Trend</div>
-        <span class="panel-chip">MONTHLY</span>
+      <div class="panel-hd">
+        <div><div class="panel-t">Spend trend</div><div class="panel-s">Actual vs projected</div></div>
+        <div class="controls-row" style="display:flex;align-items:center">
+          <div class="range-group" id="range-group">
+            <button class="range-btn active" data-days="30">30d</button>
+            <button class="range-btn" data-days="60">60d</button>
+            <button class="range-btn" data-days="90">90d</button>
+          </div>
+          <div class="pf-group" id="pf-group" style="display:none"></div>
+        </div>
       </div>
-      <div class="chart-wrap" style="position:relative">
+      <div class="chart-wrap">
         <canvas id="chart-trend"></canvas>
         <div class="skeleton sk-chart" id="sk-trend" style="position:absolute;inset:0"></div>
-        <div class="loading-hint" id="loading-hint">Fetching AWS cost data... first load takes ~15s</div>
+        <div class="loading-hint" id="loading-hint">Fetching cost data&hellip; first load ~15s</div>
       </div>
     </div>
-    <div class="panel">
-      <div class="panel-hdr">
-        <div class="panel-title">Spend by Service: Last <span id="chart-days">30</span> Days</div>
-        <span class="panel-chip" id="svc-badge">AWS ONLY</span>
+    <div class="panel ask">
+      <div class="ask-hd"><span class="ask-dot"></span><div class="panel-t">Ask nable</div></div>
+      <div class="panel-s">A FinOps analyst on your bill. It proposes, never executes.</div>
+      <div class="ask-sugs">
+        <div class="sug" data-prompt="Build a view: spend by team this quarter and pin it to my dashboard"><span class="q">+</span>Build a view: spend by team, pin it</div>
+        <div class="sug" data-prompt="What's driving our spend this month? Show the biggest movers."><span class="q">&gt;</span>What's driving spend this month?</div>
+        <div class="sug" data-prompt="Where can we cut waste right now?"><span class="q">&gt;</span>Where can we cut waste right now?</div>
       </div>
-      <div class="chart-wrap" style="position:relative">
+      <div class="ask-input" id="ask-jump">Ask about your cloud spend<span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></span></div>
+    </div>
+  </div>
+
+  <!-- Opportunities -->
+  <div class="panel" style="margin-bottom:20px">
+    <div class="opp-hd">
+      <div><div class="panel-t">Savings opportunities</div><div class="panel-s">Found by nable. Review each, nothing changes until you approve.</div></div>
+      <span class="opp-found" id="opp-found-chip">&mdash;</span>
+    </div>
+    <table>
+      <thead><tr><th>Opportunity</th><th>Service</th><th>Effort</th><th class="r">Savings</th><th class="r"></th></tr></thead>
+      <tbody id="opp-tbody"><tr><td colspan="5" style="color:var(--fg3);padding:16px 0">Loading&hellip;</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Service breakdown + scorecard -->
+  <div class="row2">
+    <div class="panel">
+      <div class="panel-hd">
+        <div><div class="panel-t">Spend by service</div><div class="panel-s">Last <span id="chart-days">30</span> days</div></div>
+        <span class="panel-chip" id="svc-badge">AWS</span>
+      </div>
+      <div class="chart-wrap">
         <canvas id="chart-svc"></canvas>
         <div class="skeleton sk-chart" id="sk-svc" style="position:absolute;inset:0"></div>
       </div>
     </div>
-  </div>
-
-  <!-- Bottom row -->
-  <div class="bottom-row">
-    <!-- Efficiency Scorecard -->
     <div class="panel">
-      <div class="panel-hdr">
-        <div class="panel-title">Efficiency Scorecard</div>
-        <span class="panel-chip" id="sc-badge">EFFICIENCY</span>
-      </div>
+      <div class="panel-hd"><div><div class="panel-t">Efficiency scorecard</div><div class="panel-s">Where you stand</div></div></div>
       <ul class="sc-list" id="sc-list">
-        <li class="sc-item"><span style="color:var(--fg3);font-size:13px">Loading...</span></li>
+        <li class="sc-item"><span style="color:var(--fg3);font-size:13px">Loading&hellip;</span></li>
       </ul>
-    </div>
-    <!-- Savings Opportunities -->
-    <div class="panel">
-      <div class="panel-hdr">
-        <div class="panel-title">Savings Opportunities</div>
-        <span class="panel-chip panel-chip-accent" id="opp-badge">-- OPEN</span>
-      </div>
-      <ul class="opp-list" id="opp-list">
-        <li class="opp-item"><span style="color:var(--fg3);font-size:13px">Loading...</span></li>
-      </ul>
-      <div class="opp-total" id="opp-total" style="display:none">
-        <span class="opp-total-label">Total Potential</span>
-        <span class="opp-total-value" id="opp-total-value">$0/mo</span>
-      </div>
-      <div class="opp-suppressed" id="opp-suppressed" style="display:none"></div>
     </div>
   </div>
 
-  <!-- Pinned views: cards you saved from the Ask tab -->
-  <div id="pinned-views" style="display:none;margin-top:26px"></div>
-
-</div>
+  <!-- Pinned views: cards saved from the Ask tab -->
+  <div id="pinned-views" style="display:none;margin-top:6px"></div>
+</main>
 
 <!-- Ask (agent) view: full-screen AI console -->
 <div id="view-agent" style="display:none">
@@ -851,39 +504,34 @@ function barColor(s){
   return 'rgba(224,92,75,.55)';
 }
 
-
 // ── State ────────────────────────────────────────────────────────────────────
 let selectedDays=parseInt(localStorage.getItem('nable_days')||'30',10)||30;
 let selectedProvider=localStorage.getItem('nable_provider')||'all';
 let svcChart=null,trendChart=null;
 
 // ── Theme ────────────────────────────────────────────────────────────────────
-// Dark only, locked. No toggle, no light mode, no prefers-color-scheme. The
-// document is pinned to data-theme="dark" so any reader of that attribute (the
-// chart helpers below) always renders the dark palette.
 const html=document.documentElement;
 html.setAttribute('data-theme','dark');
 
 // ── Header date ──────────────────────────────────────────────────────────────
 function initDate(){
-  const d=new Date();
-  document.getElementById('nav-date').textContent=
-    d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}).toUpperCase();
-  document.getElementById('proj-month').textContent=
-    d.toLocaleDateString('en-US',{month:'long'});
+  const nd=document.getElementById('nav-date');
+  if(nd) nd.textContent=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}).toUpperCase();
+  const pm=document.getElementById('proj-month');
+  if(pm) pm.textContent=new Date().toLocaleDateString('en-US',{month:'long'});
 }
 
 // ── Range controls ───────────────────────────────────────────────────────────
 function initRangeControls(){
   document.querySelectorAll('#range-group .range-btn').forEach(btn=>{
     const d=parseInt(btn.dataset.days,10);
-    if(d===selectedDays) btn.classList.add('active');
+    if(d===selectedDays) btn.classList.add('active'); else btn.classList.remove('active');
     btn.addEventListener('click',()=>{
       selectedDays=d;
       localStorage.setItem('nable_days',String(d));
       document.querySelectorAll('#range-group .range-btn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
-      document.getElementById('chart-days').textContent=d;
+      const cd=document.getElementById('chart-days'); if(cd) cd.textContent=d;
       loadData();
     });
   });
@@ -892,11 +540,12 @@ function initRangeControls(){
 // ── Provider filter ──────────────────────────────────────────────────────────
 function initProviderFilters(providers){
   const g=document.getElementById('pf-group');
+  if(!g) return;
   if(!providers||providers.length<=1){g.style.display='none';return;}
   g.style.display='flex';
   const labels={aws:'AWS',azure:'Azure',gcp:'GCP',datadog:'Datadog',snowflake:'Snowflake'};
   g.innerHTML=
-    ['all',...providers].map((p,i)=>{
+    ['all',...providers].map((p)=>{
       const lbl=p==='all'?'All':labels[p]||p.toUpperCase();
       const active=selectedProvider===p?' active':'';
       return `<button class="pf-btn${active}" data-provider="${p}">${lbl}</button>`;
@@ -921,10 +570,6 @@ async function loadData(){
   }catch(e){console.error('Dashboard load failed:',e);showLoadError(e);}
 }
 
-// When /api/data can't be reached at all (server down, wrong port, opened as a
-// file), stop the skeletons spinning forever on "CONNECTING" and say what's
-// wrong. A reachable server that errors returns 200 with an error field, which
-// render() surfaces instead.
 function showLoadError(e){
   const lb=document.getElementById('loading-banner'); if(lb) lb.style.display='none';
   document.querySelectorAll('.skeleton').forEach(s=>s.remove());
@@ -933,16 +578,16 @@ function showLoadError(e){
   });
   const score=document.getElementById('score-pct');
   if(score&&!score.textContent.trim()){score.textContent='--';score.style.color='var(--fg3)';}
-  const pb=document.getElementById('prov-badge'),pl=document.getElementById('prov-label');
-  if(pb&&pl){pb.className='prov-badge prov-badge-red';pl.textContent='DISCONNECTED';}
+  const hello=document.getElementById('greet-hello');
+  if(hello&&/Loading/.test(hello.textContent)) hello.textContent='Could not reach the nable server.';
   const lh=document.getElementById('loading-hint'); if(lh) lh.style.display='none';
   const scList=document.getElementById('sc-list');
   if(scList&&/Loading/.test(scList.textContent)) scList.innerHTML='<li class="sc-item"><span style="color:var(--fg3);font-size:13px">No data, the server could not be reached.</span></li>';
-  const oppList=document.getElementById('opp-list');
-  if(oppList&&/Loading/.test(oppList.textContent)) oppList.innerHTML='<li class="opp-item"><span style="color:var(--fg3);font-size:13px">No data, the server could not be reached.</span></li>';
+  const oppBody=document.getElementById('opp-tbody');
+  if(oppBody&&/Loading/.test(oppBody.textContent)) oppBody.innerHTML='<tr><td colspan="5" style="color:var(--fg3);padding:16px 0">No data, the server could not be reached.</td></tr>';
   const banner=document.getElementById('err-banner');
   if(banner){
-    const isNet=(e instanceof TypeError); // fetch network failure vs HTTP status
+    const isNet=(e instanceof TypeError);
     banner.textContent=isNet
       ? "Can't reach the nable server. Make sure finops serve is running, then refresh this page."
       : "Couldn't load cost data ("+((e&&e.message)||'error')+"). Make sure finops serve is running and a provider is connected, then refresh.";
@@ -952,9 +597,7 @@ function showLoadError(e){
 
 // ── Render ───────────────────────────────────────────────────────────────────
 function render(d){
-  // First-load banner is done once data arrives
   const lb=document.getElementById('loading-banner'); if(lb) lb.style.display='none';
-  // Error
   const banner=document.getElementById('err-banner');
   if(d.error){banner.textContent=d.error;banner.style.display='block';}
   else{banner.style.display='none';}
@@ -987,157 +630,125 @@ function render(d){
     card.style.display='block'; return true;
   })();
 
-  // Business context headline: cost-per-customer + runway, or a cold-start prompt
+  // Business context: cost-per-customer + runway, or a cold-start prompt
   const bc=d.business_context||{};
   const bcEl=document.getElementById('bizctx');
-  if(bc.has_metrics){
-    const items=[];
-    if(bc.cost_per_customer_label){
-      items.push('<div class="bc-item"><span class="bc-label">Cost per customer</span><span class="bc-value">'+esc(bc.cost_per_customer_label)+'</span></div>');
-    }
-    if(bc.hosting_pct_mrr_label){
-      items.push('<div class="bc-item"><span class="bc-label">Hosting as % of MRR</span><span class="bc-value">'+esc(bc.hosting_pct_mrr_label)+'</span></div>');
-    }
-    const rw=bc.runway||{};
-    if(rw.available && rw.months!=null){
-      const lbl=(rw.mode==='company'?'Company runway':'Infra runway');
-      items.push('<div class="bc-item"><span class="bc-label">'+lbl+'</span><span class="bc-value">'+rw.months+' mo</span></div>');
-    }
-    if(items.length){
-      let html='<div class="bc-row">'+items.join('')+'</div>';
-      if(rw.note){html+='<div class="bc-note">'+esc(rw.note)+'</div>';}
-      else if(rw.reason){html+='<div class="bc-note">'+esc(rw.reason)+'</div>';}
-      bcEl.innerHTML=html;bcEl.style.display='block';
+  if(bcEl){
+    if(bc.has_metrics){
+      const items=[];
+      if(bc.cost_per_customer_label){items.push('<div class="bc-item"><span class="bc-label">Cost per customer</span><span class="bc-value">'+esc(bc.cost_per_customer_label)+'</span></div>');}
+      if(bc.hosting_pct_mrr_label){items.push('<div class="bc-item"><span class="bc-label">Hosting as % of MRR</span><span class="bc-value">'+esc(bc.hosting_pct_mrr_label)+'</span></div>');}
+      const rw=bc.runway||{};
+      if(rw.available && rw.months!=null){
+        const lbl=(rw.mode==='company'?'Company runway':'Infra runway');
+        items.push('<div class="bc-item"><span class="bc-label">'+lbl+'</span><span class="bc-value">'+rw.months+' mo</span></div>');
+      }
+      if(items.length){
+        let h='<div class="bc-row">'+items.join('')+'</div>';
+        if(rw.note){h+='<div class="bc-note">'+esc(rw.note)+'</div>';}
+        else if(rw.reason){h+='<div class="bc-note">'+esc(rw.reason)+'</div>';}
+        bcEl.innerHTML=h;bcEl.style.display='block';
+      }else{bcEl.style.display='none';}
+    }else if(bc.has_metrics===false && !gsShown){
+      bcEl.innerHTML='<div class="bc-prompt">Connect your business to your spend. Set revenue, customers, and cash with <code>set_business_metrics()</code> in Claude to see cost per customer and runway here.</div>';
+      bcEl.style.display='block';
     }else{bcEl.style.display='none';}
-  }else if(bc.has_metrics===false && !gsShown){
-    bcEl.innerHTML='<div class="bc-prompt">Connect your business to your spend. Set revenue, customers, and cash with <code>set_business_metrics()</code> in Claude to see cost per customer and runway here.</div>';
-    bcEl.style.display='block';
-  }else{bcEl.style.display='none';}
-
-  // Nav
-  const acct=d.account_id||'';
-  document.getElementById('hdr-title').textContent='Cost Dashboard'+(acct?', Account '+acct:'');
-  const provs=d.connected_providers||[];
-  const pb=document.getElementById('prov-badge');
-  const pl=document.getElementById('prov-label');
-  if(provs.length>0){
-    pb.className='prov-badge prov-badge-green';
-    pl.textContent=provs.map(p=>p.toUpperCase()).join('+')+' CONNECTED';
-  }else{
-    pb.className='prov-badge prov-badge-red';
-    pl.textContent='NO PROVIDER';
   }
 
-  // Card 1: MTD
+  // Greeting headline + connection sub-line
+  const acct=d.account_id||'';
+  const provs=d.connected_providers||[];
+  const found=d.opportunities_total_saving||0;
+  const oppCount=d.opportunities_count||0;
+  const hello=document.getElementById('greet-hello');
+  if(hello){
+    const hr=new Date().getHours();
+    const part=hr<12?'Good morning':hr<18?'Good afternoon':'Good evening';
+    if(found>0) hello.innerHTML=part+'. nable found <span class="accent">'+fmt(found)+'/mo</span> to save.';
+    else if(provs.length) hello.textContent=part+'. nable is scanning your bill for savings.';
+    else hello.textContent=part+'. Connect a provider to see your spend.';
+  }
+  const gsub=document.getElementById('greet-sub');
+  if(gsub){
+    const dstr=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    const conn=provs.length?provs.map(p=>p.toUpperCase()).join('+')+' connected':'no provider connected';
+    gsub.textContent=(acct?'Account '+acct+'  ·  ':'')+conn+'  ·  '+dstr;
+  }
+  // Legacy header elements (guarded; not present in this layout)
+  const pb=document.getElementById('prov-badge'),pl=document.getElementById('prov-label');
+  if(pb&&pl){
+    if(provs.length>0){pb.className='prov-badge prov-badge-green';pl.textContent=provs.map(p=>p.toUpperCase()).join('+')+' CONNECTED';}
+    else{pb.className='prov-badge prov-badge-red';pl.textContent='NO PROVIDER';}
+  }
+  const ht=document.getElementById('hdr-title'); if(ht) ht.textContent='Cost Dashboard'+(acct?', Account '+acct:'');
+
+  // Card 1: Savings found
+  const oppTotal=found;
+  setCardVal('stat-savings',fmt(oppTotal));
+  const su=document.getElementById('stat-savings-u'); if(su) su.style.display=oppTotal>0?'':'none';
+  const sp=document.getElementById('stat-savings-pill');
+  if(sp){sp.className='trend up';sp.textContent=oppCount>0?oppCount+' found':'scanning';}
+  const ss=document.getElementById('stat-savings-sub');
+  if(ss) ss.textContent=oppCount>0?'across '+oppCount+' opportunit'+(oppCount===1?'y':'ies'):'review each before anything changes';
+
+  // Card 2: MTD
   const now=new Date();
   const dom=now.getDate();
   const dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
-  document.getElementById('stat-mtd').textContent=fmt(d.total_spend_mtd||0);
-  document.getElementById('stat-mtd-sub').textContent=dom+' of '+dim+' days elapsed';
+  setCardVal('stat-mtd',fmt(d.total_spend_mtd||0));
+  const mp=document.getElementById('stat-mtd-pill'); if(mp){mp.className='trend flat';mp.textContent=dom+'/'+dim+' days';}
 
-  // Card 2: Projected
-  document.getElementById('stat-proj').textContent=fmt(d.projected_month_total||0);
+  // Card 3: Projected
+  setCardVal('stat-proj',fmt(d.projected_month_total||0));
   const diff=(d.projected_month_total||0)-(d.total_spend_last_month||0);
-  const projSub=document.getElementById('stat-proj-sub');
+  const pp=document.getElementById('stat-proj-pill');
+  const psub=document.getElementById('stat-proj-sub');
   if(Math.abs(diff)>1){
     const sign=diff>0?'+':'−';
-    projSub.textContent=sign+'$'+Math.abs(Math.round(diff)).toLocaleString('en-US')+' vs last month run rate';
-    projSub.className='card-sub '+(diff>0?'up':'down');
-  }else{projSub.textContent='on pace with last month';projSub.className='card-sub';}
-
-  // Card 3: Savings
-  const oppCount=d.opportunities_count||0;
-  const oppTotal=d.opportunities_total_saving||0;
-  document.getElementById('stat-savings').textContent=fmt(oppTotal);
-  document.getElementById('stat-savings-sub').textContent=
-    'per month, '+oppCount+' opportunit'+(oppCount===1?'y':'ies');
-
-  // Opportunities hero: lead with what nable found. Realized savings is $0 on
-  // day one, so the found number (the opportunity) is the value shown first.
-  (function(){
-    const hero=document.getElementById('opp-hero');
-    if(!hero){return;}
-    if(!(d.connected_providers||[]).length){hero.style.display='none';return;}
-    const found=d.opportunities_total_saving||0;
-    const opps=d.recent_opportunities||[];
-    const count=d.opportunities_count||opps.length||0;
-    const lg=d.savings_ledger||{};
-    const realized=lg.verified_monthly||lg.acted_on_monthly||d.savings_achieved_mtd||0;
-    const foundEl=document.getElementById('opp-found');
-    const noteEl=document.getElementById('opp-note');
-    if(found<=0 && opps.length===0){
-      foundEl.innerHTML='Scanning&hellip;';
-      noteEl.textContent='nable is analyzing your bill for savings opportunities';
-      document.getElementById('opp-hero-list').innerHTML='';
-    }else{
-      foundEl.innerHTML=fmt(found)+'<span class="opp-per">/mo</span>';
-      noteEl.textContent='across '+count+' opportunit'+(count===1?'y':'ies')+' · review each before anything changes';
-      document.getElementById('opp-hero-list').innerHTML=opps.slice(0,4).map(function(o){
-        const res=o.resource?' <span class="opp-row-res">'+esc(o.resource)+'</span>':'';
-        return '<div class="opp-row"><div class="opp-row-desc">'+esc(o.description||'Savings opportunity')+res+'</div><div class="opp-row-amt">'+fmt(o.monthly_saving||0)+'/mo</div></div>';
-      }).join('');
-    }
-    const rEl=document.getElementById('opp-realized');
-    const rSub=document.getElementById('opp-rsub');
-    rEl.textContent=fmt(realized);
-    if(realized>0){rEl.style.color='var(--success,#3cba7a)';rSub.textContent='verified on your bill';}
-    else{rEl.style.color='var(--fg-3)';rSub.textContent='capture an opportunity to start';}
-    hero.style.display='block';
-  })();
-  const ledger=d.savings_ledger||{};
-  const actedOn=ledger.acted_on_monthly||0;
-  const verifiedOn=ledger.verified_monthly||0;
-  if(actedOn>0||verifiedOn>0){
-    document.getElementById('lm-acted').textContent=fmt(actedOn);
-    document.getElementById('lm-verified').textContent=fmt(verifiedOn);
-    document.getElementById('ledger-mini').style.display='flex';
+    if(pp){pp.className='trend '+(diff>0?'warn':'up');pp.textContent=sign+'$'+Math.abs(Math.round(diff)).toLocaleString('en-US');}
+    if(psub) psub.textContent='vs last month run rate';
+    const mtdSub=document.getElementById('stat-mtd-sub'); if(mtdSub) mtdSub.textContent=diff>0?'trending over last month':'tracking under last month';
+  }else{
+    if(pp){pp.className='trend flat';pp.textContent='on pace';}
+    if(psub) psub.textContent='vs last month run rate';
+    const mtdSub=document.getElementById('stat-mtd-sub'); if(mtdSub) mtdSub.textContent='on pace with last month';
   }
 
-  // Card 4: FinOps Score, percentage only, no letter grade
+  // Card 4: FinOps Score (NN/100)
   const score=Math.round(d.finops_score||0);
   const scorePctEl=document.getElementById('score-pct');
-  scorePctEl.querySelectorAll('.skeleton').forEach(s=>s.remove());
-  scorePctEl.textContent=score+'%';
-  let scoreColor,scoreLabel;
-  if(score>=80){scoreColor='var(--success)';scoreLabel='Well optimized';}
-  else if(score>=60){scoreColor='var(--accent)';scoreLabel='Room to improve';}
-  else if(score>=40){scoreColor='var(--warn)';scoreLabel='Needs attention';}
-  else{scoreColor='var(--alert)';scoreLabel='Critical gaps';}
-  scorePctEl.style.color=scoreColor;
-  const scoreLabelEl=document.getElementById('score-label');
-  scoreLabelEl.textContent=scoreLabel;
-  scoreLabelEl.style.color=scoreColor;
-  // Weak dimensions
+  if(scorePctEl){
+    scorePctEl.textContent=score;
+    let scoreColor;
+    if(score>=80) scoreColor='var(--success)';
+    else if(score>=60) scoreColor='var(--accent)';
+    else if(score>=40) scoreColor='var(--warn)';
+    else scoreColor='var(--alert)';
+    scorePctEl.style.color=scoreColor;
+  }
   const dims=(d.scorecard||{}).dimensions||[];
   const weak=dims.filter(dim=>(dim.score||0)<40).map(dim=>(dim.display_name||dim.name).toLowerCase());
-  document.getElementById('score-gaps').textContent=
-    weak.length?weak.length+' gap'+(weak.length>1?'s':'')+': '+weak.join(', '):'';
+  const scoreGaps=document.getElementById('score-gaps');
+  if(scoreGaps) scoreGaps.textContent=weak.length?weak.slice(0,3).join(', '):'no major gaps';
+  const scorePill=document.getElementById('score-pill');
+  if(scorePill){
+    if(weak.length){scorePill.className='trend warn';scorePill.textContent=weak.length+' gap'+(weak.length>1?'s':'');}
+    else{scorePill.className='trend flat';scorePill.textContent='healthy';}
+  }
 
   // Provider filters
   initProviderFilters(provs);
 
   // Service badge
   const sb=document.getElementById('svc-badge');
-  if(provs.length===1){sb.textContent=provs[0].toUpperCase()+' ONLY';}
-  else if(provs.length>1){sb.textContent='ALL PROVIDERS';}
+  if(sb){
+    if(provs.length===1) sb.textContent=provs[0].toUpperCase();
+    else if(provs.length>1) sb.textContent='ALL';
+    else sb.textContent='AWS';
+  }
 
   // Hide chart skeletons
-  const skSvc=document.getElementById('sk-svc');
-  const skTrend=document.getElementById('sk-trend');
-  const loadHint=document.getElementById('loading-hint');
-  if(skSvc) skSvc.style.display='none';
-  if(skTrend) skTrend.style.display='none';
-  if(loadHint) loadHint.style.display='none';
-
-  // Replace stat card skeletons with values
-  ['stat-mtd','stat-proj','stat-savings'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(el) el.querySelectorAll('.skeleton').forEach(s=>s.remove());
-  });
-  ['stat-mtd-sub','stat-proj-sub','stat-savings-sub'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(el) el.querySelectorAll('.skeleton').forEach(s=>s.remove());
-  });
+  ['sk-svc','sk-trend','loading-hint'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
 
   // Charts
   renderSvcChart(d.top_services||[]);
@@ -1146,22 +757,29 @@ function render(d){
   // Scorecard
   renderScorecard(d.scorecard||{});
 
-  // Opportunities
-  renderOpps(d.recent_opportunities||[],oppCount,oppTotal,d.suppressed_opportunities||[],d.learning_active);
+  // Opportunities table
+  renderOpps(d.recent_opportunities||[],oppCount,oppTotal);
 
-  // Ledger row
-  renderLedgerRow(ledger,oppCount);
+  // Savings ledger (guarded; may not be present)
+  renderLedgerRow(d.savings_ledger||{},oppCount);
+}
+
+// Replace a card value span (clearing its skeleton) without wiping unit spans.
+function setCardVal(id,val){
+  const el=document.getElementById(id);
+  if(el) el.textContent=val;
 }
 
 // ── Service chart ─────────────────────────────────────────────────────────────
 function renderSvcChart(svcs){
+  const c=document.getElementById('chart-svc'); if(!c) return;
   const gridColor='rgba(45,45,50,.55)';
   const tickColor='#56656d';
   const labels=svcs.map(s=>s.service);
   const amounts=svcs.map(s=>s.amount);
   const colors=svcs.map((_,i)=>i===0?'#e05c4b':i===1?'#4db8d4':'rgba(86,101,109,.45)');
   if(svcChart){svcChart.destroy();svcChart=null;}
-  const ctx=document.getElementById('chart-svc').getContext('2d');
+  const ctx=c.getContext('2d');
   svcChart=new Chart(ctx,{
     type:'bar',
     data:{labels,datasets:[{data:amounts,backgroundColor:colors,borderRadius:3,borderSkipped:false}]},
@@ -1180,6 +798,7 @@ function renderSvcChart(svcs){
 
 // ── Trend chart ───────────────────────────────────────────────────────────────
 function renderTrendChart(trend){
+  const c=document.getElementById('chart-trend'); if(!c) return;
   if(!trend||trend.length===0) return;
   const gridColor='rgba(45,45,50,.55)';
   const tickColor='#56656d';
@@ -1187,7 +806,7 @@ function renderTrendChart(trend){
   const actual=trend.map(t=>t.actual);
   const projected=trend.map(t=>t.projected);
   if(trendChart){trendChart.destroy();trendChart=null;}
-  const ctx=document.getElementById('chart-trend').getContext('2d');
+  const ctx=c.getContext('2d');
   trendChart=new Chart(ctx,{
     type:'line',
     data:{labels,datasets:[
@@ -1218,10 +837,7 @@ function renderTrendChart(trend){
 
 // ── Scorecard ─────────────────────────────────────────────────────────────────
 function renderScorecard(sc){
-  const badge=document.getElementById('sc-badge');
-  badge.textContent='EFFICIENCY';
-
-  const el=document.getElementById('sc-list');
+  const el=document.getElementById('sc-list'); if(!el) return;
   const dims=sc.dimensions||[];
   if(!dims.length){
     el.innerHTML='<li class="sc-item"><span style="color:var(--fg3);font-size:13px">Run a cost audit to generate scorecard data.</span></li>';
@@ -1243,114 +859,69 @@ function renderScorecard(sc){
   }).join('');
 }
 
-// ── Savings opportunities ──────────────────────────────────────────────────────
-function renderOpps(opps,count,totalSaving,suppressed,learningActive){
-  document.getElementById('opp-badge').textContent=(count||opps.length)+' OPEN';
-  const el=document.getElementById('opp-list');
+// ── Savings opportunities (table) ──────────────────────────────────────────────
+function renderOpps(opps,count,totalSaving){
+  const chip=document.getElementById('opp-found-chip');
+  if(chip) chip.textContent=totalSaving>0?fmt(totalSaving)+'/mo available':(count||0)+' open';
+  const tb=document.getElementById('opp-tbody'); if(!tb) return;
   if(!opps||opps.length===0){
-    el.innerHTML='<li class="opp-item"><span style="color:var(--fg3);font-size:13px">No open opportunities. Run a waste audit to surface savings.</span></li>';
-    document.getElementById('opp-total').style.display='none';
-    renderSuppressed(suppressed||[]);
+    tb.innerHTML='<tr><td colspan="5" style="color:var(--fg3);padding:16px 0">No open opportunities. Ask nable to run a waste audit to surface savings.</td></tr>';
     return;
   }
-  el.innerHTML=opps.map(o=>{
-    const impact=String(o.impact||'medium').toLowerCase();
-    const dotClass=impact==='high'?'opp-dot-high':impact==='low'?'opp-dot-low':'opp-dot-med';
+  tb.innerHTML=opps.map(o=>{
     const effort=String(o.effort||'MEDIUM').toUpperCase().replace(' EFFORT','');
-    let eClass='ec-medium';
-    if(effort==='ZERO') eClass='ec-zero';
-    else if(effort==='LOW') eClass='ec-low';
-    else if(effort==='HIGH') eClass='ec-high';
-    // Support ranges
+    let tagClass='med',tagText='Medium';
+    if(effort==='ZERO'){tagClass='low';tagText='Zero';}
+    else if(effort==='LOW'){tagClass='low';tagText='Low';}
+    else if(effort==='HIGH'){tagClass='high';tagText='High';}
     let savingStr;
     if(o.monthly_saving_min!=null&&o.monthly_saving_max!=null){
       savingStr=fmt(o.monthly_saving_min)+'–'+fmt(o.monthly_saving_max)+'/mo';
     }else{
       savingStr=fmt(o.monthly_saving||0)+'/mo';
     }
-    const idAttr=o.id?`data-rec-id="${o.id}"`:'';
-    // Learning annotation: only when this rec type has real signal (not COLD).
-    const L=o.learned;
-    const tailored=L&&L.coverage&&L.coverage!=='COLD';
-    const whyAttr=(tailored&&L.why_ranked)?` title="${esc(L.why_ranked)}"`:'';
-    const tag=(tailored&&L.source_verdict==='boost')?'<span class="opp-learn">ranked for you</span>':'';
-    return `<li class="opp-item" ${idAttr}${whyAttr}>
-      <span class="opp-dot ${dotClass}"></span>
-      <div class="opp-body"><div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div>${tag}</div>
-      <div class="opp-right">
-        <span class="opp-saving">${savingStr}</span>
-        <span class="effort-chip ${eClass}">${effort} EFFORT</span>
-        ${(o.id && !window._READONLY)?`<button class="done-btn" onclick="markDone(${o.id},this)">Done</button>`:''}
-      </div>
-    </li>`;
+    const svc=esc(o.service||o.resource||'');
+    const desc=esc(o.description||o.resource||'Recommendation');
+    return `<tr>
+      <td class="opp-name">${desc}</td>
+      <td class="opp-svc">${svc}</td>
+      <td><span class="tag ${tagClass}">${tagText}</span></td>
+      <td class="r amt">${savingStr}</td>
+      <td class="r"><button class="review" data-desc="${desc.replace(/"/g,'&quot;')}">Review</button></td>
+    </tr>`;
   }).join('');
-
-  // Total potential
-  const totalEl=document.getElementById('opp-total');
-  const totalValEl=document.getElementById('opp-total-value');
-  if(totalSaving>0){
-    totalValEl.textContent=fmt(totalSaving)+'/mo';
-    totalEl.style.display='flex';
-  }else{
-    totalEl.style.display='none';
-  }
-  renderSuppressed(suppressed||[]);
+  tb.querySelectorAll('.review').forEach(b=>{
+    b.addEventListener('click',()=>{
+      const desc=b.getAttribute('data-desc')||'';
+      if(typeof switchView==='function') switchView('agent');
+      if(typeof window.askAgent==='function') window.askAgent('Walk me through this savings opportunity and draft the change for review: '+desc);
+    });
+  });
 }
 
-// "Suppressed for you": recs the learning loop ranked out because you don't act
-// on that type. Collapsed by default; nothing is deleted, you can always expand it.
-function renderSuppressed(suppressed){
-  const box=document.getElementById('opp-suppressed');
-  if(!box) return;
-  if(!suppressed||!suppressed.length){box.style.display='none';box.innerHTML='';return;}
-  const items=suppressed.map(o=>{
-    const why=(o.learned&&o.learned.why_ranked)?esc(o.learned.why_ranked):'';
-    return `<li class="opp-item opp-sup">
-      <div class="opp-body"><div class="opp-desc">${esc(o.description||o.resource||'Recommendation')}</div>${why?`<div class="opp-why">${why}</div>`:''}</div>
-      <span class="opp-saving">${fmt(o.monthly_saving||0)}/mo</span>
-    </li>`;
-  }).join('');
-  box.innerHTML=`<details class="sup-details"><summary>Suppressed for you (${suppressed.length})</summary><ul class="opp-list">${items}</ul></details>`;
-  box.style.display='block';
-}
-
-// ── Ledger row ────────────────────────────────────────────────────────────────
+// ── Ledger row (guarded; element not in this layout) ──────────────────────────
 function renderLedgerRow(ledger,oppCount){
   const row=document.getElementById('ledger-row');
+  if(!row) return;
   const id=ledger.identified_monthly||0;
   const ao=ledger.acted_on_monthly||0;
   const ver=ledger.verified_monthly||0;
   const counts=ledger.counts||{};
   if(id>0||ao>0||ver>0){row.style.display='grid';}
-  document.getElementById('ls-id').textContent=fmt(id);
-  document.getElementById('ls-id-sub').textContent=(counts.open||oppCount||0)+' open';
-  document.getElementById('ls-acted').textContent=fmt(ao);
+  const set=(i,v)=>{const e=document.getElementById(i);if(e)e.textContent=v;};
+  set('ls-id',fmt(id));
+  set('ls-id-sub',(counts.open||oppCount||0)+' open');
+  set('ls-acted',fmt(ao));
   const ac=counts.acted_on||0;
-  document.getElementById('ls-acted-sub').textContent=ac>0?ac+' action'+(ac>1?'s':'')+' taken':'no actions yet';
-  document.getElementById('ls-verified').textContent=fmt(ver);
+  set('ls-acted-sub',ac>0?ac+' action'+(ac>1?'s':'')+' taken':'no actions yet');
+  set('ls-verified',fmt(ver));
   const vc=counts.verified||0;
   const ann=ledger.verified_annual||0;
-  document.getElementById('ls-verified-sub').textContent=vc>0?fmt(ann)+'/yr confirmed':'pending verification';
-}
-
-// ── Mark done ─────────────────────────────────────────────────────────────────
-async function markDone(id,btn){
-  btn.classList.add('marking');
-  btn.textContent='…';
-  try{
-    const r=await fetch('/api/mark-done?id='+id,{method:'POST'});
-    if(r.ok){
-      const li=btn.closest('li');
-      li.style.transition='opacity .3s';li.style.opacity='0';
-      setTimeout(()=>li.remove(),320);
-      loadData();
-    }else{btn.textContent='Error';btn.classList.remove('marking');}
-  }catch{btn.textContent='Error';btn.classList.remove('marking');}
+  set('ls-verified-sub',vc>0?fmt(ann)+'/yr confirmed':'pending verification');
 }
 
 // ── Read-only mode ────────────────────────────────────────────────────────────
 if(window._READONLY){
-  // Add a subtle view-only banner
   const banner=document.createElement('div');
   banner.style.cssText='position:fixed;bottom:16px;right:16px;background:var(--bg3);border:1px solid var(--line2);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--fg3);font-weight:500;letter-spacing:.04em;text-transform:uppercase;z-index:100;pointer-events:none';
   banner.textContent='View only';
@@ -1363,14 +934,9 @@ function switchView(view){
   const dash=document.getElementById('view-dashboard'),ag=document.getElementById('view-agent');
   if(dash) dash.style.display=view==='dashboard'?'':'none';
   if(ag) ag.style.display=view==='agent'?'':'none';
-  const showDash=view==='dashboard';
-  ['title-sep','hdr-title'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display=showDash?'':'none';});
   if(view==='agent'){const i=document.getElementById('agent-input');if(i)i.focus();}
 }
 
-// Light markdown: fenced code, inline code, bold, line breaks. Fenced blocks are
-// pulled out before escaping so their contents are escaped once and never get
-// <br>-mangled.
 function fmtAnswer(t){
   const blocks=[];
   let s=String(t||'').replace(/```([\s\S]*?)```/g,(m,code)=>{
@@ -1401,8 +967,6 @@ function appendMsg(role,text,opts){
   return wrap;
 }
 
-// Keep the conversation pinned to the latest row. The scroll container is the
-// full-height stream that wraps the reading column.
 function scrollStream(){
   const s=document.getElementById('agent-stream');
   if(s) s.scrollTop=s.scrollHeight;
@@ -1416,8 +980,6 @@ function appendCard(card,data){
   log.appendChild(renderAgentCard(card,data||{},{pinnable:!window._READONLY}));
   scrollStream();
 }
-// The agent pinned a view itself (ask-to-build-a-view). Confirm inline and offer a
-// one-click jump to the dashboard, where the new card has already been added live.
 function appendPinnedConfirm(){
   const log=document.getElementById('agent-log');
   const empty=document.getElementById('agent-empty'); if(empty) empty.style.display='none';
@@ -1500,8 +1062,6 @@ async function unpinCard(id,el){
   }catch{}
 }
 async function loadPinnedViews(highlightIds){
-  // highlightIds: optional array of view ids that were just pinned this turn. Those
-  // cards animate in (cc-justpinned) so a live add lands visibly without a reload.
   const hl=new Set((highlightIds||[]).map(Number));
   const wrap=document.getElementById('pinned-views'); if(!wrap) return;
   try{
@@ -1509,7 +1069,7 @@ async function loadPinnedViews(highlightIds){
     const d=await r.json(); const views=(d&&d.views)||[];
     if(!views.length){wrap.style.display='none';wrap.innerHTML='';return;}
     wrap.style.display='block';
-    wrap.innerHTML='<div class="section-label" style="margin-bottom:12px">Pinned views</div><div class="pv-grid" id="pv-grid"></div>';
+    wrap.innerHTML='<div class="panel-t" style="margin-bottom:12px">Pinned views</div><div class="pv-grid" id="pv-grid"></div>';
     const grid=document.getElementById('pv-grid');
     let firstNew=null;
     views.forEach(v=>{
@@ -1539,9 +1099,6 @@ async function askAgent(q){
     if(r.ok && data && (data.answer || (data.cards && data.cards.length) || data.views_changed)){
       if(data.answer) appendMsg('agent',data.answer);
       (data.cards||[]).forEach((card,i)=>appendCard(card,(data.cardData||[])[i]));
-      // The agent pinned a view this turn: re-render the pinned-views grid in place
-      // (no full reload) and confirm inline. The grid lives on the dashboard tab, so
-      // it's ready the moment the user switches back.
       if(data.views_changed){
         loadPinnedViews(data.new_view_ids||[]);
         appendPinnedConfirm();
@@ -1573,7 +1130,9 @@ function initAgent(){
     input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,200)+'px';});
   }
   document.querySelectorAll('.starter').forEach(b=>b.addEventListener('click',()=>askAgent(b.textContent)));
-  // A view-only link can't drive the agent (it can propose actions), so disable input there.
+  // Top "Ask nable" button + the Ask-panel input jump to the agent console.
+  const topAsk=document.getElementById('btn-ask-top'); if(topAsk) topAsk.addEventListener('click',()=>switchView('agent'));
+  const jump=document.getElementById('ask-jump'); if(jump) jump.addEventListener('click',()=>switchView('agent'));
   if(window._READONLY && composer){
     composer.innerHTML='<div class="agent-note">Asking is disabled on a view-only link. Open your own nable dashboard to use the agent.</div>';
   }
@@ -1595,23 +1154,23 @@ setInterval(loadData,60000);
     var first=list.querySelector('.side-hist');
     if(first && first.title===q) return;  // skip a consecutive duplicate
     var e=document.getElementById('side-history-empty'); if(e) e.remove();
-    var lbl=q.length>30?q.slice(0,29)+'…':q;
+    var lbl=q.length>28?q.slice(0,27)+'…':q;
     var btn=document.createElement('button');
-    btn.className='side-item side-hist'; btn.textContent=lbl; btn.title=q;
+    btn.className='nav-item side-hist'; btn.textContent=lbl; btn.title=q;
     // Open Ask and load the question into the composer, do NOT silently fire a
-    // brand-new chat (that was the confusing behavior). Real thread reopening
-    // comes with the threaded-chat redesign.
+    // brand-new chat. Real thread reopening comes with the threaded-chat redesign.
     btn.addEventListener('click',function(){ if(typeof switchView==='function') switchView('agent'); var inp=document.getElementById('agent-input'); if(inp){inp.value=q; inp.style.height='auto'; inp.focus();} });
     list.insertBefore(btn,list.firstChild);
     while(list.children.length>8) list.removeChild(list.lastChild);
   }
-  // Record every question (composer, starter, or agent) into the in-session history.
+  // Record every question into the in-session history.
   if(typeof window.askAgent==='function'){
     var _ask=window.askAgent;
     window.askAgent=function(q){ addHist(q); return _ask.call(this,q); };
   }
-  // Sidebar agents launch the Ask view with a focused starting prompt.
-  document.querySelectorAll('.side-agent').forEach(function(b){
+  // Sidebar agents + the "New view" item + Ask-panel suggestion chips launch the
+  // Ask view with a focused starting prompt.
+  document.querySelectorAll('.side-agent,.sug[data-prompt]').forEach(function(b){
     b.addEventListener('click',function(){ if(typeof switchView==='function') switchView('agent'); if(typeof window.askAgent==='function') window.askAgent(b.dataset.prompt); });
   });
 })();
