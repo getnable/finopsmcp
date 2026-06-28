@@ -339,6 +339,21 @@ html,body{
   animation:lbspin .7s linear infinite;
 }
 @keyframes lbspin{to{transform:rotate(360deg)}}
+.getstarted{background:linear-gradient(180deg,rgba(77,184,212,.05),transparent 60%),var(--bg1);border:1px solid var(--line);border-radius:var(--r-xl);padding:20px 24px;margin-bottom:16px}
+.gs-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
+.gs-title{font-size:15px;font-weight:600;color:var(--fg)}
+.gs-sub{font-size:12.5px;color:var(--fg3);margin-top:3px}
+.gs-x{background:none;border:none;color:var(--fg3);font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
+.gs-x:hover{color:var(--fg)}
+.gs-steps{display:flex;flex-direction:column}
+.gs-step{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line)}
+.gs-step:first-child{border-top:none}
+.gs-check{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--line2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--bg)}
+.gs-step.done .gs-check{background:var(--success);border-color:var(--success)}
+.gs-label{flex:1;font-size:13.5px;color:var(--fg)}
+.gs-step.done .gs-label{color:var(--fg3)}
+.gs-act{font-size:12.5px;color:var(--accent);background:none;border:none;cursor:pointer;font-family:inherit;font-weight:500;white-space:nowrap;padding:0}
+.gs-act:hover{text-decoration:underline}
 .bizctx{background:var(--bg1);border:1px solid transparent;border-radius:var(--r-xl);padding:20px 24px;margin-bottom:8px;display:none;box-shadow:var(--lift)}
 .bizctx .bc-row{display:flex;gap:0;flex-wrap:wrap;align-items:stretch}
 .bizctx .bc-item{display:flex;flex-direction:column;gap:6px;padding:2px 28px;border-left:1px solid var(--line)}
@@ -601,6 +616,17 @@ footer a:hover{color:var(--accent)}
   <div id="loading-banner" class="loading-banner">
     <span class="lb-spin"></span>
     <span>Loading your cost data. The first load pulls fresh numbers from your cloud provider and can take up to ~15 seconds.</span>
+  </div>
+
+  <div id="getstarted" class="getstarted" style="display:none">
+    <div class="gs-head">
+      <div>
+        <div class="gs-title">Get started with nable</div>
+        <div class="gs-sub">A few steps to unlock cost-per-customer, runway, and alerts.</div>
+      </div>
+      <button class="gs-x" id="gs-x" aria-label="Dismiss">×</button>
+    </div>
+    <div class="gs-steps" id="gs-steps"></div>
   </div>
 
   <div id="bizctx" class="bizctx"></div>
@@ -927,6 +953,33 @@ function render(d){
   if(d.error){banner.textContent=d.error;banner.style.display='block';}
   else{banner.style.display='none';}
 
+  // Get-started checklist: auto-checks what's set up, hands the rest to the agent.
+  const gsShown=(function(){
+    const card=document.getElementById('getstarted');
+    if(!card) return false;
+    if(localStorage.getItem('nable-gs-dismissed')==='1'){card.style.display='none';return false;}
+    const provs=(d.connected_providers||[]).length>0;
+    const metrics=!!(d.business_context&&d.business_context.has_metrics);
+    if(provs&&metrics){card.style.display='none';return false;}
+    const steps=[
+      {label:'Connect a cloud provider',done:provs,prompt:'How do I connect a cloud provider to nable?'},
+      {label:'Add your business context (revenue, customers)',done:metrics,prompt:'How do I set my business metrics so I can see cost per customer and runway?'},
+      {label:'Set a monthly budget and cost alerts',done:false,prompt:'Help me set a monthly budget and cost alerts.'},
+      {label:'Ask nable your first question',done:false,prompt:''}
+    ];
+    const wrap=document.getElementById('gs-steps'); wrap.innerHTML='';
+    steps.forEach(function(s){
+      const row=document.createElement('div');
+      row.className='gs-step'+(s.done?' done':'');
+      row.innerHTML='<span class="gs-check">'+(s.done?'✓':'')+'</span><span class="gs-label">'+s.label+'</span>'+(s.done?'':'<button class="gs-act">Set up →</button>');
+      if(!s.done){row.querySelector('.gs-act').addEventListener('click',function(){if(typeof switchView==='function')switchView('agent');if(s.prompt&&typeof window.askAgent==='function')window.askAgent(s.prompt);});}
+      wrap.appendChild(row);
+    });
+    const x=document.getElementById('gs-x');
+    if(x)x.onclick=function(){localStorage.setItem('nable-gs-dismissed','1');card.style.display='none';};
+    card.style.display='block'; return true;
+  })();
+
   // Business context headline: cost-per-customer + runway, or a cold-start prompt
   const bc=d.business_context||{};
   const bcEl=document.getElementById('bizctx');
@@ -949,7 +1002,7 @@ function render(d){
       else if(rw.reason){html+='<div class="bc-note">'+esc(rw.reason)+'</div>';}
       bcEl.innerHTML=html;bcEl.style.display='block';
     }else{bcEl.style.display='none';}
-  }else if(bc.has_metrics===false){
+  }else if(bc.has_metrics===false && !gsShown){
     bcEl.innerHTML='<div class="bc-prompt">Connect your business to your spend. Set revenue, customers, and cash with <code>set_business_metrics()</code> in Claude to see cost per customer and runway here.</div>';
     bcEl.style.display='block';
   }else{bcEl.style.display='none';}
