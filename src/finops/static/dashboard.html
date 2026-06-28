@@ -560,7 +560,8 @@ footer a:hover{color:var(--accent)}
   .side-nav{margin-bottom:16px}
   .side-empty{font-size:12px;color:var(--fg3,#6e6e68);padding:5px 11px;line-height:1.45}
   .side-hist{color:var(--fg2,#a8a8a2);font-weight:450}
-  .side-agent svg,.side-hist svg{color:var(--accent,#4db8d4);opacity:.55}
+  .side-agent svg{width:24px;height:24px;padding:5px;border-radius:7px;background:rgba(77,184,212,.1);color:var(--accent,#4db8d4);opacity:1;box-sizing:border-box}
+  .side-agent{padding-top:8px;padding-bottom:8px}
   .side-item:hover svg{opacity:.95}
   .topbar .logo,.topbar .nav-tabs,.topbar .nav-sep{display:none}
   @media(max-width:820px){body{padding-left:0}.sidebar{display:none}.topbar .logo,.topbar .nav-tabs{display:flex}}
@@ -1585,11 +1586,16 @@ setInterval(loadData,60000);
   function addHist(q){
     q=(q||'').trim(); if(!q) return;
     var list=document.getElementById('side-history'); if(!list) return;
+    var first=list.querySelector('.side-hist');
+    if(first && first.title===q) return;  // skip a consecutive duplicate
     var e=document.getElementById('side-history-empty'); if(e) e.remove();
     var lbl=q.length>30?q.slice(0,29)+'…':q;
     var btn=document.createElement('button');
     btn.className='side-item side-hist'; btn.textContent=lbl; btn.title=q;
-    btn.addEventListener('click',function(){ if(typeof switchView==='function') switchView('agent'); if(typeof window.askAgent==='function') window.askAgent(q); });
+    // Open Ask and load the question into the composer, do NOT silently fire a
+    // brand-new chat (that was the confusing behavior). Real thread reopening
+    // comes with the threaded-chat redesign.
+    btn.addEventListener('click',function(){ if(typeof switchView==='function') switchView('agent'); var inp=document.getElementById('agent-input'); if(inp){inp.value=q; inp.style.height='auto'; inp.focus();} });
     list.insertBefore(btn,list.firstChild);
     while(list.children.length>8) list.removeChild(list.lastChild);
   }
