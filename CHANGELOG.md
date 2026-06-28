@@ -2,6 +2,52 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.96
+
+Faster answers, sharper cost accuracy, a security fix, and managed single-tenant hosting.
+
+### Performance
+- **The agent runs its tool calls in parallel.** A question that needs several cost
+  lookups used to run them one after another, each a slow Cost Explorer round-trip.
+  They now run concurrently, so multi-tool answers come back faster.
+- **Cost data is cached to disk, not just memory.** A restart, a redeploy, or the
+  next day's first query serves the prior fetch instead of re-hitting Cost Explorer.
+  Best-effort: any disk problem falls back to a normal fetch, never to stale numbers.
+- Concurrent fetch in the cost-per-commit path and parallel Cost Explorer calls in
+  tag-coverage analysis.
+
+### Cost accuracy
+- **Bedrock no longer reports $0.** An exact-match SERVICE filter missed Bedrock's
+  per-model line items; spend is attributed by service name now.
+- **Textract waste no longer inflates the "unknown" bucket N times.** The per-tag
+  breakdown resets its buckets correctly.
+- Fixed a 30-day-sum bug in cost totals and a GitHub timestamp key mismatch.
+
+### Agent
+- **Spend questions get the number, not a waste audit.** "What did we spend this
+  month?" now leads with the total and top services instead of pivoting to a savings
+  pitch.
+
+### Security
+- **Blocked git-ref argument injection (RCE) in the PR tools** and hardened the GCP
+  attribution SQL against unsanitized label keys.
+
+### Hosting (managed single-tenant)
+- **Closed the deploy gaps found in the first live single-tenant deploy** and pass
+  the Anthropic key plus managed-AI budget through to the instance, so the hosted Ask
+  tab works.
+- Graceful shutdown on SIGTERM so a hosted box survives `docker stop` and restarts.
+- Real icon and wordmark logo in the hosted dashboard topbar.
+
+### Site
+- Marketing-only front page with the demo front and center; Pricing and FAQ moved to
+  /pricing. Centered, consistent layout, Architecture and Security collapsed into
+  tabs, and a plain-language overview atop the docs.
+
+### Fixes
+- Side-effect-free `--help`, better `finops login` error handling, and genericized
+  customer names in tool docstring examples.
+
 ## 0.8.95
 
 Login-first activation everywhere.
