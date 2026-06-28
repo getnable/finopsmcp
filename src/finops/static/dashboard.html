@@ -541,6 +541,12 @@ footer a:hover{color:var(--accent)}
   .side-item.active{background:var(--bg3,#1d1d24);color:var(--fg,#f4f4f0)}
   .side-item.active svg{color:var(--accent,#4db8d4);opacity:1}
   .side-foot{margin-top:auto;font-size:11px;color:var(--fg3,#6e6e68);padding:10px 11px 0;border-top:1px solid var(--line,#22222b)}
+  .sidebar{overflow-y:auto}
+  .side-nav{margin-bottom:16px}
+  .side-empty{font-size:12px;color:var(--fg3,#6e6e68);padding:5px 11px;line-height:1.45}
+  .side-hist{color:var(--fg2,#a8a8a2);font-weight:450}
+  .side-agent svg,.side-hist svg{color:var(--accent,#4db8d4);opacity:.55}
+  .side-item:hover svg{opacity:.95}
   .topbar .logo,.topbar .nav-tabs,.topbar .nav-sep{display:none}
   @media(max-width:820px){body{padding-left:0}.sidebar{display:none}.topbar .logo,.topbar .nav-tabs{display:flex}}
 </style>
@@ -550,6 +556,20 @@ footer a:hover{color:var(--accent)}
   <nav class="side-nav">
     <button class="nav-tab side-item active" data-view="dashboard"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>Dashboard</button>
     <button class="nav-tab side-item" data-view="agent"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>Ask</button>
+  </nav>
+
+  <div class="side-cap">Agents</div>
+  <nav class="side-nav">
+    <button class="side-item side-agent" data-prompt="What's driving our spend this month? Show the biggest movers."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Cost investigation</button>
+    <button class="side-item side-agent" data-prompt="Show me rightsizing recommendations and the monthly savings."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Rightsizing</button>
+    <button class="side-item side-agent" data-prompt="Find idle resources we can safely remove."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Idle cleanup</button>
+    <button class="side-item side-agent" data-prompt="Any cost anomalies this week? Explain the biggest one."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Anomalies</button>
+    <button class="side-item side-agent" data-prompt="Where are we under-committed? Show savings-plan opportunities."><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3l1.6 5.8L19 10l-5.4 1.2L12 17l-1.6-5.8L5 10l5.4-1.2z"/></svg>Commitments</button>
+  </nav>
+
+  <div class="side-cap">History</div>
+  <nav class="side-nav" id="side-history">
+    <div class="side-empty" id="side-history-empty">Ask something to start</div>
   </nav>
   <div class="side-foot">nable · single-tenant</div>
 </aside>
@@ -1506,6 +1526,30 @@ initAgent();
 loadData();
 loadPinnedViews();
 setInterval(loadData,60000);
+</script>
+<script>
+(function(){
+  function addHist(q){
+    q=(q||'').trim(); if(!q) return;
+    var list=document.getElementById('side-history'); if(!list) return;
+    var e=document.getElementById('side-history-empty'); if(e) e.remove();
+    var lbl=q.length>30?q.slice(0,29)+'…':q;
+    var btn=document.createElement('button');
+    btn.className='side-item side-hist'; btn.textContent=lbl; btn.title=q;
+    btn.addEventListener('click',function(){ if(typeof switchView==='function') switchView('agent'); if(typeof window.askAgent==='function') window.askAgent(q); });
+    list.insertBefore(btn,list.firstChild);
+    while(list.children.length>8) list.removeChild(list.lastChild);
+  }
+  // Record every question (composer, starter, or agent) into the in-session history.
+  if(typeof window.askAgent==='function'){
+    var _ask=window.askAgent;
+    window.askAgent=function(q){ addHist(q); return _ask.call(this,q); };
+  }
+  // Sidebar agents launch the Ask view with a focused starting prompt.
+  document.querySelectorAll('.side-agent').forEach(function(b){
+    b.addEventListener('click',function(){ if(typeof switchView==='function') switchView('agent'); if(typeof window.askAgent==='function') window.askAgent(b.dataset.prompt); });
+  });
+})();
 </script>
 </body>
 </html>
