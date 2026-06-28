@@ -22,10 +22,21 @@ curl -SL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}
   -o "${DOCKER_CONFIG}/cli-plugins/docker-compose"
 chmod +x "${DOCKER_CONFIG}/cli-plugins/docker-compose"
 
+# docker buildx, required by compose v2 to build images (`up --build`). Without
+# it the build fails with "compose build requires buildx 0.17.0 or later".
+BUILDX_VERSION="v0.18.0"
+curl -SL "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64" \
+  -o "${DOCKER_CONFIG}/cli-plugins/docker-buildx"
+chmod +x "${DOCKER_CONFIG}/cli-plugins/docker-buildx"
+
 # Public repo, no credentials needed to clone. Check out the latest RELEASE TAG,
 # not arbitrary main HEAD, so the box runs a tested release.
 git clone https://github.com/chaandannn/finopsmcp /opt/nable
 git -C /opt/nable checkout "$(git -C /opt/nable describe --tags --abbrev=0)"
+
+# The clone runs as root (cloud-init); hand /opt/nable to ec2-user so the
+# operator can scp the per-customer .env in and edit it without sudo.
+chown -R ec2-user:ec2-user /opt/nable
 
 echo "nable host ready. Next: scp the per-customer .env to /opt/nable/.env, then"
 echo "  cd /opt/nable && docker compose --profile tls up -d --build"
