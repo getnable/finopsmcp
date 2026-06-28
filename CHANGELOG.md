@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.100
+
+The OS keychain is read once per process, not every few minutes.
+
+### Fixed
+- **No more repeated macOS Keychain prompts.** `Vault.default()` and the license
+  trial check read the OS keychain on every call, so a long-running server
+  re-read it constantly and macOS re-prompted ("python wants to use your
+  confidential information") every few minutes. Both now cache the master key and
+  the trial date in-process and read the keychain at most once per session. Click
+  "Always Allow" on the first prompt and it stays quiet.
+
 ## 0.8.99
 
 Audit fixes: tool loading, share links, doctor, and the serve dashboard.
