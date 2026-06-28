@@ -202,25 +202,25 @@ def test_dashboard_has_chartjs(running_server):
 def test_dashboard_has_spend_by_service(running_server):
     _, port = running_server
     _, body = _get(f"http://127.0.0.1:{port}/")
-    assert "Spend by Service" in body
+    assert "Spend by service" in body
 
 
 def test_dashboard_has_trend_chart(running_server):
     _, port = running_server
     _, body = _get(f"http://127.0.0.1:{port}/")
-    assert "Cost Trend" in body
+    assert "Spend trend" in body
 
 
 def test_dashboard_has_efficiency_scorecard(running_server):
     _, port = running_server
     _, body = _get(f"http://127.0.0.1:{port}/")
-    assert "Efficiency Scorecard" in body
+    assert "Efficiency scorecard" in body
 
 
 def test_dashboard_has_savings_opportunities(running_server):
     _, port = running_server
     _, body = _get(f"http://127.0.0.1:{port}/")
-    assert "Savings Opportunities" in body
+    assert "Savings opportunities" in body
 
 
 def test_api_data_has_trend_key(running_server):
