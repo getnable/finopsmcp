@@ -1503,7 +1503,8 @@ body{padding:0 0 60px}
 /* Top nav bar */
 .topbar{background:var(--bg);border-bottom:1px solid var(--line);padding:14px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
 .topbar-left{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
-.logo{font-size:17px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
+.logo{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:600;color:var(--fg);letter-spacing:-.01em}
+.logo svg{flex-shrink:0;display:block}
 .logo .n{color:var(--accent)}
 .header-title{font-size:14px;color:var(--fg2);border-left:1px solid var(--line2);padding-left:20px}
 .topbar-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
@@ -1619,7 +1620,10 @@ footer a:hover{filter:brightness(1.15)}
 
 <nav class="topbar">
   <div class="topbar-left">
-    <div class="logo"><span class="n">n</span>able</div>
+    <div class="logo">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#4db8d4"/><path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#0d0f10"/></svg>
+      <span>nable</span>
+    </div>
     <div class="header-title" id="hdr-title">Cost Dashboard</div>
   </div>
   <div class="topbar-right">
