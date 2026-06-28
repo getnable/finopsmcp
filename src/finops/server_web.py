@@ -2025,6 +2025,12 @@ class _Handler(BaseHTTPRequestHandler):
         rebinds its hostname to 127.0.0.1 still sends Host: evil.com."""
         host = (self.headers.get("Host") or "").split(":")[0].lower()
         allowed = {"localhost", "127.0.0.1", "::1", "[::1]"}
+        # The TLS deploy serves one public hostname (DOMAIN, required by the tls
+        # profile). Auto-allow it so a hosted box never 403s its own domain
+        # without the operator needing a separate allowlist entry.
+        domain = os.getenv("DOMAIN", "").strip().lower()
+        if domain:
+            allowed.add(domain)
         extra = os.getenv("FINOPS_DASHBOARD_ALLOWED_HOSTS", "")
         allowed.update(h.strip().lower() for h in extra.split(",") if h.strip())
         return host in allowed

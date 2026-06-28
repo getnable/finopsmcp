@@ -17,6 +17,12 @@ services:
       FINOPS_DATA_DIR: "${FINOPS_DATA_DIR:-/data}"
       # Dashboard auth
       FINOPS_DASHBOARD_PASSWORD: "${FINOPS_DASHBOARD_PASSWORD:-}"
+      # Public hostname this instance serves (set by the tls profile). nable
+      # auto-allows it as a valid Host header, so the box answers its own domain
+      # without a separate allowlist entry.
+      DOMAIN: "${DOMAIN:-}"
+      # Extra Host headers to accept beyond localhost + DOMAIN (comma-separated).
+      FINOPS_DASHBOARD_ALLOWED_HOSTS: "${FINOPS_DASHBOARD_ALLOWED_HOSTS:-}"
       # SSO: set all three to replace password login with your IdP
       # Supported: Okta, Azure AD (Entra ID), Google Workspace, any OIDC provider
       FINOPS_SSO_ISSUER: "${FINOPS_SSO_ISSUER:-}"

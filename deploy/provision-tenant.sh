@@ -55,6 +55,11 @@ DERIVED="$(printf '%s' "nable-instance:${INSTANCE_ID}" \
 # A strong fallback dashboard password (used only if the customer has no SSO).
 DASH_PW="$(openssl rand -hex 24)"
 
+# Seed a Postgres password. The compose file's optional postgres service requires
+# the variable to exist even though single-tenant uses SQLite, so this keeps the
+# deploy from failing to parse the compose file.
+PG_PW="$(openssl rand -hex 16)"
+
 mkdir -p tenants
 OUT="tenants/${SLUG}.env"
 umask 077
@@ -72,6 +77,10 @@ FINOPS_CONTROL_PLANE_SECRET=${DERIVED}
 FINOPS_REQUIRE_AUTH=1
 FINOPS_DASHBOARD_PASSWORD=${DASH_PW}
 FINOPS_ENABLE_SCHEDULER=1
+
+# Required so the compose file's optional postgres service parses. Single-tenant
+# uses SQLite; this is only consumed if you switch on shared Postgres.
+POSTGRES_PASSWORD=${PG_PW}
 # FINOPS_SSO_ISSUER=
 # FINOPS_SSO_CLIENT_ID=
 # FINOPS_SSO_CLIENT_SECRET=
