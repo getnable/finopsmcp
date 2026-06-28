@@ -42,7 +42,7 @@ Most spend is concentrated in us-east-1 ($5,841 of the $7,284 AWS total).
 
 ## Quick start
 
-Requires Python 3.10 or newer. The `uvx` command below fetches a matching Python for you. If you take the `pip` path instead, check yours first with `python --version` (or `python3 --version`). On older Python, pip reports `No matching distribution found for finops-mcp`.
+Requires Python 3.11 or newer. The `uvx` command below fetches a matching Python for you. If you take the `pip` path instead, check yours first with `python --version` (or `python3 --version`). On older Python, pip reports `No matching distribution found for finops-mcp`.
 
 **Step 1: Install and run the setup wizard**
 

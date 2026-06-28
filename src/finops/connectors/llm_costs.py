@@ -318,7 +318,12 @@ def get_all_llm_costs(
 
     def _fetch_bedrock():
         import boto3
-        boto3.client("sts").get_caller_identity()  # quick auth check
+        from botocore.config import Config
+        # Bound the STS auth probe. Without a timeout a hung IMDS/STS endpoint
+        # blocks a pool thread for botocore's default (~60s x retries); on any
+        # failure the outer loop skips Bedrock cleanly.
+        _cfg = Config(connect_timeout=5, read_timeout=10, retries={"max_attempts": 1})
+        boto3.client("sts", config=_cfg).get_caller_identity()  # quick auth check
         return get_bedrock_costs(start_date, end_date)
 
     def _fetch_vertex():

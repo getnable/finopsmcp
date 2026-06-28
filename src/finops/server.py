@@ -7041,6 +7041,7 @@ async def open_rightsizing_pr(
 
 
 def main() -> None:
+    import contextlib
     import logging
     import sys
 
@@ -7096,44 +7097,50 @@ def main() -> None:
         "   📈  Unit economics, cost per customer, % of MRR",
     ]
 
-    if status.mode == "pro":
-        print(f"\n  {border}")
-        print(f"  nable Team  ·  {status.email}")
-        print(f"  {border}")
-        for f in _FREE:
-            print(f"  {f}")
-        print(f"  {'─' * (W - 0)}")
-        for t in _TEAM:
-            print(f"  {t.replace('   ', '', 1)}")
-        print(f"  {border}\n")
+    # This banner is for a human. On the MCP-server path (the only path that
+    # reaches here, the TTY case returned above) stdout is the JSON-RPC channel
+    # for the client handshake, and any non-JSON bytes written there before
+    # mcp.run() can corrupt it so the client silently loads no tools. Route the
+    # whole banner to stderr, where it still shows in the client's server logs.
+    with contextlib.redirect_stdout(sys.stderr):
+        if status.mode == "pro":
+            print(f"\n  {border}")
+            print(f"  nable Team  ·  {status.email}")
+            print(f"  {border}")
+            for f in _FREE:
+                print(f"  {f}")
+            print(f"  {'─' * (W - 0)}")
+            for t in _TEAM:
+                print(f"  {t.replace('   ', '', 1)}")
+            print(f"  {border}\n")
 
-    elif status.mode == "trial":
-        days = status.days_remaining
-        print(f"\n  {border}")
-        print(f"  nable Team trial  ·  {days} day{'s' if days != 1 else ''} remaining  ·  all features unlocked")
-        print(f"  {border}")
-        for f in _FREE:
-            print(f"  {f}")
-        for t in _TEAM:
-            print(f"  {t.replace('   ', '', 1)}")
-        print(f"  {'─' * W}")
-        print(f"  Subscribe before day {30 - (30 - days) + 1} to keep Team features:")
-        print(f"  {_UPGRADE_URL}")
-        print(f"  {border}\n")
+        elif status.mode == "trial":
+            days = status.days_remaining
+            print(f"\n  {border}")
+            print(f"  nable Team trial  ·  {days} day{'s' if days != 1 else ''} remaining  ·  all features unlocked")
+            print(f"  {border}")
+            for f in _FREE:
+                print(f"  {f}")
+            for t in _TEAM:
+                print(f"  {t.replace('   ', '', 1)}")
+            print(f"  {'─' * W}")
+            print(f"  Subscribe before day {30 - (30 - days) + 1} to keep Team features:")
+            print(f"  {_UPGRADE_URL}")
+            print(f"  {border}\n")
 
-    else:
-        print(f"\n  {border}")
-        print(f"  nable  ·  free tier")
-        print(f"  {border}")
-        for f in _FREE:
-            print(f"  {f}")
-        print(f"  {'─' * W}")
-        print(f"  Locked on free tier  ↓")
-        for t in _TEAM:
-            print(f"  {t}")
-        print(f"  {'─' * W}")
-        print(f"  First month free → {_UPGRADE_URL}")
-        print(f"  {border}\n")
+        else:
+            print(f"\n  {border}")
+            print(f"  nable  ·  free tier")
+            print(f"  {border}")
+            for f in _FREE:
+                print(f"  {f}")
+            print(f"  {'─' * W}")
+            print(f"  Locked on free tier  ↓")
+            for t in _TEAM:
+                print(f"  {t}")
+            print(f"  {'─' * W}")
+            print(f"  First month free → {_UPGRADE_URL}")
+            print(f"  {border}\n")
 
     # Warn if running in Postgres mode without auth enforcement
     if os.getenv("DATABASE_URL") and os.getenv("FINOPS_REQUIRE_AUTH") != "1":

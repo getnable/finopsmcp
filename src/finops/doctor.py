@@ -152,6 +152,7 @@ def _check_aws_scope() -> dict:
 
     # Check Cost Explorer access (the core requirement)
     ce_ok = False
+    ce_unverified: str | None = None
     try:
         from datetime import date, timedelta
         ce = boto3.client("ce", region_name="us-east-1", config=_boto_cfg)
@@ -165,10 +166,13 @@ def _check_aws_scope() -> dict:
         ce_ok = True
     except Exception as e:
         err = str(e)
-        if "AccessDenied" in err:
-            pass  # missing ce: permission
+        if "AccessDenied" in err or "not authorized" in err:
+            pass  # missing ce: permission, ce_ok stays False
         else:
-            ce_ok = True  # got a real response error, not auth
+            # Throttling, an expired/invalid token, a validation error, or a
+            # network failure: we could not verify access. Never report the one
+            # capability doctor exists to check as healthy on an unconfirmed error.
+            ce_unverified = err.splitlines()[0][:160] if err else "unknown error"
 
     # Extended Cost Explorer actions nable uses for commitments and forecasting.
     # A credential can pass GetCostAndUsage but still miss these, which only
@@ -196,7 +200,11 @@ def _check_aws_scope() -> dict:
                 if "AccessDenied" in str(e) or "not authorized" in str(e):
                     missing_ce.append(action)
 
-    if not ce_ok:
+    if not ce_ok and ce_unverified:
+        ce_detail = f" · Cost Explorer: ? (could not verify: {ce_unverified})"
+        rec = ("Could not verify Cost Explorer access (this is not a permissions denial). "
+               "Check the credential or session is still valid, e.g. run: aws sso login, then retry: finops doctor")
+    elif not ce_ok:
         ce_detail = " · Cost Explorer: ✗ (missing ce:GetCostAndUsage)"
         rec = "Grant ce:GetCostAndUsage on this credential, or run: finops setup aws --iam-template"
     elif missing_ce:

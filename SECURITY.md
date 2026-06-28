@@ -5,6 +5,14 @@ credentials stay in your OS keyring, cost data caches in a local SQLite
 database, and there is no nable backend that receives either. The security
 architecture is documented at https://getnable.com/security.
 
+Two egress paths are worth naming directly. The AI assistant (the Slack bot
+and the dashboard Ask tab) sends your cost question and its results to
+Anthropic's API to generate an answer when you use it, never to a nable
+server, and `FINOPS_AIRGAP=1` disables it. Anonymous usage telemetry (tool
+names and a random install id, never cost figures, credentials, or account
+identifiers) is on by default and turns off with `NABLE_NO_TELEMETRY=1` or
+`FINOPS_AIRGAP=1`.
+
 ## Reporting a vulnerability
 
 Email **hello@getnable.com** with the details. Please include steps to

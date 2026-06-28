@@ -1998,16 +1998,13 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "serve":
         from .server_web import run_server, set_connectors
-        from .connectors.aws import AWSConnector
-        from .connectors.azure import AzureConnector
-        from .connectors.gcp import GCPConnector
-        # Pre-initialize connectors using vault/keyring credentials so the
-        # dashboard shows real data from the correct accounts.
-        set_connectors({
-            "aws": AWSConnector(),
-            "azure": AzureConnector(),
-            "gcp": GCPConnector(),
-        })
+        # Importing the MCP server module hydrates vault/keyring credentials into
+        # the environment (load_vault_to_env runs at its import) and exposes the
+        # canonical connector set. Without this the serve process ran with an empty
+        # environment, so Azure, GCP, and SaaS providers (which read credentials
+        # from env) showed $0 or disconnected on the dashboard even when set up.
+        from .server import _CLOUD_CONNECTORS, _SAAS_CONNECTORS
+        set_connectors({**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS})
         run_server(
             host=getattr(parsed, "host", "127.0.0.1"),
             port=getattr(parsed, "port", 8080),
