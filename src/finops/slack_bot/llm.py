@@ -353,20 +353,42 @@ def _run_agent_loop_sync(
             return LoopResult("\n".join(text_parts).strip() or "No response.", side_effects,
                               usage["input"], usage["output"])
 
-        tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
-            if block.name in remediation_names:
-                result_str = remediation.execute_draft_tool(
-                    block.name, block.input or {}, requested_by=requested_by, side_effects=side_effects
+        # The model routinely emits several read-only cost queries in one turn;
+        # running them serially is the dominant latency. Dispatch the read tools
+        # concurrently (execute_bridge_tool is thread-safe: RBAC uses the role
+        # passed per call, no shared state), keep remediation drafts serial since
+        # they mutate side_effects, then append side effects in block order so
+        # ordering stays deterministic.
+        tool_blocks = [b for b in response.content if b.type == "tool_use"]
+        read_blocks = [b for b in tool_blocks if b.name not in remediation_names]
+        results_by_id: dict[str, str] = {}
+
+        if len(read_blocks) > 1:
+            import concurrent.futures as _cf
+            with _cf.ThreadPoolExecutor(max_workers=min(6, len(read_blocks))) as _ex:
+                _futs = {
+                    _ex.submit(execute_bridge_tool, b.name, b.input or {}, role): b
+                    for b in read_blocks
+                }
+                for _f in _cf.as_completed(_futs):
+                    results_by_id[_futs[_f].id] = _f.result()
+        elif read_blocks:
+            b = read_blocks[0]
+            results_by_id[b.id] = execute_bridge_tool(b.name, b.input or {}, role=role)
+
+        for b in tool_blocks:
+            if b.name in remediation_names:
+                results_by_id[b.id] = remediation.execute_draft_tool(
+                    b.name, b.input or {}, requested_by=requested_by, side_effects=side_effects
                 )
-            else:
-                result_str = execute_bridge_tool(block.name, block.input or {}, role=role)
-                if block.name == "slice_costs":
-                    _append_cost_card(result_str, side_effects)
-                elif block.name == "pin_view":
-                    _append_pinned_view(result_str, side_effects)
+
+        tool_results = []
+        for block in tool_blocks:
+            result_str = results_by_id[block.id]
+            if block.name == "slice_costs":
+                _append_cost_card(result_str, side_effects)
+            elif block.name == "pin_view":
+                _append_pinned_view(result_str, side_effects)
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": block.id, "content": result_str}
             )
