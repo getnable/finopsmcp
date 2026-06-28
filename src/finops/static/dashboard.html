@@ -210,12 +210,12 @@ html,body{
 /* ── Charts ───────────────────────────────────────────────────────────────── */
 /* The trend chart leads (wider) and the breakdown rides alongside, so the row
    breathes instead of reading as two equal boxes. */
-.charts-row{display:grid;grid-template-columns:1.4fr 1fr;gap:24px;margin-bottom:8px}
+.charts-row{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:16px}
 @media(max-width:800px){.charts-row{grid-template-columns:1fr}}
 .chart-wrap{position:relative;height:280px}
 
 /* ── Bottom row ───────────────────────────────────────────────────────────── */
-.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:8px}
+.bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 .bottom-row .panel{min-height:320px}
 @media(max-width:800px){.bottom-row{grid-template-columns:1fr}}
 
@@ -526,6 +526,33 @@ footer a:hover{color:var(--accent)}
 </style>
 </head>
 <body>
+
+<style>
+  :root{--sidebar-w:212px}
+  body{padding-left:var(--sidebar-w)}
+  .sidebar{position:fixed;left:0;top:0;bottom:0;width:var(--sidebar-w);background:var(--bg1,#0f0f12);border-right:1px solid var(--line,#22222b);display:flex;flex-direction:column;padding:22px 14px 18px;z-index:60}
+  .side-logo{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:600;color:var(--fg,#f4f4f0);letter-spacing:-.01em;text-decoration:none;padding:4px 8px;margin-bottom:24px}
+  .side-logo svg{flex-shrink:0}
+  .side-cap{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3,#6e6e68);padding:0 11px;margin:0 0 8px}
+  .side-nav{display:flex;flex-direction:column;gap:3px}
+  .side-item{display:flex;align-items:center;gap:11px;width:100%;padding:9px 11px;border-radius:var(--r-md,6px);background:transparent;border:none;color:var(--fg2,#a8a8a2);font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;text-align:left;letter-spacing:-.01em;transition:background .15s,color .15s}
+  .side-item svg{flex-shrink:0;opacity:.8;transition:color .15s,opacity .15s}
+  .side-item:hover{background:var(--bg2,#15151a);color:var(--fg,#f4f4f0)}
+  .side-item.active{background:var(--bg3,#1d1d24);color:var(--fg,#f4f4f0)}
+  .side-item.active svg{color:var(--accent,#4db8d4);opacity:1}
+  .side-foot{margin-top:auto;font-size:11px;color:var(--fg3,#6e6e68);padding:10px 11px 0;border-top:1px solid var(--line,#22222b)}
+  .topbar .logo,.topbar .nav-tabs,.topbar .nav-sep{display:none}
+  @media(max-width:820px){body{padding-left:0}.sidebar{display:none}.topbar .logo,.topbar .nav-tabs{display:flex}}
+</style>
+<aside class="sidebar">
+  <a class="side-logo" href="/"><svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#4db8d4"/><path d="M9.5 23V11.5h2.6v1.5c.7-1.1 1.9-1.7 3.4-1.7 2.6 0 4.2 1.7 4.2 4.5V23h-2.7v-6.6c0-1.7-.9-2.6-2.4-2.6s-2.5 1-2.5 2.7V23H9.5Z" fill="#0d0f10"/></svg><span>nable</span></a>
+  <div class="side-cap">Workspace</div>
+  <nav class="side-nav">
+    <button class="nav-tab side-item active" data-view="dashboard"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>Dashboard</button>
+    <button class="nav-tab side-item" data-view="agent"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>Ask</button>
+  </nav>
+  <div class="side-foot">nable · single-tenant</div>
+</aside>
 
 <!-- Top nav -->
 <nav class="topbar">
