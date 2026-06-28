@@ -144,15 +144,17 @@ html,body{
 @media(max-width:520px){.cards{grid-template-columns:1fr}}
 
 .card{
-  position:relative;background:transparent;border:1px solid transparent;border-radius:var(--r-lg);
-  padding:18px 22px 20px 24px;overflow:hidden;
+  position:relative;background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:18px 20px;overflow:hidden;
   transition:background .2s,border-color .2s;
 }
-.card::before{content:"";position:absolute;left:6px;top:20px;bottom:20px;width:2px;border-radius:2px;background:var(--line2);transition:background .2s}
-.card:hover{background:var(--bg1);border-color:var(--line)}
+.card::before{display:none}
+.card:hover{border-color:var(--line2)}
+.card-icon{width:36px;height:36px;border-radius:9px;background:rgba(77,184,212,.1);color:var(--accent);display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.card-icon svg{width:18px;height:18px}
 .card-label{
   font-size:10.5px;font-weight:600;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--fg3);margin-bottom:16px;
+  text-transform:uppercase;color:var(--fg3);margin-bottom:8px;
 }
 .card-value{
   font-size:38px;font-weight:500;line-height:1;
@@ -686,18 +688,21 @@ footer a:hover{color:var(--accent)}
   <div class="cards">
     <!-- MTD Spend -->
     <div class="card">
+      <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18"/><path d="M16 14.5h2"/></svg></div>
       <div class="card-label">MTD Spend</div>
       <div class="card-value" id="stat-mtd"><span class="skeleton sk-val"></span></div>
       <div class="card-sub" id="stat-mtd-sub"><span class="skeleton sk-sub"></span></div>
     </div>
     <!-- Projected -->
     <div class="card">
+      <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M16 7h5v5"/></svg></div>
       <div class="card-label">Projected <span id="proj-month">Month</span> Total</div>
       <div class="card-value" id="stat-proj"><span class="skeleton sk-val"></span></div>
       <div class="card-sub" id="stat-proj-sub"><span class="skeleton sk-sub"></span></div>
     </div>
     <!-- Identified savings -->
     <div class="card">
+      <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6"/><path d="M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg></div>
       <div class="card-label">Identified Savings</div>
       <div class="card-value down" id="stat-savings"><span class="skeleton sk-val"></span></div>
       <div class="card-sub" id="stat-savings-sub"><span class="skeleton sk-sub"></span></div>
@@ -708,6 +713,7 @@ footer a:hover{color:var(--accent)}
     </div>
     <!-- FinOps Score -->
     <div class="card">
+      <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 18a8 8 0 1 1 14 0"/><path d="M12 14l3.5-3"/><circle cx="12" cy="14" r="1.3" fill="currentColor" stroke="none"/></svg></div>
       <div class="card-label">FinOps Score</div>
       <div class="score-pct" id="score-pct" style="color:var(--fg3)"><span class="skeleton" style="height:48px;width:72px;border-radius:4px;display:inline-block"></span></div>
       <div class="score-label" id="score-label"></div>
