@@ -2,6 +2,25 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.97
+
+The dashboard, rebuilt around the agent.
+
+### Dashboard
+- **Opportunities-first opening.** Leads with what nable found ("Savings nable found
+  $X/mo") and an honest realized counter, instead of a raw cost table. Realized is $0
+  on day one, so the opportunity is the value shown first.
+- **The sidebar is the AI spine.** A Workspace group, an Agents group (cost
+  investigation, rightsizing, idle cleanup, anomalies, commitments) that each launch a
+  focused Ask session, and a chat History group.
+- **Onboarding checklist** that auto-checks what's already set up (provider connected,
+  business context) and hands the rest to the agent, collapsed to a one-line nudge.
+- **Cleaner craft.** Surfaced metric cards with icon tiles, one tight metric row
+  instead of a sprawling grid, the left rail dropped, tighter panel spacing.
+- Fixed a history-click bug that fired a brand-new chat instead of loading the question.
+- The 0.8.96 logo edit reached only the fallback copy of the dashboard; it now lands in
+  the served file (static/dashboard.html).
+
 ## 0.8.96
 
 Faster answers, sharper cost accuracy, a security fix, and managed single-tenant hosting.
