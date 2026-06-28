@@ -69,6 +69,13 @@ services:
       AZURE_CLIENT_SECRET: "${AZURE_CLIENT_SECRET:-}"
       # GCP
       GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+      # --- AI / agent (powers the Ask tab + the Slack agent) ---
+      # The agent's LLM key: bring-your-own (the customer's) or your managed key.
+      # Without it the Ask tab reports "no AI key configured".
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      # Caps managed-AI spend per month (USD) so a hosted tenant can't run up your
+      # Anthropic bill. Blank = unmetered (fine for a BYO-key self-hosted box).
+      FINOPS_MANAGED_AI_BUDGET_USD: "${FINOPS_MANAGED_AI_BUDGET_USD:-}"
     volumes:
       - nable-data:/data
     depends_on:
