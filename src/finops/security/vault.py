@@ -237,10 +237,18 @@ class Vault:
             con.close()
         self._key = new_key
         self._fernet = new_fernet
+        # The cached master key is now stale; force a fresh resolution next time.
+        Vault._key_cache.clear()
         rotated = len(rows) - skipped
         log.info("Vault: key rotation complete (%d rotated, %d skipped)", rotated, skipped)
 
     # ── Factory methods ───────────────────────────────────────────────────────
+
+    # Master key cached per keyring service so the OS keychain is read once per
+    # process instead of on every Vault.default() call. Without this, a long-running
+    # server re-read the keychain repeatedly and macOS re-prompted the user every
+    # few minutes. Only successful reads are cached (a missing item never prompts).
+    _key_cache: dict[str, bytes] = {}
 
     @classmethod
     def _load_or_create_key(cls, key_path: Path) -> bytes:
@@ -256,11 +264,17 @@ class Vault:
 
     @classmethod
     def _try_keyring(cls) -> bytes | None:
+        svc = _keyring_service()
+        cached = cls._key_cache.get(svc)
+        if cached is not None:
+            return cached
         try:
             import keyring  # type: ignore[import]
-            val = keyring.get_password(_keyring_service(), _KEYRING_USER)
+            val = keyring.get_password(svc, _KEYRING_USER)
             if val:
-                return base64.urlsafe_b64decode(val.encode())
+                key = base64.urlsafe_b64decode(val.encode())
+                cls._key_cache[svc] = key
+                return key
         except Exception:
             pass
         return None
@@ -269,7 +283,9 @@ class Vault:
     def _save_keyring(cls, key: bytes) -> bool:
         try:
             import keyring  # type: ignore[import]
-            keyring.set_password(_keyring_service(), _KEYRING_USER, base64.urlsafe_b64encode(key).decode())
+            svc = _keyring_service()
+            keyring.set_password(svc, _KEYRING_USER, base64.urlsafe_b64encode(key).decode())
+            cls._key_cache[svc] = key  # warm the cache so the next read skips the keychain
             return True
         except Exception:
             return False

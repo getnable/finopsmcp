@@ -188,14 +188,23 @@ def _sign_date(iso_date: str) -> str:
 
 # ── Keyring helpers ───────────────────────────────────────────────────────────
 
+# The trial date, cached after the first successful keychain read so the OS
+# keychain is not re-read (and macOS does not re-prompt) on every status check.
+_kr_cached_date: "date | None" = None
+
+
 def _kr_get() -> date | None:
+    global _kr_cached_date
+    if _kr_cached_date is not None:
+        return _kr_cached_date
     try:
         import keyring  # type: ignore
         val = keyring.get_password(_KR_SERVICE, _KR_USERNAME)
         if val:
             iso, _, sig = val.partition(":")
             if sig and hmac.compare_digest(sig, _sign_date(iso)):
-                return date.fromisoformat(iso)
+                _kr_cached_date = date.fromisoformat(iso)
+                return _kr_cached_date
             log.debug("Keyring entry signature mismatch - ignoring")
     except Exception:
         pass
@@ -203,10 +212,12 @@ def _kr_get() -> date | None:
 
 
 def _kr_set(d: date) -> None:
+    global _kr_cached_date
     try:
         import keyring  # type: ignore
         iso = d.isoformat()
         keyring.set_password(_KR_SERVICE, _KR_USERNAME, f"{iso}:{_sign_date(iso)}")
+        _kr_cached_date = d  # warm the cache so the next read skips the keychain
     except Exception:
         pass
 
