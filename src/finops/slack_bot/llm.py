@@ -264,10 +264,18 @@ def _run_agent_loop_sync(
         log.error('anthropic package not installed; install "finops-mcp[slack]"')
         return LoopResult("nable isn't fully set up yet. Ask whoever installed me to finish configuring it.")
 
+    # Airgap mode disables the AI assistant: answering a question sends the cost
+    # query results to api.anthropic.com, which airgap mode exists to prevent.
+    if os.environ.get("FINOPS_AIRGAP", "").strip():
+        return LoopResult("nable is in airgap mode (FINOPS_AIRGAP is set), so the AI assistant is off "
+                          "because answering would send data to Anthropic. Unset FINOPS_AIRGAP to use it.")
+
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        log.error("ANTHROPIC_API_KEY not set; the Slack bot cannot call the model")
-        return LoopResult("nable isn't fully set up yet (no AI key configured). Ask whoever installed me to finish setup.")
+        log.error("ANTHROPIC_API_KEY not set; nable cannot call the model")
+        return LoopResult("No AI key is configured, so I can't answer yet. Whoever runs nable needs to set the "
+                          "ANTHROPIC_API_KEY environment variable where it runs (get a key at console.anthropic.com), "
+                          "then try again.")
 
     # Identity must be set in THIS thread: ContextVars do not cross executor threads.
     role = "admin"

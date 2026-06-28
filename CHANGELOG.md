@@ -2,6 +2,39 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.99
+
+Audit fixes: tool loading, share links, doctor, and the serve dashboard.
+
+### Fixed
+- **MCP tool loading.** The startup banner printed to stdout on the server path,
+  the same channel as the JSON-RPC handshake, so a strict MCP client could load
+  zero nable tools. The banner now goes to stderr and stdout stays clean.
+- **`finops serve` showed $0 for Azure, GCP, and SaaS.** The serve process never
+  hydrated the vault into the environment, so providers that read credentials
+  from env looked disconnected. It now hydrates and uses the full connector set.
+- **Read-only share links are read-only again.** The `/view` flag was injected
+  after the page scripts ran, so the "View only" badge never showed and the Ask
+  composer stayed live. It is injected in the head now, before the scripts run.
+- **`finops doctor` no longer reports "Cost Explorer: ✓" on a real error.** A
+  throttle, an expired token, or a network failure was treated as healthy. It
+  now reports "could not verify" and never green on an unconfirmed error.
+- **The Bedrock cost probe can't hang.** The STS auth check had no timeout; it
+  now bounds connect and read and skips Bedrock cleanly on failure.
+
+### Changed
+- **A legible "no AI key" message.** The dashboard Ask and the Slack bot now say
+  to set `ANTHROPIC_API_KEY` and where to get one, instead of a vague guess.
+- **Airgap covers the AI assistant.** `FINOPS_AIRGAP=1` now disables the agent
+  (which would otherwise send query results to Anthropic), and SECURITY.md names
+  the two egress paths (the assistant and anonymous telemetry) directly.
+- **Dashboard polish.** A fresh account reads "not scored" instead of a false
+  "healthy", "New view" pre-fills an editable prompt instead of auto-sending,
+  and a long answer shows a "still working" note instead of static dots.
+- Server error responses (SSO, `/api/data`, mark-done) are generic to the client
+  and logged in full server-side, no raw exceptions or account identifiers.
+- Docs now state Python 3.11+ (the package requires 3.11), not 3.10.
+
 ## 0.8.98
 
 The clean dashboard redesign goes live.

@@ -2213,7 +2213,8 @@ button:hover{{filter:brightness(1.1)}}
             except (ValueError, TypeError):
                 self._send(400, "application/json", b'{"error":"Invalid id"}')
             except Exception as exc:
-                body = json.dumps({"error": str(exc)}).encode()
+                log.error("mark-done failed: %s", exc, exc_info=True)
+                body = json.dumps({"error": "Could not mark the recommendation as done."}).encode()
                 self._send(500, "application/json", body)
             return
 
@@ -2456,9 +2457,13 @@ button:hover{{filter:brightness(1.1)}}
 
             # /view without token — check read-only cookie
             if self._ro_cookie_valid() or self._cookie_valid():
+                # Inject the read-only flag into <head>, before the dashboard
+                # scripts run. Injecting at </body> set it after the scripts had
+                # already read window._READONLY, so the "View only" badge never
+                # showed and the Ask composer stayed interactive on share links.
                 html = _load_dashboard_html().replace(
-                    "</body>",
-                    "<script>window._READONLY=true;</script></body>",
+                    "</head>",
+                    "<script>window._READONLY=true;</script></head>",
                 )
                 self._send(200, "text/html; charset=utf-8", html.encode())
             else:
@@ -2479,7 +2484,7 @@ button:hover{{filter:brightness(1.1)}}
                 self.end_headers()
             except Exception as exc:
                 log.error("SSO login error: %s", exc)
-                self._serve_login_page(sso_error=f"SSO configuration error: {exc}")
+                self._serve_login_page(sso_error="Single sign-on is not configured correctly. Contact your administrator.")
             return
 
         if path == "/sso/callback":
@@ -2490,7 +2495,8 @@ button:hover{{filter:brightness(1.1)}}
             state = qs.get("state", [""])[0]
             error_param = qs.get("error_description", qs.get("error", [""]))[0]
             if error_param:
-                self._serve_login_page(sso_error=f"IdP returned error: {error_param}")
+                log.warning("SSO IdP returned error: %s", error_param)
+                self._serve_login_page(sso_error="Single sign-on failed. Please try again or contact your administrator.")
                 return
             if not code or not state:
                 self._serve_login_page(sso_error="Missing code or state in SSO callback")
@@ -2509,7 +2515,7 @@ button:hover{{filter:brightness(1.1)}}
                 self.end_headers()
             except Exception as exc:
                 log.warning("SSO callback failed: %s", exc)
-                self._serve_login_page(sso_error=f"Sign-in failed: {exc}")
+                self._serve_login_page(sso_error="Sign-in failed. Please try again or contact your administrator.")
             return
 
         if path == "/auth/cp":
@@ -2604,7 +2610,9 @@ button:hover{{filter:brightness(1.1)}}
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                 }
             except Exception as exc:
-                data = {"error": str(exc), "generated_at": datetime.now(timezone.utc).isoformat()}
+                log.error("dashboard data fetch failed: %s", exc, exc_info=True)
+                data = {"error": "Could not load cost data. Check that a provider is connected and see the server logs for details.",
+                        "generated_at": datetime.now(timezone.utc).isoformat()}
             finally:
                 loop.close()
             body = json.dumps(data).encode()

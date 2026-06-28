@@ -47,6 +47,6 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 - Flat fee, not a percentage of spend: nable never profits from your bill growing
 - Local-first (Dev, Pro, Startups): credentials stay in your OS keyring, cost data caches in a local SQLite database on your machine, nable has no backend that holds your data
 - Hosting (optional add-on on any paid plan): single-tenant, your data is never pooled with another customer's, billed in monthly use-it-or-lose-it credits on top of the plan
-- Install: `uvx nable` (uv fetches a matching Python and runs the setup wizard), or `pip install -U finops-mcp` on Python 3.10 or newer
+- Install: `uvx nable` (uv fetches a matching Python and runs the setup wizard), or `pip install -U finops-mcp` on Python 3.11 or newer
 - Works with: Claude Desktop, Cursor, Windsurf, Zed and any MCP client
 - Site: https://getnable.com

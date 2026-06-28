@@ -303,7 +303,7 @@ footer a:hover{color:var(--accent)}
   <div class="nav-cap">Dashboards</div>
   <nav class="nav">
     <button class="nav-item nav-tab active" data-view="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>Cost overview</button>
-    <button class="nav-item nav-new side-agent" data-prompt="Build a view: spend by team this quarter and pin it to my dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New view</button>
+    <button class="nav-item nav-new" id="new-view" data-prompt="Build a view: spend by team this quarter, then pin it to my dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New view</button>
   </nav>
 
   <div class="nav-cap">Agents</div>
@@ -714,25 +714,32 @@ function render(d){
     const mtdSub=document.getElementById('stat-mtd-sub'); if(mtdSub) mtdSub.textContent='on pace with last month';
   }
 
-  // Card 4: FinOps Score (NN/100)
+  // Card 4: FinOps Score (NN/100). Until a cost audit has produced scorecard
+  // dimensions, the account is unscored, not "healthy", show that honestly
+  // rather than a green 0/100 with "no major gaps".
+  const dims=(d.scorecard||{}).dimensions||[];
+  const scored=dims.length>0;
+  const weak=dims.filter(dim=>(dim.score||0)<40).map(dim=>(dim.display_name||dim.name).toLowerCase());
   const score=Math.round(d.finops_score||0);
   const scorePctEl=document.getElementById('score-pct');
   if(scorePctEl){
-    scorePctEl.textContent=score;
-    let scoreColor;
-    if(score>=80) scoreColor='var(--success)';
-    else if(score>=60) scoreColor='var(--accent)';
-    else if(score>=40) scoreColor='var(--warn)';
-    else scoreColor='var(--alert)';
-    scorePctEl.style.color=scoreColor;
+    if(!scored){scorePctEl.textContent='—';scorePctEl.style.color='var(--fg3)';}
+    else{
+      scorePctEl.textContent=score;
+      let scoreColor;
+      if(score>=80) scoreColor='var(--success)';
+      else if(score>=60) scoreColor='var(--accent)';
+      else if(score>=40) scoreColor='var(--warn)';
+      else scoreColor='var(--alert)';
+      scorePctEl.style.color=scoreColor;
+    }
   }
-  const dims=(d.scorecard||{}).dimensions||[];
-  const weak=dims.filter(dim=>(dim.score||0)<40).map(dim=>(dim.display_name||dim.name).toLowerCase());
   const scoreGaps=document.getElementById('score-gaps');
-  if(scoreGaps) scoreGaps.textContent=weak.length?weak.slice(0,3).join(', '):'no major gaps';
+  if(scoreGaps) scoreGaps.textContent=!scored?'run a cost audit to score':(weak.length?weak.slice(0,3).join(', '):'no major gaps');
   const scorePill=document.getElementById('score-pill');
   if(scorePill){
-    if(weak.length){scorePill.className='trend warn';scorePill.textContent=weak.length+' gap'+(weak.length>1?'s':'');}
+    if(!scored){scorePill.className='trend flat';scorePill.textContent='not scored';}
+    else if(weak.length){scorePill.className='trend warn';scorePill.textContent=weak.length+' gap'+(weak.length>1?'s':'');}
     else{scorePill.className='trend flat';scorePill.textContent='healthy';}
   }
 
@@ -1092,6 +1099,13 @@ async function askAgent(q){
   if(input){input.value='';input.style.height='auto';}
   const thinking=appendMsg('agent','',{thinking:true});
   setAgentBusy(true);
+  // After a few seconds, reassure instead of showing static dots: the first
+  // question pulls live cost data and a "what changed" question runs a longer pass.
+  const _reassure=setTimeout(function(){
+    if(!agentBusy) return;
+    const b=thinking.querySelector('.msg-bubble');
+    if(b) b.innerHTML='<span class="dots"><i></i><i></i><i></i></span><span style="color:var(--fg3);font-size:13px;margin-left:10px">Still working. The first question pulls live cost data, and a deeper question can take up to a minute.</span>';
+  },6000);
   try{
     const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
     const data=await r.json().catch(()=>({}));
@@ -1112,6 +1126,7 @@ async function askAgent(q){
     thinking.remove();
     appendMsg('agent','Network error reaching the agent. Check that the server is running and try again.',{err:true});
   }finally{
+    clearTimeout(_reassure);
     setAgentBusy(false);
     const i=document.getElementById('agent-input'); if(i) i.focus();
   }
@@ -1172,6 +1187,15 @@ setInterval(loadData,60000);
   // Ask view with a focused starting prompt.
   document.querySelectorAll('.side-agent,.sug[data-prompt]').forEach(function(b){
     b.addEventListener('click',function(){ if(typeof switchView==='function') switchView('agent'); if(typeof window.askAgent==='function') window.askAgent(b.dataset.prompt); });
+  });
+  // "New view" opens Ask with an editable template in the composer instead of
+  // auto-firing a canned prompt, so the user shapes the view (dimension, period)
+  // before asking. It reads as a builder, so it should not answer for them.
+  var _nv=document.getElementById('new-view');
+  if(_nv) _nv.addEventListener('click',function(){
+    if(typeof switchView==='function') switchView('agent');
+    var inp=document.getElementById('agent-input');
+    if(inp){ inp.value=_nv.dataset.prompt; inp.style.height='auto'; inp.style.height=Math.min(inp.scrollHeight,200)+'px'; inp.focus(); }
   });
 })();
 </script>
