@@ -1,0 +1,66 @@
+name: Build container image (GHCR)
+
+# Build the nable container image once, in CI, and push it to GHCR. Hosted boxes
+# then PULL this prebuilt, tested artifact (docker compose pull) instead of each
+# box compiling it from source. That is what makes updating N single-tenant boxes
+# one command (see deploy/fleet-update.sh and docs/FLEET.md) instead of N manual
+# rebuilds. Runs on every release tag; the workflow_dispatch input lets you build
+# the image for an already-tagged version retroactively from the selected ref.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      image_version:
+        description: "Version tag for the image, e.g. 0.8.100. Builds from the selected ref."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write   # push to GHCR
+
+jobs:
+  build-and-push:
+    name: Build and push to GHCR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Resolve image version
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.image_version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"   # refs/tags/vX.Y.Z -> X.Y.Z
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building ghcr.io/${GITHUB_REPOSITORY_OWNER}/finops:${VERSION}"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64   # the hosted boxes are x86_64
+          push: true
+          # A plain single-manifest image so every box (docker compose v2) pulls
+          # it cleanly. Attestation manifests are skipped here to avoid the multi-
+          # manifest index some pull paths choke on; the PyPI artifact carries the
+          # signed provenance.
+          provenance: false
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/finops:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/finops:latest

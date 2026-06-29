@@ -22,8 +22,9 @@ curl -SL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}
   -o "${DOCKER_CONFIG}/cli-plugins/docker-compose"
 chmod +x "${DOCKER_CONFIG}/cli-plugins/docker-compose"
 
-# docker buildx, required by compose v2 to build images (`up --build`). Without
-# it the build fails with "compose build requires buildx 0.17.0 or later".
+# docker buildx. The box PULLS the prebuilt release image from GHCR, so buildx is
+# not needed for normal operation; it is kept only for the optional local-build
+# fallback (`docker compose up --build`). Safe to drop on a pull-only box.
 BUILDX_VERSION="v0.18.0"
 curl -SL "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64" \
   -o "${DOCKER_CONFIG}/cli-plugins/docker-buildx"
@@ -39,4 +40,8 @@ git -C /opt/nable checkout "$(git -C /opt/nable describe --tags --abbrev=0)"
 chown -R ec2-user:ec2-user /opt/nable
 
 echo "nable host ready. Next: scp the per-customer .env to /opt/nable/.env, then"
-echo "  cd /opt/nable && docker compose --profile tls up -d --build"
+echo "  cd /opt/nable && docker compose --profile tls pull && docker compose --profile tls up -d"
+echo ""
+echo "For one-command fleet updates with no SSH, give this instance an IAM role"
+echo "that includes AmazonSSMManagedInstanceCore and tag it app=nable, then drive"
+echo "all boxes from deploy/fleet-update.sh. See docs/FLEET.md."
