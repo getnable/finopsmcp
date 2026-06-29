@@ -724,7 +724,7 @@ function CheckIcon(){
 // Paid checkout links. Pro = $100/mo flat or $1,000/yr (2 months free): local,
 // bring your own LLM key. Startups = $1,000/mo or $10,000/yr: org scale, local,
 // bring your own LLM key. Hosting (single-tenant + managed AI) is an optional
-// credit-based add-on on either plan, billed on top, use-it-or-lose-it.
+// managed single-tenant add-on on either plan, billed on top; priced via a demo.
 const PRO_MONTHLY_LINK     = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
 const PRO_ANNUAL_LINK      = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
 const STARTUP_MONTHLY_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
@@ -739,7 +739,7 @@ const PRICE_ROWS = [
   { label: "Remediation PRs, alerts, dashboards, Slack bot", dev: false,         pro: true,           startup: true,                    ent: true },
   { label: "Runs",                                          dev: "Your machine", pro: "Your machine", startup: "Your machine",          ent: "Hosted or self-host" },
   { label: "Managed AI",                                    dev: "Your own key", pro: "Your own key", startup: "Your own key",          ent: "Custom" },
-  { label: "Hosting + managed AI (add-on)",                 dev: false,          pro: "+$200/mo · 500 credits", startup: "+$4,000/mo · 10,000 credits", ent: "Custom" },
+  { label: "Hosting + managed AI (add-on)",                 dev: false,          pro: "Contact us", startup: "Contact us", ent: "Custom" },
   { label: "SSO + audit logs",                              dev: false,          pro: false,          startup: false,                   ent: true },
   { label: "Support",                                       dev: "Slack",        pro: "Slack",        startup: "Priority Slack",        ent: "Slack + SLA" },
 ];
@@ -797,7 +797,7 @@ function Pricing(){
       feats:["Everything in Dev","Remediation PRs + tickets","Alerts, digests, budgets","Hosting add-on available"],
       cta:annual ? "Get annual" : "Get Pro", href:proLink, plan:annual?"pro_annual":"pro_monthly", ext:true, primary:true, rec:true },
     { key:"startup", name:"Startups", tag:"Scale to the whole org", amt:startupPrice, per, billed,
-      feats:["Everything in Pro","Org scale, more accounts","Priority support","10,000-credit hosting tier"],
+      feats:["Everything in Pro","Org scale, more accounts","Priority support","Single-tenant hosting available"],
       cta:"Get Startups", href:startupLink, plan:annual?"startups_annual":"startups_monthly", ext:true, primary:false, rec:false },
     { key:"ent", name:"Enterprise", tag:"Controls, SSO + an SLA", amt:"Custom", per:"", billed:"Talk to us",
       feats:["Everything in Startups","SSO + audit logs","Dedicated SLA","Hosted or self-host"],
@@ -825,10 +825,9 @@ function Pricing(){
 
         <div className="phost">
           <div className="phost-label">Hosting add-on</div>
-          <p className="phost-body">Optional on Pro or Startups. We run nable single-tenant with a managed AI agent, billed on top of your plan in monthly credits that reset each month, use them or lose them.</p>
+          <p className="phost-body">Optional on Pro or Startups. We run nable single-tenant for you, with a managed AI agent and dashboards your team can use without a terminal. Your bill and credentials are never pooled with another customer's.</p>
           <div className="phost-rows">
-            <div className="phost-row"><span className="phost-tier">Pro</span><span className="phost-price">500 credits · $200/mo</span></div>
-            <div className="phost-row"><span className="phost-tier">Startups</span><span className="phost-price">10,000 credits · $4,000/mo</span></div>
+            <a className="phost-demo" href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" style={{display:'inline-flex',padding:'10px 20px',borderRadius:'8px',background:'var(--accent)',color:'#06181d',fontWeight:600,fontSize:'14px',textDecoration:'none'}}>Contact us for a demo &rarr;</a>
           </div>
         </div>
 
@@ -884,7 +883,7 @@ const FAQ_QA = [
   ["What is nable?",
    "nable is a local-first, AI-native FinOps tool. It is an MCP server you install on your own machine to ask about your AWS, Azure, GCP, and AI or LLM spend right inside Claude, Cursor, or any MCP editor. Your credentials never leave your machine."],
   ["Is nable free?",
-   "Yes. The Dev tier is free with no credit card and no expiry: cost queries, anomaly detection, rightsizing, LLM spend tracking, and every connector. Paid tiers add remediation pull requests, alerts, scheduled digests, with single-tenant hosting available as a credit-based add-on."],
+   "Yes. The Dev tier is free with no credit card and no expiry: cost queries, anomaly detection, rightsizing, LLM spend tracking, and every connector. Paid tiers add remediation pull requests, alerts, scheduled digests, with managed single-tenant hosting available as an optional add-on, contact us for a demo."],
   ["Does nable see or store my cloud credentials?",
    "No. nable runs on your machine. Credentials stay in your OS keyring and cost data caches in a local SQLite database. There is no nable backend that holds your data, and nothing is shipped to a vendor."],
   ["Can nable change my cloud infrastructure on its own?",
