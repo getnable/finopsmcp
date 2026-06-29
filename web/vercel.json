@@ -4,6 +4,7 @@
     { "source": "/account", "destination": "/account.html" },
     { "source": "/about", "destination": "/about.html" },
     { "source": "/finops-mcp-comparison", "destination": "/finops-mcp-comparison.html" },
+    { "source": "/reduce-aws-bill", "destination": "/reduce-aws-bill.html" },
     { "source": "/security", "destination": "/security.html" },
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/terms", "destination": "/terms.html" },
