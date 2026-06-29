@@ -33,6 +33,19 @@ POSTHOG_PROJECT_ID = os.environ.get("POSTHOG_PROJECT_ID", "")
 POSTHOG_API_KEY = os.environ.get("POSTHOG_PERSONAL_API_KEY", "")
 ACTIVATION_EVENT = os.environ.get("ACTIVATION_EVENT", "provider_connected")
 
+# The connect funnel in order, so we can see exactly where people drop before
+# they activate. These are the events setup_wizard.py emits.
+FUNNEL_STEPS = [
+    ("aws_connect_opened", "opened the connect flow"),
+    ("ambient_probe_done", "probed for existing AWS creds"),
+    ("ambient_confirmed", "accepted a detected profile"),
+    ("no_ambient_creds", "no creds found, sent to manual"),
+    ("ambient_declined", "declined the detected profile"),
+    ("connect_attempted", "attempted a connection"),
+    ("verify_failed", "connection verify FAILED"),
+    ("provider_connected", "CONNECTED  <- activation"),
+]
+
 
 def _get_json(url, headers=None, data=None):
     # Shell out to curl: it uses the system trust store, which avoids the macOS
@@ -88,6 +101,27 @@ def activations():
     return count(7), count(30)
 
 
+def funnel(days=30):
+    if not (POSTHOG_PROJECT_ID and POSTHOG_API_KEY):
+        return None
+    events = ", ".join(f"'{e}'" for e, _ in FUNNEL_STEPS)
+    sql = (
+        f"SELECT event, count(DISTINCT person_id) FROM events "
+        f"WHERE event IN ({events}) AND timestamp > now() - INTERVAL {days} DAY "
+        f"GROUP BY event"
+    )
+    body = json.dumps({"query": {"kind": "HogQLQuery", "query": sql}}).encode()
+    res = _get_json(
+        f"{POSTHOG_HOST}/api/projects/{POSTHOG_PROJECT_ID}/query",
+        headers={
+            "Authorization": f"Bearer {POSTHOG_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        data=body,
+    )
+    return {row[0]: row[1] for row in res.get("results", [])}
+
+
 def main():
     print(f"\n  Weekly read . {PKG} . {date.today().isoformat()}")
     print("  " + "-" * 52)
@@ -122,6 +156,21 @@ def main():
     else:
         print("  Activations: set POSTHOG_PROJECT_ID + POSTHOG_PERSONAL_API_KEY to show")
         print(f"    distinct '{ACTIVATION_EVENT}'. This is the real read; the rest is noise.")
+
+    try:
+        fn = funnel(30)
+    except Exception as e:  # noqa: BLE001
+        fn = None
+        print(f"  funnel: query failed ({e})")
+    if fn:
+        print()
+        print("  Connect funnel (distinct people, last 30 days):")
+        top = fn.get("aws_connect_opened", 0) or 1
+        for ev, label in FUNNEL_STEPS:
+            c = fn.get(ev, 0)
+            print(f"    {c:>5,}  {round(100 * c / top):>3}%  {label}")
+        conn = fn.get("provider_connected", 0)
+        print(f"    => {round(100 * conn / top)}% of people who opened the flow connected")
     print()
 
 
