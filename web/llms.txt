@@ -29,6 +29,7 @@ nable proposes; a human decides. It drafts pull requests, opens tickets, and rai
 - [Security](https://getnable.com/security): architecture, credential handling, AI exposure, disclosure policy
 - [Access scope](https://getnable.com/iam): exact least-privilege read-only IAM policies for AWS, GCP, Azure; what nable can and cannot touch
 - [FinOps MCP comparison](https://getnable.com/finops-mcp-comparison): nable vs AWS Billing MCP, Vantage, Finout and open-source servers, compared honestly
+- [How to reduce your AWS bill](https://getnable.com/reduce-aws-bill): practical guide to finding and cutting AWS waste, the five highest-payoff levers
 - [About](https://getnable.com/about): who builds nable and why
 
 ## Install

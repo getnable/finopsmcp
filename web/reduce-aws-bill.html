@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to reduce your AWS bill: a practical 2026 guide · nable</title>
+<meta name="description" content="A practical, no-fluff guide to cutting your AWS bill: kill idle resources, right-size over-provisioned instances, commit to steady-state usage with Savings Plans, tier storage, and catch spikes early. Most teams find 20-30% without re-architecting." />
+<link rel="canonical" href="https://getnable.com/reduce-aws-bill" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Why did my AWS bill go up this month?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A month-over-month AWS increase is usually one of four things: a new or scaled-up workload, a forgotten resource left running, a pricing change such as on-demand replacing an expired commitment, or fast-growing data transfer and AI/Bedrock usage. Compare this month to last by service and by usage type in Cost Explorer, and the one or two line items that moved will stand out. Set an anomaly alert so the next spike is caught in days, not at invoice time."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How much of cloud spend is typically wasted?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Organizations estimate that roughly 30% of their cloud spend is wasted, according to Flexera's State of the Cloud report. The waste is rarely one big item; it is many small ones: idle test environments, over-provisioned databases, on-demand pricing on steady workloads, and orphaned storage and snapshots."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the fastest way to cut an AWS bill without re-architecting?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The fastest wins need no code changes: delete idle and unattached resources, right-size instances and databases running far below capacity, and buy Savings Plans or Reserved Instances for the baseline you run every day. These three levers typically recover 20-30% and can be done in a few days."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I track Amazon Bedrock or LLM costs?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Break AI spend down by model and by usage, not just by the Bedrock service total. Token prices keep falling, but agents use 5 to 30 times more tokens, so the bill climbs anyway. Attribute cost per model, per token, and per workload so you can see which model or feature is driving the growth, and route to a cheaper model where quality allows."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is it safe to give a cost tool access to my AWS account?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It is safe when the access is read-only and scoped to cost and metadata. A well-designed FinOps tool reads Cost Explorer, billing, and describe APIs only; it cannot read your S3 objects, logs, or database rows. nable goes further by running locally so your credentials stay in your own machine's keyring and never reach a vendor backend."
+      }
+    }
+  ]
+}
+</script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#000000;--bg-1:#121517;--bg-2:#16191c;
+    --fg:#f4f7f8;--fg-2:#aeb7bd;--fg-3:#6b7177;
+    --line:#1f2428;--line-2:#2a3036;--accent:#4db8d4;--ok:#3cba7a;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  html,body{background:var(--bg);color:var(--fg);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.6;font-size:15.5px;letter-spacing:-.005em}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 86%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:14px 0}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between}
+  .logo{font-weight:600;font-size:16px;letter-spacing:-.02em}
+  .logo .n{color:var(--accent)}
+  .nav-cta{display:inline-flex;padding:8px 16px;border-radius:8px;background:var(--accent);color:#06181d;font-size:13.5px;font-weight:600}
+  header.hero{padding:60px 0 12px}
+  .crumb{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:20px}
+  h1{font-size:clamp(29px,4.2vw,42px);font-weight:500;letter-spacing:-.03em;line-height:1.12}
+  h1 .accent{color:var(--accent)}
+  .answer{margin-top:20px;font-size:17px;color:var(--fg);max-width:68ch;line-height:1.62;border-left:2px solid var(--accent);padding-left:18px}
+  .updated{margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--fg-3)}
+  main{padding:30px 0 56px}
+  h2{font-size:21px;font-weight:500;letter-spacing:-.02em;margin:40px 0 12px}
+  h3{font-size:16.5px;font-weight:600;margin:22px 0 6px;color:var(--fg)}
+  p,li{color:var(--fg-2);font-size:15px;max-width:72ch}
+  ul,ol{padding-left:22px;margin:10px 0}
+  li{margin:7px 0}
+  strong{color:var(--fg);font-weight:600}
+  code{font-family:var(--mono);font-size:13px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--fg)}
+  .stat{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);padding:18px 22px;margin:18px 0}
+  .stat .big{font-size:30px;font-weight:600;color:var(--accent);letter-spacing:-.02em;line-height:1}
+  .stat .src{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);margin-top:8px}
+  .lever{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);padding:18px 22px;margin:12px 0}
+  .lever h3{margin-top:0}
+  .lever p{margin:0;max-width:none}
+  .cta-card{border:1px solid var(--line-2);border-radius:14px;background:linear-gradient(180deg,rgba(77,184,212,.06),transparent 70%),var(--bg-1);padding:24px 26px;margin:28px 0}
+  .cta-card code{background:var(--bg-2)}
+  .cta-row{margin-top:16px;display:flex;gap:12px;flex-wrap:wrap}
+  .btn{display:inline-flex;padding:10px 18px;border-radius:9px;font-size:14px;font-weight:600}
+  .btn-primary{background:var(--accent);color:#06181d}
+  .btn-ghost{border:1px solid var(--line-2);color:var(--fg)}
+  .faq h3{margin:20px 0 5px}
+  footer{border-top:1px solid var(--line);padding:26px 0;font-size:13px;color:var(--fg-3);margin-top:20px}
+  .foot-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  footer a{color:var(--fg-2)}
+  footer a:hover{color:var(--fg)}
+  a.inline{color:var(--accent)}
+</style>
+</head>
+<body>
+<nav><div class="wrap nav-inner">
+  <a class="logo" href="/"><span class="n">n</span>able</a>
+  <a class="nav-cta" href="/#install">Get started free</a>
+</div></nav>
+<header class="hero"><div class="wrap">
+  <div class="crumb"><a href="/">getnable.com</a> / how to reduce your AWS bill</div>
+  <h1>How to reduce your <span class="accent">AWS bill</span></h1>
+  <p class="answer">To cut your AWS bill, work in this order: turn off idle and unattached resources, right-size instances and databases running below capacity, cover steady-state usage with Savings Plans or Reserved Instances, move cold data to cheaper storage tiers, and set anomaly alerts so a spike never runs a full month before you catch it. Most teams recover 20 to 30 percent without re-architecting anything.</p>
+  <p class="updated">Last updated: June 28, 2026</p>
+</div></header>
+<main><div class="wrap">
+
+<h2>Most of the bill is small, boring waste</h2>
+<div class="stat">
+  <div class="big">~30%</div>
+  <p style="margin:6px 0 0">of cloud spend is wasted, by organizations' own estimate.</p>
+  <div class="src">Source: Flexera, State of the Cloud Report</div>
+</div>
+<p>The waste is rarely one dramatic line item. It is a forgotten test environment, a database three sizes too large, on-demand pricing on a workload that runs 24/7, an unattached volume nobody deleted, and AI usage that crept up quietly. The good news: that also means most of it is recoverable without touching your architecture. Here are the levers, in the order that pays off fastest.</p>
+
+<h2>The five levers, fastest payoff first</h2>
+
+<div class="lever"><h3>1. Kill idle and unattached resources</h3>
+<p>Stopped EC2 instances still paying for attached EBS, unattached volumes, idle load balancers, unused Elastic IPs, and old snapshots add up quietly. These are pure waste with no workload behind them, so deleting them carries almost no risk. This is the first place to look and usually the fastest money.</p></div>
+
+<div class="lever"><h3>2. Right-size what is over-provisioned</h3>
+<p>EC2, RDS, and ECS tasks pinned at 10 percent CPU are paying for capacity they never use. AWS Compute Optimizer and CloudWatch metrics show which instances and databases can drop a size or two with no performance hit. Right-sizing is a config change, not a rewrite.</p></div>
+
+<div class="lever"><h3>3. Commit to your steady-state usage</h3>
+<p>Anything you run every day at on-demand pricing is overpaying. Cover that baseline with Savings Plans or Reserved Instances. A one-year, no-upfront commitment is the low-risk default and often saves 30 to 40 percent on the committed usage. Commit to the floor of your usage, not the peak.</p></div>
+
+<div class="lever"><h3>4. Tier your storage</h3>
+<p>Turn on S3 Intelligent-Tiering so cold objects move to cheaper tiers automatically, add lifecycle rules to Infrequent Access or Glacier for archives, and migrate gp2 EBS volumes to gp3 for the same performance at lower cost. Storage waste compounds because it is rarely revisited.</p></div>
+
+<div class="lever"><h3>5. Catch spikes early, and watch AI spend</h3>
+<p>Set anomaly detection against a rolling baseline and alert in Slack, so a runaway cost is caught in days instead of at invoice time. Pay special attention to AI and Bedrock spend: token prices keep falling, but agents use 5 to 30 times more tokens, so the bill climbs anyway. Track cost per model and per workload to see what is driving it.</p></div>
+
+<h2>The fastest way to do all of this</h2>
+<div class="cta-card">
+<p>Doing this by hand means living in Cost Explorer, Compute Optimizer, and a dozen browser tabs. <strong>nable does the finding for you, from inside Claude or Cursor.</strong> Ask "where is my AWS waste" and it returns the idle resources, the right-sizing moves, and the commitment opportunities, ranked by dollars, then drafts the Terraform fix as a pull request for you to approve. It is read-only, it proposes rather than executes, and it runs on your own machine, so your credentials never leave your laptop.</p>
+<div class="cta-row">
+  <a class="btn btn-primary" href="/#install">Install free: <code style="background:rgba(0,0,0,.15);color:#06181d;border:none">uvx nable</code></a>
+  <a class="btn btn-ghost" href="/finops-mcp-comparison">Compare FinOps tools</a>
+</div>
+</div>
+
+<h2 class="faq">Common questions</h2>
+<div class="faq">
+<h3>Why did my AWS bill go up this month?</h3>
+<p>Usually one of four things: a new or scaled-up workload, a forgotten resource left running, a pricing change such as on-demand replacing an expired commitment, or fast-growing data transfer and AI usage. Compare this month to last by service and by usage type in Cost Explorer, and the one or two line items that moved will stand out.</p>
+
+<h3>How much of cloud spend is typically wasted?</h3>
+<p>Around 30 percent, by organizations' own estimate (Flexera, State of the Cloud). It is spread across many small items rather than one big one, which is why a systematic sweep beats hunting for a single culprit.</p>
+
+<h3>What is the fastest way to cut an AWS bill without re-architecting?</h3>
+<p>Delete idle and unattached resources, right-size what is over-provisioned, and buy Savings Plans for your baseline usage. These three need no code changes and typically recover 20 to 30 percent in a few days.</p>
+
+<h3>How do I track Amazon Bedrock or LLM costs?</h3>
+<p>Break AI spend down by model and usage, not just the Bedrock total. Attribute cost per model, per token, and per workload so you can see which feature is driving growth and route to a cheaper model where quality allows.</p>
+
+<h3>Is it safe to give a cost tool access to my AWS account?</h3>
+<p>Yes, when the access is read-only and scoped to cost and metadata. A well-built tool reads Cost Explorer, billing, and describe APIs only and cannot read your S3 objects, logs, or database rows. nable runs locally, so credentials stay in your own machine's keyring. See <a class="inline" href="/security">how nable handles access</a>.</p>
+</div>
+
+</div></main>
+<footer><div class="wrap foot-inner">
+  <span><span style="color:var(--accent)">n</span>able · local-first FinOps</span>
+  <span><a href="/">Home</a> · <a href="/finops-mcp-comparison">Compare</a> · <a href="/security">Security</a> · <a href="/docs">Docs</a> · <a href="/pricing">Pricing</a></span>
+</div></footer>
+</body></html>
