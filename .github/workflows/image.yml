@@ -18,14 +18,18 @@ on:
         required: true
         type: string
 
+# Least privilege: read-only by default; the build job requests packages: write
+# at the job level for the GHCR push.
 permissions:
   contents: read
-  packages: write   # push to GHCR
 
 jobs:
   build-and-push:
     name: Build and push to GHCR
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # push to GHCR
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
