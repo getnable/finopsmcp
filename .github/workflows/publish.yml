@@ -9,14 +9,18 @@ on:
   # registry leg alone). skip-existing makes the PyPI step a no-op on re-runs.
   workflow_dispatch:
 
+# Least privilege: the workflow token is read-only by default; the two jobs that
+# need id-token: write for OIDC request it explicitly at the job level.
 permissions:
   contents: read
-  id-token: write   # needed for trusted publishing (OIDC)
 
 jobs:
   build-and-publish:
     name: Build and publish to PyPI
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # PyPI trusted publishing (OIDC)
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -52,6 +56,9 @@ jobs:
   publish-mcp-registry:
     name: Publish to MCP Registry
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # mcp-publisher login github-oidc
     # The registry validates that the PyPI package referenced in server.json
     # exists, so publish there first.
     needs: build-and-publish
