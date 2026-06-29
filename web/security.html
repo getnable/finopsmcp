@@ -40,6 +40,12 @@
   .card{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);padding:22px 26px;margin:14px 0}
   .card h3{margin-top:0}
   strong{color:var(--fg);font-weight:600}
+  .tl-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:22px 0 8px}
+  @media(max-width:640px){.tl-grid{grid-template-columns:1fr}}
+  .tl{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);padding:18px 20px}
+  .tl h3{margin:0 0 7px;font-size:15.5px;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:9px}
+  .tl h3::before{content:"";width:7px;height:7px;border-radius:2px;background:var(--accent);transform:rotate(45deg);flex-shrink:0}
+  .tl p{margin:0;font-size:14px;color:var(--fg-2);line-height:1.55;max-width:none}
   footer{border-top:1px solid var(--line);padding:26px 0;font-size:13px;color:var(--fg-3)}
   .foot-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
   footer a{color:var(--fg-2)}
@@ -55,9 +61,19 @@
   <div class="crumb"><a href="/">getnable.com</a> / security</div>
   <h1>Security, <span class="accent">by design</span>.</h1>
   <p class="lede">nable is not SaaS. It runs on your machine, holds credentials in your OS keyring, queries your cloud providers directly, and has no backend that receives your data. Most security questionnaires get shorter from here.</p>
-  <p class="updated">Last updated: June 13, 2026</p>
+  <p class="updated">Last updated: June 28, 2026</p>
 </div></header>
 <main><div class="wrap">
+
+<h2>The short version</h2>
+<div class="tl-grid">
+  <div class="tl"><h3>Local-first</h3><p>Your cloud credentials live in your machine's OS keyring and your bill caches locally. For the local app, no nable server ever receives either.</p></div>
+  <div class="tl"><h3>Read-only and content-blind</h3><p>nable reads cost and resource metadata only. It cannot read your S3 files, logs, CloudTrail events, or database rows, and you can verify that from the IAM policy.</p></div>
+  <div class="tl"><h3>Single-tenant hosting</h3><p>When we host nable for you, it runs on an instance dedicated to your company. Your data is never pooled with another customer's.</p></div>
+  <div class="tl"><h3>The AI never sees your secrets</h3><p>The assistant works on your cost data only; your credentials never enter its context. Model calls run on Anthropic, which does not train on data sent through its API.</p></div>
+  <div class="tl"><h3>You hold the off switch</h3><p>Grant read-only access you can revoke any time. One flag, <code>FINOPS_AIRGAP=1</code>, forbids every outbound call except to your own cloud provider.</p></div>
+  <div class="tl"><h3>Verifiable, not just claimed</h3><p>Source-available with a published <a href="/.well-known/security.txt" style="color:var(--accent)">security.txt</a>, so the no-egress behavior is something you can confirm, not take on faith.</p></div>
+</div>
 
 <h2>Architecture</h2>
 <div class="card"><h3>Where things live</h3>
