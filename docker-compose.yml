@@ -2,8 +2,14 @@ version: "3.9"
 
 services:
   nable:
+    # Hosted boxes PULL this prebuilt release image from GHCR (built by
+    # .github/workflows/image.yml on every version tag), they do not compile it.
+    # Update flow on a box: `docker compose pull && docker compose up -d`, seconds
+    # not minutes, and every tenant runs the identical tested artifact. Pin a
+    # version with NABLE_VERSION in .env (recommended per tenant); blank = latest.
+    # `build: .` stays as a local-dev fallback (docker compose up --build).
     build: .
-    image: nable/finops:latest
+    image: "ghcr.io/chaandannn/finops:${NABLE_VERSION:-latest}"
     ports:
       # Bind the raw app port to loopback by default so it is never publicly
       # exposed. Under the tls profile Caddy reaches nable over the compose
