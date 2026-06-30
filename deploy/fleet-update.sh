@@ -29,6 +29,26 @@ for bin in aws jq; do
   command -v "$bin" >/dev/null 2>&1 || { echo "error: '$bin' is required on this machine" >&2; exit 1; }
 done
 
+# Preflight: confirm at least one box is reachable by SSM under this tag before
+# dispatching. send-command will happily return a CommandId that targets zero
+# instances and look like success, the silent no-op that makes a "fleet update"
+# land nowhere. describe-instance-information only lists instances whose SSM agent
+# is online AND whose IAM role can reach SSM, so a zero count means the one-time
+# per-box setup (SSM role + tag) is missing. See docs/FLEET.md.
+ONLINE=$(aws ssm describe-instance-information \
+  --region "${REGION}" \
+  --filters "Key=tag:${TAG_KEY},Values=${TAG_VALUE}" \
+  --query 'length(InstanceInformationList)' --output text 2>/dev/null || echo 0)
+if [ "${ONLINE:-0}" = "0" ]; then
+  {
+    echo "error: no ${TAG_KEY}=${TAG_VALUE} instances are online in SSM in ${REGION}."
+    echo "       Each box needs an instance-profile role with AmazonSSMManagedInstanceCore"
+    echo "       plus the ${TAG_KEY}=${TAG_VALUE} tag. Nothing was dispatched. See docs/FLEET.md."
+  } >&2
+  exit 1
+fi
+echo "Found ${ONLINE} reachable ${TAG_KEY}=${TAG_VALUE} box(es) in ${REGION}."
+
 # This runs ON each box: pin the version compose reads, pull the image, restart,
 # and reclaim the disk the old image held. Idempotent, re-running is safe.
 REMOTE_SCRIPT=$(cat <<EOF

@@ -21,6 +21,13 @@ services:
       # volumes below), not the container's ephemeral home, so cost history,
       # snapshots, and sessions survive a rebuild / `docker compose up --build`.
       FINOPS_DATA_DIR: "${FINOPS_DATA_DIR:-/data}"
+      # Credential vault master key (base64 Fernet key). Supply it HERE from the
+      # host .env so it lives on the host root volume, NOT inside the mounted /data
+      # volume next to the encrypted vault.db. A leaked or snapshotted data volume
+      # is then useless on its own. Blank = the app self-manages a key file inside
+      # /data (fine for a laptop, weak for a hosted box). Keep it constant: changing
+      # it orphans every stored credential. deploy/provision-tenant.sh generates one.
+      FINOPS_VAULT_KEY: "${FINOPS_VAULT_KEY:-}"
       # Dashboard auth
       FINOPS_DASHBOARD_PASSWORD: "${FINOPS_DASHBOARD_PASSWORD:-}"
       # Public hostname this instance serves (set by the tls profile). nable

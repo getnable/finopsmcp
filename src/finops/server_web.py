@@ -63,6 +63,12 @@ _SESSIONS: dict[str, float] = {}        # full access (password / SSO login)
 _RO_SESSIONS: dict[str, float] = {}     # read-only share links (/view)
 _SESSION_TTL_SECONDS: int = 8 * 3600  # 8 hours
 _RO_SESSION_TTL_SECONDS: int = 24 * 3600  # 24 hours for share links
+# Optional role ceiling for a FULL-access token (token -> "analyst"). Absent means
+# admin, the single-tenant default, so the box owner and every password/SSO login
+# stay unrestricted and can never be locked out of their own box. Only a
+# control-plane login that carries a sub-admin role records one here, which the
+# dashboard agent then enforces via require_role. See _session_identity().
+_SESSION_ROLES: dict[str, str] = {}
 # The dashboard runs on ThreadingHTTPServer, so two requests can mint or prune a
 # session at the same instant. Without this lock, _prune iterating store.items()
 # while another thread inserts a token raises "dictionary changed size during
@@ -77,12 +83,24 @@ def _prune(store: dict[str, float]) -> None:
             store.pop(t, None)
 
 
-def _create_session() -> str:
-    """Mint a FULL-access session token."""
+def _create_session(role: str = "admin") -> str:
+    """Mint a FULL-access session token.
+
+    `role` is the session's ceiling for the dashboard agent. "admin" (the default,
+    used by password, SSO, and owner logins) records nothing, so the session stays
+    unrestricted and the box owner can never be locked out. A sub-admin role
+    ("analyst") is recorded in _SESSION_ROLES so require_role enforces it inside the
+    agent loop. See _session_identity()."""
     token = secrets.token_urlsafe(32)
     with _SESSION_LOCK:
         _SESSIONS[token] = _time_module.time() + _SESSION_TTL_SECONDS
+        if role and role != "admin":
+            _SESSION_ROLES[token] = role
         _prune(_SESSIONS)
+        # Drop role entries whose session has expired so the map can't grow
+        # unbounded across logins.
+        for t in [t for t in _SESSION_ROLES if t not in _SESSIONS]:
+            _SESSION_ROLES.pop(t, None)
     return token
 
 
@@ -2092,6 +2110,25 @@ class _Handler(BaseHTTPRequestHandler):
         """Return True if the request has either full or read-only access."""
         return self._cookie_valid() or self._ro_cookie_valid()
 
+    def _session_identity(self):
+        """Identity to attach to the dashboard agent for THIS request, or None.
+
+        None means admin (the single-tenant default) and is what every owner,
+        password, and SSO session returns, so the box owner is never locked out. A
+        full session minted with a sub-admin role (a control-plane analyst login)
+        returns an Identity carrying that role, which require_role then enforces
+        inside the agent loop, blocking admin-only tools for that session."""
+        cookie_header = self.headers.get("Cookie", "")
+        m = re.search(r"nable_session=([A-Za-z0-9_=-]+)", cookie_header)
+        if not m:
+            return None
+        role = _SESSION_ROLES.get(m.group(1))
+        if not role or role == "admin":
+            return None
+        from .auth.rbac import Identity
+        return Identity(key_id=0, name="dashboard", email="",
+                        role=role, scope_team=None, scope_provider=None)
+
     def _cookie_attrs(self) -> str:
         """Common Set-Cookie attributes. Adds Secure when the request reached us
         over HTTPS (directly or via a TLS-terminating proxy that sets
@@ -2246,7 +2283,7 @@ button:hover{{filter:brightness(1.1)}}
                         "answer": "You're out of managed AI for this month. Add credits or "
                                   "bring your own key to keep going.", "cards": []}).encode())
                     return
-                result = ask(question, tier="chat")
+                result = ask(question, tier="chat", identity=self._session_identity())
                 side = result.side_effects or []
                 cards = [se["card"] for se in side
                          if isinstance(se, dict) and se.get("type") == "cost_card" and se.get("card")]
@@ -2317,7 +2354,8 @@ button:hover{{filter:brightness(1.1)}}
                                   "bring your own key to keep going.", "cards": []}).encode())
                     return
                 result = ask(prompt, tier=decision.tier, history=history,
-                             max_tool_calls=decision.max_tool_calls)
+                             max_tool_calls=decision.max_tool_calls,
+                             identity=self._session_identity())
                 side = result.side_effects or []
                 cards = [se["card"] for se in side
                          if isinstance(se, dict) and se.get("type") == "cost_card" and se.get("card")]
@@ -2533,12 +2571,16 @@ button:hover{{filter:brightness(1.1)}}
                 self._serve_login_page(
                     sso_error="That sign-in link is invalid or expired. Open your dashboard from getnable.com again.")
                 return
-            # Least privilege: a viewer gets a read-only session, everyone else a
-            # full session. Same two-tier model the read-only share links use.
-            if payload["role"] == "viewer":
+            # Least privilege by role: a viewer gets a read-only session (no agent
+            # access at all); an analyst gets a full session capped at the analyst
+            # role so the dashboard agent refuses admin-only tools; admin (or any
+            # other value) gets an unrestricted full session. Read-only share links
+            # use the same nable_view store.
+            cp_role = payload["role"]
+            if cp_role == "viewer":
                 cookie = f"nable_view={_create_ro_session()}; {self._cookie_attrs()}"
             else:
-                cookie = f"nable_session={_create_session()}; {self._cookie_attrs()}"
+                cookie = f"nable_session={_create_session(role=cp_role)}; {self._cookie_attrs()}"
             log.info("Control-plane login: %s (role=%s)", payload["email"], payload["role"])
             self.send_response(302)
             self.send_header("Location", "/")

@@ -23,3 +23,13 @@ scripts
 docs
 dashboard.html
 package*.json
+
+# Secrets, local credential vaults, and runtime data must never enter the build
+# context: the release image is published to a public registry for tokenless pulls.
+*.db
+*.sqlite
+*.sqlite3
+*.key
+*.pem
+.finops
+tenants

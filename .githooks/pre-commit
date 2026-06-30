@@ -9,12 +9,12 @@ if [ -z "$CHANGED" ]; then
   exit 0
 fi
 
-echo "JSX changed — rebuilding..."
+echo "JSX changed, rebuilding..."
 
 if command -v npx >/dev/null 2>&1; then
-  ESBUILD="npx esbuild"
+  ESBUILD="npx esbuild@0.23.1"
 elif [ -x "$HOME/.bun/bin/bun" ]; then
-  ESBUILD="$HOME/.bun/bin/bun x esbuild"
+  ESBUILD="$HOME/.bun/bin/bun x esbuild@0.23.1"
 else
   echo "Error: esbuild not found. Install with: npm install -g esbuild"
   exit 1
