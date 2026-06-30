@@ -142,12 +142,19 @@ def require_role(min_role: str, ident: Identity | None = None) -> dict | None:
         if err := require_role("analyst"):
             return err
     """
-    if not _auth_required():
-        return None
-
     ident = ident or current_identity()
 
-    if ident is None:
+    if not _auth_required():
+        # Permissive (single-user / SQLite) mode. With no identity attached the box
+        # owner runs wide open, exactly as before: the local CLI and password/SSO
+        # dashboard sessions never attach one. But when a caller HAS deliberately
+        # attached an identity for this call (e.g. a control-plane analyst session
+        # driving the dashboard agent), honor its role ceiling so a non-admin cannot
+        # run admin-only tools even on a single-tenant box.
+        if ident is None:
+            return None
+        # fall through to the role check below
+    elif ident is None:
         return {
             "error": "auth_required",
             "message": (

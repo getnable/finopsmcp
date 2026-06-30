@@ -2,6 +2,37 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.101
+
+Hardening pass: credentials at rest, role enforcement on hosted boxes, and a safer fleet and build pipeline.
+
+### Security
+- **The vault master key can live off the data volume.** Hosted deployments can
+  now supply `FINOPS_VAULT_KEY` from the host environment, so the Fernet key no
+  longer has to sit in the same `/data` volume as the encrypted `vault.db`. A
+  leaked or snapshotted data volume is then useless on its own.
+  `deploy/provision-tenant.sh` generates one per tenant. Existing boxes are
+  unaffected: a blank key keeps the previous self-managed key-file behavior.
+- **Role enforcement now works on a single-tenant box.** `require_role` honors an
+  explicitly attached identity even in permissive SQLite mode, and defaults to
+  admin when none is attached, so the box owner can never be locked out. The
+  dashboard agent attaches the session's role, and a control-plane analyst login
+  gets a real analyst ceiling instead of silent admin.
+- **Public image hardening.** `.dockerignore` now excludes `*.db`, `*.key`,
+  `*.pem`, `.finops`, and `tenants/`, so no local vault or tenant secret can be
+  baked into the published image.
+
+### Fixed
+- **Fleet updates fail loudly on a misconfigured fleet.** `deploy/fleet-update.sh`
+  preflights that at least one tagged box is reachable via SSM and errors instead
+  of dispatching a silent no-op when the per-box role or tag is missing.
+
+### Added
+- **CI guard against stale web bundles.** A new workflow rebuilds `web/app.js` and
+  `web/tweaks-panel.js` from their JSX with a pinned esbuild and fails if the
+  committed bundle is out of date. The pre-commit hook is pinned to the same
+  version so the two never disagree.
+
 ## 0.8.100
 
 The OS keychain is read once per process, not every few minutes.

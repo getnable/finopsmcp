@@ -60,6 +60,17 @@ DASH_PW="$(openssl rand -hex 24)"
 # deploy from failing to parse the compose file.
 PG_PW="$(openssl rand -hex 16)"
 
+# Vault master key (URL-safe base64 Fernet key). It goes in THIS .env on the host
+# root volume, never inside the /data volume that holds the encrypted vault.db, so
+# a leaked or snapshotted data volume can't be decrypted on its own. Keep it
+# constant for the life of the box: rotating it orphans every stored credential.
+if command -v python3 >/dev/null 2>&1; then
+  VAULT_KEY="$(python3 -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
+else
+  # Fernet requires URL-safe base64 (-_ instead of +/); translate openssl's output.
+  VAULT_KEY="$(openssl rand 32 | openssl base64 -A | tr '+/' '-_')"
+fi
+
 mkdir -p tenants
 OUT="tenants/${SLUG}.env"
 umask 077
@@ -77,6 +88,9 @@ FINOPS_CONTROL_PLANE_SECRET=${DERIVED}
 FINOPS_REQUIRE_AUTH=1
 FINOPS_DASHBOARD_PASSWORD=${DASH_PW}
 FINOPS_ENABLE_SCHEDULER=1
+
+# Credential vault master key, kept here on the host and off the /data volume.
+FINOPS_VAULT_KEY=${VAULT_KEY}
 
 # Required so the compose file's optional postgres service parses. Single-tenant
 # uses SQLite; this is only consumed if you switch on shared Postgres.

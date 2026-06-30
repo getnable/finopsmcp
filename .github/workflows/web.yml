@@ -1,0 +1,46 @@
+name: Web bundle
+
+# The marketing site ships compiled bundles (web/app.js, web/tweaks-panel.js)
+# generated from their .jsx sources by .githooks/pre-commit. If a commit skips the
+# hook (committed from another machine, or with --no-verify), a stale bundle can
+# silently ship old copy or pricing. This rebuilds with the SAME pinned esbuild the
+# hook uses and fails if the committed bundle does not match its source.
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**"]
+  pull_request:
+    branches: [main]
+    paths: ["web/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle-in-sync:
+    name: bundles match their JSX
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Rebuild the JSX bundles
+        # ubuntu-latest ships Node + npx, so no setup step is needed. Pinned to the
+        # same esbuild version as .githooks/pre-commit so CI and the hook agree
+        # byte-for-byte.
+        run: |
+          npx --yes esbuild@0.23.1 web/app.jsx --jsx=transform --outfile=web/app.js --log-level=warning
+          npx --yes esbuild@0.23.1 web/tweaks-panel.jsx --jsx=transform --outfile=web/tweaks-panel.js --log-level=warning
+
+      - name: Fail if a committed bundle is stale
+        run: |
+          if ! git diff --quiet -- web/app.js web/tweaks-panel.js; then
+            echo "::error::web/app.js or web/tweaks-panel.js is out of date with its .jsx source. Rebuild with the pre-commit hook (npx esbuild@0.23.1 web/app.jsx --jsx=transform --outfile=web/app.js) and commit the result."
+            git --no-pager diff --stat -- web/app.js web/tweaks-panel.js
+            exit 1
+          fi
+          echo "Bundles are in sync with their JSX sources."
