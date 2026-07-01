@@ -54,6 +54,11 @@ actions it takes or proposes (from `estimate_change_cost`). Returns a run verdic
 within budget / approaching / over, with the split by model vs cloud. This is the unit
 a model router does not have: the whole run, not one call. Reuses the budget enforcer.
 
+Run lifecycle: a local run row opens on the first gate call for a `task_id`,
+accumulates across the run, and closes on an explicit end signal or a TTL (default a
+few hours), so an agent that never signals done cannot leave a run accumulating forever
+or wrongly block a task budget.
+
 ### T2: pre-action gate on what the agent DOES
 
 The existing `check_action_policy` on terraform / helm / infra actions, extended to
@@ -108,8 +113,11 @@ A per-policy setting `remediation_mode`, default `propose`:
   2. the action is a two-way door (`is_one_way(action_type)` is False), and
   3. the cost is within `max_auto_remediation_usd` (a separate cap from the action
      threshold), and
-  4. it targets the agent's OWN footprint: a resource tagged as agent-created, or an
-     action type in an explicit `auto_remediation_allowlist`.
+  4. it targets the agent's OWN footprint, proven by nable's local run-provenance
+     ledger: a resource nable itself recorded the agent creating during this run, or
+     an action type in an explicit `auto_remediation_allowlist`. A cloud tag is NOT
+     sufficient (it is mutable by anything with write access); absent a provenance
+     record, escalate to a human. Fail closed.
 
   Examples it may auto-do: tear down an orphaned scratch DB the agent created, cancel
   the agent's redundant job, apply the cheaper model choice.
@@ -123,6 +131,11 @@ A per-policy setting `remediation_mode`, default `propose`:
 - Every auto action is audited (what, when, cost, reversal path) and reversible.
 - A kill switch (`FINOPS_REMEDIATION_MODE=propose` env, or the policy) reverts to
   propose instantly.
+- The own-footprint auth boundary is nable's local run-provenance ledger, never a
+  cloud tag. No provenance record for a resource means escalate, not auto.
+- `door_of` MUST default an unknown or unclassified `action_type` to `one_way`
+  (escalate), so a new action type can never auto-fire before it is deliberately
+  classified and added to the allowlist.
 
 This reuses `policy.py` exactly: auto mode changes only what happens on an
 already-safe `allow` + two-way + in-budget verdict (apply instead of propose). The
@@ -149,9 +162,11 @@ everything dangerous. This is the opt-in enforcement mode deferred in CD-1.
    running after its task, and T4 records the recovered run-rate as MEASURED.
 4. The savings view reports MEASURED and ESTIMATED savings separately, attributed to
    agent/task, and never sums them into one headline.
-5. `remediation_mode` defaults to `propose`. In `auto`, a test proves: an
-   `allow`+two-way+in-budget+own-footprint action is applied; a one-way, an
-   over-budget, and a customer-infra action all escalate to a human unchanged.
+5. `remediation_mode` defaults to `propose`. An EXHAUSTIVE parametrized test over every
+   allowlisted action type crossed with door and budget states proves auto applies IF
+   AND ONLY IF `allow` + two-way + in-cap + a provenance record; a one-way, over-budget,
+   unclassified, or no-provenance action always escalates. An unknown action type is
+   treated as one-way.
 6. Every auto action writes an audit record with a reversal path; the kill switch
    reverts to propose within one request.
 7. Propose-only guarantees hold: no `escalate`/`block` action is ever auto-applied, in
@@ -164,7 +179,7 @@ everything dangerous. This is the opt-in enforcement mode deferred in CD-1.
 
 | Layer | What | Count |
 |-------|------|-------|
-| Unit | gate branches (exist), cheaper_path, age_hours, fail-by-stakes door branch, the four auto-mode preconditions, kill switch | +8 |
+| Unit | gate branches (exist), cheaper_path, age_hours, fail-by-stakes door branch, the exhaustive auto-mode invariant (apply iff allow+two-way+in-cap+provenance), door_of unknown-type defaults to one_way, provenance fail-closed, run lifecycle + TTL, kill switch | +12 |
 | Integration | run budget across model + cloud; `check_action_policy` end to end on a Terraform fixture in propose and auto modes; orphaned-resource flag | +4 |
 | Eval | `cost_guard` persona calls the gate before an apply and honors escalate | +1 |
 
