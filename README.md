@@ -210,6 +210,28 @@ Config file locations:
 
 > **Why uvx?** Claude Desktop is a GUI app and doesn't inherit your shell's PATH. uvx sidesteps this by running finops-mcp in its own isolated environment. It's the most reliable option on corporate machines with managed Python installs.
 
+## Give your agent cost controls
+
+nable is not just tools your agent reads from. It is a pre-action gate your agent
+calls **before** it makes a cost-affecting change: it prices the change, checks it
+against your budget, and offers a cheaper path. It never applies anything itself.
+Propose-only, your agent proposes and a human approves.
+
+Add one line to your agent's system prompt (Claude Code, Cursor, or any MCP client):
+
+> Before you apply any infrastructure change (a terraform apply, a helm upgrade,
+> creating or resizing a resource) or start an expensive job, first call
+> `check_action_policy` with the action and the change (a terraform plan, a helm
+> diff, or a `monthly_delta_usd`). Relay the verdict, the dollar impact, and the
+> cheaper path when one is offered. Never apply a `block` or an `escalate` action;
+> surface it to the human. nable is advisory and propose-only.
+
+That turns any agent into a cost-aware one. The gate returns `allow` / `warn` /
+`block` / `escalate` against your policy, the monthly and annual dollar impact, a
+budget verdict labeled with its data age, and a spot alternative when the change is
+compute. One-way doors (delete, terminate, buy a commitment) and over-budget changes
+always escalate to a human.
+
 ---
 
 ## Connectors (17)

@@ -69,14 +69,26 @@ default. This is the agent's actions in the world, not its prompts. Return shape
 {
   "gate": "allow" | "warn" | "block" | "escalate",
   "reason": "...",
-  "monthly_delta_usd": 4100.0, "annual_delta_usd": 49200.0,
-  "door": "two_way" | "one_way",
-  "budget": {"name":"platform","limit_usd":20000,"run_rate_usd":15200,"as_of":"...","age_hours":6},
-  "cheaper_path": {"summary":"spot + rightsized r6g.xlarge","monthly_delta_usd":1200.0,"how":"..."} | null,
-  "remediation": {"mode":"propose"|"auto","applied":false,"reversal":null},
-  "advisory": true
+  "action_type": "...", "door": "two_way" | "one_way",
+  "monthly_delta_usd": 4100.0,
+  "cost": {                         // present only when a change was described
+    "verdict": "ok|warn|over_budget|no_budget",
+    "monthly_delta_usd": 4100.0, "annual_delta_usd": 49200.0,
+    "budget": {"name":"platform","limit_usd":20000,"current_run_rate_usd":15200,
+               "projected_pct_of_limit":91.2,"headroom_usd":-100,
+               "as_of":"2026-07-01T02:00:00Z","age_hours":6.0},   // null if no budget
+    "breakdown": [ ... ]
+  },
+  "cheaper_path": {"summary":"...","estimated_monthly_usd":1200.0,
+                   "estimated_saving_usd":2900.0,"is_estimate":true},  // null if none
+  "remediation": {"mode":"propose"|"auto","applied":false},
+  "policy_note": "..."
 }
 ```
+
+Contract note: the budget block, `annual_delta_usd`, and `breakdown` are nested under
+`cost`, not at the top level. An agent reads the budget age at
+`result["cost"]["budget"]["age_hours"]`; `cheaper_path` and `remediation` are top-level.
 
 ### T3: agent-loop + orphaned-resource waste
 
