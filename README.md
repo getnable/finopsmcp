@@ -1,6 +1,6 @@
 # nable
 
-**Open-source, local-first FinOps. Ask your whole cloud and AI bill anything, get the fix as a pull request you approve, and prove the savings on your next invoice.**
+**Cost controls, built into your AI. Ask your whole cloud and AI bill anything inside Claude or Cursor, gate what your agents do against your budget, and get the fix as a pull request you approve. One connector to AWS, Azure, GCP and 10+ SaaS and AI providers.**
 
 [![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/finops-mcp?color=4db8d4)](https://pypi.org/project/finops-mcp/)

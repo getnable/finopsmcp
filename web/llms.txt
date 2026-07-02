@@ -1,6 +1,6 @@
 # nable
 
-> Local-first, AI-native FinOps. Ask anything about your cloud and AI spend, right inside Claude, Cursor, or any MCP editor. nable runs on your own machine, connects to AWS, Azure, GCP and 10+ SaaS and AI providers, and your credentials never leave your laptop.
+> Cost controls, built into your AI. nable makes Claude, Cursor, and your AI agents cost-aware: ask your whole cloud and AI bill anything, and your agents check every change against your budget before they act. One connector to AWS, Azure, GCP and 10+ SaaS and AI providers. Runs on your own machine, propose-only.
 
 nable is an MCP (Model Context Protocol) server you install locally. It answers cost questions, detects anomalies, recommends rightsizing, tracks AI and LLM spend by model (Amazon Bedrock, OpenAI, Anthropic, Azure OpenAI), and drafts the pull request to fix waste. There is no SaaS account to create and no nable backend that holds your data. The differentiator is the intersection: genuinely multi-cloud, plus cross-provider AI spend, plus true local-first, in one answer.
 
@@ -29,6 +29,7 @@ nable proposes; a human decides. It drafts pull requests, opens tickets, and rai
 - [Security](https://getnable.com/security): architecture, credential handling, AI exposure, disclosure policy
 - [Access scope](https://getnable.com/iam): exact least-privilege read-only IAM policies for AWS, GCP, Azure; what nable can and cannot touch
 - [FinOps MCP comparison](https://getnable.com/finops-mcp-comparison): nable vs AWS Billing MCP, Vantage, Finout and open-source servers, compared honestly
+- [Cost controls for AI agents](https://getnable.com/agents): the pre-action gate an AI agent calls before it acts. It prices the change, checks it against your budget, offers a cheaper path, and is propose-only. Governs the whole run (model spend plus the cloud the agent touches), not per-prompt routing. Different from an LLM gateway.
 - [How to reduce your AWS bill](https://getnable.com/reduce-aws-bill): practical guide to finding and cutting AWS waste, the five highest-payoff levers
 - [About](https://getnable.com/about): who builds nable and why
 

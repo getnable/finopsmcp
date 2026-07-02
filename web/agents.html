@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cost controls for AI agents · nable</title>
+<meta name="description" content="nable is the cost gate your AI agent calls before it acts. It prices the change, checks it against your budget, offers a cheaper path, and refuses anything a human has not approved. It governs the whole run, model spend plus the cloud your agent touches, not a single prompt." />
+<link rel="canonical" href="https://getnable.com/agents" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type":"Question","name":"What are cost controls for AI agents?","acceptedAnswer":{"@type":"Answer","text":"Cost controls for AI agents are a check an agent runs before it takes a cost-affecting action, applying an infrastructure change, choosing a model, or starting an expensive job. Instead of reading a cost dashboard after the money is spent, the agent asks a gate: what does this cost, is it within budget, is there a cheaper path? nable is that gate. It answers with a verdict (allow, warn, block, or escalate), the dollar impact, and a cheaper alternative, and it never applies the change itself. A human approves."}},
+    {"@type":"Question","name":"How is this different from an LLM gateway like Portkey or LiteLLM?","acceptedAnswer":{"@type":"Answer","text":"An LLM gateway caps model spend per API key: it optimizes one call. nable governs the whole run, the agent's model spend plus the cloud it provisions, against your real budget. A gateway never sees your AWS bill, so it cannot catch the oversized database the agent is about to create or the scratch resources it leaves running. nable does, because it is a cross-cloud FinOps tool that lives in the agent's loop."}},
+    {"@type":"Question","name":"Can nable change my cloud infrastructure on its own?","acceptedAnswer":{"@type":"Answer","text":"No. nable is propose-only. The gate returns a verdict and, where useful, drafts the fix as a pull request, but a human reviews and applies it. One-way doors such as delete, terminate, or buying a commitment, and any over-budget change, always escalate to a human. nable never edits, deletes, or buys anything in your environment autonomously."}},
+    {"@type":"Question","name":"How does my agent use it?","acceptedAnswer":{"@type":"Answer","text":"nable runs as a local MCP server (uvx nable). Add one line to your agent's system prompt telling it to call check_action_policy before any infrastructure change or expensive job, and the agent becomes cost-aware. It works in Claude Code, Cursor, or any MCP client. Credentials stay on your machine."}}
+  ]
+}
+</script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#000000;--bg-1:#0b0e10;--bg-2:#121517;--bg-3:#1a1e22;
+    --fg:#f4f7f8;--fg-2:#aeb7bd;--fg-3:#6b7177;
+    --line:#1c2125;--line-2:#2a3036;--accent:#4db8d4;--accent-dim:#2c7d91;
+    --ok:#3cba7a;--warn:#e6a840;--alert:#e05c4b;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  html,body{background:var(--bg);color:var(--fg);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.6;font-size:15.5px;letter-spacing:-.005em}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:960px;margin:0 auto;padding:0 28px}
+  /* Depth: one restrained ice-blue glow behind the hero, no gradients elsewhere. */
+  .glow{position:fixed;top:-260px;left:50%;transform:translateX(-50%);width:900px;height:640px;
+    background:radial-gradient(closest-side,rgba(77,184,212,.14),rgba(77,184,212,.04) 45%,transparent 72%);
+    filter:blur(20px);z-index:0;pointer-events:none}
+  nav,header,main,footer{position:relative;z-index:1}
+  nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 82%,transparent);backdrop-filter:blur(16px);border-bottom:1px solid var(--line);padding:14px 0}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between}
+  .logo{font-weight:600;font-size:16px;letter-spacing:-.02em}
+  .logo .n{color:var(--accent)}
+  .nav-cta{display:inline-flex;padding:8px 16px;border-radius:8px;background:var(--accent);color:#06181d;font-size:13.5px;font-weight:600;transition:filter .15s}
+  .nav-cta:hover{filter:brightness(1.08)}
+  header.hero{padding:76px 0 20px;text-align:center}
+  .crumb{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:22px}
+  .eyebrow{font-size:11px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-dim);margin-bottom:18px}
+  h1{font-size:clamp(34px,5vw,60px);font-weight:300;letter-spacing:-.04em;line-height:1.04;max-width:16ch;margin:0 auto}
+  h1 .accent{color:var(--accent)}
+  .sub{margin:22px auto 0;font-size:17px;color:var(--fg-2);max-width:64ch;line-height:1.6}
+  .hero-cta{margin-top:28px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;padding:11px 20px;border-radius:9px;font-size:14px;font-weight:600;min-height:44px;transition:filter .15s,border-color .15s,background .15s}
+  .btn-primary{background:var(--accent);color:#06181d}
+  .btn-primary:hover{filter:brightness(1.08)}
+  .btn-ghost{border:1px solid var(--line-2);color:var(--fg)}
+  .btn-ghost:hover{background:var(--bg-2);border-color:var(--accent-dim)}
+  .btn code{font-family:var(--mono);font-size:13px}
+  /* The hero visual is the loop, not a chart: a live-feeling intercept console. */
+  .console{max-width:680px;margin:40px auto 0;text-align:left;border-radius:14px;
+    border:1px solid var(--line-2);background:
+      linear-gradient(180deg,rgba(77,184,212,.05),transparent 60%),var(--bg-1);
+    box-shadow:0 24px 70px -30px rgba(0,0,0,.9),0 0 0 1px rgba(77,184,212,.04);overflow:hidden}
+  .console-bar{display:flex;align-items:center;gap:7px;padding:11px 15px;border-bottom:1px solid var(--line)}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .console-title{font-family:var(--mono);font-size:11.5px;color:var(--fg-3);margin-left:8px}
+  .console-body{font-family:var(--mono);font-size:13px;line-height:1.72;padding:18px 20px;color:var(--fg-2);white-space:pre-wrap}
+  .console-body .who{color:var(--fg);font-weight:500}
+  .console-body .nb{color:var(--accent)}
+  .console-body .esc{color:var(--warn);font-weight:500}
+  .console-body .cut{color:var(--ok);font-weight:500}
+  .console-body .mut{color:var(--fg-3)}
+  main{padding:26px 0 40px}
+  section{padding:44px 0;border-top:1px solid var(--line)}
+  .label{font-size:11px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-dim);margin-bottom:12px}
+  h2{font-size:clamp(24px,3vw,34px);font-weight:400;letter-spacing:-.03em;line-height:1.12;max-width:20ch}
+  section > .wrap > p{color:var(--fg-2);font-size:15.5px;max-width:70ch;margin-top:14px}
+  strong{color:var(--fg);font-weight:600}
+  code{font-family:var(--mono);font-size:13px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--fg)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px}
+  @media(max-width:680px){.grid{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);padding:20px 22px;transition:border-color .15s,transform .15s}
+  .card:hover{border-color:var(--line-2);transform:translateY(-2px)}
+  .card h3{font-size:16px;font-weight:600;margin-bottom:6px}
+  .card p{color:var(--fg-2);font-size:14px;margin:0}
+  .vs{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px}
+  @media(max-width:680px){.vs{grid-template-columns:1fr}}
+  .vs .col{border:1px solid var(--line);border-radius:12px;padding:20px 22px;background:var(--bg-1)}
+  .vs .col.ours{border-color:var(--accent-dim);background:linear-gradient(180deg,rgba(77,184,212,.05),transparent 65%),var(--bg-1)}
+  .vs h4{font-size:13px;font-weight:600;letter-spacing:.02em;margin-bottom:10px}
+  .vs .col.ours h4{color:var(--accent)}
+  .vs ul{list-style:none;margin:0;padding:0}
+  .vs li{color:var(--fg-2);font-size:14px;padding:6px 0 6px 20px;position:relative}
+  .vs li::before{content:"";position:absolute;left:0;top:12px;width:6px;height:6px;border-radius:50%;background:var(--fg-3)}
+  .vs .col.ours li::before{background:var(--accent)}
+  .snippet{margin-top:20px;border-radius:12px;border:1px solid var(--line-2);background:var(--bg-1);overflow:hidden}
+  .snippet .h{font-family:var(--mono);font-size:11px;color:var(--fg-3);padding:10px 16px;border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.06em}
+  .snippet .b{font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--fg-2);padding:16px;white-space:pre-wrap}
+  .ships{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:22px}
+  @media(max-width:680px){.ships{grid-template-columns:1fr}}
+  .ships .box{border:1px solid var(--line);border-radius:12px;padding:20px 22px;background:var(--bg-1)}
+  .ships .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:2px;display:inline-block;margin-bottom:12px}
+  .ships .now .tag{color:#06181d;background:var(--ok)}
+  .ships .next .tag{color:var(--fg-2);border:1px solid var(--line-2)}
+  .ships li{color:var(--fg-2);font-size:14px;margin:6px 0}
+  .ships ul{padding-left:18px;margin:0}
+  .cta-card{border:1px solid var(--line-2);border-radius:14px;background:linear-gradient(180deg,rgba(77,184,212,.07),transparent 70%),var(--bg-1);padding:30px 28px;margin-top:26px;text-align:center}
+  .cta-card h2{margin:0 auto;max-width:24ch}
+  .cta-card .cta-row{margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  footer{border-top:1px solid var(--line);padding:26px 0;font-size:13px;color:var(--fg-3);margin-top:10px}
+  .foot-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  footer a{color:var(--fg-2)}
+  footer a:hover{color:var(--fg)}
+  a.inline{color:var(--accent)}
+  @media(prefers-reduced-motion:reduce){.card:hover{transform:none}}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<nav><div class="wrap nav-inner">
+  <a class="logo" href="/"><span class="n">n</span>able</a>
+  <a class="nav-cta" href="/#install">Get started free</a>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <div class="eyebrow">Agent cost controls</div>
+  <h1>The cost check your agents call <span class="accent">before they act</span>.</h1>
+  <p class="sub">nable is not another cost dashboard. It is the gate your AI agent consults before it applies a change: it prices the change, checks it against your budget, offers a cheaper path, and refuses anything a human has not approved. It governs the whole run, model spend plus the cloud your agent touches, not a single prompt.</p>
+  <div class="hero-cta">
+    <a class="btn btn-primary" href="/#install">Install free: <code style="background:rgba(0,0,0,.15);color:#06181d;border:none;margin-left:6px">uvx nable</code></a>
+    <a class="btn btn-ghost" href="https://calendar.app.google/2duYBqjLXaTmX5xC8">Book a demo</a>
+  </div>
+
+  <div class="console">
+    <div class="console-bar">
+      <span class="dot" style="background:#e05c4b"></span>
+      <span class="dot" style="background:#e6a840"></span>
+      <span class="dot" style="background:#3cba7a"></span>
+      <span class="console-title">your agent, gated by nable</span>
+    </div>
+<div class="console-body"><span class="who">agent ›</span> terraform apply
+  + aws_instance.api   db.r6g.4xlarge      <span class="esc">+$4,100/mo</span>
+
+<span class="nb">nable › check_action_policy</span>
+  gate      <span class="esc">ESCALATE</span>   over the platform budget (91% of limit)
+  impact    +$4,100/mo   ($49,200/yr)
+  cheaper   <span class="cut">run it on spot   ~$1,200/mo</span>   (estimate)
+  <span class="mut">budget as of 6h ago</span>
+
+  <span class="mut">⧗ waiting for a human. nable never applies anything itself.</span></div>
+  </div>
+</div></header>
+
+<main><div class="wrap">
+
+<section><div class="wrap" style="padding:0">
+  <div class="label">The difference</div>
+  <h2>Every cost tool shows you charts after the money is gone.</h2>
+  <p>Dashboards are post-mortems. By the time a spike shows up in Cost Explorer, an agent has already spun up the oversized database, run the redundant job, and left the scratch resources running. nable moves the cost check to where it matters: <strong>inside the agent's loop, before the spend resolves.</strong> The agent asks first, and nable answers with a verdict it can act on.</p>
+</div></section>
+
+<section><div class="wrap" style="padding:0">
+  <div class="label">Governs the run, not the prompt</div>
+  <h2>An LLM gateway caps a call. nable governs the whole footprint.</h2>
+  <p>Gateways like Portkey and LiteLLM cap model spend per key. Useful, but they never see your cloud bill, so they cannot catch the change that actually costs money. nable is a cross-cloud FinOps tool sitting in the loop, so it governs model spend <strong>and</strong> the cloud the agent provisions, against your real budget.</p>
+  <div class="vs">
+    <div class="col">
+      <h4>An LLM gateway</h4>
+      <ul>
+        <li>Caps token spend per API key</li>
+        <li>Optimizes a single model call</li>
+        <li>Never sees your AWS, Azure, or GCP bill</li>
+        <li>Blind to the infrastructure the agent creates</li>
+      </ul>
+    </div>
+    <div class="col ours">
+      <h4>nable</h4>
+      <ul>
+        <li>Budgets the whole run: model plus cloud</li>
+        <li>Gates the infra action, not just the prompt</li>
+        <li>Cross-cloud, and includes AI and LLM spend</li>
+        <li>Offers a cheaper path and drafts the fix</li>
+      </ul>
+    </div>
+  </div>
+</div></section>
+
+<section><div class="wrap" style="padding:0">
+  <div class="label">Propose-only, always</div>
+  <h2>It can say no. It cannot act.</h2>
+  <p>The gate returns <code>allow</code>, <code>warn</code>, <code>block</code>, or <code>escalate</code> against your policy. One-way doors, deleting, terminating, buying a commitment, and any over-budget change always escalate to a human. nable proposes and a human approves. It never edits, deletes, or buys anything in your environment on its own, so you can wire an agent through it without handing it the keys.</p>
+  <div class="grid">
+    <div class="card"><h3>Reversible and in budget</h3><p>Allowed, with the dollar impact and a cheaper path. A human applies it.</p></div>
+    <div class="card"><h3>One-way or over budget</h3><p>Escalated. A human reviews the irreversible or expensive move before anything happens.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap" style="padding:0">
+  <div class="label">It remembers</div>
+  <h2>A fresh agent starts from zero. nable does not.</h2>
+  <p>A stateless agent calling a cloud API can fetch a number. It cannot tell you this change is three times your trailing baseline, or that you tried this exact fix in March and it verified at $4,100 saved, or that the instance it wants to stop is a warm standby you flagged in April. nable holds that history across clouds and AI spend, so its answers carry memory the calling agent cannot have. The longer it runs, the more it knows.</p>
+</div></section>
+
+<section><div class="wrap" style="padding:0">
+  <div class="label">Adoption</div>
+  <h2>Add it in one line.</h2>
+  <p>nable runs as a local MCP server, so it works in Claude Code, Cursor, or any MCP client, with your credentials on your own machine. Point your agent at the gate with a single instruction:</p>
+  <div class="snippet">
+    <div class="h">system prompt</div>
+    <div class="b">Before you apply any infrastructure change (a terraform apply, a
+helm upgrade, creating or resizing a resource) or start an
+expensive job, first call check_action_policy with the action and
+the change. Relay the verdict, the dollar impact, and the cheaper
+path when one is offered. Never apply a block or an escalate
+action; surface it to the human. nable is advisory and propose-only.</div>
+  </div>
+</div></section>
+
+<section><div class="wrap" style="padding:0">
+  <div class="label">Honest status</div>
+  <h2>What ships today, and what is next.</h2>
+  <p>We will not put a number on the site we cannot reproduce. Here is exactly where this is.</p>
+  <div class="ships">
+    <div class="box now">
+      <span class="tag">Live now</span>
+      <ul>
+        <li>The pre-action gate: price a change, check it against your budget, get a verdict</li>
+        <li>A cheaper-path suggestion for compute, labeled an estimate</li>
+        <li>Budget verdicts labeled with the age of the data</li>
+        <li>Propose-only, in the live <code>uvx nable</code> MCP</li>
+      </ul>
+    </div>
+    <div class="box next">
+      <span class="tag">Coming</span>
+      <ul>
+        <li>Per-run budgets that span model spend and cloud together</li>
+        <li>A savings view attributing what the controls actually saved</li>
+        <li>Orphaned-resource and agent-loop waste detection</li>
+        <li>An opt-in auto-remediation mode, bounded to reversible cleanup</li>
+      </ul>
+    </div>
+  </div>
+</div></section>
+
+<div class="cta-card">
+  <h2>Give your agents a cost conscience.</h2>
+  <p style="color:var(--fg-2);margin:12px auto 0;max-width:52ch">Local-first, propose-only, cross-cloud. Free to start.</p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="/#install">Install free: <code style="background:rgba(0,0,0,.15);color:#06181d;border:none;margin-left:6px">uvx nable</code></a>
+    <a class="btn btn-ghost" href="/finops-mcp-comparison">Compare FinOps tools</a>
+  </div>
+</div>
+
+</div></main>
+
+<footer><div class="wrap foot-inner">
+  <span><span style="color:var(--accent)">n</span>able · local-first FinOps</span>
+  <span><a href="/">Home</a> · <a href="/finops-mcp-comparison">Compare</a> · <a href="/security">Security</a> · <a href="/docs">Docs</a> · <a href="/pricing">Pricing</a></span>
+</div></footer>
+</body></html>

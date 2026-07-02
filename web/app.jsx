@@ -118,6 +118,7 @@ function Nav(){
   }
 
   return (
+    <>
     <nav className="nav">
       <div className="nav-inner">
         <a href="/" className="logo">
@@ -125,6 +126,7 @@ function Nav(){
           <span><span style={{color:'var(--accent)'}}>n</span>able</span>
         </a>
         <ul>
+          <li><a href="/agents.html" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'agents'}); }}>Agents</a></li>
           <li><a href="/pricing.html" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</a></li>
           <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
         </ul>
@@ -154,9 +156,11 @@ function Nav(){
           )}
         </button>
       </div>
+    </nav>
       {open && (
         <div className="nav-mobile-menu">
-          <a className="nav-mobile-item" href="/pricing.html" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</a>
+          <a className="nav-mobile-item" href="/agents.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'agents'}); }}>Agents</a>
+          <a className="nav-mobile-item" href="/pricing.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</a>
           <a className="nav-mobile-item" href="/docs.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
           <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:10}}>
             <a href="/account.html" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
@@ -167,7 +171,7 @@ function Nav(){
           </div>
         </div>
       )}
-    </nav>
+    </>
   );
 }
 
@@ -564,7 +568,7 @@ function Architecture({ version }){
         <div className="arch-tabs" role="tablist">
           <button role="tab" aria-selected={tab==="flow"} className={"arch-tab" + (tab==="flow"?" active":"")} onClick={()=>setTab("flow")}>The flow</button>
           <button role="tab" aria-selected={tab==="data"} className={"arch-tab" + (tab==="data"?" active":"")} onClick={()=>setTab("data")}>Your data</button>
-          <button role="tab" aria-selected={tab==="run"} className={"arch-tab" + (tab==="run"?" active":"")} onClick={()=>setTab("run")}>Run it or host it</button>
+          <button role="tab" aria-selected={tab==="run"} className={"arch-tab" + (tab==="run"?" active":"")} onClick={()=>setTab("run")}>Run or host</button>
         </div>
 
         <div className="arch-panel">
