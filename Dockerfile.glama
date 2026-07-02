@@ -4,6 +4,8 @@
 # 164 tools). This is intentionally NOT the team web-dashboard image (that is the
 # root Dockerfile); this one runs the stdio MCP server.
 FROM python:3.12-slim@sha256:d764629ce0ddd8c71fd371e9901efb324a95789d2315a47db7e4d27e78f1b0e9
-RUN pip install --no-cache-dir finops-mcp
+RUN pip install --no-cache-dir finops-mcp \
+    && useradd --create-home --shell /usr/sbin/nologin nable
 ENV NABLE_NO_TELEMETRY=1
+USER nable
 ENTRYPOINT ["finops-mcp"]
