@@ -8097,11 +8097,29 @@ async def check_action_policy(
         if isinstance(cost, dict) and cost.get("error"):
             return cost
 
+    from .agent_controls import suggest_cheaper_path, remediation_status, data_age_hours
+
     delta = (cost or {}).get("monthly_delta_usd", 0.0)
     verdict = (cost or {}).get("verdict")
     gate = evaluate_action_gate(action_type, delta, verdict, policy=load_policy())
     if cost is not None:
+        # Label the budget verdict with the age of the cost data it rests on, so the
+        # agent knows how fresh the "over budget" call is. Cached by design: no live
+        # Cost Explorer call on this request path. Best-effort, never fails the gate.
+        b = cost.get("budget")
+        if isinstance(b, dict):
+            try:
+                from .storage.snapshots import latest_captured_at
+                as_of = latest_captured_at()
+            except Exception:
+                as_of = None
+            b["as_of"] = as_of
+            b["age_hours"] = data_age_hours(as_of)
         gate["cost"] = cost
+        cheaper = suggest_cheaper_path(cost.get("breakdown"), delta)
+        if cheaper:
+            gate["cheaper_path"] = cheaper
+    gate["remediation"] = remediation_status()
     gate["policy_note"] = ("Advisory only. nable proposes, a human approves and applies. "
                            "It never executes actions in your environment on its own.")
     return gate

@@ -47,6 +47,27 @@ def store_snapshot(
         ))
 
 
+def latest_captured_at() -> str | None:
+    """ISO timestamp of the most recent cost snapshot, or None if there are none.
+
+    This is the freshness of the cost data a budget's run-rate is computed from, so
+    the pre-action gate can label its budget verdict with a data age. A small sorted
+    read (add an index on cost_snapshots.captured_at if the table grows large); never
+    a live provider call.
+    """
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(cost_snapshots.c.captured_at)
+            .order_by(cost_snapshots.c.captured_at.desc())
+            .limit(1)
+        ).first()
+    if not row or row[0] is None:
+        return None
+    val = row[0]
+    return val.isoformat() if hasattr(val, "isoformat") else str(val)
+
+
 def get_history(
     provider: str,
     service: str,
