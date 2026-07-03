@@ -314,7 +314,7 @@ const QUERIES = [
           <div className="r"><span>GCP · CUDs (compute)</span><span className="v num">64%</span><span className="d down num">-20.4%</span></div>
           <div className="r total"><span>Blended effective discount</span><span className="v num">-</span><span className="d down num">-26.7%</span></div>
         </div>
-        <p style={{marginTop:12}}>You'd unlock another <span style={{color:"var(--accent)"}}>$8,200 / mo</span> by raising Compute SP coverage to 92%. Model it?</p>
+        <p style={{marginTop:12}}>Raising Compute SP coverage to 92% is worth another <span style={{color:"var(--accent)"}}>$8,200 / mo</span>. Model it?</p>
       </>
     )
   },
@@ -330,7 +330,7 @@ const QUERIES = [
           <li><b>Track AI spend</b> by model and forecast where your token bill lands</li>
           <li><b>Act</b>: open a rightsizing PR against your IaC, file a ticket, post to Slack</li>
         </ul>
-        <p style={{marginTop:12}}><span style={{color:"var(--accent)"}}>160+ tools</span> in all. Pick a prompt below to run a real one.</p>
+        <p style={{marginTop:12}}><span style={{color:"var(--accent)"}}>180+ tools</span> in all. Pick a prompt below to run a real one.</p>
       </>
     )
   },
@@ -691,7 +691,7 @@ function Connectors(){
       <div className="wrap">
         <div className="section-head center">
           <div className="label">One dataset</div>
-          <h2>17 providers,<br/><em>one normalized bill.</em></h2>
+          <h2>18 providers,<br/><em>one normalized bill.</em></h2>
           <p>Every provider lands in the same FOCUS 2.0 records, the open FinOps standard, which nable extends past the clouds to usage-based SaaS and per-model AI spend. That is why one question can span AWS, Snowflake, Datadog and your OpenAI tokens: they all answer in the same shape.</p>
           <div className="focus-chips" aria-hidden="true">
             <span>FOCUS 2.0</span><span>AWS · Azure · GCP</span><span>11 SaaS providers</span><span>AI spend, per model</span><span>tokens preserved</span>
@@ -893,7 +893,7 @@ const FAQ_QA = [
   ["Can nable change my cloud infrastructure on its own?",
    "No. nable is propose-only. It drafts a pull request or opens a ticket with the fix, and a human reviews and applies it. It never edits, deletes, or buys anything in your environment autonomously."],
   ["What clouds and tools does nable support?",
-   "AWS, Azure, GCP, and Kubernetes, plus more than ten SaaS and AI providers including Datadog, Snowflake, Databricks, Stripe, OpenAI, Anthropic, and Amazon Bedrock. It exposes 165+ read-only tools your editor can call."],
+   "AWS, Azure, GCP, and Kubernetes, plus more than ten SaaS and AI providers including Datadog, Snowflake, Databricks, Stripe, OpenAI, Anthropic, and Amazon Bedrock. It exposes 180+ tools your editor can call. None of them can change your infrastructure: fixes ship as pull requests or tickets a human approves."],
   ["How is nable different from Vantage, CloudHealth, or the AWS FinOps agent?",
    "nable is local-first, your credentials and bills never leave your machine; AI-native, it lives in Claude or Cursor instead of a separate dashboard; and genuinely cross-cloud, including AI and LLM spend in the same answer. It proposes fixes as pull requests for human approval rather than acting on its own."],
   ["What is a FinOps MCP server?",
