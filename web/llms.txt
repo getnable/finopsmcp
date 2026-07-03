@@ -1,6 +1,6 @@
 # nable
 
-> Cost controls, built into your AI. nable makes Claude, Cursor, and your AI agents cost-aware: ask your whole cloud and AI bill anything, and your agents check every change against your budget before they act. One connector to AWS, Azure, GCP and 10+ SaaS and AI providers. Runs on your own machine, propose-only.
+> Cost controls, built into your agents. nable makes Claude, Cursor, and your AI agents cost-aware: ask your whole cloud and AI bill anything, and your agents check every change against your budget before they act. One connector to AWS, Azure, GCP and 10+ SaaS and AI providers. Runs on your own machine, propose-only.
 
 nable is an MCP (Model Context Protocol) server you install locally. It answers cost questions, detects anomalies, recommends rightsizing, tracks AI and LLM spend by model (Amazon Bedrock, OpenAI, Anthropic, Azure OpenAI), and drafts the pull request to fix waste. There is no SaaS account to create and no nable backend that holds your data. The differentiator is the intersection: genuinely multi-cloud, plus cross-provider AI spend, plus true local-first, in one answer.
 
