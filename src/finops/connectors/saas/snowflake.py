@@ -40,7 +40,13 @@ class SnowflakeConnector(BaseConnector):
         return bool(self._account and self._user and has_auth)
 
     def _connect(self):
-        import snowflake.connector
+        try:
+            import snowflake.connector
+        except ImportError as e:
+            raise RuntimeError(
+                "Snowflake support needs an extra dependency. "
+                "Run: pip install 'finops-mcp[snowflake]'"
+            ) from e
         kwargs: dict[str, Any] = dict(account=self._account, user=self._user, role=self._role)
         if self._warehouse:
             kwargs["warehouse"] = self._warehouse

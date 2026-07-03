@@ -48,7 +48,7 @@ uvx --from finops-mcp finops welcome --demo
 
 ## What you get
 
-- 160+ tools for cost queries, anomaly detection, rightsizing, and PRs
+- 180+ tools for cost queries, anomaly detection, rightsizing, and PRs
 - AI spend tracked by model, alongside cloud, Kubernetes, and SaaS
 - Read-only by default. It runs on your machine. No vendor holds your data.
 

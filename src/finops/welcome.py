@@ -310,36 +310,17 @@ def _value_moment_body(demo: bool = False) -> bool:
     """Scan and print a real dollar figure. Wrapped by _show_value_moment, which
     owns the demo-env lifecycle."""
     if not demo:
-        _line(dim("  Scanning your account, this can take up to ~30s..."))
+        _line(dim("  Scanning your account, this takes a few seconds..."))
 
     import asyncio
     from . import server  # heavy import, only at the value-moment step
 
     _quiet_logs()
 
-    # Headline first, on its own wall-clock cap. The user came for this number, so
-    # the optional idle/AI scans below must never block or blank it. _run_capped's
-    # daemon-thread join returns on time even when a call pins the event loop (an
-    # asyncio timeout alone would not fire, the bug that used to hang setup and
-    # blanked this scan when an un-guarded tool reached for real AWS in demo).
+    # The headline the user came for. Compute and validate it first, on its own
+    # wall-clock cap. _run_capped's daemon-thread join returns on time even when a
+    # call pins the event loop (a plain asyncio timeout would not fire).
     summary = _run_capped(lambda: asyncio.run(server.get_cost_summary()), _VALUE_MOMENT_TIMEOUT)
-
-    # Optional extras, real accounts only. There is no demo idle/AI dataset, and
-    # calling those tools in demo would reach for real AWS, so skip them in demo.
-    # Each runs on its own cap so a slow scan can't hold the headline hostage.
-    idle = None
-    ai_plan = None
-    llm = None
-    if not demo and isinstance(summary, dict) and not summary.get("error"):
-        idle = _run_capped(lambda: asyncio.run(server.list_idle_resources()), 12)
-        ai_plan = _run_capped(lambda: asyncio.run(server.optimize_ai_spend()), 18)
-        # AI-native users connect a model provider too, and the token bill is their
-        # biggest number and the thing no cloud dashboard shows. Surface it in the
-        # same value moment instead of only the cloud bill. Gated on a fast config
-        # check so cloud-only users never wait on a token fetch.
-        if _run_capped(lambda: asyncio.run(_any_llm_configured()), 3):
-            llm = _run_capped(lambda: asyncio.run(server.get_llm_costs(days=30)), 15)
-
     if not isinstance(summary, dict) or summary.get("error"):
         return False
     # Real tool returns grand_total_usd / grand_by_service; demo data returns
@@ -355,6 +336,11 @@ def _value_moment_body(demo: bool = False) -> bool:
                    if any(w in k.lower() for w in _AI_KEYWORDS))
     ai_share = round(ai_total / total * 100) if total else 0
 
+    # Print the headline NOW, before any optional scan runs. This block used to
+    # print only after the idle/AI/LLM scans finished, and those ran serially with
+    # caps summing to ~45s, so a real first-run user stared at "Scanning..." for up
+    # to ~40s even though this number was ready in under a second. That hang was the
+    # top activation risk. The number never waits on the extras again.
     _blank()
     _line(_rule())
     _blank()
@@ -362,25 +348,45 @@ def _value_moment_body(demo: bool = False) -> bool:
     _line(green("✓") + bold("  " + _header))
     _blank()
     _line(f"  {dim('Total spend')}      {bold('$' + format(total, ',.0f'))}")
-    # The token bill (OpenAI/Anthropic/Bedrock/gateways), the AI-native hero number,
-    # shown alongside the cloud bill when a model provider is connected.
-    if isinstance(llm, dict):
-        llm_total = llm.get("total_usd") or 0
-        if llm_total >= 1:
-            _line(f"  {dim('AI / LLM spend')}   {bold('$' + format(llm_total, ',.0f'))}  {dim('OpenAI, Anthropic, Bedrock')}")
     _line(f"  {dim('Top driver')}       {top_name}  {cyan('$' + format(top_val, ',.0f'))}")
     if ai_share >= 5:
         _line(f"  {dim('AI / ML share')}    {bold(str(ai_share) + '%')}  {dim('of your cloud bill')}")
-    if isinstance(idle, dict):
-        waste = idle.get("total_monthly_waste_usd") or 0
-        if waste and waste >= 1:
-            _line(f"  {dim('Idle / wasted')}    {amber('$' + format(waste, ',.0f') + '/mo')}  {dim('doing nothing')}")
-    # Realizable AI savings (e.g. prompt caching). Only the addressable figure,
-    # never the labeled routing ceiling, so onboarding never overpromises.
-    if isinstance(ai_plan, dict) and not ai_plan.get("error"):
-        ai_save = ai_plan.get("addressable_savings_monthly_usd") or 0
-        if ai_save and ai_save >= 10:
-            _line(f"  {dim('AI savings')}       {green('$' + format(ai_save, ',.0f') + '/mo')}  {dim('ready to capture')}")
+
+    # Optional extras, real accounts only. Run CONCURRENTLY so the added wait is
+    # the slowest single scan (~10s), not the sum of all three (~45s). Each keeps
+    # its own wall-clock cap. There is no demo idle/AI dataset, and calling these
+    # in demo would reach for real AWS, so they are skipped in demo.
+    if not demo:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as _pool:
+            _f_idle = _pool.submit(_run_capped, lambda: asyncio.run(server.list_idle_resources()), 10)
+            _f_ai = _pool.submit(_run_capped, lambda: asyncio.run(server.optimize_ai_spend()), 10)
+            # Gate the token-bill fetch on a fast config check so cloud-only users
+            # never wait on it, but let idle/AI keep running while we check.
+            _f_llm = None
+            if _run_capped(lambda: asyncio.run(_any_llm_configured()), 3):
+                _f_llm = _pool.submit(_run_capped, lambda: asyncio.run(server.get_llm_costs(days=30)), 10)
+            idle = _f_idle.result()
+            ai_plan = _f_ai.result()
+            llm = _f_llm.result() if _f_llm else None
+
+        # The token bill (OpenAI/Anthropic/Bedrock/gateways): the AI-native hero
+        # number, shown when a model provider is connected.
+        if isinstance(llm, dict):
+            llm_total = llm.get("total_usd") or 0
+            if llm_total >= 1:
+                _line(f"  {dim('AI / LLM spend')}   {bold('$' + format(llm_total, ',.0f'))}  {dim('OpenAI, Anthropic, Bedrock')}")
+        if isinstance(idle, dict):
+            waste = idle.get("total_monthly_waste_usd") or 0
+            if waste and waste >= 1:
+                _line(f"  {dim('Idle / wasted')}    {amber('$' + format(waste, ',.0f') + '/mo')}  {dim('doing nothing')}")
+        # Realizable AI savings (e.g. prompt caching). Only the addressable figure,
+        # never the labeled routing ceiling, so onboarding never overpromises.
+        if isinstance(ai_plan, dict) and not ai_plan.get("error"):
+            ai_save = ai_plan.get("addressable_savings_monthly_usd") or 0
+            if ai_save and ai_save >= 10:
+                _line(f"  {dim('AI savings')}       {green('$' + format(ai_save, ',.0f') + '/mo')}  {dim('ready to capture')}")
+
     _blank()
     return True
 

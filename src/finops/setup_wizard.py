@@ -1587,7 +1587,7 @@ def _print_tools_cheatsheet() -> None:
     ]
     print()
     print("  " + bold("Ask nable in Claude (or Cursor / Windsurf / VS Code)"))
-    print("  " + dim("Plain English. nable picks the right tool. A few to start:"))
+    print("  " + dim("Just ask. nable picks the right tool. A few to start:"))
     print()
     for title, qs in sections:
         print("  " + cyan(title))
@@ -2584,6 +2584,8 @@ def _connected_extras() -> str:
         extras.append("azure")
     if any(k.startswith("GCP") or k.startswith("GOOGLE") for k in keys):
         extras.append("gcp")
+    if any(k.startswith("SNOWFLAKE") for k in keys):
+        extras.append("snowflake")
     return ",".join(extras)
 
 

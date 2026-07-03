@@ -64,16 +64,27 @@ def _check_keyring_storage() -> dict:
     ]
     leaked = [k for k in sensitive_env_keys if os.environ.get(k)]
 
+    # Locate the vault master key in the vault's own resolution order: env var,
+    # then the 0600 key file, then the OS keyring. Check the silent sources first
+    # so `finops doctor` no longer reads (and, on macOS, can prompt for) the
+    # keychain on every run now that the vault is file-first.
     keyring_ok = False
     keyring_detail = "keyring library not installed"
     try:
-        import keyring
-        val = keyring.get_password("finops-mcp", "master-key")
-        if val:
-            keyring_ok = True
-            keyring_detail = "master key found in OS keyring"
+        from .security.vault import _data_dir
+        if os.environ.get("FINOPS_VAULT_KEY"):
+            keyring_ok, keyring_detail = True, "master key provided via FINOPS_VAULT_KEY"
+        elif (_data_dir() / "vault.key").exists():
+            keyring_ok, keyring_detail = True, "master key found in vault.key (0600 file)"
         else:
-            keyring_detail = "keyring available but master key not stored yet"
+            try:
+                import keyring
+                if keyring.get_password("finops-mcp", "master-key"):
+                    keyring_ok, keyring_detail = True, "master key found in OS keyring"
+                else:
+                    keyring_detail = "keyring available but master key not stored yet"
+            except ImportError:
+                keyring_detail = "keyring library not installed"
     except Exception as e:
         keyring_detail = str(e)
 

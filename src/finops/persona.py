@@ -31,11 +31,11 @@ PERSONAS: dict[str, dict[str, str]] = {
     },
     "finance": {
         "label": "Finance / Management",
-        "description": "spend summaries, budget tracking, plain English",
+        "description": "spend summaries, budget tracking, clear answers",
         "mcp_context": (
             "Format all responses for a non-technical finance audience. Use dollar amounts prominently. "
             "Avoid instance type names, API terminology, and technical jargon entirely. "
-            "Explain what services are in plain English. Lead with the bottom line."
+            "Explain what services are in clear terms. Lead with the bottom line."
         ),
     },
     "platform": {

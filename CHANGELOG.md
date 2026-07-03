@@ -2,6 +2,33 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.103
+
+First-run diagnostic fixes: the value moment no longer hangs, and the package metadata is honest again.
+
+### Fixed
+- **The first-run value moment no longer hangs.** The headline spend number was
+  computed in under a second but printed only after three optional scans (idle
+  resources, AI-spend plan, LLM bill) that ran serially with wall-clock caps
+  summing to ~45s. A real new user could stare at "Scanning..." for up to ~40s.
+  The headline now prints immediately, and the optional scans run concurrently
+  (added wait is the slowest single scan, ~10s, not their sum). Demo mode hid
+  this, which is why it kept slipping past.
+- **`finops doctor` no longer reads the OS keychain on every run.** It now
+  resolves the vault master key in the vault's own order (env, then the 0600
+  `vault.key` file, then the keyring), so on a file-first install it reports the
+  key correctly without touching (or, on macOS, prompting for) the keychain.
+- **Friendlier Snowflake missing-dependency error.** A slim install now gets
+  "Run: pip install 'finops-mcp[snowflake]'" instead of a raw ModuleNotFoundError,
+  and the setup wizard folds the `snowflake` extra into the pinned launch command
+  when Snowflake is connected.
+- **`__version__` was stale (0.8.101) while the package was 0.8.102.** Now in sync.
+- Retired "plain English" from the first-run wizard screen, the finance persona,
+  and the dashboard sandbox (the earlier scrub was web-only).
+- Corrected tool count (165/160+ to 180+) and plugin version (0.8.77) in the
+  Claude plugin and marketplace manifests, fixed a description typo, and replaced
+  the inaccurate "credentials stay in your OS keychain" with "on your machine."
+
 ## 0.8.102
 
 The keychain-prompt fix and the FOCUS long tail: one normalized cost dataset across clouds, SaaS and AI.
