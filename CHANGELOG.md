@@ -2,6 +2,43 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.102
+
+The keychain-prompt fix and the FOCUS long tail: one normalized cost dataset across clouds, SaaS and AI.
+
+### Fixed
+- **No more recurring macOS credential prompts.** Every license check used to
+  read the trial date from the OS keychain and rewrite it, which recreated the
+  item, reset its ACL, and made macOS re-prompt on every session ("python wants
+  to access system.cache.prefs"). The signed trial file is now the primary
+  store and the keychain is written exactly once, at creation. The vault master
+  key is likewise resolved from a 0600 key file first, with the keyring as the
+  durable recovery copy, so version upgrades no longer prompt either. Set
+  `FINOPS_VAULT_KEYCHAIN_ONLY=1` to keep the key exclusively in the keychain.
+  The trial keychain entry is renamed to an honest `nable-trial` and migrates
+  automatically.
+
+### Added
+- **FOCUS 2.0 across the usage-based long tail.** Snowflake, Datadog, MongoDB
+  Atlas, New Relic, Databricks, Vercel, Langfuse, Cloudflare, PagerDuty, GitHub
+  and Twilio now normalize into the same FOCUS 2.0 records as AWS, Azure and
+  GCP, via one generic translator. `get_focus_costs` and `slice_costs` query
+  all of them in a single shape.
+- **LLM/AI spend in the unified dataset.** OpenAI, Anthropic, OpenRouter and
+  LiteLLM spend joins the FOCUS dataset, one record per model with token counts
+  and request volume preserved as tags. Bedrock and Vertex are excluded from
+  the merge since they already arrive through the AWS and GCP exports, so
+  nothing is double-counted. Filter with `provider="openai"` or `provider="ai"`.
+- **Agent cost-control gate.** Agents can call `check_action_policy` and
+  `estimate_change_cost` before applying a change, getting an allow, block or
+  escalate answer against your budgets and policies plus a cheaper path when
+  one exists.
+
+### Hardened
+- FOCUS translators degrade safely on hostile provider data: non-finite costs
+  are clamped, malformed gateway responses drop fields instead of records, and
+  internal per-provider payloads no longer leak into `get_llm_costs` responses.
+
 ## 0.8.101
 
 Hardening pass: credentials at rest, role enforcement on hosted boxes, and a safer fleet and build pipeline.
