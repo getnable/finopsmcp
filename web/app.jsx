@@ -183,9 +183,9 @@ function Hero(){
       <div className="wrap">
         <div className="hero-c">
           <h1 className="display">
-            Every cloud and AI bill, <span className="h1-ask">one question away.</span>
+            All of FinOps, <span className="h1-ask">built into your AI.</span>
           </h1>
-          <p className="hero-sub">nable normalizes AWS, Snowflake, Datadog, and your OpenAI tokens into one bill, then answers anything you ask, right inside Claude or Cursor.</p>
+          <p className="hero-sub">See every dollar across cloud, SaaS, and AI, cut the waste, and check what your agents spend before they act, without leaving Claude or Cursor.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
             <a className="btn btn-primary" href="/docs.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
