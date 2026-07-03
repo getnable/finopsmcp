@@ -16,15 +16,16 @@ from .schema import FocusRecord
 from .translators import aws as _aws_t
 from .translators import azure as _azure_t
 from .translators import gcp as _gcp_t
-from .translators import snowflake as _snowflake_t
 
 __all__ = ["normalize", "FocusRecord"]
 
+# Cloud providers have bespoke translators (rich, per-provider billing exports).
+# Usage-based SaaS providers share one generic translator and normalize directly
+# in their get_costs_as_focus via focus.translators.generic.saas_focus_records.
 _TRANSLATORS = {
     "aws": _aws_t.translate,
     "azure": _azure_t.translate,
     "gcp": _gcp_t.translate,
-    "snowflake": _snowflake_t.translate,
 }
 
 
