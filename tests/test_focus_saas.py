@@ -105,6 +105,22 @@ def test_new_relic_zero_cost_keeps_usage_tags():
     assert r.Tags.get("gb_ingested") == "512.5"
 
 
+def test_non_finite_amounts_clamped_to_zero():
+    # NaN/inf from a provider API must not poison totals or JSON serialization.
+    entries = [
+        CostEntry("p", "a", "a", "nan-svc", "", float("nan")),
+        CostEntry("p", "a", "a", "inf-svc", "", float("inf")),
+        CostEntry("p", "a", "a", "ok-svc", "", 12.5),
+    ]
+    recs = saas_focus_records(
+        _summary("p", entries),
+        provider="P", publisher="P", category="Other",
+        start_date=_START, end_date=_END,
+    )
+    costs = {r.ServiceName: r.BilledCost for r in recs}
+    assert costs == {"nan-svc": 0.0, "inf-svc": 0.0, "ok-svc": 12.5}
+
+
 def test_empty_summary_yields_no_records():
     recs = saas_focus_records(
         _summary("mongodb_atlas", []),

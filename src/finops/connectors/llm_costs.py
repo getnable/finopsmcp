@@ -247,6 +247,7 @@ def get_all_llm_costs(
     start_date: date | None = None,
     end_date: date | None = None,
     days: int = 30,
+    include_provider_results: bool = False,
 ) -> dict[str, Any]:
     """
     Aggregate LLM costs across all configured providers.
@@ -284,7 +285,10 @@ def get_all_llm_costs(
     _ck = _cache.make_key("llm.get_all", start_date.isoformat(), end_date.isoformat())
     _hit = _cache.get(_ck)
     if _hit is not None:
-        return _copy.deepcopy(_hit)
+        out = _copy.deepcopy(_hit)
+        if not include_provider_results:
+            out.pop("provider_results", None)
+        return out
 
     results: dict[str, dict] = {}
 
@@ -421,10 +425,15 @@ def get_all_llm_costs(
         "sources":      {k: v.get("source", "none") for k, v in results.items()},
         # Per-provider normalized dicts (by_model, by_model_tokens, ...), kept so
         # FOCUS normalization can attribute each model to its provider. The flat
-        # by_model above loses that; provider_results does not.
+        # by_model above loses that; provider_results does not. Internal only:
+        # stripped from the public return unless include_provider_results is set,
+        # so MCP tool responses do not carry the duplicated per-provider payloads.
         "provider_results": results,
     }
     _cache.set(_ck, _copy.deepcopy(_out), _cache.COST_TTL)
+    if not include_provider_results:
+        _out = dict(_out)
+        _out.pop("provider_results", None)
     return _out
 
 
@@ -465,7 +474,7 @@ def get_all_llm_costs_as_focus(
     if start_date is None:
         start_date = end_date - timedelta(days=days)
 
-    agg = get_all_llm_costs(start_date, end_date, days=days)
+    agg = get_all_llm_costs(start_date, end_date, days=days, include_provider_results=True)
     records: list = []
     for key, result in (agg.get("provider_results") or {}).items():
         if exclude_cloud_native and key in _CLOUD_NATIVE_LLM:

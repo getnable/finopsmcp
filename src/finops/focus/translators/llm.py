@@ -21,6 +21,7 @@ recorded even when a gateway reports usage without dollars.
 """
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -53,8 +54,14 @@ def llm_result_to_focus(
         return []
     publisher = publisher or provider
     ps, pe = _period(start_date), _period(end_date)
-    by_model: dict[str, Any] = result.get("by_model") or {}
-    by_tokens: dict[str, Any] = result.get("by_model_tokens") or {}
+    # A gateway (self-hosted LiteLLM, proxy) can return malformed shapes; degrade
+    # per-field rather than raising, or one bad provider drops every AI record.
+    by_model = result.get("by_model")
+    if not isinstance(by_model, dict):
+        by_model = {}
+    by_tokens = result.get("by_model_tokens")
+    if not isinstance(by_tokens, dict):
+        by_tokens = {}
 
     # Union of models that reported cost and models that reported only tokens, so
     # nothing is dropped (gateways may report usage without a dollar figure).
@@ -65,10 +72,14 @@ def llm_result_to_focus(
             amount = round(float(by_model.get(model, 0.0) or 0.0), 10)
         except (TypeError, ValueError):
             amount = 0.0
+        if not math.isfinite(amount):
+            amount = 0.0
         tags: dict[str, str] = {}
-        for k, v in (by_tokens.get(model) or {}).items():
+        tok = by_tokens.get(model)
+        for k, v in (tok.items() if isinstance(tok, dict) else ()):
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 tags[str(k)] = str(v)
+        model = str(model)
         records.append(FocusRecord(
             BilledCost=amount,
             EffectiveCost=amount,

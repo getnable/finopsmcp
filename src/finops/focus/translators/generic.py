@@ -11,6 +11,7 @@ one get_costs_as_focus method, not a new translator.
 """
 from __future__ import annotations
 
+import math
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -18,6 +19,16 @@ from ..schema import FocusRecord, SERVICE_CATEGORIES
 
 _CHARGE = {"usage": "Usage", "purchase": "Purchase", "tax": "Tax",
            "adjustment": "Adjustment", "credit": "Credit"}
+
+
+def _amount(v: Any) -> float:
+    """Coerce a cost to a finite float. NaN/inf from a provider API would poison
+    sum() totals and break strict JSON parsing downstream, so clamp to 0.0."""
+    try:
+        f = float(v or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return round(f, 10) if math.isfinite(f) else 0.0
 
 
 def _period(d: date) -> datetime:
@@ -53,7 +64,7 @@ def entry_to_focus(
     by the connector; everything else comes from the entry."""
     if category not in SERVICE_CATEGORIES:
         category = "Other"
-    amount = round(float(getattr(entry, "amount", 0.0) or 0.0), 10)
+    amount = _amount(getattr(entry, "amount", 0.0))
     service = (getattr(entry, "service", "") or provider).strip() or provider
     region = (getattr(entry, "region", "") or "").strip() or None
     account = (getattr(entry, "account_id", "") or "").strip() or None

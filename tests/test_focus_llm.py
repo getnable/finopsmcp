@@ -88,6 +88,50 @@ def test_get_all_llm_costs_as_focus_rolls_providers(monkeypatch):
     assert all(r.ServiceCategory == "AI and Machine Learning" for r in recs)
 
 
+def test_llm_malformed_provider_shapes_degrade_not_raise():
+    # A misbehaving gateway must not take down the whole AI merge.
+    bad_shapes = [
+        {"by_model": "notadict"},
+        {"by_model_tokens": "notadict"},
+        {"by_model": {"m": 1.0}, "by_model_tokens": {"m": "notadict"}},
+        {"by_model": {"m": {"weird": 1}}},
+        {"by_model": {123: 4.5}},
+    ]
+    for res in bad_shapes:
+        recs = llm_result_to_focus(res, provider="X", start_date=_START, end_date=_END)
+        assert isinstance(recs, list)
+        for r in recs:
+            assert isinstance(r.ServiceName, str)
+            assert isinstance(r.BilledCost, float)
+
+
+def test_llm_non_finite_costs_clamped():
+    res = {"by_model": {"a": float("nan"), "b": float("inf"), "c": 5.0}}
+    recs = {r.ServiceName: r.BilledCost for r in
+            llm_result_to_focus(res, provider="X", start_date=_START, end_date=_END)}
+    assert recs == {"a": 0.0, "b": 0.0, "c": 5.0}
+
+
+def test_provider_results_internal_only(monkeypatch):
+    # provider_results is for FOCUS attribution; MCP tool responses must not carry it.
+    import finops.connectors.llm_costs as llm
+    from finops import cache as _cache
+
+    cached = {"total_usd": 1.0, "by_model": {"m": 1.0}, "by_model_tokens": {},
+              "daily": [], "sources": {"openai": "api"},
+              "provider_results": {"openai": {"by_model": {"m": 1.0}}}}
+    monkeypatch.setattr(_cache, "get", lambda key: cached)
+
+    pub = llm.get_all_llm_costs(_START, _END)
+    assert "provider_results" not in pub
+    assert pub["by_model"] == {"m": 1.0}
+
+    internal = llm.get_all_llm_costs(_START, _END, include_provider_results=True)
+    assert internal["provider_results"] == {"openai": {"by_model": {"m": 1.0}}}
+    # The cached value itself is untouched (deepcopy semantics preserved).
+    assert "provider_results" in cached
+
+
 def test_get_all_llm_costs_as_focus_excludes_cloud_native(monkeypatch):
     # Bedrock/Vertex already appear in AWS/GCP FOCUS; exclude to avoid double count.
     import finops.connectors.llm_costs as llm
