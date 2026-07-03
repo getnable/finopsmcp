@@ -419,9 +419,49 @@ def get_all_llm_costs(
         "top_spenders": top_spenders,
         "recommendations": recommendations,
         "sources":      {k: v.get("source", "none") for k, v in results.items()},
+        # Per-provider normalized dicts (by_model, by_model_tokens, ...), kept so
+        # FOCUS normalization can attribute each model to its provider. The flat
+        # by_model above loses that; provider_results does not.
+        "provider_results": results,
     }
     _cache.set(_ck, _copy.deepcopy(_out), _cache.COST_TTL)
     return _out
+
+
+# FOCUS ProviderName for each internal LLM provider key.
+_LLM_FOCUS_NAMES = {
+    "openai": "OpenAI",
+    "anthropic": "Anthropic",
+    "bedrock": "AWS Bedrock",
+    "vertex": "Google Vertex AI",
+    "openrouter": "OpenRouter",
+    "litellm": "LiteLLM",
+}
+
+
+def get_all_llm_costs_as_focus(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    days: int = 30,
+) -> list:
+    """Return all configured LLM/AI spend as FOCUS 2.0 records, one per model per
+    provider (ServiceCategory "AI and Machine Learning"). Token counts and request
+    volume ride along in each record's Tags."""
+    from ..focus.translators.llm import llm_result_to_focus
+
+    if end_date is None:
+        end_date = date.today()
+    if start_date is None:
+        start_date = end_date - timedelta(days=days)
+
+    agg = get_all_llm_costs(start_date, end_date, days=days)
+    records: list = []
+    for key, result in (agg.get("provider_results") or {}).items():
+        name = _LLM_FOCUS_NAMES.get(key, key.title())
+        records.extend(llm_result_to_focus(
+            result, provider=name, start_date=start_date, end_date=end_date,
+        ))
+    return records
 
 
 def _generate_recommendations(
