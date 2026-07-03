@@ -184,7 +184,7 @@ function Hero(){
           <h1 className="display">
             Every cloud and AI bill, <span className="h1-ask">one question away.</span>
           </h1>
-          <p className="hero-sub">nable normalizes AWS, Snowflake, Datadog, and your OpenAI tokens into one bill, then answers in plain English, right inside Claude or Cursor.</p>
+          <p className="hero-sub">nable normalizes AWS, Snowflake, Datadog, and your OpenAI tokens into one bill, then answers anything you ask, right inside Claude or Cursor.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
             <a className="btn btn-primary" href="/docs.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
@@ -499,7 +499,7 @@ function SeeItWork({ interaction }){
         <div className="section-head center">
           <div className="label">See it work</div>
           <h2>Ask your bill like you'd<br/><em>ask a teammate.</em></h2>
-          <p>nable pulls every connected provider, normalizes to USD, and answers in plain English. Watch it run through real questions, or ask your own.</p>
+          <p>nable pulls every connected provider, normalizes to USD, and answers right in your editor. Watch it run through real questions, or ask your own.</p>
         </div>
         <div className="console-stage">
           <Console interaction={interaction} />
@@ -1083,7 +1083,7 @@ function GetStarted(){
         <div className="section-head center">
           <div className="label">Get started</div>
           <h2>Two minutes, three steps,<br/><em>no SQL, no dashboards.</em></h2>
-          <p>Give nable read-only access to your bill, then ask questions in plain English. That is the whole setup.</p>
+          <p>Give nable read-only access to your bill, then just ask. That is the whole setup.</p>
         </div>
         <div className="start-grid">
           <div className="start-step">
@@ -1099,7 +1099,7 @@ function GetStarted(){
           <div className="start-step">
             <div className="start-n">3</div>
             <h3>Ask</h3>
-            <p>In Claude or Cursor, ask why the bill went up. Get the cause, the cost, and the fix, in plain English.</p>
+            <p>In Claude or Cursor, ask why the bill went up. Get the cause, the cost, and the fix back in the same chat.</p>
           </div>
         </div>
       </div>
@@ -1163,7 +1163,7 @@ function DemoVideo(){
         <div className="section-head center">
           <div className="label">See it work</div>
           <h2>Watch nable<br/><em>find the money.</em></h2>
-          <p>Ask in plain English. nable reads your real bill, finds what changed, and drafts the fix, live.</p>
+          <p>Just ask. nable reads your real bill, finds what changed, and drafts the fix, live.</p>
         </div>
         <div className="demo-video-frame">
           <video className="demo-video" src="/nablepreview.mp4?v=2" autoPlay loop muted playsInline preload="auto" />
