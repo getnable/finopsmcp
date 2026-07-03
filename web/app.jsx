@@ -93,7 +93,7 @@ function Ticker({ installs, version }){
         <span className="sep">·</span>
         <span className="seg">4k+ PyPI downloads / mo</span>
         <span className="sep">·</span>
-        <span className="seg">17 connectors · AWS · Azure · GCP +14</span>
+        <span className="seg">18 providers · AWS · Azure · GCP + 15 more</span>
         <span className="sep">·</span>
         <span className="seg">
           <a href="/about" style={{color:"var(--accent)",textDecoration:"none",fontWeight:500}}>
@@ -325,7 +325,7 @@ const QUERIES = [
       <>
         <p>A lot, and all of it from your editor. On a connected account I can:</p>
         <ul className="caps">
-          <li><b>Answer cost questions</b> across AWS, Azure, GCP, Kubernetes and 13+ SaaS and AI providers</li>
+          <li><b>Answer cost questions</b> across AWS, Azure, GCP, Kubernetes and 15 SaaS and AI providers</li>
           <li><b>Catch anomalies</b> with Z-score detection and name the tag driving the spike</li>
           <li><b>Find savings</b>: rightsizing, idle cleanup, commitment and discount coverage</li>
           <li><b>Track AI spend</b> by model and forecast where your token bill lands</li>
@@ -624,7 +624,7 @@ function Architecture({ version }){
             <div className="arch-col">
               <span className="lab">provider apis</span>
               <div className="arch-node">
-                <h4>17 connectors</h4>
+                <h4>18 providers</h4>
                 <span className="sub">cost · usage · billing</span>
                 <div className="chips"><span>AWS CE/CUR</span><span>Azure CM</span><span>GCP BQ</span><span>+14</span></div>
               </div>
@@ -707,7 +707,7 @@ function Connectors(){
         </div>
       </div>
       <div className="wrap">
-        <p className="logo-band-note">+ 8 more connectors · new providers ship monthly</p>
+        <p className="logo-band-note">18 providers, one normalized bill · new ones ship monthly</p>
       </div>
     </section>
   );
@@ -740,7 +740,7 @@ const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 // Comparison rows. value true -> check, false -> dash, string -> mono text.
 const PRICE_ROWS = [
   { label: "Users",                                         dev: "Just you",     pro: "Your team",    startup: "Your org",              ent: "Your org" },
-  { label: "Cost queries, anomalies, rightsizing, 17 connectors", dev: true,     pro: true,           startup: true,                    ent: true },
+  { label: "Cost queries, anomalies, rightsizing, 18 providers", dev: true,     pro: true,           startup: true,                    ent: true },
   { label: "Remediation PRs, alerts, dashboards, Slack bot", dev: false,         pro: true,           startup: true,                    ent: true },
   { label: "Runs",                                          dev: "Your machine", pro: "Your machine", startup: "Your machine",          ent: "Hosted or self-host" },
   { label: "Managed AI",                                    dev: "Your own key", pro: "Your own key", startup: "Your own key",          ent: "Custom" },
@@ -795,8 +795,8 @@ function Pricing(){
   const startupLink = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
 
   const tiers = [
-    { key:"dev", name:"Dev", tag:"Ask your bill anything", amt:"Free", per:"forever", billed:"No credit card",
-      feats:["Cost, anomaly + rightsizing","LLM spend by model","All 17 connectors","Your own LLM key"],
+    { key:"dev", name:"Dev", tag:"Ask about your bill", amt:"Free", per:"forever", billed:"No credit card",
+      feats:["Cost, anomaly + rightsizing","LLM spend by model","All 18 providers","Your own LLM key"],
       cta:"Start free", href:"/docs.html", plan:"dev", ext:false, primary:false, rec:false },
     { key:"pro", name:"Pro", tag:"Find and fix the waste", amt:proPrice, per, billed,
       feats:["Everything in Dev","Remediation PRs + tickets","Alerts, digests, budgets","Hosting add-on available"],

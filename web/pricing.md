@@ -7,7 +7,7 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 - Seats: 1, solo use
 - Runs: local, on your own machine
 - AI: bring your own LLM key
-- Includes: cost queries across AWS, Azure, GCP and 10+ SaaS and AI providers; anomaly detection; rightsizing recommendations; LLM spend tracking by model; every connector
+- Includes: cost queries across AWS, Azure, GCP and 15 more SaaS and AI providers; anomaly detection; rightsizing recommendations; LLM spend tracking by model; every connector
 - Not included: Terraform remediation PRs, ticket creation, Slack and Teams alerts, digests, commitment recommendations
 - Sign up: no credit card, no expiry
 

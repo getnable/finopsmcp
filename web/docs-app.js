@@ -242,7 +242,7 @@ const INTEL = [];
 
 /* ── Overview: What nable does ── */
 INTEL.push({ id:'features', name:'All tools', crumb:'Tools',
-  blurb:'165+ read-only MCP tools, grouped by what you would actually ask. nable is not just a connector that pipes billing data into an AI: it runs active analysis (anomaly detection, CloudWatch-based rightsizing, waste-pattern scanning, commitment modeling, AI and token unit economics, forecasting) and surfaces it as tools your editor can query, reason about, and act on. Everything runs on your machine.',
+  blurb:'180+ tools, grouped by what you would actually ask. nable is not just a connector that pipes billing data into an AI: it runs active analysis (anomaly detection, CloudWatch-based rightsizing, waste-pattern scanning, commitment modeling, AI and token unit economics, forecasting) and surfaces it as tools your editor can query, reason about, and act on. Everything runs on your machine.',
   body:`<p class="body">You don’t call tools by name. You describe the outcome you want, and nable picks the right tool, runs the analysis, and where there’s a fix to make, <strong>drafts it for your approval</strong>. It proposes; you decide. It never changes your cloud on its own.</p>
 
     <h3 class="sub-h" id="ask-to-act" data-toc>Ask nable to act</h3>
@@ -297,7 +297,7 @@ INTEL.push({ id:'understand', name:'Understand your bill', crumb:'Tools',
       ['get_cost_history','Historical daily cost for a provider + service, for trend context'],
       ['compare_providers','Side-by-side cost comparison across all configured providers'],
       ['get_total_spend_all_sources','Grand total across cloud + SaaS, your true total tech spend'],
-      ['get_focus_costs','Unified cost data in FOCUS 2.0 format across all cloud providers'],
+      ['get_focus_costs','Unified cost data in FOCUS 1.2 format across all cloud providers'],
       ['get_tag_cost_breakdown_cur','Break AWS costs by a resource tag using CUR line items via Athena'],
       ['benchmark_costs','Compare your spend profile against anonymised peer-group medians'],
     ], 230) });

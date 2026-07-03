@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>nable docs — FinOps that runs on your machine</title>
+<title>nable docs , FinOps that runs on your machine</title>
 <link rel="canonical" href="https://getnable.com/docs" />
 <meta name="description" content="Install nable in minutes: setup wizard, connector guides for AWS, Azure, GCP and AI providers, every MCP tool, and security architecture. Runs on your machine." />
 <link rel="icon" type="image/svg+xml" href="/favicon-docs.svg" />
@@ -301,9 +301,9 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
         <span>nable</span>
       </a>
       <ul class="top-links">
-        <li><a href="/#product">Product</a></li>
+        <li><a href="/#demo">Product</a></li>
         <li><a href="/#connectors">Connectors</a></li>
-        <li><a href="/#pricing">Pricing</a></li>
+        <li><a href="/pricing.html">Pricing</a></li>
         <li><a href="/docs" class="on">Docs</a></li>
       </ul>
     </div>
@@ -478,7 +478,7 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
 <span class="t-cmd">finops setup aws</span>
 <span class="t-cmd">finops setup azure</span>
 <span class="t-cmd">finops setup gcp</span></code></pre></div>
-          <p class="hint">The wizard creates a <strong style="color:var(--fg)">read-only IAM policy</strong>, walks through the API key, and stores credentials in your OS keyring. You don't need all 17 connectors — one is enough to start.</p>
+          <p class="hint">The wizard creates a <strong style="color:var(--fg)">read-only IAM policy</strong>, walks through the API key, and stores credentials in your OS keyring. You don't need all 17 connectors , one is enough to start.</p>
         </div></div>
 
         <div class="step"><div class="step-num">3</div><div class="step-body">
@@ -488,7 +488,7 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
     <span class="t-key">"finops"</span><span class="t-punc">: {</span> <span class="t-key">"command"</span><span class="t-punc">:</span> <span class="t-str">"finops-mcp"</span> <span class="t-punc">}</span>
   <span class="t-punc">}</span>
 <span class="t-punc">}</span></code></pre></div>
-          <p class="hint">Run <code>finops setup</code> to have this written automatically, or paste it manually. Then <strong style="color:var(--fg)">fully quit and reopen</strong> your editor — most clients only read config at startup.</p>
+          <p class="hint">Run <code>finops setup</code> to have this written automatically, or paste it manually. Then <strong style="color:var(--fg)">fully quit and reopen</strong> your editor , most clients only read config at startup.</p>
         </div></div>
 
         <div class="step"><div class="step-num">4</div><div class="step-body">
@@ -637,7 +637,7 @@ compute-optimizer:Get*</code></pre></div>
       <h2 class="sec-h"><span class="plogo" style="--m:url(/logos/azure.svg)"></span>Azure</h2>
       <p class="body">Connects to the Azure Cost Management API. Supports a Service Principal (recommended for automation) and device-code flow (interactive login).</p>
       <div class="card"><div class="card-label">Required Azure role</div>
-        <ul class="checklist"><li><span class="ck">✓</span><span><strong>Cost Management Reader</strong> — scoped to your Subscription or Management Group</span></li></ul>
+        <ul class="checklist"><li><span class="ck">✓</span><span><strong>Cost Management Reader</strong> , scoped to your Subscription or Management Group</span></li></ul>
       </div>
       <h3 class="sub-h" id="azure-setup" data-toc>Setup</h3>
       <div class="steps">
@@ -662,9 +662,9 @@ compute-optimizer:Get*</code></pre></div>
       <p class="body">Primary path: BigQuery billing export (recommended, richer data). Fallback: Cloud Billing API. Both use a service-account JSON key stored encrypted in your vault.</p>
       <div class="card"><div class="card-label">Required IAM roles</div>
         <ul class="checklist">
-          <li><span class="ck">✓</span><span><strong>roles/billing.viewer</strong> — Billing API access</span></li>
-          <li><span class="ck">✓</span><span><strong>roles/bigquery.dataViewer</strong> — only if using BigQuery export</span></li>
-          <li><span class="ck">✓</span><span><strong>roles/bigquery.jobUser</strong> — only if using BigQuery export</span></li>
+          <li><span class="ck">✓</span><span><strong>roles/billing.viewer</strong> , Billing API access</span></li>
+          <li><span class="ck">✓</span><span><strong>roles/bigquery.dataViewer</strong> , only if using BigQuery export</span></li>
+          <li><span class="ck">✓</span><span><strong>roles/bigquery.jobUser</strong> , only if using BigQuery export</span></li>
         </ul>
       </div>
       <h3 class="sub-h" id="gcp-setup" data-toc>Setup</h3>
@@ -958,7 +958,7 @@ compute-optimizer:Get*</code></pre></div>
         <p class="body" style="font-size:13.5px;margin:0">Cost Explorer isn't enabled yet, or it's still warming up (up to 24h on new accounts). Confirm under Billing → Cost Explorer, make sure your region is <code class="ic">us-east-1</code>, and check the IAM user has <code class="ic">ce:GetCostAndUsage</code>. Run <code class="ic">aws sts get-caller-identity</code> to confirm which account you're reading.</p>
       </div>
       <div class="card"><h3 class="sub-h" id="ts-tools" data-toc>Tools don't appear after config</h3>
-        <p class="body" style="font-size:13.5px;margin:0">Most MCP clients only read config at startup. Fully quit and reopen the editor — not just close the window. Then run <code class="ic">finops doctor</code> to confirm each provider.</p>
+        <p class="body" style="font-size:13.5px;margin:0">Most MCP clients only read config at startup. Fully quit and reopen the editor , not just close the window. Then run <code class="ic">finops doctor</code> to confirm each provider.</p>
       </div>
       <div class="card"><h3 class="sub-h" id="ts-keyring" data-toc>Credentials not persisting after restart</h3>
         <p class="body" style="font-size:13.5px;margin:0">Install the keyring extra: <code class="ic">pip install finops-mcp[keyring]</code>. Without it, credentials fall back to a local encrypted file. Re-run <code class="ic">finops setup</code> after installing.</p>
