@@ -396,6 +396,8 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
 /* connectors */
+.focus-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:22px}
+.focus-chips span{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-3);border:1px solid var(--line-2);border-radius:var(--r-xs);padding:4px 10px;background:var(--bg-1)}
 .conn-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:0;border:1px solid var(--line);border-radius:var(--r-xl);overflow:hidden;background:var(--bg-1)}
 @media(max-width:1024px){.conn-grid{grid-template-columns:repeat(4,1fr)}}
 .conn{padding:22px 18px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;transition:.18s;cursor:default}

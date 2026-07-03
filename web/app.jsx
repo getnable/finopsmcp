@@ -690,9 +690,12 @@ function Connectors(){
     <section id="connectors" className="alt">
       <div className="wrap">
         <div className="section-head center">
-          <div className="label">Connectors</div>
-          <h2>All 17 sources,<br/><em>one conversation.</em></h2>
-          <p>Every connector is a real API integration, not a CSV export. New providers ship monthly.</p>
+          <div className="label">One dataset</div>
+          <h2>17 providers,<br/><em>one normalized bill.</em></h2>
+          <p>Every provider lands in the same FOCUS 2.0 records, the open FinOps standard, which nable extends past the clouds to usage-based SaaS and per-model AI spend. That is why one question can span AWS, Snowflake, Datadog and your OpenAI tokens: they all answer in the same shape.</p>
+          <div className="focus-chips" aria-hidden="true">
+            <span>FOCUS 2.0</span><span>AWS · Azure · GCP</span><span>11 SaaS providers</span><span>AI spend, per model</span><span>tokens preserved</span>
+          </div>
         </div>
       </div>
       <div className="logo-marquee">
@@ -895,6 +898,8 @@ const FAQ_QA = [
    "nable is local-first, your credentials and bills never leave your machine; AI-native, it lives in Claude or Cursor instead of a separate dashboard; and genuinely cross-cloud, including AI and LLM spend in the same answer. It proposes fixes as pull requests for human approval rather than acting on its own."],
   ["What is a FinOps MCP server?",
    "MCP, the Model Context Protocol, lets AI editors call external tools. A FinOps MCP server exposes cloud-cost tools to your AI editor, so you ask about spend in your own words and the editor calls the right tool. nable is a local-first FinOps MCP server."],
+  ["Does nable normalize cost data across providers?",
+   "Yes. Every provider is normalized into FOCUS 2.0, the FinOps Foundation's open billing standard. nable extends the standard past AWS, Azure, and GCP to usage-based SaaS like Snowflake, Datadog, MongoDB Atlas, and Databricks, and to per-model AI spend from OpenAI, Anthropic, OpenRouter, and LiteLLM with token counts preserved. One query spans your whole bill because every provider answers in the same schema."],
   ["Can nable show what my AI coding costs?",
    "Yes. nable attributes merged pull requests and commits to the AI model that wrote them and joins your LLM spend by model, so you can see what each model shipped and what it cost per pull request or per commit."],
 ];
