@@ -9,10 +9,10 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@400;500&display=swap">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  html,body{background:var(--bg);color:var(--fg);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-feature-settings:"ss01","cv11";-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px;letter-spacing:-0.005em}
+  html,body{background:var(--bg);color:var(--fg);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-feature-settings:"ss01","cv11";-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px;letter-spacing:-0.005em}
   :root{
     --bg:#000000;
     --bg-2:#0a0a0c;
@@ -50,7 +50,7 @@
   .nav .right{display:flex;gap:10px;align-items:center}
 
   /* buttons */
-  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;font-size:13.5px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:.15s;letter-spacing:-.005em;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;font-size:13.5px;font-weight:500;border:1px solid transparent;cursor:pointer;transition:.15s;letter-spacing:-.005em;font-family:'Geist',ui-sans-serif,system-ui,sans-serif}
   .btn-primary{background:var(--fg);color:var(--bg);border-color:var(--fg)}
   .btn-primary:hover{background:#fff;border-color:#fff}
   .btn-primary:disabled{opacity:.45;cursor:not-allowed}
@@ -64,7 +64,7 @@
   /* type */
   h1,h2,h3,h4{font-weight:500;letter-spacing:-.025em;color:var(--fg)}
   p{color:var(--fg-2);line-height:1.6}
-  .label{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);letter-spacing:.02em}
+  .label{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);letter-spacing:.02em}
 
   /* main content area */
   main{min-height:calc(100vh - 60px);padding:64px 0 96px;position:relative;z-index:1;background:radial-gradient(ellipse 86% 42% at 50% -6%, rgba(77,184,212,.05), transparent 58%)}
@@ -81,8 +81,8 @@
 
   /* form elements */
   .field-group{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
-  .field-label{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase}
-  .field-input{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:14px;color:var(--fg);outline:none;transition:.15s}
+  .field-label{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--fg-3);letter-spacing:.04em;text-transform:uppercase}
+  .field-input{width:100%;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-size:14px;color:var(--fg);outline:none;transition:.15s}
   .field-input:focus{border-color:var(--fg-2)}
   .field-input.code-input{font-family:var(--mono);font-size:24px;letter-spacing:.18em;text-align:center;padding:14px 12px}
   .field-input::placeholder{color:var(--fg-3)}
@@ -90,7 +90,7 @@
   .form-action{margin-top:20px}
 
   /* inline error */
-  .inline-error{font-size:12.5px;color:var(--alert);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin-top:8px;display:none}
+  .inline-error{font-size:12.5px;color:var(--alert);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;margin-top:8px;display:none}
   .inline-error.show{display:block}
 
   /* resend link */
@@ -105,17 +105,17 @@
 
   .acct-section{border-top:1px solid var(--line);padding:28px 0}
   .acct-section:last-child{border-bottom:1px solid var(--line)}
-  .acct-section .sect-label{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--accent-dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:18px;display:flex;align-items:center;gap:11px}
+  .acct-section .sect-label{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--accent-dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:18px;display:flex;align-items:center;gap:11px}
   .acct-section .sect-label::before{content:"";width:24px;height:1px;background:var(--accent-dim);opacity:.55}
 
   /* license key block */
   .key-block{background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin-bottom:12px;position:relative}
   .key-block code{font-family:var(--mono);font-size:12px;color:var(--accent);word-break:break-all;line-height:1.7;display:block}
   .key-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .copy-btn{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-2);background:transparent;border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;transition:.15s}
+  .copy-btn{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-2);background:transparent;border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;font-family:'Geist',ui-sans-serif,system-ui,sans-serif;transition:.15s}
   .copy-btn:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
   .copy-btn.copied{color:var(--hl);border-color:var(--hl)}
-  .free-plan-note{font-size:13px;color:var(--fg-3);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin-top:4px}
+  .free-plan-note{font-size:13px;color:var(--fg-3);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;margin-top:4px}
   .free-plan-note a{color:var(--fg-2);border-bottom:1px solid var(--line)}
   .free-plan-note a:hover{color:var(--fg)}
 
@@ -123,20 +123,20 @@
   .plan-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:12px}
   .plan-info{}
   .plan-name{font-size:16px;font-weight:500;color:var(--fg);letter-spacing:-.01em}
-  .plan-status{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);margin-top:3px}
+  .plan-status{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);margin-top:3px}
   .plan-status .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:6px;vertical-align:1px}
   .plan-status .dot.active{background:var(--hl)}
   .plan-status .dot.free{background:var(--fg-4)}
-  .billing-note{font-size:12.5px;color:var(--fg-3);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin-top:8px}
+  .billing-note{font-size:12.5px;color:var(--fg-3);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;margin-top:8px}
 
   /* account substat + hosting choice */
-  .acct-substat{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);margin-top:8px}
+  .acct-substat{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3);margin-top:8px}
 
   /* open hosted dashboard */
   .dash-open{margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   .dash-open .btn-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
   .dash-open .btn-primary:hover{background:#5cc1da;border-color:#5cc1da}
-  .dash-note{font-size:12.5px;color:var(--fg-3);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin:0}
+  .dash-note{font-size:12.5px;color:var(--fg-3);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;margin:0}
   .dash-open .inline-error{margin-top:0;flex-basis:100%}
   .host-choices{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 6px}
   .host-card{text-align:left;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:14px 15px;cursor:pointer;transition:.15s;font-family:inherit;color:inherit}
@@ -144,7 +144,7 @@
   .host-card.selected{border-color:var(--accent);background:var(--bg-3)}
   .host-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
   .host-card-title{font-size:14px;font-weight:500;color:var(--fg);letter-spacing:-.01em}
-  .host-badge{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--fg-3);border:1px solid var(--line-2);border-radius:2px;padding:2px 6px}
+  .host-badge{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--fg-3);border:1px solid var(--line-2);border-radius:2px;padding:2px 6px}
   .host-card.selected .host-badge{color:var(--accent);border-color:var(--accent-dim)}
   .host-card p{font-size:12.5px;color:var(--fg-2);line-height:1.55;margin:0}
   .host-detail{margin-top:8px}
@@ -152,7 +152,7 @@
   .host-cmd code{font-family:var(--mono);font-size:11.5px;color:var(--accent);display:block;white-space:pre-wrap;word-break:break-all}
   .host-detail>p{font-size:12.5px;color:var(--fg-2);margin:0}
   .host-detail>p a{color:var(--fg);border-bottom:1px solid var(--line-2)}
-  .host-confirm{font-size:13px;color:var(--success);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;margin-top:10px}
+  .host-confirm{font-size:13px;color:var(--success);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;margin-top:10px}
   select.field-input{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2356656d' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px}
 
   /* quick links */
@@ -173,7 +173,7 @@
 
   /* footer */
   footer{border-top:1px solid var(--line);padding:28px 0}
-  .foot-inner{display:flex;align-items:center;justify-content:space-between;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3)}
+  .foot-inner{display:flex;align-items:center;justify-content:space-between;font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-size:11.5px;color:var(--fg-3)}
 
   /* states */
   #state-email, #state-code, #state-account{display:none}

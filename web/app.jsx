@@ -1005,7 +1005,7 @@ function PaletteSwatches({ value, onChange }){
               display:"flex",alignItems:"center",gap:8,padding:"7px 9px",
               border:"1px solid",borderColor: on ? "var(--accent)" : "rgba(255,255,255,.12)",
               borderRadius:7,background:"rgba(255,255,255,.03)",color:"var(--fg)",
-              fontFamily:"'Bricolage Grotesque',system-ui,sans-serif",fontSize:12,cursor:"pointer",
+              fontFamily:"'Geist',system-ui,sans-serif",fontSize:12,cursor:"pointer",
               boxShadow: on ? "0 0 0 2px rgba(95,232,160,.18)" : "none",
               transition:".15s"
             }}>

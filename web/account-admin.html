@@ -9,7 +9,7 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@400;500&display=swap">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -20,33 +20,33 @@
     --alert:#e05c4b;--warn:#e6a840;--success:#3cba7a;
     --mono:'Geist Mono',ui-monospace,monospace;
   }
-  html,body{background:var(--bg);color:var(--fg);font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px;letter-spacing:-0.005em}
+  html,body{background:var(--bg);color:var(--fg);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5;font-size:15px;letter-spacing:-0.005em}
   a{color:inherit;text-decoration:none}
   .wrap{max-width:1140px;margin:0 auto;padding:0 32px}
   .nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 86%,transparent);backdrop-filter:saturate(140%) blur(14px);-webkit-backdrop-filter:saturate(140%) blur(14px);border-bottom:1px solid var(--line)}
   .nav-inner{display:flex;align-items:center;justify-content:space-between;height:60px}
   .logo{display:flex;align-items:center;gap:9px;font-weight:500;letter-spacing:-.02em;font-size:16px}
   .logo img{width:24px;height:24px;border-radius:6px;display:block}
-  .logo .tag{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--fg-3);border:1px solid var(--line-2);border-radius:2px;padding:1px 6px;margin-left:4px}
+  .logo .tag{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--fg-3);border:1px solid var(--line-2);border-radius:2px;padding:1px 6px;margin-left:4px}
   .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;font-size:13.5px;font-weight:500;border:1px solid var(--line);background:transparent;color:var(--fg-2);cursor:pointer;transition:.15s;font-family:inherit}
   .btn:hover{color:var(--fg);border-color:var(--line-2);background:var(--bg-2)}
   main{min-height:calc(100vh - 60px);padding:48px 0 96px}
   h1{font-size:24px;font-weight:500;letter-spacing:-.025em;margin-bottom:4px}
-  .sub{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:12px;color:var(--fg-3);margin-bottom:28px}
+  .sub{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-size:12px;color:var(--fg-3);margin-bottom:28px}
 
   .stat-strip{display:flex;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:24px;flex-wrap:wrap}
   .stat{flex:1;min-width:140px;padding:16px 18px;border-right:1px solid var(--line)}
   .stat:last-child{border-right:0}
   .stat .v{font-family:var(--mono);font-size:22px;font-weight:500;color:var(--fg);font-variant-numeric:tabular-nums}
-  .stat .k{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em;margin-top:4px}
+  .stat .k{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em;margin-top:4px}
 
   table{width:100%;border-collapse:collapse;font-size:13.5px}
-  thead th{text-align:left;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em;font-weight:500;padding:10px 12px;border-bottom:1px solid var(--line-2)}
+  thead th{text-align:left;font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-size:11px;color:var(--fg-3);text-transform:uppercase;letter-spacing:.05em;font-weight:500;padding:10px 12px;border-bottom:1px solid var(--line-2)}
   tbody td{padding:11px 12px;border-bottom:1px solid var(--line);color:var(--fg-2)}
   tbody tr:hover{background:var(--bg-2)}
   td.email{color:var(--fg);font-weight:500}
   td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
-  .pill{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;border-radius:2px;padding:2px 7px;border:1px solid var(--line-2);color:var(--fg-3)}
+  .pill{font-family:'Geist',ui-sans-serif,system-ui,sans-serif;font-weight:500;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;border-radius:2px;padding:2px 7px;border:1px solid var(--line-2);color:var(--fg-3)}
   .pill.team,.pill.pro{color:var(--accent);border-color:var(--accent-dim)}
   .pill.trial{color:var(--warn);border-color:var(--warn)}
   .pill.req{color:var(--success);border-color:var(--success)}
