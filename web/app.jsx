@@ -182,16 +182,16 @@ function Hero(){
       <div className="wrap">
         <div className="hero-c">
           <h1 className="display">
-            Stop guessing why cloud costs went up. <span className="h1-ask">Ask.</span>
+            Every cloud and AI bill, <span className="h1-ask">one question away.</span>
           </h1>
-          <p className="hero-sub">Then it finds the waste, writes the fix for you to approve, and proves the savings on your next bill.</p>
+          <p className="hero-sub">nable normalizes AWS, Snowflake, Datadog, and your OpenAI tokens into one bill, then answers in plain English, right inside Claude or Cursor.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
             <a className="btn btn-primary" href="/docs.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
               Get started free <span className="arr">→</span>
             </a>
           </div>
-          <p className="hero-trustline">Every cloud + AI bill in <b>one place</b> · works in any editor · free for solo use</p>
+          <p className="hero-trustline"><b>18 providers</b> normalized into one · works in any editor · free for solo use</p>
         </div>
       </div>
     </header>
