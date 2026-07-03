@@ -439,14 +439,25 @@ _LLM_FOCUS_NAMES = {
 }
 
 
+# Bedrock and Vertex spend already appears in the AWS/GCP FOCUS exports (Cost
+# Explorer / BigQuery billing). Exclude them when merging into the unified FOCUS
+# dataset so cloud-native AI is not double-counted.
+_CLOUD_NATIVE_LLM = {"bedrock", "vertex"}
+
+
 def get_all_llm_costs_as_focus(
     start_date: date | None = None,
     end_date: date | None = None,
     days: int = 30,
+    exclude_cloud_native: bool = False,
 ) -> list:
     """Return all configured LLM/AI spend as FOCUS 2.0 records, one per model per
     provider (ServiceCategory "AI and Machine Learning"). Token counts and request
-    volume ride along in each record's Tags."""
+    volume ride along in each record's Tags.
+
+    exclude_cloud_native: drop Bedrock and Vertex (already in the AWS/GCP FOCUS
+    exports) so the unified FOCUS dataset does not double-count them.
+    """
     from ..focus.translators.llm import llm_result_to_focus
 
     if end_date is None:
@@ -457,6 +468,8 @@ def get_all_llm_costs_as_focus(
     agg = get_all_llm_costs(start_date, end_date, days=days)
     records: list = []
     for key, result in (agg.get("provider_results") or {}).items():
+        if exclude_cloud_native and key in _CLOUD_NATIVE_LLM:
+            continue
         name = _LLM_FOCUS_NAMES.get(key, key.title())
         records.extend(llm_result_to_focus(
             result, provider=name, start_date=start_date, end_date=end_date,

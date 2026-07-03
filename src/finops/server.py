@@ -9541,41 +9541,32 @@ async def get_focus_costs(
         except ValueError:
             return {"error": f"Invalid end_date: {end_date!r}. Use YYYY-MM-DD."}
 
-    # Resolve which connectors can emit FOCUS. Clouds ship it; usage-based SaaS
-    # providers gain it one at a time as their translators land, so this set widens
-    # automatically as coverage grows. We only probe FOCUS-capable connectors.
-    _focus_capable = {n: c for n, c in {**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS}.items()
-                      if hasattr(c, "get_costs_as_focus")}
-    active_cloud = await _active(subset=_focus_capable)
-    if provider:
+    # Fan out across every FOCUS-capable source: clouds, usage-based SaaS, and the
+    # aggregated LLM/AI providers. Shared with slice_costs so coverage stays in sync.
+    all_records, errors, providers = await _fetch_focus_records(sd, ed, provider)
+
+    if provider and not all_records:
+        from .connectors.llm_costs import _LLM_FOCUS_NAMES
         p = provider.lower()
-        if p not in _focus_capable:
-            return {"error": f"Provider {provider!r} does not emit FOCUS yet. FOCUS-capable: {', '.join(sorted(_focus_capable)) or 'none'}."}
-        if p not in active_cloud:
+        perr = errors.get(p)
+        _llm_names = set(_LLM_FOCUS_NAMES) | {v.lower() for v in _LLM_FOCUS_NAMES.values()}
+        if perr == "unknown provider" and p not in _llm_names and p not in ("llm", "ai"):
+            _capable = sorted(n for n, c in {**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS}.items()
+                              if hasattr(c, "get_costs_as_focus"))
+            return {"error": f"Provider {provider!r} does not emit FOCUS yet. FOCUS-capable: "
+                             f"{', '.join(_capable) or 'none'}, plus AI providers "
+                             f"(openai, anthropic, openrouter, litellm)."}
+        if perr == "not configured":
             return {"error": f"Provider {provider!r} is not configured. Run 'finops-mcp setup' to connect it."}
-        active_cloud = {p: active_cloud[p]}
-
-    if not active_cloud:
-        return {"error": "No FOCUS-capable providers are configured. Connect AWS, Azure, GCP, or a supported usage-based provider like Snowflake."}
-
-    all_records = []
-    errors: dict[str, str] = {}
-
-    async def _one_focus(name: str, connector: Any):
-        try:
-            return name, await connector.get_costs_as_focus(sd, ed), None
-        except Exception as exc:
-            log.error("FOCUS fetch failed: provider=%s error=%s", name, exc)
-            return name, None, str(exc)
-
-    for name, records, err in await asyncio.gather(*[_one_focus(n, c) for n, c in active_cloud.items()]):
-        if err is not None:
-            errors[name] = err
-        else:
-            all_records.extend(records)
+        if p in _llm_names or p in ("llm", "ai"):
+            return {"error": f"Provider {provider!r} is not configured or has no spend in the selected range."}
 
     if not all_records and errors:
         return {"error": "All providers failed", "details": errors}
+
+    if not all_records:
+        return {"error": "No FOCUS-capable providers are configured. Connect AWS, Azure, GCP, a "
+                         "supported usage-based provider like Snowflake, or an AI provider like OpenAI."}
 
     # Serialize records to dicts, converting datetime fields to ISO strings
     def _serialize(rec) -> dict:
@@ -9619,7 +9610,7 @@ async def get_focus_costs(
         return {
             "focus_version": "2.0",
             "period": {"start": sd.isoformat(), "end": ed.isoformat()},
-            "providers_queried": sorted(active_cloud.keys()),
+            "providers_queried": providers,
             "group_by": group_by,
             "total_billed_cost": round(sum(r.BilledCost for r in all_records), 4),
             "total_effective_cost": round(sum(r.EffectiveCost for r in all_records), 4),
@@ -9636,7 +9627,7 @@ async def get_focus_costs(
     return {
         "focus_version": "2.0",
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
-        "providers_queried": sorted(active_cloud.keys()),
+        "providers_queried": providers,
         "total_billed_cost": round(sum(r.BilledCost for r in all_records), 4),
         "total_effective_cost": round(sum(r.EffectiveCost for r in all_records), 4),
         "record_count": len(serialized),
@@ -9652,12 +9643,28 @@ async def _fetch_focus_records(sd: date, ed: date, provider: str | None = None):
     _focus_capable = {n: c for n, c in {**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS}.items()
                       if hasattr(c, "get_costs_as_focus")}
     active_cloud = await _active(subset=_focus_capable)
+
+    # LLM/AI spend is aggregated by module functions, not BaseConnectors, so it
+    # rides a separate path. Bedrock/Vertex are excluded here to avoid double
+    # counting against the AWS/GCP FOCUS exports.
+    from .connectors.llm_costs import _LLM_FOCUS_NAMES, get_all_llm_costs_as_focus
+    _llm_display = {v.lower(): k for k, v in _LLM_FOCUS_NAMES.items()}
+    include_llm = True
+    llm_filter: str | None = None  # FOCUS ProviderName to keep
+
     if provider:
         p = provider.lower()
         if p in active_cloud:
             active_cloud = {p: active_cloud[p]}
+            include_llm = False
         elif p in _focus_capable:
             return [], {p: "not configured"}, []
+        elif p in ("llm", "ai"):
+            active_cloud = {}
+        elif p in _LLM_FOCUS_NAMES:
+            active_cloud, llm_filter = {}, _LLM_FOCUS_NAMES[p]
+        elif p in _llm_display:
+            active_cloud, llm_filter = {}, _LLM_FOCUS_NAMES[_llm_display[p]]
         else:
             return [], {p: "unknown provider"}, []
 
@@ -9676,7 +9683,22 @@ async def _fetch_focus_records(sd: date, ed: date, provider: str | None = None):
             errors[name] = err
         elif recs:
             records.extend(recs)
-    return records, errors, sorted(active_cloud.keys())
+
+    provider_names = sorted(active_cloud.keys())
+    if include_llm:
+        try:
+            llm_recs = await asyncio.to_thread(
+                get_all_llm_costs_as_focus, sd, ed, exclude_cloud_native=True
+            )
+            if llm_filter is not None:
+                llm_recs = [r for r in llm_recs if r.ProviderName == llm_filter]
+            records.extend(llm_recs)
+            provider_names += sorted({r.ProviderName for r in llm_recs})
+        except Exception as exc:  # pragma: no cover - network failure path
+            log.error("FOCUS LLM fetch failed: error=%s", exc)
+            errors["llm"] = str(exc)
+
+    return records, errors, provider_names
 
 
 @mcp.tool()

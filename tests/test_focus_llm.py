@@ -67,17 +67,33 @@ def test_llm_publisher_override_and_empty():
     assert llm_result_to_focus(None, provider="OpenAI", start_date=_START, end_date=_END) == []
 
 
-def test_get_all_llm_costs_as_focus_rolls_providers(monkeypatch):
-    import finops.connectors.llm_costs as llm
-
-    fake = {
+def _fake_all():
+    return {
         "provider_results": {
             "openai": {"by_model": {"gpt-4o": 10.0}, "by_model_tokens": {}},
             "openrouter": {"by_model": {"llama-3": 5.0}, "by_model_tokens": {}},
+            "bedrock": {"by_model": {"claude-3-5-sonnet": 20.0}, "by_model_tokens": {}},
+            "vertex": {"by_model": {"gemini-1.5-pro": 8.0}, "by_model_tokens": {}},
         }
     }
-    monkeypatch.setattr(llm, "get_all_llm_costs", lambda *a, **k: fake)
+
+
+def test_get_all_llm_costs_as_focus_rolls_providers(monkeypatch):
+    import finops.connectors.llm_costs as llm
+
+    monkeypatch.setattr(llm, "get_all_llm_costs", lambda *a, **k: _fake_all())
     recs = llm.get_all_llm_costs_as_focus(_START, _END)
     providers = {r.ProviderName for r in recs}
-    assert providers == {"OpenAI", "OpenRouter"}
+    assert providers == {"OpenAI", "OpenRouter", "AWS Bedrock", "Google Vertex AI"}
     assert all(r.ServiceCategory == "AI and Machine Learning" for r in recs)
+
+
+def test_get_all_llm_costs_as_focus_excludes_cloud_native(monkeypatch):
+    # Bedrock/Vertex already appear in AWS/GCP FOCUS; exclude to avoid double count.
+    import finops.connectors.llm_costs as llm
+
+    monkeypatch.setattr(llm, "get_all_llm_costs", lambda *a, **k: _fake_all())
+    recs = llm.get_all_llm_costs_as_focus(_START, _END, exclude_cloud_native=True)
+    providers = {r.ProviderName for r in recs}
+    assert providers == {"OpenAI", "OpenRouter"}
+    assert "AWS Bedrock" not in providers and "Google Vertex AI" not in providers
