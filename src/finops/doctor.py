@@ -54,7 +54,8 @@ def _check_python_version() -> dict:
 
 
 def _check_keyring_storage() -> dict:
-    """Verify credentials are in the OS keyring, not plain env vars."""
+    """Verify the vault master key is present (file, env, or keyring) and warn
+    when sensitive credentials sit in plain environment variables."""
     sensitive_env_keys = [
         "AWS_SECRET_ACCESS_KEY",
         "AZURE_CLIENT_SECRET",
@@ -64,18 +65,25 @@ def _check_keyring_storage() -> dict:
     ]
     leaked = [k for k in sensitive_env_keys if os.environ.get(k)]
 
-    # Locate the vault master key in the vault's own resolution order: env var,
-    # then the 0600 key file, then the OS keyring. Check the silent sources first
-    # so `finops doctor` no longer reads (and, on macOS, can prompt for) the
-    # keychain on every run now that the vault is file-first.
+    # Locate the vault master key in the vault's own resolution order: the
+    # FINOPS_VAULT_KEY env var, then the 0600 key file, then the OS keyring.
+    # Check the silent sources first so `finops doctor` no longer reads (and, on
+    # macOS, can prompt for) the keychain on every run now that the vault is
+    # file-first. The key file lives in the profile dir when FINOPS_PROFILE is
+    # set, mirroring Vault.default().
     keyring_ok = False
     keyring_detail = "keyring library not installed"
     try:
-        from .security.vault import _data_dir
+        from .security.vault import _active_profile, _data_dir
+        _profile = _active_profile()
+        if _profile:
+            _key_path = Path.home() / ".finops" / "profiles" / _profile / "vault.key"
+        else:
+            _key_path = _data_dir() / "vault.key"
         if os.environ.get("FINOPS_VAULT_KEY"):
             keyring_ok, keyring_detail = True, "master key provided via FINOPS_VAULT_KEY"
-        elif (_data_dir() / "vault.key").exists():
-            keyring_ok, keyring_detail = True, "master key found in vault.key (0600 file)"
+        elif _key_path.exists():
+            keyring_ok, keyring_detail = True, "master key stored (file, chmod 600)"
         else:
             try:
                 import keyring
@@ -90,7 +98,7 @@ def _check_keyring_storage() -> dict:
 
     # Hard-fail only when keyring IS installed but the master key is missing.
     # When keyring is not installed at all, treat as a warning (ok: None) rather
-    # than a failure — env-var-based credentials are a valid setup path.
+    # than a failure, since env-var-based credentials are a valid setup path.
     if keyring_ok:
         ok_val: bool | None = not leaked  # keyring installed + keys in env = warn
     elif "not installed" in keyring_detail:
