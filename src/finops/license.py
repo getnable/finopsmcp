@@ -68,9 +68,16 @@ _ACTIVATE_CMD   = "finops login"                     # shown after purchase: one
 _TRIAL_DAYS  = 7
 _TRIAL_FILE  = Path.home() / ".finops-mcp" / "trial_start"
 
-# Keyring service/username — intentionally generic to avoid being obvious
-_KR_SERVICE  = "system.cache.prefs"
-_KR_USERNAME = "user.defaults"
+# Keyring service/username for the trial start date. Earlier releases disguised
+# this as "system.cache.prefs" to resist trial resets, which backfired: macOS
+# shows the item name in its permission dialog, so users saw "python wants to
+# access system.cache.prefs", unattributable and malware-shaped. The honest name
+# costs little; the HMAC signature and the dual store are the real protection.
+# Legacy names are kept so existing entries migrate on first read.
+_KR_SERVICE  = "nable-trial"
+_KR_USERNAME = "trial-start"
+_KR_LEGACY_SERVICE  = "system.cache.prefs"
+_KR_LEGACY_USERNAME = "user.defaults"
 
 # ── Pro-only features (the ~10%) ──────────────────────────────────────────────
 # Everything NOT in this set is available on the free tier.
@@ -200,6 +207,17 @@ def _kr_get() -> date | None:
     try:
         import keyring  # type: ignore
         val = keyring.get_password(_KR_SERVICE, _KR_USERNAME)
+        if not val:
+            # One-time migration from the legacy disguised entry.
+            val = keyring.get_password(_KR_LEGACY_SERVICE, _KR_LEGACY_USERNAME)
+            if val:
+                iso, _, sig = val.partition(":")
+                if sig and hmac.compare_digest(sig, _sign_date(iso)):
+                    keyring.set_password(_KR_SERVICE, _KR_USERNAME, val)
+                try:
+                    keyring.delete_password(_KR_LEGACY_SERVICE, _KR_LEGACY_USERNAME)
+                except Exception:
+                    pass
         if val:
             iso, _, sig = val.partition(":")
             if sig and hmac.compare_digest(sig, _sign_date(iso)):
@@ -260,21 +278,31 @@ def _file_set(d: date) -> None:
 
 def _get_or_create_trial_start() -> date:
     """
-    Return the trial start date, using the EARLIEST date across both stores
-    so deleting one store can't push the start date forward.
-    """
-    kr_date   = _kr_get()
-    file_date = _file_get()
-    candidates = [d for d in (kr_date, file_date) if d is not None]
+    Return the trial start date. The signed file is the primary store; the OS
+    keyring is the recovery store, consulted only when the file is missing or
+    invalid. Steady state therefore never opens the keychain: on macOS every
+    keychain access from an unsigned interpreter can pop a permission dialog,
+    and the previous version of this function did a read AND an unconditional
+    rewrite on every license check. The rewrite recreated the keychain item,
+    which reset its ACL, so "Always Allow" never stuck and users were prompted
+    on every session. The keyring is now written exactly once, at creation.
 
-    if candidates:
-        earliest = min(candidates)
-        _kr_set(earliest)
-        _file_set(earliest)
-        return earliest
+    Anti-reset properties are unchanged: deleting the file restores it from the
+    keyring, a tampered date in either store fails the HMAC signature (which is
+    machine-bound, so a copied file can't move the date either), and deleting
+    both stores resets the trial, the same accepted residual as before.
+    """
+    file_date = _file_get()
+    if file_date is not None:
+        return file_date
+
+    kr_date = _kr_get()
+    if kr_date is not None:
+        _file_set(kr_date)  # restore the missing file store; keychain untouched
+        return kr_date
 
     today = date.today()
-    _kr_set(today)
+    _kr_set(today)  # creating our own item never prompts; only rewrites did
     _file_set(today)
     return today
 

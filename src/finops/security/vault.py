@@ -251,16 +251,29 @@ class Vault:
     _key_cache: dict[str, bytes] = {}
 
     @classmethod
-    def _load_or_create_key(cls, key_path: Path) -> bytes:
-        if key_path.exists():
-            raw = key_path.read_bytes()
-        else:
-            from cryptography.fernet import Fernet
-            raw = Fernet.generate_key()
-            key_path.write_bytes(raw)
+    def _read_key_file(cls, key_path: Path) -> bytes | None:
+        """Read the local key file; None if missing or not a plausible Fernet key
+        (44 urlsafe-base64 bytes), so a corrupt file falls through to recovery."""
+        try:
+            if key_path.exists():
+                raw = key_path.read_bytes().strip()
+                if len(raw) == 44:
+                    return raw
+                log.warning("Vault: ignoring malformed key file at %s", key_path)
+        except OSError:
+            pass
+        return None
+
+    @classmethod
+    def _write_key_file(cls, key_path: Path, key: bytes) -> None:
+        """Cache the master key beside the vault DB (chmod 600). Reading a file
+        is silent where a keychain read can prompt; the keyring stays the
+        durable recovery copy."""
+        try:
+            key_path.write_bytes(key)
             key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-            log.info("Vault: generated new master key at %s", key_path)
-        return raw
+        except OSError as e:
+            log.debug("Vault: could not write key file: %s", e)
 
     @classmethod
     def _try_keyring(cls) -> bytes | None:
@@ -294,9 +307,19 @@ class Vault:
     def default(cls) -> "Vault":
         """
         Open (or create) the default vault. Key priority:
-        1. OS keyring (scoped to active profile if FINOPS_PROFILE is set)
-        2. FINOPS_VAULT_KEY env var (for CI/container deployments)
-        3. ~/.finops/vault.key file (chmod 600), or profile dir equivalent
+        1. FINOPS_VAULT_KEY env var (explicit operator config: CI, containers, fleet)
+        2. ~/.finops/vault.key file (chmod 600), or profile dir equivalent
+        3. OS keyring, re-caching the key to the file for next time
+        4. Generate a new key, stored in both the keyring and the file
+
+        The file outranks the keyring deliberately. On macOS, every keychain
+        access from an unsigned interpreter can pop a permission dialog, and
+        uvx creates a new interpreter per release, so a keychain-first vault
+        prompted users on every upgrade. Reading a 0600 file is silent; the
+        keyring remains the durable recovery copy (the earlier design already
+        fell back to this same file whenever no keyring was available). Set
+        FINOPS_VAULT_KEYCHAIN_ONLY=1 to keep the key exclusively in the OS
+        keyring and accept the prompts.
 
         When FINOPS_PROFILE is set, the vault DB lives in
         ~/.finops/profiles/{profile}/vault.db and the keyring service is
@@ -311,28 +334,34 @@ class Vault:
         else:
             data = _data_dir()
         db_path = data / "vault.db"
+        key_path = data / "vault.key"
+        keychain_only = os.environ.get("FINOPS_VAULT_KEYCHAIN_ONLY", "") == "1"
 
-        # 1. OS keyring
-        key = cls._try_keyring()
+        # 1. Env var (base64-encoded Fernet key, for CI/container/fleet use)
+        key = None
+        raw_env = os.environ.get("FINOPS_VAULT_KEY", "")
+        if raw_env:
+            key = base64.urlsafe_b64decode(raw_env.encode())
 
-        # 2. Env var (base64-encoded Fernet key, for CI/container use)
+        # 2. Key file (the silent fast path)
+        if key is None and not keychain_only:
+            key = cls._read_key_file(key_path)
+
+        # 3. OS keyring (recovery store; one prompt at most, then re-cached)
         if key is None:
-            raw_env = os.environ.get("FINOPS_VAULT_KEY", "")
-            if raw_env:
-                key = base64.urlsafe_b64decode(raw_env.encode())
+            key = cls._try_keyring()
+            if key is not None and not keychain_only:
+                cls._write_key_file(key_path, key)
+                log.info("Vault: cached master key to %s", key_path)
 
-        # 3. Key file
+        # 4. First run: generate and store in both places
         if key is None:
-            key_path = data / "vault.key"
-            key = cls._load_or_create_key(key_path)
-            # Try to promote to keyring for better security; delete the file
-            # once the key is safely stored so it doesn't sit world-readable.
-            if cls._save_keyring(key):
-                log.info("Vault: promoted master key to OS keyring")
-                try:
-                    key_path.unlink()
-                    log.info("Vault: removed vault.key file after keyring promotion")
-                except OSError:
-                    pass
+            from cryptography.fernet import Fernet
+            key = Fernet.generate_key()
+            saved = cls._save_keyring(key)
+            if not saved or not keychain_only:
+                cls._write_key_file(key_path, key)
+            log.info("Vault: generated new master key (keyring=%s, file=%s)",
+                     saved, not keychain_only or not saved)
 
         return cls(db_path, key)
