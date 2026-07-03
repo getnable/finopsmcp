@@ -125,6 +125,25 @@ class LangfuseConnector(BaseConnector):
             entries=entries,
         )
 
+    async def get_costs_as_focus(
+        self,
+        start_date: date,
+        end_date: date,
+        granularity: str = "MONTHLY",
+    ) -> list:
+        """Return Langfuse cost as FOCUS 2.0 records (per-model LLM observability spend)."""
+        from ...focus.translators.generic import saas_focus_records
+
+        summary = await self.get_costs(start_date, end_date, granularity=granularity)
+        return saas_focus_records(
+            summary,
+            provider="Langfuse",
+            publisher="Langfuse",
+            category="AI and Machine Learning",
+            start_date=start_date,
+            end_date=end_date,
+        )
+
     async def list_accounts(self) -> list[dict[str, str]]:
         """Return the Langfuse project name."""
         try:

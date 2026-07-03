@@ -205,6 +205,25 @@ class DatabricksConnector(BaseConnector):
         # Fall back to estimating from cluster/job data
         return await self._estimated_costs_from_clusters(start_date, end_date)
 
+    async def get_costs_as_focus(
+        self,
+        start_date: date,
+        end_date: date,
+        granularity: str = "MONTHLY",
+    ) -> list:
+        """Return Databricks cost as FOCUS 2.0 records (DBU compute across workloads)."""
+        from ..focus.translators.generic import saas_focus_records
+
+        summary = await self.get_costs(start_date, end_date, granularity=granularity)
+        return saas_focus_records(
+            summary,
+            provider="Databricks",
+            publisher="Databricks",
+            category="Compute",
+            start_date=start_date,
+            end_date=end_date,
+        )
+
     # ── Billable Usage API (account-level, requires account admin) ────────────
 
     async def _try_billable_usage_api(
