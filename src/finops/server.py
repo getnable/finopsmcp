@@ -9504,15 +9504,18 @@ async def get_focus_costs(
     group_by: str | None = None,
 ) -> dict:
     """
-    Return unified cost data in FOCUS 2.0 format across all connected cloud providers.
+    Return unified cost data in FOCUS 2.0 format across all connected providers,
+    clouds plus supported usage-based SaaS (e.g. Snowflake).
 
     FOCUS (FinOps Open Cost and Usage Specification) is an open standard for
-    normalizing cloud cost data across AWS, Azure, and GCP into a vendor-neutral schema.
+    normalizing cost data into one vendor-neutral schema. nable extends it past the
+    clouds to the usage-based long tail, so you can query total spend across AWS,
+    Azure, GCP, and SaaS providers in a single shape.
 
     Args:
         start_date: ISO date string (YYYY-MM-DD). Defaults to 30 days ago.
         end_date:   ISO date string (YYYY-MM-DD). Defaults to today.
-        provider:   Optional filter. One of "aws", "azure", "gcp". Omit for all providers.
+        provider:   Optional filter, e.g. "aws", "azure", "gcp", "snowflake". Omit for all.
         group_by:   Optional grouping. One of "ServiceName", "ServiceCategory",
                     "RegionId", "SubAccountId". Returns aggregated totals when set.
 
@@ -9538,18 +9541,22 @@ async def get_focus_costs(
         except ValueError:
             return {"error": f"Invalid end_date: {end_date!r}. Use YYYY-MM-DD."}
 
-    # Resolve which cloud connectors to query
-    active_cloud = await _active(subset=_CLOUD_CONNECTORS)
+    # Resolve which connectors can emit FOCUS. Clouds ship it; usage-based SaaS
+    # providers gain it one at a time as their translators land, so this set widens
+    # automatically as coverage grows. We only probe FOCUS-capable connectors.
+    _focus_capable = {n: c for n, c in {**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS}.items()
+                      if hasattr(c, "get_costs_as_focus")}
+    active_cloud = await _active(subset=_focus_capable)
     if provider:
         p = provider.lower()
-        if p not in _CLOUD_CONNECTORS:
-            return {"error": f"Unknown provider {provider!r}. Supported: aws, azure, gcp."}
+        if p not in _focus_capable:
+            return {"error": f"Provider {provider!r} does not emit FOCUS yet. FOCUS-capable: {', '.join(sorted(_focus_capable)) or 'none'}."}
         if p not in active_cloud:
             return {"error": f"Provider {provider!r} is not configured. Run 'finops-mcp setup' to connect it."}
         active_cloud = {p: active_cloud[p]}
 
     if not active_cloud:
-        return {"error": "No cloud providers are configured. Run 'finops-mcp setup' to connect AWS, Azure, or GCP."}
+        return {"error": "No FOCUS-capable providers are configured. Connect AWS, Azure, GCP, or a supported usage-based provider like Snowflake."}
 
     all_records = []
     errors: dict[str, str] = {}
@@ -9642,12 +9649,14 @@ async def get_focus_costs(
 async def _fetch_focus_records(sd: date, ed: date, provider: str | None = None):
     """Fan out get_costs_as_focus across active cloud connectors. Returns
     (records, errors, provider_names). Shared by get_focus_costs and slice_costs."""
-    active_cloud = await _active(subset=_CLOUD_CONNECTORS)
+    _focus_capable = {n: c for n, c in {**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS}.items()
+                      if hasattr(c, "get_costs_as_focus")}
+    active_cloud = await _active(subset=_focus_capable)
     if provider:
         p = provider.lower()
         if p in active_cloud:
             active_cloud = {p: active_cloud[p]}
-        elif p in _CLOUD_CONNECTORS:
+        elif p in _focus_capable:
             return [], {p: "not configured"}, []
         else:
             return [], {p: "unknown provider"}, []

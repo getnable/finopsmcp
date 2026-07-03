@@ -142,5 +142,43 @@ class SnowflakeConnector(BaseConnector):
             entries=entries,
         )
 
+    async def get_costs_as_focus(
+        self,
+        start_date: date,
+        end_date: date,
+        granularity: str = "MONTHLY",
+    ) -> list:
+        """Return Snowflake cost as FOCUS 2.0 records (warehouse compute as Database usage).
+
+        Credits consumed ride along in the record description, so the data is complete
+        even when no contract credit price is set and the dollar amount is 0.
+        """
+        from datetime import datetime, timezone
+        from ..focus import normalize
+
+        summary = await self.get_costs(start_date, end_date, granularity=granularity)
+        ps = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc).isoformat()
+        pe = datetime(end_date.year, end_date.month, end_date.day, tzinfo=timezone.utc).isoformat()
+        records = []
+        for e in summary.entries:
+            meta = e.metadata or {}
+            records.append(normalize("snowflake", {
+                "billed_cost": e.amount,
+                "service_name": e.service,
+                "resource_id": e.service,
+                "resource_name": e.service,
+                "credits": meta.get("credits_consumed", 0),
+                "account": e.account_id,
+                "region": e.region or "",
+                "charge_category": "Usage",
+                "service_category": "Database",
+                "billing_period_start": ps,
+                "billing_period_end": pe,
+                "charge_period_start": ps,
+                "charge_period_end": pe,
+                "tags": {},
+            }))
+        return records
+
     async def list_accounts(self) -> list[dict[str, str]]:
         return [{"id": self._account, "name": self._account}]
