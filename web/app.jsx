@@ -74,11 +74,8 @@ function useScrollTracking() {
 function LogoMark(){
   return (
     <svg width="26" height="26" viewBox="0 0 120 120" className="mark-img" aria-hidden="true">
-      <defs><linearGradient id="nmg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stopColor="#5cc1da"/><stop offset="1" stopColor="#3a9ab6"/>
-      </linearGradient></defs>
-      <rect width="120" height="120" rx="27" fill="url(#nmg)"/>
-      <path d="M44 80 L44 56 A16 16 0 0 1 76 56 L76 80" fill="none" stroke="#000000" strokeWidth="13" strokeLinecap="round" strokeLinejoin="round"/>
+      <rect x="2" y="2" width="116" height="116" rx="25" fill="#0a0a0c" stroke="#2c7d91" strokeOpacity=".55" strokeWidth="3"/>
+      <path d="M40 84 L40 55 A20 20 0 0 1 80 55 L80 84" fill="none" stroke="#4db8d4" strokeWidth="15" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }

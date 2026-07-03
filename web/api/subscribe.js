@@ -55,7 +55,7 @@ function welcomeHtml(email) {
 <body>
 <div class="card">
   <div class="header">
-    <svg width="24" height="24" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><defs><linearGradient id="nmg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5cc1da"/><stop offset="1" stop-color="#3a9ab6"/></linearGradient></defs><rect width="120" height="120" rx="27" fill="url(#nmg)"/><path d="M44 80 L44 56 A16 16 0 0 1 76 56 L76 80" fill="none" stroke="#0d0f10" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <svg width="24" height="24" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0"><rect x="2" y="2" width="116" height="116" rx="25" fill="#0a0a0c" stroke="#2c7d91" stroke-opacity=".55" stroke-width="3"/><path d="M40 84 L40 55 A20 20 0 0 1 80 55 L80 84" fill="none" stroke="#4db8d4" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <span class="wordmark" style="margin-left:8px">nable</span>
   </div>
   <div class="body">
