@@ -179,6 +179,7 @@ function Nav(){
 function Hero(){
   return (
     <header className="hero hero-centered" id="top">
+      <div className="hero-grid" aria-hidden="true"></div>
       <div className="wrap">
         <div className="hero-c">
           <h1 className="display">

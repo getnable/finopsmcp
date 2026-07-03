@@ -105,6 +105,15 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .page-atmos circle:nth-of-type(3){animation-delay:2.9s}
 @keyframes nodePulse{0%,100%{opacity:.5}50%{opacity:1}}
 @media(prefers-reduced-motion:reduce){.hero-centered::before,.page-atmos circle{animation:none}}
+/* Hero-only grid: a crisp ice-blue lattice, densest behind the headline, masked
+   to fade out. Founder request 2026-07-03, an intentional exception to the
+   site-wide no-grid rule, scoped to the hero and kept faint. */
+.hero-grid{position:absolute;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(to right, rgba(77,184,212,.07) 1px, transparent 1px),
+                   linear-gradient(to bottom, rgba(77,184,212,.07) 1px, transparent 1px);
+  background-size:54px 54px;
+  -webkit-mask-image:radial-gradient(ellipse 58% 54% at 50% 42%, #000 12%, transparent 74%);
+  mask-image:radial-gradient(ellipse 58% 54% at 50% 42%, #000 12%, transparent 74%)}
 .hero-centered .wrap{display:flex;justify-content:center;width:100%;position:relative;z-index:1}
 .hero-c{width:100%;max-width:900px;display:flex;flex-direction:column;align-items:center}
 .hero-centered .display{text-align:center}
