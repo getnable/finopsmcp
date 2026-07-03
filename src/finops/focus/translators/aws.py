@@ -1,5 +1,5 @@
 """
-AWS CUR 2.0 to FOCUS 2.0 translator.
+AWS CUR 2.0 to FOCUS 1.2 translator.
 
 CUR 2.0 column reference:
   https://docs.aws.amazon.com/cur/latest/userguide/data-dictionary.html

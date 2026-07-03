@@ -108,7 +108,7 @@ class VercelConnector(BaseConnector):
         end_date: date,
         granularity: str = "MONTHLY",
     ) -> list:
-        """Return Vercel cost as FOCUS 2.0 records (serverless/edge compute usage)."""
+        """Return Vercel cost as FOCUS 1.2 records (serverless/edge compute usage)."""
         from ...focus.translators.generic import saas_focus_records
 
         summary = await self.get_costs(start_date, end_date, granularity=granularity)

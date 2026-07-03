@@ -89,7 +89,7 @@ class DatadogConnector(BaseConnector):
         end_date: date,
         granularity: str = "MONTHLY",
     ) -> list:
-        """Return Datadog cost as FOCUS 2.0 records (per-product observability usage)."""
+        """Return Datadog cost as FOCUS 1.2 records (per-product observability usage)."""
         from ...focus.translators.generic import saas_focus_records
 
         summary = await self.get_costs(start_date, end_date, granularity=granularity)

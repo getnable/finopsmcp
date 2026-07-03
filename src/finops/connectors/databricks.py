@@ -211,7 +211,7 @@ class DatabricksConnector(BaseConnector):
         end_date: date,
         granularity: str = "MONTHLY",
     ) -> list:
-        """Return Databricks cost as FOCUS 2.0 records (DBU compute across workloads)."""
+        """Return Databricks cost as FOCUS 1.2 records (DBU compute across workloads)."""
         from ..focus.translators.generic import saas_focus_records
 
         summary = await self.get_costs(start_date, end_date, granularity=granularity)

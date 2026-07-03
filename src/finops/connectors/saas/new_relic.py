@@ -131,7 +131,7 @@ class NewRelicConnector(BaseConnector):
         end_date: date,
         granularity: str = "MONTHLY",
     ) -> list:
-        """Return New Relic cost as FOCUS 2.0 records (observability data ingest and users).
+        """Return New Relic cost as FOCUS 1.2 records (observability data ingest and users).
 
         GB ingested and user counts ride along in each record's Tags, so the data is
         complete even when no contract price is set and the dollar amount is 0.

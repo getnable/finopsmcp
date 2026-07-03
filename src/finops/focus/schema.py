@@ -1,7 +1,7 @@
 """
-FOCUS 2.0 schema.
+FOCUS 1.2 schema.
 
-FinOps Open Cost and Usage Specification 2.0 defines a vendor-neutral
+FinOps Open Cost and Usage Specification 1.2 defines a vendor-neutral
 record format for cloud and SaaS cost data. This module provides the
 canonical Python dataclass used throughout nable's FOCUS layer.
 
@@ -15,7 +15,7 @@ from datetime import datetime
 
 @dataclass
 class FocusRecord:
-    """One line item in FOCUS 2.0 format."""
+    """One line item in FOCUS 1.2 format."""
 
     # Cost columns
     BilledCost: float                   # actual charged amount

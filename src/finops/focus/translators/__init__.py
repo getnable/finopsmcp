@@ -1,1 +1,1 @@
-# FOCUS 2.0 provider translators
+# FOCUS 1.2 provider translators

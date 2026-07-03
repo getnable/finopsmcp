@@ -4,6 +4,7 @@ Uses Python's stdlib smtplib; supports Gmail, SES, SendGrid SMTP relay.
 """
 from __future__ import annotations
 
+import html
 import os
 import smtplib
 import ssl
@@ -14,6 +15,13 @@ from email.mime.text import MIMEText
 
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
+
+
+def _esc(v: object) -> str:
+    """Escape provider-derived strings (service names, recommendation titles,
+    descriptions) before they enter the HTML email body. They originate from
+    cloud metadata a tenant does not fully control."""
+    return html.escape(str(v))
 
 
 def _build_html(
@@ -29,7 +37,7 @@ def _build_html(
     change_label = f"+{pct_change:.1f}%" if pct_change >= 0 else f"{pct_change:.1f}%"
 
     provider_rows = "".join(
-        f"<tr><td style='padding:8px 12px;border-bottom:1px solid #f1f5f9'>{p['provider'].upper()}</td>"
+        f"<tr><td style='padding:8px 12px;border-bottom:1px solid #f1f5f9'>{_esc(p['provider'].upper())}</td>"
         f"<td style='padding:8px 12px;border-bottom:1px solid #f1f5f9;text-align:right'>${p['amount']:,.0f}</td>"
         f"<td style='padding:8px 12px;border-bottom:1px solid #f1f5f9;text-align:right;color:#64748b'>"
         f"{p['pct']:.1f}%</td></tr>"
@@ -38,8 +46,8 @@ def _build_html(
 
     anomaly_items = "".join(
         f"<li style='margin-bottom:8px'>"
-        f"<span style='color:#dc2626;font-weight:600'>{a['severity'].upper()}</span> — "
-        f"{a['provider'].upper()} / {a['service']}: "
+        f"<span style='color:#dc2626;font-weight:600'>{_esc(a['severity'].upper())}</span> &mdash; "
+        f"{_esc(a['provider'].upper())} / {_esc(a['service'])}: "
         f"{'↑' if a['direction']=='spike' else '↓'} {abs(a['pct_change']):.0f}% "
         f"vs baseline (${a['current_amount']:,.0f})</li>"
         for a in anomalies[:5]
@@ -47,7 +55,7 @@ def _build_html(
 
     rec_items = "".join(
         f"<li style='margin-bottom:8px'>"
-        f"<strong>{r['title']}</strong>: {r['description']} "
+        f"<strong>{_esc(r['title'])}</strong>: {_esc(r['description'])} "
         f"<span style='color:#16a34a;font-weight:600'>Save ${r['monthly_savings']:,.0f}/mo</span></li>"
         for r in recommendations[:5]
     ) or "<li style='color:#64748b'>No recommendations at this time.</li>"

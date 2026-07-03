@@ -76,7 +76,7 @@ class PagerDutyConnector(BaseConnector):
         end_date: date,
         granularity: str = "MONTHLY",
     ) -> list:
-        """Return PagerDuty cost as FOCUS 2.0 records (per-seat incident-ops subscription)."""
+        """Return PagerDuty cost as FOCUS 1.2 records (per-seat incident-ops subscription)."""
         from ...focus.translators.generic import saas_focus_records
 
         summary = await self.get_costs(start_date, end_date, granularity=granularity)

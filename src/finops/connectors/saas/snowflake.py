@@ -148,7 +148,7 @@ class SnowflakeConnector(BaseConnector):
         end_date: date,
         granularity: str = "MONTHLY",
     ) -> list:
-        """Return Snowflake cost as FOCUS 2.0 records (warehouse compute as Database usage).
+        """Return Snowflake cost as FOCUS 1.2 records (warehouse compute as Database usage).
 
         Credits consumed ride along in each record's Tags, so the data is complete
         even when no contract credit price is set and the dollar amount is 0.

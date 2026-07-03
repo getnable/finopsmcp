@@ -1,4 +1,4 @@
-"""Generic FOCUS 2.0 translator for usage-based SaaS providers.
+"""Generic FOCUS 1.2 translator for usage-based SaaS providers.
 
 The clouds (AWS, Azure, GCP) have bespoke translators for their rich billing
 exports. Every usage-based SaaS connector, by contrast, emits the same uniform
@@ -106,7 +106,7 @@ def saas_focus_records(
     end_date: date,
     resource_type: str = "Service",
 ) -> list[FocusRecord]:
-    """Translate a connector's CostSummary into a list of FOCUS 2.0 records.
+    """Translate a connector's CostSummary into a list of FOCUS 1.2 records.
 
     Args:
         summary:       CostSummary returned by a connector's get_costs.

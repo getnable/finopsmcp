@@ -135,7 +135,7 @@ class GitHubConnector(BaseConnector):
         end_date: date,
         granularity: str = "MONTHLY",
     ) -> list:
-        """Return GitHub cost as FOCUS 2.0 records (Actions, Packages, storage usage)."""
+        """Return GitHub cost as FOCUS 1.2 records (Actions, Packages, storage usage)."""
         from ...focus.translators.generic import saas_focus_records
 
         summary = await self.get_costs(start_date, end_date, granularity=granularity)

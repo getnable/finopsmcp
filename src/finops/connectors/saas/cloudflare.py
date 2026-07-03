@@ -96,7 +96,7 @@ class CloudflareConnector(BaseConnector):
         end_date: date,
         granularity: str = "MONTHLY",
     ) -> list:
-        """Return Cloudflare cost as FOCUS 2.0 records (CDN/edge networking usage)."""
+        """Return Cloudflare cost as FOCUS 1.2 records (CDN/edge networking usage)."""
         from ...focus.translators.generic import saas_focus_records
 
         summary = await self.get_costs(start_date, end_date, granularity=granularity)

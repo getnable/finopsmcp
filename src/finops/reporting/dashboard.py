@@ -14,12 +14,22 @@ Outputs to ~/.finops/dashboards/ by default.
 """
 from __future__ import annotations
 
+import html
 import os
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 _DASHBOARD_DIR = Path.home() / ".finops" / "dashboards"
+
+
+def _esc(v: Any) -> str:
+    """Escape any provider-derived string before it enters generated HTML.
+    Resource names, tags, and recommendation descriptions come from cloud
+    metadata a tenant does not fully control (an EC2 Name tag or S3 bucket
+    named with an <img onerror> payload would otherwise be stored HTML/JS in
+    the operator's dashboard). Never interpolate these raw."""
+    return html.escape(str(v))
 
 
 def _dashboard_dir() -> Path:
@@ -76,7 +86,7 @@ def _build_html(
         delta_cls = "up" if d > 0 else ("down" if d < 0 else "neutral")
         svc_rows += f"""
         <tr>
-          <td>{svc_name}</td>
+          <td>{_esc(svc_name)}</td>
           <td class="num">{_fmt_usd(tm, 2)}</td>
           <td class="num">{_fmt_usd(lm, 2)}</td>
           <td class="num {delta_cls}">{sign}{_fmt_usd(d, 2)}</td>
@@ -93,8 +103,8 @@ def _build_html(
         saving = opp.get("estimated_monthly_savings_usd", 0.0)
         opp_rows += f"""
         <tr>
-          <td>{desc}</td>
-          <td class="chip">{cat}</td>
+          <td>{_esc(desc)}</td>
+          <td class="chip">{_esc(cat)}</td>
           <td class="num success">{_fmt_usd(saving, 2)}/mo</td>
         </tr>"""
 
@@ -113,9 +123,9 @@ def _build_html(
         source = item.get("source", "")
         ledger_rows += f"""
         <tr>
-          <td>{desc}</td>
-          <td class="chip">{source}</td>
-          <td class="chip {status_cls}">{status}</td>
+          <td>{_esc(desc)}</td>
+          <td class="chip">{_esc(source)}</td>
+          <td class="chip {status_cls}">{_esc(status)}</td>
           <td class="num success">{amt_str}/mo</td>
         </tr>"""
 
@@ -134,7 +144,7 @@ def _build_html(
         bar_width = min(int(pct), 100)
         budget_rows += f"""
         <tr>
-          <td>{name}</td>
+          <td>{_esc(name)}</td>
           <td class="num">{_fmt_usd(spent, 2)}</td>
           <td class="num">{_fmt_usd(limit, 2)}</td>
           <td>
@@ -143,7 +153,7 @@ def _build_html(
             </div>
             <span class="{status_cls}">{pct:.1f}%</span>
           </td>
-          <td class="chip {status_cls}">{status}</td>
+          <td class="chip {status_cls}">{_esc(status)}</td>
         </tr>"""
 
     budget_section = ""
@@ -170,7 +180,7 @@ def _build_html(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>nable · Account Dashboard · {account_label}</title>
+<title>nable · Account Dashboard · {_esc(account_label)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@300;400;500;600&display=swap">
 <style>
@@ -405,7 +415,7 @@ def _build_html(
 <body>
 <header>
   <span class="logo">nable</span>
-  <h1>Account Dashboard &middot; {account_label}</h1>
+  <h1>Account Dashboard &middot; {_esc(account_label)}</h1>
   <span class="period">{today}</span>
 </header>
 

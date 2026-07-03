@@ -131,7 +131,7 @@ class LangfuseConnector(BaseConnector):
         end_date: date,
         granularity: str = "MONTHLY",
     ) -> list:
-        """Return Langfuse cost as FOCUS 2.0 records (per-model LLM observability spend)."""
+        """Return Langfuse cost as FOCUS 1.2 records (per-model LLM observability spend)."""
         from ...focus.translators.generic import saas_focus_records
 
         summary = await self.get_costs(start_date, end_date, granularity=granularity)

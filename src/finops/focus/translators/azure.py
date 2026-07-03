@@ -1,5 +1,5 @@
 """
-Azure Cost Export to FOCUS 2.0 translator.
+Azure Cost Export to FOCUS 1.2 translator.
 
 Azure Cost Exports with FOCUS schema output these columns:
   BilledCost, EffectiveCost, ResourceId, ResourceName, ServiceName,

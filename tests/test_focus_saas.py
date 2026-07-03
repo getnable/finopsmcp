@@ -2,7 +2,7 @@
 
 The clouds have bespoke translators. Every usage-based SaaS provider shares one
 generic translator (focus.translators.generic.saas_focus_records) that maps the
-uniform CostEntry shape into FOCUS 2.0 records. This is the long-tail engine that
+uniform CostEntry shape into FOCUS 1.2 records. This is the long-tail engine that
 turns nable's connector fan-out into a single normalized cost dataset.
 
 Covers: field mapping, ServiceCategory clamping, credits/usage preserved as Tags

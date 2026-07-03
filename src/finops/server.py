@@ -9504,7 +9504,7 @@ async def get_focus_costs(
     group_by: str | None = None,
 ) -> dict:
     """
-    Return unified cost data in FOCUS 2.0 format across all connected providers,
+    Return unified cost data in FOCUS 1.2 format across all connected providers,
     clouds plus supported usage-based SaaS (e.g. Snowflake).
 
     FOCUS (FinOps Open Cost and Usage Specification) is an open standard for
@@ -9520,7 +9520,7 @@ async def get_focus_costs(
                     "RegionId", "SubAccountId". Returns aggregated totals when set.
 
     Returns:
-        FOCUS 2.0 normalized cost records with fields: BilledCost, EffectiveCost,
+        FOCUS 1.2 normalized cost records with fields: BilledCost, EffectiveCost,
         ServiceName, ServiceCategory, ProviderName, RegionId, SubAccountId, Tags, etc.
     """
     require_role("viewer")
@@ -9608,7 +9608,7 @@ async def get_focus_costs(
             grouped_list.append(g)
 
         return {
-            "focus_version": "2.0",
+            "focus_version": "1.2",
             "period": {"start": sd.isoformat(), "end": ed.isoformat()},
             "providers_queried": providers,
             "group_by": group_by,
@@ -9625,7 +9625,7 @@ async def get_focus_costs(
     # last resort; the cheap path is group_by, which aggregates server-side.
     kept, omitted = fit_to_budget(serialized)
     return {
-        "focus_version": "2.0",
+        "focus_version": "1.2",
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "providers_queried": providers,
         "total_billed_cost": round(sum(r.BilledCost for r in all_records), 4),

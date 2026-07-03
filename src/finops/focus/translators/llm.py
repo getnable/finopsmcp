@@ -1,4 +1,4 @@
-"""FOCUS 2.0 translator for LLM / AI providers.
+"""FOCUS 1.2 translator for LLM / AI providers.
 
 Every LLM connector (OpenAI, Anthropic, Bedrock, Vertex, OpenRouter, LiteLLM)
 returns the same normalized shape:
@@ -13,7 +13,7 @@ returns the same normalized shape:
       "source": "api" | "limited" | "none",
     }
 
-This maps one such dict to FOCUS 2.0 records: one record per model, ServiceCategory
+This maps one such dict to FOCUS 1.2 records: one record per model, ServiceCategory
 "AI and Machine Learning", ResourceType "Model", with token counts and request
 volume preserved in Tags so unit-economics survive normalization. Token usage is
 recorded even when a provider reports cost-only (Bedrock/Vertex), and cost is
@@ -42,7 +42,7 @@ def llm_result_to_focus(
     start_date: date,
     end_date: date,
 ) -> list[FocusRecord]:
-    """Translate one LLM provider's normalized cost dict into FOCUS 2.0 records.
+    """Translate one LLM provider's normalized cost dict into FOCUS 1.2 records.
 
     Args:
         result:    The normalized LLM-connector dict (by_model + by_model_tokens).

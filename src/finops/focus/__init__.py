@@ -1,5 +1,5 @@
 """
-FOCUS 2.0 normalization layer.
+FOCUS 1.2 normalization layer.
 
 Provides a single normalize() entry point that routes raw provider rows
 to the correct translator and returns a FocusRecord.

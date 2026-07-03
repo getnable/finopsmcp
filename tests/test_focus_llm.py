@@ -1,7 +1,7 @@
 """FOCUS normalization for LLM / AI providers.
 
 The AI spend narrative is the moat: every LLM connector returns the same normalized
-dict (by_model + by_model_tokens), and one translator maps it to FOCUS 2.0 records
+dict (by_model + by_model_tokens), and one translator maps it to FOCUS 1.2 records
 (one per model, "AI and Machine Learning", ResourceType "Model") with token counts
 preserved as Tags. get_all_llm_costs_as_focus rolls this across every provider.
 """

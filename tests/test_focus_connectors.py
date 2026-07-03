@@ -1,7 +1,7 @@
 """Every FOCUS-capable SaaS connector wires get_costs_as_focus to the generic
 translator with a valid ServiceCategory and the right import path.
 
-Stubs get_costs (no network) and asserts the connector emits FOCUS 2.0 records
+Stubs get_costs (no network) and asserts the connector emits FOCUS 1.2 records
 with the expected ProviderName and a schema-valid ServiceCategory. This catches
 category typos and relative-import mistakes (saas/ needs ...focus, the top-level
 databricks connector needs ..focus).

@@ -1,5 +1,5 @@
 """
-GCP Billing Export to FOCUS 2.0 translator.
+GCP Billing Export to FOCUS 1.2 translator.
 
 GCP Billing Export (BigQuery) schema reference:
   https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables

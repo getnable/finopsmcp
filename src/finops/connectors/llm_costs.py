@@ -460,7 +460,7 @@ def get_all_llm_costs_as_focus(
     days: int = 30,
     exclude_cloud_native: bool = False,
 ) -> list:
-    """Return all configured LLM/AI spend as FOCUS 2.0 records, one per model per
+    """Return all configured LLM/AI spend as FOCUS 1.2 records, one per model per
     provider (ServiceCategory "AI and Machine Learning"). Token counts and request
     volume ride along in each record's Tags.
 
