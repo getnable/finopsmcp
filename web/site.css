@@ -83,8 +83,8 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .hero{position:relative;padding:80px 0 80px;overflow:hidden}
 .eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:'Bricolage Grotesque',system-ui,sans-serif;font-size:11px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:28px;padding:5px 11px;border:1px solid var(--line-2);border-radius:var(--r-xs);background:var(--bg-1)}
 .eyebrow .d{width:5px;height:5px;border-radius:50%;background:var(--accent)}
-h1.display{font-size:clamp(40px,4.6vw,62px);line-height:1.06;letter-spacing:-.04em;font-weight:300;font-family:'Bricolage Grotesque',system-ui,sans-serif}
-h1.display .h1-ask{display:block}
+h1.display{font-size:clamp(46px,5.2vw,74px);line-height:1.03;letter-spacing:-.043em;font-weight:440;font-family:'Bricolage Grotesque',system-ui,sans-serif}
+h1.display .h1-ask{display:block;color:var(--accent);font-weight:500}
 h1.display .accent{display:block;font-style:normal;font-weight:600;color:var(--accent);font-family:'Bricolage Grotesque',system-ui,sans-serif}
 h1.display .strike{position:relative;color:var(--fg-3);font-style:normal;font-weight:300;white-space:nowrap}
 h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52%;height:2px;background:var(--accent);transform:rotate(-2deg)}
@@ -109,7 +109,7 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .hero-actions .btn{min-height:44px}
 .hero-trustline{margin-top:26px;font-size:13px;color:var(--fg-3);letter-spacing:.01em}
 .hero-trustline b{color:var(--fg-2);font-weight:500}
-.page-atmos{position:fixed;inset:0;z-index:0;pointer-events:none}
+.page-atmos{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5}
 .page-content{position:relative;z-index:1}
 .page-atmos .atmos-svg{display:block;width:100%;height:100%}
 @media(max-width:560px){.hero-centered{padding:72px 0 64px}.hero-actions{flex-direction:column;width:100%}.hero-actions .copycmd,.hero-actions .btn{width:100%;min-width:0;justify-content:center}}
@@ -241,7 +241,8 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .section-head.center p{margin-left:auto;margin-right:auto}
 /* The loop: propose -> verify -> learn */
 .loop-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
-.loop-step{padding:28px 26px;background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-xl);display:flex;flex-direction:column;gap:10px}
+.loop-step{padding:28px 26px;background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-xl);display:flex;flex-direction:column;gap:10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03);transition:border-color .2s,background .2s}
+.loop-step:hover{border-color:var(--line-2);background:var(--bg-2)}
 .loop-n{font-family:var(--font-mono);font-size:12px;color:var(--accent);letter-spacing:.06em}
 .loop-step h3{font-size:19px;font-weight:500;letter-spacing:-.02em;margin:0;color:var(--fg)}
 .loop-step p{font-size:14px;line-height:1.6;color:var(--fg-2);margin:0}
@@ -594,7 +595,31 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 /* ── Scroll reveal (JS-gated so no-JS users see content immediately) ── */
 .js .reveal{opacity:0;transform:translateY(28px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);will-change:opacity,transform}
 .js .reveal.in{opacity:1;transform:none}
-@media(prefers-reduced-motion:reduce){.js .reveal{opacity:1 !important;transform:none !important;transition:none}}
+/* Card grids stagger in behind their section head, one beat apart */
+.js .reveal .loop-step,.js .reveal .start-step{opacity:0;transform:translateY(18px);transition:opacity .6s cubic-bezier(.2,.7,.2,1),transform .6s cubic-bezier(.2,.7,.2,1),border-color .2s,background-color .2s}
+.js .reveal.in .loop-step,.js .reveal.in .start-step{opacity:1;transform:none}
+.js .reveal.in .loop-step:nth-child(2),.js .reveal.in .start-step:nth-child(2){transition-delay:.09s}
+.js .reveal.in .loop-step:nth-child(3),.js .reveal.in .start-step:nth-child(3){transition-delay:.18s}
+@media(prefers-reduced-motion:reduce){.js .reveal,.js .reveal .loop-step,.js .reveal .start-step{opacity:1 !important;transform:none !important;transition:none}}
+
+/* ── Hero load-in choreography: one promise, four beats ── */
+@keyframes heroRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.js .hero-c>*{animation:heroRise .7s cubic-bezier(.2,.7,.2,1) both}
+.js .hero-c>*:nth-child(2){animation-delay:.12s}
+.js .hero-c>*:nth-child(3){animation-delay:.22s}
+.js .hero-c>*:nth-child(4){animation-delay:.32s}
+@media(prefers-reduced-motion:reduce){.js .hero-c>*{animation:none}}
+
+/* ── Agent cost controls band: the piece no dashboard has ── */
+.agents-band{border:1px solid var(--line);border-radius:var(--r-2xl);background:linear-gradient(180deg,var(--bg-2),var(--bg-1));padding:40px 44px;display:flex;align-items:center;justify-content:space-between;gap:36px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);transition:border-color .2s}
+.agents-band:hover{border-color:var(--line-2)}
+.agents-band-copy{max-width:640px}
+.band-tag{display:inline-flex;font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-dim);border:1px solid var(--line-2);border-radius:var(--r-xs);padding:3px 8px;margin-bottom:16px}
+.agents-band h3{font-size:clamp(22px,2.6vw,30px);font-weight:400;letter-spacing:-.025em;line-height:1.15;color:var(--fg)}
+.agents-band h3 em{font-style:italic;color:var(--accent);font-weight:400}
+.agents-band p{margin-top:12px;color:var(--fg-2);font-size:14.5px;line-height:1.6;max-width:56ch}
+.agents-band .btn{flex:none}
+@media(max-width:760px){.agents-band{flex-direction:column;align-items:flex-start;padding:28px 24px;gap:24px}}
 
 /* ── Demo video, front and center ── */
 .demo-video-frame{max-width:960px;margin:40px auto 0;border:1px solid var(--line-2);border-radius:var(--r-2xl);overflow:hidden;background:var(--bg-1);box-shadow:0 40px 120px -40px rgba(77,184,212,.40),0 0 0 1px rgba(77,184,212,.14)}

@@ -1105,6 +1105,27 @@ function GetStarted(){
   );
 }
 
+/* Agent cost controls: the differentiator no dashboard has, linking out to /agents */
+function AgentsBand(){
+  return (
+    <section className="tight alt">
+      <div className="wrap">
+        <div className="agents-band">
+          <div className="agents-band-copy">
+            <div className="band-tag">Agent cost controls</div>
+            <h3>Your agents ask nable <em>before they spend.</em></h3>
+            <p>An agent calls nable to price a change, check it against your budgets and policies, and get a cheaper path, before anything is applied. Live now in every install.</p>
+          </div>
+          <a className="btn btn-primary" href="/agents.html"
+             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'agents_band',cta:'see_agents'}); }}>
+            See how it works <span className="arr">→</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* The payoff: verified, learning savings (the differentiation people miss) */
 function ProofBand(){
   return (
@@ -1207,6 +1228,8 @@ function App(){
       <Reveal><DemoVideo /></Reveal>
       <Reveal><GetStarted /></Reveal>
       <Reveal><Loop /></Reveal>
+      <Reveal><AiCost /></Reveal>
+      <Reveal><AgentsBand /></Reveal>
       <Reveal><ProofBand /></Reveal>
       <Reveal><Connectors /></Reveal>
       <Reveal><Architecture version={version} /></Reveal>
