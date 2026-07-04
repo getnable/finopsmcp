@@ -271,6 +271,7 @@ def _show_value_moment(demo: bool = False) -> bool:
 
 
 _VALUE_MOMENT_TIMEOUT = 30  # seconds; hard wall-clock cap on the first-run scan
+_LAST_TOTAL = [0.0]  # 30-day total from the last value moment, for the budget suggestion
 
 
 def _run_capped(fn, timeout: float):
@@ -329,6 +330,7 @@ def _value_moment_body(demo: bool = False) -> bool:
     by_svc = summary.get("grand_by_service") or summary.get("by_service") or {}
     if total <= 0 or not isinstance(by_svc, dict) or not by_svc:
         return False
+    _LAST_TOTAL[0] = float(total)  # anchor for the budget suggestion after this scan
 
     top = sorted(by_svc.items(), key=lambda kv: kv[1], reverse=True)
     top_name, top_val = top[0]
@@ -508,6 +510,88 @@ def _oneclick_aws_url() -> str | None:
     except Exception:
         pass
     return None
+
+
+def _nice_budget(x: float) -> int:
+    """Round a spend figure up to a clean budget number: nearest 1000 above 10k,
+    nearest 100 above 200, else nearest 10. Keeps the suggestion legible, not
+    $3,847.11."""
+    import math
+    if x <= 0:
+        return 0
+    step = 1000 if x >= 10000 else (100 if x >= 200 else 10)
+    return int(math.ceil(x / step) * step)
+
+
+def _offer_budget_guardrail() -> None:
+    """After a real value moment, offer a monthly budget seeded from the scanned
+    spend. This is the activation step: it heads off the find-out-the-hard-way
+    bill AND sets the number every agent checks against before it acts. Best
+    effort, never blocks onboarding, and skips silently if a total budget exists."""
+    total = _LAST_TOTAL[0]
+    if total <= 0:
+        return
+    try:
+        from .budget.enforcer import create_budget, list_budgets
+    except Exception:
+        return
+    # Returning user who already set one: do not nag.
+    try:
+        if any(b.get("scope_type") == "total" for b in list_budgets(active_only=True)):
+            return
+    except Exception:
+        pass
+
+    suggested = _nice_budget(total * 1.15)  # ~15% headroom over the current run rate
+    if suggested <= 0:
+        return
+
+    _blank()
+    _line(_rule())
+    _blank()
+    _line(bold("One more thing: a budget your agents respect."))
+    _line(dim(f"  You spent ${total:,.0f} in the last 30 days. Set a monthly budget and"))
+    _line(dim("  nable alerts you before you cross it, and any agent can check spend"))
+    _line(dim("  against it before it acts, so a runaway agent can't blow past it."))
+    _blank()
+    try:
+        ans = input(f"  Monthly budget in USD [{suggested:,}, Enter to accept, n to skip]: ").strip()
+    except (KeyboardInterrupt, EOFError):
+        return
+    if ans.lower() in ("n", "no", "skip"):
+        _blank()
+        _line(dim("  No budget set. Ask your editor to \"set a monthly budget\" anytime."))
+        return
+
+    amount = float(suggested)
+    if ans:
+        try:
+            amount = float(ans.replace("$", "").replace(",", "").strip())
+        except ValueError:
+            amount = float(suggested)
+    if amount <= 0:
+        return
+
+    try:
+        create_budget(
+            name="Monthly budget",
+            scope_type="total",
+            limit_usd=amount,
+            period="monthly",
+            alert_at_pct=80.0,
+            critical_at_pct=100.0,
+            created_by="onboarding",
+        )
+    except Exception:
+        _blank()
+        _line(dim("  Could not save the budget just now. Set one later from your editor."))
+        return
+
+    _fire_telemetry("budget_set", {"source": "onboarding", "limit_usd": amount})
+    _blank()
+    _line(green("  ✓") + f"  Budget set: {bold('$' + format(amount, ',.0f') + '/mo')}  {dim('· nable warns at 80%, flags at 100%')}")
+    _line(dim("  Your agents can now check it before they act:"))
+    _line("    " + cyan("check_action_policy") + dim("   and   ") + cyan("check_budget_status"))
 
 
 def run_welcome_flow(demo: bool = False) -> None:
@@ -691,6 +775,15 @@ def run_welcome_flow(demo: bool = False) -> None:
         if _oneclick:
             _line(dim("  Or one-click a read-only key:  ") + cyan(_oneclick))
         _blank()
+
+    # Activation moment: with a real number on screen, offer a budget the agents
+    # respect. Only after a real scan (the sample fallback never sets shown), and
+    # best-effort so it can never break onboarding.
+    if shown:
+        try:
+            _offer_budget_guardrail()
+        except Exception:
+            pass
 
     # Finish, honest about which clients are wired, and the restart cliff. MCP
     # clients only load servers at startup, so a user with the editor already open

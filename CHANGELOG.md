@@ -2,6 +2,20 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.104
+
+Smarter first run: setup now ends by offering a budget your agents respect.
+
+### Added
+- **Post-scan budget step in onboarding.** After the first-run value moment shows
+  a real spend number, nable offers to set a monthly budget seeded from that
+  number (about 15% headroom, rounded to a clean figure). It heads off the
+  find-out-the-hard-way bill and, more to the point, sets the number every agent
+  checks against before it acts. The closing line points at `check_action_policy`
+  and `check_budget_status`, so an agent builder sees the spend-control story on
+  day one instead of in a docs page. Interactive only, skippable with `n`, and it
+  never prompts a returning user who already has a total budget.
+
 ## 0.8.103
 
 First-run diagnostic fixes: the value moment no longer hangs, and the package metadata is honest again.
