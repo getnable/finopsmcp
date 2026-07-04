@@ -764,16 +764,21 @@ def run_welcome_flow(demo: bool = False) -> None:
             # bill, the number that actually matters for this segment.
             shown = _connect_llm_provider()
 
-    # Never dead-end. If they skipped, declined, or the scan came up empty,
-    # show nable on sample data so the value lands before they ever leave.
+    # Real data or nothing. If they skipped or the scan came up empty, never show
+    # invented numbers, they teach nothing and undercut trust. Point at the fastest
+    # path to their own real number so the value lands the moment they connect.
     if not shown:
         _blank()
-        _line(bold("Here's nable on a sample bill") + dim("  (example numbers · connect an account to see your own)"))
-        _show_value_moment(demo=True)
-        _line(dim("  Ready for real numbers?  ") + cyan(_cli("setup aws")) + dim("  (read-only, ~1 min)"))
+        _line(bold("No numbers yet, on purpose.") + dim("  nable only ever shows your real spend."))
         _oneclick = _oneclick_aws_url()
         if _oneclick:
-            _line(dim("  Or one-click a read-only key:  ") + cyan(_oneclick))
+            _line(dim("  See yours in two copy-pastes, read-only AWS key, no local creds:"))
+            _line(f"    {cyan(_oneclick)}")
+            _line(dim("  Then run  ") + cyan(_cli("welcome")) + dim("  again, or  ") + cyan(_cli("setup aws")) + dim("  if you already have a profile."))
+        else:
+            _line(dim("  Connect an account to see it:  ") + cyan(_cli("setup aws")) + dim("  (read-only, ~1 min)"))
+            _line(dim("  Or paste a model key:  ") + cyan(_cli("setup openai")) + dim("  for your AI / token bill."))
+        _line(dim("  Just exploring? ") + cyan(_cli("welcome --demo")) + dim("  walks a clearly-labeled sample bill."))
         _blank()
 
     # Activation moment: with a real number on screen, offer a budget the agents

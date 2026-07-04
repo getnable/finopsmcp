@@ -2,6 +2,20 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.105
+
+Real data or nothing: the first run never invents numbers.
+
+### Changed
+- **The guided onboarding no longer falls back to a sample bill.** Before, a user
+  who skipped the credential step, or whose scan came up empty, was shown nable on
+  made-up example numbers. Now that path shows an honest empty state ("No numbers
+  yet, on purpose") and the fastest way to a real one: the one-click read-only AWS
+  key when it is published, plus `finops setup aws` / `finops setup openai`. No toy
+  figures ever land in front of someone evaluating the product. `finops welcome
+  --demo` still exists as an explicit, clearly-labeled sample walkthrough for
+  anyone who wants it.
+
 ## 0.8.104
 
 Smarter first run: setup now ends by offering a budget your agents respect.

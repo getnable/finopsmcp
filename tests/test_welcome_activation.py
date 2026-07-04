@@ -7,7 +7,8 @@ figure when the user handed over cloud credentials. If they skipped, they saw
 nothing and left. These tests lock in the fix:
 
   1. The value moment tells the truth in demo mode (sample data, not "your account").
-  2. A user who skips the credential step STILL sees a number (demo fallback).
+  2. A user who skips the credential step is never dead-ended and never shown fake
+     numbers: they get an honest empty state plus the fastest real connect path.
   3. Ambient AWS credentials trigger a one-keystroke real scan, no menu.
 
 Scans are stubbed so these stay fast and never touch a network or a real cloud.
@@ -90,8 +91,9 @@ def test_value_moment_returns_false_on_empty(monkeypatch):
     assert w._show_value_moment(demo=True) is False
 
 
-def test_skip_still_shows_a_number(monkeypatch, capsys):
-    """The core regression: declining the credential step must not dead-end."""
+def test_skip_offers_real_connect_never_fake_numbers(monkeypatch, capsys):
+    """Real data or nothing: declining the credential step must not dead-end, but
+    it must never invent a sample number either. It offers the fastest real path."""
     monkeypatch.setattr("finops.setup_wizard._configure_claude_desktop", lambda *a, **k: None)
 
     async def _no_ambient(self):
@@ -106,9 +108,11 @@ def test_skip_still_shows_a_number(monkeypatch, capsys):
     w.run_welcome_flow(demo=False)
     out = capsys.readouterr().out
 
-    assert calls == [True]  # only the demo fallback ran, no real scan
-    assert "Here's nable on a sample bill" in out
-    assert "finops setup aws" in out  # clear next step offered
+    assert calls == []  # no value moment at all: no real scan, and no fake demo bill
+    assert "Here's nable on a sample bill" not in out  # the old auto-demo is gone
+    assert "No numbers yet, on purpose." in out  # honest empty state
+    assert "finops setup aws" in out  # clear real next step offered
+    assert "welcome --demo" in out  # demo stays available as an explicit opt-in
 
 
 def test_ambient_aws_offers_one_keystroke_real_scan(monkeypatch):
@@ -149,9 +153,9 @@ def test_slow_ambient_probe_does_not_hang_onboarding(monkeypatch):
 
     w.run_welcome_flow(demo=False)
 
-    # The probe timed out: ambient was treated as absent, so we fell to the demo
-    # fallback rather than offering a real scan or hanging.
-    assert calls == [True]
+    # The probe timed out: ambient was treated as absent, so onboarding fell through
+    # to the connect nudge rather than hanging or invoking a real scan.
+    assert calls == []  # no value moment ran; the timeout did not trigger a scan
 
 
 def test_demo_env_restored_after_value_moment(monkeypatch):
@@ -178,8 +182,8 @@ def test_demo_env_restored_after_value_moment(monkeypatch):
     assert "FINOPS_DEMO_MODE" not in _os.environ
 
 
-def test_ambient_aws_declined_falls_through_to_menu_then_demo(monkeypatch):
-    """Ambient creds present but user says no -> menu, skip, demo fallback."""
+def test_ambient_aws_declined_falls_through_to_menu_then_connect_nudge(monkeypatch, capsys):
+    """Ambient creds present but user says no -> menu, skip, connect nudge (no fake bill)."""
     monkeypatch.setattr("finops.setup_wizard._configure_claude_desktop", lambda *a, **k: None)
 
     async def _ambient(self):
@@ -193,5 +197,7 @@ def test_ambient_aws_declined_falls_through_to_menu_then_demo(monkeypatch):
     monkeypatch.setattr(w, "_show_value_moment", lambda demo=False: calls.append(demo) or (demo is True))
 
     w.run_welcome_flow(demo=False)
+    out = capsys.readouterr().out
 
-    assert calls == [True]  # declined real scan never ran; demo fallback did
+    assert calls == []  # declined real scan never ran, and no demo fallback either
+    assert "No numbers yet, on purpose." in out  # honest empty state, real next step
