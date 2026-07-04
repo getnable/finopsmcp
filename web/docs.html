@@ -350,6 +350,9 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
     <div class="nav-group">Tools</div>
     <div id="sb-intel"></div>
 
+    <div class="nav-group">Agent guardrail</div>
+    <a href="#guard" class="nav-link" data-spy="guard">Cost guardrail for agents</a>
+
     <div class="nav-group">Security</div>
     <a href="#security" class="nav-link" data-spy="security">Security &amp; permissions</a>
     <a href="#iam" class="nav-link" data-spy="iam">Least-privilege IAM</a>
@@ -693,6 +696,51 @@ compute-optimizer:Get*</code></pre></div>
     <!-- Intelligence / What nable does (injected) -->
     <div class="cat-rule"><span>What nable does</span></div>
     <div id="intel-sections"></div>
+
+    <!-- Agent guardrail -->
+    <div class="cat-rule"><span>Agent guardrail</span></div>
+
+    <section class="doc-section" id="guard" data-title="Cost guardrail for agents" data-crumb="Agent guardrail">
+      <h2 class="sec-h">Cost guardrail for agents</h2>
+      <p class="body">One command wires nable into an AI coding agent so it checks every infrastructure-mutating command against your policy <em>before</em> it runs. No prompt engineering. It is advisory and propose-only: nable pauses or blocks an action and shows why, but it never executes anything itself. Read the <a class="ilink" href="/agents">agent cost controls overview</a> for the why.</p>
+
+      <h3 class="sub-h" id="guard-install" data-toc>Install</h3>
+      <p class="body">In your project (or add <code class="ic">--global</code> for every repo), run:</p>
+      <div class="code" data-code>
+        <div class="code-head"><span class="code-fname">terminal</span><button class="code-copy" data-copy>Copy</button></div>
+        <pre><code><span class="t-cmd">finops guard install</span></code></pre>
+      </div>
+      <p class="hint">This writes a Claude Code <code>PreToolUse</code> hook to <code>.claude/settings.json</code>. Restart Claude Code so it picks up the hook. Uses <code>uvx nable</code>? The hook is <code>finops guard hook</code> either way. Check status with <code>finops guard status</code>, remove with <code>finops guard uninstall</code>.</p>
+
+      <h3 class="sub-h" id="guard-verdicts" data-toc>What it does</h3>
+      <p class="body">Before your agent runs an infrastructure command, nable classifies it and applies your policy:</p>
+      <div class="cc-table">
+        <div class="cc-head"><div class="can">Command</div><div class="cannot">Verdict</div></div>
+        <div class="cc-body">
+          <div>One-way door: <code class="ic">terraform destroy</code>, <code class="ic">kubectl delete</code>, <code class="ic">aws ec2 terminate-instances</code>, a commitment purchase</div>
+          <div><strong>ask</strong> — pauses for a human, with the reason. Irreversible or financial moves always escalate.</div>
+          <div>Reversible but not in your allowlist</div>
+          <div><strong>deny</strong> — the agent is told why and proposes something else</div>
+          <div>Reversible and in policy: <code class="ic">terraform apply</code>, <code class="ic">helm upgrade</code>, stopping an instance</div>
+          <div><strong>silent</strong> — runs as normal, zero friction</div>
+        </div>
+      </div>
+      <p class="body">Try any command against your policy without an agent:</p>
+      <div class="code" data-code>
+        <div class="code-head"><span class="code-fname">terminal</span><button class="code-copy" data-copy>Copy</button></div>
+        <pre><code><span class="t-cmd">finops guard check</span> <span class="t-punc">--command</span> <span class="t-str">"terraform destroy"</span></code></pre>
+      </div>
+
+      <h3 class="sub-h" id="guard-policy" data-toc>Policy knobs</h3>
+      <div class="card"><ul class="checklist">
+        <li><span class="ck">·</span><span><code class="ic">FINOPS_POLICY_MAX_AUTO_USD</code> — a monthly-dollar threshold; a cost increase above it escalates. Default 500.</span></li>
+        <li><span class="ck">·</span><span><code class="ic">FINOPS_POLICY_ALLOWED_ACTIONS</code> — comma-separated action types a human can apply (e.g. <code>rightsizing,tag_fix,stop_idle</code>). Anything else is denied.</span></li>
+        <li><span class="ck">·</span><span><code class="ic">FINOPS_GUARD_STRICT=1</code> — also pause on reversible mutations (<code>terraform apply</code>, <code>helm upgrade</code>) with a nudge to cost the change first.</span></li>
+      </ul></div>
+
+      <h3 class="sub-h" id="guard-safety" data-toc>Safety</h3>
+      <p class="body">The guard never executes a command; it only returns <code>ask</code>, <code>deny</code>, or nothing. It fails open, any internal error exits cleanly so a guard bug can never break your agent, and it adds about 80ms per command. Propose-only stays fully intact: nable does not auto-execute infrastructure. Outside Claude Code (Cursor, Windsurf, your own loop), point the agent at the same gate with a one-line system-prompt instruction, see the <a class="ilink" href="/agents#adoption">adoption paths</a>.</p>
+    </section>
 
     <!-- Security -->
     <div class="cat-rule"><span>Security</span></div>
