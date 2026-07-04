@@ -1,6 +1,6 @@
 # Pricing, nable
 
-nable is a local-first FinOps tool. It runs on your own machine as an MCP server and answers cloud and AI cost questions inside Claude, Cursor and other MCP editors. Paid plans are flat-rate with unlimited seats, never per-seat and never a percentage of your cloud spend. Managed single-tenant hosting is available as an add-on; contact us for a demo. Last updated: 2026-06-28.
+nable is a local-first FinOps tool. It runs on your own machine as an MCP server and answers cloud and AI cost questions inside Claude, Cursor and other MCP editors. Paid plans are flat-rate with unlimited seats, never per-seat and never a percentage of your cloud spend. Managed single-tenant hosting is available as an add-on; contact us for a demo. Last updated: 2026-07-04.
 
 ## Dev
 - Price: $0 per month
@@ -12,14 +12,14 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 - Sign up: no credit card, no expiry
 
 ## Pro
-- Price: $100 per month flat, unlimited seats, billed monthly
-- Annual price: $1,000 per year, about $83 per month, two months free
+- Price: $25 per month flat, unlimited seats, billed monthly
+- Annual price: $250 per year, about $21 per month, two months free
 - Trial: 7-day free trial
 - Runs: local, on your own machine
 - AI: bring your own LLM key
 - Includes: everything in Dev, plus Terraform remediation (patches the .tf and opens the PR), ticket creation (Jira, Linear, GitHub), Slack and Teams alerts, weekly digests, budgets, commitment and savings-plan recommendations, the conversational Slack bot, root cause analysis with chat remediation, BI dashboards
-- Buy monthly: https://buy.stripe.com/9B600igyt1oO1d69V02Nq06
-- Buy yearly: https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07
+- Buy monthly: https://buy.stripe.com/5kQeVc4PL9Vk4piaZ42Nq0a
+- Buy yearly: https://buy.stripe.com/eVqaEW961aZocVO8QW2Nq0b
 
 ## Startups
 - Price: $1,000 per month, unlimited seats, billed monthly

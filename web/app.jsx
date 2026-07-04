@@ -726,12 +726,12 @@ function CheckIcon(){
   );
 }
 
-// Paid checkout links. Pro = $100/mo flat or $1,000/yr (2 months free): local,
+// Paid checkout links. Pro = $25/mo flat or $250/yr (2 months free): local,
 // bring your own LLM key. Startups = $1,000/mo or $10,000/yr: org scale, local,
 // bring your own LLM key. Hosting (single-tenant + managed AI) is an optional
 // managed single-tenant add-on on either plan, billed on top; priced via a demo.
-const PRO_MONTHLY_LINK     = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
-const PRO_ANNUAL_LINK      = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
+const PRO_MONTHLY_LINK     = "https://buy.stripe.com/5kQeVc4PL9Vk4piaZ42Nq0a";
+const PRO_ANNUAL_LINK      = "https://buy.stripe.com/eVqaEW961aZocVO8QW2Nq0b";
 const STARTUP_MONTHLY_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
 const STARTUP_ANNUAL_LINK  = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 
@@ -787,7 +787,7 @@ function PricingCards({ tiers, annual }){
 function Pricing(){
   const [annual, setAnnual] = useState(false);
 
-  const proPrice     = annual ? "$1,000" : "$100";
+  const proPrice     = annual ? "$250" : "$25";
   const startupPrice = annual ? "$10,000" : "$1,000";
   const per    = annual ? "/yr" : "/mo";
   const billed = annual ? "Billed annually" : "Billed monthly";

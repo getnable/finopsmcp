@@ -389,8 +389,8 @@ function Connectors() {
 function CheckIcon() {
   return /* @__PURE__ */ React.createElement("svg", { width: "15", height: "15", viewBox: "0 0 15 15", fill: "none", "aria-hidden": "true", style: { flexShrink: 0, marginTop: 1 } }, /* @__PURE__ */ React.createElement("circle", { cx: "7.5", cy: "7.5", r: "7", stroke: "currentColor", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("path", { d: "M4.5 7.5L6.5 9.5L10.5 5.5", stroke: "currentColor", strokeWidth: "1.4", strokeLinecap: "round", strokeLinejoin: "round" }));
 }
-const PRO_MONTHLY_LINK = "https://buy.stripe.com/9B600igyt1oO1d69V02Nq06";
-const PRO_ANNUAL_LINK = "https://buy.stripe.com/bJe5kCbe97Nc0924AG2Nq07";
+const PRO_MONTHLY_LINK = "https://buy.stripe.com/5kQeVc4PL9Vk4piaZ42Nq0a";
+const PRO_ANNUAL_LINK = "https://buy.stripe.com/eVqaEW961aZocVO8QW2Nq0b";
 const STARTUP_MONTHLY_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
 const STARTUP_ANNUAL_LINK = "https://buy.stripe.com/14A6oG0zvgjI9JCffk2Nq09";
 const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
@@ -425,7 +425,7 @@ function PricingCards({ tiers, annual }) {
 }
 function Pricing() {
   const [annual, setAnnual] = useState(false);
-  const proPrice = annual ? "$1,000" : "$100";
+  const proPrice = annual ? "$250" : "$25";
   const startupPrice = annual ? "$10,000" : "$1,000";
   const per = annual ? "/yr" : "/mo";
   const billed = annual ? "Billed annually" : "Billed monthly";

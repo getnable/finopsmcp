@@ -1,5 +1,5 @@
 """The upgrade nudge should lead with a real savings number when nable has
-already found enough to dwarf the $100/mo plan, and stay quiet about ROI when the
+already found enough to dwarf the $25/mo plan, and stay quiet about ROI when the
 number is weak or the user already pays."""
 from finops import server
 
@@ -29,15 +29,15 @@ def test_nudge_leads_with_roi_when_compelling(monkeypatch):
     monkeypatch.setattr(server, "_savings_found_monthly", lambda: 8432.0)
     out = server._team_nudge("Auto-create tickets with Team.")
     assert "$8,432/mo" in out
-    assert "84x" in out  # 8432 / 100 = 84.3 -> 84x
-    assert "$100/mo Team plan" in out
+    assert "337x" in out  # 8432 / 25 = 337.3 -> 337x
+    assert "$25/mo Team plan" in out
     assert "Auto-create tickets with Team." in out
 
 
 def test_nudge_suppresses_weak_multiplier(monkeypatch):
     # Found less than the plan price: a "0.6x" pitch would hurt, so suppress it.
     monkeypatch.setattr(server, "get_status", lambda: _Lic("free"))
-    monkeypatch.setattr(server, "_savings_found_monthly", lambda: 25.0)
+    monkeypatch.setattr(server, "_savings_found_monthly", lambda: 12.0)
     out = server._team_nudge("Upgrade to keep going.")
     assert "x the" not in out
     assert "Upgrade to keep going." in out
