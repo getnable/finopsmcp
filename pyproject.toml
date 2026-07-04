@@ -112,7 +112,15 @@ all = [
     "google-cloud-monitoring>=2.21.0",
     "google-cloud-recommender>=2.15.0",
 ]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
+dev = [
+    "pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4",
+    # Installed in CI so the GCP Recommender tests run against Google's real proto
+    # types (Money, CostProjection, Duration-as-timedelta), not hand-rolled stand-ins.
+    # This is a schema-drift guard: if a field name or shape changes, CI fails instead
+    # of us finding out against a live account we don't have. The other cloud SDKs stay
+    # out of dev on purpose; the Recommender path is the newest and least-dogfooded.
+    "google-cloud-recommender>=2.15.0",
+]
 
 [project.scripts]
 finops-mcp        = "finops.server:main"
