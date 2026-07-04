@@ -6,7 +6,7 @@ generalizes it to the whole connector surface so "connect everything" is a
 sub-10-minute job instead of 30 paste-a-key wizards:
 
   - environment variables for every API-key provider nable supports
-  - well-known credential files (~/.modal.toml, ~/.databrickscfg, gh CLI hosts)
+  - well-known credential files (~/.modal.toml, ~/.databrickscfg)
   - a gcloud ADC flag that routes into the GCP detect-confirm flow
 
 Used by `finops connect` (the standalone command) and by the welcome flow
@@ -28,7 +28,6 @@ KEY_HELP: dict[str, tuple[str | None, str]] = {
     "Datadog":       ("https://app.datadoghq.com/organization-settings/api-keys", "App key lives next door under Application Keys."),
     "Langfuse":      ("https://cloud.langfuse.com", "Project → Settings → API Keys."),
     "Snowflake":     (None, "Your regular Snowflake login; the account identifier is in your Snowflake URL (e.g. xy12345.us-east-1)."),
-    "GitHub":        ("https://github.com/settings/tokens", "A fine-grained PAT with read-only org access is enough."),
     "MongoDB Atlas": ("https://cloud.mongodb.com", "Organization → Access Manager → API Keys (Org Billing Viewer role)."),
     "Twilio":        ("https://console.twilio.com", "Account SID and Auth Token are on the console home page."),
     "Cloudflare":    ("https://dash.cloudflare.com/profile/api-tokens", "Create Token with billing read access."),
@@ -43,7 +42,6 @@ KEY_HELP: dict[str, tuple[str | None, str]] = {
     "Cohere":        ("https://dashboard.cohere.com/api-keys", ""),
     "Mistral AI":    ("https://console.mistral.ai/api-keys", ""),
     "New Relic":     ("https://one.newrelic.com/api-keys", "Use a USER key (NRAK-…)."),
-    "PagerDuty":     ("https://support.pagerduty.com/docs/api-access-keys", "Integrations → API Access Keys in your PagerDuty subdomain."),
     "Databricks":    ("https://docs.databricks.com/en/dev-tools/auth/pat.html", "Workspace → Settings → Developer → Access tokens; nable also reads ~/.databrickscfg."),
     "GCP":           ("https://console.cloud.google.com/iam-admin/serviceaccounts", "Or run `gcloud auth application-default login`, nable detects it."),
 }
@@ -66,14 +64,12 @@ PROVIDER_ENV: dict[str, tuple[str, list[str], list[str]]] = {
     "langfuse":   ("Langfuse",      ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"],    ["LANGFUSE_HOST"]),
     "snowflake":  ("Snowflake",     ["SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD"],
                                                                                        ["SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_ROLE", "SNOWFLAKE_CREDIT_PRICE"]),
-    "github":     ("GitHub",        ["GITHUB_TOKEN"],                                  ["GITHUB_ORGS"]),
     "mongodb":    ("MongoDB Atlas", ["MONGODB_ATLAS_PUBLIC_KEY", "MONGODB_ATLAS_PRIVATE_KEY"],
                                                                                        ["MONGODB_ATLAS_ORG_IDS"]),
     "twilio":     ("Twilio",        ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"],       []),
     "cloudflare": ("Cloudflare",    ["CLOUDFLARE_API_TOKEN"],                          ["CLOUDFLARE_ACCOUNT_ID"]),
     "vercel":     ("Vercel",        ["VERCEL_TOKEN"],                                  ["VERCEL_TEAM_ID"]),
     "newrelic":   ("New Relic",     ["NEW_RELIC_API_KEY"],                             ["NEW_RELIC_ACCOUNT_ID"]),
-    "pagerduty":  ("PagerDuty",     ["PAGERDUTY_API_KEY"],                             []),
     "databricks": ("Databricks",    ["DATABRICKS_HOST", "DATABRICKS_TOKEN"],           ["DATABRICKS_ACCOUNT_ID", "DATABRICKS_ACCOUNT_TOKEN", "DATABRICKS_DBU_PRICE"]),
 }
 
@@ -125,21 +121,6 @@ def _probe_databrickscfg(home: Path) -> dict[str, str] | None:
     return None
 
 
-def _probe_gh_hosts(home: Path) -> dict[str, str] | None:
-    """gh CLI stores an oauth token in ~/.config/gh/hosts.yml. It authenticates
-    the GitHub API like a PAT (org billing endpoints may need broader scopes)."""
-    p = home / ".config" / "gh" / "hosts.yml"
-    if not p.exists():
-        return None
-    try:
-        m = re.search(r"oauth_token:\s*(\S+)", p.read_text())
-    except Exception:
-        return None
-    if m and _plausible(m.group(1)):
-        return {"GITHUB_TOKEN": m.group(1)}
-    return None
-
-
 def gcloud_adc_path(home: Path | None = None) -> Path | None:
     """The gcloud Application Default Credentials file, if present."""
     home = home or Path.home()
@@ -159,7 +140,6 @@ def gcloud_adc_path(home: Path | None = None) -> Path | None:
 _FILE_PROBES = {
     "modal": _probe_modal_toml,
     "databricks": _probe_databrickscfg,
-    "github": _probe_gh_hosts,
 }
 
 
@@ -192,8 +172,7 @@ def scan_ambient_credentials(home: Path | None = None) -> list[dict]:
         if probe:
             file_env = probe(home)
             if file_env:
-                src = {"modal": "~/.modal.toml", "databricks": "~/.databrickscfg",
-                       "github": "gh CLI (~/.config/gh/hosts.yml)"}[slug]
+                src = {"modal": "~/.modal.toml", "databricks": "~/.databrickscfg"}[slug]
                 findings.append({"slug": slug, "name": name, "source": src, "env": file_env})
 
     findings.sort(key=lambda f: f["name"].lower())

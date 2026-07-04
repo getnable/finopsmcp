@@ -1866,7 +1866,6 @@ def _print_tools_cheatsheet() -> None:
 # After connecting a provider, suggest a question relevant to *that* provider, so
 # the close is not always "ask about AWS" after connecting something else.
 _CONNECT_QUESTIONS = {
-    "github": "What has my AI coding shipped this month, by model?",
     "openai": "What's my OpenAI spend, by model?",
     "anthropic": "What's my Anthropic spend, by model?",
     "openrouter": "What's my OpenRouter spend, by model?",
@@ -1887,7 +1886,6 @@ _CONNECT_QUESTIONS = {
     "cohere": "What's my Cohere usage costing?",
     "mistral": "What's my Mistral spend?",
     "newrelic": "What am I spending on New Relic?",
-    "pagerduty": "What are my PagerDuty seats costing?",
 }
 _CONNECT_CHANNELS = {"slack": "Slack", "teams": "Microsoft Teams", "notion": "Notion", "n8n": "n8n"}
 
@@ -1988,7 +1986,6 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("datadog",      help="Connect Datadog usage and cost API")
     sub.add_parser("langfuse",     help="Connect Langfuse LLM observability costs")
     sub.add_parser("snowflake",    help="Connect Snowflake credit consumption")
-    sub.add_parser("github",       help="Connect GitHub Actions minutes and Copilot seats")
     sub.add_parser("mongodb",      help="Connect MongoDB Atlas invoice API")
     sub.add_parser("twilio",       help="Connect Twilio usage records")
     sub.add_parser("cloudflare",   help="Connect Cloudflare billing and subscriptions")
@@ -2008,7 +2005,6 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("cohere",       help="Connect Cohere API usage")
     sub.add_parser("mistral",      help="Connect Mistral AI API usage")
     sub.add_parser("newrelic",     help="Connect New Relic data ingest and seat costs")
-    sub.add_parser("pagerduty",    help="Connect PagerDuty seat counts")
     sub.add_parser("databricks",   help="Connect Databricks DBU consumption and job costs")
     sub.add_parser("claude",       help="Register nable in Claude Desktop config")
     up_p = sub.add_parser("upgrade", help="Upgrade nable: cache the new version, then move the config pin")
@@ -2117,11 +2113,6 @@ def main(args: list[str] | None = None) -> None:
             ("SNOWFLAKE_ROLE", "Role (default: ACCOUNTADMIN)", False),
             ("SNOWFLAKE_CREDIT_PRICE", "Credit price USD (your contract rate, optional)", False),
         ]),
-        "github": lambda: setup_saas_api_key("GitHub", [
-            ("GITHUB_TOKEN", "Personal Access Token (github_pat_...)", True),
-            ("GITHUB_ORGS", "Organization names (comma-separated)", False),
-        ], note="GitHub bills usage (Actions minutes, Copilot seats), not a dollar "
-                "API. nable shows the usage; dollar cost comes from your GitHub invoice."),
         "mongodb": lambda: setup_saas_api_key("MongoDB Atlas", [
             ("MONGODB_ATLAS_PUBLIC_KEY", "Public Key", False),
             ("MONGODB_ATLAS_PRIVATE_KEY", "Private Key", True),
@@ -2182,10 +2173,6 @@ def main(args: list[str] | None = None) -> None:
         ], note="New Relic reports usage (GB ingested, user counts). Add your "
                 "contract rates below and nable turns them into dollars; leave blank "
                 "to see usage only."),
-        "pagerduty": lambda: setup_saas_api_key("PagerDuty", [
-            ("PAGERDUTY_API_KEY", "API Key", True),
-        ], note="PagerDuty has no billing API. nable reports active seat counts; "
-                "dollar cost is seats x your contract rate, on your PagerDuty invoice."),
         "databricks": lambda: setup_saas_api_key("Databricks", [
             ("DATABRICKS_HOST", "Workspace URL (e.g. https://adb-1234567890.1.azuredatabricks.net)", False),
             ("DATABRICKS_TOKEN", "Personal Access Token or Service Principal token", True),
@@ -2345,7 +2332,7 @@ def main(args: list[str] | None = None) -> None:
         # Explicit `finops setup`: full interactive provider menu for power users.
         _wizard_select_persona()
 
-        providers = ["aws", "azure", "gcp", "openai", "anthropic", "openrouter", "litellm", "modal", "together", "replicate", "datadog", "langfuse", "snowflake", "github", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "pagerduty", "databricks", "slack", "teams", "notion", "n8n"]
+        providers = ["aws", "azure", "gcp", "openai", "anthropic", "openrouter", "litellm", "modal", "together", "replicate", "datadog", "langfuse", "snowflake", "mongodb", "twilio", "cloudflare", "vercel", "cohere", "mistral", "newrelic", "databricks", "slack", "teams", "notion", "n8n"]
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")

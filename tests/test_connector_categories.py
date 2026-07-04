@@ -1,8 +1,8 @@
 """Each SaaS connector must tag its spend with the intended FOCUS ServiceCategory.
 
-Datadog/New Relic/PagerDuty are observability, GitHub is developer tooling. Before
-this they all fell into "Other". This guards the wiring so a connector can't quietly
-regress to an undifferentiated bucket.
+Datadog and New Relic are observability. Before this they fell into "Other".
+This guards the wiring so a connector can't quietly regress to an
+undifferentiated bucket.
 """
 import re
 from pathlib import Path
@@ -14,8 +14,6 @@ CONNECTORS = Path(__file__).parent.parent / "src" / "finops" / "connectors"
 EXPECTED = {
     "saas/datadog.py": "Observability",
     "saas/new_relic.py": "Observability",
-    "saas/pagerduty.py": "Observability",
-    "saas/github.py": "Developer Tools",
     "saas/vercel.py": "Compute",
     "saas/cloudflare.py": "Networking",
     "saas/langfuse.py": "AI and Machine Learning",
@@ -34,4 +32,5 @@ def test_connector_uses_expected_focus_category(rel, category):
 
 def test_new_categories_are_registered():
     from finops.focus.schema import SERVICE_CATEGORIES
-    assert {"Observability", "Developer Tools"} <= SERVICE_CATEGORIES
+    assert "Observability" in SERVICE_CATEGORIES
+    assert "Developer Tools" not in SERVICE_CATEGORIES

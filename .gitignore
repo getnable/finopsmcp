@@ -121,3 +121,4 @@ docs/video/*.jpeg
 stripe-env-helper.mjs
 .vercel
 .env*
+internal/

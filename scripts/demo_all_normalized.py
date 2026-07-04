@@ -165,10 +165,6 @@ TWILIO = {"usage_records": [
     {"category": "sms", "price": 2600.0, "usage": "1300000", "usage_unit": "messages"},
     {"category": "calls", "price": 800.0, "usage": "40000", "usage_unit": "minutes"}],
     "next_page_uri": None}
-PAGERDUTY = {"total": 42}
-GITHUB_ACTIONS = {"total_paid_minutes_used": 14000, "included_minutes": 3000, "total_minutes_used": 17000}
-GITHUB_PACKAGES = {"total_paid_bandwidth_gb": 120.0, "total_paid_storage_gb": 60.0}
-GITHUB_COPILOT = {"seat_breakdown": {"active_this_cycle": 35}}
 NEWRELIC_INGEST = [{"sum.GigabytesIngested": 5100.0}]
 NEWRELIC_USERS = [{"latest.UserCount": 12}]
 # Databricks account usage export is CSV, not JSON.
@@ -266,8 +262,6 @@ PROVIDERS = {
     "vercel":   lambda: _drive_connector("vercel", [VERCEL]),
     "cloudflare": lambda: _drive_connector("cloudflare", [CLOUDFLARE_HISTORY, CLOUDFLARE_SUBS]),
     "twilio":   lambda: _drive_connector("twilio", [TWILIO]),
-    "pagerduty": lambda: _drive_connector("pagerduty", [PAGERDUTY]),
-    "github":   lambda: _drive_connector("github", [GITHUB_ACTIONS, GITHUB_PACKAGES, GITHUB_COPILOT]),
     "new_relic": lambda: _drive_connector("new_relic", [
         {"data": {"actor": {"account": {"nrql": {"results": NEWRELIC_INGEST}}}}},
         {"data": {"actor": {"account": {"nrql": {"results": NEWRELIC_USERS}}}}},
@@ -284,7 +278,6 @@ def _fmt_money(v):
 
 
 async def main() -> None:
-    os.environ["GITHUB_ORGS"] = "acme"  # so the github connector iterates one org
 
     results: dict[str, list] = {}
     coverage: list[tuple[str, str, str]] = []

@@ -72,29 +72,17 @@ def test_databrickscfg_probe(isolated, tmp_path):
     assert f["env"]["DATABRICKS_TOKEN"] == "dapiabc123def"
 
 
-def test_gh_hosts_probe(isolated, tmp_path):
-    ghdir = tmp_path / ".config" / "gh"
-    ghdir.mkdir(parents=True)
-    (ghdir / "hosts.yml").write_text(
-        "github.com:\n    oauth_token: gho_testtoken123\n    user: someone\n"
-    )
-    found = scan.scan_ambient_credentials(home=tmp_path)
-    f = next((f for f in found if f["slug"] == "github"), None)
-    assert f is not None
-    assert f["env"]["GITHUB_TOKEN"] == "gho_testtoken123"
-    assert "gh CLI" in f["source"]
-
-
 def test_env_beats_file_probe(isolated, monkeypatch, tmp_path):
-    # GITHUB_TOKEN in the environment wins over the gh hosts file.
-    ghdir = tmp_path / ".config" / "gh"
-    ghdir.mkdir(parents=True)
-    (ghdir / "hosts.yml").write_text("github.com:\n    oauth_token: gho_filetoken\n")
-    monkeypatch.setenv("GITHUB_TOKEN", "github_pat_envtoken")
+    # DATABRICKS_TOKEN in the environment wins over the ~/.databrickscfg file.
+    (tmp_path / ".databrickscfg").write_text(
+        "[DEFAULT]\nhost = https://adb-1.azuredatabricks.net\ntoken = dapi-filetoken\n"
+    )
+    monkeypatch.setenv("DATABRICKS_HOST", "https://adb-1.azuredatabricks.net")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "dapi-envtoken")
     found = scan.scan_ambient_credentials(home=tmp_path)
-    f = next(f for f in found if f["slug"] == "github")
+    f = next(f for f in found if f["slug"] == "databricks")
     assert f["source"] == "environment"
-    assert f["env"]["GITHUB_TOKEN"] == "github_pat_envtoken"
+    assert f["env"]["DATABRICKS_TOKEN"] == "dapi-envtoken"
 
 
 def test_connect_finding_stores_in_vault(isolated, tmp_path):

@@ -19,8 +19,6 @@ from finops.connectors.saas.new_relic import NewRelicConnector
 from finops.connectors.saas.vercel import VercelConnector
 from finops.connectors.saas.langfuse import LangfuseConnector
 from finops.connectors.saas.cloudflare import CloudflareConnector
-from finops.connectors.saas.pagerduty import PagerDutyConnector
-from finops.connectors.saas.github import GitHubConnector
 from finops.connectors.saas.twilio import TwilioConnector
 from finops.connectors.databricks import DatabricksConnector
 from finops.focus.schema import FocusRecord, SERVICE_CATEGORIES
@@ -37,8 +35,6 @@ _CASES = [
     (VercelConnector, "Vercel"),
     (LangfuseConnector, "Langfuse"),
     (CloudflareConnector, "Cloudflare"),
-    (PagerDutyConnector, "PagerDuty"),
-    (GitHubConnector, "GitHub"),
     (TwilioConnector, "Twilio"),
     (DatabricksConnector, "Databricks"),
 ]

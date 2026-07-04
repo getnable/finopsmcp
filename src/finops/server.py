@@ -41,11 +41,9 @@ from .connectors.base import CostSummary
 from .connectors.gcp import GCPConnector
 from .connectors.saas.cloudflare import CloudflareConnector
 from .connectors.saas.datadog import DatadogConnector
-from .connectors.saas.github import GitHubConnector
 from .connectors.saas.langfuse import LangfuseConnector
 from .connectors.saas.mongodb_atlas import MongoDBAtlasConnector
 from .connectors.saas.new_relic import NewRelicConnector
-from .connectors.saas.pagerduty import PagerDutyConnector
 from .connectors.saas.snowflake import SnowflakeConnector
 from .connectors.saas.twilio import TwilioConnector
 from .connectors.saas.vercel import VercelConnector
@@ -189,11 +187,9 @@ _SAAS_CONNECTORS: dict[str, Any] = {
     "datadog": DatadogConnector(),
     "langfuse": LangfuseConnector(),
     "snowflake": SnowflakeConnector(),
-    "github": GitHubConnector(),
     "mongodb_atlas": MongoDBAtlasConnector(),
     "vercel": VercelConnector(),
     "cloudflare": CloudflareConnector(),
-    "pagerduty": PagerDutyConnector(),
     "twilio": TwilioConnector(),
     "new_relic": NewRelicConnector(),
     "databricks": DatabricksConnector(),

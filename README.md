@@ -247,9 +247,7 @@ always escalate to a human.
 | MongoDB Atlas | Invoice API |
 | Twilio | Usage Records API |
 | Cloudflare | Billing API |
-| GitHub | Actions minutes + Copilot seats |
 | Vercel | Invoice API (Enterprise) |
-| PagerDuty | Seat count |
 | New Relic | Data ingest + user counts |
 | Stripe | Fees and billing activity |
 | Databricks | DBU usage and SQL warehouse spend |
