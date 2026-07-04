@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tool reference (182) · nable docs</title>
-<meta name="description" content="Complete reference for all 182 MCP tools in nable: cloud cost visibility, waste audits, AI spend, the agent cost gate, Kubernetes, budgets, and more.">
+<title>Tool reference (183) · nable docs</title>
+<meta name="description" content="Complete reference for all 183 MCP tools in nable: cloud cost visibility, waste audits, AI spend, the agent cost gate, Kubernetes, budgets, and more.">
 <link rel="icon" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap" rel="stylesheet">
@@ -46,16 +46,16 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
 <body>
 <header><div class="wrap">
   <a class="brand" href="/">nable</a>
-  <span class="crumb"><a href="/docs">Docs</a> / Tool reference</span>
+  <span class="crumb"><a href="/docs.html">Docs</a> / Tool reference</span>
 </div></header>
 <main class="wrap">
   <h1>Tool reference</h1>
   <p class="sub">Every tool nable exposes to Claude, Cursor, and any MCP client.
   You never call these by name, just ask, and nable picks the right one.
   This page is generated from the source of <code>finops-mcp</code> on every release.</p>
-  <input id="q" type="search" placeholder="Filter 182 tools… (e.g. kubernetes, idle, budget)" autocomplete="off">
-  <p class="meta"><span id="shown">182</span> of 182 tools · read-only unless marked · PRO = paid tier</p>
-  <nav class="toc"><a href="#cost-visibility">Cost visibility<span class="n">23</span></a><a href="#waste-rightsizing">Waste &amp; rightsizing<span class="n">34</span></a><a href="#savings-commitments">Savings &amp; commitments<span class="n">12</span></a><a href="#ai-llm-spend">AI &amp; LLM spend<span class="n">17</span></a><a href="#agent-cost-gate">Agent cost gate<span class="n">5</span></a><a href="#kubernetes">Kubernetes<span class="n">12</span></a><a href="#budgets">Budgets<span class="n">6</span></a><a href="#anomalies-alerts">Anomalies &amp; alerts<span class="n">6</span></a><a href="#forecasting">Forecasting<span class="n">3</span></a><a href="#teams-attribution">Teams &amp; attribution<span class="n">8</span></a><a href="#organizations-accounts">Organizations &amp; accounts<span class="n">8</span></a><a href="#azure">Azure<span class="n">6</span></a><a href="#gcp">GCP<span class="n">1</span></a><a href="#databricks">Databricks<span class="n">3</span></a><a href="#tickets-prs">Tickets &amp; PRs<span class="n">6</span></a><a href="#reports-exports">Reports &amp; exports<span class="n">17</span></a><a href="#saved-views">Saved views<span class="n">6</span></a><a href="#platform-admin">Platform &amp; admin<span class="n">9</span></a></nav>
+  <input id="q" type="search" placeholder="Filter 183 tools… (e.g. kubernetes, idle, budget)" autocomplete="off">
+  <p class="meta"><span id="shown">183</span> of 183 tools · read-only unless marked · PRO = paid tier</p>
+  <nav class="toc"><a href="#cost-visibility">Cost visibility<span class="n">23</span></a><a href="#waste-rightsizing">Waste &amp; rightsizing<span class="n">34</span></a><a href="#savings-commitments">Savings &amp; commitments<span class="n">12</span></a><a href="#ai-llm-spend">AI &amp; LLM spend<span class="n">17</span></a><a href="#agent-cost-gate">Agent cost gate<span class="n">5</span></a><a href="#kubernetes">Kubernetes<span class="n">12</span></a><a href="#budgets">Budgets<span class="n">6</span></a><a href="#anomalies-alerts">Anomalies &amp; alerts<span class="n">6</span></a><a href="#forecasting">Forecasting<span class="n">3</span></a><a href="#teams-attribution">Teams &amp; attribution<span class="n">8</span></a><a href="#organizations-accounts">Organizations &amp; accounts<span class="n">8</span></a><a href="#azure">Azure<span class="n">6</span></a><a href="#gcp">GCP<span class="n">2</span></a><a href="#databricks">Databricks<span class="n">3</span></a><a href="#tickets-prs">Tickets &amp; PRs<span class="n">6</span></a><a href="#reports-exports">Reports &amp; exports<span class="n">17</span></a><a href="#saved-views">Saved views<span class="n">6</span></a><a href="#platform-admin">Platform &amp; admin<span class="n">9</span></a></nav>
   <section id="cost-visibility"><h2>Cost visibility <span class="count">23</span></h2>
 <div class="tool" data-name="benchmark_costs" data-text="benchmark_costs compare this account&#x27;s spend profile against anonymised peer group medians.">
   <div class="t-head"><code class="t-name">benchmark_costs</code></div>
@@ -640,7 +640,7 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
 <div class="tool" data-name="forecast_costs" data-text="forecast_costs forecast future cloud spend using holt-winters time-series modelling.">
   <div class="t-head"><code class="t-name">forecast_costs</code><span class="pro">PRO</span></div>
   <p class="t-sum">Forecast future cloud spend using Holt-Winters time-series modelling.</p>
-  <code class="t-sig">(account_id, service?, horizon_days?, history_days?)</code>
+  <code class="t-sig">(account_id?, service?, horizon_days?, history_days?)</code>
 </div>
 <div class="tool" data-name="forecast_llm_costs" data-text="forecast_llm_costs forecast ai/llm token spend and, if you give a balance, the date your credits or commitment run out. uses nable&#x27;s per-account forecaster (holt-winters with linear and naive fallbacks by history length) on your daily token-cost series.">
   <div class="t-head"><code class="t-name">forecast_llm_costs</code><span class="pro">PRO</span></div>
@@ -756,11 +756,16 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <div class="t-head"><code class="t-name">get_resource_cost_breakdown_azure</code><span class="pro">PRO</span></div>
   <p class="t-sum">Return per-resource Azure cost detail via the Cost Management Query API.</p>
   <code class="t-sig">(start_date?, end_date?, subscription_id?, resource_group?, min_cost_usd?, limit?)</code>
-</div></section><section id="gcp"><h2>GCP <span class="count">1</span></h2>
+</div></section><section id="gcp"><h2>GCP <span class="count">2</span></h2>
 <div class="tool" data-name="audit_gcp_waste" data-text="audit_gcp_waste deep gcp waste audit: scans compute engine across all zones/regions for unattached persistent disks, reserved-but-idle static ips, old snapshots, and idle vms (cpu joined from cloud monitoring). returns findings sorted by estimated monthly savings.">
   <div class="t-head"><code class="t-name">audit_gcp_waste</code></div>
   <p class="t-sum">Deep GCP waste audit: scans Compute Engine across all zones/regions for unattached persistent disks, reserved-but-idle static IPs, old snapshots, and idle VMs (CPU joined from Cloud Monitoring). Returns findings sorted by estimated monthly savings.</p>
   <code class="t-sig">(projects?, checks?, idle_days?, snapshot_age_days?)</code>
+</div>
+<div class="tool" data-name="get_gcp_recommendations" data-text="get_gcp_recommendations pull google&#x27;s native recommender api cost recommendations for your gcp projects.">
+  <div class="t-head"><code class="t-name">get_gcp_recommendations</code></div>
+  <p class="t-sum">Pull Google&#x27;s native Recommender API cost recommendations for your GCP projects.</p>
+  <code class="t-sig">(projects?, recommenders?)</code>
 </div></section><section id="databricks"><h2>Databricks <span class="count">3</span></h2>
 <div class="tool" data-name="get_databricks_costs" data-text="get_databricks_costs return databricks workspace cost breakdown for the given date range.">
   <div class="t-head"><code class="t-name">get_databricks_costs</code></div>
@@ -968,7 +973,7 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   
 </div></section>
 </main>
-<footer><div class="wrap">Generated from server.py · <a href="/docs">Back to docs</a> · <a href="/tools.json">tools.json</a></div></footer>
+<footer><div class="wrap">Generated from server.py · <a href="/docs.html">Back to docs</a> · <a href="/tools.json">tools.json</a></div></footer>
 <script>
 const q=document.getElementById('q'),tools=[...document.querySelectorAll('.tool')],
 secs=[...document.querySelectorAll('section')],shown=document.getElementById('shown');

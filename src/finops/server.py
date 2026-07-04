@@ -3414,6 +3414,84 @@ async def audit_gcp_waste(
 
 
 @mcp.tool()
+async def get_gcp_recommendations(
+    projects: list[str] | None = None,
+    recommenders: list[str] | None = None,
+) -> dict:
+    """
+    Pull Google's native Recommender API cost recommendations for your GCP projects.
+
+    This is the deeper, GCP-native counterpart to audit_gcp_waste. Instead of
+    scanning resources ourselves with list-price estimates, it asks Google's own
+    Recommender API, which runs ML on 8+ days of real usage and prices savings
+    against your actual SKU rates (including committed-use discounts already in
+    effect). It covers what the scanner can't: machine-type rightsizing,
+    committed-use-discount purchases, Cloud SQL idle/overprovisioned, Cloud Run
+    tuning, plus idle VMs/disks/IPs/images. Findings come back sorted by monthly
+    savings and wrapped in the same trust envelope (measured -> recommendation,
+    inferred -> investigation).
+
+    Needs the Recommender API enabled (recommender.googleapis.com) and the
+    Recommender Viewer role (roles/recommender.viewer). Recommendations only appear
+    after Google has ~8 days of usage history.
+
+    Args:
+        projects: GCP project IDs to query. Defaults to GCP_PROJECT_IDS or the
+                  default project on your credentials.
+        recommenders: Subset of recommender ids to run. Defaults to all cost
+                  recommenders (idle VM/disk/IP/image, machine-type rightsizing,
+                  Cloud SQL idle/overprovisioned, Cloud Run cost, committed-use).
+
+    Examples:
+        - "What does Google recommend to cut our GCP costs?"
+        - "Any committed-use discounts worth buying on GCP?"
+        - "Show GCP rightsizing recommendations from the Recommender API"
+    """
+    gcp = _CLOUD_CONNECTORS.get("gcp")
+    if gcp is None or not await gcp.is_configured():
+        return {"error": "GCP is not configured. Run 'finops setup gcp' to connect."}
+    try:
+        from .recommendations.gcp_recommender import get_gcp_recommendations as _run
+        report = await _run(gcp, projects=projects, recommenders=recommenders)
+        if report.get("error"):
+            return report
+
+        all_findings = report.get("findings") or []
+        if all_findings:
+            kept, omitted = fit_to_budget(all_findings, max_tokens=6000)
+            report["findings"] = kept
+            if omitted > 0:
+                report["findings_truncated"] = (
+                    f"Showing top {len(kept)} of {len(all_findings)} recommendations by "
+                    f"monthly savings. {omitted} lower-value ones omitted. Use "
+                    f"by_category, by_project, and by_severity for the full breakdown, "
+                    f"or pass recommenders/projects to narrow the query."
+                )
+
+        monthly = report.get("total_estimated_monthly_savings", 0)
+        n = report.get("total_findings", 0)
+        report["summary"] = (
+            f"Google's Recommender API returned {n} cost recommendation(s) across "
+            f"{len(report.get('projects_scanned', []))} project(s). "
+            f"Estimated savings: ${monthly:,.2f}/mo "
+            f"(${report.get('total_estimated_annual_savings', 0):,.2f}/yr)."
+        )
+
+        if monthly > 0 and n > 0:
+            nudge = _team_nudge(
+                f"To auto-create Jira, Linear, or GitHub tickets for these {n} GCP "
+                f"recommendations so your team acts on them, upgrade to Team:"
+            )
+            if nudge:
+                report["_upgrade"] = nudge
+
+        return report
+    except Exception as e:
+        log.error("get_gcp_recommendations failed: %s", e, exc_info=True)
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def get_traffic_cost_breakdown(
     days: int = 30,
 ) -> dict:

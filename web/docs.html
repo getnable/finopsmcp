@@ -854,6 +854,7 @@ compute-optimizer:Get*</code></pre></div>
         <li><span class="ck">·</span><span><code class="ic">roles/bigquery.jobUser</code> on the project, to run the export queries</span></li>
         <li><span class="ck">·</span><span><code class="ic">roles/compute.viewer</code> on each audited project (optional, for the GCP waste audit)</span></li>
         <li><span class="ck">·</span><span><code class="ic">roles/monitoring.viewer</code> on each audited project (optional, for the GCP waste audit)</span></li>
+        <li><span class="ck">·</span><span><code class="ic">roles/recommender.viewer</code> on each project (optional, to pull Google's native Recommender API: rightsizing, committed-use, Cloud SQL, idle resources)</span></li>
       </ul></div>
       <p class="body">All are read and query roles. nable reads your Cloud Billing export in BigQuery and, for the optional waste audit, lists Compute resources and reads Monitoring metrics. It writes to nothing. Set <code class="ic">GCP_PROJECT_IDS</code> to turn the resource audit on.</p>
 

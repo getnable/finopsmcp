@@ -70,6 +70,7 @@ gcp = [
     "google-cloud-bigquery>=3.17.0",
     "google-cloud-compute>=1.19.0",
     "google-cloud-monitoring>=2.21.0",
+    "google-cloud-recommender>=2.15.0",
 ]
 keyring = ["keyring>=25.0.0"]
 pdf = ["pdfplumber>=0.10.0"]
@@ -109,6 +110,7 @@ all = [
     "google-cloud-bigquery>=3.17.0",
     "google-cloud-compute>=1.19.0",
     "google-cloud-monitoring>=2.21.0",
+    "google-cloud-recommender>=2.15.0",
 ]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
 
