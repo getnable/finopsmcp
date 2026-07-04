@@ -2,6 +2,15 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.112
+
+Cross-cloud commitment reporting now catches GCP. The FOCUS normalizer detected
+AWS Savings Plans and Azure reservations but missed GCP committed-use discounts
+whenever the billing export omitted the coded credit type. It now reads the
+credit name too, so a GCP CUD is labeled as reliably as the other two and shows
+up when you group spend by commitment. The saving already reached effective cost;
+this fixes the label.
+
 ## 0.8.111
 
 Faster on big orgs. Tag attribution compiles its rules once instead of re-sorting
