@@ -2,6 +2,14 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.114
+
+Removed GitHub and PagerDuty as cost connectors. They report usage, not dollars,
+so they always showed \$0 and added a line that looked broken rather than any real
+cost signal. GitHub ticketing and PR comments are unaffected (separate feature),
+and you can still capture GitHub/PagerDuty spend from their invoice emails via
+fetch_invoice_emails.
+
 ## 0.8.113
 
 Cleaner cost categories and clearer connect-time expectations. Observability
