@@ -1,0 +1,982 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tool reference (182) · nable docs</title>
+<meta name="description" content="Complete reference for all 182 MCP tools in nable: cloud cost visibility, waste audits, AI spend, the agent cost gate, Kubernetes, budgets, and more.">
+<link rel="icon" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/fontsource/css/geist-mono@latest/index.css" rel="stylesheet">
+<style>
+:root{--bg:#000;--bg-1:#0a0a0c;--bg-2:#121214;--line:#232327;--line-2:#2d2d32;
+--fg:#f0f2f3;--fg-2:#94a3ab;--fg-3:#56656d;--accent:#4db8d4;--accent-dim:#2c7d91}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font-family:'Geist',system-ui,sans-serif;line-height:1.55}
+a{color:var(--accent);text-decoration:none}
+.wrap{max-width:1060px;margin:0 auto;padding:0 24px}
+header{border-bottom:1px solid var(--line);padding:18px 0;position:sticky;top:0;background:rgba(0,0,0,.88);backdrop-filter:blur(8px);z-index:5}
+header .wrap{display:flex;align-items:center;gap:14px}
+.brand{font-weight:600;letter-spacing:-.02em;color:var(--fg)}
+.crumb{color:var(--fg-3);font-size:13px}
+.crumb a{color:var(--fg-2)}
+h1{font-size:clamp(30px,3.6vw,44px);letter-spacing:-.035em;font-weight:400;line-height:1.08;margin:52px 0 10px}
+.sub{color:var(--fg-2);max-width:640px;margin-bottom:26px}
+.sub code{font-family:'Geist Mono',monospace;font-size:.92em;color:var(--fg)}
+#q{width:100%;max-width:460px;background:var(--bg-1);border:1px solid var(--line);border-radius:6px;
+padding:10px 14px;color:var(--fg);font-family:'Geist',sans-serif;font-size:14px;outline:none}
+#q:focus{border-color:var(--accent-dim)}
+.meta{color:var(--fg-3);font-size:13px;margin:10px 0 34px}
+.toc{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 40px}
+.toc a{border:1px solid var(--line);border-radius:2px;padding:4px 10px;font-size:12.5px;color:var(--fg-2)}
+.toc a:hover{border-color:var(--line-2);color:var(--fg)}
+.toc .n{color:var(--fg-3);margin-left:6px}
+section{margin-bottom:44px}
+h2{font-size:20px;font-weight:500;letter-spacing:-.02em;padding-bottom:10px;border-bottom:1px solid var(--line);margin-bottom:6px}
+h2 .count{color:var(--fg-3);font-weight:400;font-size:14px;margin-left:8px}
+.tool{padding:14px 0;border-bottom:1px solid var(--line)}
+.tool:last-child{border-bottom:none}
+.t-head{display:flex;align-items:center;gap:10px}
+.t-name{font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13.5px;color:var(--accent)}
+.pro{font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--accent-dim);border:1px solid var(--accent-dim);border-radius:2px;padding:1px 6px}
+.t-sum{color:var(--fg-2);font-size:14px;margin-top:4px;max-width:820px}
+.t-sig{display:block;font-family:'Geist Mono',monospace;font-size:12px;color:var(--fg-3);margin-top:5px}
+footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding:28px 0 48px;margin-top:30px}
+.hidden{display:none}
+</style></head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="/">nable</a>
+  <span class="crumb"><a href="/docs.html">Docs</a> / Tool reference</span>
+</div></header>
+<main class="wrap">
+  <h1>Tool reference</h1>
+  <p class="sub">Every tool nable exposes to Claude, Cursor, and any MCP client.
+  You never call these by name, just ask, and nable picks the right one.
+  This page is generated from the source of <code>finops-mcp</code> on every release.</p>
+  <input id="q" type="search" placeholder="Filter 182 tools… (e.g. kubernetes, idle, budget)" autocomplete="off">
+  <p class="meta"><span id="shown">182</span> of 182 tools · read-only unless marked · PRO = paid tier</p>
+  <nav class="toc"><a href="#cost-visibility">Cost visibility<span class="n">23</span></a><a href="#waste-rightsizing">Waste &amp; rightsizing<span class="n">34</span></a><a href="#savings-commitments">Savings &amp; commitments<span class="n">12</span></a><a href="#ai-llm-spend">AI &amp; LLM spend<span class="n">17</span></a><a href="#agent-cost-gate">Agent cost gate<span class="n">5</span></a><a href="#kubernetes">Kubernetes<span class="n">12</span></a><a href="#budgets">Budgets<span class="n">6</span></a><a href="#anomalies-alerts">Anomalies &amp; alerts<span class="n">6</span></a><a href="#forecasting">Forecasting<span class="n">3</span></a><a href="#teams-attribution">Teams &amp; attribution<span class="n">8</span></a><a href="#organizations-accounts">Organizations &amp; accounts<span class="n">8</span></a><a href="#azure">Azure<span class="n">6</span></a><a href="#gcp">GCP<span class="n">1</span></a><a href="#databricks">Databricks<span class="n">3</span></a><a href="#tickets-prs">Tickets &amp; PRs<span class="n">6</span></a><a href="#reports-exports">Reports &amp; exports<span class="n">17</span></a><a href="#saved-views">Saved views<span class="n">6</span></a><a href="#platform-admin">Platform &amp; admin<span class="n">9</span></a></nav>
+  <section id="cost-visibility"><h2>Cost visibility <span class="count">23</span></h2>
+<div class="tool" data-name="benchmark_costs" data-text="benchmark_costs compare this account&#x27;s spend profile against anonymised peer group medians.">
+  <div class="t-head"><code class="t-name">benchmark_costs</code></div>
+  <p class="t-sum">Compare this account&#x27;s spend profile against anonymised peer group medians.</p>
+  <code class="t-sig">(account_id, vertical?, days?)</code>
+</div>
+<div class="tool" data-name="compare_providers" data-text="compare_providers side-by-side cost comparison across all configured providers.">
+  <div class="t-head"><code class="t-name">compare_providers</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Side-by-side cost comparison across all configured providers.</p>
+  <code class="t-sig">(category?, start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="explain_cost_change" data-text="explain_cost_change explain what recent cost changes actually mean for the business.">
+  <div class="t-head"><code class="t-name">explain_cost_change</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Explain what recent cost changes actually mean for the business.</p>
+  <code class="t-sig">(compare_days?)</code>
+</div>
+<div class="tool" data-name="explain_recent_cost_drivers" data-text="explain_recent_cost_drivers explain what drove cost changes across all connected providers in the last n days.">
+  <div class="t-head"><code class="t-name">explain_recent_cost_drivers</code></div>
+  <p class="t-sum">Explain what drove cost changes across all connected providers in the last N days.</p>
+  <code class="t-sig">(days?, top_n?)</code>
+</div>
+<div class="tool" data-name="get_cost_history" data-text="get_cost_history return historical daily cost data for a specific provider + service. used for trend analysis and understanding anomaly context.">
+  <div class="t-head"><code class="t-name">get_cost_history</code></div>
+  <p class="t-sum">Return historical daily cost data for a specific provider + service. Used for trend analysis and understanding anomaly context.</p>
+  <code class="t-sig">(provider, service, account_id, days?)</code>
+</div>
+<div class="tool" data-name="get_cost_summary" data-text="get_cost_summary get total spend summarized by service, account, and region.">
+  <div class="t-head"><code class="t-name">get_cost_summary</code></div>
+  <p class="t-sum">Get total spend summarized by service, account, and region.</p>
+  <code class="t-sig">(provider?, category?, start_date?, end_date?, granularity?, account?)</code>
+</div>
+<div class="tool" data-name="get_cost_trends" data-text="get_cost_trends cost trends over time broken down by day or month.">
+  <div class="t-head"><code class="t-name">get_cost_trends</code></div>
+  <p class="t-sum">Cost trends over time broken down by day or month.</p>
+  <code class="t-sig">(provider?, category?, days?, granularity?)</code>
+</div>
+<div class="tool" data-name="get_costs_by_service" data-text="get_costs_by_service cost breakdown by service, optionally filtered to a keyword.">
+  <div class="t-head"><code class="t-name">get_costs_by_service</code></div>
+  <p class="t-sum">Cost breakdown by service, optionally filtered to a keyword.</p>
+  <code class="t-sig">(service_filter?, provider?, category?, start_date?, end_date?, account?)</code>
+</div>
+<div class="tool" data-name="get_data_transfer_costs" data-text="get_data_transfer_costs identify significant data transfer cost line items from aws cost explorer.">
+  <div class="t-head"><code class="t-name">get_data_transfer_costs</code></div>
+  <p class="t-sum">Identify significant data transfer cost line items from AWS Cost Explorer.</p>
+  <code class="t-sig">(start_date?, end_date?, threshold_usd?)</code>
+</div>
+<div class="tool" data-name="get_documentdb_costs" data-text="get_documentdb_costs analyze amazon documentdb costs by cluster, with rightsizing recommendations.">
+  <div class="t-head"><code class="t-name">get_documentdb_costs</code></div>
+  <p class="t-sum">Analyze Amazon DocumentDB costs by cluster, with rightsizing recommendations.</p>
+  <code class="t-sig">(days?, account?)</code>
+</div>
+<div class="tool" data-name="get_focus_costs" data-text="get_focus_costs return unified cost data in focus 1.2 format across all connected providers, clouds plus supported usage-based saas (e.g. snowflake).">
+  <div class="t-head"><code class="t-name">get_focus_costs</code></div>
+  <p class="t-sum">Return unified cost data in FOCUS 1.2 format across all connected providers, clouds plus supported usage-based SaaS (e.g. Snowflake).</p>
+  <code class="t-sig">(start_date?, end_date?, provider?, group_by?)</code>
+</div>
+<div class="tool" data-name="get_marketplace_costs" data-text="get_marketplace_costs break down aws marketplace costs by product and vendor.">
+  <div class="t-head"><code class="t-name">get_marketplace_costs</code></div>
+  <p class="t-sum">Break down AWS Marketplace costs by product and vendor.</p>
+  <code class="t-sig">(days?, account?)</code>
+</div>
+<div class="tool" data-name="get_resource_cost_breakdown_aws" data-text="get_resource_cost_breakdown_aws return per-resource aws cost detail from the cost and usage report (cur) via athena. includes unblended cost, on-demand equivalent, and effective savings from savings plans or reserved instances.">
+  <div class="t-head"><code class="t-name">get_resource_cost_breakdown_aws</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Return per-resource AWS cost detail from the Cost and Usage Report (CUR) via Athena. Includes unblended cost, on-demand equivalent, and effective savings from Savings Plans or Reserved Instances.</p>
+  <code class="t-sig">(start_date?, end_date?, service?, account_id?, min_cost_usd?, limit?)</code>
+</div>
+<div class="tool" data-name="get_saas_spend_summary" data-text="get_saas_spend_summary dedicated summary of all saas tool spending (datadog, snowflake, github, etc.). useful for understanding your software vendor bill separate from cloud infrastructure.">
+  <div class="t-head"><code class="t-name">get_saas_spend_summary</code></div>
+  <p class="t-sum">Dedicated summary of all SaaS tool spending (Datadog, Snowflake, GitHub, etc.). Useful for understanding your software vendor bill separate from cloud infrastructure.</p>
+  <code class="t-sig">(start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="get_service_cost" data-text="get_service_cost get cost breakdown for any named cloud service on aws, azure, or gcp.">
+  <div class="t-head"><code class="t-name">get_service_cost</code></div>
+  <p class="t-sum">Get cost breakdown for any named cloud service on AWS, Azure, or GCP.</p>
+  <code class="t-sig">(service_name, provider?, start_date?, end_date?, granularity?)</code>
+</div>
+<div class="tool" data-name="get_storage_info" data-text="get_storage_info show the current storage backend (sqlite local or postgres shared). helps teams understand whether they&#x27;re in single-engineer or shared mode.">
+  <div class="t-head"><code class="t-name">get_storage_info</code></div>
+  <p class="t-sum">Show the current storage backend (SQLite local or Postgres shared). Helps teams understand whether they&#x27;re in single-engineer or shared mode.</p>
+  
+</div>
+<div class="tool" data-name="get_top_cost_drivers" data-text="get_top_cost_drivers return the top n most expensive services across all configured providers.">
+  <div class="t-head"><code class="t-name">get_top_cost_drivers</code></div>
+  <p class="t-sum">Return the top N most expensive services across all configured providers.</p>
+  <code class="t-sig">(limit?, provider?, category?, start_date?, end_date?, account?)</code>
+</div>
+<div class="tool" data-name="get_total_spend_all_sources" data-text="get_total_spend_all_sources grand total across all connected sources, cloud infrastructure + saas tools combined. the true &quot;total technology spend&quot; number.">
+  <div class="t-head"><code class="t-name">get_total_spend_all_sources</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Grand total across ALL connected sources, cloud infrastructure + SaaS tools combined. The true &quot;total technology spend&quot; number.</p>
+  <code class="t-sig">(start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="get_traffic_cost_breakdown" data-text="get_traffic_cost_breakdown break down aws network/data-transfer spend: how much, and where it goes.">
+  <div class="t-head"><code class="t-name">get_traffic_cost_breakdown</code></div>
+  <p class="t-sum">Break down AWS network/data-transfer spend: how much, and where it goes.</p>
+  <code class="t-sig">(days?)</code>
+</div>
+<div class="tool" data-name="list_active_services" data-text="list_active_services list every cloud service that has spend in the period, across aws, azure, and gcp.">
+  <div class="t-head"><code class="t-name">list_active_services</code></div>
+  <p class="t-sum">List every cloud service that has spend in the period, across AWS, Azure, and GCP.</p>
+  <code class="t-sig">(provider?, start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="list_connected_providers" data-text="list_connected_providers list all configured cloud and saas providers with their connection status. shows which connectors are active, which need credentials, and the active plan.">
+  <div class="t-head"><code class="t-name">list_connected_providers</code></div>
+  <p class="t-sum">List all configured cloud and SaaS providers with their connection status. Shows which connectors are active, which need credentials, and the active plan.</p>
+  
+</div>
+<div class="tool" data-name="run_full_cost_audit" data-text="run_full_cost_audit run a full cost optimization audit across all connected aws resources. use this when the user explicitly asks for a full audit, cost scan, or optimization sweep. for simple cost questions (&quot;what did i spend last month?&quot;) prefer get_cost_summary or get_costs_by_service, they are faster and cheaper.">
+  <div class="t-head"><code class="t-name">run_full_cost_audit</code></div>
+  <p class="t-sum">Run a full cost optimization audit across all connected AWS resources. Use this when the user explicitly asks for a full audit, cost scan, or optimization sweep. For simple cost questions (&quot;what did I spend last month?&quot;) prefer get_cost_summary or get_costs_by_service, they are faster and cheaper.</p>
+  <code class="t-sig">(regions?, top_n?)</code>
+</div>
+<div class="tool" data-name="slice_costs" data-text="slice_costs slice cloud cost any way you want. this is the flexible, moldable cost query: group and filter by any combination of dimensions, over any date range, instead of a fixed set of canned reports. returns both the numbers and a `card` describing how to chart them (which the ui can render and pin to the dashboard).">
+  <div class="t-head"><code class="t-name">slice_costs</code></div>
+  <p class="t-sum">Slice cloud cost any way you want. This is the flexible, moldable cost query: group and filter by ANY combination of dimensions, over any date range, instead of a fixed set of canned reports. Returns both the numbers and a `card` describing how to chart them (which the UI can render and pin to the dashboard).</p>
+  <code class="t-sig">(dimensions?, filters?, exclusions?, metric?, granularity?, order_by?, …)</code>
+</div></section><section id="waste-rightsizing"><h2>Waste &amp; rightsizing <span class="count">34</span></h2>
+<div class="tool" data-name="audit_aws_waste" data-text="audit_aws_waste deep aws waste audit: scans ec2, ebs, rds, lambda, nat gateways, cloudwatch logs, s3, and cloudtrail for waste. returns findings sorted by monthly savings.">
+  <div class="t-head"><code class="t-name">audit_aws_waste</code></div>
+  <p class="t-sum">Deep AWS waste audit: scans EC2, EBS, RDS, Lambda, NAT Gateways, CloudWatch Logs, S3, and CloudTrail for waste. Returns findings sorted by monthly savings.</p>
+  <code class="t-sig">(regions?, checks?, account_id?)</code>
+</div>
+<div class="tool" data-name="audit_cloudwatch_logs_ia_opportunities" data-text="audit_cloudwatch_logs_ia_opportunities finds cloudwatch log groups to migrate to infrequent access class. ia cuts ingestion cost 50% ($0.075 to $0.0375/gb). candidates: groups older than 30 days with &gt;1 gb/month still on standard. note: ia does not support metric filters or subscription filters.">
+  <div class="t-head"><code class="t-name">audit_cloudwatch_logs_ia_opportunities</code></div>
+  <p class="t-sum">Finds CloudWatch Log groups to migrate to Infrequent Access class. IA cuts ingestion cost 50% ($0.075 to $0.0375/GB). Candidates: groups older than 30 days with &gt;1 GB/month still on STANDARD. Note: IA does not support metric filters or subscription filters.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="audit_cloudwatch_metric_cardinality" data-text="audit_cloudwatch_metric_cardinality audits cloudwatch custom metric cardinality. custom metrics above the 10,000 free-tier threshold cost $0.30/metric/month. high-cardinality dimensions like pod_id or request_id can cause thousands of metrics per microservice.">
+  <div class="t-head"><code class="t-name">audit_cloudwatch_metric_cardinality</code></div>
+  <p class="t-sum">Audits CloudWatch custom metric cardinality. Custom metrics above the 10,000 free-tier threshold cost $0.30/metric/month. High-cardinality dimensions like pod_id or request_id can cause thousands of metrics per microservice.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="audit_cloudwatch_orphaned_alarms" data-text="audit_cloudwatch_orphaned_alarms finds cloudwatch alarms on deleted resources. standard alarms cost $0.10/month, composite $0.30/month. terminated instances and deleted queues leave alarms stuck in insufficient_data indefinitely.">
+  <div class="t-head"><code class="t-name">audit_cloudwatch_orphaned_alarms</code></div>
+  <p class="t-sum">Finds CloudWatch alarms on deleted resources. Standard alarms cost $0.10/month, composite $0.30/month. Terminated instances and deleted queues leave alarms stuck in INSUFFICIENT_DATA indefinitely.</p>
+  <code class="t-sig">(regions?, max_results?)</code>
+</div>
+<div class="tool" data-name="audit_ebs_snapshot_replication" data-text="audit_ebs_snapshot_replication audits cross-region ebs snapshot replication for waste. replicated snapshots cost $0.05/gb-month in each region. finds orphaned copies (source volume deleted), excessive copies (more than 3 regions), and old copies where a newer copy exists.">
+  <div class="t-head"><code class="t-name">audit_ebs_snapshot_replication</code></div>
+  <p class="t-sum">Audits cross-region EBS snapshot replication for waste. Replicated snapshots cost $0.05/GB-month in each region. Finds orphaned copies (source volume deleted), excessive copies (more than 3 regions), and old copies where a newer copy exists.</p>
+  <code class="t-sig">(regions?, max_results?)</code>
+</div>
+<div class="tool" data-name="audit_efs_cross_az_mounts" data-text="audit_efs_cross_az_mounts finds ec2 instances mounting efs from a different az. cross-az mounts cost $0.02/gb in hidden transfer charges. fix by adding a mount target per az.">
+  <div class="t-head"><code class="t-name">audit_efs_cross_az_mounts</code></div>
+  <p class="t-sum">Finds EC2 instances mounting EFS from a different AZ. Cross-AZ mounts cost $0.02/GB in hidden transfer charges. Fix by adding a mount target per AZ.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="audit_nlb_cross_zone_costs" data-text="audit_nlb_cross_zone_costs finds nlbs with cross-zone load balancing enabled. cross-zone lb charges $0.01/gb for cross-az traffic. safe to disable when azs have equal capacity.">
+  <div class="t-head"><code class="t-name">audit_nlb_cross_zone_costs</code></div>
+  <p class="t-sum">Finds NLBs with cross-zone load balancing enabled. Cross-zone LB charges $0.01/GB for cross-AZ traffic. Safe to disable when AZs have equal capacity.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="audit_public_ipv4_addresses" data-text="audit_public_ipv4_addresses audits public ipv4 addresses across aws. since feb 2024, aws charges $3.60/month per ip including stopped instances. finds unattached elastic ips and ips on stopped instances with release recommendations.">
+  <div class="t-head"><code class="t-name">audit_public_ipv4_addresses</code></div>
+  <p class="t-sum">Audits public IPv4 addresses across AWS. Since Feb 2024, AWS charges $3.60/month per IP including stopped instances. Finds unattached Elastic IPs and IPs on stopped instances with release recommendations.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="audit_rds_manual_snapshots" data-text="audit_rds_manual_snapshots audits rds manual snapshots for waste. manual snapshots never auto-expire and cost $0.095/gb-month. finds orphaned snapshots (source db deleted) and old snapshots past the retention threshold.">
+  <div class="t-head"><code class="t-name">audit_rds_manual_snapshots</code></div>
+  <p class="t-sum">Audits RDS manual snapshots for waste. Manual snapshots never auto-expire and cost $0.095/GB-month. Finds orphaned snapshots (source DB deleted) and old snapshots past the retention threshold.</p>
+  <code class="t-sig">(regions?, age_threshold_days?)</code>
+</div>
+<div class="tool" data-name="audit_s3_intelligent_tiering" data-text="audit_s3_intelligent_tiering finds s3 buckets using intelligent-tiering where the monitoring fee exceeds savings. it costs $0.0025/1,000 objects, making it more expensive than s3 standard for objects smaller than 128kb.">
+  <div class="t-head"><code class="t-name">audit_s3_intelligent_tiering</code></div>
+  <p class="t-sum">Finds S3 buckets using Intelligent-Tiering where the monitoring fee exceeds savings. IT costs $0.0025/1,000 objects, making it more expensive than S3 Standard for objects smaller than 128KB.</p>
+  <code class="t-sig">(regions?, max_results?)</code>
+</div>
+<div class="tool" data-name="audit_s3_transfer_acceleration" data-text="audit_s3_transfer_acceleration finds s3 buckets with transfer acceleration enabled that won&#x27;t benefit. ta adds $0.04-0.08/gb and is often forgotten. flags buckets as waste if volume is under 1 gb/month, bucket is in us-east-1, or it is behind cloudfront. returns a cli disable command for each flagged bucket.">
+  <div class="t-head"><code class="t-name">audit_s3_transfer_acceleration</code></div>
+  <p class="t-sum">Finds S3 buckets with Transfer Acceleration enabled that won&#x27;t benefit. TA adds $0.04-0.08/GB and is often forgotten. Flags buckets as waste if volume is under 1 GB/month, bucket is in us-east-1, or it is behind CloudFront. Returns a CLI disable command for each flagged bucket.</p>
+  
+</div>
+<div class="tool" data-name="audit_spot_diversification" data-text="audit_spot_diversification audits asgs using spot for instance type diversification. asgs with fewer than 3 types are high_risk. best practice: 5+ types with capacity-optimized allocation to avoid correlated interruptions.">
+  <div class="t-head"><code class="t-name">audit_spot_diversification</code></div>
+  <p class="t-sum">Audits ASGs using spot for instance type diversification. ASGs with fewer than 3 types are HIGH_RISK. Best practice: 5+ types with capacity-optimized allocation to avoid correlated interruptions.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="audit_terraform_tags" data-text="audit_terraform_tags scan terraform state for resources missing required tags. runs `terraform show -json` in tf_dir (or reads state_path directly). required tags configured via finops_required_tags env var (comma-separated, default: team,environment,service).">
+  <div class="t-head"><code class="t-name">audit_terraform_tags</code></div>
+  <p class="t-sum">Scan Terraform state for resources missing required tags. Runs `terraform show -json` in tf_dir (or reads state_path directly). Required tags configured via FINOPS_REQUIRED_TAGS env var (comma-separated, default: team,environment,service).</p>
+  <code class="t-sig">(tf_dir, state_path?)</code>
+</div>
+<div class="tool" data-name="audit_textract_environment_waste" data-text="audit_textract_environment_waste analyzes textract spend by environment to find non-production api calls. textract charges per page, qa and staging environments often call it unnecessarily. identifies which lambda functions or services are calling textract in non-prod and estimates the monthly waste.">
+  <div class="t-head"><code class="t-name">audit_textract_environment_waste</code></div>
+  <p class="t-sum">Analyzes Textract spend by environment to find non-production API calls. Textract charges per page, QA and staging environments often call it unnecessarily. Identifies which Lambda functions or services are calling Textract in non-prod and estimates the monthly waste.</p>
+  <code class="t-sig">(days?)</code>
+</div>
+<div class="tool" data-name="cleanup_idle_resources" data-text="cleanup_idle_resources delete or release idle aws resources. this is a real action that terminates ec2 instances, releases ebs volumes, and frees elastic ips. always runs in dry_run=true mode first so you can review what will be deleted. requires explicit confirmation before setting dry_run=false.">
+  <div class="t-head"><code class="t-name">cleanup_idle_resources</code></div>
+  <p class="t-sum">Delete or release idle AWS resources. This is a REAL ACTION that terminates EC2 instances, releases EBS volumes, and frees Elastic IPs. Always runs in dry_run=True mode first so you can review what will be deleted. Requires explicit confirmation before setting dry_run=False.</p>
+  <code class="t-sig">(resource_ids?, resource_types?, regions?, min_idle_days?, dry_run?)</code>
+</div>
+<div class="tool" data-name="get_ecr_cleanup_recommendations" data-text="get_ecr_cleanup_recommendations find ecr repositories with old untagged container images consuming storage.">
+  <div class="t-head"><code class="t-name">get_ecr_cleanup_recommendations</code></div>
+  <p class="t-sum">Find ECR repositories with old untagged container images consuming storage.</p>
+  <code class="t-sig">(older_than_days?, regions?)</code>
+</div>
+<div class="tool" data-name="get_ecs_rightsizing_recommendations" data-text="get_ecs_rightsizing_recommendations find ecs fargate services with over-provisioned cpu allocations.">
+  <div class="t-head"><code class="t-name">get_ecs_rightsizing_recommendations</code></div>
+  <p class="t-sum">Find ECS Fargate services with over-provisioned CPU allocations.</p>
+  <code class="t-sig">(cpu_threshold?, regions?)</code>
+</div>
+<div class="tool" data-name="get_idle_load_balancers" data-text="get_idle_load_balancers detect albs, nlbs, and classic elbs with near-zero traffic over the past 14 days.">
+  <div class="t-head"><code class="t-name">get_idle_load_balancers</code></div>
+  <p class="t-sum">Detect ALBs, NLBs, and Classic ELBs with near-zero traffic over the past 14 days.</p>
+  <code class="t-sig">(regions?, request_threshold?)</code>
+</div>
+<div class="tool" data-name="get_idle_rds_instances" data-text="get_idle_rds_instances find rds instances with near-zero database connections over the past 14 days.">
+  <div class="t-head"><code class="t-name">get_idle_rds_instances</code></div>
+  <p class="t-sum">Find RDS instances with near-zero database connections over the past 14 days.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="get_instance_deep_analysis" data-text="get_instance_deep_analysis deep cloudwatch analysis for a specific ec2 instance. returns cpu, network, and disk utilization percentiles, a rightsizing recommendation, and the compute optimizer recommendation if available.">
+  <div class="t-head"><code class="t-name">get_instance_deep_analysis</code></div>
+  <p class="t-sum">Deep CloudWatch analysis for a specific EC2 instance. Returns CPU, network, and disk utilization percentiles, a rightsizing recommendation, and the Compute Optimizer recommendation if available.</p>
+  <code class="t-sig">(instance_id, region?, lookback_days?)</code>
+</div>
+<div class="tool" data-name="get_rds_rightsizing_recommendations" data-text="get_rds_rightsizing_recommendations detect over-provisioned rds instances with low cpu utilization.">
+  <div class="t-head"><code class="t-name">get_rds_rightsizing_recommendations</code></div>
+  <p class="t-sum">Detect over-provisioned RDS instances with low CPU utilization.</p>
+  <code class="t-sig">(cpu_threshold?, regions?)</code>
+</div>
+<div class="tool" data-name="get_ri_waste_detail" data-text="get_ri_waste_detail identify wasted reserved instance spend from cur rifee line items.">
+  <div class="t-head"><code class="t-name">get_ri_waste_detail</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Identify wasted Reserved Instance spend from CUR RIFee line items.</p>
+  <code class="t-sig">(start_date?, end_date?, min_waste_usd?)</code>
+</div>
+<div class="tool" data-name="get_rightsizing_recommendations" data-text="get_rightsizing_recommendations analyze ec2 instances with low cpu utilization over the past 14 days and return rightsizing recommendations with projected monthly savings.">
+  <div class="t-head"><code class="t-name">get_rightsizing_recommendations</code></div>
+  <p class="t-sum">Analyze EC2 instances with low CPU utilization over the past 14 days and return rightsizing recommendations with projected monthly savings.</p>
+  <code class="t-sig">(avg_cpu_threshold?, max_cpu_threshold?)</code>
+</div>
+<div class="tool" data-name="get_s3_incomplete_multipart_uploads" data-text="get_s3_incomplete_multipart_uploads find s3 buckets with incomplete multipart uploads older than the threshold.">
+  <div class="t-head"><code class="t-name">get_s3_incomplete_multipart_uploads</code></div>
+  <p class="t-sum">Find S3 buckets with incomplete multipart uploads older than the threshold.</p>
+  <code class="t-sig">(older_than_days?)</code>
+</div>
+<div class="tool" data-name="identify_nonprod_scheduling_opportunities" data-text="identify_nonprod_scheduling_opportunities finds non-production ec2 instances (dev/staging/test) running 24/7. scheduling to business hours only saves 60-70% on compute costs.">
+  <div class="t-head"><code class="t-name">identify_nonprod_scheduling_opportunities</code></div>
+  <p class="t-sum">Finds non-production EC2 instances (dev/staging/test) running 24/7. Scheduling to business hours only saves 60-70% on compute costs.</p>
+  <code class="t-sig">(regions?, max_results?)</code>
+</div>
+<div class="tool" data-name="list_idle_resources" data-text="list_idle_resources scan for idle/wasted aws resources that are costing money but doing nothing.">
+  <div class="t-head"><code class="t-name">list_idle_resources</code></div>
+  <p class="t-sum">Scan for idle/wasted AWS resources that are costing money but doing nothing.</p>
+  <code class="t-sig">(resource_types?, regions?, min_idle_days?)</code>
+</div>
+<div class="tool" data-name="recommend_database_savings_plans" data-text="recommend_database_savings_plans recommends aws database savings plans for rds and aurora spend. database sps (re:invent 2025) offer up to 45% savings, separate from compute sps. sizes a 1-year no-upfront plan to uncovered baseline spend.">
+  <div class="t-head"><code class="t-name">recommend_database_savings_plans</code></div>
+  <p class="t-sum">Recommends AWS Database Savings Plans for RDS and Aurora spend. Database SPs (re:Invent 2025) offer up to 45% savings, separate from Compute SPs. Sizes a 1-year no-upfront plan to uncovered baseline spend.</p>
+  
+</div>
+<div class="tool" data-name="recommend_lambda_snapstart" data-text="recommend_lambda_snapstart finds java lambda functions that should use snapstart. snapstart eliminates cold starts for free, replacing expensive provisioned concurrency.">
+  <div class="t-head"><code class="t-name">recommend_lambda_snapstart</code></div>
+  <p class="t-sum">Finds Java Lambda functions that should use SnapStart. SnapStart eliminates cold starts for free, replacing expensive provisioned concurrency.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="recommend_spot_adoption" data-text="recommend_spot_adoption finds on-demand ec2 instances to migrate to spot for 60-80% savings. uses env tags, asg membership, cpu variance, and spot advisor interruption data. returns recommended, possible, or not_recommended per instance.">
+  <div class="t-head"><code class="t-name">recommend_spot_adoption</code></div>
+  <p class="t-sum">Finds on-demand EC2 instances to migrate to spot for 60-80% savings. Uses env tags, ASG membership, CPU variance, and Spot Advisor interruption data. Returns RECOMMENDED, POSSIBLE, or NOT_RECOMMENDED per instance.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="scan_cloudwatch_waste" data-text="scan_cloudwatch_waste finds cloudwatch log groups with no retention policy (infinite retention costs $0.03/gb-month). returns groups, estimated monthly cost, recommended retention periods by log type, and cli commands to fix top offenders.">
+  <div class="t-head"><code class="t-name">scan_cloudwatch_waste</code></div>
+  <p class="t-sum">Finds CloudWatch Log Groups with no retention policy (infinite retention costs $0.03/GB-month). Returns groups, estimated monthly cost, recommended retention periods by log type, and CLI commands to fix top offenders.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="scan_graviton_migration_opportunities" data-text="scan_graviton_migration_opportunities finds ec2 instances that can migrate to graviton (arm64) for 20-40% savings. returns ranked candidates with estimated monthly savings per instance.">
+  <div class="t-head"><code class="t-name">scan_graviton_migration_opportunities</code></div>
+  <p class="t-sum">Finds EC2 instances that can migrate to Graviton (arm64) for 20-40% savings. Returns ranked candidates with estimated monthly savings per instance.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="scan_lambda_concurrency_waste" data-text="scan_lambda_concurrency_waste scans lambda functions with provisioned concurrency for waste. provisioned concurrency costs money even when idle. returns functions below 50% avg utilization with savings estimates.">
+  <div class="t-head"><code class="t-name">scan_lambda_concurrency_waste</code></div>
+  <p class="t-sum">Scans Lambda functions with provisioned concurrency for waste. Provisioned concurrency costs money even when idle. Returns functions below 50% avg utilization with savings estimates.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="scan_s3_bucket_key_opportunities" data-text="scan_s3_bucket_key_opportunities finds s3 buckets using kms encryption without bucket keys enabled. bucket keys reduce kms api calls by up to 99%. returns affected buckets with the cli command to fix each one.">
+  <div class="t-head"><code class="t-name">scan_s3_bucket_key_opportunities</code></div>
+  <p class="t-sum">Finds S3 buckets using KMS encryption without Bucket Keys enabled. Bucket Keys reduce KMS API calls by up to 99%. Returns affected buckets with the CLI command to fix each one.</p>
+  
+</div>
+<div class="tool" data-name="scan_waste_patterns" data-text="scan_waste_patterns scan for cloud cost waste patterns using nable&#x27;s proprietary pattern library.">
+  <div class="t-head"><code class="t-name">scan_waste_patterns</code></div>
+  <p class="t-sum">Scan for cloud cost waste patterns using nable&#x27;s proprietary pattern library.</p>
+  <code class="t-sig">(account_id, min_monthly_waste?, categories?)</code>
+</div></section><section id="savings-commitments"><h2>Savings &amp; commitments <span class="count">12</span></h2>
+<div class="tool" data-name="dismiss_recommendation" data-text="dismiss_recommendation dismiss a recommendation you&#x27;ve decided not to act on (won&#x27;t fix, accepted risk, etc.). dismissed recommendations won&#x27;t appear in open potential savings.">
+  <div class="t-head"><code class="t-name">dismiss_recommendation</code></div>
+  <p class="t-sum">Dismiss a recommendation you&#x27;ve decided not to act on (won&#x27;t fix, accepted risk, etc.). Dismissed recommendations won&#x27;t appear in open potential savings.</p>
+  <code class="t-sig">(recommendation_id, reason?)</code>
+</div>
+<div class="tool" data-name="get_commitment_analysis" data-text="get_commitment_analysis analyze reserved instance and savings plan coverage, utilization, and waste. coverage %, utilization, and waste figures are free. purchase recommendations with $ amounts require a team plan (commitment_recommendations).">
+  <div class="t-head"><code class="t-name">get_commitment_analysis</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Analyze Reserved Instance and Savings Plan coverage, utilization, and waste. Coverage %, utilization, and waste figures are free. Purchase recommendations with $ amounts require a Team plan (commitment_recommendations).</p>
+  
+</div>
+<div class="tool" data-name="get_commitment_coverage_by_tag" data-text="get_commitment_coverage_by_tag estimate ri/sp commitment coverage for a specific tag slice, even when tagging is incomplete.">
+  <div class="t-head"><code class="t-name">get_commitment_coverage_by_tag</code></div>
+  <p class="t-sum">Estimate RI/SP commitment coverage for a specific tag slice, even when tagging is incomplete.</p>
+  <code class="t-sig">(tag_key, tag_value, tag_coverage_pct?)</code>
+</div>
+<div class="tool" data-name="get_effective_rate_profile" data-text="get_effective_rate_profile auto-detect the account&#x27;s effective private rates by comparing actual billed amounts against public on-demand prices.">
+  <div class="t-head"><code class="t-name">get_effective_rate_profile</code></div>
+  <p class="t-sum">Auto-detect the account&#x27;s effective private rates by comparing actual billed amounts against public on-demand prices.</p>
+  
+</div>
+<div class="tool" data-name="get_recommendation_learning" data-text="get_recommendation_learning what nable has learned about how you use recommendations, and how it adapts.">
+  <div class="t-head"><code class="t-name">get_recommendation_learning</code></div>
+  <p class="t-sum">What nable has learned about how YOU use recommendations, and how it adapts.</p>
+  
+</div>
+<div class="tool" data-name="get_recommendation_quality" data-text="get_recommendation_quality the recommendation-quality flywheel: per recommendation type, how often recs get acted on and how close the predicted savings were to the measured realized savings. the verified-savings proof, and the signal for which recommendation types actually pay off.">
+  <div class="t-head"><code class="t-name">get_recommendation_quality</code></div>
+  <p class="t-sum">The recommendation-quality flywheel: per recommendation type, how often recs get acted on and how close the predicted savings were to the measured realized savings. The verified-savings proof, and the signal for which recommendation types actually pay off.</p>
+  
+</div>
+<div class="tool" data-name="get_savings_ledger" data-text="get_savings_ledger shows a clean summary of savings found, acted on, and verified.">
+  <div class="t-head"><code class="t-name">get_savings_ledger</code></div>
+  <p class="t-sum">Shows a clean summary of savings found, acted on, and verified.</p>
+  <code class="t-sig">(days?, account_id?)</code>
+</div>
+<div class="tool" data-name="get_savings_plan_showback" data-text="get_savings_plan_showback show exactly how much each team saved from savings plans and reserved instances.">
+  <div class="t-head"><code class="t-name">get_savings_plan_showback</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Show exactly how much each team saved from Savings Plans and Reserved Instances.</p>
+  <code class="t-sig">(tag_key?, start_date?, end_date?, include_ri?)</code>
+</div>
+<div class="tool" data-name="get_savings_summary" data-text="get_savings_summary show the realized-savings dashboard: how much nable has recommended, how much has been acted on, and how much has been verified as actually saved.">
+  <div class="t-head"><code class="t-name">get_savings_summary</code></div>
+  <p class="t-sum">Show the realized-savings dashboard: how much nable has recommended, how much has been acted on, and how much has been verified as actually saved.</p>
+  
+</div>
+<div class="tool" data-name="list_savings_recommendations" data-text="list_savings_recommendations list tracked recommendations with their current status.">
+  <div class="t-head"><code class="t-name">list_savings_recommendations</code></div>
+  <p class="t-sum">List tracked recommendations with their current status.</p>
+  <code class="t-sig">(status?, source?, limit?)</code>
+</div>
+<div class="tool" data-name="mark_recommendation_acted_on" data-text="mark_recommendation_acted_on mark a savings recommendation as acted on (you&#x27;ve implemented the change). nable will then attempt to verify the change next time verify_savings() runs.">
+  <div class="t-head"><code class="t-name">mark_recommendation_acted_on</code></div>
+  <p class="t-sum">Mark a savings recommendation as acted on (you&#x27;ve implemented the change). nable will then attempt to verify the change next time verify_savings() runs.</p>
+  <code class="t-sig">(recommendation_id)</code>
+</div>
+<div class="tool" data-name="verify_savings" data-text="verify_savings auto-verify acted-on recommendations by checking if changes were actually implemented in aws (ec2 instance type changes, etc.).">
+  <div class="t-head"><code class="t-name">verify_savings</code></div>
+  <p class="t-sum">Auto-verify acted-on recommendations by checking if changes were actually implemented in AWS (EC2 instance type changes, etc.).</p>
+  
+</div></section><section id="ai-llm-spend"><h2>AI &amp; LLM spend <span class="count">17</span></h2>
+<div class="tool" data-name="get_ai_billing_blind_spots" data-text="get_ai_billing_blind_spots flag aws ai/marketplace spend that bypasses aws cost anomaly detection,    bedrock (bills through marketplace), other marketplace ai/saas, and sagemaker. these line items are invisible to aws&#x27;s own anomaly detector, so a spike goes unnoticed until the invoice lands. nable watches them directly.">
+  <div class="t-head"><code class="t-name">get_ai_billing_blind_spots</code></div>
+  <p class="t-sum">Flag AWS AI/Marketplace spend that bypasses AWS Cost Anomaly Detection,    Bedrock (bills through Marketplace), other Marketplace AI/SaaS, and SageMaker. These line items are invisible to AWS&#x27;s own anomaly detector, so a spike goes unnoticed until the invoice lands. nable watches them directly.</p>
+  <code class="t-sig">(days?)</code>
+</div>
+<div class="tool" data-name="get_ai_engineering_report" data-text="get_ai_engineering_report what your ai coding tools actually shipped, by model, and what it cost.">
+  <div class="t-head"><code class="t-name">get_ai_engineering_report</code><span class="pro">PRO</span></div>
+  <p class="t-sum">What your AI coding tools actually shipped, by model, and what it cost.</p>
+  <code class="t-sig">(days?, repos?, unit?)</code>
+</div>
+<div class="tool" data-name="get_ai_kpis" data-text="get_ai_kpis full ai cost health dashboard with actionable kpis.">
+  <div class="t-head"><code class="t-name">get_ai_kpis</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Full AI cost health dashboard with actionable KPIs.</p>
+  <code class="t-sig">(days?, infra_total_usd?)</code>
+</div>
+<div class="tool" data-name="get_ai_spend_monitor" data-text="get_ai_spend_monitor on-demand view of what nable&#x27;s daily ai-spend monitor watches: a spike or drop on your token-spend series, plus commitment contracts that need attention (capacity under-utilized, enterprise minimum shortfall, commitment expiring). the scheduler runs this daily and alerts via slack; this returns the same view on demand.">
+  <div class="t-head"><code class="t-name">get_ai_spend_monitor</code><span class="pro">PRO</span></div>
+  <p class="t-sum">On-demand view of what nable&#x27;s daily AI-spend monitor watches: a spike or drop on your token-spend series, plus commitment contracts that need attention (capacity under-utilized, enterprise minimum shortfall, commitment expiring). The scheduler runs this daily and alerts via Slack; this returns the same view on demand.</p>
+  <code class="t-sig">(days?)</code>
+</div>
+<div class="tool" data-name="get_bedrock_costs" data-text="get_bedrock_costs break down amazon bedrock costs by model and token type.">
+  <div class="t-head"><code class="t-name">get_bedrock_costs</code></div>
+  <p class="t-sum">Break down Amazon Bedrock costs by model and token type.</p>
+  <code class="t-sig">(days?, account?)</code>
+</div>
+<div class="tool" data-name="get_gpu_infra_costs" data-text="get_gpu_infra_costs report spend status across serverless-gpu / inference-infra providers,    modal, together, and replicate. for the model-builder slice of ai startups this is the single largest variable cost, billed per gpu-second inside each vendor&#x27;s own dashboard and invisible to any cloud bill.">
+  <div class="t-head"><code class="t-name">get_gpu_infra_costs</code></div>
+  <p class="t-sum">Report spend status across serverless-GPU / inference-infra providers,    Modal, Together, and Replicate. For the model-builder slice of AI startups this is the single largest variable cost, billed per GPU-second inside each vendor&#x27;s own dashboard and invisible to any cloud bill.</p>
+  <code class="t-sig">(days?, start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="get_kendra_costs" data-text="get_kendra_costs analyze amazon kendra costs by index, with edition and usage flags.">
+  <div class="t-head"><code class="t-name">get_kendra_costs</code></div>
+  <p class="t-sum">Analyze Amazon Kendra costs by index, with edition and usage flags.</p>
+  <code class="t-sig">(account?)</code>
+</div>
+<div class="tool" data-name="get_langfuse_model_costs" data-text="get_langfuse_model_costs break down llm spend and token usage by model from langfuse observability data.">
+  <div class="t-head"><code class="t-name">get_langfuse_model_costs</code></div>
+  <p class="t-sum">Break down LLM spend and token usage by model from Langfuse observability data.</p>
+  <code class="t-sig">(days?, start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="get_langfuse_trace_volume" data-text="get_langfuse_trace_volume daily trace and observation counts from langfuse, usage volume over time.">
+  <div class="t-head"><code class="t-name">get_langfuse_trace_volume</code></div>
+  <p class="t-sum">Daily trace and observation counts from Langfuse, usage volume over time.</p>
+  <code class="t-sig">(days?, start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="get_llm_commitment_analysis" data-text="get_llm_commitment_analysis optimize token spend against committed ai contracts: prepaid credits, azure openai ptus, aws bedrock provisioned throughput, and enterprise rate cards. this is reserved-instance analysis for tokens. nable prices you against your actual negotiated terms, not list, which a provider dashboard cannot do.">
+  <div class="t-head"><code class="t-name">get_llm_commitment_analysis</code></div>
+  <p class="t-sum">Optimize token spend against committed AI contracts: prepaid credits, Azure OpenAI PTUs, AWS Bedrock Provisioned Throughput, and enterprise rate cards. This is Reserved-Instance analysis for tokens. nable prices you against your ACTUAL negotiated terms, not list, which a provider dashboard cannot do.</p>
+  <code class="t-sig">(days?)</code>
+</div>
+<div class="tool" data-name="get_llm_cost_by_model" data-text="get_llm_cost_by_model break down ai/llm costs by individual model with efficiency metrics.">
+  <div class="t-head"><code class="t-name">get_llm_cost_by_model</code></div>
+  <p class="t-sum">Break down AI/LLM costs by individual model with efficiency metrics.</p>
+  <code class="t-sig">(days?, provider?)</code>
+</div>
+<div class="tool" data-name="get_llm_costs" data-text="get_llm_costs aggregate ai/llm spend across all configured providers, openai, anthropic, aws bedrock, azure openai, and vertex ai.">
+  <div class="t-head"><code class="t-name">get_llm_costs</code></div>
+  <p class="t-sum">Aggregate AI/LLM spend across all configured providers, OpenAI, Anthropic, AWS Bedrock, Azure OpenAI, and Vertex AI.</p>
+  <code class="t-sig">(days?, start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="get_llm_unit_economics" data-text="get_llm_unit_economics calculate cost per unit of business value from ai apis.">
+  <div class="t-head"><code class="t-name">get_llm_unit_economics</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Calculate cost per unit of business value from AI APIs.</p>
+  <code class="t-sig">(metric_name?, metric_count?, days?)</code>
+</div>
+<div class="tool" data-name="get_llm_unit_economics_full" data-text="get_llm_unit_economics_full ai cost unit economics: cost per customer, mau, api request, and gross margin impact.">
+  <div class="t-head"><code class="t-name">get_llm_unit_economics_full</code><span class="pro">PRO</span></div>
+  <p class="t-sum">AI cost unit economics: cost per customer, MAU, API request, and gross margin impact.</p>
+  <code class="t-sig">(customers?, mau?, mrr?, api_requests?, days?)</code>
+</div>
+<div class="tool" data-name="get_textract_costs" data-text="get_textract_costs analyze aws textract costs by api type (sync vs async).">
+  <div class="t-head"><code class="t-name">get_textract_costs</code></div>
+  <p class="t-sum">Analyze AWS Textract costs by API type (sync vs async).</p>
+  <code class="t-sig">(days?, account?)</code>
+</div>
+<div class="tool" data-name="optimize_ai_spend" data-text="optimize_ai_spend ranked, dollar-quantified plan to cut your ai/llm bill, across openai, anthropic, aws bedrock, azure openai, and vertex.">
+  <div class="t-head"><code class="t-name">optimize_ai_spend</code></div>
+  <p class="t-sum">Ranked, dollar-quantified plan to cut your AI/LLM bill, across OpenAI, Anthropic, AWS Bedrock, Azure OpenAI, and Vertex.</p>
+  <code class="t-sig">(days?)</code>
+</div>
+<div class="tool" data-name="recommend_bedrock_model_routing" data-text="recommend_bedrock_model_routing analyzes bedrock model usage to find invocations that could route to cheaper models without quality loss. sonnet costs 20x more than haiku. classification, extraction, and short-context tasks rarely need sonnet.">
+  <div class="t-head"><code class="t-name">recommend_bedrock_model_routing</code></div>
+  <p class="t-sum">Analyzes Bedrock model usage to find invocations that could route to cheaper models without quality loss. Sonnet costs 20x more than Haiku. Classification, extraction, and short-context tasks rarely need Sonnet.</p>
+  <code class="t-sig">(days?)</code>
+</div></section><section id="agent-cost-gate"><h2>Agent cost gate <span class="count">5</span></h2>
+<div class="tool" data-name="check_action_policy" data-text="check_action_policy advisory policy gate: should a proposed remediation action proceed?">
+  <div class="t-head"><code class="t-name">check_action_policy</code></div>
+  <p class="t-sum">Advisory policy gate: should a proposed remediation action proceed?</p>
+  <code class="t-sig">(action_type, terraform_plan_json?, terraform_plan_file?, tf_dir?, helm_diff?, monthly_delta_usd?, …)</code>
+</div>
+<div class="tool" data-name="delete_alert_policy" data-text="delete_alert_policy remove a custom alert policy. the service will revert to the default threshold.">
+  <div class="t-head"><code class="t-name">delete_alert_policy</code></div>
+  <p class="t-sum">Remove a custom alert policy. The service will revert to the default threshold.</p>
+  <code class="t-sig">(policy_id)</code>
+</div>
+<div class="tool" data-name="estimate_change_cost" data-text="estimate_change_cost cost preflight for a proposed change: what it costs and whether it fits budget.">
+  <div class="t-head"><code class="t-name">estimate_change_cost</code></div>
+  <p class="t-sum">Cost preflight for a proposed change: what it costs and whether it fits budget.</p>
+  <code class="t-sig">(terraform_plan_json?, terraform_plan_file?, tf_dir?, helm_diff?, monthly_delta_usd?, budget_name?)</code>
+</div>
+<div class="tool" data-name="estimate_terraform_cost" data-text="estimate_terraform_cost estimate the monthly aws cost change from a terraform plan before applying it.">
+  <div class="t-head"><code class="t-name">estimate_terraform_cost</code></div>
+  <p class="t-sum">Estimate the monthly AWS cost change from a Terraform plan BEFORE applying it.</p>
+  <code class="t-sig">(plan_json?, plan_file?, tf_dir?)</code>
+</div>
+<div class="tool" data-name="set_alert_policy" data-text="set_alert_policy set a custom alert policy for anomaly detection on a specific provider or service.">
+  <div class="t-head"><code class="t-name">set_alert_policy</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Set a custom alert policy for anomaly detection on a specific provider or service.</p>
+  <code class="t-sig">(provider?, service_pattern?, muted?, min_pct_change?, min_usd_change?, note?)</code>
+</div></section><section id="kubernetes"><h2>Kubernetes <span class="count">12</span></h2>
+<div class="tool" data-name="compare_kubernetes_clusters" data-text="compare_kubernetes_clusters compare costs and efficiency across all configured kubernetes clusters. useful for multi-cluster setups (prod vs staging, region vs region).">
+  <div class="t-head"><code class="t-name">compare_kubernetes_clusters</code></div>
+  <p class="t-sum">Compare costs and efficiency across all configured Kubernetes clusters. Useful for multi-cluster setups (prod vs staging, region vs region).</p>
+  
+</div>
+<div class="tool" data-name="create_kubernetes_waste_tickets" data-text="create_kubernetes_waste_tickets create tickets for kubernetes waste findings: idle nodes, over-provisioned workloads, and orphaned helm releases.">
+  <div class="t-head"><code class="t-name">create_kubernetes_waste_tickets</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Create tickets for Kubernetes waste findings: idle nodes, over-provisioned workloads, and orphaned Helm releases.</p>
+  <code class="t-sig">(min_monthly_waste?)</code>
+</div>
+<div class="tool" data-name="estimate_helm_diff_cost" data-text="estimate_helm_diff_cost estimate the monthly cost impact of a helm diff or values.yaml change. handles replicacount, cpu/memory requests, instancetype, and nodecount changes.">
+  <div class="t-head"><code class="t-name">estimate_helm_diff_cost</code></div>
+  <p class="t-sum">Estimate the monthly cost impact of a helm diff or values.yaml change. Handles replicaCount, CPU/memory requests, instanceType, and nodeCount changes.</p>
+  <code class="t-sig">(diff_text, release_name?, current_replicas?, current_cpu_request?, current_memory_request?)</code>
+</div>
+<div class="tool" data-name="get_cluster_efficiency" data-text="get_cluster_efficiency kubernetes cluster efficiency score (0-100) with letter grade, per-namespace breakdown, and prioritised recommendations ranked by dollar impact.">
+  <div class="t-head"><code class="t-name">get_cluster_efficiency</code></div>
+  <p class="t-sum">Kubernetes cluster efficiency score (0-100) with letter grade, per-namespace breakdown, and prioritised recommendations ranked by dollar impact.</p>
+  <code class="t-sig">(context?)</code>
+</div>
+<div class="tool" data-name="get_databricks_cluster_efficiency" data-text="get_databricks_cluster_efficiency audit all databricks clusters for efficiency issues and cost waste.">
+  <div class="t-head"><code class="t-name">get_databricks_cluster_efficiency</code></div>
+  <p class="t-sum">Audit all Databricks clusters for efficiency issues and cost waste.</p>
+  
+</div>
+<div class="tool" data-name="get_helm_release_costs" data-text="get_helm_release_costs cost breakdown by helm release, shows what each release actually costs rather than raw deployment names. detects orphaned releases wasting money.">
+  <div class="t-head"><code class="t-name">get_helm_release_costs</code></div>
+  <p class="t-sum">Cost breakdown by Helm release, shows what each release actually costs rather than raw deployment names. Detects orphaned releases wasting money.</p>
+  <code class="t-sig">(context?, namespace?)</code>
+</div>
+<div class="tool" data-name="get_kubernetes_cost_trends" data-text="get_kubernetes_cost_trends kubernetes cost trend over time from stored daily snapshots. shows whether cluster spend is growing, shrinking, or stable.">
+  <div class="t-head"><code class="t-name">get_kubernetes_cost_trends</code></div>
+  <p class="t-sum">Kubernetes cost trend over time from stored daily snapshots. Shows whether cluster spend is growing, shrinking, or stable.</p>
+  <code class="t-sig">(days?, cluster?, namespace?, granularity?)</code>
+</div>
+<div class="tool" data-name="get_kubernetes_costs" data-text="get_kubernetes_costs full kubernetes cost breakdown -- node costs attributed to namespaces, workloads, and labels. detects wasted spend and rightsizing opportunities.">
+  <div class="t-head"><code class="t-name">get_kubernetes_costs</code></div>
+  <p class="t-sum">Full Kubernetes cost breakdown -- node costs attributed to namespaces, workloads, and labels. Detects wasted spend and rightsizing opportunities.</p>
+  <code class="t-sig">(context?, namespace?)</code>
+</div>
+<div class="tool" data-name="get_kubernetes_namespace_breakdown" data-text="get_kubernetes_namespace_breakdown deep-dive cost breakdown for a single kubernetes namespace. shows every workload, pod count, cpu/memory efficiency, and waste.">
+  <div class="t-head"><code class="t-name">get_kubernetes_namespace_breakdown</code></div>
+  <p class="t-sum">Deep-dive cost breakdown for a single Kubernetes namespace. Shows every workload, pod count, CPU/memory efficiency, and waste.</p>
+  <code class="t-sig">(namespace)</code>
+</div>
+<div class="tool" data-name="get_label_costs" data-text="get_label_costs aggregate kubernetes costs by any pod label across all namespaces. great for chargeback: see spend by team, environment, app, or any label.">
+  <div class="t-head"><code class="t-name">get_label_costs</code></div>
+  <p class="t-sum">Aggregate Kubernetes costs by any pod label across all namespaces. Great for chargeback: see spend by team, environment, app, or any label.</p>
+  <code class="t-sig">(label_key?, context?)</code>
+</div>
+<div class="tool" data-name="get_workload_costs" data-text="get_workload_costs detailed kubernetes workload cost breakdown with efficiency grades. supports filtering by namespace and workload kind, sorting by cost or waste.">
+  <div class="t-head"><code class="t-name">get_workload_costs</code></div>
+  <p class="t-sum">Detailed Kubernetes workload cost breakdown with efficiency grades. Supports filtering by namespace and workload kind, sorting by cost or waste.</p>
+  <code class="t-sig">(namespace?, kind?, sort_by?, context?, limit?)</code>
+</div>
+<div class="tool" data-name="list_kubernetes_contexts" data-text="list_kubernetes_contexts list all kubernetes contexts available in the local kubeconfig, and show which one is currently active. use this to discover what to pass as the &#x27;context&#x27; argument to get_kubernetes_costs.">
+  <div class="t-head"><code class="t-name">list_kubernetes_contexts</code></div>
+  <p class="t-sum">List all Kubernetes contexts available in the local kubeconfig, and show which one is currently active. Use this to discover what to pass as the &#x27;context&#x27; argument to get_kubernetes_costs.</p>
+  
+</div></section><section id="budgets"><h2>Budgets <span class="count">6</span></h2>
+<div class="tool" data-name="check_budget_status" data-text="check_budget_status check current spend against budgets. shows how much has been spent, what&#x27;s remaining, and whether any budgets are in warning or exceeded status.">
+  <div class="t-head"><code class="t-name">check_budget_status</code></div>
+  <p class="t-sum">Check current spend against budgets. Shows how much has been spent, what&#x27;s remaining, and whether any budgets are in warning or exceeded status.</p>
+  <code class="t-sig">(budget_name?)</code>
+</div>
+<div class="tool" data-name="delete_budget" data-text="delete_budget delete (deactivate) a budget by id so it stops alerting and gating agent actions.">
+  <div class="t-head"><code class="t-name">delete_budget</code></div>
+  <p class="t-sum">Delete (deactivate) a budget by ID so it stops alerting and gating agent actions.</p>
+  <code class="t-sig">(budget_id)</code>
+</div>
+<div class="tool" data-name="get_credit_status" data-text="get_credit_status track aws promotional-credit (activate) burn-down and detect the moment billing flips from credits to cash, the cliff where an early startup first feels cost pain. aws sends no native alert for this.">
+  <div class="t-head"><code class="t-name">get_credit_status</code></div>
+  <p class="t-sum">Track AWS promotional-credit (Activate) burn-down and detect the moment billing flips from credits to cash, the cliff where an early startup first feels cost pain. AWS sends no native alert for this.</p>
+  <code class="t-sig">(months?)</code>
+</div>
+<div class="tool" data-name="list_budgets" data-text="list_budgets list all configured budgets with their limits and scopes.">
+  <div class="t-head"><code class="t-name">list_budgets</code></div>
+  <p class="t-sum">List all configured budgets with their limits and scopes.</p>
+  
+</div>
+<div class="tool" data-name="set_budget" data-text="set_budget create or update a spending budget. budgets fire slack alerts when spend crosses alert_at_pct, and fail ci checks when it crosses block_at_pct.">
+  <div class="t-head"><code class="t-name">set_budget</code></div>
+  <p class="t-sum">Create or update a spending budget. Budgets fire Slack alerts when spend crosses alert_at_pct, and fail CI checks when it crosses block_at_pct.</p>
+  <code class="t-sig">(name, limit_usd, scope_type?, scope_value?, period?, alert_at_pct?, …)</code>
+</div>
+<div class="tool" data-name="sync_budgets_from_yaml" data-text="sync_budgets_from_yaml import budgets from a budget.yml file. idempotent, running twice is safe. use this to version-control your spending limits alongside your infrastructure code.">
+  <div class="t-head"><code class="t-name">sync_budgets_from_yaml</code></div>
+  <p class="t-sum">Import budgets from a budget.yml file. Idempotent, running twice is safe. Use this to version-control your spending limits alongside your infrastructure code.</p>
+  <code class="t-sig">(yaml_path)</code>
+</div></section><section id="anomalies-alerts"><h2>Anomalies &amp; alerts <span class="count">6</span></h2>
+<div class="tool" data-name="acknowledge_anomaly" data-text="acknowledge_anomaly mark an anomaly as acknowledged (dismissed). it will no longer appear in active anomalies.">
+  <div class="t-head"><code class="t-name">acknowledge_anomaly</code></div>
+  <p class="t-sum">Mark an anomaly as acknowledged (dismissed). It will no longer appear in active anomalies.</p>
+  <code class="t-sig">(anomaly_id)</code>
+</div>
+<div class="tool" data-name="check_notification_config" data-text="check_notification_config check which notification channels (slack, teams) are configured and active.">
+  <div class="t-head"><code class="t-name">check_notification_config</code></div>
+  <p class="t-sum">Check which notification channels (Slack, Teams) are configured and active.</p>
+  
+</div>
+<div class="tool" data-name="create_anomaly_tickets" data-text="create_anomaly_tickets create tickets in jira, linear, or github issues for all active high/medium anomalies that don&#x27;t already have a ticket. uses the first configured ticketing provider.">
+  <div class="t-head"><code class="t-name">create_anomaly_tickets</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Create tickets in Jira, Linear, or GitHub Issues for all active high/medium anomalies that don&#x27;t already have a ticket. Uses the first configured ticketing provider.</p>
+  <code class="t-sig">(limit?)</code>
+</div>
+<div class="tool" data-name="get_account_anomalies" data-text="get_account_anomalies detect accounts with unusual spend changes versus their prior period. returns accounts that significantly spiked or dropped in cost. requires a team plan (org_reports).">
+  <div class="t-head"><code class="t-name">get_account_anomalies</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Detect accounts with unusual spend changes versus their prior period. Returns accounts that significantly spiked or dropped in cost. Requires a Team plan (org_reports).</p>
+  <code class="t-sig">(days_back?)</code>
+</div>
+<div class="tool" data-name="get_anomalies" data-text="get_anomalies return active (unacknowledged) cost anomalies detected from historical baselines.">
+  <div class="t-head"><code class="t-name">get_anomalies</code></div>
+  <p class="t-sum">Return active (unacknowledged) cost anomalies detected from historical baselines.</p>
+  <code class="t-sig">(provider?, severity?, limit?, account?)</code>
+</div>
+<div class="tool" data-name="list_alert_policies" data-text="list_alert_policies list all custom alert policies for anomaly detection.">
+  <div class="t-head"><code class="t-name">list_alert_policies</code></div>
+  <p class="t-sum">List all custom alert policies for anomaly detection.</p>
+  
+</div></section><section id="forecasting"><h2>Forecasting <span class="count">3</span></h2>
+<div class="tool" data-name="forecast_azure_costs" data-text="forecast_azure_costs forecast azure spend using azure cost management&#x27;s own forecast model.">
+  <div class="t-head"><code class="t-name">forecast_azure_costs</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Forecast Azure spend using Azure Cost Management&#x27;s own forecast model.</p>
+  <code class="t-sig">(subscription_id?, end_date?)</code>
+</div>
+<div class="tool" data-name="forecast_costs" data-text="forecast_costs forecast future cloud spend using holt-winters time-series modelling.">
+  <div class="t-head"><code class="t-name">forecast_costs</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Forecast future cloud spend using Holt-Winters time-series modelling.</p>
+  <code class="t-sig">(account_id, service?, horizon_days?, history_days?)</code>
+</div>
+<div class="tool" data-name="forecast_llm_costs" data-text="forecast_llm_costs forecast ai/llm token spend and, if you give a balance, the date your credits or commitment run out. uses nable&#x27;s per-account forecaster (holt-winters with linear and naive fallbacks by history length) on your daily token-cost series.">
+  <div class="t-head"><code class="t-name">forecast_llm_costs</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Forecast AI/LLM token spend and, if you give a balance, the date your credits or commitment run out. Uses nable&#x27;s per-account forecaster (Holt-Winters with linear and naive fallbacks by history length) on your daily token-cost series.</p>
+  <code class="t-sig">(horizon_days?, balance_usd?)</code>
+</div></section><section id="teams-attribution"><h2>Teams &amp; attribution <span class="count">8</span></h2>
+<div class="tool" data-name="get_business_metrics" data-text="get_business_metrics return stored business metrics and trend over time.">
+  <div class="t-head"><code class="t-name">get_business_metrics</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Return stored business metrics and trend over time.</p>
+  <code class="t-sig">(history_days?)</code>
+</div>
+<div class="tool" data-name="get_costs_by_team" data-text="get_costs_by_team return cloud costs broken down by engineering team, using tag attribution rules.">
+  <div class="t-head"><code class="t-name">get_costs_by_team</code></div>
+  <p class="t-sum">Return cloud costs broken down by engineering team, using tag attribution rules.</p>
+  <code class="t-sig">(start_date?, end_date?, provider?)</code>
+</div>
+<div class="tool" data-name="get_efficiency_scorecard" data-text="get_efficiency_scorecard finops efficiency scorecard, a 0–100 score with letter grade across 5 dimensions: compute efficiency, waste reduction, commitment coverage, tag hygiene, and anomaly response. tracked over time so you can see if you&#x27;re improving.">
+  <div class="t-head"><code class="t-name">get_efficiency_scorecard</code></div>
+  <p class="t-sum">FinOps efficiency scorecard, a 0–100 score with letter grade across 5 dimensions: compute efficiency, waste reduction, commitment coverage, tag hygiene, and anomaly response. Tracked over time so you can see if you&#x27;re improving.</p>
+  <code class="t-sig">(scope?, team?, environment?, provider?)</code>
+</div>
+<div class="tool" data-name="get_tag_cost_breakdown_cur" data-text="get_tag_cost_breakdown_cur break aws costs down by a resource tag using cur line-item data via athena.">
+  <div class="t-head"><code class="t-name">get_tag_cost_breakdown_cur</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Break AWS costs down by a resource tag using CUR line-item data via Athena.</p>
+  <code class="t-sig">(tag_key?, start_date?, end_date?, cost_type?)</code>
+</div>
+<div class="tool" data-name="get_team_scorecards" data-text="get_team_scorecards efficiency scorecard for every team, side by side. teams are discovered from your cost attribution tags (team=x). shows which teams are leading and which need help.">
+  <div class="t-head"><code class="t-name">get_team_scorecards</code></div>
+  <p class="t-sum">Efficiency scorecard for every team, side by side. Teams are discovered from your cost attribution tags (team=X). Shows which teams are leading and which need help.</p>
+  
+</div>
+<div class="tool" data-name="get_unit_economics" data-text="get_unit_economics connect your total cloud and saas spend to business metrics.">
+  <div class="t-head"><code class="t-name">get_unit_economics</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Connect your total cloud and SaaS spend to business metrics.</p>
+  <code class="t-sig">(period_days?)</code>
+</div>
+<div class="tool" data-name="run_attribution_now" data-text="run_attribution_now fetch tagged cost data from aws/azure/gcp and store team attributions. run this after setting up tag_rules.yaml to populate team cost data.">
+  <div class="t-head"><code class="t-name">run_attribution_now</code></div>
+  <p class="t-sum">Fetch tagged cost data from AWS/Azure/GCP and store team attributions. Run this after setting up tag_rules.yaml to populate team cost data.</p>
+  <code class="t-sig">(start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="set_business_metrics" data-text="set_business_metrics store your business metrics so nable can connect cloud costs to business outcomes.">
+  <div class="t-head"><code class="t-name">set_business_metrics</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Store your business metrics so nable can connect cloud costs to business outcomes.</p>
+  <code class="t-sig">(arr_usd?, mrr_usd?, mau?, dau?, paying_customers?, api_calls_monthly?, …)</code>
+</div></section><section id="organizations-accounts"><h2>Organizations &amp; accounts <span class="count">8</span></h2>
+<div class="tool" data-name="generate_account_dashboard" data-text="generate_account_dashboard generate a cost dashboard for the account and open it in your browser.">
+  <div class="t-head"><code class="t-name">generate_account_dashboard</code></div>
+  <p class="t-sum">Generate a cost dashboard for the account and open it in your browser.</p>
+  <code class="t-sig">(account_id?, open_browser?, push_to_notion?)</code>
+</div>
+<div class="tool" data-name="get_cost_summary_all_accounts" data-text="get_cost_summary_all_accounts fan out cost queries across all configured aws accounts and return a combined view sorted by total spend. shows each account&#x27;s total and top services.">
+  <div class="t-head"><code class="t-name">get_cost_summary_all_accounts</code></div>
+  <p class="t-sum">Fan out cost queries across ALL configured AWS accounts and return a combined view sorted by total spend. Shows each account&#x27;s total and top services.</p>
+  <code class="t-sig">(start_date?, end_date?, granularity?)</code>
+</div>
+<div class="tool" data-name="get_org_cost_summary" data-text="get_org_cost_summary get a cost rollup across all aws organization accounts: total spend, per-account breakdown sorted by spend, and top services per account. requires a team plan (org_reports).">
+  <div class="t-head"><code class="t-name">get_org_cost_summary</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Get a cost rollup across all AWS Organization accounts: total spend, per-account breakdown sorted by spend, and top services per account. Requires a Team plan (org_reports).</p>
+  <code class="t-sig">(days_back?)</code>
+</div>
+<div class="tool" data-name="get_ou_cost_breakdown" data-text="get_ou_cost_breakdown break costs down by aws organizational unit (ou). when ous map to departments or teams, this gives you a clean chargeback report. requires a team plan (org_reports).">
+  <div class="t-head"><code class="t-name">get_ou_cost_breakdown</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Break costs down by AWS Organizational Unit (OU). When OUs map to departments or teams, this gives you a clean chargeback report. Requires a Team plan (org_reports).</p>
+  <code class="t-sig">(days_back?)</code>
+</div>
+<div class="tool" data-name="get_top_spending_accounts" data-text="get_top_spending_accounts show the highest-spending aws accounts in the organization. requires a team plan (org_reports).">
+  <div class="t-head"><code class="t-name">get_top_spending_accounts</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Show the highest-spending AWS accounts in the organization. Requires a Team plan (org_reports).</p>
+  <code class="t-sig">(limit?, days_back?)</code>
+</div>
+<div class="tool" data-name="list_accounts" data-text="list_accounts list all cloud accounts, subscriptions, and saas org ids that are accessible.">
+  <div class="t-head"><code class="t-name">list_accounts</code></div>
+  <p class="t-sum">List all cloud accounts, subscriptions, and SaaS org IDs that are accessible.</p>
+  <code class="t-sig">(provider?)</code>
+</div>
+<div class="tool" data-name="list_aws_accounts" data-text="list_aws_accounts list all aws accounts configured in ~/.finops-mcp/accounts.yaml.">
+  <div class="t-head"><code class="t-name">list_aws_accounts</code></div>
+  <p class="t-sum">List all AWS accounts configured in ~/.finops-mcp/accounts.yaml.</p>
+  
+</div>
+<div class="tool" data-name="list_org_accounts" data-text="list_org_accounts list all aws organization member accounts, discovering them via the aws organizations api. syncs account metadata to local db for future queries. account listing is free. detailed cost rollup across accounts requires a team plan.">
+  <div class="t-head"><code class="t-name">list_org_accounts</code></div>
+  <p class="t-sum">List all AWS Organization member accounts, discovering them via the AWS Organizations API. Syncs account metadata to local DB for future queries. Account listing is free. Detailed cost rollup across accounts requires a Team plan.</p>
+  
+</div></section><section id="azure"><h2>Azure <span class="count">6</span></h2>
+<div class="tool" data-name="get_azure_advisor_recommendations" data-text="get_azure_advisor_recommendations azure advisor cost recommendations, with microsoft-computed annual savings.">
+  <div class="t-head"><code class="t-name">get_azure_advisor_recommendations</code></div>
+  <p class="t-sum">Azure Advisor cost recommendations, with Microsoft-computed annual savings.</p>
+  <code class="t-sig">(subscription_id?, limit?)</code>
+</div>
+<div class="tool" data-name="get_azure_budgets" data-text="get_azure_budgets read the budgets you already set in azure and report consumption against each.">
+  <div class="t-head"><code class="t-name">get_azure_budgets</code></div>
+  <p class="t-sum">Read the budgets you already set in Azure and report consumption against each.</p>
+  <code class="t-sig">(subscription_id?)</code>
+</div>
+<div class="tool" data-name="get_azure_cost_by_dimension" data-text="get_azure_cost_by_dimension break azure spend down by any dimension: service, resource group, location, or meter.">
+  <div class="t-head"><code class="t-name">get_azure_cost_by_dimension</code></div>
+  <p class="t-sum">Break Azure spend down by any dimension: service, resource group, location, or meter.</p>
+  <code class="t-sig">(dimension, start_date?, end_date?, subscription_id?, limit?)</code>
+</div>
+<div class="tool" data-name="get_azure_reservation_utilization" data-text="get_azure_reservation_utilization fetch azure reservation utilization summaries from the capacity api.">
+  <div class="t-head"><code class="t-name">get_azure_reservation_utilization</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Fetch Azure reservation utilization summaries from the Capacity API.</p>
+  <code class="t-sig">(start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="get_azure_vm_rightsizing" data-text="get_azure_vm_rightsizing find idle and oversized azure vms from azure monitor cpu, with real dollar cost.">
+  <div class="t-head"><code class="t-name">get_azure_vm_rightsizing</code></div>
+  <p class="t-sum">Find idle and oversized Azure VMs from Azure Monitor CPU, with real dollar cost.</p>
+  <code class="t-sig">(subscription_id?, lookback_days?, limit?, max_vms_scanned?)</code>
+</div>
+<div class="tool" data-name="get_resource_cost_breakdown_azure" data-text="get_resource_cost_breakdown_azure return per-resource azure cost detail via the cost management query api.">
+  <div class="t-head"><code class="t-name">get_resource_cost_breakdown_azure</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Return per-resource Azure cost detail via the Cost Management Query API.</p>
+  <code class="t-sig">(start_date?, end_date?, subscription_id?, resource_group?, min_cost_usd?, limit?)</code>
+</div></section><section id="gcp"><h2>GCP <span class="count">1</span></h2>
+<div class="tool" data-name="audit_gcp_waste" data-text="audit_gcp_waste deep gcp waste audit: scans compute engine across all zones/regions for unattached persistent disks, reserved-but-idle static ips, old snapshots, and idle vms (cpu joined from cloud monitoring). returns findings sorted by estimated monthly savings.">
+  <div class="t-head"><code class="t-name">audit_gcp_waste</code></div>
+  <p class="t-sum">Deep GCP waste audit: scans Compute Engine across all zones/regions for unattached persistent disks, reserved-but-idle static IPs, old snapshots, and idle VMs (CPU joined from Cloud Monitoring). Returns findings sorted by estimated monthly savings.</p>
+  <code class="t-sig">(projects?, checks?, idle_days?, snapshot_age_days?)</code>
+</div></section><section id="databricks"><h2>Databricks <span class="count">3</span></h2>
+<div class="tool" data-name="get_databricks_costs" data-text="get_databricks_costs return databricks workspace cost breakdown for the given date range.">
+  <div class="t-head"><code class="t-name">get_databricks_costs</code></div>
+  <p class="t-sum">Return Databricks workspace cost breakdown for the given date range.</p>
+  <code class="t-sig">(start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="get_databricks_dbu_breakdown" data-text="get_databricks_dbu_breakdown show dbu (databricks unit) consumption by cluster, job, and cluster type.">
+  <div class="t-head"><code class="t-name">get_databricks_dbu_breakdown</code></div>
+  <p class="t-sum">Show DBU (Databricks Unit) consumption by cluster, job, and cluster type.</p>
+  <code class="t-sig">(start_date?, end_date?)</code>
+</div>
+<div class="tool" data-name="get_databricks_job_costs" data-text="get_databricks_job_costs show cost and dbu breakdown by databricks job run.">
+  <div class="t-head"><code class="t-name">get_databricks_job_costs</code></div>
+  <p class="t-sum">Show cost and DBU breakdown by Databricks job run.</p>
+  <code class="t-sig">(start_date?, end_date?, top_n?)</code>
+</div></section><section id="tickets-prs"><h2>Tickets &amp; PRs <span class="count">6</span></h2>
+<div class="tool" data-name="create_rightsizing_tickets" data-text="create_rightsizing_tickets create tickets for rightsizing recommendations, over-provisioned ec2, rds, and other resources that could be downsized to save money.">
+  <div class="t-head"><code class="t-name">create_rightsizing_tickets</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Create tickets for rightsizing recommendations, over-provisioned EC2, RDS, and other resources that could be downsized to save money.</p>
+  <code class="t-sig">(min_monthly_savings?, provider?)</code>
+</div>
+<div class="tool" data-name="create_scorecard_tickets" data-text="create_scorecard_tickets create tickets for scorecard dimensions scoring below a threshold. helps teams track and remediate finops efficiency gaps.">
+  <div class="t-head"><code class="t-name">create_scorecard_tickets</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Create tickets for scorecard dimensions scoring below a threshold. Helps teams track and remediate FinOps efficiency gaps.</p>
+  <code class="t-sig">(score_threshold?, team?)</code>
+</div>
+<div class="tool" data-name="create_ticket" data-text="create_ticket create a ticket in the configured ticketing system (jira, linear, or github issues) with a custom title and body. use this for any finding, recommendation, or action item that doesn&#x27;t fit a specific category.">
+  <div class="t-head"><code class="t-name">create_ticket</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Create a ticket in the configured ticketing system (Jira, Linear, or GitHub Issues) with a custom title and body. Use this for any finding, recommendation, or action item that doesn&#x27;t fit a specific category.</p>
+  <code class="t-sig">(title, body, priority?, labels?)</code>
+</div>
+<div class="tool" data-name="generate_terraform_tag_fixes" data-text="generate_terraform_tag_fixes generate hcl patches for all open tag violations in tf_dir. shows a unified diff per .tf file, does not write to disk. run audit_terraform_tags first to populate violations.">
+  <div class="t-head"><code class="t-name">generate_terraform_tag_fixes</code></div>
+  <p class="t-sum">Generate HCL patches for all open tag violations in tf_dir. Shows a unified diff per .tf file, does NOT write to disk. Run audit_terraform_tags first to populate violations.</p>
+  <code class="t-sig">(tf_dir)</code>
+</div>
+<div class="tool" data-name="open_rightsizing_pr" data-text="open_rightsizing_pr apply rightsizing recommendations to terraform source, optionally opening a github pr.">
+  <div class="t-head"><code class="t-name">open_rightsizing_pr</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Apply rightsizing recommendations to Terraform source, optionally opening a GitHub PR.</p>
+  <code class="t-sig">(tf_dir, github_repo?, recommendation_ids?, resource_overrides?, branch?, base_branch?, …)</code>
+</div>
+<div class="tool" data-name="open_terraform_tag_pr" data-text="open_terraform_tag_pr apply tag fixes to .tf files and open a github pr. requires github_token env var and a git remote configured for github_repo.">
+  <div class="t-head"><code class="t-name">open_terraform_tag_pr</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Apply tag fixes to .tf files and open a GitHub PR. Requires GITHUB_TOKEN env var and a git remote configured for github_repo.</p>
+  <code class="t-sig">(tf_dir, github_repo, branch?, base_branch?, pr_title?)</code>
+</div></section><section id="reports-exports"><h2>Reports &amp; exports <span class="count">17</span></h2>
+<div class="tool" data-name="cancel_report_subscription" data-text="cancel_report_subscription cancel (deactivate) a scheduled report subscription.">
+  <div class="t-head"><code class="t-name">cancel_report_subscription</code></div>
+  <p class="t-sum">Cancel (deactivate) a scheduled report subscription.</p>
+  <code class="t-sig">(subscription_id)</code>
+</div>
+<div class="tool" data-name="export_board_summary" data-text="export_board_summary generate the cost section of a board / investor update as markdown.">
+  <div class="t-head"><code class="t-name">export_board_summary</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Generate the cost section of a board / investor update as markdown.</p>
+  <code class="t-sig">(period_days?)</code>
+</div>
+<div class="tool" data-name="export_cost_report" data-text="export_cost_report export a cost report as html (printable to pdf) and/or csv. saved to ~/.finops/exports/. no claude desktop required to open.">
+  <div class="t-head"><code class="t-name">export_cost_report</code></div>
+  <p class="t-sum">Export a cost report as HTML (printable to PDF) and/or CSV. Saved to ~/.finops/exports/. No Claude Desktop required to open.</p>
+  <code class="t-sig">(title?, sections?, formats?, start_date?, end_date?, open_file?)</code>
+</div>
+<div class="tool" data-name="export_cost_report_csv" data-text="export_cost_report_csv runs the full cost audit and exports results to a csv file.">
+  <div class="t-head"><code class="t-name">export_cost_report_csv</code></div>
+  <p class="t-sum">Runs the full cost audit and exports results to a CSV file.</p>
+  <code class="t-sig">(output_path?, regions?, top_n?)</code>
+</div>
+<div class="tool" data-name="fetch_invoice_emails" data-text="fetch_invoice_emails fetch unread invoice emails from the configured imap mailbox, extract amounts, and store them as cost entries. solves the billing api gap for vendors like pagerduty, new relic, and github enterprise.">
+  <div class="t-head"><code class="t-name">fetch_invoice_emails</code></div>
+  <p class="t-sum">Fetch unread invoice emails from the configured IMAP mailbox, extract amounts, and store them as cost entries. Solves the billing API gap for vendors like PagerDuty, New Relic, and GitHub Enterprise.</p>
+  
+</div>
+<div class="tool" data-name="get_tableau_connection_info" data-text="get_tableau_connection_info returns the tableau web data connector url for connecting tableau desktop to nable.">
+  <div class="t-head"><code class="t-name">get_tableau_connection_info</code></div>
+  <p class="t-sum">Returns the Tableau Web Data Connector URL for connecting Tableau Desktop to nable.</p>
+  <code class="t-sig">(port?)</code>
+</div>
+<div class="tool" data-name="list_report_subscriptions" data-text="list_report_subscriptions list all active report subscriptions, their names, schedules, sections, and delivery channels.">
+  <div class="t-head"><code class="t-name">list_report_subscriptions</code></div>
+  <p class="t-sum">List all active report subscriptions, their names, schedules, sections, and delivery channels.</p>
+  
+</div>
+<div class="tool" data-name="publish_cost_report_to_notion" data-text="publish_cost_report_to_notion runs the full cost audit and publishes results to your team&#x27;s notion page.">
+  <div class="t-head"><code class="t-name">publish_cost_report_to_notion</code></div>
+  <p class="t-sum">Runs the full cost audit and publishes results to your team&#x27;s Notion page.</p>
+  <code class="t-sig">(regions?)</code>
+</div>
+<div class="tool" data-name="push_to_n8n" data-text="push_to_n8n runs the cost audit and pushes results to your n8n workflow via webhook.">
+  <div class="t-head"><code class="t-name">push_to_n8n</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Runs the cost audit and pushes results to your n8n workflow via webhook.</p>
+  <code class="t-sig">(event_type?, regions?)</code>
+</div>
+<div class="tool" data-name="push_weekly_insight" data-text="push_weekly_insight push a rich weekly cost intelligence summary to slack right now.">
+  <div class="t-head"><code class="t-name">push_weekly_insight</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Push a rich weekly cost intelligence summary to Slack right now.</p>
+  
+</div>
+<div class="tool" data-name="send_digest_now" data-text="send_digest_now manually trigger a cost digest to slack and/or teams right now. normally this sends automatically at 09:00 utc daily.">
+  <div class="t-head"><code class="t-name">send_digest_now</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Manually trigger a cost digest to Slack and/or Teams right now. Normally this sends automatically at 09:00 UTC daily.</p>
+  
+</div>
+<div class="tool" data-name="send_onboarding_email" data-text="send_onboarding_email send an onboarding email to a specific address.">
+  <div class="t-head"><code class="t-name">send_onboarding_email</code></div>
+  <p class="t-sum">Send an onboarding email to a specific address.</p>
+  <code class="t-sig">(to_email, variant?, days_left?)</code>
+</div>
+<div class="tool" data-name="send_report_now" data-text="send_report_now trigger a report subscription immediately, regardless of its schedule.">
+  <div class="t-head"><code class="t-name">send_report_now</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Trigger a report subscription immediately, regardless of its schedule.</p>
+  <code class="t-sig">(subscription_id)</code>
+</div>
+<div class="tool" data-name="send_weekly_digest_now" data-text="send_weekly_digest_now immediately send the weekly email digest to the configured recipient. includes spend summary, anomalies, and top rightsizing recommendations. works without claude, pure standalone email.">
+  <div class="t-head"><code class="t-name">send_weekly_digest_now</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Immediately send the weekly email digest to the configured recipient. Includes spend summary, anomalies, and top rightsizing recommendations. Works without Claude, pure standalone email.</p>
+  
+</div>
+<div class="tool" data-name="start_dashboard_server" data-text="start_dashboard_server starts a local web dashboard you can open in a browser. binds to localhost by default. pass expose=true to bind all interfaces so others on your network can reach it (plain http, so only do this on a trusted network or behind a tls proxy).">
+  <div class="t-head"><code class="t-name">start_dashboard_server</code></div>
+  <p class="t-sum">Starts a local web dashboard you can open in a browser. Binds to localhost by default. Pass expose=true to bind all interfaces so others on your network can reach it (plain HTTP, so only do this on a trusted network or behind a TLS proxy).</p>
+  <code class="t-sig">(port?, host?, expose?)</code>
+</div>
+<div class="tool" data-name="subscribe_to_report" data-text="subscribe_to_report create a scheduled report subscription. reports are delivered automatically to slack channels and/or email addresses on the configured schedule.">
+  <div class="t-head"><code class="t-name">subscribe_to_report</code><span class="pro">PRO</span></div>
+  <p class="t-sum">Create a scheduled report subscription. Reports are delivered automatically to Slack channels and/or email addresses on the configured schedule.</p>
+  <code class="t-sig">(name, sections, frequency?, slack_channels?, email_addresses?, team?, …)</code>
+</div>
+<div class="tool" data-name="take_snapshot_now" data-text="take_snapshot_now manually trigger a cost snapshot right now (fetches yesterday&#x27;s costs from all providers). normally this runs automatically at 01:00 utc daily.">
+  <div class="t-head"><code class="t-name">take_snapshot_now</code></div>
+  <p class="t-sum">Manually trigger a cost snapshot right now (fetches yesterday&#x27;s costs from all providers). Normally this runs automatically at 01:00 UTC daily.</p>
+  
+</div></section><section id="saved-views"><h2>Saved views <span class="count">6</span></h2>
+<div class="tool" data-name="get_pinned_view" data-text="get_pinned_view re-run a pinned view by id and return fresh data plus its card. read-only.">
+  <div class="t-head"><code class="t-name">get_pinned_view</code></div>
+  <p class="t-sum">Re-run a pinned view by id and return fresh data plus its card. Read-only.</p>
+  <code class="t-sig">(view_id)</code>
+</div>
+<div class="tool" data-name="get_view" data-text="get_view run a pre-built cost view by name. these are standard reports your whole team can share.">
+  <div class="t-head"><code class="t-name">get_view</code></div>
+  <p class="t-sum">Run a pre-built cost view by name. These are standard reports your whole team can share.</p>
+  <code class="t-sig">(view, tag_key?, tag_value?, provider?, days?)</code>
+</div>
+<div class="tool" data-name="list_pinned_views" data-text="list_pinned_views list the cost cards pinned to the dashboard (the views you have saved).">
+  <div class="t-head"><code class="t-name">list_pinned_views</code></div>
+  <p class="t-sum">List the cost cards pinned to the dashboard (the views you have saved).</p>
+  
+</div>
+<div class="tool" data-name="list_views" data-text="list_views list all pre-built cost views available to your team.">
+  <div class="t-head"><code class="t-name">list_views</code></div>
+  <p class="t-sum">List all pre-built cost views available to your team.</p>
+  
+</div>
+<div class="tool" data-name="pin_view" data-text="pin_view pin a cost slice to the dashboard as a saved card. takes the same slicing arguments as slice_costs (dimensions / filters / exclusions / metric / etc.), plus a title and a rolling lookback `days`. the pinned card re-runs its slice live on each dashboard load over the trailing `days`, so it always shows fresh numbers. scope: &quot;instance&quot; (shared on this nable) or &quot;me&quot;. read-only on the cloud: this only saves a view definition locally.">
+  <div class="t-head"><code class="t-name">pin_view</code></div>
+  <p class="t-sum">Pin a cost slice to the dashboard as a saved card. Takes the same slicing arguments as slice_costs (dimensions / filters / exclusions / metric / etc.), plus a title and a rolling lookback `days`. The pinned card re-runs its slice live on each dashboard load over the trailing `days`, so it always shows fresh numbers. scope: &quot;instance&quot; (shared on this nable) or &quot;me&quot;. Read-only on the cloud: this only saves a view definition locally.</p>
+  <code class="t-sig">(title, dimensions?, filters?, exclusions?, metric?, granularity?, …)</code>
+</div>
+<div class="tool" data-name="unpin_view" data-text="unpin_view remove a pinned cost card from the dashboard by id.">
+  <div class="t-head"><code class="t-name">unpin_view</code></div>
+  <p class="t-sum">Remove a pinned cost card from the dashboard by id.</p>
+  <code class="t-sig">(view_id)</code>
+</div></section><section id="platform-admin"><h2>Platform &amp; admin <span class="count">9</span></h2>
+<div class="tool" data-name="check_connector_health" data-text="check_connector_health actively test every configured connector with a real api call. reports health status, last successful data time, and fix instructions for failures.">
+  <div class="t-head"><code class="t-name">check_connector_health</code></div>
+  <p class="t-sum">Actively test every configured connector with a real API call. Reports health status, last successful data time, and fix instructions for failures.</p>
+  
+</div>
+<div class="tool" data-name="create_api_key" data-text="create_api_key create a new api key for a team member. requires admin role in shared mode.">
+  <div class="t-head"><code class="t-name">create_api_key</code></div>
+  <p class="t-sum">Create a new API key for a team member. Requires admin role in shared mode.</p>
+  <code class="t-sig">(name, role?, email?, scope_team?, scope_provider?)</code>
+</div>
+<div class="tool" data-name="get_nable_roi" data-text="get_nable_roi shows the return on investment from using nable: savings found, acted on, and verified versus the cost of the tool itself.">
+  <div class="t-head"><code class="t-name">get_nable_roi</code></div>
+  <p class="t-sum">Shows the return on investment from using nable: savings found, acted on, and verified versus the cost of the tool itself.</p>
+  <code class="t-sig">(period_days?)</code>
+</div>
+<div class="tool" data-name="list_api_keys" data-text="list_api_keys list all active api keys (names, roles, scopes). raw keys are never shown. requires admin role in shared mode.">
+  <div class="t-head"><code class="t-name">list_api_keys</code></div>
+  <p class="t-sum">List all active API keys (names, roles, scopes). Raw keys are never shown. Requires admin role in shared mode.</p>
+  
+</div>
+<div class="tool" data-name="list_profiles" data-text="list_profiles list all configured nable profiles (for multi-account or multi-client setups).">
+  <div class="t-head"><code class="t-name">list_profiles</code></div>
+  <p class="t-sum">List all configured nable profiles (for multi-account or multi-client setups).</p>
+  
+</div>
+<div class="tool" data-name="list_vault_credentials" data-text="list_vault_credentials list the names of credentials stored in the encrypted vault (never the values).">
+  <div class="t-head"><code class="t-name">list_vault_credentials</code></div>
+  <p class="t-sum">List the names of credentials stored in the encrypted vault (never the values).</p>
+  
+</div>
+<div class="tool" data-name="revoke_api_key" data-text="revoke_api_key revoke an api key by id. the key is soft-deleted, it stops working immediately. requires admin role. use list_api_keys to find the key id first.">
+  <div class="t-head"><code class="t-name">revoke_api_key</code></div>
+  <p class="t-sum">Revoke an API key by ID. The key is soft-deleted, it stops working immediately. Requires admin role. Use list_api_keys to find the key ID first.</p>
+  <code class="t-sig">(key_id)</code>
+</div>
+<div class="tool" data-name="what_can_nable_do" data-text="what_can_nable_do show everything nable can do, tailored to what you&#x27;ve connected.">
+  <div class="t-head"><code class="t-name">what_can_nable_do</code></div>
+  <p class="t-sum">Show everything nable can do, tailored to what you&#x27;ve connected.</p>
+  <code class="t-sig">(detailed?)</code>
+</div>
+<div class="tool" data-name="whoami" data-text="whoami show the current identity and access level. works in both permissive and shared auth mode.">
+  <div class="t-head"><code class="t-name">whoami</code></div>
+  <p class="t-sum">Show the current identity and access level. Works in both permissive and shared auth mode.</p>
+  
+</div></section>
+</main>
+<footer><div class="wrap">Generated from server.py · <a href="/docs.html">Back to docs</a> · <a href="/tools.json">tools.json</a></div></footer>
+<script>
+const q=document.getElementById('q'),tools=[...document.querySelectorAll('.tool')],
+secs=[...document.querySelectorAll('section')],shown=document.getElementById('shown');
+q.addEventListener('input',()=>{
+  const v=q.value.trim().toLowerCase();let n=0;
+  tools.forEach(t=>{const hit=!v||t.dataset.text.includes(v);t.classList.toggle('hidden',!hit);if(hit)n++;});
+  secs.forEach(s=>s.classList.toggle('hidden',!s.querySelector('.tool:not(.hidden)')));
+  shown.textContent=n;
+});
+</script>
+</body></html>

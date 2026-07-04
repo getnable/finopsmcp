@@ -5731,7 +5731,7 @@ async def list_budgets() -> dict:
 @mcp.tool()
 async def delete_budget(budget_id: int) -> dict:
     """
-    Delete (deactivate) a budget by ID.
+    Delete (deactivate) a budget by ID so it stops alerting and gating agent actions.
 
     Args:
         budget_id: Budget ID from list_budgets
