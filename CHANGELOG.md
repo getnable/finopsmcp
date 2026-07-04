@@ -2,6 +2,14 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.108
+
+Accuracy fixes from a platform audit: the savings ledger no longer
+double-counts recommendations (the "potential savings" total was inflated
+by legacy duplicate rows), cost summaries no longer mislabel an active
+account as zero-spend, forecast_costs works without an explicit account id,
+and upgrade copy says "$25/mo flat" not "per seat".
+
 ## 0.8.107
 
 Pro is now $25/mo ($250/yr, two months free), down from $100. New checkout
