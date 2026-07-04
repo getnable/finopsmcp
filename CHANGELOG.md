@@ -2,6 +2,20 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.106
+
+The guardrail installs itself, and the docs finally show all 182 tools.
+
+- `finops guard install`: a Claude Code hook that auto-checks every
+  infra-mutating command (terraform destroy, kubectl delete,
+  terminate-instances, commitment purchases) against your policy before the
+  agent runs it. Ask on one-way doors, deny out-of-allowlist actions, silent
+  on everything else. Advisory only; nable never executes.
+- Tool reference: getnable.com/tools.html lists all 182 MCP tools, searchable,
+  generated from source on every release so it cannot drift.
+- Terminal URLs (one-click AWS key, docs) are now real clickable hyperlinks
+  in iTerm2, VS Code, kitty, and WezTerm.
+
 ## 0.8.105
 
 Real data or nothing: the first run never invents numbers.
