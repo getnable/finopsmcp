@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.110
+
+GCP goes deeper. New `get_gcp_recommendations` pulls Google's native Recommender
+API: machine-type rightsizing, committed-use-discount buys, Cloud SQL
+idle/overprovisioned, Cloud Run cost tuning, and idle VMs/disks/IPs/images,
+priced against your real SKU rates instead of list-price estimates. It
+complements the resource scanner (`audit_gcp_waste`): the scanner covers you on
+day one with read scope; the Recommender API adds depth once Google has ~8 days
+of usage. Findings sort by monthly savings and follow the same propose-only
+trust model. Needs the Recommender API enabled and `roles/recommender.viewer`.
+
 ## 0.8.109
 
 Connect everything in minutes. New `finops connect` scans this machine for
