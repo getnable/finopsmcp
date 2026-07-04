@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.109
+
+Connect everything in minutes. New `finops connect` scans this machine for
+provider credentials (environment, gcloud, gh, ~/.modal.toml,
+~/.databrickscfg) and connects them all in one keystroke. GCP setup is now
+detect-and-confirm like AWS: it finds gcloud/ADC credentials, discovers your
+billing accounts and BigQuery export automatically, no service-account JSON
+scavenger hunt. Every paste-a-key wizard now links the exact page where the
+key lives, and the welcome flow offers whatever else is on your machine
+right after your first bill renders.
+
 ## 0.8.108
 
 Accuracy fixes from a platform audit: the savings ledger no longer
