@@ -1543,6 +1543,88 @@ def _handle_profile_cmd(parsed: object) -> None:
         return
 
 
+def _run_guard(parsed) -> None:
+    """`finops guard`: install / manage the seamless agent cost guardrail.
+
+    The guard is a Claude Code PreToolUse hook that auto-checks infrastructure
+    commands (terraform destroy, kubectl delete, commitment purchases, ...)
+    against the human-authored policy in policy.py before the agent runs them.
+    Advisory and propose-only: it asks or denies, it never executes.
+    """
+    from . import guard
+    from .welcome import bold, cyan, dim, green
+
+    action = getattr(parsed, "guard_action", "status")
+    global_scope = getattr(parsed, "guard_global", False)
+    scope_label = "~/.claude/settings.json" if global_scope else ".claude/settings.json (this project)"
+
+    if action == "hook":
+        # Machine path: Claude Code invokes this on every Bash tool call.
+        raise SystemExit(guard.run_hook())
+
+    if action == "install":
+        already = guard.is_installed(guard._settings_path(global_scope))
+        path = guard.install(global_scope)
+        print()
+        if already:
+            print(f"  {green('✓')} Guard already installed in {path}")
+        else:
+            print(f"  {green('✓')} Agent cost guardrail installed → {path}")
+        print()
+        print(f"  {bold('What it does:')} before your agent runs an infra-mutating command")
+        print("  (terraform destroy, kubectl delete, aws ec2 terminate-instances, a")
+        print("  commitment purchase), nable checks it against your policy:")
+        print(f"    one-way door      → {cyan('ask')}   you confirm, with the reason shown")
+        print(f"    not in allowlist  → {cyan('deny')}  the agent is told why")
+        print(f"    reversible + safe → silent, zero friction")
+        print()
+        print(dim("  Policy knobs: FINOPS_POLICY_MAX_AUTO_USD, FINOPS_POLICY_ALLOWED_ACTIONS"))
+        print(dim("  Strict mode (also confirm terraform apply / helm upgrade): FINOPS_GUARD_STRICT=1"))
+        print(dim(f"  Remove any time: finops guard uninstall{' --global' if global_scope else ''}"))
+        print(dim("  Restart Claude Code to pick up the hook."))
+        print()
+        return
+
+    if action == "uninstall":
+        removed = guard.uninstall(global_scope)
+        print()
+        if removed:
+            print(f"  {green('✓')} Guard removed from {scope_label}")
+        else:
+            print(f"  Guard was not installed in {scope_label}")
+        print()
+        return
+
+    if action == "check":
+        cmd = getattr(parsed, "guard_command", "")
+        if not cmd:
+            print("\n  Usage: finops guard check --command \"terraform destroy ...\"\n")
+            return
+        verdict = guard.gate_command(cmd)
+        print()
+        if verdict is None:
+            hit = guard.classify_command(cmd)
+            if hit:
+                print(f"  {green('allow')}  ({hit[1]}, reversible and in policy) — the guard stays silent")
+            else:
+                print(f"  {green('allow')}  not an infra-mutating command — the guard stays silent")
+        else:
+            print(f"  {cyan(verdict['decision'])}  {verdict['reason']}")
+        print()
+        return
+
+    # status (default)
+    print()
+    for scope, is_global in (("project", False), ("global", True)):
+        p = guard._settings_path(is_global)
+        state = green("installed") if guard.is_installed(p) else dim("not installed")
+        print(f"  {scope:<8} {state}   {dim(str(p))}")
+    print()
+    print(dim("  Install:  finops guard install            (this project)"))
+    print(dim("            finops guard install --global    (all projects)"))
+    print()
+
+
 def _print_tools_cheatsheet() -> None:
     """Print a concise 'what you can ask nable' cheat-sheet.
 
@@ -1788,6 +1870,15 @@ def main(args: list[str] | None = None) -> None:
     welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
     sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
+
+    guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
+    guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check"],
+                         nargs="?", default="status")
+    guard_p.add_argument("--global", dest="guard_global", action="store_true",
+                         help="Install into ~/.claude/settings.json instead of this project")
+    guard_p.add_argument("--command", dest="guard_command", default="",
+                         help="With 'check': a shell command to classify against your policy")
+
     iam_p = sub.add_parser("iam-template")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
 
@@ -1805,6 +1896,12 @@ def main(args: list[str] | None = None) -> None:
         parsed.action = None
     if not hasattr(parsed, "key"):
         parsed.key = ""
+
+    # The guard hook is a machine protocol: Claude Code parses this process's
+    # stdout as JSON on every Bash call, so it must run before any banner.
+    if parsed.cmd == "guard" and getattr(parsed, "guard_action", "") == "hook":
+        from .guard import run_hook
+        raise SystemExit(run_hook())
 
     print("\n  nable setup: all credentials stay on your machine\n")
 
@@ -2018,6 +2115,9 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "tools":
         _print_tools_cheatsheet()
+        return
+    elif parsed.cmd == "guard":
+        _run_guard(parsed)
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main
