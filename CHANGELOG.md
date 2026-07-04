@@ -2,6 +2,15 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.111
+
+Faster on big orgs. Tag attribution compiles its rules once instead of re-sorting
+them for every cost line, and the AWS Organizations reporting path (org rollup,
+top-spending accounts, account anomalies, weekly digest) is now read-through
+cached like the rest of the cost data. Previously those reporting calls re-hit
+Cost Explorer every time, so one session could pay for the same org query several
+times over. No behavior change, just fewer API calls and less repeated work.
+
 ## 0.8.110
 
 GCP goes deeper. New `get_gcp_recommendations` pulls Google's native Recommender
