@@ -97,7 +97,7 @@ class DatadogConnector(BaseConnector):
             summary,
             provider="Datadog",
             publisher="Datadog",
-            category="Other",
+            category="Observability",
             start_date=start_date,
             end_date=end_date,
         )

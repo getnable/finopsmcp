@@ -1146,9 +1146,20 @@ def _normalize_and_check_key(env_key: str, val: str) -> tuple[str, str | None]:
     return clean, warn
 
 
-def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]) -> None:
-    """Generic wizard for API-key SaaS providers."""
+def setup_saas_api_key(
+    provider_name: str,
+    env_vars: list[tuple[str, str, bool]],
+    note: str | None = None,
+) -> None:
+    """Generic wizard for API-key SaaS providers.
+
+    note: printed up front. Use it for the providers that report usage but not
+    dollars unless you supply a contract rate (or that have no billing API at
+    all), so a user learns why the cost shows $0 at connect time, not later.
+    """
     _section(f"{provider_name}")
+    if note:
+        print(f"  {note}\n")
     # Deep-link the exact key page. "Where do I even get this key" is the
     # single biggest stall on the paste-a-key path; kill it before prompting.
     from .setup_scan import KEY_HELP
@@ -2109,7 +2120,8 @@ def main(args: list[str] | None = None) -> None:
         "github": lambda: setup_saas_api_key("GitHub", [
             ("GITHUB_TOKEN", "Personal Access Token (github_pat_...)", True),
             ("GITHUB_ORGS", "Organization names (comma-separated)", False),
-        ]),
+        ], note="GitHub bills usage (Actions minutes, Copilot seats), not a dollar "
+                "API. nable shows the usage; dollar cost comes from your GitHub invoice."),
         "mongodb": lambda: setup_saas_api_key("MongoDB Atlas", [
             ("MONGODB_ATLAS_PUBLIC_KEY", "Public Key", False),
             ("MONGODB_ATLAS_PRIVATE_KEY", "Private Key", True),
@@ -2165,10 +2177,15 @@ def main(args: list[str] | None = None) -> None:
         "newrelic": lambda: setup_saas_api_key("New Relic", [
             ("NEW_RELIC_API_KEY", "API Key (NRAK-...)", True),
             ("NEW_RELIC_ACCOUNT_ID", "Account ID", False),
-        ]),
+            ("NEW_RELIC_INGEST_PRICE_PER_GB", "Data ingest price USD/GB (your contract rate, optional, for $ amounts)", False),
+            ("NEW_RELIC_FULL_PLATFORM_PRICE", "Full-platform user price USD/user/mo (optional, for $ amounts)", False),
+        ], note="New Relic reports usage (GB ingested, user counts). Add your "
+                "contract rates below and nable turns them into dollars; leave blank "
+                "to see usage only."),
         "pagerduty": lambda: setup_saas_api_key("PagerDuty", [
             ("PAGERDUTY_API_KEY", "API Key", True),
-        ]),
+        ], note="PagerDuty has no billing API. nable reports active seat counts; "
+                "dollar cost is seats x your contract rate, on your PagerDuty invoice."),
         "databricks": lambda: setup_saas_api_key("Databricks", [
             ("DATABRICKS_HOST", "Workspace URL (e.g. https://adb-1234567890.1.azuredatabricks.net)", False),
             ("DATABRICKS_TOKEN", "Personal Access Token or Service Principal token", True),

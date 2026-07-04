@@ -63,4 +63,11 @@ class FocusRecord:
 
 # Valid values for enumerated FOCUS fields
 CHARGE_CATEGORIES = {"Usage", "Purchase", "Tax", "Adjustment", "Credit"}
-SERVICE_CATEGORIES = {"Compute", "Storage", "Database", "Networking", "AI and Machine Learning", "Other"}
+# nable's practical service taxonomy. The cloud/database/AI buckets follow FOCUS;
+# "Observability" (monitoring/APM/on-call) and "Developer Tools" are added so the
+# usage-based SaaS tools land in a category a user recognizes instead of a large,
+# undifferentiated "Other". Anything unmapped still falls back to "Other".
+SERVICE_CATEGORIES = {
+    "Compute", "Storage", "Database", "Networking", "AI and Machine Learning",
+    "Observability", "Developer Tools", "Other",
+}

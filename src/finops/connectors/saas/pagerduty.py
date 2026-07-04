@@ -84,7 +84,7 @@ class PagerDutyConnector(BaseConnector):
             summary,
             provider="PagerDuty",
             publisher="PagerDuty",
-            category="Other",
+            category="Observability",
             start_date=start_date,
             end_date=end_date,
         )

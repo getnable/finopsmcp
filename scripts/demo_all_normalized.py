@@ -20,9 +20,33 @@ import time
 from datetime import date
 from types import SimpleNamespace
 
+# ── LOCAL ONLY. This never reads your real provider credentials and never calls
+#    any provider. Three guarantees, set before finops is imported:
+#      1. FINOPS_AIRGAP=1  -> nable makes zero outbound calls (telemetry included).
+#      2. Every known provider credential env var is SHADOWED with a dummy, so even
+#         a coding mistake cannot pick up a real AWS/Datadog/etc. key.
+#      3. Cloud costs are normalized from synthetic raw rows (no connector network
+#         call), and SaaS/LLM run through a fake in-memory HTTP transport.
+#    Run it on your own machine; nothing here can touch anyone else's account.
 os.environ.setdefault("FINOPS_CACHE_DISABLED", "1")
-# Set connector env BEFORE finops.server is imported (connectors read env at
-# construction), so the ones that iterate accounts/orgs have something to iterate.
+os.environ["FINOPS_AIRGAP"] = "1"
+
+# Shadow every provider credential the connectors look for. Dummy values only.
+_SHADOW = [
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE",
+    "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID",
+    "GOOGLE_APPLICATION_CREDENTIALS", "GCP_SERVICE_ACCOUNT_KEY_PATH", "GCP_BILLING_ACCOUNT_IDS",
+    "DATADOG_API_KEY", "DATADOG_APP_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY",
+    "SNOWFLAKE_PRIVATE_KEY_PATH", "GITHUB_TOKEN", "MONGODB_ATLAS_PUBLIC_KEY",
+    "MONGODB_ATLAS_PRIVATE_KEY", "VERCEL_TOKEN", "CLOUDFLARE_API_TOKEN",
+    "PAGERDUTY_API_KEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "NEW_RELIC_API_KEY",
+    "DATABRICKS_HOST", "OPENAI_API_KEY", "OPENAI_ADMIN_KEY", "ANTHROPIC_API_KEY",
+]
+for _k in _SHADOW:
+    os.environ[_k] = "demo-shadowed-not-real"
+
+# Synthetic connector config so the account/org-iterating connectors have something
+# to iterate. Set BEFORE finops.server is imported (connectors read env at construction).
 os.environ.update({
     "MONGODB_ATLAS_ORG_IDS": "org-1",
     "MONGODB_ATLAS_PUBLIC_KEY": "x", "MONGODB_ATLAS_PRIVATE_KEY": "x",
@@ -281,6 +305,9 @@ async def main() -> None:
             timings[name] = time.perf_counter() - t0
             coverage.append((name, "error", f"{type(e).__name__}: {e}"))
     t_total = time.perf_counter() - t_total0
+
+    print(f"\n{'='*108}\nLOCAL ONLY: FINOPS_AIRGAP=1 (no outbound calls), all provider "
+          f"credentials shadowed, all data synthetic.\n{'='*108}")
 
     # ── 1) native -> normalized, one row per FOCUS record ──────────────────────
     print(f"\n{'='*108}\n1. NATIVE  ->  NORMALIZED (FOCUS)\n{'='*108}")

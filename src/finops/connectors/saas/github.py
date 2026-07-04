@@ -143,7 +143,7 @@ class GitHubConnector(BaseConnector):
             summary,
             provider="GitHub",
             publisher="GitHub",
-            category="Other",
+            category="Developer Tools",
             start_date=start_date,
             end_date=end_date,
         )

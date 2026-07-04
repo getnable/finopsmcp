@@ -83,11 +83,26 @@ def test_unknown_category_clamps_to_other():
     )
     r = saas_focus_records(
         _summary("datadog", [e]),
-        provider="Datadog", publisher="Datadog", category="Observability",
+        provider="Datadog", publisher="Datadog", category="Telepathy",  # not a real category
         start_date=_START, end_date=_END,
     )[0]
     assert r.ServiceCategory == "Other"
     assert r.ProviderName == "Datadog"
+
+
+def test_observability_and_dev_tools_are_valid_categories():
+    # The taxonomy now has homes for monitoring and dev tooling, so these no longer
+    # clamp to "Other".
+    e = CostEntry(provider="datadog", account_id="a", account_name="a",
+                  service="infra_hosts", region="", amount=10.0)
+    obs = saas_focus_records(_summary("datadog", [e]), provider="Datadog",
+                             publisher="Datadog", category="Observability",
+                             start_date=_START, end_date=_END)[0]
+    assert obs.ServiceCategory == "Observability"
+    dev = saas_focus_records(_summary("github", [e]), provider="GitHub",
+                             publisher="GitHub", category="Developer Tools",
+                             start_date=_START, end_date=_END)[0]
+    assert dev.ServiceCategory == "Developer Tools"
 
 
 def test_new_relic_zero_cost_keeps_usage_tags():
