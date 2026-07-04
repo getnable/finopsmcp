@@ -35,6 +35,18 @@ def amber(t: str) -> str:  return _c("33", t)
 def white(t: str) -> str:  return _c("97", t)
 
 
+def link(url: str) -> str:
+    """A clickable terminal hyperlink (OSC 8), colored like other links.
+
+    The visible text is always the URL itself, so terminals that ignore OSC 8
+    (older Terminal.app, plain logs, CI) still show a copyable address, while
+    iTerm2 / VS Code / kitty / WezTerm make it a real one-click link.
+    """
+    if not _USE_COLOR:
+        return url
+    return f"\033]8;;{url}\033\\{cyan(url)}\033]8;;\033\\"
+
+
 def _cli(cmd: str = "") -> str:
     """The command to tell the user to run, matched to how they launched nable.
 
@@ -207,7 +219,7 @@ def show_welcome() -> None:
     _line(green("✓") + bold("  7-day free trial, all features unlocked."))
     _line(dim("   No credit card required."))
     _blank()
-    _line(f"  Docs  →  {cyan('https://getnable.com/docs')}")
+    _line(f"  Docs  →  {link('https://getnable.com/docs')}")
     _blank()
     _line(_rule())
     _blank()
@@ -482,7 +494,7 @@ def _llm_admin_key_hint(provider: str) -> None:
     if provider == "OpenAI":
         _line(dim("  Key works, but no org billing data came back. OpenAI cost data needs an"))
         _line(dim("  ") + bold("admin key") + dim(" (sk-admin-...), not a regular key."))
-        _line(dim("  Create one:  ") + cyan("https://platform.openai.com/settings/organization/admin-keys"))
+        _line(dim("  Create one:  ") + link("https://platform.openai.com/settings/organization/admin-keys"))
         _line(dim("  Then run:    ") + cyan(_cli("setup openai")) + dim("  and paste it as the Admin key."))
     elif provider == "Anthropic":
         _line(dim("  Key works, but no org usage data came back. Anthropic cost data needs an"))
@@ -611,7 +623,7 @@ def run_welcome_flow(demo: bool = False) -> None:
         _blank()
         _line(f"  {bold(cyan(_cli('welcome')))}")
         _blank()
-        _line(f"  Docs  →  {cyan('https://getnable.com/docs')}")
+        _line(f"  Docs  →  {link('https://getnable.com/docs')}")
         _blank()
         return
 
@@ -731,7 +743,7 @@ def run_welcome_flow(demo: bool = False) -> None:
         _oneclick = _oneclick_aws_url()
         if _oneclick:
             _line(f"  {green('Fastest')}, one-click read-only AWS key, no local creds needed:")
-            _line(f"    {cyan(_oneclick)}")
+            _line(f"    {link(_oneclick)}")
             _line(dim("    Click it, create the stack, then choose 1 below and paste the two outputs."))
             _blank()
         _line(f"  {dim('1)')} AWS          {dim('reads your existing AWS profile')}")
@@ -773,7 +785,7 @@ def run_welcome_flow(demo: bool = False) -> None:
         _oneclick = _oneclick_aws_url()
         if _oneclick:
             _line(dim("  See yours in two copy-pastes, read-only AWS key, no local creds:"))
-            _line(f"    {cyan(_oneclick)}")
+            _line(f"    {link(_oneclick)}")
             _line(dim("  Then run  ") + cyan(_cli("welcome")) + dim("  again, or  ") + cyan(_cli("setup aws")) + dim("  if you already have a profile."))
         else:
             _line(dim("  Connect an account to see it:  ") + cyan(_cli("setup aws")) + dim("  (read-only, ~1 min)"))
@@ -810,6 +822,6 @@ def run_welcome_flow(demo: bool = False) -> None:
         _blank()
     _line(dim(f"  You should see nable in your editor's MCP tool list. Not there? Run '{_cli('doctor')}'."))
     _blank()
-    _line(f"  Docs    →  {cyan('https://getnable.com/docs')}")
+    _line(f"  Docs    →  {link('https://getnable.com/docs')}")
     _line(f"  Support →  {cyan('hello@getnable.com')}")
     _blank()

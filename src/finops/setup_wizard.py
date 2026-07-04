@@ -223,10 +223,11 @@ def setup_aws() -> None:
                 _opened = webbrowser.open(url)
             except Exception:
                 _opened = False
+            from .welcome import link as _link
             if _opened:
-                print(f"  Opened AWS in your browser. If nothing opened, use this link:\n    {url}\n")
+                print(f"  Opened AWS in your browser. If nothing opened, use this link:\n    {_link(url)}\n")
             else:
-                print(f"  Open this link in your browser:\n    {url}\n")
+                print(f"  Open this link in your browser:\n    {_link(url)}\n")
             try:
                 input("  Press Enter once the stack shows CREATE_COMPLETE → ")
             except (KeyboardInterrupt, EOFError):
