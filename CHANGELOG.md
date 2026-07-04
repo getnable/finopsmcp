@@ -2,6 +2,15 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.113
+
+Cleaner cost categories and clearer connect-time expectations. Observability
+tools (Datadog, New Relic, PagerDuty) and developer tools (GitHub) now get their
+own FOCUS service categories instead of landing in a catch-all "Other". And the
+providers that report usage rather than dollars now say so when you connect them:
+PagerDuty and GitHub explain where the dollar figure comes from, and New Relic
+prompts for your contract rates so it can show real dollars instead of $0.
+
 ## 0.8.112
 
 Cross-cloud commitment reporting now catches GCP. The FOCUS normalizer detected
