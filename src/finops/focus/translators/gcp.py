@@ -201,16 +201,28 @@ def _billing_period_from_invoice_month(invoice_month: str | None) -> tuple[datet
 
 
 def _commitment_info(row: dict[str, Any]) -> tuple[str | None, str | None]:
-    """Detect Committed Use Discounts from GCP credit types."""
+    """Detect Committed Use Discounts from GCP credits.
+
+    A CUD credit carries a coded ``type`` (COMMITTED_USAGE_DISCOUNT) in detailed
+    exports, but the human ``name``/``full_name`` ("Committed use discount: ...")
+    is present even when the coded type column is dropped (aggregated exports, some
+    export configs). Check both, so a GCP CUD is labeled as reliably as an AWS
+    Savings Plan or an Azure reservation. Without the name check a clearly-labeled
+    CUD would land in EffectiveCost but show no CommitmentDiscountType, so anyone
+    grouping spend by commitment type would miss every GCP commitment.
+    """
     credits = row.get("credits") or []
-    if isinstance(credits, list):
-        for c in credits:
-            if isinstance(c, dict):
-                ctype = str(c.get("type", "")).lower()
-                if "committed" in ctype or "cud" in ctype:
-                    return c.get("id") or c.get("name"), "Committed Use"
-                if "sustained" in ctype:
-                    return c.get("id") or c.get("name"), "Committed Use"
+    if not isinstance(credits, list):
+        return None, None
+    for c in credits:
+        if not isinstance(c, dict):
+            continue
+        ctype = str(c.get("type", "")).lower()
+        label = f"{c.get('name', '')} {c.get('full_name', '')}".lower()
+        if "committed" in ctype or "cud" in ctype or "committed use" in label:
+            return c.get("id") or c.get("name"), "Committed Use"
+        if "sustained" in ctype:
+            return c.get("id") or c.get("name"), "Committed Use"
     return None, None
 
 
