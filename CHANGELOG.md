@@ -2,6 +2,11 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.107
+
+Pro is now $25/mo ($250/yr, two months free), down from $100. New checkout
+links and every price surface updated; Startups is unchanged.
+
 ## 0.8.106
 
 The guardrail installs itself, and the docs finally show all 182 tools.
