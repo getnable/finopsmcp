@@ -24,6 +24,7 @@ require_python()
 
 import getpass
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -915,13 +916,181 @@ def setup_azure() -> None:
         pass
 
 
+_GCP_AMBIENT_TIMEOUT = 10.0  # detect + billing-account listing, hard cap
+
+
+def _detect_gcp_ambient(timeout: float = _GCP_AMBIENT_TIMEOUT) -> dict | None:
+    """Probe for working Google Cloud credentials without asking for anything.
+
+    Sources, in google.auth's own order: GOOGLE_APPLICATION_CREDENTIALS, then
+    gcloud Application Default Credentials. When found, list the open billing
+    accounts so the connect is one keystroke instead of an ID scavenger hunt.
+    Returns {source, project, billing: [(id, display_name)], billing_error} or
+    None when there are no usable credentials. Runs in a worker thread with a
+    hard cap so a hung metadata probe can never stall setup.
+    """
+    import concurrent.futures
+
+    def _probe() -> dict | None:
+        try:
+            import google.auth
+            creds, project = google.auth.default()
+        except Exception:
+            return None
+        source = ("GOOGLE_APPLICATION_CREDENTIALS"
+                  if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") else "gcloud ADC")
+        billing: list[tuple[str, str]] = []
+        billing_error = None
+        try:
+            from google.cloud import billing_v1
+            client = billing_v1.CloudBillingClient(credentials=creds)
+            for a in client.list_billing_accounts(timeout=6):
+                if getattr(a, "open", getattr(a, "open_", True)):
+                    billing.append((a.name.split("/")[-1], a.display_name or ""))
+        except Exception as e:
+            billing_error = f"{type(e).__name__}: {e}"
+        return {"source": source, "project": project or "",
+                "billing": billing, "billing_error": billing_error}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        try:
+            return ex.submit(_probe).result(timeout=timeout)
+        except Exception:
+            return None
+
+
+def _discover_bq_export(project: str, timeout: float = 8.0) -> str | None:
+    """Best-effort hunt for the standard billing-export table
+    (gcp_billing_export_v1_*) in the default project's datasets. Saves the one
+    prompt users reliably cannot answer from memory."""
+    if not project:
+        return None
+    import concurrent.futures
+    import itertools
+
+    def _probe() -> str | None:
+        from google.cloud import bigquery
+        client = bigquery.Client(project=project)
+        for ds in itertools.islice(client.list_datasets(), 25):
+            for t in itertools.islice(client.list_tables(ds.reference), 50):
+                if t.table_id.startswith("gcp_billing_export"):
+                    return f"{project}.{ds.dataset_id}.{t.table_id}"
+        return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        try:
+            return ex.submit(_probe).result(timeout=timeout)
+        except Exception:
+            return None
+
+
+def _gcp_emit_connected(billing_ids: list[str], bq_table: str | None, auth_method: str) -> None:
+    try:
+        from . import telemetry as _tel
+        _tel._send_event(_tel._get_install_id(), "provider_connected", {
+            "provider": "gcp",
+            "billing_account_count": len(billing_ids),
+            "has_bq_export": bool(bq_table),
+            "auth_method": auth_method,
+        })
+    except Exception:
+        pass
+
+
 def setup_gcp() -> None:
+    """Detect-then-confirm, same contract as AWS: probe for working credentials
+    (env key or gcloud ADC), auto-discover the billing accounts and the BigQuery
+    export table, and connect on one keystroke. Manual entry is the fallback,
+    never the default."""
+    from .security.oauth.gcp import import_service_account_key, store_billing_accounts
+
     _section("GCP: Cloud Billing")
-    key_path = _prompt("  Path to service account JSON key file")
-    # Validate file exists before proceeding
-    if key_path and not Path(key_path).expanduser().exists():
+    _emit_step("gcp_connect_opened")
+
+    print("  Checking for Google Cloud credentials on this machine...")
+    amb = _detect_gcp_ambient()
+
+    if amb:
+        proj = f", project {amb['project']}" if amb["project"] else ""
+        _ok(f"Found working credentials: {amb['source']}{proj}")
+
+        if amb["billing"]:
+            if len(amb["billing"]) == 1:
+                bid, bname = amb["billing"][0]
+                label = f"{bid}" + (f" ({bname})" if bname else "")
+                ans = _prompt(f"  Connect billing account {label}? [Y/n]", default="y").lower()
+                chosen = [bid] if ans in ("y", "yes", "") else []
+            else:
+                print("\n  Open billing accounts on these credentials:")
+                for i, (bid, bname) in enumerate(amb["billing"], 1):
+                    print(f"   {i}) {bid}" + (f"  ({bname})" if bname else ""))
+                pick = _prompt("  Connect which? [all]", default="all").lower()
+                if pick in ("all", ""):
+                    chosen = [b for b, _ in amb["billing"]]
+                else:
+                    idx = {int(x) for x in re.findall(r"\d+", pick)}
+                    chosen = [b for i, (b, _) in enumerate(amb["billing"], 1) if i in idx]
+            if chosen:
+                # Persist the credential pointer so the MCP server (editor
+                # context) resolves the same creds the CLI just used. For ADC
+                # that is the well-known gcloud file; google.auth accepts an
+                # authorized_user JSON via GOOGLE_APPLICATION_CREDENTIALS.
+                from .security.vault import Vault
+                from .setup_scan import gcloud_adc_path
+                vault = Vault.default()
+                gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+                cred_path = gac if (gac and Path(gac).expanduser().exists()) else None
+                if not cred_path:
+                    adc = gcloud_adc_path()
+                    cred_path = str(adc) if adc else None
+                if cred_path:
+                    vault.store("GCP_SERVICE_ACCOUNT_KEY_PATH", cred_path)
+
+                print("  Looking for a BigQuery billing export (detailed costs)...")
+                bq_table = _discover_bq_export(amb["project"])
+                if bq_table:
+                    _ok(f"Found billing export: {bq_table}")
+                else:
+                    print("  None found. Cost data still works via the Billing API;")
+                    print("  for per-SKU detail, enable the export (takes ~2 min):")
+                    print("    https://console.cloud.google.com/billing/export")
+                    bq_table = _prompt("  Export table if you have one (project.dataset.table, optional)",
+                                       default="") or None
+
+                projects = [amb["project"]] if amb["project"] else []
+                store_billing_accounts(chosen, bq_table, projects or None)
+                _ok(f"Connected: GCP billing account(s) {', '.join(chosen)}")
+                _gcp_emit_connected(chosen, bq_table, "ambient_" + ("env" if amb["source"].startswith("GOOGLE") else "adc"))
+                _configure_claude_desktop()
+                return
+            print("  Skipped.")
+            return
+
+        # Credentials work but billing accounts are not listable: keep the
+        # creds, ask only for the one thing we could not discover.
+        _warn("Credentials found, but they cannot list billing accounts "
+              "(needs the Billing Account Viewer role).")
+        print("  Your billing account IDs are here: https://console.cloud.google.com/billing")
+        billing_ids_raw = _prompt("  Billing account IDs (comma-separated, XXXXXX-XXXXXX-XXXXXX)")
+        billing_ids = [b.strip() for b in billing_ids_raw.split(",") if b.strip()]
+        if billing_ids:
+            store_billing_accounts(billing_ids, None, [amb["project"]] if amb["project"] else None)
+            _ok(f"Connected: GCP billing account(s) {', '.join(billing_ids)}")
+            _gcp_emit_connected(billing_ids, None, "ambient_manual_billing")
+            _configure_claude_desktop()
+        return
+
+    # Nothing ambient: manual path, with the two fastest ways to fix that.
+    print("  No Google Cloud credentials found on this machine.\n")
+    print("  Fastest: run  gcloud auth application-default login  then re-run this.")
+    print("  Or create a service account key (Billing Account Viewer role):")
+    print("    https://console.cloud.google.com/iam-admin/serviceaccounts\n")
+    key_path = _prompt("  Path to service account JSON key file (or Enter to cancel)", default="")
+    if not key_path:
+        print("  Skipped.")
+        return
+    if not Path(key_path).expanduser().exists():
         _err(f"File not found: {key_path}")
-        _warn("Create a service account key in GCP Console → IAM → Service Accounts → Keys → Add Key")
         return
     billing_ids_raw = _prompt("  Billing account IDs (comma-separated, format: XXXXXX-XXXXXX-XXXXXX)")
     billing_ids = [b.strip() for b in billing_ids_raw.split(",") if b.strip()]
@@ -931,20 +1100,11 @@ def setup_gcp() -> None:
         "GCP waste scan for idle disks, IPs and VMs)", default="")
     project_ids = [p.strip() for p in project_ids_raw.split(",") if p.strip()]
 
-    from .security.oauth.gcp import import_service_account_key, store_billing_accounts
     try:
         import_service_account_key(key_path)
         store_billing_accounts(billing_ids, bq_table or None, project_ids or None)
         _ok("GCP credentials stored")
-        try:
-            from . import telemetry as _tel
-            _tel._send_event(_tel._get_install_id(), "provider_connected", {
-                "provider": "gcp",
-                "billing_account_count": len(billing_ids),
-                "has_bq_export": bool(bq_table),
-            })
-        except Exception:
-            pass
+        _gcp_emit_connected(billing_ids, bq_table or None, "service_account_key")
     except Exception as e:
         _err(f"Failed: {e}")
         try:
@@ -989,6 +1149,16 @@ def _normalize_and_check_key(env_key: str, val: str) -> tuple[str, str | None]:
 def setup_saas_api_key(provider_name: str, env_vars: list[tuple[str, str, bool]]) -> None:
     """Generic wizard for API-key SaaS providers."""
     _section(f"{provider_name}")
+    # Deep-link the exact key page. "Where do I even get this key" is the
+    # single biggest stall on the paste-a-key path; kill it before prompting.
+    from .setup_scan import KEY_HELP
+    _url, _hint = KEY_HELP.get(provider_name, (None, ""))
+    if _url:
+        print(f"  Get your key:  {_url}")
+    if _hint:
+        print(f"  {_hint}")
+    if _url or _hint:
+        print()
     from .security.vault import Vault
     vault = Vault.default()
     stored_any = False
@@ -1866,6 +2036,7 @@ def main(args: list[str] | None = None) -> None:
     serve_p.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1, local only; use 0.0.0.0 to let your team reach it on the LAN)")
     serve_p.add_argument("--open", action="store_true", help="Open browser on start")
 
+    sub.add_parser("connect", help="Scan this machine for provider credentials and connect them all in one keystroke")
     welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect Claude + your first cloud account")
     welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
     sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
@@ -2112,6 +2283,10 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))
+        return
+    elif parsed.cmd == "connect":
+        from .setup_scan import run_connect_command
+        run_connect_command()
         return
     elif parsed.cmd == "tools":
         _print_tools_cheatsheet()

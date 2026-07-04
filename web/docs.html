@@ -477,12 +477,15 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
         </div></div>
 
         <div class="step"><div class="step-num">2</div><div class="step-body">
-          <div class="step-t" id="in-providers" data-toc>Or connect providers individually</div>
-          <div class="code" data-code><div class="code-head"><span class="code-fname">terminal</span><button class="code-copy" data-copy>Copy</button></div><pre><code><span class="t-com"># Pick whichever you care about most:</span>
+          <div class="step-t" id="in-providers" data-toc>Or connect everything at once</div>
+          <div class="code" data-code><div class="code-head"><span class="code-fname">terminal</span><button class="code-copy" data-copy>Copy</button></div><pre><code><span class="t-com"># Scans this machine for credentials (env vars, gcloud, gh, ~/.modal.toml…)</span>
+<span class="t-com"># and connects everything it finds in one keystroke:</span>
+<span class="t-cmd">finops connect</span>
+<span class="t-com"># Or pick providers individually:</span>
 <span class="t-cmd">finops setup aws</span>
-<span class="t-cmd">finops setup azure</span>
-<span class="t-cmd">finops setup gcp</span></code></pre></div>
-          <p class="hint">The wizard creates a <strong style="color:var(--fg)">read-only IAM policy</strong>, walks through the API key, and stores credentials in your OS keyring. You don't need all 17 connectors , one is enough to start.</p>
+<span class="t-cmd">finops setup gcp</span>
+<span class="t-cmd">finops setup azure</span></code></pre></div>
+          <p class="hint">AWS and GCP are detect-and-confirm: nable finds working credentials (profiles, SSO, gcloud ADC), auto-discovers the billing accounts, and connects on one keystroke. Every paste-a-key wizard links the exact page where the key lives. Credentials go to your OS keyring; nothing leaves the machine. You don't need all 30 connectors, one is enough to start.</p>
         </div></div>
 
         <div class="step"><div class="step-num">3</div><div class="step-body">

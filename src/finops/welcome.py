@@ -793,6 +793,18 @@ def run_welcome_flow(demo: bool = False) -> None:
         _line(dim("  Just exploring? ") + cyan(_cli("welcome --demo")) + dim("  walks a clearly-labeled sample bill."))
         _blank()
 
+    # Cross-sell the rest of the machine: one scan, one prompt, and the OpenAI
+    # key (or Datadog, Modal, gh token…) already sitting in the environment
+    # joins the same bill. This is the "whole bill" pitch made real in the
+    # first session. Best-effort and silent when there is nothing to offer.
+    try:
+        from .setup_scan import offer_ambient_connections
+        _connected_extra = offer_ambient_connections()
+        if _connected_extra:
+            _emit_step("welcome_ambient_scan_connected", count=_connected_extra)
+    except Exception:
+        pass
+
     # Activation moment: with a real number on screen, offer a budget the agents
     # respect. Only after a real scan (the sample fallback never sets shown), and
     # best-effort so it can never break onboarding.
