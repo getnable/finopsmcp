@@ -199,6 +199,7 @@ class AWSConnector(BaseConnector):
             entries=[],
         )
 
+        _had_results = False
         for role_arn in targets:
             ce = self._make_client(role_arn)
             account_id = self._account_id(role_arn)
@@ -250,14 +251,8 @@ class AWSConnector(BaseConnector):
                     ) from exc
                 raise
 
-            # If CE returned rows but all costs are zero, this is a free/new account
-            # with no actual spend. Flag it so callers can give a clear message
-            # instead of misdiagnosing it as a config error.
-            if results and all(
-                float(r.get("Total", {}).get("UnblendedCost", {}).get("Amount", 0)) == 0.0
-                for r in results
-            ):
-                merged._zero_spend_account = True
+            if results:
+                _had_results = True
 
             summary = self._build_summary(
                 account_id, start_date, end_date, {"ResultsByTime": results}
@@ -271,6 +266,13 @@ class AWSConnector(BaseConnector):
             for k, v in summary.by_region.items():
                 merged.by_region[k] = merged.by_region.get(k, 0.0) + v
             merged.entries.extend(summary.entries)
+
+        # Zero-spend only if CE returned rows across every account but the real
+        # merged total is 0. Checked against the built total (which sums grouped
+        # rows), not the raw ResultsByTime Total, which is empty under GroupBy
+        # and used to false-flag active accounts as zero-spend.
+        if _had_results and merged.total_usd == 0.0:
+            merged._zero_spend_account = True
 
         # Store a copy so later mutation of the returned object cannot reach the cache.
         _cache.set(_ck, _copy.deepcopy(merged), _cache.COST_TTL)

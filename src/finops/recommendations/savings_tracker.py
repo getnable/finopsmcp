@@ -38,8 +38,49 @@ _EXPIRY_DAYS = 45
 # ── Dedup key ─────────────────────────────────────────────────────────────────
 
 def _dedup(source: str, resource_id: str, recommended_config: dict) -> str:
-    raw = f"{source}:{resource_id}:{json.dumps(recommended_config, sort_keys=True)}"
+    # Hash only the STABLE parts of the config. Numeric estimate ranges
+    # (monthly_saving_min/max) moved in and out of recommended_config across
+    # releases; including them split the key and wrote the same recommendation
+    # as two rows, double-counting the potential savings. Drop them so one
+    # recommendation always maps to one key.
+    stable = {
+        k: v for k, v in (recommended_config or {}).items()
+        if k not in ("monthly_saving_min", "monthly_saving_max")
+    }
+    raw = f"{source}:{resource_id}:{json.dumps(stable, sort_keys=True)}"
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+# Identity for collapsing duplicate rows at READ time. The write-side dedup key
+# above prevents new duplicates, but rows written by older releases (before the
+# key was stabilized) persist with different keys. The dashboard and the MCP
+# tools both dedup on this identity so the "potential savings" number matches
+# everywhere and never double-counts a legacy duplicate.
+def _identity(source: str, resource_id: str, description: str) -> tuple:
+    return (source or "", resource_id or "", description or "")
+
+
+_STATUS_PRIORITY = {"verified": 4, "acted_on": 3, "open": 2, "expired": 1, "dismissed": 0}
+
+
+def _dedup_rows(rows: list[dict]) -> list[dict]:
+    """Collapse duplicate recommendations by identity, keeping the row with the
+    most advanced status (a verified/acted row beats an open duplicate), then the
+    highest estimate. Order-preserving for the survivors."""
+    best: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    for r in rows:
+        ident = _identity(r.get("source"), r.get("resource_id"), r.get("description"))
+        cur = best.get(ident)
+        if cur is None:
+            best[ident] = r
+            order.append(ident)
+            continue
+        r_rank = (_STATUS_PRIORITY.get(r.get("status"), 0), r.get("estimated_monthly_savings_usd") or 0)
+        c_rank = (_STATUS_PRIORITY.get(cur.get("status"), 0), cur.get("estimated_monthly_savings_usd") or 0)
+        if r_rank > c_rank:
+            best[ident] = r
+    return [best[i] for i in order]
 
 
 def _bucket(resource_type: str | None, environment: str | None) -> str | None:
@@ -207,29 +248,33 @@ def get_summary() -> dict[str, Any]:
       - verified_monthly_usd:  actual measured savings (verified recs)
       - counts by status and source
 
-    Uses GROUP BY aggregation rather than a full table scan so this stays
-    fast as the recommendations table grows.
+    Deduplicates legacy duplicate rows by identity before summing, so the
+    potential-savings number never double-counts a recommendation written twice
+    by an older release. The table is per-account and small, a full scan is
+    cheap and correctness beats the GROUP BY it replaced.
     """
     sr = savings_recommendations
     engine = get_engine()
 
-    # Aggregate counts and sums per (status, source) in one query
     with engine.connect() as conn:
-        agg_rows = conn.execute(
+        raw = conn.execute(
             select(
-                sr.c.status,
-                sr.c.source,
-                func.count().label("cnt"),
-                func.sum(sr.c.estimated_monthly_savings_usd).label("sum_est"),
-                func.sum(sr.c.verified_monthly_savings_usd).label("sum_verified"),
-            ).group_by(sr.c.status, sr.c.source)
+                sr.c.status, sr.c.source, sr.c.resource_id, sr.c.description,
+                sr.c.estimated_monthly_savings_usd, sr.c.verified_monthly_savings_usd,
+            )
         ).fetchall()
 
-        total_count = conn.execute(
-            select(func.count()).select_from(sr)
-        ).scalar() or 0
+    deduped = _dedup_rows([
+        {
+            "status": r.status, "source": r.source, "resource_id": r.resource_id,
+            "description": r.description,
+            "estimated_monthly_savings_usd": r.estimated_monthly_savings_usd,
+            "verified_monthly_savings_usd": r.verified_monthly_savings_usd,
+        }
+        for r in raw
+    ])
+    total_count = len(deduped)
 
-    # Known status buckets for by_source breakdown
     _STATUS_KEYS = ("open", "acted_on", "verified", "dismissed", "expired")
 
     potential = 0.0
@@ -238,32 +283,30 @@ def get_summary() -> dict[str, Any]:
     by_status: dict[str, int] = {}
     by_source: dict[str, dict] = {}
 
-    for row in agg_rows:
-        s = row.status
-        src = row.source
-        cnt = row.cnt or 0
-        sum_est = float(row.sum_est or 0.0)
-        sum_ver = float(row.sum_verified or 0.0)
+    for row in deduped:
+        s = row["status"]
+        src = row["source"]
+        est = float(row.get("estimated_monthly_savings_usd") or 0.0)
+        ver = float(row.get("verified_monthly_savings_usd") or 0.0)
 
-        by_status[s] = by_status.get(s, 0) + cnt
+        by_status[s] = by_status.get(s, 0) + 1
 
         if src not in by_source:
             by_source[src] = {k: 0 for k in _STATUS_KEYS}
             by_source[src]["potential_usd"] = 0.0
             by_source[src]["verified_usd"] = 0.0
 
-        # Only bucket into known status keys; unknown statuses fall under "dismissed"
         bucket = s if s in _STATUS_KEYS else "dismissed"
-        by_source[src][bucket] = by_source[src].get(bucket, 0) + cnt
-        by_source[src]["potential_usd"] += sum_est if s == "open" else 0.0
-        by_source[src]["verified_usd"] += sum_ver if s == "verified" else 0.0
+        by_source[src][bucket] = by_source[src].get(bucket, 0) + 1
+        by_source[src]["potential_usd"] += est if s == "open" else 0.0
+        by_source[src]["verified_usd"] += ver if s == "verified" else 0.0
 
         if s == "open":
-            potential += sum_est
+            potential += est
         elif s == "acted_on":
-            acted_estimated += sum_est
+            acted_estimated += est
         elif s == "verified":
-            verified_actual += sum_ver
+            verified_actual += ver
 
     return {
         "potential_monthly_usd": round(potential, 2),
@@ -366,8 +409,9 @@ def list_recommendations(
         q = q.where(savings_recommendations.c.source == source)
     q = q.limit(limit)
 
+    # Fetch a wider window than `limit`, dedup legacy duplicates, then trim.
     with engine.connect() as conn:
-        rows = conn.execute(q).fetchall()
+        rows = conn.execute(q.limit(None)).fetchall()
 
     result = []
     for r in rows:
@@ -391,7 +435,7 @@ def list_recommendations(
             "dismiss_reason_category": getattr(r, "dismiss_reason_category", None),
             "environment_bucket": getattr(r, "environment_bucket", None),
         })
-    return result
+    return _dedup_rows(result)[:limit]
 
 
 # ── Verification: check if changes were actually made ────────────────────────
