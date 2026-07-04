@@ -252,7 +252,31 @@ def org_cost_summary(
     """
     Fan out cost queries across all org accounts and return an aggregated
     summary sorted by spend (highest first).
+
+    Read-through cached (12h, like the per-connector cost path). Without this the
+    org rollup re-hit Cost Explorer on every call, and top_spending_accounts (which
+    delegates here) plus the weekly digest each triggered another full CE query for
+    data that refreshes only ~3x/day.
     """
+    from .. import cache as _cache
+    _ck = _cache.make_key("aws_org.org_cost_summary", days_back, include_zero_spend)
+    _hit = _cache.get(_ck)
+    if _hit is not None:
+        import copy as _copy
+        return _copy.deepcopy(_hit)
+
+    result = _org_cost_summary_uncached(days_back, include_zero_spend)
+    # Only cache a real rollup, never a transient error payload.
+    if isinstance(result, dict) and not result.get("error"):
+        import copy as _copy
+        _cache.set(_ck, _copy.deepcopy(result), _cache.COST_TTL)
+    return result
+
+
+def _org_cost_summary_uncached(
+    days_back: int = 30,
+    include_zero_spend: bool = False,
+) -> dict[str, Any]:
     start, end = _get_date_range(days_back)
 
     # Try management account CE first — it can see all accounts without assume-role
@@ -374,7 +398,16 @@ def account_anomalies(days_back: int = 30) -> list[dict[str, Any]]:
         import boto3
         ce = boto3.client("ce", region_name="us-east-1")
 
+        from .. import cache as _cache
+
         def period_totals(s: str, e: str) -> dict[str, float]:
+            # Cache per date window. The previous-period window is stable history and
+            # is reused across repeated anomaly checks; the current window refreshes
+            # only ~3x/day, so a 12h TTL never costs accuracy.
+            _ck = _cache.make_key("aws_org.period_totals", s, e)
+            _hit = _cache.get(_ck)
+            if _hit is not None:
+                return dict(_hit)
             resp = ce.get_cost_and_usage(
                 TimePeriod={"Start": s, "End": e},
                 Granularity="MONTHLY",
@@ -387,6 +420,7 @@ def account_anomalies(days_back: int = 30) -> list[dict[str, Any]]:
                     acct = group["Keys"][0]
                     amt  = float(group["Metrics"]["UnblendedCost"]["Amount"])
                     totals[acct] = totals.get(acct, 0) + amt
+            _cache.set(_ck, dict(totals), _cache.COST_TTL)
             return totals
 
         current = period_totals(start, end)

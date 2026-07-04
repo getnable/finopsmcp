@@ -28,6 +28,41 @@ from pathlib import Path
 from typing import Any
 
 _RULES_CACHE: dict | None = None
+# Rules and aliases never change between cost entries, but tags_to_attribution is
+# called once per entry (thousands of times for a real org). Compiling the rules
+# once (sort + field normalization + a flat alias lookup) turns each call from
+# "re-sort R rules and rebuild every lowercased alias list" into a linear scan with
+# O(1) alias resolution. _compiled() memoizes it; reload_rules() drops it.
+_COMPILED: "_Compiled | None" = None
+
+
+class _Compiled:
+    """Pre-processed rules: sorted once, fields lowercased once, aliases flattened
+    into a single {variant_lower: canonical} lookup so alias resolution is a dict
+    hit instead of a scan over every alias list on every entry."""
+
+    __slots__ = ("rules", "alias_lookup")
+
+    def __init__(self, cfg: dict) -> None:
+        raw_rules: list[dict] = cfg.get("rules", []) or []
+        # Sort by priority (lower = higher priority) ONCE, then normalize the fields
+        # the per-entry loop reads so it never lowercases the same literals again.
+        self.rules: list[tuple[str, str, str, str]] = [
+            (
+                str(r.get("tag_key", "")).lower(),
+                str(r.get("tag_value_pattern", "*")).lower(),
+                str(r.get("maps_to_field", "")),
+                str(r.get("maps_to_value", "")),
+            )
+            for r in sorted(raw_rules, key=lambda r: r.get("priority", 100))
+        ]
+        aliases: dict[str, list[str]] = cfg.get("team_aliases", {}) or {}
+        lookup: dict[str, str] = {}
+        for canonical, variants in aliases.items():
+            lookup[str(canonical).lower()] = canonical
+            for v in variants or []:
+                lookup[str(v).lower()] = canonical
+        self.alias_lookup = lookup
 
 
 def _load_rules() -> dict:
@@ -48,17 +83,21 @@ def _load_rules() -> dict:
     return _RULES_CACHE
 
 
+def _compiled() -> _Compiled:
+    global _COMPILED
+    if _COMPILED is None:
+        _COMPILED = _Compiled(_load_rules())
+    return _COMPILED
+
+
 def reload_rules() -> None:
-    global _RULES_CACHE
+    global _RULES_CACHE, _COMPILED
     _RULES_CACHE = None
+    _COMPILED = None
 
 
-def _resolve_alias(value: str, aliases: dict[str, list[str]]) -> str:
-    lower = value.lower()
-    for canonical, variants in aliases.items():
-        if lower == canonical or lower in [v.lower() for v in variants]:
-            return canonical
-    return value
+def _resolve_alias(value: str, alias_lookup: dict[str, str]) -> str:
+    return alias_lookup.get(value.lower(), value)
 
 
 def tags_to_attribution(tags: dict[str, str]) -> dict[str, str]:
@@ -66,9 +105,7 @@ def tags_to_attribution(tags: dict[str, str]) -> dict[str, str]:
     Given a dict of resource tags, return {team, service, environment}.
     Falls back to 'unattributed' for unmapped fields.
     """
-    cfg = _load_rules()
-    rules: list[dict] = cfg.get("rules", [])
-    aliases: dict[str, list[str]] = cfg.get("team_aliases", {})
+    compiled = _compiled()
 
     result: dict[str, str] = {
         "team": "unattributed",
@@ -76,30 +113,19 @@ def tags_to_attribution(tags: dict[str, str]) -> dict[str, str]:
         "environment": "",
     }
 
-    # Sort rules by priority (lower = higher priority) then apply
-    sorted_rules = sorted(rules, key=lambda r: r.get("priority", 100))
     lower_tags = {k.lower(): v for k, v in tags.items()}
 
-    for rule in sorted_rules:
-        tag_key = rule.get("tag_key", "").lower()
-        tag_value_pattern = rule.get("tag_value_pattern", "*")
-        maps_to_field = rule.get("maps_to_field", "")
-        maps_to_value = rule.get("maps_to_value", "")
-
+    for tag_key, tag_value_pattern, maps_to_field, maps_to_value in compiled.rules:
         if tag_key not in lower_tags:
             continue
         actual_value = lower_tags[tag_key]
-        if not fnmatch(actual_value.lower(), tag_value_pattern.lower()):
+        if not fnmatch(actual_value.lower(), tag_value_pattern):
             continue
 
-        if maps_to_value:
-            resolved = maps_to_value
-        else:
-            resolved = actual_value
+        resolved = maps_to_value if maps_to_value else actual_value
 
         if maps_to_field == "team":
-            resolved = _resolve_alias(resolved, aliases)
-            result["team"] = resolved
+            result["team"] = _resolve_alias(resolved, compiled.alias_lookup)
         elif maps_to_field == "service":
             result["service"] = resolved
         elif maps_to_field == "environment":
