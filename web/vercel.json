@@ -1,4 +1,6 @@
 {
+  "cleanUrls": true,
+  "trailingSlash": false,
   "rewrites": [
     { "source": "/docs", "destination": "/docs.html" },
     { "source": "/account", "destination": "/account.html" },

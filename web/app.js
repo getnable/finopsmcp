@@ -115,13 +115,13 @@ function Nav() {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
     setOpen(false);
   }
-  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("nav", { className: "nav" }, /* @__PURE__ */ React.createElement("div", { className: "nav-inner" }, /* @__PURE__ */ React.createElement("a", { href: "/", className: "logo" }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--accent)" } }, "n"), "able")), /* @__PURE__ */ React.createElement("ul", null, /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/agents.html", onClick: () => {
+  return /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("nav", { className: "nav" }, /* @__PURE__ */ React.createElement("div", { className: "nav-inner" }, /* @__PURE__ */ React.createElement("a", { href: "/", className: "logo" }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, /* @__PURE__ */ React.createElement("span", { style: { color: "var(--accent)" } }, "n"), "able")), /* @__PURE__ */ React.createElement("ul", null, /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/agents", onClick: () => {
     if (window.posthog) posthog.capture("nav_clicked", { item: "agents" });
-  } }, "Agents")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/pricing.html", onClick: () => {
+  } }, "Agents")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/pricing", onClick: () => {
     if (window.posthog) posthog.capture("nav_clicked", { item: "pricing" });
-  } }, "Pricing")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/docs.html", onClick: () => {
+  } }, "Pricing")), /* @__PURE__ */ React.createElement("li", null, /* @__PURE__ */ React.createElement("a", { href: "/docs", onClick: () => {
     if (window.posthog) posthog.capture("docs_clicked", { location: "nav" });
-  } }, "Docs"))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "nav-signin" }, "Sign in"), /* @__PURE__ */ React.createElement(
+  } }, "Docs"))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account", className: "nav-signin" }, "Sign in"), /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
@@ -136,7 +136,7 @@ function Nav() {
   ), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "/docs.html",
+      href: "/docs",
       className: "btn btn-primary",
       onClick: () => {
         if (window.posthog) posthog.capture("cta_clicked", { location: "nav", cta: "start_free" });
@@ -153,19 +153,19 @@ function Nav() {
       onClick: () => setOpen((o) => !o)
     },
     open ? /* @__PURE__ */ React.createElement("svg", { width: "20", height: "20", viewBox: "0 0 20 20", fill: "none", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M4 4L16 16M16 4L4 16", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" })) : /* @__PURE__ */ React.createElement("svg", { width: "20", height: "20", viewBox: "0 0 20 20", fill: "none", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { d: "M3 5h14M3 10h14M3 15h14", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" }))
-  ))), open && /* @__PURE__ */ React.createElement("div", { className: "nav-mobile-menu" }, /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/agents.html", onClick: () => {
+  ))), open && /* @__PURE__ */ React.createElement("div", { className: "nav-mobile-menu" }, /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/agents", onClick: () => {
     setOpen(false);
     if (window.posthog) posthog.capture("nav_clicked", { item: "agents" });
-  } }, "Agents"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/pricing.html", onClick: () => {
+  } }, "Agents"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/pricing", onClick: () => {
     setOpen(false);
     if (window.posthog) posthog.capture("nav_clicked", { item: "pricing" });
-  } }, "Pricing"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/docs.html", onClick: () => {
+  } }, "Pricing"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/docs", onClick: () => {
     setOpen(false);
     if (window.posthog) posthog.capture("docs_clicked", { location: "nav_mobile" });
-  } }, "Docs"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 24, display: "flex", flexDirection: "column", gap: 10 } }, /* @__PURE__ */ React.createElement("a", { href: "/account.html", className: "btn btn-ghost", style: { justifyContent: "center" }, onClick: () => setOpen(false) }, "Sign in"), /* @__PURE__ */ React.createElement(
+  } }, "Docs"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 24, display: "flex", flexDirection: "column", gap: 10 } }, /* @__PURE__ */ React.createElement("a", { href: "/account", className: "btn btn-ghost", style: { justifyContent: "center" }, onClick: () => setOpen(false) }, "Sign in"), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "/docs.html",
+      href: "/docs",
       className: "btn btn-primary",
       style: { justifyContent: "center" },
       onClick: () => {
@@ -178,7 +178,7 @@ function Nav() {
   ))));
 }
 function Hero() {
-  return /* @__PURE__ */ React.createElement("header", { className: "hero hero-centered", id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-c" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "All of FinOps, ", /* @__PURE__ */ React.createElement("span", { className: "h1-ask" }, "built into your AI.")), /* @__PURE__ */ React.createElement("p", { className: "hero-sub" }, "See every dollar across cloud, SaaS, and AI, cut the waste, and check what your agents spend before they act, without leaving Claude or Cursor."), /* @__PURE__ */ React.createElement("div", { className: "hero-actions" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" }), /* @__PURE__ */ React.createElement("a", { className: "btn btn-primary", href: "/docs.html", onClick: () => {
+  return /* @__PURE__ */ React.createElement("header", { className: "hero hero-centered", id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-c" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "All of FinOps, ", /* @__PURE__ */ React.createElement("span", { className: "h1-ask" }, "built into your AI.")), /* @__PURE__ */ React.createElement("p", { className: "hero-sub" }, "See every dollar across cloud, SaaS, and AI, cut the waste, and check what your agents spend before they act, without leaving Claude or Cursor."), /* @__PURE__ */ React.createElement("div", { className: "hero-actions" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" }), /* @__PURE__ */ React.createElement("a", { className: "btn btn-primary", href: "/docs", onClick: () => {
     if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "start_free" });
   } }, "Get started free ", /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192"))), /* @__PURE__ */ React.createElement("p", { className: "hero-trustline" }, /* @__PURE__ */ React.createElement("b", null, "18 providers"), " normalized into one \xB7 works in any editor \xB7 free for solo use"))));
 }
@@ -441,7 +441,7 @@ function Pricing() {
       billed: "No credit card",
       feats: ["Cost, anomaly + rightsizing", "LLM spend by model", "All 18 providers", "Your own LLM key"],
       cta: "Start free",
-      href: "/docs.html",
+      href: "/docs",
       plan: "dev",
       ext: false,
       primary: false,
@@ -551,7 +551,7 @@ function FootCta() {
   return /* @__PURE__ */ React.createElement("section", { className: "foot-cta", id: "cta" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "foot-label" }, /* @__PURE__ */ React.createElement("span", { className: "foot-dash" }), "Get started"), /* @__PURE__ */ React.createElement("h2", { className: "display" }, "One command.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Then just ask.")), /* @__PURE__ */ React.createElement("div", { className: "foot-cta-actions" }, /* @__PURE__ */ React.createElement("div", { className: "foot-install" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" })), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "/docs.html#quickstart",
+      href: "/docs#quickstart",
       className: "foot-quicklink",
       onClick: () => {
         if (window.posthog) posthog.capture("cta_clicked", { location: "footer_cta", cta: "quickstart" });
@@ -562,7 +562,7 @@ function FootCta() {
   ))));
 }
 function Footer({ version }) {
-  return /* @__PURE__ */ React.createElement("footer", null, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "foot" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("a", { href: "#top", className: "logo", style: { marginBottom: 18 } }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, "nable")), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-3)", fontSize: 13, maxWidth: "34ch", lineHeight: 1.55, marginTop: 10 } }, "Your cloud and AI bill, answered. Made in Austin, TX.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Product"), /* @__PURE__ */ React.createElement("a", { href: "/#demo" }, "Demo"), /* @__PURE__ */ React.createElement("a", { href: "/#connectors" }, "Connectors"), /* @__PURE__ */ React.createElement("a", { href: "/pricing.html" }, "Pricing"), /* @__PURE__ */ React.createElement("a", { href: "/pricing.html#faq" }, "FAQ"), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("footer", null, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "foot" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("a", { href: "#top", className: "logo", style: { marginBottom: 18 } }, /* @__PURE__ */ React.createElement(LogoMark, null), /* @__PURE__ */ React.createElement("span", null, "nable")), /* @__PURE__ */ React.createElement("p", { style: { color: "var(--fg-3)", fontSize: 13, maxWidth: "34ch", lineHeight: 1.55, marginTop: 10 } }, "Your cloud and AI bill, answered. Made in Austin, TX.")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Product"), /* @__PURE__ */ React.createElement("a", { href: "/#demo" }, "Demo"), /* @__PURE__ */ React.createElement("a", { href: "/#connectors" }, "Connectors"), /* @__PURE__ */ React.createElement("a", { href: "/pricing" }, "Pricing"), /* @__PURE__ */ React.createElement("a", { href: "/pricing#faq" }, "FAQ"), /* @__PURE__ */ React.createElement(
     "a",
     {
       href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
@@ -573,7 +573,7 @@ function Footer({ version }) {
       }
     },
     "Book a demo"
-  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Resources"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html" }, "Docs"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html#quickstart" }, "Quickstart"), /* @__PURE__ */ React.createElement("a", { href: "/docs.html#iam" }, "IAM templates"), /* @__PURE__ */ React.createElement("a", { href: "/security" }, "Security")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Company"), /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About"), /* @__PURE__ */ React.createElement("a", { href: "/about#investors" }, "Investors"), /* @__PURE__ */ React.createElement("a", { href: "mailto:hello@getnable.com", target: "_blank", rel: "noopener noreferrer" }, "Contact"), /* @__PURE__ */ React.createElement("a", { href: "https://github.com/chaandannn/finopsmcp", target: "_blank", rel: "noopener noreferrer" }, "GitHub"), /* @__PURE__ */ React.createElement("a", { href: "https://www.linkedin.com/company/getnable/", target: "_blank", rel: "noopener noreferrer" }, "LinkedIn"))), /* @__PURE__ */ React.createElement("div", { className: "foot-meta" }, /* @__PURE__ */ React.createElement("span", null, "2026 nable \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/privacy", style: { color: "var(--fg-3)" } }, "Privacy"), " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/terms", style: { color: "var(--fg-3)" } }, "Terms")), /* @__PURE__ */ React.createElement("span", null, "nable \xB7 runtime healthy"))));
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Resources"), /* @__PURE__ */ React.createElement("a", { href: "/docs" }, "Docs"), /* @__PURE__ */ React.createElement("a", { href: "/docs#quickstart" }, "Quickstart"), /* @__PURE__ */ React.createElement("a", { href: "/docs#iam" }, "IAM templates"), /* @__PURE__ */ React.createElement("a", { href: "/security" }, "Security")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Company"), /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About"), /* @__PURE__ */ React.createElement("a", { href: "/about#investors" }, "Investors"), /* @__PURE__ */ React.createElement("a", { href: "mailto:hello@getnable.com", target: "_blank", rel: "noopener noreferrer" }, "Contact"), /* @__PURE__ */ React.createElement("a", { href: "https://github.com/chaandannn/finopsmcp", target: "_blank", rel: "noopener noreferrer" }, "GitHub"), /* @__PURE__ */ React.createElement("a", { href: "https://www.linkedin.com/company/getnable/", target: "_blank", rel: "noopener noreferrer" }, "LinkedIn"))), /* @__PURE__ */ React.createElement("div", { className: "foot-meta" }, /* @__PURE__ */ React.createElement("span", null, "2026 nable \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/privacy", style: { color: "var(--fg-3)" } }, "Privacy"), " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/terms", style: { color: "var(--fg-3)" } }, "Terms")), /* @__PURE__ */ React.createElement("span", null, "nable \xB7 runtime healthy"))));
 }
 const PALETTE_OPTIONS = [
   { value: "onyx", label: "Onyx", swatch: ["#0a0a0c", "#5fe8a0", "#15151a"] },
@@ -641,7 +641,7 @@ function AgentsBand() {
     "a",
     {
       className: "btn btn-primary",
-      href: "/agents.html",
+      href: "/agents",
       onClick: () => {
         if (window.posthog) posthog.capture("cta_clicked", { location: "agents_band", cta: "see_agents" });
       }

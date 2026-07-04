@@ -123,15 +123,15 @@ function Nav(){
           <span><span style={{color:'var(--accent)'}}>n</span>able</span>
         </a>
         <ul>
-          <li><a href="/agents.html" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'agents'}); }}>Agents</a></li>
-          <li><a href="/pricing.html" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</a></li>
-          <li><a href="/docs.html" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
+          <li><a href="/agents" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'agents'}); }}>Agents</a></li>
+          <li><a href="/pricing" onClick={()=>{ if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</a></li>
+          <li><a href="/docs" onClick={()=>{ if(window.posthog) posthog.capture('docs_clicked',{location:'nav'}); }}>Docs</a></li>
         </ul>
         <div className="right">
-          <a href="/account.html" className="nav-signin">Sign in</a>
+          <a href="/account" className="nav-signin">Sign in</a>
           <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" className="btn btn-ghost"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'book_demo'}); }}>Book a demo</a>
-          <a href="/docs.html" className="btn btn-primary"
+          <a href="/docs" className="btn btn-primary"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'}); }}>
             Get started free <span className="arr">→</span>
           </a>
@@ -156,12 +156,12 @@ function Nav(){
     </nav>
       {open && (
         <div className="nav-mobile-menu">
-          <a className="nav-mobile-item" href="/agents.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'agents'}); }}>Agents</a>
-          <a className="nav-mobile-item" href="/pricing.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</a>
-          <a className="nav-mobile-item" href="/docs.html" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
+          <a className="nav-mobile-item" href="/agents" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'agents'}); }}>Agents</a>
+          <a className="nav-mobile-item" href="/pricing" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('nav_clicked',{item:'pricing'}); }}>Pricing</a>
+          <a className="nav-mobile-item" href="/docs" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
           <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:10}}>
-            <a href="/account.html" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
-            <a href="/docs.html" className="btn btn-primary" style={{justifyContent:"center"}}
+            <a href="/account" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
+            <a href="/docs" className="btn btn-primary" style={{justifyContent:"center"}}
               onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('cta_clicked',{location:'nav_mobile',cta:'start_free'}); }}>
               Get started free <span className="arr">→</span>
             </a>
@@ -188,7 +188,7 @@ function Hero(){
           <p className="hero-sub">See every dollar across cloud, SaaS, and AI, cut the waste, and check what your agents spend before they act, without leaving Claude or Cursor.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
-            <a className="btn btn-primary" href="/docs.html" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
+            <a className="btn btn-primary" href="/docs" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
               Get started free <span className="arr">→</span>
             </a>
           </div>
@@ -797,7 +797,7 @@ function Pricing(){
   const tiers = [
     { key:"dev", name:"Dev", tag:"Ask about your bill", amt:"Free", per:"forever", billed:"No credit card",
       feats:["Cost, anomaly + rightsizing","LLM spend by model","All 18 providers","Your own LLM key"],
-      cta:"Start free", href:"/docs.html", plan:"dev", ext:false, primary:false, rec:false },
+      cta:"Start free", href:"/docs", plan:"dev", ext:false, primary:false, rec:false },
     { key:"pro", name:"Pro", tag:"Find and fix the waste", amt:proPrice, per, billed,
       feats:["Everything in Dev","Remediation PRs + tickets","Alerts, digests, budgets","Hosting add-on available"],
       cta:annual ? "Get annual" : "Get Pro", href:proLink, plan:annual?"pro_annual":"pro_monthly", ext:true, primary:true, rec:true },
@@ -933,7 +933,7 @@ function FootCta(){
         </h2>
         <div className="foot-cta-actions">
           <div className="foot-install"><CopyCmd cmd="uvx nable" /></div>
-          <a href="/docs.html#quickstart" className="foot-quicklink"
+          <a href="/docs#quickstart" className="foot-quicklink"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_cta',cta:'quickstart'}); }}>
             or read the quickstart <span className="arr">→</span>
           </a>
@@ -959,16 +959,16 @@ function Footer({ version }){
             <h5>Product</h5>
             <a href="/#demo">Demo</a>
             <a href="/#connectors">Connectors</a>
-            <a href="/pricing.html">Pricing</a>
-            <a href="/pricing.html#faq">FAQ</a>
+            <a href="/pricing">Pricing</a>
+            <a href="/pricing#faq">FAQ</a>
             <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'footer_nav',cta:'book_demo'}); }}>Book a demo</a>
           </div>
           <div>
             <h5>Resources</h5>
-            <a href="/docs.html">Docs</a>
-            <a href="/docs.html#quickstart">Quickstart</a>
-            <a href="/docs.html#iam">IAM templates</a>
+            <a href="/docs">Docs</a>
+            <a href="/docs#quickstart">Quickstart</a>
+            <a href="/docs#iam">IAM templates</a>
             <a href="/security">Security</a>
           </div>
           <div>
@@ -1119,7 +1119,7 @@ function AgentsBand(){
             <h3>Your agents ask nable <em>before they spend.</em></h3>
             <p>An agent calls nable to price a change, check it against your budgets and policies, and get a cheaper path, before anything is applied. Live now in every install.</p>
           </div>
-          <a className="btn btn-primary" href="/agents.html"
+          <a className="btn btn-primary" href="/agents"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'agents_band',cta:'see_agents'}); }}>
             See how it works <span className="arr">→</span>
           </a>
