@@ -53,7 +53,9 @@ function applyPalette(name){
 function useScrollTracking() {
   useEffect(() => {
     if (!window.posthog) return;
-    const sections = ['demo', 'connectors', 'architecture', 'pricing', 'foot-cta'];
+    // ids must match the real <section id>s; 'architecture' and 'foot-cta' never
+    // existed, so scroll tracking was silently blind past the connectors band.
+    const sections = ['demo', 'start', 'loop', 'ai', 'arch', 'connectors', 'pricing', 'faq', 'cta'];
     const seen = new Set();
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
@@ -93,7 +95,7 @@ function Ticker({ installs, version }){
         <span className="sep">·</span>
         <span className="seg">4k+ PyPI downloads / mo</span>
         <span className="sep">·</span>
-        <span className="seg">18 providers · AWS · Azure · GCP + 15 more</span>
+        <span className="seg">AWS · Azure · GCP · SaaS · AI spend, one bill</span>
         <span className="sep">·</span>
         <span className="seg">
           <a href="/about" style={{color:"var(--accent)",textDecoration:"none",fontWeight:500}}>
@@ -192,7 +194,7 @@ function Hero(){
               Get started free <span className="arr">→</span>
             </a>
           </div>
-          <p className="hero-trustline"><b>18 providers</b> normalized into one · works in any editor · free for solo use</p>
+          <p className="hero-trustline"><b>Clouds, SaaS and AI spend</b> normalized into one bill · works in any editor · free for solo use</p>
         </div>
       </div>
     </header>
@@ -624,7 +626,7 @@ function Architecture({ version }){
             <div className="arch-col">
               <span className="lab">provider apis</span>
               <div className="arch-node">
-                <h4>18 providers</h4>
+                <h4>Every provider</h4>
                 <span className="sub">cost · usage · billing</span>
                 <div className="chips"><span>AWS CE/CUR</span><span>Azure CM</span><span>GCP BQ</span><span>+14</span></div>
               </div>
@@ -692,7 +694,7 @@ function Connectors(){
       <div className="wrap">
         <div className="section-head center">
           <div className="label">One dataset</div>
-          <h2>18 providers,<br/><em>one normalized bill.</em></h2>
+          <h2>Every provider,<br/><em>one normalized bill.</em></h2>
           <p>Every provider lands in the same FOCUS 1.2 records, the open FinOps standard, which nable extends past the clouds to usage-based SaaS and per-model AI spend. That is why one question can span AWS, Snowflake, Datadog and your OpenAI tokens: they all answer in the same shape.</p>
           <div className="focus-chips" aria-hidden="true">
             <span>FOCUS 1.2</span><span>AWS · Azure · GCP</span><span>11 SaaS providers</span><span>AI spend, per model</span><span>tokens preserved</span>
@@ -707,7 +709,7 @@ function Connectors(){
         </div>
       </div>
       <div className="wrap">
-        <p className="logo-band-note">18 providers, one normalized bill · new ones ship monthly</p>
+        <p className="logo-band-note">Clouds, SaaS and AI spend in one normalized bill · new providers ship monthly · <a className="logo-band-link" href="/docs#env-vars" onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'connectors',cta:'provider_setup'}); }}>setup guide for every provider &rarr;</a></p>
       </div>
     </section>
   );
@@ -740,7 +742,7 @@ const BOOK_CALL_LINK = "https://calendar.app.google/2duYBqjLXaTmX5xC8";
 // Comparison rows. value true -> check, false -> dash, string -> mono text.
 const PRICE_ROWS = [
   { label: "Users",                                         dev: "Just you",     pro: "Your team",    startup: "Your org",              ent: "Your org" },
-  { label: "Cost queries, anomalies, rightsizing, 18 providers", dev: true,     pro: true,           startup: true,                    ent: true },
+  { label: "Cost queries, anomalies, rightsizing, every provider", dev: true,   pro: true,           startup: true,                    ent: true },
   { label: "Remediation PRs, alerts, dashboards, Slack bot", dev: false,         pro: true,           startup: true,                    ent: true },
   { label: "Runs",                                          dev: "Your machine", pro: "Your machine", startup: "Your machine",          ent: "Hosted or self-host" },
   { label: "Managed AI",                                    dev: "Your own key", pro: "Your own key", startup: "Your own key",          ent: "Custom" },
@@ -796,7 +798,7 @@ function Pricing(){
 
   const tiers = [
     { key:"dev", name:"Dev", tag:"Ask about your bill", amt:"Free", per:"forever", billed:"No credit card",
-      feats:["Cost, anomaly + rightsizing","LLM spend by model","All 18 providers","Your own LLM key"],
+      feats:["Cost, anomaly + rightsizing","LLM spend by model","Every provider included","Your own LLM key"],
       cta:"Start free", href:"/docs", plan:"dev", ext:false, primary:false, rec:false },
     { key:"pro", name:"Pro", tag:"Find and fix the waste", amt:proPrice, per, billed,
       feats:["Everything in Dev","Remediation PRs + tickets","Alerts, digests, budgets","Hosting add-on available"],
@@ -1168,6 +1170,14 @@ function DemoVideo(){
         </div>
         <div className="demo-video-frame">
           <video className="demo-video" src="/nablepreview.mp4?v=2" autoPlay loop muted playsInline preload="auto" />
+        </div>
+        <div className="postdemo">
+          <span className="postdemo-l">Same answers, on your real bill, in about a minute:</span>
+          <code className="aicost-cmd postdemo-cmd" onClick={()=>{
+            if(navigator.clipboard) navigator.clipboard.writeText("uvx nable");
+            if(window.posthog) posthog.capture('install_copied', {location:'post_demo'});
+          }}>uvx nable</code>
+          <a className="postdemo-docs" href="/docs" onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'post_demo',cta:'setup_guide'}); }}>2-minute setup guide <span className="arr">&rarr;</span></a>
         </div>
       </div>
     </section>

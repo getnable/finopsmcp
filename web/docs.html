@@ -282,6 +282,11 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
   .env-table .ec:last-child{border-bottom:none}
 }
 @media(prefers-reduced-motion:reduce){*{transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+.er:not(.head){cursor:pointer}
+.er:not(.head):hover{background:var(--bg-2, #121214)}
+.er.hl{background:rgba(77,184,212,.07);box-shadow:inset 2px 0 0 #4db8d4}
+.er .copied-flash{color:#4db8d4;font-size:11px;margin-left:8px}
 </style>
 <!-- PostHog -->
 <script>
@@ -952,44 +957,45 @@ compute-optimizer:Get*</code></pre></div>
       <h2 class="sec-h">All environment variables</h2>
       <p class="body">Every variable nable reads. The setup wizard writes these for you; this table is for manual config, CI, and containerized runs.</p>
       <div class="env-table">
+        <p class="body" id="env-vars" style="margin-bottom:10px">Click any row to copy the variable name. Or skip the table entirely: <code class="ic">finops connect</code> detects credentials already on your machine and connects everything it finds.</p>
         <div class="er head"><div class="ec">Variable</div><div class="ec">Provider</div><div class="ec">Required</div></div>
-        <div class="er"><div class="ec k">AWS_ACCESS_KEY_ID</div><div class="ec">AWS</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="aws"><div class="ec k">AWS_ACCESS_KEY_ID</div><div class="ec">AWS</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">AWS_SECRET_ACCESS_KEY</div><div class="ec">AWS</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">AWS_DEFAULT_REGION</div><div class="ec">AWS</div><div class="ec req">Optional</div></div>
-        <div class="er"><div class="ec k">AZURE_TENANT_ID</div><div class="ec">Azure</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="azure"><div class="ec k">AZURE_TENANT_ID</div><div class="ec">Azure</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">AZURE_CLIENT_ID</div><div class="ec">Azure</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">AZURE_CLIENT_SECRET</div><div class="ec">Azure</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">AZURE_SUBSCRIPTION_ID</div><div class="ec">Azure</div><div class="ec req yes">Required</div></div>
-        <div class="er"><div class="ec k">GOOGLE_APPLICATION_CREDENTIALS</div><div class="ec">GCP</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="gcp"><div class="ec k">GOOGLE_APPLICATION_CREDENTIALS</div><div class="ec">GCP</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">GCP_PROJECT_ID</div><div class="ec">GCP</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">GCP_PROJECT_IDS</div><div class="ec">GCP</div><div class="ec req">Optional</div></div>
         <div class="er"><div class="ec k">GCP_BIGQUERY_DATASET</div><div class="ec">GCP</div><div class="ec req">Optional</div></div>
-        <div class="er"><div class="ec k">DATADOG_API_KEY</div><div class="ec">Datadog</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="datadog"><div class="ec k">DATADOG_API_KEY</div><div class="ec">Datadog</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">DATADOG_APP_KEY</div><div class="ec">Datadog</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">DATADOG_SITE</div><div class="ec">Datadog</div><div class="ec req">Optional</div></div>
-        <div class="er"><div class="ec k">SNOWFLAKE_ACCOUNT</div><div class="ec">Snowflake</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="snowflake"><div class="ec k">SNOWFLAKE_ACCOUNT</div><div class="ec">Snowflake</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">SNOWFLAKE_USER</div><div class="ec">Snowflake</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">SNOWFLAKE_PASSWORD</div><div class="ec">Snowflake</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">SNOWFLAKE_WAREHOUSE</div><div class="ec">Snowflake</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">SNOWFLAKE_CREDIT_PRICE</div><div class="ec">Snowflake</div><div class="ec req">Optional</div></div>
         <div class="er"><div class="ec k">SNOWFLAKE_ROLE</div><div class="ec">Snowflake</div><div class="ec req">Optional</div></div>
-        <div class="er"><div class="ec k">STRIPE_SECRET_KEY</div><div class="ec">Stripe</div><div class="ec req yes">Required</div></div>
-        <div class="er"><div class="ec k">TWILIO_ACCOUNT_SID</div><div class="ec">Twilio</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="stripe"><div class="ec k">STRIPE_SECRET_KEY</div><div class="ec">Stripe</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="twilio"><div class="ec k">TWILIO_ACCOUNT_SID</div><div class="ec">Twilio</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">TWILIO_AUTH_TOKEN</div><div class="ec">Twilio</div><div class="ec req yes">Required</div></div>
-        <div class="er"><div class="ec k">MONGODB_ATLAS_PUBLIC_KEY</div><div class="ec">MongoDB</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="mongodb"><div class="ec k">MONGODB_ATLAS_PUBLIC_KEY</div><div class="ec">MongoDB</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">MONGODB_ATLAS_PRIVATE_KEY</div><div class="ec">MongoDB</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">MONGODB_ATLAS_ORG_IDS</div><div class="ec">MongoDB</div><div class="ec req">Optional</div></div>
-        <div class="er"><div class="ec k">CLOUDFLARE_API_TOKEN</div><div class="ec">Cloudflare</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="cloudflare"><div class="ec k">CLOUDFLARE_API_TOKEN</div><div class="ec">Cloudflare</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">CLOUDFLARE_ACCOUNT_ID</div><div class="ec">Cloudflare</div><div class="ec req">Optional</div></div>
-        <div class="er"><div class="ec k">VERCEL_TOKEN</div><div class="ec">Vercel</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="vercel"><div class="ec k">VERCEL_TOKEN</div><div class="ec">Vercel</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">VERCEL_TEAM_ID</div><div class="ec">Vercel</div><div class="ec req">Optional</div></div>
-        <div class="er"><div class="ec k">NEW_RELIC_API_KEY</div><div class="ec">New Relic</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="new-relic"><div class="ec k">NEW_RELIC_API_KEY</div><div class="ec">New Relic</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">NEW_RELIC_ACCOUNT_ID</div><div class="ec">New Relic</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">NEW_RELIC_INGEST_PRICE_PER_GB</div><div class="ec">New Relic</div><div class="ec req">Optional</div></div>
-        <div class="er"><div class="ec k">LANGFUSE_PUBLIC_KEY</div><div class="ec">Langfuse</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="langfuse"><div class="ec k">LANGFUSE_PUBLIC_KEY</div><div class="ec">Langfuse</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">LANGFUSE_SECRET_KEY</div><div class="ec">Langfuse</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">LANGFUSE_HOST</div><div class="ec">Langfuse</div><div class="ec req">Optional</div></div>
-        <div class="er"><div class="ec k">DATABRICKS_HOST</div><div class="ec">Databricks</div><div class="ec req yes">Required</div></div>
+        <div class="er" id="databricks"><div class="ec k">DATABRICKS_HOST</div><div class="ec">Databricks</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">DATABRICKS_TOKEN</div><div class="ec">Databricks</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">DATABRICKS_ACCOUNT_ID</div><div class="ec">Databricks</div><div class="ec req">Optional</div></div>
         <div class="er"><div class="ec k">DATABRICKS_DBU_PRICE</div><div class="ec">Databricks</div><div class="ec req">Optional</div></div>
@@ -1099,5 +1105,39 @@ compute-optimizer:Get*</code></pre></div>
 </div>
 
 <script src="/docs-app.js"></script>
+
+<script>
+(function(){
+  // env rows: click to copy the variable name (they looked interactive; now they are)
+  document.querySelectorAll('.er:not(.head)').forEach(function(row){
+    row.title = 'Click to copy';
+    row.addEventListener('click', function(){
+      var k = row.querySelector('.ec.k');
+      if(!k || !navigator.clipboard) return;
+      navigator.clipboard.writeText(k.textContent.trim());
+      var flash = document.createElement('span');
+      flash.className = 'copied-flash'; flash.textContent = 'copied';
+      k.appendChild(flash); setTimeout(function(){ flash.remove(); }, 1200);
+      if(window.posthog) posthog.capture('env_var_copied', {variable: k.textContent.trim().replace('copied','')});
+    });
+  });
+  // provider hash (e.g. /docs#vercel): scroll + highlight that provider's rows
+  function highlight(){
+    var h = (location.hash || '').slice(1);
+    if(!h) return;
+    var anchor = document.getElementById(h);
+    if(!anchor || !anchor.classList.contains('er')) return;
+    var provider = (anchor.querySelectorAll('.ec')[1] || {}).textContent;
+    document.querySelectorAll('.er.hl').forEach(function(r){ r.classList.remove('hl'); });
+    document.querySelectorAll('.er:not(.head)').forEach(function(r){
+      var p = (r.querySelectorAll('.ec')[1] || {}).textContent;
+      if(p === provider) r.classList.add('hl');
+    });
+    anchor.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+  window.addEventListener('hashchange', highlight);
+  highlight();
+})();
+</script>
 </body>
 </html>

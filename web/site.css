@@ -394,6 +394,14 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .aicost-cta-l{display:block;font-size:13px;color:var(--fg-2);margin-bottom:12px}
 .aicost-cmd{display:block;font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;color:var(--accent);background:var(--bg-2);border:1px solid var(--line-2);border-radius:var(--r-md);padding:12px 14px;cursor:pointer;transition:border-color .18s,background .18s;word-break:break-all}
 .aicost-cmd:hover{border-color:var(--accent-dim);background:#12171a}
+/* post-demo conversion band: the demo is the most-viewed section, give it an exit */
+.postdemo{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:14px;margin-top:34px}
+.postdemo-l{color:var(--fg-2);font-size:15px}
+.postdemo-cmd{display:inline-block;padding:10px 16px}
+.postdemo-docs{color:var(--accent);font-size:14px;text-decoration:none;transition:color .18s}
+.postdemo-docs:hover{color:var(--fg)}
+.logo-band-link{color:var(--accent);text-decoration:none}
+.logo-band-link:hover{color:var(--fg)}
 @media(max-width:880px){.arch-row{grid-template-columns:1fr;gap:12px}.arch-arrow{transform:rotate(90deg);padding:0;min-height:32px}.arch-arrow .line{min-width:40px;width:40px}.arch-col{padding:8px 18px}}
 
 /* question marquee */
