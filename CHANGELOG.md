@@ -2,6 +2,16 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.119
+
+Hosting credits are wired end to end on the software side. A Stripe credit
+purchase now records a grant on your customer record, and the new `finops
+credits` command applies it to the instance: grants stack within the month,
+expire at the period roll, and arm the managed-AI meter on their own. The
+dashboard warns in the chat itself once 80% of the month's allowance is used,
+so the stop at zero is never a surprise. Upgrade links from in-product nudges
+now carry attribution tags so we can see which moments actually convert.
+
 ## 0.8.118
 
 Numbers you can defend. The Textract non-prod finding now headlines the
