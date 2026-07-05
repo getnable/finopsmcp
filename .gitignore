@@ -122,3 +122,4 @@ stripe-env-helper.mjs
 .vercel
 .env*
 internal/
+shim/dist/

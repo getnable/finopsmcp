@@ -878,3 +878,13 @@ def run_welcome_flow(demo: bool = False) -> None:
     _line(f"  Docs    →  {link('https://getnable.com/docs')}")
     _line(f"  Support →  {cyan('hello@getnable.com')}")
     _blank()
+    # Staleness self-check, capped at 2s and silent on any failure. Resolver
+    # skew once served users a five-week-old build with nothing telling them.
+    try:
+        from .update_check import staleness_note
+        _stale = staleness_note()
+        if _stale:
+            _line(amber("  " + _stale))
+            _blank()
+    except Exception:
+        pass

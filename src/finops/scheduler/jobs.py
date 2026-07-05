@@ -74,7 +74,17 @@ def _acquire_scheduler_lock() -> bool:
         import fcntl  # unix-only; Windows raises ImportError -> fail open below
         import hashlib
         import tempfile
-        ident = url or os.environ.get("FINOPS_DB_PATH", "default")
+        # Key the lock on the RESOLVED database location. The old fallback used a
+        # raw env var that is usually unset, so every SQLite instance on a host
+        # shared one "default" lock and all but one silently lost their
+        # digest/anomaly jobs even when they used different database files.
+        ident = url or os.environ.get("FINOPS_DB_PATH", "")
+        if not ident:
+            try:
+                from ..storage.db import data_dir
+                ident = str(data_dir() / "finops.db")
+            except Exception:
+                ident = "default"
         key = hashlib.sha256(ident.encode()).hexdigest()[:16]
         path = os.path.join(tempfile.gettempdir(), f"nable-sched-{key}.lock")
         fh = open(path, "w")

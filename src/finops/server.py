@@ -7440,6 +7440,20 @@ def main() -> None:
     # scheduled job at startup and are meaningless to end users.
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
+    # Staleness self-check (2s cap, airgap-aware, stderr only so the MCP stdio
+    # stream stays clean). Dormant editor installs restart the server often;
+    # this is the one channel that reliably reaches them.
+    def _staleness_log():
+        try:
+            from .update_check import staleness_note
+            note = staleness_note()
+            if note:
+                logging.getLogger("finops").warning(note)
+        except Exception:
+            pass
+    import threading as _threading
+    _threading.Thread(target=_staleness_log, daemon=True).start()
+
     # Resolve and cache the calling user's identity at startup.
     # In single-user mode this is a no-op. In shared mode it validates
     # FINOPS_API_KEY and attaches the Identity to the main thread.

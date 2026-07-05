@@ -1,0 +1,43 @@
+name: Publish nable shim (PyPI)
+
+# The `nable` package on PyPI is a metadata-only brand alias for finops-mcp
+# (see shim/pyproject.toml). It changes rarely, only when its Python floor or
+# dependency floor moves, so it publishes on its own tag.
+#
+# ONE-TIME HUMAN STEP before the first CI publish: on pypi.org, project `nable`
+# -> Settings -> Publishing -> add a trusted publisher for this repo
+# (chaandannn/finopsmcp, workflow publish-shim.yml, environment blank).
+# Until that click happens, publish manually from shim/ with:  uv publish
+on:
+  push:
+    tags:
+      - "shim-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: Build and publish shim to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # PyPI trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: pip install build twine
+      - name: Build distributions
+        run: python -m build shim/ --outdir shim/dist/
+      - name: Check distributions
+        run: twine check shim/dist/*
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          packages-dir: shim/dist/
+          skip-existing: true
