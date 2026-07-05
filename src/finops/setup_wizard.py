@@ -1803,6 +1803,8 @@ def _run_guard(parsed) -> None:
     print()
     print(dim("  Install:  finops guard install            (this project)"))
     print(dim("            finops guard install --global    (all projects)"))
+    print(dim("  The hook is Claude Code. Other MCP agents (Cursor, etc.) get the same"))
+    print(dim("  gate as a tool: the agent calls check_action_policy before acting."))
     print()
 
 

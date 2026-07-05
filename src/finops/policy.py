@@ -21,6 +21,12 @@ GATE_ESCALATE = "escalate"  # one-way door or over budget: a human must review f
 TWO_WAY_DOORS = {
     "rightsizing", "tag_fix", "gp2_to_gp3", "graviton_migration",
     "spot_migration", "stop_idle", "schedule_nonprod", "ticket",
+    # Reversible infrastructure mutations. These MUST be known here: the shell
+    # guard classifies `terraform apply` as infra_apply and allows it by default,
+    # so the MCP gate has to agree or the two halves contradict each other (the
+    # gate used to BLOCK terraform_apply as "unknown" while the guard waved the
+    # same command through). Budget/threshold escalation still applies.
+    "infra_apply", "terraform_apply", "helm_upgrade", "kubectl_apply",
 }
 ONE_WAY_DOORS = {
     "idle_cleanup", "delete_resource", "terminate_instance",

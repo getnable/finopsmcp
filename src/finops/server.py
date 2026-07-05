@@ -8449,7 +8449,10 @@ async def estimate_change_cost(
             return {"error": "Describe the change: pass terraform_plan_json / "
                              "terraform_plan_file / tf_dir, helm_diff, or monthly_delta_usd."}
     except Exception as e:
-        return {"error": f"Could not estimate the change cost: {e}"}
+        return {"error": f"Could not estimate the change cost: {e}",
+                "hint": ("terraform_plan_json must be the JSON from `terraform show -json "
+                         "<planfile>` (run `terraform plan -out=tf.plan` first). Or pass "
+                         "tf_dir and nable runs the plan itself.")}
 
     # 2. Budget to check against (first active, or by name). Best-effort: no DB / no
     #    budgets configured falls through to a "no_budget" verdict, never an error.

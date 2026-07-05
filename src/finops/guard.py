@@ -37,6 +37,16 @@ from .policy import GATE_ALLOW, GATE_BLOCK, GATE_ESCALATE, evaluate_action_gate
 _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bterraform\s+(?:\S+\s+)*destroy\b", "delete_resource"),
     (r"\btofu\s+(?:\S+\s+)*destroy\b", "delete_resource"),
+    # destroy hidden behind the apply verb: `terraform apply -destroy` is destroy.
+    # Must sit in the one-way list (checked first) or the two-way apply pattern
+    # would classify it as a reversible mutation.
+    (r"\b(?:terraform|tofu)\s+(?:\S+\s+)*apply\b[^|;&]*\s-destroy\b", "delete_resource"),
+    (r"\bpulumi\s+(?:\S+\s+)*destroy\b", "delete_resource"),
+    (r"\beksctl\s+delete\b", "delete_resource"),
+    # bucket/object wipes: `aws s3 rb` removes a bucket, `aws s3 rm --recursive`
+    # empties one; gsutil is the GCP equivalent. Data deletion is a one-way door.
+    (r"\baws\s+s3\s+r[mb]\b", "delete_resource"),
+    (r"\bgsutil\s+(?:-\S+\s+)*r[mb]\b", "delete_resource"),
     (r"\bhelm\s+(?:uninstall|delete)\b", "delete_resource"),
     (r"\bkubectl\s+(?:\S+\s+)*delete\b", "delete_resource"),
     (r"\baws\s+ec2\s+terminate-instances\b", "terminate_instance"),
@@ -152,7 +162,25 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
 
 # ── Installer ──────────────────────────────────────────────────────────────────
 
+# Marker used to find our hook in settings regardless of how the command is
+# prefixed (bare, absolute path, or uvx wrapper).
+_HOOK_MARKER = "guard hook"
 _HOOK_CMD = "finops guard hook"
+
+
+def _hook_command() -> str:
+    """The command Claude Code should run for the hook, resolved to something
+    that exists OUTSIDE this process. A uvx user has no `finops` on PATH, so the
+    bare command would fail with command-not-found on every single Bash call and
+    spam the agent with hook errors. Prefer a persistent binary; fall back to a
+    uvx invocation (uv is guaranteed present for anyone who installed via uvx)."""
+    import shutil
+    found = shutil.which("finops")
+    if found:
+        # Quote in case the path has spaces (framework installs on macOS do not,
+        # but user venvs can).
+        return f'"{found}" guard hook' if " " in found else f"{found} guard hook"
+    return "uvx --from finops-mcp finops guard hook"
 
 
 def _settings_path(global_scope: bool) -> Path:
@@ -178,7 +206,8 @@ def is_installed(path: Path) -> bool:
         return False
     for entry in (s.get("hooks", {}).get("PreToolUse") or []):
         for h in entry.get("hooks", []):
-            if _HOOK_CMD in (h.get("command") or ""):
+            cmd = h.get("command") or ""
+            if _HOOK_MARKER in cmd and "finops" in cmd:
                 return True
     return False
 
@@ -191,9 +220,13 @@ def install(global_scope: bool = False) -> Path:
         return path
     hooks = settings.setdefault("hooks", {})
     pre = hooks.setdefault("PreToolUse", [])
+    cmd = _hook_command()
     pre.append({
         "matcher": "Bash",
-        "hooks": [{"type": "command", "command": _HOOK_CMD, "timeout": 10}],
+        # uvx resolves an environment per call; give the cold-cache case room.
+        # Timeouts fail open in Claude Code, so a slow first call cannot block.
+        "hooks": [{"type": "command", "command": cmd,
+                   "timeout": 30 if cmd.startswith("uvx") else 10}],
     })
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2) + "\n")
@@ -211,7 +244,8 @@ def uninstall(global_scope: bool = False) -> bool:
     kept = []
     for entry in pre:
         inner = [h for h in entry.get("hooks", [])
-                 if _HOOK_CMD not in (h.get("command") or "")]
+                 if not (_HOOK_MARKER in (h.get("command") or "")
+                         and "finops" in (h.get("command") or ""))]
         if len(inner) != len(entry.get("hooks", [])):
             removed = True
         if inner or not entry.get("hooks"):
