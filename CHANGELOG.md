@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.122
+
+nable now tells you when you are running an old build. A capped, airgap-aware
+version check surfaces one line in the welcome flow and the server startup log
+when a newer release exists, ending a silent-staleness trap where the uvx
+launcher could resolve a five-week-old build on Python 3.10 machines (the
+launcher package is fixed too; it now requires Python 3.11+ like the product).
+Also fixes a scheduler lock collision where two instances with different
+databases on one machine shared a lock and one silently stopped sending
+digests and anomaly alerts.
+
 ## 0.8.121
 
 The agent guardrail got a hardening pass. It now catches destroy hidden behind
