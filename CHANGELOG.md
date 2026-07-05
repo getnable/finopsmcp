@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.118
+
+Numbers you can defend. The Textract non-prod finding now headlines the
+conservative floor of its savings range instead of the best case, with the full
+range stated alongside, and that same floor flows through the dashboard, the
+savings ledger, and upgrade math. Slack/Teams alerts now page on cost spikes;
+routine cost drops are recorded and queryable but no longer page (a
+high-severity drop still does, since something may have stopped running;
+FINOPS_ALERT_DROPS tunes this). Anomaly summaries separate spikes from drops.
+And scan_waste_patterns, benchmark_costs, and forecast_costs no longer require
+an account id; nable resolves the connected account automatically.
+
 ## 0.8.117
 
 Every tool is now fully documented. All 183 MCP tools describe their parameters
