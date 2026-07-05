@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.120
+
+Faster to value, lighter in your context window. Anomaly detection now works on
+day one: nable seeds its baselines from your Cost Explorer history instead of
+waiting a week for snapshots. After your first bill renders, nable suggests
+three questions tailored to your account's actual shape. A new
+nable_setup_status tool lets your AI agent finish your setup for you, without a
+secret ever passing through chat. And 27 rarely-used tools no longer load by
+default, cutting roughly 25k tokens of tool definitions from every session
+(their capabilities remain in the full audit; FINOPS_ALL_TOOLS=1 restores
+them).
+
 ## 0.8.119
 
 Hosting credits are wired end to end on the software side. A Stripe credit
