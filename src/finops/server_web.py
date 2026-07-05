@@ -2373,13 +2373,28 @@ button:hover{{filter:brightness(1.1)}}
                 side = result.side_effects or []
                 cards = [se["card"] for se in side
                          if isinstance(se, dict) and se.get("type") == "cost_card" and se.get("card")]
+                # Bill-shock guard: past 80% of the month's managed-AI allowance,
+                # say so in the answer itself. The block at zero must never be the
+                # first the user hears about the meter.
+                _answer = result.answer
+                try:
+                    _bs2 = credits.budget_status()
+                    if _bs2.get("low_balance"):
+                        _answer = (
+                            f"{_answer}\n\n(Heads-up: about "
+                            f"${_bs2.get('remaining', 0):,.0f} of managed AI is left "
+                            f"this month, {_bs2.get('pct_used', 0):.0f}% used. Add "
+                            f"credits or bring your own key to avoid an interruption.)"
+                        )
+                except Exception:
+                    pass
                 record_managed_ai_usage(
                     surface="sandbox_chat", tier=decision.tier, model=decision.model,
                     input_tokens=getattr(result, "input_tokens", 0),
                     output_tokens=getattr(result, "output_tokens", 0),
                 )
                 self._send(200, "application/json",
-                           json.dumps({"answer": result.answer, "cards": cards}, default=str).encode())
+                           json.dumps({"answer": _answer, "cards": cards}, default=str).encode())
             except Exception as exc:
                 log.error("sandbox chat failed: %s", exc, exc_info=True)
                 self._send(200, "application/json", json.dumps({"answer": None, "error": "agent error"}).encode())

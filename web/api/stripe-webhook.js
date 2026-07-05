@@ -109,6 +109,92 @@ function planForAmount(amount) {
   return amount >= TEAM_MIN_CENTS ? "team" : "pro";
 }
 
+// ─── Hosting-credit purchases ────────────────────────────────────────────────
+// Credits are the hosting add-on: a one-time or recurring purchase that funds
+// the managed-AI meter on the customer's single-tenant box. Env format maps a
+// Stripe id to the managed-AI allowance GRANTED in USD (list price), which is
+// where the ~50% margin is encoded (e.g. a $200 purchase granting $100):
+//   STRIPE_CREDIT_PAYMENT_LINKS = "plink_abc:100,plink_def:2000"
+//   STRIPE_CREDIT_PRICE_IDS     = "price_abc:100,price_def:2000"
+// A credit purchase does NOT mint a license key. The grant lands on the Stripe
+// customer's metadata (the same zero-infra channel hosting.js uses); the box
+// applies it with `finops credits grant <usd> --note <ref>` (concierge or a
+// fleet SSM command today, automated pull later).
+function _creditMap(envVar) {
+  const map = new Map();
+  for (const pair of (process.env[envVar] || "").split(",")) {
+    const [id, usd] = pair.split(":").map((x) => (x || "").trim());
+    const v = parseFloat(usd);
+    if (id && Number.isFinite(v) && v > 0) map.set(id, v);
+  }
+  return map;
+}
+
+function creditUsdForEvent(obj, isInvoice) {
+  if (!isInvoice) {
+    const link = obj.payment_link || null;
+    const map = _creditMap("STRIPE_CREDIT_PAYMENT_LINKS");
+    if (link && map.has(link)) return map.get(link);
+    return null;
+  }
+  const map = _creditMap("STRIPE_CREDIT_PRICE_IDS");
+  const lines = obj.lines?.data || [];
+  for (const l of lines) {
+    const id = l.price?.id || l.pricing?.price_details?.price || null;
+    if (id && map.has(id)) return map.get(id);
+  }
+  return null;
+}
+
+const STRIPE_API = "https://api.stripe.com/v1";
+
+async function _stripeReq(path, opts = {}) {
+  const r = await fetch(`${STRIPE_API}${path}`, {
+    ...opts,
+    headers: {
+      Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...(opts.headers || {}),
+    },
+  });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.error?.message || `stripe ${r.status}`);
+  return body;
+}
+
+async function recordCreditGrant(obj, email, usd, event) {
+  // Resolve the customer: the session's customer id, else look up (or create)
+  // by email so a link bought without a customer object still lands somewhere
+  // the admin view and the box can find it.
+  let customerId = typeof obj.customer === "string" ? obj.customer : obj.customer?.id;
+  if (!customerId) {
+    const found = await _stripeReq(`/customers?email=${encodeURIComponent(email)}&limit=1`);
+    customerId = found.data?.[0]?.id;
+  }
+  if (!customerId) {
+    const created = await _stripeReq(`/customers`, {
+      method: "POST",
+      body: new URLSearchParams({ email }).toString(),
+    });
+    customerId = created.id;
+  }
+  // Read-modify-write on metadata. Same-event duplicates are already blocked by
+  // the KV dedup above; concurrent DIFFERENT purchases for one customer are rare
+  // enough at this stage that last-write-wins on the running total is acceptable.
+  const customer = await _stripeReq(`/customers/${customerId}`);
+  const period = new Date().toISOString().slice(0, 7); // YYYY-MM (UTC)
+  const key = `hosting_credit_usd_${period}`;
+  const prev = parseFloat(customer.metadata?.[key] || "0") || 0;
+  const params = new URLSearchParams();
+  params.set(`metadata[${key}]`, String(Math.round((prev + usd) * 100) / 100));
+  params.set(
+    `metadata[hosting_credit_last]`,
+    `$${usd} on ${new Date().toISOString().slice(0, 10)} (${event.id})`
+  );
+  await _stripeReq(`/customers/${customerId}`, { method: "POST", body: params.toString() });
+  return customerId;
+}
+
 // Renewal invoices carry price ids, not payment links. Map via
 //   STRIPE_TEAM_PRICE_IDS / STRIPE_PRO_PRICE_IDS, comma-separated price_...
 // ids (Stripe Dashboard → Products → price). Falls back to amount.
@@ -387,6 +473,25 @@ export default async function handler(req, res) {
   if (!email) {
     console.error(`No email on ${event.type} ${obj.id}`);
     return res.status(200).json({ received: true, warning: "no email found" });
+  }
+
+  // 3b. Hosting-credit purchase: record the grant, mint no license key.
+  const creditUsd = creditUsdForEvent(obj, isInvoice);
+  if (creditUsd != null) {
+    try {
+      const customerId = await recordCreditGrant(obj, email, creditUsd, event);
+      console.log(
+        `Hosting credit grant: $${creditUsd} managed AI for ${email} ` +
+        `(customer=${customerId}, event=${event.type}, paid=${obj.amount_total ?? obj.amount_paid})`
+      );
+      return res.status(200).json({ received: true, credit_grant_usd: creditUsd });
+    } catch (err) {
+      // 500 so Stripe retries, and undo the dedup marks so the retry is processed.
+      processedEvents.delete(event.id);
+      await _kvUnmark(event.id);
+      console.error(`Credit grant failed for ${email}:`, err.message);
+      return res.status(500).json({ error: err.message });
+    }
   }
 
   // 4. Generate key + send email

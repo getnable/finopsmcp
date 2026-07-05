@@ -1806,6 +1806,50 @@ def _run_guard(parsed) -> None:
     print()
 
 
+def _run_credits(parsed) -> None:
+    """`finops credits` - the box-side half of the hosting-credit purchase flow.
+
+    A Stripe purchase lands as metadata on the customer (webhook); a human or a
+    fleet SSM command applies it here with `finops credits grant <usd> --note
+    <invoice>`. Additive within the month, use-it-or-lose-it at the roll.
+    `budget` sets the recurring monthly allowance instead. `show` prints the
+    meter the dashboard uses.
+    """
+    from .billing import credits as _credits
+    action = getattr(parsed, "action", "show")
+    usd = getattr(parsed, "usd", None)
+    if action == "grant":
+        if not usd or usd <= 0:
+            print("Usage: finops credits grant <usd> [--note <reference>]")
+            return
+        st = _credits.add_grant(usd, source="cli", note=getattr(parsed, "note", ""))
+        print(f"Granted ${usd:,.2f} of managed AI for {st['period']}.")
+    elif action == "budget":
+        _credits.set_monthly_budget(usd)
+        if usd and usd > 0:
+            print(f"Monthly managed-AI budget set to ${usd:,.2f}.")
+        else:
+            print("Monthly managed-AI budget cleared (unmetered).")
+    st = _credits.budget_status()
+    if not st.get("metered"):
+        print("Unmetered: no budget or grants set. Usage is tracked, nothing is blocked.")
+        print(f"  spent this period ({st['period']}): ${st['spent']:,.4f} across {st['turns']} turn(s)")
+        return
+    print(f"Managed AI, {st['period']}:")
+    print(f"  total     ${st['total']:,.2f}"
+          + (f"  (budget ${st['budget']:,.2f} + grants ${st['grants']:,.2f})" if st.get("grants") else ""))
+    print(f"  spent     ${st['spent']:,.2f}  ({st['pct_used']:.0f}% used, {st['turns']} turns)")
+    print(f"  remaining ${st['remaining']:,.2f}")
+    if st.get("low_balance"):
+        print("  ⚠ past 80% of this month's allowance.")
+    log_entries = _credits.grant_log()
+    if log_entries:
+        print("  grants this period:")
+        for g in log_entries:
+            note = f" ({g['note']})" if g.get("note") else ""
+            print(f"    +${g['usd']:,.2f} {g['source']}{note} at {g['at'][:16]}")
+
+
 def _print_tools_cheatsheet() -> None:
     """Print a concise 'what you can ask nable' cheat-sheet.
 
@@ -2009,6 +2053,11 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("claude",       help="Register nable in Claude Desktop config")
     up_p = sub.add_parser("upgrade", help="Upgrade nable: cache the new version, then move the config pin")
     up_p.add_argument("version", nargs="?", default="", help="Target version (default: latest on PyPI)")
+    cr_p = sub.add_parser("credits", help="Managed-AI credit balance for this instance (show / grant / budget)")
+    cr_p.add_argument("action", nargs="?", default="show", choices=["show", "grant", "budget"],
+                      help="show = balance, grant = add a purchased top-up, budget = set the monthly allowance")
+    cr_p.add_argument("usd", nargs="?", type=float, default=None, help="Dollar amount for grant/budget")
+    cr_p.add_argument("--note", default="", help="Reference for a grant (e.g. Stripe invoice id)")
     sub.add_parser("aws-cur",      help="Deploy AWS CUR pipeline via CloudFormation")
     config_p = sub.add_parser("config", help="Configure user preferences (persona, etc.)")
     config_p.add_argument("--persona", metavar="ROLE", default="",
@@ -2291,6 +2340,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "connect":
         from .setup_scan import run_connect_command
         run_connect_command()
+        return
+    elif parsed.cmd == "credits":
+        _run_credits(parsed)
         return
     elif parsed.cmd == "tools":
         _print_tools_cheatsheet()

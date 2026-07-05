@@ -444,7 +444,19 @@ async def _resolve_account_id(account_id: str | None) -> str:
     return ""
 
 
-def _team_nudge(message: str) -> str | None:
+def _nudge_url(context: str) -> str:
+    """The upgrade URL tagged with which moment produced the nudge, so a checkout
+    click in PostHog can be attributed to it. utm params go BEFORE the #pricing
+    fragment or the fragment eats them."""
+    if not context:
+        return _UPGRADE_URL
+    base, _, frag = _UPGRADE_URL.partition("#")
+    sep = "&" if "?" in base else "?"
+    tagged = f"{base}{sep}utm_source=nable&utm_medium=nudge&utm_campaign={context}"
+    return f"{tagged}#{frag}" if frag else tagged
+
+
+def _team_nudge(message: str, context: str = "") -> str | None:
     """
     Return a contextual upgrade nudge for free-tier users only.
     Returns None for trial and pro users so the message never appears for paying customers.
@@ -452,6 +464,9 @@ def _team_nudge(message: str) -> str | None:
     When nable has already identified enough savings to dwarf the $25/mo plan, lead
     with that real number. The ROI is the most honest upgrade argument there is, and
     it only appears when the multiple is genuinely compelling (>= 1x the plan price).
+
+    context tags the moment ("anomalies", "aws_audit", ...): it rides the URL as
+    utm params and the impression event, so nudge -> checkout is attributable.
     """
     try:
         if get_status().mode != "free":
@@ -465,16 +480,18 @@ def _team_nudge(message: str) -> str | None:
             _tel._send_event(_tel._get_install_id(), "upgrade_nudge_shown", {
                 "savings_found_monthly": round(found, 2),
                 "roi_multiple": round(found / _TEAM_MONTHLY_USD, 1) if found else 0,
+                "context": context or "generic",
             })
         except Exception:
             pass
+        url = _nudge_url(context)
         if found >= _TEAM_MONTHLY_USD:
             return (
                 f"nable has already found ${found:,.0f}/mo in savings here, "
                 f"{found / _TEAM_MONTHLY_USD:.0f}x the ${_TEAM_MONTHLY_USD:.0f}/mo Team plan. "
-                f"{message} {_UPGRADE_URL}"
+                f"{message} {url}"
             )
-        return f"{message} {_UPGRADE_URL}"
+        return f"{message} {url}"
     except Exception:
         return None
 
@@ -916,7 +933,7 @@ async def get_cost_summary(
         nudge = _team_nudge(
             "To get automatic Slack alerts when spend spikes and auto-create tickets "
             "for waste findings, upgrade to Team:"
-        )
+        , context="cost_summary")
         if nudge:
             result["_tip"] = nudge
 
@@ -1736,7 +1753,7 @@ async def get_anomalies(
             "To get Slack or Teams alerts the moment a cost spike fires so you catch"
             " it live, upgrade to Team:"
         )
-    nudge = _team_nudge(nudge_msg)
+    nudge = _team_nudge(nudge_msg, context="anomalies")
     if nudge:
         result["_upgrade"] = nudge
 
@@ -2160,7 +2177,7 @@ async def get_rightsizing_recommendations(
                 f"You have {count} rightsizing opportunit{'ies' if count != 1 else 'y'} "
                 f"worth ${savings:,.0f}/mo. To auto-create Jira, Linear, or GitHub tickets "
                 f"so these actually get fixed, upgrade to Team:"
-            )
+            , context="rightsizing_recommendations")
             if nudge:
                 result["_upgrade"] = nudge
 
@@ -3446,7 +3463,7 @@ async def audit_aws_waste(
             nudge = _team_nudge(
                 f"To auto-create Jira, Linear, or GitHub tickets for these {findings} "
                 f"findings so your team actually acts on them, upgrade to Team:"
-            )
+            , context="aws_waste")
             if nudge:
                 report["_upgrade"] = nudge
 
@@ -3527,7 +3544,7 @@ async def audit_gcp_waste(
             nudge = _team_nudge(
                 f"To auto-create Jira, Linear, or GitHub tickets for these {n} GCP "
                 f"findings so your team actually acts on them, upgrade to Team:"
-            )
+            , context="gcp_waste")
             if nudge:
                 report["_upgrade"] = nudge
 
@@ -3607,7 +3624,7 @@ async def get_gcp_recommendations(
             nudge = _team_nudge(
                 f"To auto-create Jira, Linear, or GitHub tickets for these {n} GCP "
                 f"recommendations so your team acts on them, upgrade to Team:"
-            )
+            , context="gcp_recommendations")
             if nudge:
                 report["_upgrade"] = nudge
 
@@ -10751,7 +10768,7 @@ async def identify_nonprod_scheduling_opportunities(
         nudge = _team_nudge(
             f"To auto-create Jira, Linear, or GitHub tickets for these {total} "
             f"scheduling opportunities, upgrade to Team:"
-        )
+        , context="identify_nonprod_scheduling_opportunities")
         if nudge:
             lines.append("")
             lines.append(nudge)
@@ -10881,7 +10898,7 @@ async def audit_rds_manual_snapshots(
         nudge = _team_nudge(
             f"To auto-create Jira, Linear, or GitHub tickets for these snapshot findings, "
             f"upgrade to Team:"
-        )
+        , context="rds_manual_snapshots")
         if nudge:
             lines.append("")
             lines.append(nudge)
@@ -11245,7 +11262,7 @@ async def scan_graviton_migration_opportunities(
             f"opportunit{'ies' if len(candidates) != 1 else 'y'} "
             f"worth ${total_savings:,.0f}/mo. To auto-create Jira, Linear, or GitHub "
             f"tickets so these actually get fixed, upgrade to Team:"
-        )
+        , context="scan_graviton_migration_opportunities")
         if nudge:
             lines += ["", nudge]
 
@@ -11330,7 +11347,7 @@ async def recommend_spot_adoption(
             f"opportunit{'ies' if len(recommended) != 1 else 'y'} "
             f"worth ${total_savings:,.0f}/mo. To auto-create Jira, Linear, or GitHub "
             f"tickets so these actually get fixed, upgrade to Team:"
-        )
+        , context="recommend_spot_adoption")
         if nudge:
             lines += ["", nudge]
 

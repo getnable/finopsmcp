@@ -123,15 +123,19 @@ def _advance(d: dict, period: str) -> bool:
         budget = _effective_budget(d)
         spent = float(d.get("spent_usd") or 0.0)
         roll = float(d.get("rollover_usd") or 0.0)
+        grants = float(d.get("grants_usd") or 0.0)
         d.setdefault("history", {})[cur] = {
             "spent_usd": round(spent, 6),
             "budget_usd": budget,
             "rollover_usd": round(roll, 6),
+            "grants_usd": round(grants, 6),
         }
         # Use-it-or-lose-it: the monthly allowance does not carry forward. The
-        # prior period's spend and budget are preserved in history above; the
-        # live rollover always resets to zero.
+        # prior period's spend, budget, and purchased grants are preserved in
+        # history above; the live rollover and grants reset to zero.
         d["rollover_usd"] = 0.0
+        d["grants_usd"] = 0.0
+        d["grant_log"] = []
     d["current_period"] = period
     d["spent_usd"] = 0.0
     d["turns"] = 0
@@ -169,20 +173,29 @@ def budget_status(period: str | None = None) -> dict:
             _save(d)
         spent = round(float(d.get("spent_usd") or 0.0), 6)
         roll = round(float(d.get("rollover_usd") or 0.0), 6)
+        grants = round(float(d.get("grants_usd") or 0.0), 6)
         budget = _effective_budget(d)
         turns = int(d.get("turns") or 0)
-    metered = budget is not None
-    total = round(budget + roll, 6) if metered else None
+    # A purchased grant meters the instance even without a configured budget:
+    # the customer paid for a specific allowance, so the clamp must be armed.
+    metered = budget is not None or grants > 0
+    total = round((budget or 0.0) + roll + grants, 6) if metered else None
     remaining = round(max(0.0, total - spent), 6) if metered else None
+    pct_used = round(min(100.0, spent / total * 100.0), 1) if metered and total else 0.0
     return {
         "period": p,
         "spent": spent,
         "budget": budget,
         "rollover": roll,
+        "grants": grants,
         "total": total,
         "remaining": remaining,
         "turns": turns,
         "metered": metered,
+        # Bill-shock guard: the block at zero already exists; the warning at 80%
+        # is what prevents the block from ever being a surprise.
+        "pct_used": pct_used,
+        "low_balance": bool(metered and pct_used >= 80.0 and (remaining or 0) > 0),
     }
 
 
@@ -198,6 +211,42 @@ def set_monthly_budget(usd: float | None) -> None:
             v = None
         d["budget_usd"] = v if (v is not None and v > 0) else None
         _save(d)
+
+
+def add_grant(usd: float, source: str = "manual", note: str = "") -> dict:
+    """Add a purchased credit grant to the CURRENT period. Additive, unlike
+    set_monthly_budget: two purchases in a month stack. This is the box-side
+    landing point for a Stripe hosting-credit purchase; the concierge (or a
+    fleet SSM command) applies it with `finops credits grant <usd>`. Grants are
+    use-it-or-lose-it and reset at the period roll, matching the pricing model.
+    Returns the updated budget_status."""
+    try:
+        v = float(usd)
+    except (TypeError, ValueError):
+        v = 0.0
+    if v <= 0:
+        return budget_status()
+    with _LOCK:
+        d = _load()
+        _advance(d, _current_period())
+        d["grants_usd"] = round(float(d.get("grants_usd") or 0.0) + v, 6)
+        d.setdefault("grant_log", []).append({
+            "usd": round(v, 6),
+            "source": source,
+            "note": note,
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
+        _save(d)
+    return budget_status()
+
+
+def grant_log() -> list[dict]:
+    """This period's applied grants, newest last. For the CLI and the admin view."""
+    with _LOCK:
+        d = _load()
+        if _advance(d, _current_period()):
+            _save(d)
+        return list(d.get("grant_log") or [])
 
 
 def reset() -> None:
