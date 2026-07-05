@@ -453,6 +453,27 @@ def _team_nudge(message: str) -> str | None:
         return None
 
 
+def _cap_provider_service_detail(by_provider: dict, top_n: int = 8) -> dict:
+    """Trim each provider's by_service to its top N line items, rolling the tail
+    into two scalar fields. The per-provider service dict is the token-bloat driver
+    in multi-provider responses (18 providers x ~25 services inlines 450 lines,
+    ~4.6k tokens); the top few services are ~all the spend and the rest are noise.
+    total_usd stays exact, and grand_by_service still carries the full cross-provider
+    ranking, so nothing needed for an answer is lost.
+    """
+    for p in by_provider.values():
+        if not isinstance(p, dict):
+            continue
+        svc = p.get("by_service") or {}
+        if len(svc) > top_n:
+            items = sorted(svc.items(), key=lambda x: -x[1])
+            p["by_service"] = {k: v for k, v in items[:top_n]}
+            tail = items[top_n:]
+            p["by_service_others_usd"] = round(sum(v for _, v in tail), 4)
+            p["by_service_omitted"] = len(tail)
+    return by_provider
+
+
 def _summary_to_dict(summary: CostSummary) -> dict:
     d: dict = {
         "provider": summary.provider,
@@ -819,6 +840,12 @@ async def get_cost_summary(
         return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect a cloud provider, then restart your AI client."}
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed, granularity)
+    # With several providers the per-provider service detail is the token-bloat driver.
+    # Keep full detail for a single-provider query (that's where the detail is wanted);
+    # cap it once the answer spans multiple providers. grand_by_service keeps the full
+    # cross-provider ranking regardless.
+    if len(by_provider) > 1:
+        by_provider = _cap_provider_service_detail(by_provider)
 
     _ranked_services = sorted(grand_by_service.items(), key=lambda x: -x[1])
     result = {
@@ -1313,6 +1340,9 @@ async def get_total_spend_all_sources(
         return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, or another provider, then restart your AI client."}
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed)
+    # Cross-provider tool: top_services already carries the ranked drivers, so cap the
+    # per-provider service detail to keep the payload flat as providers scale.
+    by_provider = _cap_provider_service_detail(by_provider)
 
     cloud_total = sum(
         by_provider[p]["total_usd"]
