@@ -428,6 +428,22 @@ def _savings_found_monthly() -> float:
         return 0.0
 
 
+async def _resolve_account_id(account_id: str | None) -> str:
+    """Resolve the AWS account id for tools where a natural question ("scan for
+    waste") should not require the user to know their 12-digit account id. Uses
+    the id given, else asks STS on the connected AWS account. Returns "" when
+    nothing resolves; the caller decides how to phrase the error."""
+    if account_id:
+        return account_id
+    aws = _CLOUD_CONNECTORS.get("aws")
+    try:
+        if aws and await aws.is_configured():
+            return aws._account_id() or ""
+    except Exception:
+        pass
+    return ""
+
+
 def _team_nudge(message: str) -> str | None:
     """
     Return a contextual upgrade nudge for free-tier users only.
@@ -441,6 +457,17 @@ def _team_nudge(message: str) -> str | None:
         if get_status().mode != "free":
             return None
         found = _savings_found_monthly()
+        # Count the impression so the funnel is measurable: which nudges show, with
+        # what ROI multiple, is the difference between knowing which moment converts
+        # and guessing. Fire-and-forget, never blocks or fails the answer.
+        try:
+            from . import telemetry as _tel
+            _tel._send_event(_tel._get_install_id(), "upgrade_nudge_shown", {
+                "savings_found_monthly": round(found, 2),
+                "roi_multiple": round(found / _TEAM_MONTHLY_USD, 1) if found else 0,
+            })
+        except Exception:
+            pass
         if found >= _TEAM_MONTHLY_USD:
             return (
                 f"nable has already found ${found:,.0f}/mo in savings here, "
@@ -1670,22 +1697,45 @@ async def get_anomalies(
     formatted = _apply_alert_policies(formatted, policies)
     muted_count = before_count - len(formatted)
 
+    # Spikes and drops are different events: a spike is the problem the user is
+    # hunting; a drop is usually good news (a fix landed, something was cleaned up)
+    # or, rarely, a sign that something stopped running. Splitting the counts keeps
+    # "5 anomalies!" from meaning "1 real spike and 4 pieces of good news".
+    spike_count = sum(1 for a in formatted if a.get("direction") == "spike")
+    drop_count = len(formatted) - spike_count
     result: dict = {
         "count": len(formatted),
+        "spikes": spike_count,
+        "drops": drop_count,
         "anomalies": formatted,
         "tip": "Use acknowledge_anomaly(id) to dismiss resolved anomalies. Use set_alert_policy() to mute noisy services.",
     }
+    if drop_count:
+        result["drops_note"] = (
+            "Drops are usually good news (a fix landed or a resource was removed). "
+            "Treat a large sudden drop as a check that nothing stopped running "
+            "unintentionally, not as a problem."
+        )
     if muted_count > 0:
         result["muted_by_policy"] = muted_count
 
-    # Nudge free users toward Slack alerts -- most useful next step after seeing anomalies
-    high_count = sum(1 for a in formatted if a.get("severity") == "high")
-    nudge_msg = (
-        f"You have {len(formatted)} anomal{'ies' if len(formatted) != 1 else 'y'}"
-        + (f" ({high_count} high-severity)" if high_count else "")
-        + ". To get Slack or Teams alerts the moment these fire so you catch spikes live,"
-        + " upgrade to Team:"
-    )
+    # Nudge free users toward Slack alerts -- most useful next step after seeing
+    # anomalies. Lead with spikes; counting good-news drops as alarm inflates the
+    # pitch and reads as noise the moment the user looks at the list.
+    high_spikes = sum(1 for a in formatted
+                      if a.get("severity") == "high" and a.get("direction") == "spike")
+    if spike_count:
+        nudge_msg = (
+            f"You have {spike_count} cost spike{'s' if spike_count != 1 else ''}"
+            + (f" ({high_spikes} high-severity)" if high_spikes else "")
+            + ". To get Slack or Teams alerts the moment these fire so you catch spikes live,"
+            + " upgrade to Team:"
+        )
+    else:
+        nudge_msg = (
+            "To get Slack or Teams alerts the moment a cost spike fires so you catch"
+            " it live, upgrade to Team:"
+        )
     nudge = _team_nudge(nudge_msg)
     if nudge:
         result["_upgrade"] = nudge
@@ -7980,7 +8030,7 @@ async def get_langfuse_trace_volume(
 
 @mcp.tool()
 async def benchmark_costs(
-    account_id: str,
+    account_id: str | None = None,
     vertical: str = "default",
     days: int = 30,
 ) -> dict:
@@ -7992,7 +8042,8 @@ async def benchmark_costs(
     resource %, LLM spend %, data transfer %, and rightsizing opportunity %.
 
     Args:
-        account_id: AWS account ID to analyse
+        account_id: AWS account ID to analyse. Auto-discovered from the connected
+                    AWS account when omitted.
         vertical:   industry peer group, saas, ecommerce, fintech, media, ai_ml, default
         days:       lookback period for metric calculation
 
@@ -8002,6 +8053,10 @@ async def benchmark_costs(
         - "Benchmark our costs"
 
     """
+    account_id = await _resolve_account_id(account_id)
+    if not account_id:
+        return {"error": "No account_id provided and none could be auto-discovered.",
+                "hint": "Connect AWS with `finops setup aws`, or pass account_id explicitly."}
     try:
         from .analytics.benchmarks import compare
         return compare(account_id=account_id, vertical=vertical, days=days)
@@ -8042,19 +8097,12 @@ async def forecast_costs(
         from .ml.forecasting import Forecaster
         aws = _CLOUD_CONNECTORS.get("aws")
         aws_configured = aws and await aws.is_configured()
+        account_id = await _resolve_account_id(account_id)
         if not account_id:
-            # Natural call ("forecast next month") shouldn't require knowing the
-            # account id. Resolve the connected account from STS.
-            if aws_configured:
-                try:
-                    account_id = aws._account_id()
-                except Exception:
-                    account_id = ""
-            if not account_id:
-                return {
-                    "error": "No account_id provided and none could be auto-discovered.",
-                    "hint": "Connect AWS with `finops setup aws`, or pass account_id explicitly.",
-                }
+            return {
+                "error": "No account_id provided and none could be auto-discovered.",
+                "hint": "Connect AWS with `finops setup aws`, or pass account_id explicitly.",
+            }
         f = Forecaster.for_account(
             account_id,
             service=service,
@@ -8073,7 +8121,7 @@ async def forecast_costs(
 
 @mcp.tool()
 async def scan_waste_patterns(
-    account_id: str,
+    account_id: str | None = None,
     min_monthly_waste: float = 20.0,
     categories: str | None = None,
 ) -> dict:
@@ -8085,7 +8133,8 @@ async def scan_waste_patterns(
     waste estimate, and specific remediation steps.
 
     Args:
-        account_id:        AWS account ID to scan
+        account_id:        AWS account ID to scan. Auto-discovered from the
+                           connected AWS account when omitted.
         min_monthly_waste: only return findings above this monthly USD threshold
         categories:        comma-separated filter e.g. "compute,storage" (omit for all)
 
@@ -8096,6 +8145,10 @@ async def scan_waste_patterns(
         - "Any recurring waste in this account?"
 
     """
+    account_id = await _resolve_account_id(account_id)
+    if not account_id:
+        return {"error": "No account_id provided and none could be auto-discovered.",
+                "hint": "Connect AWS with `finops setup aws`, or pass account_id explicitly."}
     try:
         from .ml.patterns import PatternContext, scan_dict
         from .storage.db import get_engine

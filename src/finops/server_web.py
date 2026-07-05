@@ -843,13 +843,16 @@ async def _live_opportunities(aws: Any) -> list[dict]:
                 w = data.get("estimated_monthly_waste", 0) or 0
                 if w > 0:
                     callers = data.get("non_prod_callers", [])
-                    # Range: min = ~50% of savings (conservative: only some envs disabled),
-                    # max = full waste (all non-prod disabled). Anchored on env signals not raw callers.
+                    # Range: min = ~50% of waste (conservative: only some envs disabled),
+                    # max = full waste (all non-prod disabled). The HEADLINE is the
+                    # conservative floor, never the max: this figure feeds the savings
+                    # ledger and the upgrade nudges, and an inflated best case there is
+                    # the fastest way to lose trust. Reality can only beat the floor.
                     w_min = round(w * 0.5, 2)
                     w_max = round(w, 2)
                     out.append({
                         "description": f"Disable Textract in non-production environments ({len(callers)} caller(s) detected)",
-                        "monthly_saving": w_max,
+                        "monthly_saving": w_min,
                         "monthly_saving_min": w_min,
                         "monthly_saving_max": w_max,
                         "resource": "Amazon Textract", "effort": "LOW",

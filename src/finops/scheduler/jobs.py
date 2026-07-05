@@ -25,6 +25,29 @@ _scheduler_lock_handle = None
 _SCHED_LOCK_KEY = 0x6E61626C  # 'nabl'
 
 
+def should_alert(direction: str, severity: str) -> bool:
+    """Whether an anomaly earns a Slack/Teams/n8n push.
+
+    Spikes always alert: a spike is the event the alert loop exists for. Drops are
+    usually good news (a fix landed, a resource was cleaned up) and pushing every
+    one trains the team to mute the integration, which kills the paid loop. A
+    HIGH-severity drop still alerts by default because a large sudden drop can mean
+    something stopped running that shouldn't have (backups, a data pipeline).
+
+    FINOPS_ALERT_DROPS tunes it: "high" (default), "all", or "never". Every anomaly
+    is still recorded and queryable via get_anomalies regardless; this gates only
+    the push.
+    """
+    if direction != "drop":
+        return True
+    policy = os.getenv("FINOPS_ALERT_DROPS", "high").strip().lower()
+    if policy == "all":
+        return True
+    if policy == "never":
+        return False
+    return severity == "high"
+
+
 def _acquire_scheduler_lock() -> bool:
     """Best-effort single-owner guard across processes sharing one database.
 
@@ -155,6 +178,10 @@ async def _detect_and_alert() -> list[dict]:
             # Already detected and alerted for this spend event (cron retry, the
             # run_anomaly_check_now tool, or a second process). Do not re-alert or
             # re-create the ticket, that is what makes a team mute the integration.
+            continue
+        if not should_alert(anomaly.direction, anomaly.severity):
+            # Recorded and queryable via get_anomalies, but not pushed. Routine
+            # cost drops as pages are how alert channels get muted.
             continue
         anomaly_dict = {
             "id": anomaly_id,

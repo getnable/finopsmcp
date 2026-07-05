@@ -429,6 +429,13 @@ def scan_textract_environment_waste(
             _assumptions.append(
                 "Textract attributed by API call count (CloudTrail), which assumes a "
                 "similar cost per call.")
+        # The non-prod SPEND is measured; the SAVING depends on how much of it you
+        # gate. The remediation itself says not to hard-disable everything (QA flows
+        # legitimately test document processing), so claiming the full figure as
+        # "savings" is the best case dressed as the estimate. Headline the
+        # conservative floor (half gated, the same floor the dashboard range uses)
+        # and carry the full range in metadata so reality can only beat the number.
+        _conservative = round(estimated_monthly_waste * 0.5, 2)
         finding = Finding(
             source="textract_env",
             title="Textract is running in non-production environments",
@@ -437,8 +444,11 @@ def scan_textract_environment_waste(
                  "spend has no production value."),
             evidence=MEASURED,
             confidence="high" if has_useful_tags else "medium",
-            assumptions=_assumptions,
-            est_monthly_savings=estimated_monthly_waste,
+            assumptions=_assumptions + [
+                "Savings figure assumes you gate about half of non-prod usage; disabling "
+                "all of it saves up to the full non-prod spend."
+            ],
+            est_monthly_savings=_conservative,
             remediation=[
                 "Gate Textract behind an environment flag in non-prod. Do not hard-disable "
                 "it: that breaks any QA flow that legitimately tests document processing.",
@@ -448,6 +458,8 @@ def scan_textract_environment_waste(
                 "basis": ("environment-tagged Textract spend" if has_useful_tags
                           else "CloudTrail records of who actually called Textract"),
                 "non_prod_pct": round(non_prod_pct * 100, 1),
+                "non_prod_monthly_spend": estimated_monthly_waste,
+                "savings_range_monthly": [_conservative, estimated_monthly_waste],
             },
         )
     elif estimated_monthly_waste > 50 and total_spend > 0 and non_prod_callers:
