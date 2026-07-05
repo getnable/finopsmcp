@@ -2,6 +2,19 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.121
+
+The agent guardrail got a hardening pass. It now catches destroy hidden behind
+the apply verb (terraform apply -destroy), pulumi destroy, eksctl delete, and
+S3/GCS bucket wipes (aws s3 rb/rm, gsutil rm), all one-way doors that
+previously slipped through. The shell hook and the check_action_policy tool
+now agree: plain terraform apply is allowed by default in both, with budget
+escalation intact, where the tool previously blocked what the hook allowed.
+And finops guard install writes a hook command that actually exists for uvx
+installs instead of failing on every agent command. Clearer errors on
+malformed terraform plans, and guard status now points non-Claude-Code agents
+at the check_action_policy tool.
+
 ## 0.8.120
 
 Faster to value, lighter in your context window. Anomaly detection now works on
