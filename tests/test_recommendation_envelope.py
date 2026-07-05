@@ -36,7 +36,7 @@ def test_recommendation_keeps_precise_dollars():
     d = f.to_dict()
     assert d["kind"] == "recommendation"
     assert d["est_monthly_savings"] == 1654.0
-    assert d["magnitude"] == ""
+    assert "magnitude" not in d  # empty fields are dropped, not serialized
 
 
 def _stub_clients(monkeypatch):
@@ -77,5 +77,5 @@ def test_textract_tagged_spend_is_a_recommendation(monkeypatch):
     f = t.scan_textract_environment_waste(days=30)["finding"]
     assert f and f["kind"] == "recommendation"
     assert f["est_monthly_savings"] and f["est_monthly_savings"] > 0
-    assert f["magnitude"] == ""
+    assert "magnitude" not in f  # empty fields are dropped, not serialized
     assert f["remediation"]

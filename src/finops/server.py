@@ -415,16 +415,15 @@ def _savings_found_monthly() -> float:
     """Cheap local read: total monthly savings nable has already identified for
     this user (active recommendations only). Lets upgrade nudges cite a real
     number instead of an abstract pitch. Returns 0.0 on any error, never raises.
+
+    MUST go through the ledger's deduped get_summary, never a raw table sum: raw
+    rows carry historical duplicates of the same recommendation (a raw sum here
+    once quoted $4,731/mo when the deduped truth was $2,367/mo). An inflated
+    number in an upsell is the one place we can least afford to be wrong.
     """
     try:
-        from .storage.db import get_engine, savings_recommendations
-        from sqlalchemy import select
-        sr = savings_recommendations
-        with get_engine().connect() as conn:
-            rows = conn.execute(
-                select(sr.c.estimated_monthly_savings_usd, sr.c.status)
-            ).fetchall()
-        return float(sum((r[0] or 0) for r in rows if r[1] not in ("dismissed", "expired")))
+        from .recommendations.savings_tracker import get_summary
+        return float(get_summary().get("potential_monthly_usd", 0.0) or 0.0)
     except Exception:
         return 0.0
 
@@ -582,8 +581,15 @@ async def _gather_costs(
 @mcp.tool()
 async def list_connected_providers() -> dict:
     """
-    List all configured cloud and SaaS providers with their connection status.
-    Shows which connectors are active, which need credentials, and the active plan.
+    List every cloud, SaaS, and LLM provider nable knows, each marked connected or
+    not-configured, plus the active plan. The starting point for "what am I
+    connected to" and for spotting which connector still needs credentials
+    (each not-configured entry names the setup command to run).
+
+    Examples:
+        - "Which providers are connected?"
+        - "Is GCP set up yet?"
+        - "What plan am I on?"
     """
     result: dict[str, dict] = {}
     for category, pool in [("cloud", _CLOUD_CONNECTORS), ("saas", _SAAS_CONNECTORS)]:
@@ -1157,10 +1163,17 @@ async def get_cost_trends(
 @mcp.tool()
 async def list_accounts(provider: str | None = None) -> dict:
     """
-    List all cloud accounts, subscriptions, and SaaS org IDs that are accessible.
+    List all cloud accounts, subscriptions, and SaaS org IDs that nable can see,
+    grouped by provider: AWS account ids, Azure subscriptions, GCP billing
+    accounts, and each SaaS provider's org. Use it to find the account id or
+    name other tools accept as their account argument.
 
     Args:
-        provider: Specific provider. None = all.
+        provider: Limit to one provider (e.g. "aws"). None = all providers.
+
+    Examples:
+        - "What accounts is nable connected to?"
+        - "List my Azure subscriptions"
     """
     pool = {provider: _ALL_CONNECTORS[provider]} if provider and provider in _ALL_CONNECTORS else _ALL_CONNECTORS
     targets = await _active(pool)
@@ -1964,11 +1977,15 @@ async def send_digest_now() -> dict:
 @mcp.tool()
 async def check_notification_config() -> dict:
     """
-    Check which notification channels (Slack, Teams) are configured and active.
+    Check which notification channels (Slack, Teams) are configured and active,
+    returning each channel's status and what is missing when one is not set up.
+    Use it to verify where anomaly alerts and digests will be delivered before
+    relying on them.
 
     Examples:
         - "Is Slack configured for alerts?"
         - "Where are cost alerts being sent?"
+        - "Why did no alert reach Teams?"
     """
     from .notifications import slack, teams
 
@@ -3403,7 +3420,11 @@ async def audit_gcp_waste(
             return report
 
         # Same token-budget cap as the AWS audit: keep the highest-value findings,
-        # leave the aggregates (computed over the whole list) intact.
+        # leave the aggregates (computed over the whole list) intact. Hoist the
+        # per-category why/remediation boilerplate first so the budget buys
+        # findings, not the same two sentences repeated per resource.
+        from .token_budget import hoist_finding_boilerplate
+        report = hoist_finding_boilerplate(report)
         all_findings = report.get("findings") or []
         if all_findings:
             kept, omitted = fit_to_budget(all_findings, max_tokens=6000)
@@ -3482,6 +3503,8 @@ async def get_gcp_recommendations(
         if report.get("error"):
             return report
 
+        from .token_budget import hoist_finding_boilerplate
+        report = hoist_finding_boilerplate(report)
         all_findings = report.get("findings") or []
         if all_findings:
             kept, omitted = fit_to_budget(all_findings, max_tokens=6000)
@@ -10047,7 +10070,15 @@ async def pin_view(
 
 @mcp.tool()
 async def list_pinned_views() -> dict:
-    """List the cost cards pinned to the dashboard (the views you have saved)."""
+    """
+    List the cost cards pinned to the dashboard: every saved view with its id,
+    title, template, metric and dimensions, so you can re-run one with
+    get_pinned_view(id) or remove one with unpin_view(id).
+
+    Examples:
+        - "What views do I have pinned?"
+        - "Show my saved cost cards"
+    """
     require_role("viewer")
     from .slice.views import list_pinned_views as _list
     views = _list(owner="instance")
@@ -10060,7 +10091,18 @@ async def list_pinned_views() -> dict:
 
 @mcp.tool()
 async def get_pinned_view(view_id: int) -> dict:
-    """Re-run a pinned view by id and return fresh data plus its card. Read-only."""
+    """
+    Re-run a pinned view by id and return fresh cost data plus its rendered card.
+    Read-only: nothing is modified, the saved definition is executed against
+    current data.
+
+    Args:
+        view_id: The pinned card's id, from list_pinned_views().
+
+    Examples:
+        - "Refresh my S3 spend card"
+        - "Re-run pinned view 2"
+    """
     require_role("viewer")
     from .slice.views import get_pinned_view as _get
     v = _get(int(view_id), owner="instance")
@@ -10073,7 +10115,18 @@ async def get_pinned_view(view_id: int) -> dict:
 
 @mcp.tool()
 async def unpin_view(view_id: int) -> dict:
-    """Remove a pinned cost card from the dashboard by id."""
+    """
+    Remove a pinned cost card from the dashboard by id, so the dashboard stops
+    tracking that saved view. The underlying saved view is not deleted, only
+    unpinned; pin_view() puts it back.
+
+    Args:
+        view_id: The pinned card's id, from list_pinned_views().
+
+    Examples:
+        - "Unpin the S3 spend card from my dashboard"
+        - "Remove pinned view 3"
+    """
     require_role("viewer")
     from .slice.views import unpin_view as _unpin
     return {"unpinned": _unpin(int(view_id), owner="instance"), "id": int(view_id)}

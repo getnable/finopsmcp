@@ -54,6 +54,48 @@ def estimate_cost_usd(tokens: int) -> float:
     return round(tokens / 1000 * _USD_PER_1K_TOKENS, 4)
 
 
+def hoist_finding_boilerplate(report: dict, category_key: str = "category") -> dict:
+    """Deduplicate per-category boilerplate across a report's findings.
+
+    Envelope-style findings repeat the same fixed ``why`` paragraph and
+    ``remediation`` steps on every finding of a category: 20 idle disks carry the
+    same two sentences 20 times (~140 tokens each). This moves those shared strings
+    into one top-level ``playbooks[category]`` entry and strips them from the
+    individual findings, so the model reads the guidance once and each finding
+    carries only its unique data. No information is lost; it changes where the
+    text lives, not what is said. Only hoists when the text is identical across
+    the category, a finding with bespoke text keeps it inline.
+    """
+    findings = report.get("findings") or []
+    by_cat: dict[str, list[dict]] = {}
+    for f in findings:
+        env = f.get("finding")
+        if isinstance(env, dict):
+            by_cat.setdefault(str(f.get(category_key, "")), []).append(env)
+
+    playbooks: dict[str, dict] = {}
+    for cat, envs in by_cat.items():
+        if not cat:
+            continue
+        shared: dict[str, Any] = {}
+        for field in ("why", "remediation"):
+            values = [json.dumps(e.get(field), default=str) for e in envs]
+            if values[0] != "null" and all(v == values[0] for v in values):
+                shared[field] = envs[0].get(field)
+        if shared:
+            playbooks[cat] = shared
+            for e in envs:
+                for field in shared:
+                    e.pop(field, None)
+    if playbooks:
+        report["playbooks"] = playbooks
+        report["playbooks_note"] = (
+            "why/remediation for each finding lives once in playbooks, keyed by the "
+            "finding's category."
+        )
+    return report
+
+
 def fit_to_budget(
     rows: list,
     max_tokens: int = DEFAULT_MAX_TOKENS,

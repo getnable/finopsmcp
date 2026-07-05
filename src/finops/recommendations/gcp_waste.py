@@ -372,7 +372,7 @@ def _envelope_for(raw: dict) -> Finding | None:
                 "keeps the data recoverable while stopping the disk charge.",
             ],
             resource_id=rid,
-            metadata={"region": region, **detail, "pricing_basis": PRICING_BASIS},
+            metadata={"region": region, **detail},  # pricing_basis lives once at report level
         )
 
     if category == "idle_ip":
@@ -473,7 +473,7 @@ def _envelope_for(raw: dict) -> Finding | None:
             resource_id=rid,
             metadata={"region": region, "avg_cpu_pct": cpu,
                       "machine_type": detail.get("machine_type"),
-                      "vcpus": detail.get("vcpus"), "pricing_basis": PRICING_BASIS},
+                      "vcpus": detail.get("vcpus")},  # pricing_basis at report level
         )
 
     return None

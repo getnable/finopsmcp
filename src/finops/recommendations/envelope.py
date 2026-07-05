@@ -104,7 +104,12 @@ class Finding:
             d["est_monthly_savings"] = None
             d["magnitude"] = magnitude_band(self.rough_monthly if self.rough_monthly is not None
                                             else self.est_monthly_savings)
-        else:
-            d["magnitude"] = ""
         d.pop("rough_monthly", None)
-        return d
+        # Findings ship to the model in lists of dozens, so every empty field is pure
+        # token cost (measured ~30 tokens of empty keys per audit finding). Drop the
+        # valueless ones. est_monthly_savings survives even as None: on an
+        # investigation the explicit None IS the message, we refuse to invent a number.
+        return {
+            k: v for k, v in d.items()
+            if k == "est_monthly_savings" or v not in ("", [], {}, None, False)
+        }

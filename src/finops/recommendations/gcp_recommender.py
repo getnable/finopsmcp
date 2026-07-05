@@ -315,7 +315,6 @@ def _finding_for(project: str, recommender: str, rec: Any) -> dict | None:
             "recommender_subtype": str(getattr(rec, "recommender_subtype", "") or ""),
             "google_description": description,
             "currency": currency,
-            "pricing_basis": PRICING_BASIS,
         },
     )
 
