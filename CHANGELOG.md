@@ -2,6 +2,14 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.117
+
+Every tool is now fully documented. All 183 MCP tools describe their parameters
+and include example queries, which helps your AI client pick the right tool and
+fill its arguments correctly, and completes the description-quality pass started
+in 0.8.116. A CI check now blocks any new tool from shipping with a bare
+description. The web tool reference is regenerated from the improved docs.
+
 ## 0.8.116
 
 Audits got twice as cheap to read. Waste-audit findings carried repeated
