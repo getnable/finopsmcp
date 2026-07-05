@@ -2,6 +2,16 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.123
+
+Role-based access now reaches SSO sessions on hosted instances. Map your IdP
+groups to nable roles with FINOPS_SSO_ADMIN_GROUPS, FINOPS_SSO_ANALYST_GROUPS,
+and FINOPS_SSO_VIEWER_GROUPS, and the dashboard agent enforces each session's
+ceiling: an analyst login cannot run admin-only tools. Fully backward
+compatible: with no mapping configured, SSO behavior is unchanged, so upgrading
+cannot lock anyone out. FINOPS_SSO_GROUPS_CLAIM and FINOPS_SSO_DEFAULT_ROLE
+tune the claim name and the unmapped-user role.
+
 ## 0.8.122
 
 nable now tells you when you are running an old build. A capped, airgap-aware
