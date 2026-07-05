@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.116
+
+Audits got twice as cheap to read. Waste-audit findings carried repeated
+boilerplate (the same why/remediation on every resource, empty fields, a
+pricing note per finding); the guidance now lives once per category in a
+playbooks map and empty fields are dropped, halving tokens per finding, so the
+same response budget returns roughly twice the findings. Tool descriptions for
+several housekeeping tools were rewritten, with a test that stops new tools
+shipping bare ones. And upgrade nudges now cite the deduplicated savings
+ledger, so the ROI number in the pitch matches the one in the report.
+
 ## 0.8.115
 
 Multi-provider cost answers stay lean as you scale. Cross-provider queries used to
