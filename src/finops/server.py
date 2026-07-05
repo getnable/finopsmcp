@@ -1322,6 +1322,10 @@ async def get_saas_spend_summary(
         - "How much are we spending on SaaS tools?"
         - "What's our total software vendor spend?"
         - "Break down our SaaS costs by tool"
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date (YYYY-MM-DD). Defaults to today.
+
     """
     return await get_cost_summary(category="saas", start_date=start_date, end_date=end_date)
 
@@ -1339,6 +1343,10 @@ async def get_total_spend_all_sources(
         - "What is our total tech spend this month?"
         - "How much are we spending on everything combined?"
         - "Give me our full cloud + software cost picture"
+    Args:
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date (YYYY-MM-DD). Defaults to today.
+
     """
     if (err := require_pro("cross_cloud")):
         return err
@@ -2182,6 +2190,10 @@ async def generate_account_dashboard(
         - "Give me a summary of my costs"
         - "Generate the account dashboard"
         - "What does my cost health look like?"
+    Examples:
+        - "Build me a dashboard for the prod account"
+        - "Generate an account cost dashboard and open it"
+
     """
     import subprocess
     import sys
@@ -2546,6 +2558,10 @@ async def get_savings_ledger(
     Args:
         days: Lookback window in days (default 30). Filters by generated_at.
         account_id: Filter to a specific cloud account ID. None = all accounts.
+    Examples:
+        - "Show the savings ledger"
+        - "What savings has nable found and what happened to them?"
+
     """
     from datetime import datetime, timedelta, timezone
     from .storage.db import get_engine, savings_recommendations
@@ -2631,6 +2647,10 @@ async def get_recommendation_quality() -> dict:
         - "Which of our recommendations actually saved money?"
         - "How accurate are nable's savings estimates?"
         - "How much have we verifiably saved, and from what?"
+    Examples:
+        - "How accurate have nable's recommendations been?"
+        - "Show recommendation quality stats"
+
     """
     try:
         from .recommendations.savings_tracker import quality_signal
@@ -2657,6 +2677,9 @@ async def get_recommendation_learning() -> dict:
         - "Why am I seeing this recommendation?" / "Why did this rank high?"
         - "What recommendation types did you stop showing me?"
         - "How is nable tailoring recommendations to us?"
+    Examples:
+        - "What has nable learned from my accepted and dismissed recommendations?"
+
     """
     try:
         from .recommendations.learning import customer_signal
@@ -2677,6 +2700,10 @@ async def list_profiles() -> str:
         - "What profiles do I have configured?"
         - "Show me my nable profiles"
         - "Which profile is active?"
+    Examples:
+        - "List my nable profiles"
+        - "Which cost profiles are configured?"
+
     """
     from pathlib import Path
 
@@ -4283,6 +4310,11 @@ async def list_idle_resources(
         - "Find idle resources wasting money in AWS"
         - "List any unattached EBS volumes older than 90 days"
         - "What stopped EC2 instances are we still paying for?"
+    Args:
+        resource_types: Subset to scan, e.g. ["ebs", "eip", "nat"]. All types when omitted.
+        regions: AWS regions to scan. Defaults to all enabled regions.
+        min_idle_days: Only report resources idle at least this many days.
+
     """
     try:
         from .cleanup.idle import scan_idle_resources, idle_resources_summary
@@ -4346,6 +4378,13 @@ async def cleanup_idle_resources(
         - "Show me what would happen if I cleaned up unattached EBS volumes"
         - "Delete the EBS volumes we just listed" (then confirm: dry_run=False)
         - "Clean up all unused Elastic IPs in us-east-1"
+    Args:
+        resource_ids: Explicit resource ids to act on. Required unless scanning by type.
+        resource_types: Idle resource types to include, e.g. ["ebs", "eip"].
+        regions: AWS regions to scan. Defaults to all enabled regions.
+        min_idle_days: Only include resources idle at least this many days.
+        dry_run: True (default) previews actions without executing anything.
+
     """
     if err := require_role("admin"):
         return err
@@ -4453,6 +4492,10 @@ async def get_kubernetes_costs(
         - "Show me wasted Kubernetes spend"
         - "Which pods are over-provisioned?"
         - "What's our cluster CPU efficiency?"
+    Args:
+        context: Kubernetes context name from list_kubernetes_contexts(). Default context when omitted.
+        namespace: Limit to one Kubernetes namespace. All namespaces when omitted.
+
     """
     try:
         from .connectors.kubernetes import KubernetesConnector
@@ -4600,6 +4643,9 @@ async def get_kubernetes_namespace_breakdown(namespace: str) -> dict:
         - "Break down costs in the production namespace"
         - "Which services in 'data-platform' are most expensive?"
         - "Show me waste in the staging namespace"
+    Args:
+        namespace: Limit to one Kubernetes namespace. All namespaces when omitted.
+
     """
     return await get_kubernetes_costs(namespace=namespace)
 
@@ -4629,6 +4675,12 @@ async def get_efficiency_scorecard(
         - "How is our AWS efficiency rated?"
         - "What's our worst performing dimension?"
         - "Are we improving or getting worse on cloud efficiency?"
+    Args:
+        scope: "org" (default) or "team" for a single team's scorecard.
+        team: Team name from your attribution tags, when scope="team".
+        environment: Limit to one environment (e.g. "prod").
+        provider: Limit to one provider (e.g. "aws"). None = all.
+
     """
     from .scoring.scorecard import build_scorecard
 
@@ -4950,6 +5002,10 @@ async def get_helm_release_costs(
         - "Do we have any orphaned Helm releases?"
         - "Show me waste broken down by Helm chart"
         - "How much is our ingress controller costing us?"
+    Args:
+        context: Kubernetes context name from list_kubernetes_contexts(). Default context when omitted.
+        namespace: Limit to one Kubernetes namespace. All namespaces when omitted.
+
     """
     try:
         from .connectors.kubernetes import KubernetesConnector
@@ -5084,6 +5140,13 @@ async def estimate_helm_diff_cost(
         - "How much will this helm diff cost?"
         - "What's the cost impact of scaling from 3 to 10 replicas?"
         - "Estimate cost of upgrading this node pool instance type"
+    Args:
+        diff_text: Output of `helm diff upgrade ...` to price.
+        release_name: Helm release the diff belongs to.
+        current_replicas: Current replica count, for delta math.
+        current_cpu_request: Current CPU request (e.g. "500m").
+        current_memory_request: Current memory request (e.g. "512Mi").
+
     """
     try:
         from .connectors.helm import estimate_helm_diff, format_helm_diff_comment
@@ -5140,6 +5203,9 @@ async def get_cluster_efficiency(context: str | None = None) -> dict:
         - "Which namespaces are dragging down our efficiency score?"
         - "Where should we focus to improve cluster efficiency?"
         - "Are we wasting money in Kubernetes?"
+    Args:
+        context: Kubernetes context name from list_kubernetes_contexts(). Default context when omitted.
+
     """
     from .demo_data import is_demo, get_demo_response
     if is_demo():
@@ -5203,6 +5269,10 @@ async def get_label_costs(
         - "How much is the payments team spending in the cluster?"
         - "Show K8s cost by app label"
         - "What percentage of our cluster is untagged?"
+    Args:
+        label_key: Kubernetes label key to group costs by (e.g. "app", "team").
+        context: Kubernetes context name from list_kubernetes_contexts(). Default context when omitted.
+
     """
     try:
         from .connectors.kubernetes import KubernetesConnector
@@ -6696,6 +6766,13 @@ def create_api_key(
         - "Create a viewer key for Alice scoped to the platform team"
         - "Give Bob an analyst key"
         - "Create an admin key for the CI system"
+    Args:
+        name: Human-readable key name (e.g. "ci-reporter").
+        role: "viewer", "analyst", or "admin".
+        email: Owner email recorded for audit.
+        scope_team: Restrict the key to one team's data.
+        scope_provider: Restrict the key to one provider.
+
     """
     if err := require_role("admin"):
         return err
@@ -6733,6 +6810,9 @@ def revoke_api_key(key_id: int) -> dict:
     Examples:
         - "Revoke Alice's key"
         - "Remove access for key ID 3"
+    Args:
+        key_id: The key id from list_api_keys().
+
     """
     if err := require_role("admin"):
         return err
@@ -7306,6 +7386,15 @@ async def get_ai_engineering_report(days: int = 30, repos: list[str] | None = No
     Good triggers: "what has AI shipped", "AI engineering output", "which model
     wrote the most code", "cost per PR by model", "cost per commit", "is our AI
     spend producing work".
+    Args:
+        days: Look-back window in days (default 30).
+        repos: Git repos to include (owner/name). All configured repos when omitted.
+        unit: Business unit for cost-per-unit math (e.g. "pr", "commit").
+
+    Examples:
+        - "What has AI coding shipped this month and what did it cost?"
+        - "AI engineering report for the last 14 days"
+
     """
     if (err := require_pro("ai_unit_economics")):
         return err
@@ -7908,6 +7997,10 @@ async def benchmark_costs(
         days:       lookback period for metric calculation
 
     Returns per-metric comparisons with assessments (better/similar/worse) and insights.
+    Examples:
+        - "How does our cloud spend compare to similar companies?"
+        - "Benchmark our costs"
+
     """
     try:
         from .analytics.benchmarks import compare
@@ -7938,6 +8031,10 @@ async def forecast_costs(
 
     Returns forecast including method used, MAPE accuracy %, monthly projection,
     and day-by-day point/lower/upper estimates.
+    Examples:
+        - "Forecast our AWS spend for next month"
+        - "Where will EC2 costs be in 60 days?"
+
     """
     if (err := require_pro("forecasting")):
         return err
@@ -7994,6 +8091,10 @@ async def scan_waste_patterns(
 
     Returns structured findings sorted by monthly waste descending, with
     total_monthly_waste and total_annual_waste summary.
+    Examples:
+        - "Scan for waste patterns"
+        - "Any recurring waste in this account?"
+
     """
     try:
         from .ml.patterns import PatternContext, scan_dict
@@ -8057,6 +8158,15 @@ async def estimate_terraform_cost(
     Returns a cost delta breakdown per resource with adds, changes, and removes.
     Prices: AWS on-demand us-east-1. Supports EC2, RDS, Aurora, ElastiCache,
     EKS, NAT Gateways, ALB/NLB, ECS Fargate, Lambda, EBS, OpenSearch, MSK, Redshift.
+    Args:
+        plan_json: Terraform plan JSON string (`terraform show -json`).
+        plan_file: Path to a terraform plan JSON file.
+        tf_dir: Terraform directory to plan and price.
+
+    Examples:
+        - "What will this terraform plan cost?"
+        - "Price the plan in ./infra"
+
     """
     try:
         from .connectors.terraform_estimate import estimate_plan, estimate_from_file, estimate_from_dir
@@ -8118,6 +8228,18 @@ async def estimate_change_cost(
 
     Good triggers: "will this fit my budget", "what will this terraform/helm change cost
     before I apply it", "cost preflight", "can the agent afford this change".
+    Args:
+        terraform_plan_json: Terraform plan JSON string to price.
+        terraform_plan_file: Path to a terraform plan JSON file.
+        tf_dir: Terraform directory to plan and price.
+        helm_diff: Helm diff text to price instead of terraform.
+        monthly_delta_usd: Known monthly delta, when you already have the number.
+        budget_name: Budget to check the delta against.
+
+    Examples:
+        - "What would this change cost per month?"
+        - "Preflight the cost of this terraform plan"
+
     """
     from .preflight import evaluate_preflight
 
@@ -8224,6 +8346,19 @@ async def check_action_policy(
 
     Good triggers: "can the agent do X", "is this action within policy", "should I
     apply this fix", "is it safe to auto-apply this".
+    Args:
+        action_type: The infra action being attempted (e.g. "terraform_apply").
+        terraform_plan_json: Terraform plan JSON string to evaluate.
+        terraform_plan_file: Path to a terraform plan JSON file.
+        tf_dir: Terraform directory to plan and evaluate.
+        helm_diff: Helm diff text to evaluate instead of terraform.
+        monthly_delta_usd: Known monthly delta, when you already have the number.
+        budget_name: Budget to evaluate the action against.
+
+    Examples:
+        - "Is this apply within policy?"
+        - "Check this change against our cost guardrails"
+
     """
     from .policy import evaluate_action_gate, load_policy
 
@@ -8901,6 +9036,9 @@ async def export_board_summary(period_days: int = 30) -> dict:
         - "Generate our board update cost section"
         - "Export a board-ready cost summary"
         - "Give me the markdown for our investor update infra section"
+    Args:
+        period_days: Reporting period in days (default 30).
+
     """
     if err := require_pro("business_metrics"):
         return err
@@ -9402,6 +9540,10 @@ async def get_databricks_costs(
     Args:
         start_date: ISO date string (YYYY-MM-DD). Defaults to 30 days ago.
         end_date:   ISO date string (YYYY-MM-DD). Defaults to today.
+    Examples:
+        - "What are we spending on Databricks?"
+        - "Databricks costs this month"
+
     """
     from .connectors.databricks import DatabricksConnector
 
@@ -9456,6 +9598,9 @@ async def get_databricks_dbu_breakdown(
     Args:
         start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
         end_date:   ISO date (YYYY-MM-DD). Defaults to today.
+    Examples:
+        - "Break down our Databricks DBU usage by SKU"
+
     """
     from .connectors.databricks import DatabricksConnector
 
@@ -9523,6 +9668,9 @@ async def get_databricks_cluster_efficiency() -> dict:
     - Clusters with no cost-attribution tags
 
     Returns a prioritized list of issues and estimated wasted spend.
+    Examples:
+        - "Which Databricks clusters are inefficient?"
+
     """
     from .connectors.databricks import DatabricksConnector
 
@@ -9590,6 +9738,10 @@ async def get_databricks_job_costs(
         start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
         end_date:   ISO date (YYYY-MM-DD). Defaults to today.
         top_n:      Number of top job runs to return (default 20).
+    Examples:
+        - "What do our Databricks jobs cost?"
+        - "Top 10 most expensive Databricks jobs"
+
     """
     from .connectors.databricks import DatabricksConnector
 
@@ -9662,6 +9814,9 @@ async def get_focus_costs(
     Returns:
         FOCUS 1.2 normalized cost records with fields: BilledCost, EffectiveCost,
         ServiceName, ServiceCategory, ProviderName, RegionId, SubAccountId, Tags, etc.
+    Examples:
+        - "Show costs in FOCUS format grouped by service category"
+
     """
     require_role("viewer")
 
@@ -9883,6 +10038,20 @@ async def slice_costs(
     via: "auto" (default; CUR only when a line-item dimension is requested), "focus", or "cur".
 
     This is read-only: it slices and charts cost data. It never changes anything.
+    Args:
+        dimensions: Fields to group by (e.g. ["service", "region"]).
+        filters: Include-filters, {field: [values]}.
+        exclusions: Exclude-filters, {field: [values]}.
+        metric: "cost" (default) or another supported metric.
+        granularity: "DAILY" or "MONTHLY".
+        order_by: Sort field, defaults to the metric descending.
+        limit: Max rows to return.
+        start_date: ISO date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: ISO date (YYYY-MM-DD). Defaults to today.
+        provider: Limit to one provider (e.g. "aws"). None = all.
+        title: Optional title for the resulting card.
+        via: Internal: how the slice was invoked.
+
     """
     require_role("viewer")
     from .slice import parse_spec, run_slice
@@ -10046,6 +10215,22 @@ async def pin_view(
     live on each dashboard load over the trailing `days`, so it always shows fresh
     numbers. scope: "instance" (shared on this nable) or "me". Read-only on the cloud:
     this only saves a view definition locally.
+    Args:
+        title: Card title shown on the dashboard.
+        dimensions: Fields to group by (as in slice_costs).
+        filters: Include-filters, {field: [values]}.
+        exclusions: Exclude-filters, {field: [values]}.
+        metric: "cost" (default) or another supported metric.
+        granularity: "DAILY" or "MONTHLY".
+        order_by: Sort field, defaults to the metric descending.
+        limit: Max rows in the card.
+        days: Look-back window in days (default 30).
+        scope: "instance" (default) pins for this machine.
+
+    Examples:
+        - "Pin this S3-by-region view to my dashboard"
+        - "Save that as a card"
+
     """
     require_role("viewer")
     from .slice import parse_spec
@@ -10145,6 +10330,10 @@ async def get_bedrock_costs(days: int = 30, account: str = "") -> str:
     Args:
         days:    Number of days to analyze (default 30).
         account: Reserved for future multi-account support.
+    Examples:
+        - "What is Bedrock costing us?"
+        - "Bedrock spend by model this month"
+
     """
     try:
         from .connectors.aws_services.bedrock import BedrockAnalyzer
@@ -10165,6 +10354,9 @@ async def get_documentdb_costs(days: int = 30, account: str = "") -> str:
     Args:
         days:    Number of days to analyze (default 30).
         account: Reserved for future multi-account support.
+    Examples:
+        - "DocumentDB costs for the last 30 days"
+
     """
     try:
         from .connectors.aws_services.documentdb import DocumentDBAnalyzer
@@ -10186,6 +10378,9 @@ async def get_kendra_costs(account: str = "") -> str:
 
     Args:
         account: Reserved for future multi-account support.
+    Examples:
+        - "What is Amazon Kendra costing us?"
+
     """
     try:
         from .connectors.aws_services.kendra import KendraAnalyzer
@@ -10207,6 +10402,10 @@ async def get_textract_costs(days: int = 30, account: str = "") -> str:
     Args:
         days:    Number of days to analyze (default 30).
         account: Reserved for future multi-account support.
+    Examples:
+        - "Textract spend this month"
+        - "What are we paying for OCR?"
+
     """
     try:
         from .connectors.aws_services.textract import TextractAnalyzer
@@ -10232,6 +10431,9 @@ async def audit_textract_environment_waste(days: int = 30) -> dict:
 
     Args:
         days: Number of days to analyze (default 30).
+    Examples:
+        - "Is non-prod Textract usage wasting money?"
+
     """
     try:
         from .recommendations.textract_env import scan_textract_environment_waste
@@ -10261,6 +10463,9 @@ async def recommend_bedrock_model_routing(days: int = 30) -> dict:
 
     Args:
         days: Number of days to analyze (default 30).
+    Examples:
+        - "Could cheaper Bedrock models handle some of our load?"
+
     """
     try:
         from .recommendations.bedrock_routing import recommend_bedrock_model_routing as _recommend
@@ -10281,6 +10486,9 @@ async def get_marketplace_costs(days: int = 30, account: str = "") -> str:
     Args:
         days:    Number of days to analyze (default 30).
         account: Reserved for future multi-account support.
+    Examples:
+        - "What AWS Marketplace subscriptions are we paying for?"
+
     """
     try:
         from .connectors.aws_services.marketplace import MarketplaceAnalyzer
@@ -11536,6 +11744,14 @@ async def run_full_cost_audit(
     opportunity to investigate first.
 
     After showing results, offer to export with: 'Want me to export these to CSV?'
+    Args:
+        regions: AWS regions to scan. Defaults to all enabled regions.
+        top_n: How many top results to return.
+
+    Examples:
+        - "Run a full cost audit"
+        - "Find everything we could save"
+
     """
     require_role("analyst")
 
@@ -11786,6 +12002,15 @@ async def export_cost_report_csv(
     ~/Downloads/nable-report-YYYY-MM-DD.csv
 
     Returns the path where the file was saved and a summary.
+    Args:
+        output_path: Full path for the CSV. Defaults to ~/Downloads/nable-report-<date>.csv.
+        regions: AWS regions to scan. Defaults to all enabled regions.
+        top_n: How many top results to return.
+
+    Examples:
+        - "Export that audit to CSV"
+        - "Save the findings as a spreadsheet"
+
     """
     import csv
     import pathlib
@@ -12041,6 +12266,13 @@ async def push_to_n8n(
         - "Trigger my n8n workflow"
         - "Push cost findings to my automation"
         - "Wire this into n8n"
+    Args:
+        event_type: Which payload to send (e.g. "cost_audit").
+        regions: AWS regions to scan. Defaults to all enabled regions.
+
+    Examples:
+        - "Push the audit results to n8n"
+
     """
     if (err := require_pro("alerts")):
         return err
@@ -12126,6 +12358,13 @@ async def publish_cost_report_to_notion(
         - "Publish this to Notion"
         - "Update the team dashboard"
         - "Post the cost summary to Notion"
+    Args:
+        regions: AWS regions to scan. Defaults to all enabled regions.
+
+    Examples:
+        - "Publish the cost report to Notion"
+        - "Share this audit with the team"
+
     """
     require_role("analyst")
 
@@ -12357,6 +12596,13 @@ async def what_can_nable_do(detailed: bool = False) -> str:
     "what should I try first?", "show me what's available", or "help". Always call
     it right after a user connects their first account, so they see what just
     became possible. Pass detailed=True to also list the underlying tool names.
+    Args:
+        detailed: True returns the full capability list instead of the summary.
+
+    Examples:
+        - "What can nable do?"
+        - "List your capabilities"
+
     """
     connected: set[str] = set()
 
@@ -12439,6 +12685,10 @@ async def explain_recent_cost_drivers(
     Args:
         days:  Comparison window length in days (default 30)
         top_n: Number of top drivers to return (default 10)
+    Examples:
+        - "Why did costs go up this week?"
+        - "What drove spend recently?"
+
     """
     from .demo_data import is_demo, get_demo_response
     if is_demo():
@@ -12538,6 +12788,10 @@ async def get_nable_roi(
 
     Args:
         period_days: Lookback window for savings (default 90 days)
+    Examples:
+        - "What has nable saved us versus what it costs?"
+        - "Show nable ROI"
+
     """
     try:
         from .storage.db import get_engine, savings_recommendations
@@ -12660,6 +12914,15 @@ async def start_dashboard_server(
         - "Share the dashboard with my team" (use expose=true)
         - "Start the web server"
         - "My team wants to see costs without installing nable"
+    Args:
+        port: Local TCP port to serve on.
+        host: Interface to bind (default 127.0.0.1, local only).
+        expose: True binds beyond localhost. Only on a trusted network.
+
+    Examples:
+        - "Start the dashboard"
+        - "Serve the web dashboard on port 9000"
+
     """
     try:
         from .server_web import start_server_background, _local_ip, set_connectors
@@ -12715,6 +12978,13 @@ async def get_tableau_connection_info(port: int = 8080) -> str:
         - "Tableau integration"
         - "What's the Tableau URL?"
         - "Connect Tableau to nable"
+    Args:
+        port: Local TCP port to serve on.
+
+    Examples:
+        - "How do I connect Tableau?"
+        - "Give me the Tableau connector URL"
+
     """
     try:
         from .server_web import _local_ip

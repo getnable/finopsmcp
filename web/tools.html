@@ -157,9 +157,9 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <p class="t-sum">List every cloud service that has spend in the period, across AWS, Azure, and GCP.</p>
   <code class="t-sig">(provider?, start_date?, end_date?)</code>
 </div>
-<div class="tool" data-name="list_connected_providers" data-text="list_connected_providers list all configured cloud and saas providers with their connection status. shows which connectors are active, which need credentials, and the active plan.">
+<div class="tool" data-name="list_connected_providers" data-text="list_connected_providers list every cloud, saas, and llm provider nable knows, each marked connected or not-configured, plus the active plan. the starting point for &quot;what am i connected to&quot; and for spotting which connector still needs credentials (each not-configured entry names the setup command to run).">
   <div class="t-head"><code class="t-name">list_connected_providers</code></div>
-  <p class="t-sum">List all configured cloud and SaaS providers with their connection status. Shows which connectors are active, which need credentials, and the active plan.</p>
+  <p class="t-sum">List every cloud, SaaS, and LLM provider nable knows, each marked connected or not-configured, plus the active plan. The starting point for &quot;what am I connected to&quot; and for spotting which connector still needs credentials (each not-configured entry names the setup command to run).</p>
   
 </div>
 <div class="tool" data-name="run_full_cost_audit" data-text="run_full_cost_audit run a full cost optimization audit across all connected aws resources. use this when the user explicitly asks for a full audit, cost scan, or optimization sweep. for simple cost questions (&quot;what did i spend last month?&quot;) prefer get_cost_summary or get_costs_by_service, they are faster and cheaper.">
@@ -607,9 +607,9 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <p class="t-sum">Mark an anomaly as acknowledged (dismissed). It will no longer appear in active anomalies.</p>
   <code class="t-sig">(anomaly_id)</code>
 </div>
-<div class="tool" data-name="check_notification_config" data-text="check_notification_config check which notification channels (slack, teams) are configured and active.">
+<div class="tool" data-name="check_notification_config" data-text="check_notification_config check which notification channels (slack, teams) are configured and active, returning each channel&#x27;s status and what is missing when one is not set up. use it to verify where anomaly alerts and digests will be delivered before relying on them.">
   <div class="t-head"><code class="t-name">check_notification_config</code></div>
-  <p class="t-sum">Check which notification channels (Slack, Teams) are configured and active.</p>
+  <p class="t-sum">Check which notification channels (Slack, Teams) are configured and active, returning each channel&#x27;s status and what is missing when one is not set up. Use it to verify where anomaly alerts and digests will be delivered before relying on them.</p>
   
 </div>
 <div class="tool" data-name="create_anomaly_tickets" data-text="create_anomaly_tickets create tickets in jira, linear, or github issues for all active high/medium anomalies that don&#x27;t already have a ticket. uses the first configured ticketing provider.">
@@ -712,9 +712,9 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <p class="t-sum">Show the highest-spending AWS accounts in the organization. Requires a Team plan (org_reports).</p>
   <code class="t-sig">(limit?, days_back?)</code>
 </div>
-<div class="tool" data-name="list_accounts" data-text="list_accounts list all cloud accounts, subscriptions, and saas org ids that are accessible.">
+<div class="tool" data-name="list_accounts" data-text="list_accounts list all cloud accounts, subscriptions, and saas org ids that nable can see, grouped by provider: aws account ids, azure subscriptions, gcp billing accounts, and each saas provider&#x27;s org. use it to find the account id or name other tools accept as their account argument.">
   <div class="t-head"><code class="t-name">list_accounts</code></div>
-  <p class="t-sum">List all cloud accounts, subscriptions, and SaaS org IDs that are accessible.</p>
+  <p class="t-sum">List all cloud accounts, subscriptions, and SaaS org IDs that nable can see, grouped by provider: AWS account ids, Azure subscriptions, GCP billing accounts, and each SaaS provider&#x27;s org. Use it to find the account id or name other tools accept as their account argument.</p>
   <code class="t-sig">(provider?)</code>
 </div>
 <div class="tool" data-name="list_aws_accounts" data-text="list_aws_accounts list all aws accounts configured in ~/.finops-mcp/accounts.yaml.">
@@ -897,9 +897,9 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <p class="t-sum">Manually trigger a cost snapshot right now (fetches yesterday&#x27;s costs from all providers). Normally this runs automatically at 01:00 UTC daily.</p>
   
 </div></section><section id="saved-views"><h2>Saved views <span class="count">6</span></h2>
-<div class="tool" data-name="get_pinned_view" data-text="get_pinned_view re-run a pinned view by id and return fresh data plus its card. read-only.">
+<div class="tool" data-name="get_pinned_view" data-text="get_pinned_view re-run a pinned view by id and return fresh cost data plus its rendered card. read-only: nothing is modified, the saved definition is executed against current data.">
   <div class="t-head"><code class="t-name">get_pinned_view</code></div>
-  <p class="t-sum">Re-run a pinned view by id and return fresh data plus its card. Read-only.</p>
+  <p class="t-sum">Re-run a pinned view by id and return fresh cost data plus its rendered card. Read-only: nothing is modified, the saved definition is executed against current data.</p>
   <code class="t-sig">(view_id)</code>
 </div>
 <div class="tool" data-name="get_view" data-text="get_view run a pre-built cost view by name. these are standard reports your whole team can share.">
@@ -907,9 +907,9 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <p class="t-sum">Run a pre-built cost view by name. These are standard reports your whole team can share.</p>
   <code class="t-sig">(view, tag_key?, tag_value?, provider?, days?)</code>
 </div>
-<div class="tool" data-name="list_pinned_views" data-text="list_pinned_views list the cost cards pinned to the dashboard (the views you have saved).">
+<div class="tool" data-name="list_pinned_views" data-text="list_pinned_views list the cost cards pinned to the dashboard: every saved view with its id, title, template, metric and dimensions, so you can re-run one with get_pinned_view(id) or remove one with unpin_view(id).">
   <div class="t-head"><code class="t-name">list_pinned_views</code></div>
-  <p class="t-sum">List the cost cards pinned to the dashboard (the views you have saved).</p>
+  <p class="t-sum">List the cost cards pinned to the dashboard: every saved view with its id, title, template, metric and dimensions, so you can re-run one with get_pinned_view(id) or remove one with unpin_view(id).</p>
   
 </div>
 <div class="tool" data-name="list_views" data-text="list_views list all pre-built cost views available to your team.">
@@ -917,14 +917,14 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <p class="t-sum">List all pre-built cost views available to your team.</p>
   
 </div>
-<div class="tool" data-name="pin_view" data-text="pin_view pin a cost slice to the dashboard as a saved card. takes the same slicing arguments as slice_costs (dimensions / filters / exclusions / metric / etc.), plus a title and a rolling lookback `days`. the pinned card re-runs its slice live on each dashboard load over the trailing `days`, so it always shows fresh numbers. scope: &quot;instance&quot; (shared on this nable) or &quot;me&quot;. read-only on the cloud: this only saves a view definition locally.">
+<div class="tool" data-name="pin_view" data-text="pin_view pin a cost slice to the dashboard as a saved card. takes the same slicing arguments as slice_costs (dimensions / filters / exclusions / metric / etc.), plus a title and a rolling lookback `days`. the pinned card re-runs its slice live on each dashboard load over the trailing `days`, so it always shows fresh numbers. scope: &quot;instance&quot; (shared on this nable) or &quot;me&quot;. read-only on the cloud: this only saves a view definition locally. args: title: card title shown on the dashboard. dimensions: fields to group by (as in slice_costs). filters: include-filters, {field: [values]}. exclusions: exclude-filters, {field: [values]}. metric: &quot;cost&quot; (default) or another supported metric. granularity: &quot;daily&quot; or &quot;monthly&quot;. order_by: sort field, defaults to the metric descending. limit: max rows in the card. days: look-back window in days (default 30). scope: &quot;instance&quot; (default) pins for this machine.">
   <div class="t-head"><code class="t-name">pin_view</code></div>
-  <p class="t-sum">Pin a cost slice to the dashboard as a saved card. Takes the same slicing arguments as slice_costs (dimensions / filters / exclusions / metric / etc.), plus a title and a rolling lookback `days`. The pinned card re-runs its slice live on each dashboard load over the trailing `days`, so it always shows fresh numbers. scope: &quot;instance&quot; (shared on this nable) or &quot;me&quot;. Read-only on the cloud: this only saves a view definition locally.</p>
+  <p class="t-sum">Pin a cost slice to the dashboard as a saved card. Takes the same slicing arguments as slice_costs (dimensions / filters / exclusions / metric / etc.), plus a title and a rolling lookback `days`. The pinned card re-runs its slice live on each dashboard load over the trailing `days`, so it always shows fresh numbers. scope: &quot;instance&quot; (shared on this nable) or &quot;me&quot;. Read-only on the cloud: this only saves a view definition locally. Args: title: Card title shown on the dashboard. dimensions: Fields to group by (as in slice_costs). filters: Include-filters, {field: [values]}. exclusions: Exclude-filters, {field: [values]}. metric: &quot;cost&quot; (default) or another supported metric. granularity: &quot;DAILY&quot; or &quot;MONTHLY&quot;. order_by: Sort field, defaults to the metric descending. limit: Max rows in the card. days: Look-back window in days (default 30). scope: &quot;instance&quot; (default) pins for this machine.</p>
   <code class="t-sig">(title, dimensions?, filters?, exclusions?, metric?, granularity?, …)</code>
 </div>
-<div class="tool" data-name="unpin_view" data-text="unpin_view remove a pinned cost card from the dashboard by id.">
+<div class="tool" data-name="unpin_view" data-text="unpin_view remove a pinned cost card from the dashboard by id, so the dashboard stops tracking that saved view. the underlying saved view is not deleted, only unpinned; pin_view() puts it back.">
   <div class="t-head"><code class="t-name">unpin_view</code></div>
-  <p class="t-sum">Remove a pinned cost card from the dashboard by id.</p>
+  <p class="t-sum">Remove a pinned cost card from the dashboard by id, so the dashboard stops tracking that saved view. The underlying saved view is not deleted, only unpinned; pin_view() puts it back.</p>
   <code class="t-sig">(view_id)</code>
 </div></section><section id="platform-admin"><h2>Platform &amp; admin <span class="count">9</span></h2>
 <div class="tool" data-name="check_connector_health" data-text="check_connector_health actively test every configured connector with a real api call. reports health status, last successful data time, and fix instructions for failures.">

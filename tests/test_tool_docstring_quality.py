@@ -11,25 +11,8 @@ from pathlib import Path
 
 SERVER = Path(__file__).parent.parent / "src" / "finops" / "server.py"
 
-# Grandfathered as of 2026-07-05 (49 tools). Fix one -> delete it here.
-GRANDFATHERED = {
-    "audit_textract_environment_waste", "benchmark_costs", "check_action_policy",
-    "cleanup_idle_resources", "create_api_key", "estimate_change_cost",
-    "estimate_helm_diff_cost", "estimate_terraform_cost", "explain_recent_cost_drivers",
-    "export_board_summary", "export_cost_report_csv", "forecast_costs",
-    "generate_account_dashboard", "get_ai_engineering_report", "get_bedrock_costs",
-    "get_cluster_efficiency", "get_databricks_cluster_efficiency", "get_databricks_costs",
-    "get_databricks_dbu_breakdown", "get_databricks_job_costs", "get_documentdb_costs",
-    "get_efficiency_scorecard", "get_focus_costs", "get_helm_release_costs",
-    "get_kendra_costs", "get_kubernetes_costs", "get_kubernetes_namespace_breakdown",
-    "get_label_costs", "get_marketplace_costs", "get_nable_roi",
-    "get_recommendation_learning", "get_recommendation_quality", "get_saas_spend_summary",
-    "get_savings_ledger", "get_tableau_connection_info", "get_textract_costs",
-    "get_total_spend_all_sources", "list_idle_resources", "list_profiles", "pin_view",
-    "publish_cost_report_to_notion", "push_to_n8n", "recommend_bedrock_model_routing",
-    "revoke_api_key", "run_full_cost_audit", "scan_waste_patterns", "slice_costs",
-    "start_dashboard_server", "what_can_nable_do",
-}
+# Empty since 2026-07-05: every tool meets the bar. Keep it empty.
+GRANDFATHERED: set[str] = set()
 
 
 def _tools():
