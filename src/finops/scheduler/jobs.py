@@ -94,6 +94,14 @@ def _acquire_scheduler_lock() -> bool:
 
 async def _snapshot_all() -> dict:
     """Fetch today's costs from all configured providers and persist snapshots."""
+    # Day-one anomalies: when history is thinner than the detector's minimum,
+    # backfill baselines from Cost Explorer first, so the anomaly job that runs
+    # right after this has something to compare against on a fresh install.
+    try:
+        from ..anomaly.backfill import backfill_from_cost_explorer
+        backfill_from_cost_explorer()
+    except Exception:
+        pass
     from ..connectors.aws import AWSConnector
     from ..connectors.azure import AzureConnector
     from ..connectors.gcp import GCPConnector

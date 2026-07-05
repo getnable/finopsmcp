@@ -336,6 +336,17 @@ def _value_moment_body(demo: bool = False) -> bool:
     summary = _run_capped(lambda: asyncio.run(server.get_cost_summary()), _VALUE_MOMENT_TIMEOUT)
     if not isinstance(summary, dict) or summary.get("error"):
         return False
+
+    # Day-one anomalies: seed baselines from CE history in the background so
+    # "any cost spikes?" works today, not after 7 days of snapshots. Daemon
+    # thread + best-effort: the welcome flow never waits on it or fails from it.
+    if not demo:
+        try:
+            import threading
+            from .anomaly.backfill import backfill_from_cost_explorer
+            threading.Thread(target=backfill_from_cost_explorer, daemon=True).start()
+        except Exception:
+            pass
     # Real tool returns grand_total_usd / grand_by_service; demo data returns
     # total_usd / by_service. Accept either.
     total = summary.get("grand_total_usd") or summary.get("total_usd") or 0.0
@@ -401,8 +412,35 @@ def _value_moment_body(demo: bool = False) -> bool:
             if ai_save and ai_save >= 10:
                 _line(f"  {dim('AI savings')}       {green('$' + format(ai_save, ',.0f') + '/mo')}  {dim('ready to capture')}")
 
+    # The blank-prompt moment: the bill renders and the user has to invent a
+    # question. We already know the bill's shape, so hand them the three
+    # questions this account actually makes interesting.
+    _blank()
+    _line(dim("  Ask your AI, in your editor or Claude Desktop:"))
+    for q in _suggest_questions(by_svc, total, ai_share):
+        _line(f"    {cyan('·')} \"{q}\"")
+
     _blank()
     return True
+
+
+def _suggest_questions(by_svc: dict, total: float, ai_share: int) -> list[str]:
+    """Three questions tailored to the bill's shape. The generic 'what can you
+    do' answer is a list; a question aimed at the account's own top line gets a
+    dollar answer, and that is the moment nable earns a second question."""
+    qs: list[str] = []
+    top = sorted(by_svc.items(), key=lambda kv: kv[1], reverse=True)
+    if top:
+        name, val = top[0]
+        qs.append(f"Why is {name} ${val:,.0f} this month, and what would cut it?")
+    if ai_share >= 20:
+        qs.append("Could cheaper models handle part of our AI workload?")
+    elif any("textract" in k.lower() or "bedrock" in k.lower() for k in by_svc):
+        qs.append("Is non-production usage driving any of our AI spend?")
+    else:
+        qs.append("What is sitting idle that we are still paying for?")
+    qs.append("Any cost spikes I should know about?")
+    return qs[:3]
 
 
 def _llm_ambient_provider() -> str | None:

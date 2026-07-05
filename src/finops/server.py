@@ -96,12 +96,48 @@ def _first_run_onboarding_directive() -> dict:
         ),
     }
 
+# ── Extras gating ───────────────────────────────────────────────────────────────
+# Every registered tool's definition is loaded into the model's context by the MCP
+# client, so 183 tools cost every user roughly 25-30k tokens per session before
+# they ask anything, and models pick less accurately from a large overlapping menu.
+# The tools below are the long tail: niche one-off scanners (all still executed by
+# run_full_cost_audit, which calls the scanner FUNCTIONS directly), single-service
+# duplicates of get_service_cost, and integrations with no observed usage. They are
+# hidden, not deleted: the functions stay importable and callable, and
+# FINOPS_ALL_TOOLS=1 registers everything again. Evidence check pending a PostHog
+# per-tool usage pull; this set is deliberately conservative.
+_EXTRA_TOOLS = {
+    # niche one-off scanners (covered by run_full_cost_audit / audit_aws_waste)
+    "audit_s3_transfer_acceleration", "audit_efs_cross_az_mounts",
+    "audit_ebs_snapshot_replication", "audit_nlb_cross_zone_costs",
+    "audit_cloudwatch_metric_cardinality", "audit_cloudwatch_orphaned_alarms",
+    "audit_cloudwatch_logs_ia_opportunities", "audit_spot_diversification",
+    "scan_s3_bucket_key_opportunities", "scan_lambda_concurrency_waste",
+    "recommend_lambda_snapstart", "audit_rds_manual_snapshots",
+    "audit_public_ipv4_addresses", "audit_s3_intelligent_tiering",
+    "get_s3_incomplete_multipart_uploads", "get_ecr_cleanup_recommendations",
+    "scan_cloudwatch_waste",
+    # single-service cost duplicates of get_service_cost
+    "get_kendra_costs", "get_documentdb_costs", "get_marketplace_costs",
+    # integrations tail
+    "get_tableau_connection_info", "push_to_n8n", "publish_cost_report_to_notion",
+    "export_board_summary", "send_onboarding_email", "fetch_invoice_emails",
+}
+# Not gated: get_team_scorecards / create_scorecard_tickets stay registered, the
+# Slack bot (a Team-plan surface) allowlists them and that is where they belong.
+_REGISTER_EXTRAS = os.getenv("FINOPS_ALL_TOOLS", "").strip().lower() in ("1", "true", "yes")
+
+
 def _instrumented_tool(*dargs, **dkwargs):
     """Thin shim around mcp.tool() that injects telemetry into the registered fn."""
     decorator = _original_mcp_tool(*dargs, **dkwargs)
 
     def _wrap(fn):
         import functools
+        if fn.__name__ in _EXTRA_TOOLS and not _REGISTER_EXTRAS:
+            # Not registered with the MCP client (zero context cost), but the
+            # function stays importable and callable for internal callers/tests.
+            return fn
 
         @functools.wraps(fn)
         async def _inner(*args, **kwargs):
@@ -620,6 +656,67 @@ async def _gather_costs(
 
 
 # ── MCP tools ────────────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+async def nable_setup_status() -> dict:
+    """
+    Agent-driven onboarding: what is connected, what credentials are already on
+    this machine, and the exact command to connect each remaining provider.
+
+    Call this when the user asks to connect a provider, says setup is incomplete,
+    or asks what they are missing. Detected ambient credentials (gcloud login,
+    env keys, ~/.modal.toml) mean the connect is ONE terminal command with no
+    secrets involved; run it for the user or hand them the command.
+
+    Rules for the agent, and they are hard rules:
+      - NEVER ask the user to paste an API key or secret into the chat. For
+        paste-a-key providers, have them run the setup command in their own
+        terminal; it deep-links the key page and stores the key locally.
+      - Prefer the zero-secret paths: `finops connect` (batch-connects everything
+        detected) and `finops setup gcp` / ambient AWS, where no secret ever
+        passes through the conversation.
+
+    Examples:
+        - "Connect my GCP costs"
+        - "What providers am I missing?"
+        - "Finish setting up nable"
+    """
+    from .setup_scan import scan_ambient_credentials
+    connected = []
+    not_connected = []
+    for name, conn in _ALL_CONNECTORS.items():
+        try:
+            ok = await conn.is_configured()
+        except Exception:
+            ok = False
+        (connected if ok else not_connected).append(name)
+
+    try:
+        found = scan_ambient_credentials()
+    except Exception:
+        found = []
+    detected = [
+        {"provider": f["name"], "source": f["source"],
+         "connect": "finops connect", "secrets_in_chat": False}
+        for f in found
+    ]
+
+    return {
+        "connected": sorted(connected),
+        "not_connected": sorted(not_connected),
+        "ambient_credentials_detected": detected,
+        "zero_secret_paths": {
+            "batch": "finops connect  (connects everything detected above, one keystroke)",
+            "gcp": "finops setup gcp  (uses gcloud login; no JSON key needed if gcloud is authed)",
+            "aws": "finops setup aws  (detects local AWS credentials automatically)",
+        },
+        "paste_a_key_note": (
+            "For any other provider, the user runs `finops setup <provider>` in "
+            "their own terminal. It deep-links the exact key page and stores the "
+            "key in the local vault. Never relay a secret through this chat."
+        ),
+    }
 
 
 @mcp.tool()
