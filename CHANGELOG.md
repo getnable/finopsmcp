@@ -2,6 +2,15 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.115
+
+Multi-provider cost answers stay lean as you scale. Cross-provider queries used to
+inline every service of every provider, so at ~18 connected providers a single
+answer ballooned toward 5k tokens. Now each provider shows its top services and
+rolls the rest into a total, cutting the payload ~40% at 18 providers with totals
+unchanged. Latency was already flat (the provider fan-out runs concurrently);
+this fixes the token cost. Single-provider queries keep full detail.
+
 ## 0.8.114
 
 Removed GitHub and PagerDuty as cost connectors. They report usage, not dollars,
