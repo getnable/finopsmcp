@@ -2570,7 +2570,9 @@ button:hover{{filter:brightness(1.1)}}
                 return
             try:
                 identity = _sso.exchange_code(code, state)
-                session_token = _create_session()
+                # SEC-2: the session ceiling comes from the IdP group mapping.
+                # "admin" when no mapping is configured (historical behavior).
+                session_token = _create_session(role=identity.get("role", "admin"))
                 log.info("SSO login: %s (%s)", identity["name"], identity["email"])
                 self.send_response(302)
                 self.send_header("Location", "/")

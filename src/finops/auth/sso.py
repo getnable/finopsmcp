@@ -228,4 +228,66 @@ def exchange_code(code: str, state: str) -> dict[str, str]:
             raise ValueError(f"Email domain not allowed: {domain!r}")
 
     name: str = claims.get("name") or claims.get("preferred_username") or email
-    return {"email": email, "name": name, "sub": claims.get("sub", "")}
+    return {
+        "email": email,
+        "name": name,
+        "sub": claims.get("sub", ""),
+        "role": resolve_role(claims),
+    }
+
+
+# ── Group -> role mapping (SEC-2) ───────────────────────────────────────────────
+# Without this, every SSO login on a hosted box minted an admin session and the
+# dashboard agent ran admin-only tools for anyone in the company directory.
+#
+# Lock-out safety is the design constraint: with NO mapping configured the
+# behavior is exactly what it always was (every SSO user is admin), so existing
+# deployments cannot lose access by upgrading. Configuring ANY of the group
+# env vars opts the box into enforcement, and unmapped users then get
+# FINOPS_SSO_DEFAULT_ROLE (viewer unless overridden), never a hard denial:
+# a viewer can still see the dashboard, just not drive admin tools.
+#
+#   FINOPS_SSO_ADMIN_GROUPS    comma-separated IdP group names -> admin
+#   FINOPS_SSO_ANALYST_GROUPS  comma-separated IdP group names -> analyst
+#   FINOPS_SSO_VIEWER_GROUPS   comma-separated IdP group names -> viewer
+#   FINOPS_SSO_GROUPS_CLAIM    claim carrying the groups (default "groups")
+#   FINOPS_SSO_DEFAULT_ROLE    role when mapped groups exist but none match
+#                              (default "viewer")
+
+def _group_env(var: str) -> set[str]:
+    return {g.strip().lower() for g in os.environ.get(var, "").split(",") if g.strip()}
+
+
+def _claim_groups(claims: dict) -> set[str]:
+    """The user's groups from the configured claim. Tolerates list or
+    space/comma separated string forms (IdPs disagree on the shape)."""
+    claim_name = os.environ.get("FINOPS_SSO_GROUPS_CLAIM", "groups").strip() or "groups"
+    raw = claims.get(claim_name)
+    if isinstance(raw, str):
+        raw = raw.replace(",", " ").split()
+    if not isinstance(raw, (list, tuple)):
+        return set()
+    return {str(g).strip().lower() for g in raw if str(g).strip()}
+
+
+def resolve_role(claims: dict) -> str:
+    """Map the ID token's group claims to a nable role.
+
+    Highest matching role wins (a user in both an analyst and an admin group is
+    an admin). Returns "admin" when no mapping is configured at all, preserving
+    pre-mapping behavior so an upgrade can never lock a deployment out.
+    """
+    admin = _group_env("FINOPS_SSO_ADMIN_GROUPS")
+    analyst = _group_env("FINOPS_SSO_ANALYST_GROUPS")
+    viewer = _group_env("FINOPS_SSO_VIEWER_GROUPS")
+    if not (admin or analyst or viewer):
+        return "admin"  # mapping not configured: unchanged historical behavior
+    groups = _claim_groups(claims)
+    if groups & admin:
+        return "admin"
+    if groups & analyst:
+        return "analyst"
+    if groups & viewer:
+        return "viewer"
+    default = os.environ.get("FINOPS_SSO_DEFAULT_ROLE", "viewer").strip().lower()
+    return default if default in ("viewer", "analyst", "admin") else "viewer"
