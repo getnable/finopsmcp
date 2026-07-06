@@ -2,6 +2,16 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.124
+
+nable never touches the OS keychain when FINOPS_NO_KEYRING=1 is set (also
+implied by FINOPS_AIRGAP=1). Use it in CI, tests, demos and any ephemeral
+environment: the vault master key and trial state resolve from files only, so
+macOS never shows a keychain password prompt and your real recovery key is
+never read or rewritten by a scratch run. The test suite now ships with a
+global in-memory keyring stub, so developing nable itself no longer prompts
+either.
+
 ## 0.8.123
 
 Role-based access now reaches SSO sessions on hosted instances. Map your IdP
