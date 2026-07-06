@@ -2,6 +2,15 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.126
+
+New tool: audit_duplicate_spend. Flags spend on two services or providers
+doing the same job at once, the kind of waste a plain cost breakdown never
+surfaces because every line item looks legitimate alone. Covers duplicate LLM
+inference paths (e.g. AWS Bedrock Claude plus a direct Anthropic API key) and
+duplicate managed search/retrieval (Kendra plus OpenSearch). Always a
+"worth a look" flag, never a precise savings claim.
+
 ## 0.8.125
 
 The AWS one-click connect (no local credentials needed) now asks for a single
