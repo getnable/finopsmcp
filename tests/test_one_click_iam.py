@@ -35,6 +35,23 @@ def test_key_template_outputs_the_pasteable_credentials():
     assert secret == {"Fn::GetAtt": ["NableAccessKey", "SecretAccessKey"]}
 
 
+def test_key_template_outputs_a_single_combined_paste():
+    # tokenmaxxing-style speed fix: one output combining both values means the
+    # wizard's fast path is a single copy-paste instead of two, each with its
+    # own validation loop.
+    tpl = json.loads(I.generate_cloudformation_key())
+    combined = tpl["Outputs"]["NableSetupPaste"]["Value"]
+    assert combined == {
+        "Fn::Join": [
+            ":",
+            [
+                {"Ref": "NableAccessKey"},
+                {"Fn::GetAtt": ["NableAccessKey", "SecretAccessKey"]},
+            ],
+        ]
+    }
+
+
 def test_key_template_uses_canonical_read_actions():
     actions = _policy_actions(json.loads(I.generate_cloudformation_key()))
     assert actions == I._REQUIRED_ACTIONS

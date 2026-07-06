@@ -117,14 +117,33 @@
     }
   },
   "Outputs": {
+    "NableSetupPaste": {
+      "Description": "Copy this ONE value and paste it into the nable setup wizard (it asks for a single paste first). Treat it as a secret (it stays visible in this stack's Outputs); delete this stack any time to revoke the key.",
+      "Value": {
+        "Fn::Join": [
+          ":",
+          [
+            {
+              "Ref": "NableAccessKey"
+            },
+            {
+              "Fn::GetAtt": [
+                "NableAccessKey",
+                "SecretAccessKey"
+              ]
+            }
+          ]
+        ]
+      }
+    },
     "AccessKeyId": {
-      "Description": "Paste this as the AWS Access Key ID in the nable setup wizard",
+      "Description": "Only needed if the wizard's single-paste prompt does not accept NableSetupPaste above: paste this as the AWS Access Key ID",
       "Value": {
         "Ref": "NableAccessKey"
       }
     },
     "SecretAccessKey": {
-      "Description": "Paste this as the AWS Secret Access Key in the nable setup wizard. Treat it as a secret (it stays visible in this stack's Outputs); delete this stack any time to revoke the key.",
+      "Description": "Only needed if the wizard's single-paste prompt does not accept NableSetupPaste above: paste this as the AWS Secret Access Key. Treat it as a secret (it stays visible in this stack's Outputs); delete this stack any time to revoke the key.",
       "Value": {
         "Fn::GetAtt": [
           "NableAccessKey",

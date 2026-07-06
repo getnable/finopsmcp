@@ -197,6 +197,19 @@ def test_no_creds_offer_leads_with_cloudshell_fast_path(capsys):
     assert "Create access key" in out
 
 
+def test_parse_combined_aws_paste_accepts_valid_pair():
+    key, secret = W._parse_combined_aws_paste("AKIAABCDEFGHIJKLMNOP:supersecretkeyvalue1234567890")
+    assert key == "AKIAABCDEFGHIJKLMNOP"
+    assert secret == "supersecretkeyvalue1234567890"
+
+
+def test_parse_combined_aws_paste_rejects_bad_input():
+    assert W._parse_combined_aws_paste("") is None
+    assert W._parse_combined_aws_paste("no-colon-here") is None
+    assert W._parse_combined_aws_paste("short:short") is None  # both too short
+    assert W._parse_combined_aws_paste("notAK1234567890123:supersecretkeyvalue1234567890") is None
+
+
 def test_oneclick_aws_url_is_gated_on_publish(monkeypatch):
     """The welcome flow surfaces the one-click CFN link only when the template is
     actually published, so a no-creds user never sees a dead link, and the fast

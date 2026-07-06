@@ -29,6 +29,18 @@ import sys
 from pathlib import Path
 
 
+def _parse_combined_aws_paste(combined: str) -> tuple[str, str] | None:
+    """Parse the CloudFormation "NableSetupPaste" output ("AccessKeyId:SecretAccessKey")
+    into its two halves, or None if it does not look like a valid pair. Colons never
+    appear in either an AWS access key ID or secret key, so a plain split is safe."""
+    if not combined or ":" not in combined:
+        return None
+    key, _, secret = combined.partition(":")
+    if key.startswith("AK") and len(key) >= 16 and len(secret) >= 20:
+        return key, secret
+    return None
+
+
 def _prompt(msg: str, secret: bool = False, default: str = "") -> str:
     # Avoid a doubled default marker. Some callers embed a yes/no hint like
     # "[Y/n]" or "(y/N)" in the message themselves; only append "[default]"
@@ -209,6 +221,8 @@ def setup_aws() -> None:
             _err(f"Failed to store SSO credentials: {e}")
             return
     else:
+        access_key = None
+        secret_key = None
         if _method == "oneclick":
             url = _iam.quick_create_url()
             print("""
@@ -216,8 +230,9 @@ def setup_aws() -> None:
     1. We open the AWS console with a read-only stack pre-loaded.
     2. Tick the "I acknowledge that AWS CloudFormation might create IAM
        resources" box, click "Create stack", and wait ~30 seconds.
-    3. Open the stack's "Outputs" tab. Copy AccessKeyId and SecretAccessKey.
-    4. Paste them below. Delete the stack any time to revoke the key.
+    3. Open the stack's "Outputs" tab. Copy the "NableSetupPaste" value
+       (one combined value, so there is only one thing to copy).
+    4. Paste it below. Delete the stack any time to revoke the key.
 """)
             try:
                 import webbrowser
@@ -233,6 +248,17 @@ def setup_aws() -> None:
                 input("  Press Enter once the stack shows CREATE_COMPLETE → ")
             except (KeyboardInterrupt, EOFError):
                 print()
+
+            # Single combined paste (NableSetupPaste = "AccessKeyId:SecretAccessKey")
+            # replaces two separate copy-pastes with their own validation loops.
+            # An empty answer, or one that doesn't parse, falls through to the
+            # original two-prompt flow below rather than failing the setup.
+            combined = _prompt("  Paste the NableSetupPaste value (or press Enter to enter the two values separately)", secret=True)
+            parsed = _parse_combined_aws_paste(combined)
+            if parsed:
+                access_key, secret_key = parsed
+            elif combined:
+                _warn("That didn't look like a valid combined paste, falling back to entering the two values.")
         else:
             print("""
   Create an access key:
@@ -240,22 +266,24 @@ def setup_aws() -> None:
     2. Access keys → Create access key → choose "Other" → Create
     3. Copy both values below (the secret is only shown once)
 """)
-        access_key = _prompt("  AWS Access Key ID (starts with AKIA...)")
-        while not access_key.startswith("AK") or len(access_key) < 16:
-            if not access_key:
-                # User hit Enter/Ctrl-C with no input; abort rather than loop forever
-                _warn("No Access Key ID entered. Run 'finops setup aws' to try again.")
-                return
-            _warn("That doesn't look like a valid Access Key ID (should start with AKIA and be 20 chars)")
-            access_key = _prompt("  AWS Access Key ID")
 
-        secret_key = _prompt("  AWS Secret Access Key", secret=True)
-        while len(secret_key) < 20:
-            if not secret_key:
-                _warn("No Secret Access Key entered. Run 'finops setup aws' to try again.")
-                return
-            _warn("That doesn't look like a valid Secret Access Key")
+        if access_key is None:
+            access_key = _prompt("  AWS Access Key ID (starts with AKIA...)")
+            while not access_key.startswith("AK") or len(access_key) < 16:
+                if not access_key:
+                    # User hit Enter/Ctrl-C with no input; abort rather than loop forever
+                    _warn("No Access Key ID entered. Run 'finops setup aws' to try again.")
+                    return
+                _warn("That doesn't look like a valid Access Key ID (should start with AKIA and be 20 chars)")
+                access_key = _prompt("  AWS Access Key ID")
+
             secret_key = _prompt("  AWS Secret Access Key", secret=True)
+            while len(secret_key) < 20:
+                if not secret_key:
+                    _warn("No Secret Access Key entered. Run 'finops setup aws' to try again.")
+                    return
+                _warn("That doesn't look like a valid Secret Access Key")
+                secret_key = _prompt("  AWS Secret Access Key", secret=True)
 
         # Region with validation
         while True:
