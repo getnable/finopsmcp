@@ -2,6 +2,13 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.128
+
+Fixes MCP Registry publishing, which had silently failed since 0.8.125: the
+server.json description exceeded the registry's 100-character limit, so the
+registry froze at 0.8.124 while PyPI kept releasing. Description shortened, a
+test now guards the limit, and this release catches the registry back up.
+
 ## 0.8.127
 
 audit_duplicate_spend now also flags Databricks + Snowflake running at once,

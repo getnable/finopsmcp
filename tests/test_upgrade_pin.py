@@ -117,6 +117,23 @@ def test_server_json_version_matches_package():
     assert server["packages"][0]["version"] == pkg_version
 
 
+def test_server_json_description_within_registry_limit():
+    """The MCP Registry hard-caps server.json `description` at 100 chars and
+    rejects the whole publish with a 422 if exceeded. A 243-char description
+    shipped in 0.8.125 silently broke the registry leg for three releases (the
+    registry froze at 0.8.124 while PyPI moved on) because nothing checked the
+    length. This fails the suite at edit time instead."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    server = json.loads((root / "server.json").read_text())
+    desc = server["description"]
+    assert len(desc) <= 100, (
+        f"server.json description is {len(desc)} chars; the MCP Registry rejects "
+        f"anything over 100 with a 422 and the publish silently fails: {desc!r}"
+    )
+
+
 def test_dashboard_template_force_included_in_wheel():
     """The dashboard template is matched by an over-broad .gitignore rule
     ("dashboard.html"), so hatchling's VCS selection drops it from the wheel
