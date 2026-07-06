@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tool reference (183) · nable docs</title>
-<meta name="description" content="Complete reference for all 183 MCP tools in nable: cloud cost visibility, waste audits, AI spend, the agent cost gate, Kubernetes, budgets, and more.">
+<title>Tool reference (185) · nable docs</title>
+<meta name="description" content="Complete reference for all 185 MCP tools in nable: cloud cost visibility, waste audits, AI spend, the agent cost gate, Kubernetes, budgets, and more.">
 <link rel="icon" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap" rel="stylesheet">
@@ -42,51 +42,7 @@ h2 .count{color:var(--fg-3);font-weight:400;font-size:14px;margin-left:8px}
 .t-sig{display:block;font-family:'Geist Mono',monospace;font-size:12px;color:var(--fg-3);margin-top:5px}
 footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding:28px 0 48px;margin-top:30px}
 .hidden{display:none}
-</style>
-<!-- PostHog -->
-<script>
-  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
-  posthog.init("phc_zcaQqoAXrSghjtbE6VB83p4RjfmcpqezKWV9GdZy4dPv", {
-    api_host: "https://us.i.posthog.com",
-    person_profiles: "identified_only",
-    capture_pageview: true,
-    capture_pageleave: true,
-    session_recording: {
-      maskAllInputs: true,
-      maskTextSelector: "[data-ph-mask]",
-    },
-    disable_session_recording: false,
-  });
-</script>
-
-<script>
-(function() {
-  // Capture UTM params and pass to PostHog
-  const params = new URLSearchParams(window.location.search);
-  const utm = {};
-  ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'].forEach(k => {
-    const v = params.get(k);
-    if (v) utm[k] = v;
-  });
-  // Also capture reddit click id
-  const rdt = params.get('rdt_cid');
-  if (rdt) utm['rdt_cid'] = rdt;
-
-  if (Object.keys(utm).length > 0) {
-    // Store in session
-    sessionStorage.setItem('nable_utm', JSON.stringify(utm));
-    // Register as PostHog super properties
-    if (window.posthog) posthog.register(utm);
-  } else {
-    // Restore from session (for subsequent page views in same session)
-    const stored = sessionStorage.getItem('nable_utm');
-    if (stored && window.posthog) {
-      try { posthog.register(JSON.parse(stored)); } catch {}
-    }
-  }
-})();
-</script>
-</head>
+</style></head>
 <body>
 <header><div class="wrap">
   <a class="brand" href="/">nable</a>
@@ -97,14 +53,14 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <p class="sub">Every tool nable exposes to Claude, Cursor, and any MCP client.
   You never call these by name, just ask, and nable picks the right one.
   This page is generated from the source of <code>finops-mcp</code> on every release.</p>
-  <input id="q" type="search" placeholder="Filter 183 tools… (e.g. kubernetes, idle, budget)" autocomplete="off">
-  <p class="meta"><span id="shown">183</span> of 183 tools · read-only unless marked · PRO = paid tier</p>
-  <nav class="toc"><a href="#cost-visibility">Cost visibility<span class="n">23</span></a><a href="#waste-rightsizing">Waste &amp; rightsizing<span class="n">34</span></a><a href="#savings-commitments">Savings &amp; commitments<span class="n">12</span></a><a href="#ai-llm-spend">AI &amp; LLM spend<span class="n">17</span></a><a href="#agent-cost-gate">Agent cost gate<span class="n">5</span></a><a href="#kubernetes">Kubernetes<span class="n">12</span></a><a href="#budgets">Budgets<span class="n">6</span></a><a href="#anomalies-alerts">Anomalies &amp; alerts<span class="n">6</span></a><a href="#forecasting">Forecasting<span class="n">3</span></a><a href="#teams-attribution">Teams &amp; attribution<span class="n">8</span></a><a href="#organizations-accounts">Organizations &amp; accounts<span class="n">8</span></a><a href="#azure">Azure<span class="n">6</span></a><a href="#gcp">GCP<span class="n">2</span></a><a href="#databricks">Databricks<span class="n">3</span></a><a href="#tickets-prs">Tickets &amp; PRs<span class="n">6</span></a><a href="#reports-exports">Reports &amp; exports<span class="n">17</span></a><a href="#saved-views">Saved views<span class="n">6</span></a><a href="#platform-admin">Platform &amp; admin<span class="n">9</span></a></nav>
+  <input id="q" type="search" placeholder="Filter 185 tools… (e.g. kubernetes, idle, budget)" autocomplete="off">
+  <p class="meta"><span id="shown">185</span> of 185 tools · read-only unless marked · PRO = paid tier</p>
+  <nav class="toc"><a href="#cost-visibility">Cost visibility<span class="n">23</span></a><a href="#waste-rightsizing">Waste &amp; rightsizing<span class="n">35</span></a><a href="#savings-commitments">Savings &amp; commitments<span class="n">12</span></a><a href="#ai-llm-spend">AI &amp; LLM spend<span class="n">17</span></a><a href="#agent-cost-gate">Agent cost gate<span class="n">5</span></a><a href="#kubernetes">Kubernetes<span class="n">12</span></a><a href="#budgets">Budgets<span class="n">6</span></a><a href="#anomalies-alerts">Anomalies &amp; alerts<span class="n">6</span></a><a href="#forecasting">Forecasting<span class="n">3</span></a><a href="#teams-attribution">Teams &amp; attribution<span class="n">8</span></a><a href="#organizations-accounts">Organizations &amp; accounts<span class="n">8</span></a><a href="#azure">Azure<span class="n">6</span></a><a href="#gcp">GCP<span class="n">2</span></a><a href="#databricks">Databricks<span class="n">3</span></a><a href="#tickets-prs">Tickets &amp; PRs<span class="n">6</span></a><a href="#reports-exports">Reports &amp; exports<span class="n">17</span></a><a href="#saved-views">Saved views<span class="n">6</span></a><a href="#platform-admin">Platform &amp; admin<span class="n">9</span></a><a href="#other">Other<span class="n">1</span></a></nav>
   <section id="cost-visibility"><h2>Cost visibility <span class="count">23</span></h2>
 <div class="tool" data-name="benchmark_costs" data-text="benchmark_costs compare this account&#x27;s spend profile against anonymised peer group medians.">
   <div class="t-head"><code class="t-name">benchmark_costs</code></div>
   <p class="t-sum">Compare this account&#x27;s spend profile against anonymised peer group medians.</p>
-  <code class="t-sig">(account_id, vertical?, days?)</code>
+  <code class="t-sig">(account_id?, vertical?, days?)</code>
 </div>
 <div class="tool" data-name="compare_providers" data-text="compare_providers side-by-side cost comparison across all configured providers.">
   <div class="t-head"><code class="t-name">compare_providers</code><span class="pro">PRO</span></div>
@@ -215,7 +171,7 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <div class="t-head"><code class="t-name">slice_costs</code></div>
   <p class="t-sum">Slice cloud cost any way you want. This is the flexible, moldable cost query: group and filter by ANY combination of dimensions, over any date range, instead of a fixed set of canned reports. Returns both the numbers and a `card` describing how to chart them (which the UI can render and pin to the dashboard).</p>
   <code class="t-sig">(dimensions?, filters?, exclusions?, metric?, granularity?, order_by?, …)</code>
-</div></section><section id="waste-rightsizing"><h2>Waste &amp; rightsizing <span class="count">34</span></h2>
+</div></section><section id="waste-rightsizing"><h2>Waste &amp; rightsizing <span class="count">35</span></h2>
 <div class="tool" data-name="audit_aws_waste" data-text="audit_aws_waste deep aws waste audit: scans ec2, ebs, rds, lambda, nat gateways, cloudwatch logs, s3, and cloudtrail for waste. returns findings sorted by monthly savings.">
   <div class="t-head"><code class="t-name">audit_aws_waste</code></div>
   <p class="t-sum">Deep AWS waste audit: scans EC2, EBS, RDS, Lambda, NAT Gateways, CloudWatch Logs, S3, and CloudTrail for waste. Returns findings sorted by monthly savings.</p>
@@ -235,6 +191,11 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
   <div class="t-head"><code class="t-name">audit_cloudwatch_orphaned_alarms</code></div>
   <p class="t-sum">Finds CloudWatch alarms on deleted resources. Standard alarms cost $0.10/month, composite $0.30/month. Terminated instances and deleted queues leave alarms stuck in INSUFFICIENT_DATA indefinitely.</p>
   <code class="t-sig">(regions?, max_results?)</code>
+</div>
+<div class="tool" data-name="audit_duplicate_spend" data-text="audit_duplicate_spend find places where you&#x27;re paying for the same capability through two different services or providers at once, the kind of waste a plain cost breakdown never surfaces because every line item looks legitimate on its own. covers two patterns: multiple llm inference paths active at the same time (e.g. aws bedrock claude and a direct anthropic api key), and multiple managed search/retrieval services (kendra + opensearch).">
+  <div class="t-head"><code class="t-name">audit_duplicate_spend</code></div>
+  <p class="t-sum">Find places where you&#x27;re paying for the same capability through two different services or providers at once, the kind of waste a plain cost breakdown never surfaces because every line item looks legitimate on its own. Covers two patterns: multiple LLM inference paths active at the same time (e.g. AWS Bedrock Claude AND a direct Anthropic API key), and multiple managed search/retrieval services (Kendra + OpenSearch).</p>
+  <code class="t-sig">(days?)</code>
 </div>
 <div class="tool" data-name="audit_ebs_snapshot_replication" data-text="audit_ebs_snapshot_replication audits cross-region ebs snapshot replication for waste. replicated snapshots cost $0.05/gb-month in each region. finds orphaned copies (source volume deleted), excessive copies (more than 3 regions), and old copies where a newer copy exists.">
   <div class="t-head"><code class="t-name">audit_ebs_snapshot_replication</code></div>
@@ -384,7 +345,7 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
 <div class="tool" data-name="scan_waste_patterns" data-text="scan_waste_patterns scan for cloud cost waste patterns using nable&#x27;s proprietary pattern library.">
   <div class="t-head"><code class="t-name">scan_waste_patterns</code></div>
   <p class="t-sum">Scan for cloud cost waste patterns using nable&#x27;s proprietary pattern library.</p>
-  <code class="t-sig">(account_id, min_monthly_waste?, categories?)</code>
+  <code class="t-sig">(account_id?, min_monthly_waste?, categories?)</code>
 </div></section><section id="savings-commitments"><h2>Savings &amp; commitments <span class="count">12</span></h2>
 <div class="tool" data-name="dismiss_recommendation" data-text="dismiss_recommendation dismiss a recommendation you&#x27;ve decided not to act on (won&#x27;t fix, accepted risk, etc.). dismissed recommendations won&#x27;t appear in open potential savings.">
   <div class="t-head"><code class="t-name">dismiss_recommendation</code></div>
@@ -1014,6 +975,11 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
 <div class="tool" data-name="whoami" data-text="whoami show the current identity and access level. works in both permissive and shared auth mode.">
   <div class="t-head"><code class="t-name">whoami</code></div>
   <p class="t-sum">Show the current identity and access level. Works in both permissive and shared auth mode.</p>
+  
+</div></section><section id="other"><h2>Other <span class="count">1</span></h2>
+<div class="tool" data-name="nable_setup_status" data-text="nable_setup_status agent-driven onboarding: what is connected, what credentials are already on this machine, and the exact command to connect each remaining provider.">
+  <div class="t-head"><code class="t-name">nable_setup_status</code></div>
+  <p class="t-sum">Agent-driven onboarding: what is connected, what credentials are already on this machine, and the exact command to connect each remaining provider.</p>
   
 </div></section>
 </main>

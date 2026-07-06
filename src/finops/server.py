@@ -10628,6 +10628,68 @@ async def audit_textract_environment_waste(days: int = 30) -> dict:
 
 
 @mcp.tool()
+async def audit_duplicate_spend(days: int = 30) -> dict:
+    """
+    Find places where you're paying for the same capability through two
+    different services or providers at once, the kind of waste a plain cost
+    breakdown never surfaces because every line item looks legitimate on its
+    own. Covers two patterns: multiple LLM inference paths active at the same
+    time (e.g. AWS Bedrock Claude AND a direct Anthropic API key), and
+    multiple managed search/retrieval services (Kendra + OpenSearch).
+
+    This is a "worth a look" flag, not a claim that anything is wasted:
+    running two providers on purpose (failover, per-team routing) is a real
+    pattern too. Every finding tells you exactly how to confirm it yourself.
+
+    Use this when:
+        - User asks what redundant or duplicate spend they have
+        - User connects multiple LLM providers and wants a sanity check
+        - User wants a second pass beyond idle-resource / rightsizing checks
+
+    Args:
+        days: Lookback window in days (default 30).
+
+    Examples:
+        - "Are we paying for the same thing twice?"
+        - "Do I have duplicate or redundant cloud spend?"
+        - "Am I running two LLM providers by accident?"
+    """
+    from .demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("audit_duplicate_spend") or {}
+    try:
+        from .recommendations.duplicate_capability import scan_duplicate_capabilities
+        from .connectors.llm_costs import get_all_llm_costs
+
+        llm_data = await asyncio.to_thread(get_all_llm_costs, None, None, days)
+        llm_by_provider = llm_data.get("by_provider") or {}
+
+        aws_by_service: dict = {}
+        aws = _CLOUD_CONNECTORS.get("aws")
+        if aws is not None and await aws.is_configured():
+            ed = date.today()
+            sd = ed - timedelta(days=days)
+            summary = await aws.get_costs(sd, ed, granularity="MONTHLY")
+            aws_by_service = summary.by_service or {}
+
+        findings = scan_duplicate_capabilities(
+            llm_by_provider=llm_by_provider,
+            aws_by_service=aws_by_service,
+        )
+        return {
+            "window_days": days,
+            "checked": {
+                "llm_providers": sorted(k for k, v in llm_by_provider.items() if v),
+                "aws_connected": bool(aws_by_service),
+            },
+            "finding_count": len(findings),
+            "findings": [f.to_dict() for f in findings],
+        }
+    except Exception as e:
+        return {"error": f"Duplicate-spend audit unavailable: {e}"}
+
+
+@mcp.tool()
 async def recommend_bedrock_model_routing(days: int = 30) -> dict:
     """
     Analyzes Bedrock model usage to find invocations that could route to
