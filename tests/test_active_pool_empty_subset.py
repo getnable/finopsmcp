@@ -18,9 +18,15 @@ def test_active_with_none_falls_back_to_all_connectors():
         return True
 
     stub = SimpleNamespace(is_configured=_configured)
-    with patch.dict(srv._CLOUD_CONNECTORS, {"aws": stub}, clear=True), \
-         patch.dict(srv._SAAS_CONNECTORS, {}, clear=True):
+    # _active(None) reads the pre-materialized _ALL_CONNECTORS, NOT the two
+    # source dicts, so patch that one. Also clear the _ACTIVE_CACHE: a real
+    # connector configured on the dev box (or an earlier test) would otherwise
+    # be served from cache and mask the fallback. (This is the exact bug that
+    # let this test pass on a laptop with AWS configured but fail in CI.)
+    srv._ACTIVE_CACHE.clear()
+    with patch.dict(srv._ALL_CONNECTORS, {"aws": stub}, clear=True):
         result = asyncio.run(srv._active(None))
+    srv._ACTIVE_CACHE.clear()
     assert set(result) == {"aws"}
 
 
