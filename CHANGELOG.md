@@ -2,6 +2,14 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.130
+
+Polished the setup flow's visual language: the welcome banner's color
+palette (bold/dim/status colors, a fixed-width rule) now carries through
+every prompt, not just the banner, and the "3 steps" status column lines
+up on the same character offset for every row instead of drifting per label
+length.
+
 ## 0.8.129
 
 Azure connect now matches AWS and GCP: `finops setup azure` opens Cloud Shell
