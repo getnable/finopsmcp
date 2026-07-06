@@ -2,6 +2,16 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.129
+
+Azure connect now matches AWS and GCP: `finops setup azure` opens Cloud Shell
+(already signed in, no local az CLI needed), you paste one generated script
+in, and paste one line back. It creates a read-only service principal and
+assigns Cost Management Reader, Reader, and Monitoring Reader across every
+subscription automatically, replacing three manual `az role assignment`
+commands per subscription. Manual service-principal entry and device-code
+flow are still available as fallbacks.
+
 ## 0.8.128
 
 Fixes MCP Registry publishing, which had silently failed since 0.8.125: the
