@@ -872,17 +872,65 @@ def setup_aws_org() -> None:
 def setup_azure() -> None:
     _section("Azure: Cost Management")
     print("  Choose authentication method:")
-    print("  1) Service Principal (recommended for production)")
-    print("  2) Device code flow (browser required)")
+    print("  1) Cloud Shell one-paste (recommended, no local az CLI needed)")
+    print("  2) Service Principal (enter tenant/client/secret manually)")
+    print("  3) Device code flow (browser required)")
     choice = _prompt("  Choice", default="1")
+
+    from .security.oauth.azure import store_service_principal, start_device_flow, poll_for_token, store_credentials
+
+    if choice == "1":
+        from .security.azure_cloudshell import CLOUDSHELL_URL, generate_cloudshell_script, parse_combined_azure_paste
+        script = generate_cloudshell_script()
+        print(f"""
+  1. Open Azure Cloud Shell (already signed in as you, no install needed):
+       {CLOUDSHELL_URL}
+  2. Paste the script below into it, and wait for it to finish (~30 seconds).
+  3. Paste the ONE line it prints back here.
+
+  ----- copy from here -----
+{script}  ----- to here -----
+""")
+        try:
+            import webbrowser
+            webbrowser.open(CLOUDSHELL_URL)
+        except Exception:
+            pass
+        combined = _prompt("  Paste the line Cloud Shell printed (or press Enter for manual entry)", secret=True)
+        parsed = parse_combined_azure_paste(combined)
+        if parsed:
+            tenant_id, client_id, client_secret, sub_ids = parsed
+            try:
+                store_service_principal(tenant_id, client_id, client_secret, sub_ids)
+                _ok("Azure credentials stored (Cost Management Reader, Reader, Monitoring Reader already assigned)")
+                try:
+                    from . import telemetry as _tel
+                    _tel._send_event(_tel._get_install_id(), "provider_connected", {
+                        "provider": "azure", "auth_method": "cloudshell_paste",
+                        "subscription_count": len(sub_ids),
+                    })
+                except Exception:
+                    pass
+                return
+            except Exception as e:
+                _err(f"Failed: {e}")
+                try:
+                    from . import telemetry as _tel
+                    _tel._send_event(_tel._get_install_id(), "provider_connect_failed", {
+                        "provider": "azure", "error_type": type(e).__name__,
+                    })
+                except Exception:
+                    pass
+                return
+        elif combined:
+            _warn("That didn't look like a valid Cloud Shell output line, falling back to manual entry.")
+        choice = "2"  # fall through to manual service-principal entry below
 
     sub_ids_raw = _prompt("  Subscription IDs (comma-separated)")
     sub_ids = [s.strip() for s in sub_ids_raw.split(",") if s.strip()]
     tenant_id = _prompt("  Tenant ID")
 
-    from .security.oauth.azure import store_service_principal, start_device_flow, poll_for_token, store_credentials
-
-    if choice == "1":
+    if choice == "2":
         client_id = _prompt("  Client (App) ID")
         client_secret = _prompt("  Client Secret", secret=True)
         try:
