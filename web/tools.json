@@ -13,7 +13,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 7737
+   "lineno": 7744
   },
   {
    "name": "get_ai_engineering_report",
@@ -37,7 +37,7 @@
    ],
    "pro": true,
    "category": "AI & LLM spend",
-   "lineno": 7545
+   "lineno": 7552
   },
   {
    "name": "get_ai_kpis",
@@ -56,7 +56,7 @@
    ],
    "pro": true,
    "category": "AI & LLM spend",
-   "lineno": 8588
+   "lineno": 8595
   },
   {
    "name": "get_ai_spend_monitor",
@@ -70,7 +70,7 @@
    ],
    "pro": true,
    "category": "AI & LLM spend",
-   "lineno": 7874
+   "lineno": 7881
   },
   {
    "name": "get_bedrock_costs",
@@ -89,7 +89,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 10507
+   "lineno": 10514
   },
   {
    "name": "get_gpu_infra_costs",
@@ -113,7 +113,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 7668
+   "lineno": 7675
   },
   {
    "name": "get_kendra_costs",
@@ -127,7 +127,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 10555
+   "lineno": 10562
   },
   {
    "name": "get_langfuse_model_costs",
@@ -151,7 +151,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 8054
+   "lineno": 8061
   },
   {
    "name": "get_langfuse_trace_volume",
@@ -175,7 +175,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 8116
+   "lineno": 8123
   },
   {
    "name": "get_llm_commitment_analysis",
@@ -189,7 +189,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 7768
+   "lineno": 7775
   },
   {
    "name": "get_llm_cost_by_model",
@@ -208,7 +208,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 7931
+   "lineno": 7938
   },
   {
    "name": "get_llm_costs",
@@ -232,7 +232,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 7587
+   "lineno": 7594
   },
   {
    "name": "get_llm_unit_economics",
@@ -256,7 +256,7 @@
    ],
    "pro": true,
    "category": "AI & LLM spend",
-   "lineno": 7986
+   "lineno": 7993
   },
   {
    "name": "get_llm_unit_economics_full",
@@ -290,7 +290,7 @@
    ],
    "pro": true,
    "category": "AI & LLM spend",
-   "lineno": 8726
+   "lineno": 8733
   },
   {
    "name": "get_textract_costs",
@@ -309,7 +309,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 10579
+   "lineno": 10586
   },
   {
    "name": "optimize_ai_spend",
@@ -323,7 +323,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 8650
+   "lineno": 8657
   },
   {
    "name": "recommend_bedrock_model_routing",
@@ -337,7 +337,7 @@
    ],
    "pro": false,
    "category": "AI & LLM spend",
-   "lineno": 10693
+   "lineno": 10710
   },
   {
    "name": "check_action_policy",
@@ -381,7 +381,7 @@
    ],
    "pro": false,
    "category": "Agent cost gate",
-   "lineno": 8503
+   "lineno": 8510
   },
   {
    "name": "delete_alert_policy",
@@ -395,7 +395,7 @@
    ],
    "pro": false,
    "category": "Agent cost gate",
-   "lineno": 1711
+   "lineno": 1718
   },
   {
    "name": "estimate_change_cost",
@@ -434,7 +434,7 @@
    ],
    "pro": false,
    "category": "Agent cost gate",
-   "lineno": 8385
+   "lineno": 8392
   },
   {
    "name": "estimate_terraform_cost",
@@ -458,7 +458,7 @@
    ],
    "pro": false,
    "category": "Agent cost gate",
-   "lineno": 8326
+   "lineno": 8333
   },
   {
    "name": "set_alert_policy",
@@ -497,7 +497,7 @@
    ],
    "pro": true,
    "category": "Agent cost gate",
-   "lineno": 1595
+   "lineno": 1602
   },
   {
    "name": "acknowledge_anomaly",
@@ -511,7 +511,7 @@
    ],
    "pro": false,
    "category": "Anomalies & alerts",
-   "lineno": 1861
+   "lineno": 1868
   },
   {
    "name": "check_notification_config",
@@ -519,7 +519,7 @@
    "params": [],
    "pro": false,
    "category": "Anomalies & alerts",
-   "lineno": 2150
+   "lineno": 2157
   },
   {
    "name": "create_anomaly_tickets",
@@ -533,7 +533,7 @@
    ],
    "pro": true,
    "category": "Anomalies & alerts",
-   "lineno": 3006
+   "lineno": 3013
   },
   {
    "name": "get_account_anomalies",
@@ -547,7 +547,7 @@
    ],
    "pro": true,
    "category": "Anomalies & alerts",
-   "lineno": 6261
+   "lineno": 6268
   },
   {
    "name": "get_anomalies",
@@ -576,7 +576,7 @@
    ],
    "pro": false,
    "category": "Anomalies & alerts",
-   "lineno": 1742
+   "lineno": 1749
   },
   {
    "name": "list_alert_policies",
@@ -584,7 +584,7 @@
    "params": [],
    "pro": false,
    "category": "Anomalies & alerts",
-   "lineno": 1669
+   "lineno": 1676
   },
   {
    "name": "get_azure_advisor_recommendations",
@@ -603,7 +603,7 @@
    ],
    "pro": false,
    "category": "Azure",
-   "lineno": 6681
+   "lineno": 6688
   },
   {
    "name": "get_azure_budgets",
@@ -617,7 +617,7 @@
    ],
    "pro": false,
    "category": "Azure",
-   "lineno": 6775
+   "lineno": 6782
   },
   {
    "name": "get_azure_cost_by_dimension",
@@ -651,7 +651,7 @@
    ],
    "pro": false,
    "category": "Azure",
-   "lineno": 6834
+   "lineno": 6841
   },
   {
    "name": "get_azure_reservation_utilization",
@@ -670,7 +670,7 @@
    ],
    "pro": true,
    "category": "Azure",
-   "lineno": 6643
+   "lineno": 6650
   },
   {
    "name": "get_azure_vm_rightsizing",
@@ -699,7 +699,7 @@
    ],
    "pro": false,
    "category": "Azure",
-   "lineno": 6721
+   "lineno": 6728
   },
   {
    "name": "get_resource_cost_breakdown_azure",
@@ -738,7 +738,7 @@
    ],
    "pro": true,
    "category": "Azure",
-   "lineno": 6575
+   "lineno": 6582
   },
   {
    "name": "check_budget_status",
@@ -752,7 +752,7 @@
    ],
    "pro": false,
    "category": "Budgets",
-   "lineno": 6030
+   "lineno": 6037
   },
   {
    "name": "delete_budget",
@@ -766,7 +766,7 @@
    ],
    "pro": false,
    "category": "Budgets",
-   "lineno": 6093
+   "lineno": 6100
   },
   {
    "name": "get_credit_status",
@@ -780,7 +780,7 @@
    ],
    "pro": false,
    "category": "Budgets",
-   "lineno": 7707
+   "lineno": 7714
   },
   {
    "name": "list_budgets",
@@ -788,7 +788,7 @@
    "params": [],
    "pro": false,
    "category": "Budgets",
-   "lineno": 6075
+   "lineno": 6082
   },
   {
    "name": "set_budget",
@@ -832,7 +832,7 @@
    ],
    "pro": false,
    "category": "Budgets",
-   "lineno": 5982
+   "lineno": 5989
   },
   {
    "name": "sync_budgets_from_yaml",
@@ -846,7 +846,7 @@
    ],
    "pro": false,
    "category": "Budgets",
-   "lineno": 6115
+   "lineno": 6122
   },
   {
    "name": "benchmark_costs",
@@ -870,7 +870,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 8160
+   "lineno": 8167
   },
   {
    "name": "compare_providers",
@@ -894,7 +894,7 @@
    ],
    "pro": true,
    "category": "Cost visibility",
-   "lineno": 1191
+   "lineno": 1198
   },
   {
    "name": "explain_cost_change",
@@ -908,7 +908,7 @@
    ],
    "pro": true,
    "category": "Cost visibility",
-   "lineno": 9095
+   "lineno": 9102
   },
   {
    "name": "explain_recent_cost_drivers",
@@ -927,7 +927,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 12913
+   "lineno": 12930
   },
   {
    "name": "get_cost_history",
@@ -956,7 +956,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 1881
+   "lineno": 1888
   },
   {
    "name": "get_cost_summary",
@@ -995,7 +995,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 927
+   "lineno": 934
   },
   {
    "name": "get_cost_trends",
@@ -1024,7 +1024,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 1262
+   "lineno": 1269
   },
   {
    "name": "get_costs_by_service",
@@ -1063,7 +1063,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 1041
+   "lineno": 1048
   },
   {
    "name": "get_data_transfer_costs",
@@ -1087,7 +1087,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 4402
+   "lineno": 4409
   },
   {
    "name": "get_documentdb_costs",
@@ -1106,7 +1106,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 10531
+   "lineno": 10538
   },
   {
    "name": "get_focus_costs",
@@ -1135,7 +1135,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 9976
+   "lineno": 9983
   },
   {
    "name": "get_marketplace_costs",
@@ -1154,7 +1154,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 10725
+   "lineno": 10742
   },
   {
    "name": "get_resource_cost_breakdown_aws",
@@ -1193,7 +1193,7 @@
    ],
    "pro": true,
    "category": "Cost visibility",
-   "lineno": 6341
+   "lineno": 6348
   },
   {
    "name": "get_saas_spend_summary",
@@ -1212,7 +1212,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 1454
+   "lineno": 1461
   },
   {
    "name": "get_service_cost",
@@ -1246,7 +1246,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 10812
+   "lineno": 10829
   },
   {
    "name": "get_storage_info",
@@ -1254,7 +1254,7 @@
    "params": [],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 6884
+   "lineno": 6891
   },
   {
    "name": "get_top_cost_drivers",
@@ -1293,7 +1293,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 1142
+   "lineno": 1149
   },
   {
    "name": "get_total_spend_all_sources",
@@ -1312,7 +1312,7 @@
    ],
    "pro": true,
    "category": "Cost visibility",
-   "lineno": 1475
+   "lineno": 1482
   },
   {
    "name": "get_traffic_cost_breakdown",
@@ -1326,7 +1326,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 3735
+   "lineno": 3742
   },
   {
    "name": "list_active_services",
@@ -1350,7 +1350,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 10748
+   "lineno": 10765
   },
   {
    "name": "list_connected_providers",
@@ -1358,7 +1358,7 @@
    "params": [],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 723
+   "lineno": 730
   },
   {
    "name": "run_full_cost_audit",
@@ -1377,7 +1377,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 11970
+   "lineno": 11987
   },
   {
    "name": "slice_costs",
@@ -1446,7 +1446,7 @@
    ],
    "pro": false,
    "category": "Cost visibility",
-   "lineno": 10184
+   "lineno": 10191
   },
   {
    "name": "get_databricks_costs",
@@ -1465,7 +1465,7 @@
    ],
    "pro": false,
    "category": "Databricks",
-   "lineno": 9711
+   "lineno": 9718
   },
   {
    "name": "get_databricks_dbu_breakdown",
@@ -1484,7 +1484,7 @@
    ],
    "pro": false,
    "category": "Databricks",
-   "lineno": 9771
+   "lineno": 9778
   },
   {
    "name": "get_databricks_job_costs",
@@ -1508,7 +1508,7 @@
    ],
    "pro": false,
    "category": "Databricks",
-   "lineno": 9909
+   "lineno": 9916
   },
   {
    "name": "forecast_azure_costs",
@@ -1527,7 +1527,7 @@
    ],
    "pro": true,
    "category": "Forecasting",
-   "lineno": 6800
+   "lineno": 6807
   },
   {
    "name": "forecast_costs",
@@ -1556,7 +1556,7 @@
    ],
    "pro": true,
    "category": "Forecasting",
-   "lineno": 8196
+   "lineno": 8203
   },
   {
    "name": "forecast_llm_costs",
@@ -1575,7 +1575,7 @@
    ],
    "pro": true,
    "category": "Forecasting",
-   "lineno": 7839
+   "lineno": 7846
   },
   {
    "name": "audit_gcp_waste",
@@ -1604,7 +1604,7 @@
    ],
    "pro": false,
    "category": "GCP",
-   "lineno": 3574
+   "lineno": 3581
   },
   {
    "name": "get_gcp_recommendations",
@@ -1623,7 +1623,7 @@
    ],
    "pro": false,
    "category": "GCP",
-   "lineno": 3655
+   "lineno": 3662
   },
   {
    "name": "compare_kubernetes_clusters",
@@ -1631,7 +1631,7 @@
    "params": [],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 5745
+   "lineno": 5752
   },
   {
    "name": "create_kubernetes_waste_tickets",
@@ -1645,7 +1645,7 @@
    ],
    "pro": true,
    "category": "Kubernetes",
-   "lineno": 3099
+   "lineno": 3106
   },
   {
    "name": "estimate_helm_diff_cost",
@@ -1679,7 +1679,7 @@
    ],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 5290
+   "lineno": 5297
   },
   {
    "name": "get_cluster_efficiency",
@@ -1693,7 +1693,7 @@
    ],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 5351
+   "lineno": 5358
   },
   {
    "name": "get_databricks_cluster_efficiency",
@@ -1701,7 +1701,7 @@
    "params": [],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 9843
+   "lineno": 9850
   },
   {
    "name": "get_helm_release_costs",
@@ -1720,7 +1720,7 @@
    ],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 5153
+   "lineno": 5160
   },
   {
    "name": "get_kubernetes_cost_trends",
@@ -1749,7 +1749,7 @@
    ],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 5537
+   "lineno": 5544
   },
   {
    "name": "get_kubernetes_costs",
@@ -1768,7 +1768,7 @@
    ],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 4642
+   "lineno": 4649
   },
   {
    "name": "get_kubernetes_namespace_breakdown",
@@ -1782,7 +1782,7 @@
    ],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 4801
+   "lineno": 4808
   },
   {
    "name": "get_label_costs",
@@ -1801,7 +1801,7 @@
    ],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 5415
+   "lineno": 5422
   },
   {
    "name": "get_workload_costs",
@@ -1835,7 +1835,7 @@
    ],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 5471
+   "lineno": 5478
   },
   {
    "name": "list_kubernetes_contexts",
@@ -1843,7 +1843,7 @@
    "params": [],
    "pro": false,
    "category": "Kubernetes",
-   "lineno": 4612
+   "lineno": 4619
   },
   {
    "name": "generate_account_dashboard",
@@ -1867,7 +1867,7 @@
    ],
    "pro": false,
    "category": "Organizations & accounts",
-   "lineno": 2333
+   "lineno": 2340
   },
   {
    "name": "get_cost_summary_all_accounts",
@@ -1891,7 +1891,7 @@
    ],
    "pro": false,
    "category": "Organizations & accounts",
-   "lineno": 1379
+   "lineno": 1386
   },
   {
    "name": "get_org_cost_summary",
@@ -1905,7 +1905,7 @@
    ],
    "pro": true,
    "category": "Organizations & accounts",
-   "lineno": 6198
+   "lineno": 6205
   },
   {
    "name": "get_ou_cost_breakdown",
@@ -1919,7 +1919,7 @@
    ],
    "pro": true,
    "category": "Organizations & accounts",
-   "lineno": 6311
+   "lineno": 6318
   },
   {
    "name": "get_top_spending_accounts",
@@ -1938,7 +1938,7 @@
    ],
    "pro": true,
    "category": "Organizations & accounts",
-   "lineno": 6236
+   "lineno": 6243
   },
   {
    "name": "list_accounts",
@@ -1952,7 +1952,7 @@
    ],
    "pro": false,
    "category": "Organizations & accounts",
-   "lineno": 1305
+   "lineno": 1312
   },
   {
    "name": "list_aws_accounts",
@@ -1960,7 +1960,7 @@
    "params": [],
    "pro": false,
    "category": "Organizations & accounts",
-   "lineno": 1332
+   "lineno": 1339
   },
   {
    "name": "list_org_accounts",
@@ -1968,7 +1968,7 @@
    "params": [],
    "pro": false,
    "category": "Organizations & accounts",
-   "lineno": 6153
+   "lineno": 6160
   },
   {
    "name": "nable_setup_status",
@@ -1976,7 +1976,7 @@
    "params": [],
    "pro": false,
    "category": "Other",
-   "lineno": 662
+   "lineno": 669
   },
   {
    "name": "check_connector_health",
@@ -1984,7 +1984,7 @@
    "params": [],
    "pro": false,
    "category": "Platform & admin",
-   "lineno": 811
+   "lineno": 818
   },
   {
    "name": "create_api_key",
@@ -2018,7 +2018,7 @@
    ],
    "pro": false,
    "category": "Platform & admin",
-   "lineno": 6912
+   "lineno": 6919
   },
   {
    "name": "get_nable_roi",
@@ -2032,7 +2032,7 @@
    ],
    "pro": false,
    "category": "Platform & admin",
-   "lineno": 13018
+   "lineno": 13035
   },
   {
    "name": "list_api_keys",
@@ -2040,7 +2040,7 @@
    "params": [],
    "pro": false,
    "category": "Platform & admin",
-   "lineno": 6953
+   "lineno": 6960
   },
   {
    "name": "list_profiles",
@@ -2048,7 +2048,7 @@
    "params": [],
    "pro": false,
    "category": "Platform & admin",
-   "lineno": 2856
+   "lineno": 2863
   },
   {
    "name": "list_vault_credentials",
@@ -2056,7 +2056,7 @@
    "params": [],
    "pro": false,
    "category": "Platform & admin",
-   "lineno": 2185
+   "lineno": 2192
   },
   {
    "name": "revoke_api_key",
@@ -2070,7 +2070,7 @@
    ],
    "pro": false,
    "category": "Platform & admin",
-   "lineno": 6969
+   "lineno": 6976
   },
   {
    "name": "what_can_nable_do",
@@ -2084,7 +2084,7 @@
    ],
    "pro": false,
    "category": "Platform & admin",
-   "lineno": 12837
+   "lineno": 12854
   },
   {
    "name": "whoami",
@@ -2092,7 +2092,7 @@
    "params": [],
    "pro": false,
    "category": "Platform & admin",
-   "lineno": 6990
+   "lineno": 6997
   },
   {
    "name": "cancel_report_subscription",
@@ -2106,7 +2106,7 @@
    ],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 5955
+   "lineno": 5962
   },
   {
    "name": "export_board_summary",
@@ -2120,7 +2120,7 @@
    ],
    "pro": true,
    "category": "Reports & exports",
-   "lineno": 9206
+   "lineno": 9213
   },
   {
    "name": "export_cost_report",
@@ -2159,7 +2159,7 @@
    ],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 2429
+   "lineno": 2436
   },
   {
    "name": "export_cost_report_csv",
@@ -2183,7 +2183,7 @@
    ],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 12235
+   "lineno": 12252
   },
   {
    "name": "fetch_invoice_emails",
@@ -2191,7 +2191,7 @@
    "params": [],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 3288
+   "lineno": 3295
   },
   {
    "name": "get_tableau_connection_info",
@@ -2205,7 +2205,7 @@
    ],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 13218
+   "lineno": 13235
   },
   {
    "name": "list_report_subscriptions",
@@ -2213,7 +2213,7 @@
    "params": [],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 5896
+   "lineno": 5903
   },
   {
    "name": "publish_cost_report_to_notion",
@@ -2227,7 +2227,7 @@
    ],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 12589
+   "lineno": 12606
   },
   {
    "name": "push_to_n8n",
@@ -2246,7 +2246,7 @@
    ],
    "pro": true,
    "category": "Reports & exports",
-   "lineno": 12494
+   "lineno": 12511
   },
   {
    "name": "push_weekly_insight",
@@ -2254,7 +2254,7 @@
    "params": [],
    "pro": true,
    "category": "Reports & exports",
-   "lineno": 3318
+   "lineno": 3325
   },
   {
    "name": "send_digest_now",
@@ -2262,7 +2262,7 @@
    "params": [],
    "pro": true,
    "category": "Reports & exports",
-   "lineno": 2127
+   "lineno": 2134
   },
   {
    "name": "send_onboarding_email",
@@ -2286,7 +2286,7 @@
    ],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 2077
+   "lineno": 2084
   },
   {
    "name": "send_report_now",
@@ -2300,7 +2300,7 @@
    ],
    "pro": true,
    "category": "Reports & exports",
-   "lineno": 5930
+   "lineno": 5937
   },
   {
    "name": "send_weekly_digest_now",
@@ -2308,7 +2308,7 @@
    "params": [],
    "pro": true,
    "category": "Reports & exports",
-   "lineno": 3470
+   "lineno": 3477
   },
   {
    "name": "start_dashboard_server",
@@ -2332,7 +2332,7 @@
    ],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 13148
+   "lineno": 13165
   },
   {
    "name": "subscribe_to_report",
@@ -2386,7 +2386,7 @@
    ],
    "pro": true,
    "category": "Reports & exports",
-   "lineno": 5811
+   "lineno": 5818
   },
   {
    "name": "take_snapshot_now",
@@ -2394,7 +2394,7 @@
    "params": [],
    "pro": false,
    "category": "Reports & exports",
-   "lineno": 1928
+   "lineno": 1935
   },
   {
    "name": "get_pinned_view",
@@ -2408,7 +2408,7 @@
    ],
    "pro": false,
    "category": "Saved views",
-   "lineno": 10462
+   "lineno": 10469
   },
   {
    "name": "get_view",
@@ -2442,7 +2442,7 @@
    ],
    "pro": false,
    "category": "Saved views",
-   "lineno": 9418
+   "lineno": 9425
   },
   {
    "name": "list_pinned_views",
@@ -2450,7 +2450,7 @@
    "params": [],
    "pro": false,
    "category": "Saved views",
-   "lineno": 10441
+   "lineno": 10448
   },
   {
    "name": "list_views",
@@ -2458,7 +2458,7 @@
    "params": [],
    "pro": false,
    "category": "Saved views",
-   "lineno": 9389
+   "lineno": 9396
   },
   {
    "name": "pin_view",
@@ -2517,7 +2517,7 @@
    ],
    "pro": false,
    "category": "Saved views",
-   "lineno": 10383
+   "lineno": 10390
   },
   {
    "name": "unpin_view",
@@ -2531,7 +2531,7 @@
    ],
    "pro": false,
    "category": "Saved views",
-   "lineno": 10486
+   "lineno": 10493
   },
   {
    "name": "dismiss_recommendation",
@@ -2550,7 +2550,7 @@
    ],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 2640
+   "lineno": 2647
   },
   {
    "name": "get_commitment_analysis",
@@ -2558,7 +2558,7 @@
    "params": [],
    "pro": true,
    "category": "Savings & commitments",
-   "lineno": 2926
+   "lineno": 2933
   },
   {
    "name": "get_commitment_coverage_by_tag",
@@ -2582,7 +2582,7 @@
    ],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 5054
+   "lineno": 5061
   },
   {
    "name": "get_effective_rate_profile",
@@ -2590,7 +2590,7 @@
    "params": [],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 4569
+   "lineno": 4576
   },
   {
    "name": "get_recommendation_learning",
@@ -2598,7 +2598,7 @@
    "params": [],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 2827
+   "lineno": 2834
   },
   {
    "name": "get_recommendation_quality",
@@ -2606,7 +2606,7 @@
    "params": [],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 2803
+   "lineno": 2810
   },
   {
    "name": "get_savings_ledger",
@@ -2625,7 +2625,7 @@
    ],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 2709
+   "lineno": 2716
   },
   {
    "name": "get_savings_plan_showback",
@@ -2654,7 +2654,7 @@
    ],
    "pro": true,
    "category": "Savings & commitments",
-   "lineno": 6513
+   "lineno": 6520
   },
   {
    "name": "get_savings_summary",
@@ -2662,7 +2662,7 @@
    "params": [],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 2287
+   "lineno": 2294
   },
   {
    "name": "list_savings_recommendations",
@@ -2686,7 +2686,7 @@
    ],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 2558
+   "lineno": 2565
   },
   {
    "name": "mark_recommendation_acted_on",
@@ -2700,7 +2700,7 @@
    ],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 2613
+   "lineno": 2620
   },
   {
    "name": "verify_savings",
@@ -2708,7 +2708,7 @@
    "params": [],
    "pro": false,
    "category": "Savings & commitments",
-   "lineno": 2666
+   "lineno": 2673
   },
   {
    "name": "get_business_metrics",
@@ -2722,7 +2722,7 @@
    ],
    "pro": true,
    "category": "Teams & attribution",
-   "lineno": 8963
+   "lineno": 8970
   },
   {
    "name": "get_costs_by_team",
@@ -2746,7 +2746,7 @@
    ],
    "pro": false,
    "category": "Teams & attribution",
-   "lineno": 1950
+   "lineno": 1957
   },
   {
    "name": "get_efficiency_scorecard",
@@ -2775,7 +2775,7 @@
    ],
    "pro": false,
    "category": "Teams & attribution",
-   "lineno": 4818
+   "lineno": 4825
   },
   {
    "name": "get_tag_cost_breakdown_cur",
@@ -2804,7 +2804,7 @@
    ],
    "pro": true,
    "category": "Teams & attribution",
-   "lineno": 6466
+   "lineno": 6473
   },
   {
    "name": "get_team_scorecards",
@@ -2812,7 +2812,7 @@
    "params": [],
    "pro": false,
    "category": "Teams & attribution",
-   "lineno": 4973
+   "lineno": 4980
   },
   {
    "name": "get_unit_economics",
@@ -2826,7 +2826,7 @@
    ],
    "pro": true,
    "category": "Teams & attribution",
-   "lineno": 9010
+   "lineno": 9017
   },
   {
    "name": "run_attribution_now",
@@ -2845,7 +2845,7 @@
    ],
    "pro": false,
    "category": "Teams & attribution",
-   "lineno": 2012
+   "lineno": 2019
   },
   {
    "name": "set_business_metrics",
@@ -2924,7 +2924,7 @@
    ],
    "pro": true,
    "category": "Teams & attribution",
-   "lineno": 8857
+   "lineno": 8864
   },
   {
    "name": "create_rightsizing_tickets",
@@ -2943,7 +2943,7 @@
    ],
    "pro": true,
    "category": "Tickets & PRs",
-   "lineno": 3035
+   "lineno": 3042
   },
   {
    "name": "create_scorecard_tickets",
@@ -2962,7 +2962,7 @@
    ],
    "pro": true,
    "category": "Tickets & PRs",
-   "lineno": 3195
+   "lineno": 3202
   },
   {
    "name": "create_ticket",
@@ -2991,7 +2991,7 @@
    ],
    "pro": true,
    "category": "Tickets & PRs",
-   "lineno": 3248
+   "lineno": 3255
   },
   {
    "name": "generate_terraform_tag_fixes",
@@ -3005,7 +3005,7 @@
    ],
    "pro": false,
    "category": "Tickets & PRs",
-   "lineno": 7087
+   "lineno": 7094
   },
   {
    "name": "open_rightsizing_pr",
@@ -3059,7 +3059,7 @@
    ],
    "pro": true,
    "category": "Tickets & PRs",
-   "lineno": 7340
+   "lineno": 7347
   },
   {
    "name": "open_terraform_tag_pr",
@@ -3093,7 +3093,7 @@
    ],
    "pro": true,
    "category": "Tickets & PRs",
-   "lineno": 7181
+   "lineno": 7188
   },
   {
    "name": "audit_aws_waste",
@@ -3117,7 +3117,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 3502
+   "lineno": 3509
   },
   {
    "name": "audit_cloudwatch_logs_ia_opportunities",
@@ -3131,7 +3131,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11776
+   "lineno": 11793
   },
   {
    "name": "audit_cloudwatch_metric_cardinality",
@@ -3145,7 +3145,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11620
+   "lineno": 11637
   },
   {
    "name": "audit_cloudwatch_orphaned_alarms",
@@ -3164,11 +3164,11 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11695
+   "lineno": 11712
   },
   {
    "name": "audit_duplicate_spend",
-   "summary": "Find places where you're paying for the same capability through two different services or providers at once, the kind of waste a plain cost breakdown never surfaces because every line item looks legitimate on its own. Covers two patterns: multiple LLM inference paths active at the same time (e.g. AWS Bedrock Claude AND a direct Anthropic API key), and multiple managed search/retrieval services (Kendra + OpenSearch).",
+   "summary": "Find places where you're paying for the same capability through two different services or providers at once, the kind of waste a plain cost breakdown never surfaces because every line item looks legitimate on its own. Covers three patterns: multiple LLM inference paths active at the same time (e.g. AWS Bedrock Claude AND a direct Anthropic API key), multiple managed search/retrieval services (Kendra + OpenSearch), and two data platforms at once (Databricks + Snowflake).",
    "params": [
     {
      "name": "days",
@@ -3178,7 +3178,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 10631
+   "lineno": 10638
   },
   {
    "name": "audit_ebs_snapshot_replication",
@@ -3197,7 +3197,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11881
+   "lineno": 11898
   },
   {
    "name": "audit_efs_cross_az_mounts",
@@ -3211,7 +3211,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11221
+   "lineno": 11238
   },
   {
    "name": "audit_nlb_cross_zone_costs",
@@ -3225,7 +3225,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11264
+   "lineno": 11281
   },
   {
    "name": "audit_public_ipv4_addresses",
@@ -3239,7 +3239,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 3781
+   "lineno": 3788
   },
   {
    "name": "audit_rds_manual_snapshots",
@@ -3258,7 +3258,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 10960
+   "lineno": 10977
   },
   {
    "name": "audit_s3_intelligent_tiering",
@@ -3277,7 +3277,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11313
+   "lineno": 11330
   },
   {
    "name": "audit_s3_transfer_acceleration",
@@ -3285,7 +3285,7 @@
    "params": [],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11926
+   "lineno": 11943
   },
   {
    "name": "audit_spot_diversification",
@@ -3299,7 +3299,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11537
+   "lineno": 11554
   },
   {
    "name": "audit_terraform_tags",
@@ -3318,7 +3318,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 7031
+   "lineno": 7038
   },
   {
    "name": "audit_textract_environment_waste",
@@ -3332,7 +3332,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 10603
+   "lineno": 10610
   },
   {
    "name": "cleanup_idle_resources",
@@ -3366,7 +3366,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 4519
+   "lineno": 4526
   },
   {
    "name": "get_ecr_cleanup_recommendations",
@@ -3385,7 +3385,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 4264
+   "lineno": 4271
   },
   {
    "name": "get_ecs_rightsizing_recommendations",
@@ -3404,7 +3404,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 4331
+   "lineno": 4338
   },
   {
    "name": "get_idle_load_balancers",
@@ -3423,7 +3423,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 4145
+   "lineno": 4152
   },
   {
    "name": "get_idle_rds_instances",
@@ -3437,7 +3437,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 4072
+   "lineno": 4079
   },
   {
    "name": "get_instance_deep_analysis",
@@ -3461,7 +3461,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 3882
+   "lineno": 3889
   },
   {
    "name": "get_rds_rightsizing_recommendations",
@@ -3480,7 +3480,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 3968
+   "lineno": 3975
   },
   {
    "name": "get_ri_waste_detail",
@@ -3504,7 +3504,7 @@
    ],
    "pro": true,
    "category": "Waste & rightsizing",
-   "lineno": 6411
+   "lineno": 6418
   },
   {
    "name": "get_rightsizing_recommendations",
@@ -3523,7 +3523,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 2209
+   "lineno": 2216
   },
   {
    "name": "get_s3_incomplete_multipart_uploads",
@@ -3537,7 +3537,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 4220
+   "lineno": 4227
   },
   {
    "name": "identify_nonprod_scheduling_opportunities",
@@ -3556,7 +3556,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 10866
+   "lineno": 10883
   },
   {
    "name": "list_idle_resources",
@@ -3580,7 +3580,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 4458
+   "lineno": 4465
   },
   {
    "name": "recommend_database_savings_plans",
@@ -3588,7 +3588,7 @@
    "params": [],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11850
+   "lineno": 11867
   },
   {
    "name": "recommend_lambda_snapstart",
@@ -3602,7 +3602,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11175
+   "lineno": 11192
   },
   {
    "name": "recommend_spot_adoption",
@@ -3616,7 +3616,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11452
+   "lineno": 11469
   },
   {
    "name": "scan_cloudwatch_waste",
@@ -3630,7 +3630,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 3914
+   "lineno": 3921
   },
   {
    "name": "scan_graviton_migration_opportunities",
@@ -3644,7 +3644,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11370
+   "lineno": 11387
   },
   {
    "name": "scan_lambda_concurrency_waste",
@@ -3658,7 +3658,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11090
+   "lineno": 11107
   },
   {
    "name": "scan_s3_bucket_key_opportunities",
@@ -3666,7 +3666,7 @@
    "params": [],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 11134
+   "lineno": 11151
   },
   {
    "name": "scan_waste_patterns",
@@ -3690,7 +3690,7 @@
    ],
    "pro": false,
    "category": "Waste & rightsizing",
-   "lineno": 8251
+   "lineno": 8258
   }
  ]
 }

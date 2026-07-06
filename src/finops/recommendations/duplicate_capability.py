@@ -8,13 +8,18 @@ you have to already suspect it and go looking. This scanner looks for spend
 patterns where multiple connected providers or AWS services serve the same
 underlying capability at once.
 
-V1 covers the two clusters with the least false-positive risk:
+V1 covers three clusters, chosen for the lowest false-positive risk available:
   - LLM inference paths: 2+ of {Bedrock, direct OpenAI, Anthropic, Vertex,
     OpenRouter, LiteLLM, Together, Replicate, Modal} carrying real spend at
     once usually means one is a leftover from testing or a migration that
     never got cleaned up, not a deliberate multi-provider setup.
   - Managed search/retrieval: 2+ of {Kendra, OpenSearch Service} carrying AWS
     spend at once.
+  - Data platform / lakehouse: Databricks and Snowflake both carrying real
+    spend at once. Increasingly overlapping (Databricks SQL warehouses vs.
+    Snowflake, Snowpark vs. Spark), and one of the most common real-world
+    "do we actually need both" stories in FinOps, though team-by-team
+    platform choice is common enough that this stays a flag, not a claim.
 
 Deliberately NOT covered yet: overlapping database engines (RDS + DocumentDB,
 etc). Multi-database architectures are extremely often intentional, different
@@ -156,9 +161,75 @@ def find_duplicate_search_services(aws_by_service: dict[str, float]) -> Finding 
     )
 
 
+# SaaS provider keys (as used in server._SAAS_CONNECTORS / get_cost_summary's
+# by_provider) that are alternative data platforms / lakehouses.
+_DATA_PLATFORM_LABELS = {
+    "databricks": "Databricks",
+    "snowflake": "Snowflake",
+}
+
+
+def find_duplicate_data_platforms(saas_by_provider: dict[str, float]) -> Finding | None:
+    """Flag when both Databricks and Snowflake carry real spend at once.
+
+    Args:
+        saas_by_provider: provider -> total_usd, e.g. the SaaS-category
+            by_provider view from get_cost_summary(category="saas").
+    """
+    active = {
+        _DATA_PLATFORM_LABELS[k]: round(v, 2)
+        for k, v in (saas_by_provider or {}).items()
+        if k in _DATA_PLATFORM_LABELS and v and v > _NOISE_FLOOR_USD
+    }
+    if len(active) < 2:
+        return None
+
+    names = sorted(active, key=lambda k: -active[k])
+    total = round(sum(active.values()), 2)
+    smaller_total = round(total - active[names[0]], 2)
+
+    return Finding(
+        source="duplicate_capability",
+        title="Two data platforms running at once (Databricks + Snowflake)",
+        why=(
+            f"{' and '.join(names)} both show real spend. Both run SQL and "
+            "Spark-style analytics over your data now, and paying for both "
+            "at once is one of the most common 'do we still need this one' "
+            "conversations in FinOps."
+        ),
+        evidence=INFERRED,
+        confidence="medium",
+        why_unsure=(
+            "Different teams standardizing on different platforms, or "
+            "genuinely different workloads (ML/Spark on one, BI/SQL on the "
+            "other), is a common and legitimate reason to run both. This "
+            "flags the overlap, it does not claim one is unused."
+        ),
+        assumptions=[
+            "Every active platform above the noise floor ($1/mo) is "
+            "counted; this does not know your team's actual workload split."
+        ],
+        rough_monthly=smaller_total,
+        confirm_steps=[
+            f"Check whether {names[-1]} still has active, current workloads, "
+            "or whether it's legacy from before a migration to the other.",
+            "If both serve genuinely different jobs (e.g. ML training vs. "
+            "BI queries), no action needed, this flag can be dismissed.",
+        ],
+        remediation=[
+            "If the workloads overlap, consolidate onto one platform and "
+            "wind the other down.",
+            "If they're intentionally split, tag workloads by platform so "
+            "the split is documented, not just tribal knowledge.",
+        ],
+        metadata={"active_platforms": active, "total_monthly_usd": total},
+    )
+
+
 def scan_duplicate_capabilities(
     llm_by_provider: dict[str, float] | None = None,
     aws_by_service: dict[str, float] | None = None,
+    saas_by_provider: dict[str, float] | None = None,
 ) -> list[Finding]:
     """Run every duplicate-capability check and return the findings that fired."""
     findings: list[Finding] = []
@@ -168,6 +239,10 @@ def scan_duplicate_capabilities(
             findings.append(f)
     if aws_by_service:
         f = find_duplicate_search_services(aws_by_service)
+        if f:
+            findings.append(f)
+    if saas_by_provider:
+        f = find_duplicate_data_platforms(saas_by_provider)
         if f:
             findings.append(f)
     return findings

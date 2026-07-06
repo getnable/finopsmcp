@@ -312,7 +312,14 @@ _ACTIVE_CACHE: dict[frozenset, tuple[float, dict]] = {}
 
 
 async def _active(subset: dict | None = None) -> dict[str, Any]:
-    pool = subset or _ALL_CONNECTORS
+    # `subset or _ALL_CONNECTORS` would treat an explicitly-passed empty dict
+    # the same as "no subset given" and silently fall back to every connector.
+    # That is the wrong answer for a caller who computed an empty pool on
+    # purpose, e.g. get_cost_summary(provider="typo'd-name") building
+    # {provider: ...} if provider in _ALL_CONNECTORS else {}: an invalid
+    # provider name must return "nothing configured", not everyone's spend.
+    # Only a real None (the default, "no subset requested") falls back.
+    pool = _ALL_CONNECTORS if subset is None else subset
     key = frozenset(pool.keys())
     now = time.monotonic()
     cached = _ACTIVE_CACHE.get(key)
@@ -10633,9 +10640,10 @@ async def audit_duplicate_spend(days: int = 30) -> dict:
     Find places where you're paying for the same capability through two
     different services or providers at once, the kind of waste a plain cost
     breakdown never surfaces because every line item looks legitimate on its
-    own. Covers two patterns: multiple LLM inference paths active at the same
-    time (e.g. AWS Bedrock Claude AND a direct Anthropic API key), and
-    multiple managed search/retrieval services (Kendra + OpenSearch).
+    own. Covers three patterns: multiple LLM inference paths active at the
+    same time (e.g. AWS Bedrock Claude AND a direct Anthropic API key),
+    multiple managed search/retrieval services (Kendra + OpenSearch), and
+    two data platforms at once (Databricks + Snowflake).
 
     This is a "worth a look" flag, not a claim that anything is wasted:
     running two providers on purpose (failover, per-team routing) is a real
@@ -10653,6 +10661,7 @@ async def audit_duplicate_spend(days: int = 30) -> dict:
         - "Are we paying for the same thing twice?"
         - "Do I have duplicate or redundant cloud spend?"
         - "Am I running two LLM providers by accident?"
+        - "Do I need both Databricks and Snowflake?"
     """
     from .demo_data import is_demo, get_demo_response
     if is_demo():
@@ -10672,15 +10681,23 @@ async def audit_duplicate_spend(days: int = 30) -> dict:
             summary = await aws.get_costs(sd, ed, granularity="MONTHLY")
             aws_by_service = summary.by_service or {}
 
+        saas_summary = await get_cost_summary(category="saas")
+        saas_by_provider = {
+            k: v.get("total_usd", 0.0)
+            for k, v in (saas_summary.get("by_provider") or {}).items()
+        }
+
         findings = scan_duplicate_capabilities(
             llm_by_provider=llm_by_provider,
             aws_by_service=aws_by_service,
+            saas_by_provider=saas_by_provider,
         )
         return {
             "window_days": days,
             "checked": {
                 "llm_providers": sorted(k for k, v in llm_by_provider.items() if v),
                 "aws_connected": bool(aws_by_service),
+                "saas_providers": sorted(k for k, v in saas_by_provider.items() if v),
             },
             "finding_count": len(findings),
             "findings": [f.to_dict() for f in findings],
