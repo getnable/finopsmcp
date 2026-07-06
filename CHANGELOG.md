@@ -2,6 +2,14 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.127
+
+audit_duplicate_spend now also flags Databricks + Snowflake running at once,
+a third cluster alongside LLM inference paths and managed search. Also fixes
+a real bug: an invalid provider name passed to get_cost_summary silently
+returned every connected provider's spend instead of an error; it now errors
+cleanly.
+
 ## 0.8.126
 
 New tool: audit_duplicate_spend. Flags spend on two services or providers
