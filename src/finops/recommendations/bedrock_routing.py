@@ -454,10 +454,25 @@ def recommend_bedrock_model_routing(
             },
         )
 
-    return {
+    result = {
         "models_in_use": models_in_use,
         "routing_opportunities": routing_opportunities,
         "total_monthly_savings": round(total_monthly_savings, 2),
         "implementation_note": implementation_note,
         "finding": finding.to_dict() if finding else None,
     }
+    if routing_opportunities:
+        # total_monthly_savings and each opportunity's monthly_savings are a price-ratio
+        # ceiling (current model's rate vs. Haiku's), not a measured or committed saving:
+        # the 70%-eligible split is an assumption and Haiku's answer quality on the
+        # flagged calls is unverified. finding.why_unsure carries the full caveat, but
+        # that lives one level down from these headline numbers, so state it here too,
+        # at the same level as the number, where a quick read of the result can't miss it.
+        result["savings_ceiling_caveat"] = (
+            "total_monthly_savings is a ceiling if every flagged call moved to Haiku, "
+            "not a confirmed saving. It assumes 70% of flagged calls are simple enough "
+            "to route and that Haiku's output quality holds for them, neither of which "
+            "has been checked yet. Shadow-test Haiku against a real prompt sample before "
+            "acting on this number; see finding.confirm_steps."
+        )
+    return result

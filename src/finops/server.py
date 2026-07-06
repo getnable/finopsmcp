@@ -499,6 +499,9 @@ def _nudge_url(context: str) -> str:
     return f"{tagged}#{frag}" if frag else tagged
 
 
+_NUDGE_PREFIX = "Team plan note, not a finding: "
+
+
 def _team_nudge(message: str, context: str = "") -> str | None:
     """
     Return a contextual upgrade nudge for free-tier users only.
@@ -507,6 +510,11 @@ def _team_nudge(message: str, context: str = "") -> str | None:
     When nable has already identified enough savings to dwarf the $25/mo plan, lead
     with that real number. The ROI is the most honest upgrade argument there is, and
     it only appears when the multiple is genuinely compelling (>= 1x the plan price).
+
+    Every return value is prefixed with _NUDGE_PREFIX. Call sites stash this string
+    under a "_tip"/"_upgrade" key alongside real findings, and without an explicit
+    marker a consuming model (or a user skimming the reply) can't tell a savings
+    multiple used as a sales pitch apart from an actual audit result.
 
     context tags the moment ("anomalies", "aws_audit", ...): it rides the URL as
     utm params and the impression event, so nudge -> checkout is attributable.
@@ -530,11 +538,11 @@ def _team_nudge(message: str, context: str = "") -> str | None:
         url = _nudge_url(context)
         if found >= _TEAM_MONTHLY_USD:
             return (
-                f"nable has already found ${found:,.0f}/mo in savings here, "
+                f"{_NUDGE_PREFIX}nable has already found ${found:,.0f}/mo in savings here, "
                 f"{found / _TEAM_MONTHLY_USD:.0f}x the ${_TEAM_MONTHLY_USD:.0f}/mo Team plan. "
                 f"{message} {url}"
             )
-        return f"{message} {url}"
+        return f"{_NUDGE_PREFIX}{message} {url}"
     except Exception:
         return None
 
@@ -4472,7 +4480,11 @@ async def list_idle_resources(
 
     Finds: unattached EBS volumes, unused Elastic IPs, old snapshots with no AMI
     dependency, stopped EC2 instances (still paying for EBS), load balancers
-    with no healthy targets.
+    with no healthy targets. That is the full scope: this tool does not look at
+    RDS, DocumentDB, Kendra, or Textract, so a small or zero total here is not a
+    clean bill of health for the account, only for these five resource types.
+    Use get_idle_rds_instances, get_documentdb_costs, audit_textract_environment_waste,
+    or run_full_cost_audit for those.
 
     Results are sorted by monthly waste descending. Protected resources
     (tagged env=prod, protected=true, etc.) are flagged but never acted on.

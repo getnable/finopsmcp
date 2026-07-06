@@ -6,10 +6,13 @@ run_welcome_flow()   - full interactive onboarding, always runs (finops welcome)
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
 import threading
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 # ── Colour helpers ─────────────────────────────────────────────────────────────
 
@@ -634,6 +637,7 @@ def _offer_budget_guardrail() -> None:
             created_by="onboarding",
         )
     except Exception:
+        log.error("onboarding budget save failed (limit_usd=%s)", amount, exc_info=True)
         _blank()
         _line(dim("  Could not save the budget just now. Set one later from your editor."))
         return

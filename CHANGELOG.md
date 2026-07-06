@@ -2,6 +2,20 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.131
+
+Fixes from an independent dogfooding review: the Team-plan upgrade nudge
+that cites real savings found so far is now prefixed so it never reads as
+an audit finding. The Bedrock model-routing tool now returns a top-level
+`savings_ceiling_caveat` next to its headline savings number, since a
+price-ratio ceiling sitting unqualified next to real dollar figures invited
+treating it as a firm plan. `list_idle_resources` now says up front, in
+both the docstring and the response, that it only covers 5 resource types
+and points to the tools that cover RDS, DocumentDB, Kendra, and Textract,
+so a clean scan there isn't mistaken for a clean account. The onboarding
+budget save also now logs the real exception on failure instead of
+swallowing it silently.
+
 ## 0.8.130
 
 Polished the setup flow's visual language: the welcome banner's color

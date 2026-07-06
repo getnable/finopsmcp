@@ -428,6 +428,13 @@ def idle_resources_summary(resources: list[IdleResource]) -> dict[str, Any]:
         "total_annual_waste_usd": round(total_monthly * 12, 2),
         "by_type": by_type,
         "resources": kept,
+        "scope": (
+            "Covers only ebs_volume, elastic_ip, snapshot, stopped_ec2, and load_balancer. "
+            "A low or zero total here does not mean the account is clean: RDS, DocumentDB, "
+            "Kendra, and Textract waste live in their own dedicated tools "
+            "(get_idle_rds_instances, get_documentdb_costs, audit_textract_environment_waste, "
+            "run_full_cost_audit for the full sweep)."
+        ),
     }
     if omitted:
         out["resources_truncated"] = True
