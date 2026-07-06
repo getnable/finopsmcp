@@ -59,21 +59,25 @@ def _prompt(msg: str, secret: bool = False, default: str = "") -> str:
 
 
 def _section(title: str) -> None:
-    print(f"\n{'─' * 60}")
-    print(f"  {title}")
-    print(f"{'─' * 60}")
+    from .welcome import bold, _rule
+    print(f"\n  {_rule()}")
+    print(f"  {bold(title)}")
+    print(f"  {_rule()}")
 
 
 def _ok(msg: str) -> None:
-    print(f"  ✓ {msg}")
+    from .welcome import green
+    print(f"  {green('✓')} {msg}")
 
 
 def _warn(msg: str) -> None:
-    print(f"  ⚠  {msg}")
+    from .welcome import amber
+    print(f"  {amber('⚠')}  {msg}")
 
 
 def _err(msg: str) -> None:
-    print(f"  ✗ {msg}", file=sys.stderr)
+    from .welcome import red
+    print(f"  {red('✗')} {msg}", file=sys.stderr)
 
 
 # ── AWS account listing ───────────────────────────────────────────────────────
@@ -3374,17 +3378,21 @@ def _configure_claude_desktop_inner() -> bool:
         _ok(f"Claude Desktop already configured: {display_cmd}")
         return True
 
-    print(f"\n  ──────────────────────────────────────────────────")
-    print(f"  Configure Claude Desktop to use nable?")
-    print(f"  Config file: {config_path}")
-    print(f"  Command:     {display_cmd}")
+    from .welcome import bold, dim, _rule
+    print(f"\n  {_rule()}")
+    print(f"  {bold('Configure Claude Desktop to use nable?')}")
+    print(f"  {dim('Config file:')} {config_path}")
+    print(f"  {dim('Command:    ')} {display_cmd}")
+    _notes = []
     if uvx_bin:
-        print(f"  (uvx mode: works on corporate machines without PATH changes)")
+        _notes.append("uvx mode: works on corporate machines without PATH changes")
     if vault_env:
-        print(f"  (including {len(vault_env)} credential(s) from vault)")
+        _notes.append(f"including {len(vault_env)} credential(s) from vault")
     if existing:
-        print(f"  (updates existing entry)")
-    print(f"  ──────────────────────────────────────────────────")
+        _notes.append("updates existing entry")
+    for _note in _notes:
+        print(f"  {dim('· ' + _note)}")
+    print(f"  {_rule()}")
 
     try:
         ans = _prompt("  Write config? [Y/n]", default="y").lower()

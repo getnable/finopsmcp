@@ -33,6 +33,7 @@ def cyan(t: str) -> str:   return _c("36", t)
 def yellow(t: str) -> str: return _c("33", t)
 def amber(t: str) -> str:  return _c("33", t)
 def white(t: str) -> str:  return _c("97", t)
+def red(t: str) -> str:    return _c("31", t)
 
 
 def link(url: str) -> str:
@@ -668,9 +669,24 @@ def run_welcome_flow(demo: bool = False) -> None:
     # Step indicators
     _line(bold("3 steps to your first cost insight:"))
     _blank()
-    _line(f"  {green('1')}  {bold('Install')}          {green('done')}")
-    _line(f"  {amber('2')}  {bold('Connect editor')}   {dim('writing your MCP config')}")
-    _line(f"  {dim('3')}  {dim('Connect a cloud')}  {dim('AWS, Azure, or GCP')}")
+    # Label column padded on the raw (uncolored) text, then colored, so ANSI
+    # escape codes never get counted as visible width and throw the status
+    # column out of alignment (the previous hand-padded spacing did exactly
+    # that, each row landing its status text one column further right or
+    # left than the last).
+    _STEP_LABEL_W = 16
+    for _n, _label, _status, _state in (
+        (1, "Install", "done", "done"),
+        (2, "Connect editor", "writing your MCP config", "active"),
+        (3, "Connect a cloud", "AWS, Azure, or GCP", "pending"),
+    ):
+        _padded = _label.ljust(_STEP_LABEL_W)
+        if _state == "done":
+            _line(f"  {green(str(_n))}  {bold(_padded)}{green(_status)}")
+        elif _state == "active":
+            _line(f"  {amber(str(_n))}  {bold(_padded)}{dim(_status)}")
+        else:
+            _line(f"  {dim(str(_n))}  {dim(_padded)}{dim(_status)}")
     _blank()
     _line(_rule())
     _blank()
