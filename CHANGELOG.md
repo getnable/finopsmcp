@@ -2,6 +2,15 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.125
+
+The AWS one-click connect (no local credentials needed) now asks for a single
+pasted value instead of two. The CloudFormation stack's Outputs tab has a new
+NableSetupPaste entry combining the access key and secret; the setup wizard
+accepts it as one paste and falls back to the original two-field entry only if
+it doesn't parse. The MCP registry listing also got a fuller description and
+an icon.
+
 ## 0.8.124
 
 nable never touches the OS keychain when FINOPS_NO_KEYRING=1 is set (also
