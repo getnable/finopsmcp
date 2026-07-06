@@ -37,6 +37,21 @@ def _keyring_service() -> str:
     return _KEYRING_SERVICE_DEFAULT
 
 
+def _keyring_disabled() -> bool:
+    """FINOPS_NO_KEYRING=1 (or FINOPS_AIRGAP=1) forbids any OS keychain access.
+
+    The keychain here belongs to the macOS user, not to $HOME or
+    FINOPS_DATA_DIR, so ephemeral runs (tests, demo scripts, CI on a laptop,
+    cold-run checks with a scratch HOME) that miss the key file would otherwise
+    fall through to the developer's real keychain: a password prompt per run,
+    and on first-run generation a write that clobbers the real recovery key.
+    license.py carries the same gate for the trial store."""
+    return (
+        os.environ.get("FINOPS_NO_KEYRING", "") == "1"
+        or os.environ.get("FINOPS_AIRGAP", "") == "1"
+    )
+
+
 class VaultError(Exception):
     pass
 
@@ -277,6 +292,8 @@ class Vault:
 
     @classmethod
     def _try_keyring(cls) -> bytes | None:
+        if _keyring_disabled():
+            return None
         svc = _keyring_service()
         cached = cls._key_cache.get(svc)
         if cached is not None:
@@ -294,6 +311,8 @@ class Vault:
 
     @classmethod
     def _save_keyring(cls, key: bytes) -> bool:
+        if _keyring_disabled():
+            return False
         try:
             import keyring  # type: ignore[import]
             svc = _keyring_service()

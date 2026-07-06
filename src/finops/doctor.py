@@ -84,6 +84,8 @@ def _check_keyring_storage() -> dict:
             keyring_ok, keyring_detail = True, "master key provided via FINOPS_VAULT_KEY"
         elif _key_path.exists():
             keyring_ok, keyring_detail = True, "master key stored (file, chmod 600)"
+        elif os.environ.get("FINOPS_NO_KEYRING") == "1" or os.environ.get("FINOPS_AIRGAP") == "1":
+            keyring_detail = "OS keychain access disabled (FINOPS_NO_KEYRING); no master key file yet"
         else:
             try:
                 import keyring

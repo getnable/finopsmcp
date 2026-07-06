@@ -200,8 +200,23 @@ def _sign_date(iso_date: str) -> str:
 _kr_cached_date: "date | None" = None
 
 
+def _keyring_disabled() -> bool:
+    """FINOPS_NO_KEYRING=1 (or FINOPS_AIRGAP=1) forbids any OS keychain access.
+
+    The keychain belongs to the macOS user, not to $HOME, so an ephemeral run
+    (tests, demos, scratch-HOME cold runs) that misses the trial file would
+    otherwise probe the developer's real keychain, including the legacy
+    disguised entry, and prompt. Mirrors security/vault.py."""
+    return (
+        os.environ.get("FINOPS_NO_KEYRING", "") == "1"
+        or os.environ.get("FINOPS_AIRGAP", "") == "1"
+    )
+
+
 def _kr_get() -> date | None:
     global _kr_cached_date
+    if _keyring_disabled():
+        return None
     if _kr_cached_date is not None:
         return _kr_cached_date
     try:
@@ -231,6 +246,8 @@ def _kr_get() -> date | None:
 
 def _kr_set(d: date) -> None:
     global _kr_cached_date
+    if _keyring_disabled():
+        return
     try:
         import keyring  # type: ignore
         iso = d.isoformat()

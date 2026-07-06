@@ -183,3 +183,38 @@ def test_vault_malformed_key_file_falls_through(kr, vault_env):
     v = V.Vault.default()
     assert v._key == key
     assert (vault_env / "vault.key").read_bytes() == key  # healed by the re-cache
+
+
+# ── FINOPS_NO_KEYRING kill switch ─────────────────────────────────────────────
+# Ephemeral runs (demos, CI, scratch-HOME cold runs) miss the key/trial files
+# but still share the developer's real OS keychain. The kill switch must keep
+# every path off the keychain entirely, even on a file miss.
+
+@pytest.mark.parametrize("env_var", ["FINOPS_NO_KEYRING", "FINOPS_AIRGAP"])
+def test_no_keyring_vault_first_run_never_touches_keychain(kr, vault_env, monkeypatch, env_var):
+    monkeypatch.setenv(env_var, "1")
+    v = V.Vault.default()
+    assert kr.touches == 0
+    # Still fully functional: key generated and cached to the file.
+    assert (vault_env / "vault.key").read_bytes() == v._key
+    v.store("X", "y")
+    assert V.Vault.default().get("X") == "y"
+
+
+@pytest.mark.parametrize("env_var", ["FINOPS_NO_KEYRING", "FINOPS_AIRGAP"])
+def test_no_keyring_trial_never_touches_keychain(kr, trial_file, monkeypatch, env_var):
+    monkeypatch.setenv(env_var, "1")
+    # Existing keychain entries must not even be read, let alone the legacy
+    # disguised item probed.
+    kr.store[(L._KR_SERVICE, L._KR_USERNAME)] = _signed(date(2026, 1, 1))
+    kr.store[(L._KR_LEGACY_SERVICE, L._KR_LEGACY_USERNAME)] = _signed(date(2026, 1, 1))
+    assert L._get_or_create_trial_start() == date.today()
+    assert kr.touches == 0
+    assert L._file_get() == date.today()  # trial still works, file-only
+
+
+def test_no_keyring_beats_keychain_only_flag(kr, vault_env, monkeypatch):
+    monkeypatch.setenv("FINOPS_NO_KEYRING", "1")
+    monkeypatch.setenv("FINOPS_VAULT_KEYCHAIN_ONLY", "1")
+    V.Vault.default()
+    assert kr.touches == 0
