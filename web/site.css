@@ -259,19 +259,7 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .loop-n{font-family:var(--font-mono);font-size:12px;color:var(--accent);letter-spacing:.06em}
 .loop-step h3{font-size:19px;font-weight:500;letter-spacing:-.02em;margin:0;color:var(--fg)}
 .loop-step p{font-size:14px;line-height:1.6;color:var(--fg-2);margin:0}
-/* Verified-savings band */
-.proof-band{padding:104px 0;text-align:center;position:relative;background:radial-gradient(ellipse 70% 60% at 50% 50%, rgba(77,184,212,.05), transparent 70%)}
-.proof-line{max-width:900px;margin:0 auto;font-size:clamp(30px,4vw,50px);line-height:1.12;letter-spacing:-.03em;font-weight:300;color:var(--fg)}
-.proof-line em{font-style:italic;font-weight:400;color:var(--accent)}
 @media(max-width:760px){.loop-grid{grid-template-columns:1fr}}
-/* Get-started bridge: lighter numbered steps, distinct from the loop cards */
-.start-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:30px;margin-top:8px}
-.start-step{display:flex;flex-direction:column;gap:8px}
-.start-n{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:var(--r-lg);background:rgba(77,184,212,.10);border:1px solid rgba(77,184,212,.30);color:var(--accent);font-family:var(--font-mono);font-size:14px;font-weight:500;margin-bottom:4px}
-.start-step h3{font-size:18px;font-weight:600;letter-spacing:-.02em;margin:0;color:var(--fg)}
-.start-step p{font-size:14px;line-height:1.62;color:var(--fg-2);margin:0}
-.start-step p code{font-family:var(--font-mono);font-size:12.5px;color:var(--accent);background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r-xs);padding:1px 6px}
-@media(max-width:760px){.start-grid{grid-template-columns:1fr;gap:24px}}
 /* Plain-language data guarantees (local vs hosted) */
 .arch-tabs{display:flex;width:fit-content;max-width:100%;margin:6px auto 34px;background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-lg);padding:3px;gap:3px}
 .arch-tab{padding:9px 18px;border:1px solid transparent;border-radius:var(--r-md);background:transparent;color:var(--fg-3);font-family:'Geist',system-ui,sans-serif;font-size:13.5px;font-weight:500;cursor:pointer;transition:background .15s,color .15s,border-color .15s;white-space:nowrap}
@@ -619,11 +607,11 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 .js .reveal{opacity:0;transform:translateY(28px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);will-change:opacity,transform}
 .js .reveal.in{opacity:1;transform:none}
 /* Card grids stagger in behind their section head, one beat apart */
-.js .reveal .loop-step,.js .reveal .start-step{opacity:0;transform:translateY(18px);transition:opacity .6s cubic-bezier(.2,.7,.2,1),transform .6s cubic-bezier(.2,.7,.2,1),border-color .2s,background-color .2s}
-.js .reveal.in .loop-step,.js .reveal.in .start-step{opacity:1;transform:none}
-.js .reveal.in .loop-step:nth-child(2),.js .reveal.in .start-step:nth-child(2){transition-delay:.09s}
-.js .reveal.in .loop-step:nth-child(3),.js .reveal.in .start-step:nth-child(3){transition-delay:.18s}
-@media(prefers-reduced-motion:reduce){.js .reveal,.js .reveal .loop-step,.js .reveal .start-step{opacity:1 !important;transform:none !important;transition:none}}
+.js .reveal .loop-step{opacity:0;transform:translateY(18px);transition:opacity .6s cubic-bezier(.2,.7,.2,1),transform .6s cubic-bezier(.2,.7,.2,1),border-color .2s,background-color .2s}
+.js .reveal.in .loop-step{opacity:1;transform:none}
+.js .reveal.in .loop-step:nth-child(2){transition-delay:.09s}
+.js .reveal.in .loop-step:nth-child(3){transition-delay:.18s}
+@media(prefers-reduced-motion:reduce){.js .reveal,.js .reveal .loop-step{opacity:1 !important;transform:none !important;transition:none}}
 
 /* ── Hero load-in choreography: one promise, four beats ── */
 @keyframes heroRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
@@ -634,7 +622,9 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 @media(prefers-reduced-motion:reduce){.js .hero-c>*{animation:none}}
 
 /* ── Agent cost controls band: the piece no dashboard has ── */
-.agents-band{border:1px solid var(--line);border-radius:var(--r-2xl);background:linear-gradient(180deg,var(--bg-2),var(--bg-1));padding:40px 44px;display:flex;align-items:center;justify-content:space-between;gap:36px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);transition:border-color .2s}
+/* Now a closing coda inside Loop's section (folded in during the density
+   pass), not its own top-level section, so it needs its own top spacing. */
+.agents-band{margin-top:40px;border:1px solid var(--line);border-radius:var(--r-2xl);background:linear-gradient(180deg,var(--bg-2),var(--bg-1));padding:40px 44px;display:flex;align-items:center;justify-content:space-between;gap:36px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);transition:border-color .2s}
 .agents-band:hover{border-color:var(--line-2)}
 .agents-band-copy{max-width:640px}
 .band-tag{display:inline-flex;font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-dim);border:1px solid var(--line-2);border-radius:var(--r-xs);padding:3px 8px;margin-bottom:16px}

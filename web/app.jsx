@@ -55,7 +55,8 @@ function useScrollTracking() {
     if (!window.posthog) return;
     // ids must match the real <section id>s; 'architecture' and 'foot-cta' never
     // existed, so scroll tracking was silently blind past the connectors band.
-    const sections = ['demo', 'start', 'loop', 'ai', 'arch', 'connectors', 'pricing', 'faq', 'cta'];
+    // 'start' (the GetStarted section) was folded away in the density pass.
+    const sections = ['demo', 'loop', 'ai', 'arch', 'connectors', 'pricing', 'faq', 'cta'];
     const seen = new Set();
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
@@ -639,13 +640,13 @@ function Architecture({ version }){
           <div className="host-opt">
             <span className="host-tag">Run it yourself</span>
             <h4>Local-first, on your machine</h4>
-            <p>Install with one command. Credentials live in your OS keyring, cost data caches in a local SQLite file, and queries hit your provider APIs directly. There is no nable backend in the path and no data lake to breach. For zero AI exposure, use the local dashboard or CLI, which never call a model.</p>
+            <p>Install with one command. Credentials, cache, and queries all stay on your machine, no nable backend in the path.</p>
             <div className="gate-cmd"><CopyCmd cmd="uvx nable" /></div>
           </div>
           <div className="host-opt">
             <span className="host-tag">Or let us host it</span>
             <h4>Managed, single-tenant</h4>
-            <p>Want it always on without running it yourself? We deploy and manage a single-tenant instance for your org: your own runtime, your own store, isolated from every other customer. Same connectors, same analysis, plus the dashboard with SSO (Okta, Entra ID, Google Workspace), RBAC, and share links. Single-tenant by design, never a shared pool.</p>
+            <p>Want it always on? We run a single-tenant instance for your org, isolated from every other customer, plus SSO, RBAC, and share links.</p>
             <a className="btn btn-ghost host-cta" href={BOOK_CALL_LINK} target="_blank" rel="noopener noreferrer"
                onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'architecture',cta:'hosted_demo'}); }}>
               Talk to us about hosting <span className="arr">→</span>
@@ -1072,71 +1073,17 @@ function Loop(){
             <p>After you approve, it checks your next bill to confirm the money was really saved, then learns what works for you and gets smarter every time.</p>
           </div>
         </div>
-      </div>
-    </section>
-  );
-}
-
-/* Non-technical bridge: the 3-step shape (install, connect read-only, ask) so a
-   buyer sees how simple setup is before the docs go deep on IAM and CloudFormation. */
-function GetStarted(){
-  return (
-    <section id="start" className="alt" style={{borderTop:"1px solid var(--line)"}}>
-      <div className="wrap">
-        <div className="section-head center">
-          <div className="label">Get started</div>
-          <h2>Two minutes, three steps,<br/><em>no SQL, no dashboards.</em></h2>
-          <p>Give nable read-only access to your bill, then just ask. That is the whole setup.</p>
-        </div>
-        <div className="start-grid">
-          <div className="start-step">
-            <div className="start-n">1</div>
-            <h3>Install</h3>
-            <p>One command, <code>uvx nable</code>. It runs on your machine. No account, no signup.</p>
-          </div>
-          <div className="start-step">
-            <div className="start-n">2</div>
-            <h3>Connect, read-only</h3>
-            <p>Point it at AWS, Azure, or GCP. nable only ever reads your bill, and your credentials stay in your OS keyring, never on our servers.</p>
-          </div>
-          <div className="start-step">
-            <div className="start-n">3</div>
-            <h3>Ask</h3>
-            <p>In Claude or Cursor, ask why the bill went up. Get the cause, the cost, and the fix back in the same chat.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* Agent cost controls: the differentiator no dashboard has, linking out to /agents */
-function AgentsBand(){
-  return (
-    <section className="tight alt">
-      <div className="wrap">
         <div className="agents-band">
           <div className="agents-band-copy">
             <div className="band-tag">Agent cost controls</div>
             <h3>Your agents ask nable <em>before they spend.</em></h3>
-            <p>An agent calls nable to price a change, check it against your budgets and policies, and get a cheaper path, before anything is applied. Live now in every install.</p>
+            <p>An agent calls nable to price a change and check it against your budgets, before anything is applied. Live now in every install.</p>
           </div>
           <a className="btn btn-primary" href="/agents"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'agents_band',cta:'see_agents'}); }}>
             See how it works <span className="arr">→</span>
           </a>
         </div>
-      </div>
-    </section>
-  );
-}
-
-/* The payoff: verified, learning savings (the differentiation people miss) */
-function ProofBand(){
-  return (
-    <section className="proof-band">
-      <div className="wrap">
-        <p className="proof-line">Every other tool claims a number. <em>nable proves it on your bill</em>, and gets smarter every week.</p>
       </div>
     </section>
   );
@@ -1239,11 +1186,8 @@ function App(){
       <Nav />
       <Hero />
       <Reveal><DemoVideo /></Reveal>
-      <Reveal><GetStarted /></Reveal>
       <Reveal><Loop /></Reveal>
       <Reveal><AiCost /></Reveal>
-      <Reveal><AgentsBand /></Reveal>
-      <Reveal><ProofBand /></Reveal>
       <Reveal><Connectors /></Reveal>
       <Reveal><Architecture version={version} /></Reveal>
       <FootCta />
