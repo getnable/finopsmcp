@@ -12013,7 +12013,9 @@ async def run_full_cost_audit(
     Covers: Graviton, public IPv4, Lambda concurrency, S3 Bucket Keys,
     non-prod scheduling, RDS snapshots, spot adoption, CloudWatch cardinality,
     CloudWatch orphaned alarms, Logs IA migration, Lambda SnapStart, EFS cross-AZ,
-    NLB cross-zone, S3 IT, S3 Transfer Acceleration, EBS replication, Database SPs.
+    NLB cross-zone, S3 IT, S3 Transfer Acceleration, EBS replication, Database SPs,
+    idle/orphaned resources (unattached EBS, unused EIPs, old snapshots, stopped
+    EC2, idle load balancers), and idle RDS instances (no connections in 14d).
 
     Each scanner runs independently. After showing results, ask the user which
     opportunity to investigate first.
@@ -12058,6 +12060,8 @@ async def run_full_cost_audit(
     from .recommendations.textract_env import scan_textract_environment_waste as _textract
     from .recommendations.bedrock_routing import recommend_bedrock_model_routing as _bedrock
     from .recommendations.commitments import analyze_commitments as _commitments
+    from .cleanup.idle import scan_idle_resources as _idle_resources
+    from .analyzers.waste import scan_all_regions_rds_idle as _scan_all_regions_rds_idle
 
     # Each scanner makes blocking boto3 calls. Gathered as bare coroutines they
     # share one event loop and run back-to-back, so the audit takes the SUM of
@@ -12096,6 +12100,8 @@ async def run_full_cost_audit(
         ("textract",       _textract,                   dict()),
         ("bedrock",        _bedrock,                    dict()),
         ("commitments",    _commitments,                dict()),
+        ("idle_resources", _idle_resources,             dict(regions=regions)),
+        ("idle_rds",       _scan_all_regions_rds_idle,  dict(regions=regions)),
     ]
 
     deadline_s = int(os.getenv("FINOPS_AUDIT_TIMEOUT", "90"))
@@ -12210,6 +12216,16 @@ async def run_full_cost_audit(
                 coverage = data.get("current_coverage_pct", 0) if isinstance(data, dict) else 0
                 if s > 0 and coverage < 80:
                     out.append({"title": f"Purchase Savings Plans / Reserved Instances ({coverage:.0f}% covered)", "monthly_savings": s, "category": "Commitments", "detail": f"${s:.2f}/mo saving at current spend"})
+            elif name == "idle_resources" and isinstance(data, list):
+                for r in data:
+                    if getattr(r, "protected", False) or r.monthly_cost_usd <= 0:
+                        continue
+                    out.append({"title": f"{r.resource_type.replace('_', ' ').title()}: {r.name or r.resource_id}", "monthly_savings": r.monthly_cost_usd, "category": "Idle/Orphaned", "detail": f"{r.reason}, idle {r.idle_days}d, {r.region}"})
+            elif name == "idle_rds" and isinstance(data, list):
+                for r in data:
+                    s = r.get("estimated_monthly_savings", 0) or 0
+                    if s > 0:
+                        out.append({"title": f"Stop or delete idle RDS instance {r.get('resource_id','?')}", "monthly_savings": s, "category": "Database", "detail": f"{r.get('engine','?')} {r.get('current_class','?')}, {r.get('region','?')}, no connections in 14d"})
         except Exception as exc:
             log.warning("audit norm failed for %s: %s", name, exc)
         return out

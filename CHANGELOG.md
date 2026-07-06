@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.132
+
+`run_full_cost_audit` was missing the two waste categories a plain EC2+RDS
+account is most likely to actually have: idle/orphaned resources (unattached
+EBS volumes, unused Elastic IPs, old snapshots, stopped EC2, idle load
+balancers) and idle RDS instances with no connections in 14 days. A bare
+account running "find waste" got a report built from Graviton, Lambda,
+S3, Textract, and similar scanners that legitimately found nothing, with no
+signal that the two most basic categories were never in the sweep. Both are
+now part of the full audit.
+
 ## 0.8.131
 
 Fixes from an independent dogfooding review: the Team-plan upgrade nudge

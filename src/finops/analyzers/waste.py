@@ -1305,6 +1305,28 @@ def check_rds_idle(
     return findings
 
 
+def scan_all_regions_rds_idle(regions: list[str] | None = None) -> list[dict]:
+    """check_rds_idle needs its own rds/cloudwatch clients per region, unlike the
+    universal aws_client the other run_full_cost_audit scanners share. This wraps
+    the per-region loop into one callable with the same fn(**kwargs) shape as
+    every other scanner, so it plugs into the audit's scanner list and its tests
+    the same way."""
+    import boto3
+
+    scan_regions = regions or ["us-east-1", "us-west-2", "eu-west-1", "eu-central-1"]
+    out: list[dict] = []
+    for r in scan_regions:
+        try:
+            out.extend(check_rds_idle(
+                boto3.client("rds", region_name=r),
+                boto3.client("cloudwatch", region_name=r),
+                r,
+            ))
+        except Exception as exc:
+            log.warning("RDS idle scan failed for region %s: %s", r, exc)
+    return out
+
+
 # ── Load balancer waste ───────────────────────────────────────────────────────
 
 _ALB_HOURLY = 0.008
