@@ -101,6 +101,7 @@ class ClusterCostReport:
     by_team: dict[str, float]
     top_pods: list[PodCost]
     recommendations: list[str]
+    unpriced_nodes: dict[str, int] = field(default_factory=dict)
 
 
 # ── K8s API helpers ────────────────────────────────────────────────────────────
@@ -160,16 +161,21 @@ def _get_owner_ref(pod_meta: Any) -> str:
 
 # ── Node cost lookup ──────────────────────────────────────────────────────────
 
-def _node_daily_cost(instance_type: str, nodegroup: str | None = None) -> float:
+def _node_daily_cost(instance_type: str, nodegroup: str | None = None) -> float | None:
     """
-    Return estimated daily cost for a node.
-    Prefers Cost Explorer lookup for accurate amortised cost;
-    falls back to on-demand rate.
+    Estimated daily on-demand cost for a node from its instance type, or None if the
+    type is not in nable's price table.
+
+    We return None rather than a made-up number so an unpriced node (usually a newer
+    GPU or accelerator type) is flagged and excluded from the total, never silently
+    costed at $0.10/hr, which on a GPU box is off by 100x. This is list price, not
+    your real discounted or Spot rate; Cost-Explorer-backed real pricing is a
+    separate, deeper piece of work.
     """
     hourly = _EC2_HOURLY.get(instance_type)
     if hourly is None:
-        log.warning("Unknown instance type for cost: %s — defaulting $0.10/hr", instance_type)
-        hourly = 0.10
+        log.warning("No price for instance type %s; leaving the node unpriced.", instance_type)
+        return None
     return hourly * 24
 
 
@@ -263,9 +269,19 @@ def allocate_cluster_costs(
             "instance_type": instance_type,
             "cpu_mc": alloc_cpu * 1000 if alloc_cpu < 100 else alloc_cpu,
             "mem_mib": alloc_mem,
-            "daily_cost": daily_cost,
+            # An unpriced node contributes $0 to allocation (its pods show no cost)
+            # rather than a fabricated share; it is counted in unpriced_nodes below.
+            "daily_cost": daily_cost if daily_cost is not None else 0.0,
+            "unpriced": daily_cost is None,
             "nodegroup": nodegroup,
         }
+
+    # Count nodes we could not price, by instance type, so the report can say the
+    # total is a floor instead of quietly under-costing a GPU box.
+    unpriced_nodes: dict[str, int] = {}
+    for n in nodes.values():
+        if n.get("unpriced"):
+            unpriced_nodes[n["instance_type"]] = unpriced_nodes.get(n["instance_type"], 0) + 1
 
     # ── Collect pods ─────────────────────────────────────────────────────────
     pods_resp = core_api.list_pod_for_all_namespaces()
@@ -389,6 +405,17 @@ def allocate_cluster_costs(
     # ── Recommendations ───────────────────────────────────────────────────────
     recommendations: list[str] = []
 
+    # Unpriced nodes lead the list: the numbers below are a floor until they are
+    # priced, and the user should know that before reading any dollar figure.
+    if unpriced_nodes:
+        total_unpriced = sum(unpriced_nodes.values())
+        types_txt = ", ".join(f"{c}x {t}" for t, c in sorted(unpriced_nodes.items()))
+        recommendations.append(
+            f"{total_unpriced} node(s) could not be priced ({types_txt}). Their pods "
+            f"show $0 and the cluster total is a floor. These are usually newer GPU or "
+            f"accelerator types not yet in nable's price table."
+        )
+
     idle_pct = idle_cost / max(idle_cost + allocated_cost, 1) * 100
     if idle_pct > 30:
         recommendations.append(
@@ -425,6 +452,7 @@ def allocate_cluster_costs(
         by_team={k: round(v, 2) for k, v in sorted(by_team.items(), key=lambda x: x[1], reverse=True)},
         top_pods=top_pods,
         recommendations=recommendations,
+        unpriced_nodes=unpriced_nodes,
     )
 
 
@@ -438,6 +466,8 @@ def allocate_to_dict(cluster_name: str = "", context: str | None = None) -> dict
         "total_monthly_cost_usd": round(report.total_node_daily_cost_usd * 30, 2),
         "allocated_cost_usd":     report.allocated_cost_usd,
         "idle_cost_usd":          report.idle_cost_usd,
+        **({"unpriced_nodes": report.unpriced_nodes,
+            "cost_is_floor": True} if report.unpriced_nodes else {}),
         "idle_pct":               round(report.idle_cost_usd / max(report.allocated_cost_usd + report.idle_cost_usd, 1) * 100, 1),
         "by_team":                report.by_team,
         "by_namespace":           {

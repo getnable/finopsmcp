@@ -2,7 +2,24 @@
 
 All notable changes to finops-mcp (nable).
 
-## 0.8.136
+## 0.8.137
+
+Never fabricate a dollar for a resource we cannot price. Two paths used to emit
+a made-up $0.10/hr when an instance type was missing from the price table, which
+on a large or GPU instance is off by 100x, and a wrong number that looks real is
+worse than an honest "cost unknown".
+
+- idle RDS: an unknown DB class is now left unpriced (savings null, flagged
+  unpriced, severity unknown) instead of costed at $0.10/hr. The idle signal
+  (no connections) is measured and still surfaces; get_idle_rds_instances counts
+  unpriced instances and marks the total a floor.
+- Kubernetes node cost: an unknown node type is now excluded and reported under
+  unpriced_nodes with cost_is_floor set, instead of silently costed at $0.10/hr.
+  Added modern GPU and accelerator on-demand prices (p5/p4de, g5 full family, g6,
+  g6e, Trainium, Inferentia) so the common case is priced, not defaulted.
+
+Pre-deploy estimators (terraform_estimate, PR estimator) are unchanged: list
+price with fallbacks is correct for hypotheticals, where there is no real bill.
 
 Richer per-account learning signal, so the recommend-and-learn loop has more to
 compound on as real accounts use it.

@@ -1276,30 +1276,44 @@ def check_rds_idle(
             if max_connections >= connection_threshold:
                 continue
 
-            current_hourly = _RDS_HOURLY.get(db_class, 0.10)
-            monthly_cost = current_hourly * 730
             multi_az = db.get("MultiAZ", False)
-            if multi_az:
-                monthly_cost *= 2
+            # Do NOT fabricate a price for an unknown class. The idle signal (no
+            # connections) is measured and real; the dollar is not, so an unknown
+            # class stays unpriced rather than emitting a made-up $0.10/hr, which
+            # on a large instance is off by 100x. A wrong number that looks real
+            # is worse than an honest "cost unknown".
+            current_hourly = _RDS_HOURLY.get(db_class)
+            if current_hourly is None:
+                monthly_cost = None
+                savings_val = None
+                cost_txt = (f"cost unknown ({db_class} is not in nable's price table; "
+                            f"check the real rate in Cost Explorer)")
+                severity = "unknown"
+            else:
+                monthly_cost = current_hourly * 730 * (2 if multi_az else 1)
+                savings_val = round(monthly_cost, 2)
+                cost_txt = f"~${monthly_cost:.0f}/mo"
+                severity = _severity_from_savings(monthly_cost)
 
             findings.append({
                 "resource_id": db_id,
                 "resource_type": "RDS Instance",
                 "waste_type": "rds_idle_no_connections",
-                "estimated_monthly_savings": round(monthly_cost, 2),
+                "estimated_monthly_savings": savings_val,
+                "unpriced": savings_val is None,
                 "detail": (
                     f"RDS instance '{db_id}' ({db_class}, {engine}) had "
                     f"max {max_connections:.0f} connections over the past {lookback_days} days. "
-                    f"Running cost: ~${monthly_cost:.0f}/mo. "
+                    f"Running cost: {cost_txt}. "
                     f"Consider stopping (preserves data) or deleting with a final snapshot."
                 ),
-                "severity": _severity_from_savings(monthly_cost),
+                "severity": severity,
                 "region": region,
                 "account_id": None,
                 "current_class": db_class,
                 "engine": engine,
                 "max_connections_14d": max_connections,
-                "estimated_monthly_cost": round(monthly_cost, 2),
+                "estimated_monthly_cost": savings_val,
             })
 
     return findings

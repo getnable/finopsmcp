@@ -70,11 +70,26 @@ _EC2_HOURLY: dict[str, float] = {
     "r7g.large": 0.1071, "r7g.xlarge": 0.2142, "r7g.2xlarge": 0.4284,
     "x1e.xlarge": 0.834, "x1e.2xlarge": 1.668, "x1e.4xlarge": 3.336,
     "x2idn.16xlarge": 6.669,
-    # GPU
+    # GPU (on-demand, us-east-1). List price, not your discounted/Spot rate.
     "p3.2xlarge": 3.06, "p3.8xlarge": 12.24, "p3.16xlarge": 24.48,
-    "p4d.24xlarge": 32.77, "g4dn.xlarge": 0.526, "g4dn.2xlarge": 0.752,
+    "p4d.24xlarge": 32.77, "p4de.24xlarge": 40.97,
+    "p5.48xlarge": 98.32, "p5e.48xlarge": 98.32, "p5en.48xlarge": 98.32,
+    "g4dn.xlarge": 0.526, "g4dn.2xlarge": 0.752,
     "g4dn.4xlarge": 1.204, "g4dn.8xlarge": 2.264, "g4dn.12xlarge": 3.912,
+    "g4dn.16xlarge": 4.352, "g4dn.metal": 7.824,
     "g5.xlarge": 1.006, "g5.2xlarge": 1.212, "g5.4xlarge": 1.624,
+    "g5.8xlarge": 2.448, "g5.12xlarge": 5.672, "g5.16xlarge": 4.096,
+    "g5.24xlarge": 8.144, "g5.48xlarge": 16.288,
+    "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776, "g6.4xlarge": 1.323,
+    "g6.8xlarge": 2.0144, "g6.12xlarge": 4.6016, "g6.16xlarge": 3.3968,
+    "g6.24xlarge": 6.6752, "g6.48xlarge": 13.3504,
+    "g6e.xlarge": 1.861, "g6e.2xlarge": 2.24208, "g6e.4xlarge": 3.00424,
+    "g6e.8xlarge": 4.52856, "g6e.12xlarge": 10.49264, "g6e.16xlarge": 7.577,
+    "g6e.24xlarge": 15.066, "g6e.48xlarge": 30.13,
+    # Trainium / Inferentia accelerators
+    "trn1.2xlarge": 1.3438, "trn1.32xlarge": 21.50, "trn1n.32xlarge": 24.78,
+    "inf1.xlarge": 0.228, "inf1.2xlarge": 0.362, "inf1.6xlarge": 1.180, "inf1.24xlarge": 4.721,
+    "inf2.xlarge": 0.7582, "inf2.8xlarge": 1.9679, "inf2.24xlarge": 6.4906, "inf2.48xlarge": 12.9813,
     # Storage optimised
     "i3.large": 0.156, "i3.xlarge": 0.312, "i3.2xlarge": 0.624,
     "i3.4xlarge": 1.248, "i3.8xlarge": 2.496,

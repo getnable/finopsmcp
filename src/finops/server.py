@@ -4196,11 +4196,16 @@ async def get_idle_rds_instances(
 
         region_results = await asyncio.gather(*[_scan_region_rds_idle(r) for r in regions])
         all_findings: list[dict] = [f for findings in region_results for f in findings]
-        all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
-        total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
+        # A finding with an unknown instance class carries estimated_monthly_savings=None
+        # (we refuse to fabricate a price). Treat None as 0 for sorting and the total,
+        # so the headline never counts a made-up number, and surface how many were
+        # unpriced so the total reads as a floor, not the whole truth.
+        all_findings.sort(key=lambda x: x.get("estimated_monthly_savings") or 0, reverse=True)
+        total_savings = sum((f.get("estimated_monthly_savings") or 0) for f in all_findings)
+        unpriced = sum(1 for f in all_findings if f.get("unpriced"))
 
         kept, omitted = fit_to_budget(all_findings)
-        return {
+        out = {
             "count": len(all_findings),
             "total_monthly_savings": round(total_savings, 2),
             "total_annual_savings": round(total_savings * 12, 2),
@@ -4211,6 +4216,14 @@ async def get_idle_rds_instances(
                 "AWS auto-starts stopped instances after 7 days unless stopped again."
             ),
         }
+        if unpriced:
+            out["unpriced_count"] = unpriced
+            out["unpriced_note"] = (
+                f"{unpriced} idle instance(s) use a class not in nable's price table and "
+                f"are excluded from the total. They are still idle; verify their real rate "
+                f"in Cost Explorer. total_monthly_savings is a floor."
+            )
+        return out
     except Exception as e:
         return {"error": str(e)}
 
