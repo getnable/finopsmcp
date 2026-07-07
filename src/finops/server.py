@@ -4761,6 +4761,23 @@ async def get_kubernetes_costs(
     if is_demo():
         return get_demo_response("get_kubernetes_costs") or {}
 
+    # Prefer OpenCost when it is configured and reachable: it prices GPU, network,
+    # and PV storage at the cluster's real rates, which nable's built-in list-price
+    # allocator does not. Fall back to the built-in estimate when OpenCost is
+    # absent, so k8s cost still works with zero setup. Either way the result is
+    # tagged is_estimate so the user knows which they are seeing.
+    try:
+        from .connectors import opencost as _oc
+        if _oc.is_configured():
+            oc = await asyncio.to_thread(
+                _oc.allocation_report, "7d", "namespace",
+            )
+            if oc is not None:
+                return oc
+            log.info("OpenCost configured but not reachable; using the built-in estimate.")
+    except Exception as e:
+        log.debug("OpenCost path skipped: %s", e)
+
     try:
         connector = KubernetesConnector()
         if not await connector.is_configured():
@@ -4782,6 +4799,14 @@ async def get_kubernetes_costs(
         result: dict = {
             "cluster": report.cluster,
             "provider": report.provider,
+            # This path is nable's built-in allocator: node cost from a list-price
+            # table split by pod resource share. It is a zero-setup estimate, not
+            # your real billed rate, and does not price GPU/network/PV storage.
+            # Run OpenCost (set NABLE_OPENCOST_URL) for real, GPU-aware numbers.
+            "source": "nable-estimate",
+            "is_estimate": True,
+            "estimate_note": ("List-price estimate. For real rates including GPU, "
+                              "network, and storage, run OpenCost and set NABLE_OPENCOST_URL."),
             "node_count": report.node_count,
             "pod_count": report.pod_count,
             "total_monthly_cost_usd": report.total_monthly_cost,

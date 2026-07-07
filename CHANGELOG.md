@@ -2,7 +2,19 @@
 
 All notable changes to finops-mcp (nable).
 
-## 0.8.137
+## 0.8.138
+
+OpenCost as a Kubernetes cost source. When you run OpenCost (the CNCF project)
+in your cluster and set NABLE_OPENCOST_URL, nable reads its Allocation API and
+returns real-rate cost per namespace, including GPU, network, and PV storage,
+the things nable's built-in list-price allocator does not price. OpenCost is a
+data source here, like Cost Explorer or Datadog; nable adds the agent interface,
+remediation, and the verify loop on top, and only ever reads OpenCost.
+
+When OpenCost is not set or not reachable, get_kubernetes_costs falls back to the
+built-in zero-setup estimate, now tagged is_estimate with a note that it is list
+price and does not cover GPU. So you keep "works with no install" and get real
+numbers when OpenCost is present, and the response always says which one you got.
 
 Never fabricate a dollar for a resource we cannot price. Two paths used to emit
 a made-up $0.10/hr when an instance type was missing from the price table, which
