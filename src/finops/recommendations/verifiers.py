@@ -92,6 +92,85 @@ def verify_ec2_change(resource_id: str, recommended_config: dict, row: Any = Non
         return None
 
 
+# ── Graviton migration verifier ───────────────────────────────────────────────
+
+# arm64 / Graviton instance families. A Graviton migration is confirmed when the
+# instance's type moved to one of these families (the "g" generation marker).
+_GRAVITON_FAMILIES = (
+    "a1", "t4g", "m6g", "m7g", "m8g", "c6g", "c7g", "c8g", "r6g", "r7g", "r8g",
+    "m6gd", "c6gd", "r6gd", "m7gd", "c7gd", "r7gd", "x2gd", "im4gn", "is4gen",
+    "g5g", "hpc7g", "c6gn", "c7gn",
+)
+
+
+def _is_graviton_type(instance_type: str) -> bool:
+    """True if the instance type belongs to an arm64/Graviton family. Matches on
+    the family prefix before the size (e.g. 'm7g.xlarge' -> family 'm7g')."""
+    family = (instance_type or "").split(".", 1)[0].lower()
+    return family in _GRAVITON_FAMILIES
+
+
+def verify_graviton_change(resource_id: str, recommended_config: dict, row: Any = None) -> float | None:
+    """
+    Confirm an EC2 instance actually migrated to a Graviton (arm64) type.
+
+    Reads only: a single describe_instances call. The change is confirmed when the
+    live instance type matches the recommended Graviton type, or (if the exact
+    target is not recorded) when the type is any arm64/Graviton family and differs
+    from the original x86 type. Returns the measured monthly saving once confirmed,
+    None until then. Never mutates: it only describes.
+
+    Measured saving comes from the estimate the recommender computed, or the
+    on-demand price gap between the original x86 type and the confirmed Graviton
+    type.
+    """
+    try:
+        import boto3
+        region = getattr(row, "region", "") or None
+        ec2 = boto3.client("ec2", region_name=region) if region else boto3.client("ec2")
+        resp = ec2.describe_instances(InstanceIds=[resource_id])
+        reservations = resp.get("Reservations", [])
+        if not reservations:
+            return None
+        instances = reservations[0].get("Instances", [])
+        if not instances:
+            return None
+        current_type = instances[0].get("InstanceType", "")
+        target_type = recommended_config.get("graviton_equivalent", "") or recommended_config.get("instance_type", "")
+        old_type = recommended_config.get("from_instance_type", "")
+
+        confirmed = False
+        if target_type and current_type == target_type:
+            confirmed = True
+        elif _is_graviton_type(current_type) and current_type != old_type:
+            # Migrated to some Graviton type, even if not the exact one suggested.
+            confirmed = True
+            target_type = current_type
+        if not confirmed:
+            return None
+
+        # Prefer the estimate the recommender already computed; it accounts for the
+        # specific price gap. Fall back to the on-demand hourly delta.
+        est = recommended_config.get("estimated_monthly_savings_usd")
+        if est is None:
+            est = getattr(row, "estimated_monthly_savings_usd", None)
+        if est is not None:
+            try:
+                return round(float(est), 2)
+            except (TypeError, ValueError):
+                pass
+        try:
+            from ..connectors.terraform_estimate import _EC2_HOURLY, HOURS_PER_MONTH
+            old_hourly = _EC2_HOURLY.get(old_type, 0.0)
+            new_hourly = _EC2_HOURLY.get(target_type, 0.0)
+            return round((old_hourly - new_hourly) * HOURS_PER_MONTH, 2)
+        except Exception:
+            return 0.0
+    except Exception as e:
+        log.debug("verify_graviton_change error: %s", e)
+        return None
+
+
 # ── Idle-resource verifier ────────────────────────────────────────────────────
 
 def _idle_resource_present(ec2_client: Any, resource_type: str, resource_id: str) -> bool | None:
@@ -188,6 +267,9 @@ def verify_idle_cleanup(resource_id: str, recommended_config: dict, row: Any = N
 
 def _register_defaults() -> None:
     register("rightsizing", "ec2", verify_ec2_change)
+    # Graviton migration is a read-only checkable config change: the instance type
+    # moved to an arm64 family. Same describe-only pattern as rightsizing.
+    register("graviton", "ec2", verify_graviton_change)
     # One verifier covers every idle resource type via the source-wide fallback.
     register("idle", None, verify_idle_cleanup)
 

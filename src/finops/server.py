@@ -11432,6 +11432,34 @@ async def scan_graviton_migration_opportunities(
 
         total_savings = sum(r["savings_estimate"] for r in candidates)
 
+        # Persist for savings tracking so a later migration can be verified read-only.
+        try:
+            from .recommendations.savings_tracker import record_recommendation
+            for r in candidates:
+                if r.get("savings_estimate", 0) > 0:
+                    record_recommendation(
+                        source="graviton",
+                        provider="aws",
+                        resource_id=r["instance_id"],
+                        resource_type="ec2",
+                        resource_name=r.get("name_tag", "") or r["instance_id"],
+                        account_id=r.get("account_id", ""),
+                        region=r.get("region", ""),
+                        current_config={
+                            "instance_type": r["instance_type"],
+                            "monthly_cost_usd": r.get("current_monthly_cost_estimate", 0.0),
+                        },
+                        recommended_config={
+                            "graviton_equivalent": r["graviton_equivalent"],
+                            "from_instance_type": r["instance_type"],
+                            "estimated_monthly_savings_usd": r["savings_estimate"],
+                        },
+                        description=f"Migrate {r['instance_type']} to Graviton {r['graviton_equivalent']}",
+                        estimated_monthly_savings_usd=r["savings_estimate"],
+                    )
+        except Exception:
+            pass  # never block the main response
+
         lines: list[str] = [
             f"**{len(candidates)} instance{'s' if len(candidates) != 1 else ''} identified. "
             f"Estimated total monthly saving: ${total_savings:,.2f}**",
