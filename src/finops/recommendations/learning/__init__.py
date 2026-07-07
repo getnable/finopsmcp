@@ -16,7 +16,7 @@ Modules:
   reasons.py   classify_dismiss_reason(): free-text dismiss reason -> canonical enum.
 """
 from .reasons import classify_dismiss_reason
-from .signal import customer_signal
+from .signal import approval_profile, customer_signal
 from .rescorer import rescore
 
-__all__ = ["customer_signal", "rescore", "classify_dismiss_reason"]
+__all__ = ["customer_signal", "approval_profile", "rescore", "classify_dismiss_reason"]

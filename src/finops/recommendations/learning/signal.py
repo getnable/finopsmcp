@@ -41,9 +41,25 @@ SUPPRESS_ACT_RATE = 0.15  # below this shrunk act-rate (and WARM) -> suppress fo
 BOOST_FLOOR = 3           # >= this many resolved before we'll actively boost
 BOOST_ACT_RATE = 0.5      # at/above this shrunk act-rate (and accurate) -> boost
 ACCURACY_OK = (0.8, 1.2)  # predicted/realized within this band counts as "accurate"
+APPROVAL_MIN_ACTED = 4    # need this many acted recs before a dollar floor is trusted
 
 _RESOLVED = ("acted_on", "verified", "dismissed", "expired")
 _ACTED = ("acted_on", "verified")
+
+
+def _pctl(values: list[float], q: float) -> float | None:
+    """Linear-interpolated percentile (q in 0..1), safe for tiny lists. None if empty."""
+    if not values:
+        return None
+    xs = sorted(values)
+    if len(xs) == 1:
+        return xs[0]
+    pos = q * (len(xs) - 1)
+    lo = int(pos)
+    frac = pos - lo
+    if lo + 1 < len(xs):
+        return xs[lo] + frac * (xs[lo + 1] - xs[lo])
+    return xs[lo]
 
 # Dismiss categories that are a deliberate business choice, NOT evidence that the
 # recommendation was low quality. We record them and show them in the `why`, but we
@@ -218,6 +234,7 @@ def customer_signal() -> dict[str, Any]:
     return {
         "by_source": by_source,
         "by_bucket": by_bucket,
+        "approval_profile": approval_profile(),
         "verified_monthly_usd": round(total_realized, 2),
         "verified_annual_run_rate_usd": round(total_realized * 12, 2),
         "params": {
@@ -232,6 +249,73 @@ def customer_signal() -> dict[str, Any]:
                  "recorded but kept out of the act-rate, so a valid 'keep it' never trains "
                  "a good source down. A source/bucket stays on blanket behavior until it "
                  f"has >= {WARM_FLOOR} resolved recs; only then can it be suppressed for you."),
+    }
+
+
+def approval_profile() -> dict[str, Any]:
+    """What this customer actually says yes to: the dollar size and the resource
+    types they act on versus dismiss. Lets the loop lead with recs shaped like the
+    ones they have already approved, not by raw dollars alone.
+
+    approval_floor_usd is the 25th percentile of what they DID act on, so a rec far
+    below it can rank lower for them. It stays None until there are at least
+    APPROVAL_MIN_ACTED acted recs, so on a near-empty ledger callers fall back to
+    plain dollar ordering. Business-reason dismissals (peak / SLA / not-ours) are a
+    choice, not a no, so they are excluded from both the dollar and the per-type math.
+    Single-tenant: reads only this install's own ledger.
+    """
+    sr = savings_recommendations
+    engine = get_engine()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                sr.c.status, sr.c.resource_type, sr.c.dismiss_reason_category,
+                sr.c.estimated_monthly_savings_usd,
+            ).where(sr.c.status.in_(_RESOLVED))
+        ).fetchall()
+
+    acted_usd: list[float] = []
+    dismissed_usd: list[float] = []
+    by_type: dict[str, dict] = {}
+    for r in rows:
+        is_business = (
+            r.status == "dismissed"
+            and getattr(r, "dismiss_reason_category", None) in _BUSINESS_DISMISS_REASONS
+        )
+        if is_business:
+            continue
+        rt = (r.resource_type or "unknown").strip() or "unknown"
+        est = float(r.estimated_monthly_savings_usd or 0.0)
+        d = by_type.setdefault(rt, {"acted": 0, "resolved": 0})
+        d["resolved"] += 1
+        if r.status in _ACTED:
+            d["acted"] += 1
+            acted_usd.append(est)
+        else:
+            dismissed_usd.append(est)
+
+    total_acted = len(acted_usd)
+    coverage = _coverage(total_acted + len(dismissed_usd))
+    floor = round(_pctl(acted_usd, 0.25), 2) if total_acted >= APPROVAL_MIN_ACTED else None
+
+    types = [
+        {"resource_type": rt, "acted": c["acted"], "resolved": c["resolved"],
+         "act_rate": round(c["acted"] / c["resolved"], 3)}
+        for rt, c in sorted(by_type.items()) if c["resolved"] > 0
+    ]
+    types.sort(key=lambda t: (t["act_rate"], t["resolved"]), reverse=True)
+
+    return {
+        "coverage": coverage,
+        "approval_floor_usd": floor,
+        "acted_median_usd": round(statistics.median(acted_usd), 2) if acted_usd else None,
+        "dismissed_median_usd": round(statistics.median(dismissed_usd), 2) if dismissed_usd else None,
+        "acted_count": total_acted,
+        "by_resource_type": types,
+        "note": ("The dollar size and resource types you have acted on before. "
+                 "approval_floor_usd is the 25th percentile of what you acted on, set "
+                 "only once there are enough decisions; recs below it can rank lower "
+                 "for you. Business-reason dismissals are excluded."),
     }
 
 

@@ -2,7 +2,24 @@
 
 All notable changes to finops-mcp (nable).
 
-## 0.8.135
+## 0.8.136
+
+Richer per-account learning signal, so the recommend-and-learn loop has more to
+compound on as real accounts use it.
+
+- Approval profile: nable now learns the dollar size and resource types you
+  actually act on versus dismiss, not just how often per source. It exposes an
+  approval_floor_usd (the 25th percentile of what you have acted on) so a
+  recommendation far below what you normally approve can rank lower for you.
+  Sparse-data safe: the floor stays unset until there are enough decisions, and
+  business-reason dismissals are excluded. Surfaced in get_recommendation_learning.
+- Stronger dismiss capture: dismiss_recommendation now nudges for the reason (it
+  is what the learning loop runs on), echoes the categorized reason, and tells you
+  when a business reason will not be held against that recommendation type. A
+  dismissal with no reason gets a gentle nudge to add one.
+
+Still propose-only and single-tenant: this only produces a signal a ranker reads,
+it never mutates anything, and it reads only this install's own ledger.
 
 Closes the verify-and-learn loop, the part that turns "here is a list of
 maybes" into proven, banked savings.

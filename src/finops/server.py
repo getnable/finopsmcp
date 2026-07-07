@@ -2687,21 +2687,44 @@ async def dismiss_recommendation(recommendation_id: int, reason: str = "") -> di
     Dismiss a recommendation you've decided not to act on (won't fix, accepted risk, etc.).
     Dismissed recommendations won't appear in open potential savings.
 
+    Always pass the user's reason when they give one. It is how nable learns which
+    recommendation types fit this environment. A business reason ("reserved for peak",
+    "SLA-sensitive", "another team owns it") is recorded but kept OUT of the act-rate,
+    so a valid "keep it" never trains a good recommendation type down. A quality reason
+    ("the estimate is wrong") does count against that type. Pass the user's own words;
+    nable categorizes them.
+
     Args:
         recommendation_id: The ID from list_savings_recommendations().
-        reason: Optional note on why you're dismissing it (e.g. "reserved for burst traffic").
+        reason: Why you're dismissing it, in the user's words (e.g. "reserved for burst traffic").
 
     Examples:
         - "Dismiss recommendation 15, we need that instance for peak load"
         - "Mark recommendation 8 as won't fix"
     """
     from .recommendations.savings_tracker import mark_dismissed
+    from .recommendations.learning.reasons import classify_dismiss_reason
     ok = mark_dismissed(recommendation_id, reason)
     if ok:
-        return {
+        category = classify_dismiss_reason(reason)
+        out = {
             "status": "dismissed",
+            "reason_category": category,
             "message": f"Recommendation {recommendation_id} dismissed." + (f" Reason: {reason}" if reason else ""),
         }
+        # Make the learning loop visible: a business-reason dismissal is a choice we
+        # honor and will not hold against this recommendation type in future ranking.
+        if category in ("reserved_for_peak", "sla_sensitive", "not_our_resource"):
+            out["learning_note"] = (
+                "Recorded as a business reason, so this will not count against this "
+                "recommendation type when nable ranks future proposals for you."
+            )
+        elif not reason:
+            out["learning_note"] = (
+                "No reason captured. A short reason helps nable learn what fits your "
+                "environment and avoid suggesting it again."
+            )
+        return out
     return {
         "error": f"Recommendation {recommendation_id} not found or already in a terminal state.",
     }
