@@ -2739,14 +2739,20 @@ async def verify_savings() -> dict:
         }
 
     total_verified = sum(r["verified_monthly_savings_usd"] for r in newly_verified)
+    banked_monthly = summary["verified_monthly_usd"]
+    banked_annual = summary["verified_annual_usd"]
     return {
         "verified_count": len(newly_verified),
         "newly_verified": newly_verified,
         "total_new_monthly_savings_usd": round(total_verified, 2),
         "total_new_annual_savings_usd": round(total_verified * 12, 2),
-        "message": f"Verified {len(newly_verified)} change{'s' if len(newly_verified) != 1 else ''}: ${total_verified:,.0f}/mo (${total_verified * 12:,.0f}/yr) in confirmed savings.",
-        "cumulative_verified_monthly_usd": summary["verified_monthly_usd"],
-        "cumulative_verified_annual_usd": summary["verified_annual_usd"],
+        "message": f"Verified {len(newly_verified)} change{'s' if len(newly_verified) != 1 else ''}: ${total_verified:,.0f}/mo (${total_verified * 12:,.0f}/yr) newly banked. "
+                   f"Total verified banked savings: ${banked_monthly:,.0f}/mo (${banked_annual:,.0f}/yr) confirmed off your bill.",
+        "cumulative_verified_monthly_usd": banked_monthly,
+        "cumulative_verified_annual_usd": banked_annual,
+        # Explicit banked figures, distinct from predicted/found savings.
+        "verified_banked_monthly_usd": banked_monthly,
+        "verified_banked_annual_usd": banked_annual,
     }
 
 
@@ -13218,10 +13224,15 @@ async def get_nable_roi(
 
         found_total = sum(r.estimated_monthly_savings_usd or 0 for r in rows if r.status not in ("dismissed", "expired"))
         acted_total = sum(r.estimated_monthly_savings_usd or 0 for r in rows if r.status in ("acted_on", "verified"))
+        # Verified banked savings = money that actually left the bill. Use ONLY the
+        # measured verified amount, never the predicted estimate. A verified row is
+        # money nable confirmed against live cloud state; conflating it with the
+        # estimate would overstate what was actually banked.
         verified_total = sum(
-            r.verified_monthly_savings_usd or r.estimated_monthly_savings_usd or 0
+            r.verified_monthly_savings_usd or 0
             for r in rows if r.status == "verified"
         )
+        verified_count = sum(1 for r in rows if r.status == "verified")
 
         found_annualized = found_total * 12
         acted_annualized = acted_total * 12
@@ -13231,16 +13242,29 @@ async def get_nable_roi(
         roi_on_verified = ((verified_total - monthly_cost) / monthly_cost * 100) if monthly_cost > 0 else None
         payback_months = (monthly_cost / verified_total) if verified_total > 0 else None
 
+        # Hero line: lead with verified banked savings, the number that actually
+        # left the bill, kept clearly distinct from predicted/found opportunity.
+        if verified_total > 0:
+            hero = (f"**Verified banked savings: ${verified_total:,.0f}/mo "
+                    f"(${verified_annualized:,.0f}/yr), confirmed against live cloud state "
+                    f"across {verified_count} change{'s' if verified_count != 1 else ''}.**")
+        else:
+            hero = ("**Verified banked savings: $0/mo so far.** This tracks money that "
+                    "actually left your bill. Mark recommendations acted on, then run "
+                    "verify_savings() to bank the first confirmed savings.")
+
         lines = [
             f"## nable ROI Report ({period_days}-day window)",
+            "",
+            hero,
             "",
             f"**Tool cost:** ${period_cost:,.0f} over {period_days} days "
             f"(${monthly_cost:.0f}/mo · {plan} plan)",
             "",
             "### Savings pipeline",
-            f"- Found: ${found_total:,.0f}/mo in opportunities ({len(rows)} recommendations)",
-            f"- Acted on: ${acted_total:,.0f}/mo estimated savings",
-            f"- Verified: ${verified_total:,.0f}/mo confirmed savings",
+            f"- Found (predicted): ${found_total:,.0f}/mo in opportunities ({len(rows)} recommendations)",
+            f"- Acted on (predicted, pending verification): ${acted_total:,.0f}/mo",
+            f"- Verified (banked, actually left the bill): ${verified_total:,.0f}/mo",
             "",
         ]
 
@@ -13291,6 +13315,12 @@ async def get_nable_roi(
             "found_monthly_usd": round(found_total, 2),
             "acted_monthly_usd": round(acted_total, 2),
             "verified_monthly_usd": round(verified_total, 2),
+            # Explicit banked figure: money confirmed to have left the bill. Same
+            # value as verified_monthly_usd, named so a caller can't confuse it
+            # with predicted/found savings.
+            "verified_banked_monthly_usd": round(verified_total, 2),
+            "verified_banked_annual_usd": round(verified_annualized, 2),
+            "verified_count": verified_count,
             "found_annualized_usd": round(found_annualized, 2),
             "verified_annualized_usd": round(verified_annualized, 2),
             "annual_tool_cost_usd": round(annual_tool_cost, 2),
