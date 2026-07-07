@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.133
+
+Fix from a comprehensive security audit: resource names and tags (Kubernetes
+namespaces/releases, EC2/EBS Name tags) are set by whoever has tag or deploy
+access in a shared account or cluster, not by nable. They were spliced
+unescaped into Jira/Linear/GitHub ticket titles and bodies, and returned
+uncapped in tool output, a prompt-injection vector if that text is later
+read back into an LLM context. Now stripped of control characters, capped
+at 256 characters, and ticket bodies that quote resource metadata carry an
+explicit note that it's data, not instructions.
+
 ## 0.8.132
 
 `run_full_cost_audit` was missing the two waste categories a plain EC2+RDS

@@ -86,7 +86,14 @@ def _is_protected(tags: list[dict]) -> bool:
 
 
 def _tag_name(tags: list[dict]) -> str:
-    return next((t["Value"] for t in tags if t["Key"] == "Name"), "")
+    raw = next((t["Value"] for t in tags if t["Key"] == "Name"), "")
+    # Name tags are set by whoever can tag resources in the account, not by
+    # nable, so an unbounded or control-character-laden value would flow
+    # as-is into tool output and later into ticket titles/bodies. Strip
+    # control chars and cap length so it stays a display string, never a
+    # vector for injecting content into a downstream LLM or ticket reader.
+    cleaned = "".join(c for c in raw if c.isprintable())
+    return cleaned[:256]
 
 
 def _days_since(dt: datetime) -> int:
