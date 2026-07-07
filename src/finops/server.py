@@ -2335,6 +2335,36 @@ async def get_savings_summary() -> dict:
         if verified > 0:
             lines.append(f"  Verified savings: ${verified:,.0f}/mo (${summary['verified_annual_usd']:,.0f}/yr confirmed).")
 
+    # Learning loop: annotate each source with what THIS account's ledger shows
+    # about it (act-rate, accuracy, verdict). Propose-only: this adds honest
+    # confidence context, it never reorders spend numbers or hides anything.
+    # Degrades to a no-op on a cold ledger (no source has real signal yet).
+    try:
+        from .recommendations.learning import customer_signal
+        from .recommendations.learning.signal import signal_for, _has_signal
+        sig = customer_signal()
+        learned_notes = []
+        for src, block in summary.get("by_source", {}).items():
+            s = signal_for(sig, src)
+            block["learned"] = {
+                "verdict": s["verdict"],
+                "coverage": s["coverage"],
+                "act_rate": s["act_rate"],
+                "accuracy": s["accuracy"],
+                "why": s["why"],
+            }
+            # Only surface a headline note for sources with real, resolved signal,
+            # so a near-empty ledger stays quiet rather than over-claiming.
+            if _has_signal(s):
+                learned_notes.append(f"{src}: {s['why']}")
+        if learned_notes:
+            summary["learning_note"] = (
+                "Confidence context from your own ledger (propose-only, nothing hidden): "
+                + " ".join(learned_notes)
+            )
+    except Exception as exc:
+        log.debug("learning annotation skipped in get_savings_summary: %s", exc)
+
     summary["summary"] = " ".join(lines)
     summary["tip"] = (
         "Use mark_recommendation_acted_on(id) when you implement a recommendation. "
@@ -12258,14 +12288,42 @@ async def run_full_cost_audit(
             log.warning("audit norm failed for %s: %s", name, exc)
         return out
 
+    # Map each scanner to the ledger `source` the learning loop keys on, so the
+    # audit can rank by what THIS account actually acts on, not just raw dollars.
+    # A scanner with no ledger source (or a cold one) simply keeps dollar order.
+    _AUDIT_SOURCE = {
+        "graviton": "graviton", "idle_resources": "idle", "commitments": "commitment",
+        "spot": "spot", "db_sp": "commitment",
+    }
+
     for name, data in results:
         if data is None:
             errors.append(name)
             continue
-        findings.extend(norm(name, data))
+        for f in norm(name, data):
+            f["source"] = _AUDIT_SOURCE.get(name, name)
+            findings.append(f)
 
-    # Sort by monthly savings descending, take top N
+    # Sort by monthly savings descending first (the stable base order).
     findings.sort(key=lambda x: x.get("monthly_savings", 0), reverse=True)
+
+    # Learning loop: reorder by a learned score (savings x this account's confidence
+    # in the source) and annotate each finding. Propose-only: nothing is hidden and
+    # spend numbers are untouched; a cold ledger leaves the dollar order intact.
+    # Suppressed-for-you sources sink to the bottom rather than being removed.
+    learned_note = None
+    try:
+        from .recommendations.learning import customer_signal, rescore
+        sig = customer_signal()
+        rs = rescore(findings, sig, savings_key="monthly_savings", source_key="source")
+        # Keep suppressed findings visible (discovery sweep), just ranked last.
+        findings = rs["ranked"] + rs["suppressed_for_you"]
+        if any(s.get("coverage") != "COLD" for s in sig.get("by_source", [])):
+            learned_note = ("Ranked using your ledger (act-rate and accuracy per source), "
+                            "propose-only. Call get_recommendation_learning() for the why.")
+    except Exception as exc:
+        log.debug("learning rescore skipped in run_full_cost_audit: %s", exc)
+
     top = findings[:top_n]
 
     if not top:
@@ -12274,15 +12332,42 @@ async def run_full_cost_audit(
     total_monthly = sum(f["monthly_savings"] for f in top)
     total_annual = total_monthly * 12
 
+    # Show a Confidence column only when at least one shown finding carries real
+    # learned signal, so a cold ledger keeps the original clean 4-column table.
+    def _confidence_label(f: dict) -> str:
+        learned = f.get("learned") or {}
+        verdict = learned.get("source_verdict")
+        coverage = learned.get("coverage")
+        if not verdict or coverage in (None, "COLD"):
+            return ""
+        if verdict == "boost":
+            return "you act on these"
+        if verdict == "suppress":
+            return "rarely acted on"
+        return "neutral"
+
+    show_confidence = any(_confidence_label(f) for f in top)
+
     lines = [
         f"## Cost Audit, Top {len(top)} Opportunities",
         f"**Estimated monthly saving: ${total_monthly:,.2f} | Annual: ${total_annual:,.2f}**",
         "",
-        "| # | Opportunity | Category | Monthly Saving |",
-        "|---|-------------|----------|---------------|",
     ]
-    for i, f in enumerate(top, 1):
-        lines.append(f"| {i} | {f['title']} | {f['category']} | ${f['monthly_savings']:,.2f} |")
+    if show_confidence:
+        lines.append("| # | Opportunity | Category | Monthly Saving | Confidence (your ledger) |")
+        lines.append("|---|-------------|----------|---------------|--------------------------|")
+        for i, f in enumerate(top, 1):
+            conf = _confidence_label(f) or "-"
+            lines.append(f"| {i} | {f['title']} | {f['category']} | ${f['monthly_savings']:,.2f} | {conf} |")
+    else:
+        lines.append("| # | Opportunity | Category | Monthly Saving |")
+        lines.append("|---|-------------|----------|---------------|")
+        for i, f in enumerate(top, 1):
+            lines.append(f"| {i} | {f['title']} | {f['category']} | ${f['monthly_savings']:,.2f} |")
+
+    if learned_note:
+        lines.append("")
+        lines.append(f"*{learned_note}*")
 
     lines.append("")
     lines.append("*Run any individual tool for full details and remediation commands.*")
