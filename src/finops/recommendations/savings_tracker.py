@@ -387,6 +387,10 @@ def quality_signal() -> dict[str, Any]:
     return {
         "verified_monthly_usd": round(total_realized, 2),
         "verified_annual_run_rate_usd": round(total_realized * 12, 2),
+        # Explicit banked alias: money confirmed to have left the bill, distinct
+        # from predicted. Same value, unambiguous name for hero surfaces.
+        "verified_banked_monthly_usd": round(total_realized, 2),
+        "verified_banked_annual_usd": round(total_realized * 12, 2),
         "by_source": by_source,
         "note": ("accuracy compares predicted vs measured realized savings among "
                  "verified recommendations; act_rate is acted-or-verified over total. "

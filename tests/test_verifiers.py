@@ -20,6 +20,7 @@ from finops.recommendations.verifiers import (
     get_verifier,
     register,
     verify_ec2_change,
+    verify_graviton_change,
     verify_idle_cleanup,
 )
 
@@ -68,6 +69,10 @@ def _row(**kw):
 
 def test_registry_resolves_ec2_to_ec2_verifier():
     assert get_verifier("rightsizing", "ec2") is verify_ec2_change
+
+
+def test_registry_resolves_graviton_to_graviton_verifier():
+    assert get_verifier("graviton", "ec2") is verify_graviton_change
 
 
 def test_registry_resolves_idle_via_source_wildcard():
@@ -221,7 +226,76 @@ def test_ec2_verifier_not_resized_yet(monkeypatch):
     assert verify_ec2_change("i-1", cfg, _row()) is None
 
 
+# ── Graviton verifier: measure logic ──────────────────────────────────────────
+
+def test_graviton_verifier_confirms_exact_target(monkeypatch):
+    fake = _FakeEC2(instances={"Reservations": [
+        {"Instances": [{"InstanceType": "m7g.xlarge"}]}
+    ]})
+    _patch_client(monkeypatch, fake)
+    cfg = {"graviton_equivalent": "m7g.xlarge", "from_instance_type": "m7i.xlarge",
+           "estimated_monthly_savings_usd": 55.0}
+    assert verify_graviton_change("i-1", cfg, _row()) == 55.0
+
+
+def test_graviton_verifier_confirms_any_arm_family(monkeypatch):
+    # Migrated to a Graviton family that differs from the suggested exact target.
+    fake = _FakeEC2(instances={"Reservations": [
+        {"Instances": [{"InstanceType": "c7g.large"}]}
+    ]})
+    _patch_client(monkeypatch, fake)
+    cfg = {"graviton_equivalent": "m7g.large", "from_instance_type": "c7i.large",
+           "estimated_monthly_savings_usd": 30.0}
+    assert verify_graviton_change("i-1", cfg, _row()) == 30.0
+
+
+def test_graviton_verifier_not_migrated_yet(monkeypatch):
+    # Still on x86 -> change not landed -> None.
+    fake = _FakeEC2(instances={"Reservations": [
+        {"Instances": [{"InstanceType": "m7i.xlarge"}]}
+    ]})
+    _patch_client(monkeypatch, fake)
+    cfg = {"graviton_equivalent": "m7g.xlarge", "from_instance_type": "m7i.xlarge",
+           "estimated_monthly_savings_usd": 55.0}
+    assert verify_graviton_change("i-1", cfg, _row()) is None
+
+
+def test_graviton_verifier_missing_instance_not_verified(monkeypatch):
+    _patch_client(monkeypatch, _FakeEC2(instances={"Reservations": []}))
+    cfg = {"graviton_equivalent": "m7g.xlarge", "from_instance_type": "m7i.xlarge"}
+    assert verify_graviton_change("i-gone", cfg, _row()) is None
+
+
+def test_graviton_family_detection():
+    assert verifiers._is_graviton_type("m7g.xlarge")
+    assert verifiers._is_graviton_type("c6gd.2xlarge")
+    assert verifiers._is_graviton_type("t4g.micro")
+    assert not verifiers._is_graviton_type("m7i.xlarge")
+    assert not verifiers._is_graviton_type("m5.large")
+    assert not verifiers._is_graviton_type("")
+
+
 # ── auto_verify_acted_on dispatch end to end ──────────────────────────────────
+
+def test_auto_verify_routes_graviton_through_registry(ledger, monkeypatch):
+    from finops.recommendations.savings_tracker import auto_verify_acted_on, list_recommendations
+    import json
+    cfg = json.dumps({"graviton_equivalent": "m7g.xlarge", "from_instance_type": "m7i.xlarge",
+                      "estimated_monthly_savings_usd": 55.0})
+    rec_id = _seed("graviton", "ec2", est=55.0, recommended_config=cfg)
+    fake = _FakeEC2(instances={"Reservations": [
+        {"Instances": [{"InstanceType": "m7g.xlarge"}]}
+    ]})
+    _patch_client(monkeypatch, fake)
+
+    out = auto_verify_acted_on()
+    assert rec_id in {r["id"] for r in out}
+    verified = list_recommendations(status="verified")
+    row = next(r for r in verified if r["id"] == rec_id)
+    assert row["verified_monthly_savings_usd"] == 55.0
+
+
+
 
 def test_auto_verify_routes_idle_and_writes_measured(ledger, monkeypatch):
     from finops.recommendations.savings_tracker import auto_verify_acted_on, list_recommendations
