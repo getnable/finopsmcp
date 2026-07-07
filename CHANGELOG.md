@@ -2,7 +2,30 @@
 
 All notable changes to finops-mcp (nable).
 
-## 0.8.134
+## 0.8.135
+
+Closes the verify-and-learn loop, the part that turns "here is a list of
+maybes" into proven, banked savings.
+
+- Learning now ranks recommendations. get_savings_summary and
+  run_full_cost_audit read the per-account track record (how often a
+  recommendation type actually gets acted on and how close its predicted
+  savings landed to the measured result) and demote or annotate low-yield
+  sources, leading with what has paid off on your account. It stays
+  propose-only: ordering and annotation change, spend numbers never do, and
+  nothing is hidden. On a cold ledger it degrades to plain dollar ordering.
+- Verifiers broadened past EC2 rightsizing and idle cleanup: added a
+  read-only Graviton verifier (confirms the instance moved to an arm64
+  family) and recorded Graviton scans to the ledger so they can be banked.
+- Verified banked savings is now the hero number in get_nable_roi and
+  verify_savings, the money that actually left the bill, distinct from
+  predicted. Fixed an accuracy bug where a verified row missing its measured
+  value counted its estimate as banked, overstating the figure.
+
+Also lands the first piece of the watchdog: a read-only spend x utilization
+correlator that ranks underutilized resources and prepares (never executes)
+the fix. It is dormant foundation, nothing schedules it or pushes yet, and
+there is no auto-execute path. Design in internal/watchdog-design.md.
 
 Two things: pricing-name coherence and scan speed.
 
