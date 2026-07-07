@@ -30,7 +30,7 @@ def test_nudge_leads_with_roi_when_compelling(monkeypatch):
     out = server._team_nudge("Auto-create tickets with Team.")
     assert "$8,432/mo" in out
     assert "337x" in out  # 8432 / 25 = 337.3 -> 337x
-    assert "$25/mo Team plan" in out
+    assert "$25/mo Pro plan" in out
     assert "Auto-create tickets with Team." in out
 
 

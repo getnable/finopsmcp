@@ -480,7 +480,7 @@ def validate_key(key: str) -> LicenseStatus:
         mode=plan,
         email=email,
         issued=issued_str,
-        message=f"Team license active: {email}, issued {issued_str}.",
+        message=f"Pro license active: {email}, issued {issued_str}.",
     )
 
 
@@ -573,7 +573,7 @@ def require_team(feature: str) -> dict | None:
 
     friendly = feature.replace("_", " ")
     return {
-        "error": f"{friendly} requires the Team plan.",
+        "error": f"{friendly} requires the Pro plan.",
         "plan": s.mode,
         "upgrade": (
             f"The conversational Slack bot and chat remediation are part of nable Team "

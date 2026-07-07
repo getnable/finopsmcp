@@ -244,16 +244,21 @@ async def audit_ebs_snapshot_replication(
         regions = _DEFAULT_REGIONS
 
     now = datetime.now(timezone.utc)
-    snapshots_by_region: dict[str, list[dict]] = {}
-    live_volumes_by_region: dict[str, set[str]] = {}
 
-    for region in regions:
+    def _scan_region(region: str) -> tuple[str, list[dict], set[str]]:
         try:
             ec2 = boto3.client("ec2", region_name=region)
-            snapshots_by_region[region] = _list_snapshots_in_region(ec2)
-            live_volumes_by_region[region] = _live_volume_ids(ec2)
+            return region, _list_snapshots_in_region(ec2), _live_volume_ids(ec2)
         except Exception as e:
             log.warning("EBS snapshot audit failed for region %s: %s", region, e)
+            return region, [], set()
+
+    # Two independent blocking calls per region; scan every region concurrently so
+    # the cross-region view is assembled in the time of the slowest region.
+    import asyncio
+    scanned = await asyncio.gather(*[asyncio.to_thread(_scan_region, r) for r in regions])
+    snapshots_by_region: dict[str, list[dict]] = {reg: snaps for reg, snaps, _ in scanned}
+    live_volumes_by_region: dict[str, set[str]] = {reg: live for reg, _, live in scanned}
 
     findings = _build_cross_region_findings(
         snapshots_by_region, live_volumes_by_region, now

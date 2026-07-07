@@ -240,12 +240,15 @@ async def scan_graviton_opportunities(
     else:
         session = boto3.session.Session()
 
-    results: list[dict] = []
+    # STS caller identity is account-wide, so resolve it once here instead of
+    # re-calling it inside every region iteration (it was one STS round-trip per
+    # region before).
+    account_id = _get_account_id(session)
 
-    for region in regions:
+    def _scan_region(region: str) -> list[dict]:
+        out: list[dict] = []
         try:
             ec2 = session.client("ec2", region_name=region)
-            account_id = _get_account_id(session)
             paginator = ec2.get_paginator("describe_instances")
             pages = paginator.paginate(
                 Filters=[{"Name": "instance-state-name", "Values": ["running"]}]
@@ -273,7 +276,7 @@ async def scan_graviton_opportunities(
                             savings_pct, region, name_tag,
                         )
 
-                        results.append(
+                        out.append(
                             {
                                 "instance_id": iid,
                                 "instance_type": itype,
@@ -289,7 +292,14 @@ async def scan_graviton_opportunities(
                         )
         except Exception as exc:
             log.warning("Graviton scan failed for region %s: %s", region, exc)
-            continue
+        return out
+
+    # Each region's describe_instances is an independent blocking boto3 round-trip.
+    # Scan them concurrently in threads so the sweep costs the slowest region, not
+    # the sum of all regions (17 opted-in regions serially was the common case).
+    import asyncio
+    region_lists = await asyncio.gather(*[asyncio.to_thread(_scan_region, r) for r in regions])
+    results: list[dict] = [item for sublist in region_lists for item in sublist]
 
     results.sort(key=lambda r: r["savings_estimate"], reverse=True)
     return results

@@ -102,7 +102,7 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
 .plogo{display:inline-block;width:22px;height:22px;flex-shrink:0;vertical-align:middle;background:var(--fg-2);-webkit-mask:var(--m) center/contain no-repeat;mask:var(--m) center/contain no-repeat}
 .nav-link .plogo{width:16px;height:16px;background:var(--fg-3)}
 .nav-link:hover .plogo,.nav-link.active .plogo{background:var(--fg-2)}
-/* "Team" tier chip */
+/* "Pro" tier chip */
 .pbadge-team{font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);background:var(--accent-soft);border:1px solid color-mix(in oklab,var(--accent) 25%,transparent);border-radius:2px;padding:2px 7px;margin-left:2px;align-self:center}
 
 /* ── cards / callouts ──────────────── */
@@ -376,7 +376,7 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
     <a href="#overview" class="nav-link" data-spy="overview">Overview</a>
     <a href="#quickstart" class="nav-link" data-spy="quickstart">Quick start</a>
     <a href="#install" class="nav-link" data-spy="install">Installation</a>
-    <a href="#activate-license" class="nav-link" data-spy="activate-license">Activate Team license</a>
+    <a href="#activate-license" class="nav-link" data-spy="activate-license">Activate Pro license</a>
     <a href="#ai-clients" class="nav-link" data-spy="ai-clients">AI client setup</a>
 
     <div class="nav-group">Cloud providers</div>
@@ -560,8 +560,8 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
     <hr class="sec-divider"/>
 
     <!-- License -->
-    <section class="doc-section" id="activate-license" data-title="Activate Team license" data-crumb="Getting started">
-      <h2 class="sec-h">Activate your Team license</h2>
+    <section class="doc-section" id="activate-license" data-title="Activate Pro license" data-crumb="Getting started">
+      <h2 class="sec-h">Activate your Pro license</h2>
       <p class="body">After purchase, your license key is emailed to you. Keys start with <code class="ic">FINOPS-2-</code>. Run one command and it handles everything.</p>
       <div class="steps">
         <div class="step"><div class="step-num">1</div><div class="step-body">
@@ -571,7 +571,7 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
         </div></div>
         <div class="step"><div class="step-num">2</div><div class="step-body">
           <div class="step-t" id="lic-restart" data-toc>Restart your editor</div>
-          <p class="body">Team features turn on immediately on restart.</p>
+          <p class="body">Pro features turn on immediately on restart.</p>
         </div></div>
       </div>
       <div class="callout tip">
@@ -923,7 +923,7 @@ compute-optimizer:Get*</code></pre></div>
       <p class="body">Lets your whole team sign in with their company credentials via Okta, Azure AD, Google Workspace, Auth0, or any OIDC-compatible IdP. IdP groups automatically map to nable RBAC roles, with no manual API key distribution.</p>
       <div class="callout note">
         <svg class="cico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="8"/></svg>
-        <div><strong>How it works:</strong> user clicks "Sign in with SSO" → browser redirects to your IdP → IdP authenticates and returns an ID token → nable validates the token, reads the groups claim, and maps groups to <code>admin</code> / <code>analyst</code> / <code>viewer</code> → user receives a Team license key automatically.</div>
+        <div><strong>How it works:</strong> user clicks "Sign in with SSO" → browser redirects to your IdP → IdP authenticates and returns an ID token → nable validates the token, reads the groups claim, and maps groups to <code>admin</code> / <code>analyst</code> / <code>viewer</code> → user receives a Pro license key automatically.</div>
       </div>
       <h3 class="sub-h" id="sso-setup" data-toc>Setup</h3>
       <div class="steps">
@@ -1032,7 +1032,7 @@ compute-optimizer:Get*</code></pre></div>
         <div class="er"><div class="ec k">OIDC_CLIENT_SECRET</div><div class="ec">SSO</div><div class="ec req yes">Required</div></div>
         <div class="er"><div class="ec k">OIDC_ROLE_MAP</div><div class="ec">SSO</div><div class="ec req">Optional</div></div>
         <div class="er grp"><div class="ec">License</div></div>
-        <div class="er"><div class="ec k">FINOPS_LICENSE_KEY</div><div class="ec">Team</div><div class="ec req">Team</div></div>
+        <div class="er"><div class="ec k">FINOPS_LICENSE_KEY</div><div class="ec">Pro</div><div class="ec req">Pro</div></div>
       </div>
       <div class="callout tip">
         <svg class="cico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2z"/></svg>

@@ -2,7 +2,7 @@
 AWS Cost and Usage Report (CUR) connector via Athena.
 
 Reads line-item granularity data from a CUR v2 table in Athena.
-This is a Team plan feature -- requires CUR delivery to S3 and an
+This is a Pro plan feature -- requires CUR delivery to S3 and an
 Athena database created via the CUR console or AWS Glue Crawler.
 
 Required env vars:

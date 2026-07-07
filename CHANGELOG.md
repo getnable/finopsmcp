@@ -2,6 +2,25 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.134
+
+Two things: pricing-name coherence and scan speed.
+
+Pricing: the $25 tier is now called "Pro" everywhere. The product still had
+~20 in-app strings (nudges, license errors, docstrings) plus several website
+pages calling it "Team plan" while the license and main pricing page said
+"Pro." Same price, two names. All unified to Pro; the $1,000 tier's stray
+"Team" references corrected to "Startups." No price or model change, only the
+name. (The organizational "team" concept, cost-by-team, team scorecards,
+shared-Postgres "team mode", is untouched.)
+
+Speed: five scanners that walked AWS regions one at a time now scan them
+concurrently, so a multi-region account pays the slowest region instead of the
+sum of all of them. Covers Graviton, RDS manual snapshots, EBS snapshot
+replication, non-prod scheduling, and the idle-resource scan that runs during
+onboarding's first-value moment (it was hitting its 10s cap and showing partial
+data on wide accounts). Graviton also stops re-calling STS once per region.
+
 ## 0.8.133
 
 Fix from a comprehensive security audit: resource names and tags (Kubernetes

@@ -131,29 +131,30 @@ async def audit_rds_manual_snapshots(
             regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
     now = datetime.now(timezone.utc)
-    orphaned: list[dict] = []
-    old: list[dict] = []
-    all_records: list[dict] = []
 
-    for region in regions:
+    def _scan_region(region: str) -> list[dict]:
+        recs: list[dict] = []
         try:
             rds = boto3.client("rds", region_name=region)
             active_dbs = _get_active_db_identifiers(rds)
-
             pag = rds.get_paginator("describe_db_snapshots")
             for page in pag.paginate(SnapshotType="manual"):
                 for snap in page.get("DBSnapshots", []):
-                    record = _build_snapshot_record(
+                    recs.append(_build_snapshot_record(
                         snap, region, now, active_dbs, age_threshold_days
-                    )
-                    all_records.append(record)
-                    if record["is_orphaned"]:
-                        orphaned.append(record)
-                    elif record["is_old"]:
-                        old.append(record)
-
+                    ))
         except Exception as e:
             log.warning("RDS snapshot audit failed for region %s: %s", region, e)
+        return recs
+
+    # Each region's describe_db_snapshots is an independent blocking round-trip;
+    # scan them concurrently so the audit costs the slowest region, not the sum.
+    import asyncio
+    region_lists = await asyncio.gather(*[asyncio.to_thread(_scan_region, r) for r in regions])
+    all_records: list[dict] = [rec for sub in region_lists for rec in sub]
+    # orphaned takes precedence over old (was an if/elif in the serial loop).
+    orphaned: list[dict] = [r for r in all_records if r["is_orphaned"]]
+    old: list[dict] = [r for r in all_records if r["is_old"] and not r["is_orphaned"]]
 
     # Sort by cost descending so the most expensive appear first
     orphaned.sort(key=lambda x: x["monthly_cost"], reverse=True)

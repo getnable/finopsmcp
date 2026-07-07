@@ -240,3 +240,37 @@ def test_scan_sorted_by_savings_descending() -> None:
     assert len(results) == 3
     savings = [r["savings_estimate"] for r in results]
     assert savings == sorted(savings, reverse=True)
+
+
+def test_regions_are_scanned_concurrently() -> None:
+    # Each region's describe_instances pagination "sleeps" to simulate a blocking
+    # boto3 round-trip. 10 regions run serially would take ~10*SLEEP; run
+    # concurrently (asyncio.to_thread per region) it should finish in ~SLEEP.
+    # Guards against a regression back to a serial `for region in regions` loop.
+    import time
+
+    SLEEP = 0.1
+    N = 10
+
+    def _slow_paginate(*a, **k):
+        time.sleep(SLEEP)
+        return [{"Reservations": []}]
+
+    mock_paginator = MagicMock()
+    mock_paginator.paginate.side_effect = _slow_paginate
+    mock_ec2 = MagicMock()
+    mock_ec2.get_paginator.return_value = mock_paginator
+    mock_sts = MagicMock()
+    mock_sts.get_caller_identity.return_value = {"Account": "123456789012"}
+    mock_session = MagicMock()
+    mock_session.client.side_effect = lambda svc, **kw: (mock_ec2 if svc == "ec2" else mock_sts)
+
+    connector = _make_mock_aws_connector(session=mock_session)
+    regions = [f"region-{i}" for i in range(N)]
+
+    t0 = time.perf_counter()
+    asyncio.run(scan_graviton_opportunities(connector, regions=regions))
+    elapsed = time.perf_counter() - t0
+
+    # Serial would be ~N*SLEEP = 1.0s. Concurrent stays well under half that.
+    assert elapsed < (N * SLEEP) / 2, f"regions not scanned concurrently: {elapsed:.2f}s"

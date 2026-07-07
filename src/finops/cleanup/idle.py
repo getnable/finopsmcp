@@ -376,28 +376,39 @@ def scan_idle_resources(
 
     results: list[IdleResource] = []
 
-    for region in regions:
+    def _scan_region(region: str) -> list[IdleResource]:
+        out: list[IdleResource] = []
         try:
             ec2 = boto3.client("ec2", region_name=region)
 
             if "ebs_volume" in types:
-                results.extend(_scan_ebs_volumes(ec2, account_id, region, min_idle_days))
+                out.extend(_scan_ebs_volumes(ec2, account_id, region, min_idle_days))
 
             if "elastic_ip" in types:
-                results.extend(_scan_elastic_ips(ec2, account_id, region))
+                out.extend(_scan_elastic_ips(ec2, account_id, region))
 
             if "snapshot" in types:
-                results.extend(_scan_old_snapshots(ec2, account_id, region, min_idle_days))
+                out.extend(_scan_old_snapshots(ec2, account_id, region, min_idle_days))
 
             if "stopped_ec2" in types:
-                results.extend(_scan_stopped_ec2(ec2, account_id, region, min_idle_days))
+                out.extend(_scan_stopped_ec2(ec2, account_id, region, min_idle_days))
 
             if "load_balancer" in types:
                 elbv2 = boto3.client("elbv2", region_name=region)
-                results.extend(_scan_idle_load_balancers(elbv2, account_id, region))
+                out.extend(_scan_idle_load_balancers(elbv2, account_id, region))
 
         except Exception as e:
             log.warning("Idle resource scan failed in region %s: %s", region, e)
+        return out
+
+    # Each region runs several independent blocking boto3 calls. Scan regions
+    # concurrently so a many-region account finishes inside the value moment's
+    # 10s cap instead of hitting it and showing partial idle data. Blocking I/O
+    # releases the GIL, so threads give a real speedup here.
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(regions), 12) or 1) as pool:
+        for sub in pool.map(_scan_region, regions):
+            results.extend(sub)
 
     results.sort(key=lambda r: r.monthly_cost_usd, reverse=True)
     return results

@@ -14,7 +14,7 @@ def test_free_user_gets_topic_tip_once(monkeypatch):
     tip = server._maybe_team_tip("get_anomalies")
     assert tip is not None
     assert "Slack" in tip["missing_with_team"]
-    assert f"{server._TEAM_MONTHLY_USD:.0f}/mo flat" in tip["upgrade"]  # flat, never per-seat
+    assert f"{server._PRO_MONTHLY_USD:.0f}/mo flat" in tip["upgrade"]  # flat, never per-seat
     # same topic again (different tool, same "anomaly" topic) -> suppressed
     assert server._maybe_team_tip("get_account_anomalies") is None
 

@@ -862,7 +862,7 @@ CONNECTOR_REGISTRY: list[dict] = [
             "Hosting cost as % of MRR",
             "Cost per paying customer",
         ],
-        "note": "Required for business metrics and unit economics (Team plan).",
+        "note": "Required for business metrics and unit economics (Pro plan).",
     },
     {
         "id": "github",

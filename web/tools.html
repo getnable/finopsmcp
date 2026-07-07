@@ -354,7 +354,7 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
 </div>
 <div class="tool" data-name="get_commitment_analysis" data-text="get_commitment_analysis analyze reserved instance and savings plan coverage, utilization, and waste. coverage %, utilization, and waste figures are free. purchase recommendations with $ amounts require a team plan (commitment_recommendations).">
   <div class="t-head"><code class="t-name">get_commitment_analysis</code><span class="pro">PRO</span></div>
-  <p class="t-sum">Analyze Reserved Instance and Savings Plan coverage, utilization, and waste. Coverage %, utilization, and waste figures are free. Purchase recommendations with $ amounts require a Team plan (commitment_recommendations).</p>
+  <p class="t-sum">Analyze Reserved Instance and Savings Plan coverage, utilization, and waste. Coverage %, utilization, and waste figures are free. Purchase recommendations with $ amounts require a Pro plan (commitment_recommendations).</p>
   
 </div>
 <div class="tool" data-name="get_commitment_coverage_by_tag" data-text="get_commitment_coverage_by_tag estimate ri/sp commitment coverage for a specific tag slice, even when tagging is incomplete.">
@@ -624,7 +624,7 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
 </div>
 <div class="tool" data-name="get_account_anomalies" data-text="get_account_anomalies detect accounts with unusual spend changes versus their prior period. returns accounts that significantly spiked or dropped in cost. requires a team plan (org_reports).">
   <div class="t-head"><code class="t-name">get_account_anomalies</code><span class="pro">PRO</span></div>
-  <p class="t-sum">Detect accounts with unusual spend changes versus their prior period. Returns accounts that significantly spiked or dropped in cost. Requires a Team plan (org_reports).</p>
+  <p class="t-sum">Detect accounts with unusual spend changes versus their prior period. Returns accounts that significantly spiked or dropped in cost. Requires a Pro plan (org_reports).</p>
   <code class="t-sig">(days_back?)</code>
 </div>
 <div class="tool" data-name="get_anomalies" data-text="get_anomalies return active (unacknowledged) cost anomalies detected from historical baselines.">
@@ -704,17 +704,17 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
 </div>
 <div class="tool" data-name="get_org_cost_summary" data-text="get_org_cost_summary get a cost rollup across all aws organization accounts: total spend, per-account breakdown sorted by spend, and top services per account. requires a team plan (org_reports).">
   <div class="t-head"><code class="t-name">get_org_cost_summary</code><span class="pro">PRO</span></div>
-  <p class="t-sum">Get a cost rollup across all AWS Organization accounts: total spend, per-account breakdown sorted by spend, and top services per account. Requires a Team plan (org_reports).</p>
+  <p class="t-sum">Get a cost rollup across all AWS Organization accounts: total spend, per-account breakdown sorted by spend, and top services per account. Requires a Pro plan (org_reports).</p>
   <code class="t-sig">(days_back?)</code>
 </div>
 <div class="tool" data-name="get_ou_cost_breakdown" data-text="get_ou_cost_breakdown break costs down by aws organizational unit (ou). when ous map to departments or teams, this gives you a clean chargeback report. requires a team plan (org_reports).">
   <div class="t-head"><code class="t-name">get_ou_cost_breakdown</code><span class="pro">PRO</span></div>
-  <p class="t-sum">Break costs down by AWS Organizational Unit (OU). When OUs map to departments or teams, this gives you a clean chargeback report. Requires a Team plan (org_reports).</p>
+  <p class="t-sum">Break costs down by AWS Organizational Unit (OU). When OUs map to departments or teams, this gives you a clean chargeback report. Requires a Pro plan (org_reports).</p>
   <code class="t-sig">(days_back?)</code>
 </div>
 <div class="tool" data-name="get_top_spending_accounts" data-text="get_top_spending_accounts show the highest-spending aws accounts in the organization. requires a team plan (org_reports).">
   <div class="t-head"><code class="t-name">get_top_spending_accounts</code><span class="pro">PRO</span></div>
-  <p class="t-sum">Show the highest-spending AWS accounts in the organization. Requires a Team plan (org_reports).</p>
+  <p class="t-sum">Show the highest-spending AWS accounts in the organization. Requires a Pro plan (org_reports).</p>
   <code class="t-sig">(limit?, days_back?)</code>
 </div>
 <div class="tool" data-name="list_accounts" data-text="list_accounts list all cloud accounts, subscriptions, and saas org ids that nable can see, grouped by provider: aws account ids, azure subscriptions, gcp billing accounts, and each saas provider&#x27;s org. use it to find the account id or name other tools accept as their account argument.">
@@ -729,7 +729,7 @@ footer{border-top:1px solid var(--line);color:var(--fg-3);font-size:13px;padding
 </div>
 <div class="tool" data-name="list_org_accounts" data-text="list_org_accounts list all aws organization member accounts, discovering them via the aws organizations api. syncs account metadata to local db for future queries. account listing is free. detailed cost rollup across accounts requires a team plan.">
   <div class="t-head"><code class="t-name">list_org_accounts</code></div>
-  <p class="t-sum">List all AWS Organization member accounts, discovering them via the AWS Organizations API. Syncs account metadata to local DB for future queries. Account listing is free. Detailed cost rollup across accounts requires a Team plan.</p>
+  <p class="t-sum">List all AWS Organization member accounts, discovering them via the AWS Organizations API. Syncs account metadata to local DB for future queries. Account listing is free. Detailed cost rollup across accounts requires a Pro plan.</p>
   
 </div></section><section id="azure"><h2>Azure <span class="count">6</span></h2>
 <div class="tool" data-name="get_azure_advisor_recommendations" data-text="get_azure_advisor_recommendations azure advisor cost recommendations, with microsoft-computed annual savings.">

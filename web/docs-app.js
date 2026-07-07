@@ -188,7 +188,7 @@ const ALERTS = [
       ['Set the SMTP and recipient env vars below. Digests render and send straight from the scheduler.'],
     ],
     env:[['FINOPS_SMTP_HOST','smtp.gmail.com'],['FINOPS_SMTP_PORT','587'],['FINOPS_SMTP_USER','you@yourcompany.com'],['FINOPS_SMTP_PASSWORD','your-app-password'],['FINOPS_DIGEST_TO','team@yourcompany.com'],['FINOPS_WEEKLY_CRON','"0 9 * * 1"','optional - default Mon 09:00 UTC']],
-    pbadge:'Team' },
+    pbadge:'Pro' },
 
   { id:'ticketing', name:'Jira / Linear / GitHub', crumb:'Alerts & automation',
     blurb:'Turn a waste finding into a tracked ticket in one step. When a high or medium-severity anomaly is detected, nable opens the issue with the resource, the savings estimate, and a suggested fix. Configure one or more; the first configured is the default.',
@@ -199,7 +199,7 @@ const ALERTS = [
       ['In your editor, ask: <em>"Open a ticket for any EC2 waste over $200/mo."</em>'],
     ],
     env:[['JIRA_URL','https://yourorg.atlassian.net'],['JIRA_EMAIL','you@yourcompany.com'],['JIRA_API_TOKEN','your-api-token'],['JIRA_PROJECT_KEY','FINOPS'],['LINEAR_API_KEY','lin_api_...','if using Linear'],['LINEAR_TEAM_ID','your-team-id','if using Linear'],['GITHUB_ISSUES_REPO','yourorg/finops-alerts','if using GitHub Issues']],
-    pbadge:'Team' },
+    pbadge:'Pro' },
 
   { id:'slack-bot', name:'Slack bot', crumb:'Alerts & automation',
     blurb:'A persistent bot you can talk to directly in Slack. DM <strong>@nable</strong> or mention it in any channel and it calls the same nable tools, replying in-thread with cost analysis, anomaly summaries, and rightsizing recs. Conversational, not just one-way alerts.',
@@ -210,7 +210,7 @@ const ALERTS = [
       ['Set the env vars and start the bot:', code('terminal','<span class="t-cmd">finops-slack</span>')],
     ],
     env:[['SLACK_BOT_TOKEN','xoxb-...'],['SLACK_APP_TOKEN','xapp-...'],['ANTHROPIC_API_KEY','sk-ant-...'],['SLACK_DAILY_CHANNEL','#finops','optional - sends daily digest at 09:00 UTC']],
-    callout:['note','Uses Socket Mode — no public URL or reverse proxy needed. Keep it running in the background (systemd, screen, or Docker). <span class="ic">Team plan</span>.'] },
+    callout:['note','Uses Socket Mode — no public URL or reverse proxy needed. Keep it running in the background (systemd, screen, or Docker). <span class="ic">Pro plan</span>.'] },
 
   { id:'pr-comments', name:'PR cost comments', crumb:'Alerts & automation',
     blurb:'Posts a cost estimate on GitHub pull requests when infrastructure files change (Terraform, CloudFormation, CDK, Helm). The comment updates in place on each push and only fires when the estimated impact exceeds your threshold.',
@@ -329,7 +329,7 @@ INTEL.push({ id:'savings', name:'Find savings', crumb:'Tools',
     calloutHTML('note','For the full AWS scanner catalog (gp2→gp3, idle NAT, orphaned snapshots, public IPv4, Lambda concurrency, and more) see <a class="ilink" href="#audit">Deep AWS audits</a>. To turn a recommendation into a PR see <a class="ilink" href="#fix">Fix it</a>.') });
 
 /* ── Commitment analysis ── */
-INTEL.push({ id:'commitments', name:'Commitment analysis', crumb:'Tools', pbadge:'Team',
+INTEL.push({ id:'commitments', name:'Commitment analysis', crumb:'Tools', pbadge:'Pro',
   blurb:'Models Savings Plans and Reserved Instance coverage against your actual usage patterns. Shows your current effective discount rate, coverage gaps, and what you’d save by buying more, with ROI projections by term length.',
   body: fnCard([
       ['get_commitment_analysis','Current coverage, gaps, and purchase recommendations'],
@@ -627,7 +627,7 @@ INTEL.push({ id:'share', name:'Share & automate', crumb:'Tools',
       ['push_to_n8n','Run the audit and push results to your n8n workflow via webhook'],
       ['what_can_nable_do','Show everything nable can do, tailored to what you’ve connected'],
     ], 230) +
-    calloutHTML('note','Scheduled digests, report subscriptions, and ticket auto-creation are <span class="ic">Team</span> features. Manual exports, dashboards, and single tickets are free.') });
+    calloutHTML('note','Scheduled digests, report subscriptions, and ticket auto-creation are <span class="ic">Pro</span> features. Manual exports, dashboards, and single tickets are free.') });
 
 /* ─────────────────────────────────────────────────────────────
    render

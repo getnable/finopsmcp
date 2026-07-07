@@ -254,7 +254,7 @@ def persist_anomaly(result: AnomalyResult) -> tuple[int, bool]:
     retry, the run_anomaly_check_now tool, or a fail-open second scheduler process
     cannot re-insert the same spend event or re-fire its alerts and tickets. Uses
     inserted_primary_key (not the SQLite-only lastrowid, which returns None on
-    Postgres, the shared-team mode the Team tier sells).
+    Postgres, the shared-team mode the Startups tier sells).
     """
     engine = get_engine()
     with engine.begin() as conn:

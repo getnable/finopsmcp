@@ -6,7 +6,7 @@ resource-level and tag-level cost breakdowns, and the Capacity API for
 reservation utilization summaries.
 
 No storage account or export job required -- data is queried on demand.
-This is a Team plan feature.
+This is a Pro plan feature.
 
 Required env vars:
   AZURE_SUBSCRIPTION_ID  -- single sub ID or comma-separated list for multi-sub

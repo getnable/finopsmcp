@@ -1341,7 +1341,7 @@ def setup_sso() -> None:
          OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET
          OIDC_REDIRECT_URI, OIDC_GROUPS_CLAIM, OIDC_ROLE_MAP, OIDC_DEFAULT_ROLE
     2. Test the flow: https://getnable.com/api/sso/oidc-start
-    3. Users in your IdP will automatically receive a Team license key on first login.
+    3. Users in your IdP will automatically receive a Pro license key on first login.
 
   For Azure AD: set OIDC_GROUPS_CLAIM=roles (not "groups") and assign app roles in the manifest.
   For Okta: set OIDC_GROUPS_CLAIM=groups and add the Groups claim to your authorization server.
@@ -1397,7 +1397,7 @@ def setup_slack_bot() -> None:
                 _ok(f"Team trial active ({st.days_remaining} day"
                     f"{'s' if st.days_remaining != 1 else ''} left). The @nable bot is unlocked.")
             else:
-                _ok("Team plan active. The @nable bot is unlocked.")
+                _ok("Pro plan active. The @nable bot is unlocked.")
         else:
             _warn("The conversational @nable bot is a nable Team feature "
                   "($1,000/mo flat, unlimited seats), with a 7-day free trial.")
@@ -2145,7 +2145,7 @@ def main(args: list[str] | None = None) -> None:
     config_p.add_argument("--persona", metavar="ROLE", default="",
                           help="Set response persona: engineer, finops, finance, platform")
 
-    lic_p = sub.add_parser("license",       help="Activate a Pro or Team license key (FINOPS-2-...)")
+    lic_p = sub.add_parser("license",       help="Activate a Pro license key (FINOPS-2-...)")
     lic_p.add_argument("key", nargs="?", default="", help="License key (FINOPS-2-...)")
     login_p = sub.add_parser("login",       help="Sign in by email to activate Pro (no license key to copy)")
     login_p.add_argument("email", nargs="?", default="", help="Account email (optional; prompts if omitted)")
@@ -2571,14 +2571,14 @@ def _offer_email_signup() -> None:
 
 def _run_license_setup(key: str = "") -> None:
     """
-    Activate a Team license key.
+    Activate a Pro license key.
     Called by: finops setup license FINOPS-2-xxx
                 finops setup license   (interactive, prompts for key)
     """
     from .license import validate_key, _UPGRADE_URL, _CHECKOUT_URL
     from .security.vault import Vault
 
-    print("\n  nable Team license activation\n")
+    print("\n  nable Pro license activation\n")
 
     # If key not passed as arg, prompt
     if not key:
@@ -2609,7 +2609,7 @@ def _run_license_setup(key: str = "") -> None:
     # Also try to write directly into the Claude Desktop config
     _inject_license_into_claude_config(key)
 
-    print(f"\n  ✓  Team plan active, {status.email or 'license validated'}")
+    print(f"\n  ✓  Pro plan active, {status.email or 'license validated'}")
     print(f"  ✓  Key stored in vault.")
     print(f"  ✓  Plan: {status.mode.upper()}")
     if status.issued:
