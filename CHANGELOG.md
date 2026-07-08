@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.139
+
+More of the OpenCost wiring.
+
+- get_kubernetes_namespace_breakdown now flows through OpenCost when it is
+  connected (it already delegated to get_kubernetes_costs); the OpenCost path
+  now honors the namespace filter instead of returning every namespace.
+- New connect_opencost tool: tells you whether nable is reading real-rate costs
+  from OpenCost, and if not, gives the exact copy-paste steps to deploy OpenCost
+  and point nable at it. Propose-only: it returns instructions and reads the
+  OpenCost API, it never deploys or changes anything in your cluster.
+
 ## 0.8.138
 
 OpenCost as a Kubernetes cost source. When you run OpenCost (the CNCF project)

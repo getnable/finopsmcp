@@ -91,3 +91,36 @@ def test_window_days_parsing():
     assert oc._window_days("7d") == 7
     assert oc._window_days("24h") == 1.0
     assert oc._window_days("today") is None  # non-numeric window -> no projection
+
+
+# ── connect_opencost tool (propose-only: returns steps, runs nothing) ──────────
+
+def test_connect_opencost_not_configured(monkeypatch):
+    import asyncio
+    import finops.server as server
+    monkeypatch.delenv("NABLE_OPENCOST_URL", raising=False)
+    monkeypatch.delenv("OPENCOST_URL", raising=False)
+    out = asyncio.run(server.connect_opencost())
+    assert out["connected"] is False
+    assert any("kubectl apply" in s for s in out["steps"])
+    assert "only READS" in out["note"]
+
+
+def test_connect_opencost_connected(monkeypatch):
+    import asyncio
+    import finops.server as server
+    monkeypatch.setenv("NABLE_OPENCOST_URL", "http://opencost:9003")
+    with patch("httpx.get", return_value=_fake_response(_ALLOC)):
+        out = asyncio.run(server.connect_opencost())
+    assert out["connected"] is True
+    assert out["opencost_url"] == "http://opencost:9003"
+
+
+def test_connect_opencost_configured_but_unreachable(monkeypatch):
+    import asyncio
+    import finops.server as server
+    monkeypatch.setenv("NABLE_OPENCOST_URL", "http://opencost:9003")
+    with patch("httpx.get", side_effect=ConnectionError("down")):
+        out = asyncio.run(server.connect_opencost())
+    assert out["connected"] is False
+    assert "did not respond" in out["message"]

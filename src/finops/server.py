@@ -4773,6 +4773,9 @@ async def get_kubernetes_costs(
                 _oc.allocation_report, "7d", "namespace",
             )
             if oc is not None:
+                if namespace:
+                    oc["by_key"] = [r for r in oc["by_key"] if r["name"] == namespace]
+                    oc["filtered_to_namespace"] = namespace
                 return oc
             log.info("OpenCost configured but not reachable; using the built-in estimate.")
     except Exception as e:
@@ -4928,6 +4931,58 @@ async def get_kubernetes_namespace_breakdown(namespace: str) -> dict:
 
     """
     return await get_kubernetes_costs(namespace=namespace)
+
+
+@mcp.tool()
+async def connect_opencost() -> dict:
+    """
+    How to connect nable to OpenCost for real-rate Kubernetes cost, and whether it
+    is already connected.
+
+    Without OpenCost, nable's Kubernetes costs are a zero-setup list-price estimate
+    that does not price GPU, network, or storage. OpenCost (the CNCF project) prices
+    per namespace at your cluster's real rates. nable only READS the OpenCost API;
+    it never deploys or changes anything in your cluster. The steps below are for
+    you to run.
+
+    Examples:
+        - "How do I get accurate Kubernetes costs?"
+        - "Connect nable to OpenCost"
+        - "Why are my Kubernetes numbers an estimate?"
+    """
+    from .connectors import opencost as _oc
+    if _oc.is_configured():
+        rep = await asyncio.to_thread(_oc.allocation_report, "1d", "namespace")
+        if rep is not None:
+            return {
+                "connected": True,
+                "opencost_url": _oc.opencost_url(),
+                "message": ("nable is reading real-rate costs from OpenCost. GPU, network, and "
+                            "PV storage are priced at your cluster's actual rates."),
+            }
+        return {
+            "connected": False,
+            "opencost_url": _oc.opencost_url(),
+            "message": ("NABLE_OPENCOST_URL is set but OpenCost did not respond. Check the URL and "
+                        "that the OpenCost pod is running and reachable. nable is using the built-in "
+                        "estimate meanwhile."),
+        }
+    return {
+        "connected": False,
+        "why": ("Without OpenCost, nable's Kubernetes cost is a zero-setup list-price estimate that "
+                "does not price GPU, network, or storage. OpenCost gives real per-namespace rates."),
+        "steps": [
+            "1. Deploy OpenCost in your cluster (official quickstart):",
+            "   kubectl create namespace opencost",
+            "   kubectl apply -n opencost -f https://raw.githubusercontent.com/opencost/opencost/develop/kubernetes/opencost.yaml",
+            "2. Expose its API to your machine:",
+            "   kubectl -n opencost port-forward service/opencost 9003:9003",
+            "3. Point nable at it, then re-run your cost question:",
+            "   export NABLE_OPENCOST_URL=http://localhost:9003",
+        ],
+        "note": ("nable only READS the OpenCost API. It never deploys or changes anything in your "
+                 "cluster; you run the commands above."),
+    }
 
 
 @mcp.tool()
