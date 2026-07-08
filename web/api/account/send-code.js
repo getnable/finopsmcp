@@ -44,6 +44,36 @@ function rateLimited(key) {
   return false;
 }
 
+// Durable, cross-instance limit via Vercel KV. The in-memory map above is
+// per-warm-isolate, so an attacker spread across edge PoPs multiplies the cap
+// and can still flood a victim's inbox / burn the Resend quota. When KV is
+// configured this holds the cap globally; without it we fall back to the
+// in-memory limiter (same behavior as before), matching verify-code.js.
+const RL_WINDOW_S = Math.floor(RL_WINDOW_MS / 1000);
+
+async function kvRateLimited(key) {
+  const url = process.env.VERCEL_KV_REST_API_URL;
+  const token = process.env.VERCEL_KV_REST_API_TOKEN;
+  if (url && token) {
+    try {
+      const k = encodeURIComponent(`otp_send:${key}`);
+      const res = await fetch(`${url}/incr/${k}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const count = Number((await res.json()).result);
+      if (count === 1) {
+        await fetch(`${url}/expire/${k}/${RL_WINDOW_S}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+      if (Number.isFinite(count)) return count > RL_MAX;
+    } catch {
+      // KV unreachable: fall through to the in-memory cap rather than failing open.
+    }
+  }
+  return rateLimited(key);
+}
+
 // ── HMAC helper (Web Crypto, available in edge runtime) ───────────────────────
 
 async function hmacHex(secret, message) {
@@ -140,7 +170,7 @@ export default async function handler(req) {
 
   // Rate limit by caller IP and by target inbox. 200 on the email-keyed
   // limit so the response does not reveal whether the address is known.
-  if (rateLimited(`ip:${ip}`) || rateLimited(`em:${email}`)) {
+  if ((await kvRateLimited(`ip:${ip}`)) || (await kvRateLimited(`em:${email}`))) {
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...CORS_HEADERS },
