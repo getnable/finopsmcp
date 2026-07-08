@@ -26,6 +26,28 @@ import json
 import os
 import subprocess
 from datetime import date, timedelta
+from pathlib import Path
+
+
+def _load_env_local() -> None:
+    """Read KEY=VALUE lines from the repo's .env.local into the environment so
+    you can drop POSTHOG_PROJECT_ID / POSTHOG_PERSONAL_API_KEY there once instead
+    of exporting them on every run. Real env vars already set win over the file.
+    """
+    env_path = Path(__file__).resolve().parent.parent / ".env.local"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key, val = key.strip(), val.strip().strip('"').strip("'")
+        if key and val and key not in os.environ:
+            os.environ[key] = val
+
+
+_load_env_local()
 
 PKG = os.environ.get("PYPI_PACKAGE", "finops-mcp")
 POSTHOG_HOST = os.environ.get("POSTHOG_HOST", "https://us.i.posthog.com").rstrip("/")
@@ -101,6 +123,40 @@ def activations():
     return count(7), count(30)
 
 
+def reach(days=30):
+    """The denominator the download count can't give you: distinct machines that
+    actually RAN nable (fired a heartbeat) and that actually USED a tool, vs the
+    ones that connected a provider. The gap between ran-it and connected is the
+    real activation wall. Every server start fires a 'heartbeat'; 'tool_called'
+    means they invoked at least one tool; 'provider_connected' is activation.
+    CI and opted-out installs never send these, so this is humans, not mirrors.
+    """
+    if not (POSTHOG_PROJECT_ID and POSTHOG_API_KEY):
+        return None
+    events = ("heartbeat", "tool_called", ACTIVATION_EVENT)
+    in_list = ", ".join(f"'{e}'" for e in events)
+
+    def counts(window_days):
+        sql = (
+            f"SELECT event, count(DISTINCT person_id) FROM events "
+            f"WHERE event IN ({in_list}) "
+            f"AND timestamp > now() - INTERVAL {window_days} DAY GROUP BY event"
+        )
+        body = json.dumps({"query": {"kind": "HogQLQuery", "query": sql}}).encode()
+        res = _get_json(
+            f"{POSTHOG_HOST}/api/projects/{POSTHOG_PROJECT_ID}/query",
+            headers={
+                "Authorization": f"Bearer {POSTHOG_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            data=body,
+        )
+        return {row[0]: row[1] for row in res.get("results", [])}
+
+    # All-time uses a wide window; PostHog free retention caps it anyway.
+    return {"month": counts(days), "all": counts(3650)}
+
+
 def funnel(days=30):
     if not (POSTHOG_PROJECT_ID and POSTHOG_API_KEY):
         return None
@@ -156,6 +212,25 @@ def main():
     else:
         print("  Activations: set POSTHOG_PROJECT_ID + POSTHOG_PERSONAL_API_KEY to show")
         print(f"    distinct '{ACTIVATION_EVENT}'. This is the real read; the rest is noise.")
+
+    try:
+        rc = reach(30)
+    except Exception as e:  # noqa: BLE001
+        rc = None
+        print(f"  reach: query failed ({e})")
+    if rc:
+        print()
+        print("  Reach vs activation (distinct machines, humans only, CI stripped):")
+        for scope, label in (("month", "last 30 days"), ("all", "all time")):
+            r = rc[scope]
+            ran = r.get("heartbeat", 0)
+            used = r.get("tool_called", 0)
+            conn = r.get(ACTIVATION_EVENT, 0)
+            pct = f"{round(100 * conn / ran)}%" if ran else "n/a"
+            print(f"    {label:>13}:  ran {ran:>5,}   used a tool {used:>5,}   "
+                  f"connected {conn:>5,}   ({pct} of runners activated)")
+        print("    'ran' is the honest denominator the download count can't give you.")
+        print("    ran -> connected is the activation wall; that gap is the work.")
 
     try:
         fn = funnel(30)
