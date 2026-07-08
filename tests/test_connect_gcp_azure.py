@@ -1,0 +1,120 @@
+"""connect_gcp and connect_azure: in-client provider connect parity with AWS.
+
+GCP mirrors the AWS detect-then-confirm shape (it has ambient credentials). Azure
+has no local ambient creds, so connect_azure returns the Cloud Shell one-paste
+script and accepts the pasted line back. Both are propose-only and never mutate
+the cloud. Also covers the heartbeat 'surface' tag that splits the ran-but-never-
+used cliff into CLI vs wired-MCP-server.
+"""
+from __future__ import annotations
+
+import asyncio
+from unittest.mock import patch
+
+import finops.server as server
+
+_TENANT = "11111111-1111-1111-1111-111111111111"
+_CLIENT = "22222222-2222-2222-2222-222222222222"
+_SUB = "33333333-3333-3333-3333-333333333333"
+_AZURE_PASTE = f"{_TENANT}:{_CLIENT}:secret1234:{_SUB}"
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+# ── connect_gcp ───────────────────────────────────────────────────────────────
+
+def test_connect_gcp_no_credentials():
+    with patch("finops.setup_wizard._detect_gcp_ambient", return_value=None):
+        out = _run(server.connect_gcp())
+    assert out["connected"] is False
+    assert any("application-default login" in s for s in out["how_to_connect"])
+
+
+def test_connect_gcp_lists_billing_without_connecting():
+    amb = {"source": "gcloud ADC", "project": "proj-1",
+           "billing": [("AAAAAA-BBBBBB-CCCCCC", "Acme Billing")], "billing_error": None}
+    with patch("finops.setup_wizard._detect_gcp_ambient", return_value=amb), \
+         patch("finops.security.oauth.gcp.store_billing_accounts") as store:
+        out = _run(server.connect_gcp())
+    assert out["connected"] is False
+    assert out["candidates"][0]["billing_account_id"] == "AAAAAA-BBBBBB-CCCCCC"
+    store.assert_not_called()
+
+
+def test_connect_gcp_connects_chosen_billing_account():
+    amb = {"source": "gcloud ADC", "project": "proj-1",
+           "billing": [("AAAAAA-BBBBBB-CCCCCC", "Acme Billing")], "billing_error": None}
+    with patch("finops.setup_wizard._detect_gcp_ambient", return_value=amb), \
+         patch("finops.setup_wizard._discover_bq_export", return_value=None), \
+         patch("finops.setup_wizard._gcp_emit_connected") as emit, \
+         patch("finops.security.oauth.gcp.store_billing_accounts") as store, \
+         patch("finops.setup_scan.gcloud_adc_path", return_value=None), \
+         patch("finops.security.vault.Vault"):
+        out = _run(server.connect_gcp(billing_account_id="AAAAAA-BBBBBB-CCCCCC"))
+    assert out["connected"] is True
+    assert out["billing_account_id"] == "AAAAAA-BBBBBB-CCCCCC"
+    store.assert_called_once()
+    assert store.call_args[0][0] == ["AAAAAA-BBBBBB-CCCCCC"]
+    emit.assert_called_once()
+
+
+def test_connect_gcp_rejects_unknown_billing_account():
+    amb = {"source": "gcloud ADC", "project": "proj-1",
+           "billing": [("AAAAAA-BBBBBB-CCCCCC", "Acme")], "billing_error": None}
+    with patch("finops.setup_wizard._detect_gcp_ambient", return_value=amb), \
+         patch("finops.security.oauth.gcp.store_billing_accounts") as store:
+        out = _run(server.connect_gcp(billing_account_id="ZZZZZZ-ZZZZZZ-ZZZZZZ"))
+    assert out["connected"] is False
+    assert "error" in out
+    store.assert_not_called()
+
+
+# ── connect_azure ─────────────────────────────────────────────────────────────
+
+def test_connect_azure_no_arg_returns_script():
+    out = _run(server.connect_azure())
+    assert out["connected"] is False
+    assert "script" in out and out["script"]
+    assert "cloudshell_url" in out
+    assert any("Cloud Shell" in s for s in out["steps"])
+
+
+def test_connect_azure_connects_on_valid_paste():
+    with patch("finops.security.oauth.azure.store_service_principal") as store, \
+         patch("finops.server._telemetry._send_event"):
+        out = _run(server.connect_azure(cloudshell_output=_AZURE_PASTE))
+    assert out["connected"] is True
+    assert out["subscription_count"] == 1
+    store.assert_called_once()
+    args = store.call_args[0]
+    assert args[0] == _TENANT and args[1] == _CLIENT
+
+
+def test_connect_azure_rejects_bad_paste():
+    with patch("finops.security.oauth.azure.store_service_principal") as store:
+        out = _run(server.connect_azure(cloudshell_output="not-a-valid-line"))
+    assert out["connected"] is False
+    assert "error" in out
+    store.assert_not_called()
+
+
+# ── heartbeat surface tag (the cliff split) ───────────────────────────────────
+
+def test_ping_startup_tags_surface_mcp_server():
+    import finops.telemetry as tel
+    with patch("finops.telemetry.ping") as ping, \
+         patch("sys.stdin") as stdin:
+        stdin.isatty.return_value = False  # piped stdin = MCP client launched us
+        tel.ping_startup(provider_count=3, plan="free")
+    assert ping.call_args[0][0]["surface"] == "mcp_server"
+
+
+def test_ping_startup_tags_surface_cli():
+    import finops.telemetry as tel
+    with patch("finops.telemetry.ping") as ping, \
+         patch("sys.stdin") as stdin:
+        stdin.isatty.return_value = True  # a TTY = ran in a terminal
+        tel.ping_startup(provider_count=3, plan="free")
+    assert ping.call_args[0][0]["surface"] == "cli"

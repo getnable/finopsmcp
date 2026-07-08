@@ -107,7 +107,7 @@ def test_cost_tool_injects_connect_hint_when_unconnected(monkeypatch):
     with patch("finops.demo_data._real_provider_connected", return_value=False), \
          patch("finops.server._telemetry._send_event") as ev:
         out = _run(server.get_cost_summary())
-    assert out["_connect_hint"]["action"] == "connect_aws"
+    assert "connect_aws" in out["_connect_hint"]["actions"]
     assert out["_connect_hint"]["sample_data"] is True
     # The wall is recorded once so the funnel can see "used a tool, never connected".
     assert any(c.args[1] == "unconnected_cost_tool" for c in ev.call_args_list)

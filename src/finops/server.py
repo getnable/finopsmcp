@@ -64,6 +64,13 @@ mcp = FastMCP("nable", instructions=f"""nable: cloud cost intelligence MCP serve
 Connects to AWS, Azure, GCP, and 10+ SaaS providers to answer cost questions,
 detect anomalies, recommend rightsizing, and attribute spend to teams and services.
 
+When the user mentions a cloud bill, cloud spend, AWS/GCP/Azure, Kubernetes cost,
+or asks why costs went up, proactively offer to check it with nable. If no cloud
+account is connected yet, offer to connect one right here with connect_aws,
+connect_gcp, or connect_azure: they read credentials that already exist on the
+machine (or walk through a one-paste for Azure) and never change anything in the
+cloud. Do not make the user leave for a terminal.
+
 USER PERSONA: {_persona}
 RESPONSE FORMAT INSTRUCTION: {_persona_ctx}
 """)
@@ -87,12 +94,12 @@ _CONNECT_HINT = {
     "sample_data": True,
     "message": (
         "No cloud account is connected, so this is sample data, not your real "
-        "costs. To see your own numbers, call connect_aws. It detects AWS "
-        "credentials already on this machine and connects them right here, no "
-        "terminal needed. It only reads billing data; it never changes anything "
-        "in your AWS account."
+        "costs. To see your own numbers, connect in-chat, no terminal needed: "
+        "connect_aws or connect_gcp detect credentials already on this machine "
+        "and connect them; connect_azure walks through the Cloud Shell one-paste. "
+        "They only read billing data; they never change anything in your cloud."
     ),
-    "action": "connect_aws",
+    "actions": ["connect_aws", "connect_gcp", "connect_azure"],
 }
 
 
@@ -5127,6 +5134,191 @@ async def connect_aws(account_id: str = "") -> dict:
                  "real numbers now."),
         "note": ("Credentials stay on this machine. nable reads billing data only; it never "
                  "changes your AWS account."),
+    }
+
+
+@mcp.tool()
+async def connect_gcp(billing_account_id: str = "") -> dict:
+    """
+    Connect a Google Cloud billing account from inside your MCP client, no terminal.
+
+    Propose-then-confirm and local-only. It reads Google Cloud credentials that
+    already exist on this machine (GOOGLE_APPLICATION_CREDENTIALS or gcloud
+    Application Default Credentials), lists the open billing accounts they can
+    see, and connects the one you choose. It never changes anything in GCP, and
+    credentials stay on this machine.
+
+    Call it with no arguments to see the billing accounts available (nothing is
+    stored). Then call it again with billing_account_id set to connect one.
+
+    Examples:
+        - "Connect my Google Cloud billing"
+        - "Use my gcloud login to connect GCP"
+
+    Args:
+        billing_account_id: The billing account to connect (XXXXXX-XXXXXX-XXXXXX),
+            from the candidate list a no-argument call returns. Omit to just list.
+    """
+    import os as _os
+    from pathlib import Path as _Path
+    from .setup_wizard import _detect_gcp_ambient, _discover_bq_export, _gcp_emit_connected
+    from .security.oauth.gcp import store_billing_accounts
+    from .security.vault import Vault
+    from .setup_scan import gcloud_adc_path
+
+    amb = await asyncio.to_thread(_detect_gcp_ambient)
+    if not amb:
+        return {
+            "connected": False,
+            "candidates": [],
+            "message": "No Google Cloud credentials were found on this machine.",
+            "how_to_connect": [
+                "Run: gcloud auth application-default login",
+                "Or set GOOGLE_APPLICATION_CREDENTIALS to a service-account key path,",
+                "then ask me to connect GCP again.",
+            ],
+            "note": ("connect_gcp only reads credentials that already exist locally. It never "
+                     "creates or changes anything in your Google Cloud account."),
+        }
+
+    billing = amb.get("billing") or []
+    project = amb.get("project") or ""
+
+    # Credentials work but the billing accounts are not listable (missing the
+    # Billing Account Viewer role). Let the user pass an id explicitly.
+    if not billing and not billing_account_id:
+        return {
+            "connected": False,
+            "credentials_found": True,
+            "source": amb.get("source"),
+            "message": ("Credentials work, but they cannot list billing accounts (needs the "
+                        "Billing Account Viewer role). Find your billing account ID at "
+                        "https://console.cloud.google.com/billing and call connect_gcp with "
+                        "billing_account_id set to it."),
+        }
+
+    if not billing_account_id:
+        return {
+            "connected": False,
+            "project": project,
+            "candidates": [{"billing_account_id": bid, "name": bname} for bid, bname in billing],
+            "message": (f"Found {len(billing)} open billing account(s) on these credentials. "
+                        "Call connect_gcp again with billing_account_id set to the one to connect."),
+            "note": "Nothing was stored. connect_gcp only reads local credentials.",
+        }
+
+    known = {bid for bid, _ in billing}
+    if billing and billing_account_id not in known:
+        return {
+            "connected": False,
+            "error": f"{billing_account_id} is not among the billing accounts these credentials can see.",
+            "available": sorted(known),
+        }
+
+    # Persist the credential pointer so the MCP server resolves the same creds.
+    gac = _os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    cred_path = gac if (gac and _Path(gac).expanduser().exists()) else None
+    if not cred_path:
+        adc = gcloud_adc_path()
+        cred_path = str(adc) if adc else None
+    if cred_path:
+        Vault.default().store("GCP_SERVICE_ACCOUNT_KEY_PATH", cred_path)
+
+    bq_table = await asyncio.to_thread(_discover_bq_export, project)
+    store_billing_accounts([billing_account_id], bq_table, [project] if project else None)
+    auth = "ambient_env" if str(amb.get("source", "")).startswith("GOOGLE") else "ambient_adc"
+    _gcp_emit_connected([billing_account_id], bq_table, auth)
+    from . import demo_data as _dd
+    _dd._real_provider_cache = None
+    return {
+        "connected": True,
+        "billing_account_id": billing_account_id,
+        "project": project,
+        "bq_export": bq_table,
+        "auth_method": auth,
+        "next": "Connected. Ask me for your GCP cost summary or top cost drivers.",
+        "note": ("Credentials stay on this machine. nable reads billing data only; it never "
+                 "changes your Google Cloud account."),
+    }
+
+
+@mcp.tool()
+async def connect_azure(cloudshell_output: str = "") -> dict:
+    """
+    Connect Azure from inside your MCP client via the Cloud Shell one-paste.
+
+    Azure has no local credentials nable can safely auto-detect, so this uses the
+    one-paste flow: it returns a short script to run in Azure Cloud Shell (you are
+    already signed in there, nothing to install). The script creates a read-only
+    service principal in YOUR tenant and prints one line. Paste that line back as
+    cloudshell_output and Azure is connected. Local-only: nable never runs the
+    script or changes anything in Azure; you run it in your own Cloud Shell.
+
+    Examples:
+        - "Connect Azure"
+        - "How do I connect my Azure subscription?"
+
+    Args:
+        cloudshell_output: The single line Azure Cloud Shell printed. Omit to get
+            the script and instructions first.
+    """
+    from .security.azure_cloudshell import (
+        CLOUDSHELL_URL, generate_cloudshell_script, parse_combined_azure_paste,
+    )
+    from .security.oauth.azure import store_service_principal
+
+    if not cloudshell_output:
+        return {
+            "connected": False,
+            "cloudshell_url": CLOUDSHELL_URL,
+            "steps": [
+                f"1. Open Azure Cloud Shell (already signed in as you): {CLOUDSHELL_URL}",
+                "2. Paste the script below and wait ~30 seconds for it to finish.",
+                "3. Paste the single line it prints back to me and I'll connect Azure.",
+            ],
+            "script": generate_cloudshell_script(),
+            "note": ("The script creates a read-only service principal (Cost Management Reader, "
+                     "Reader, Monitoring Reader) in your own tenant. nable never runs it or "
+                     "changes anything in Azure; you run it in your Cloud Shell."),
+        }
+
+    parsed = parse_combined_azure_paste(cloudshell_output)
+    if not parsed:
+        return {
+            "connected": False,
+            "error": ("That did not look like the line Cloud Shell prints. Re-run the script and "
+                      "paste the single line it outputs, or call connect_azure with no argument "
+                      "to see the script again."),
+        }
+
+    tenant_id, client_id, client_secret, sub_ids = parsed
+    try:
+        await asyncio.to_thread(
+            store_service_principal, tenant_id, client_id, client_secret, sub_ids
+        )
+    except Exception as exc:  # noqa: BLE001
+        try:
+            _telemetry._send_event(_telemetry._get_install_id(), "provider_connect_failed",
+                                   {"provider": "azure", "error_type": type(exc).__name__})
+        except Exception:
+            pass
+        return {"connected": False, "error": f"Could not store Azure credentials: {exc}"}
+
+    try:
+        _telemetry._send_event(_telemetry._get_install_id(), "provider_connected", {
+            "provider": "azure", "auth_method": "cloudshell_paste",
+            "subscription_count": len(sub_ids),
+        })
+    except Exception:
+        pass
+    from . import demo_data as _dd
+    _dd._real_provider_cache = None
+    return {
+        "connected": True,
+        "provider": "azure",
+        "subscription_count": len(sub_ids),
+        "next": "Connected. Ask me for your Azure cost summary or top cost drivers.",
+        "note": "Credentials stay on this machine. nable reads billing data only.",
     }
 
 

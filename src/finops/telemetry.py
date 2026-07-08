@@ -225,7 +225,20 @@ def ping(extra: Optional[dict] = None) -> None:
 
 
 def ping_startup(provider_count: int = 0, plan: str = "free") -> None:
-    """Convenience wrapper called from server.py on startup."""
+    """Convenience wrapper called from server.py on startup.
+
+    Tags the heartbeat with the surface so the "ran nable but never issued a
+    command" cliff is splittable: a piped stdin means an MCP client launched the
+    stdio server (wired in), a TTY means someone ran the CLI in a terminal. The
+    471 machines that start nable and never call a tool are a mix of the two, and
+    the fixes differ (in-client discoverability vs finishing the wizard's
+    handoff), so we need to see the split.
+    """
     set_provider_count(provider_count)
     set_plan(plan)
-    ping({"event_type": "startup"})
+    import sys
+    try:
+        surface = "cli" if sys.stdin.isatty() else "mcp_server"
+    except Exception:
+        surface = "mcp_server"
+    ping({"event_type": "startup", "surface": surface})

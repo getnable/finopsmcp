@@ -2,6 +2,28 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.141
+
+Connect any provider in-chat, and start measuring the "ran it but never used it" cliff.
+
+- connect_gcp: in-client Google Cloud connect, same detect-then-confirm shape as
+  connect_aws. No-arg call lists the open billing accounts your local gcloud /
+  GOOGLE_APPLICATION_CREDENTIALS can see; billing_account_id connects one and
+  auto-discovers the BigQuery export. Local-only, never mutates GCP.
+- connect_azure: Azure has no local ambient credentials, so this returns the
+  Azure Cloud Shell one-paste script (creates a read-only service principal in
+  your own tenant) and connects when you paste the single line it prints back.
+  nable never runs the script; you run it in your Cloud Shell.
+- The unconnected-cost-tool hint now points at all three connect tools, not just
+  AWS.
+- Heartbeat now carries a 'surface' tag (cli vs mcp_server) so the machines that
+  start nable but never call a tool can be split into "ran the CLI once, never
+  wired it in" vs "wired into a client, never asked it anything." The fixes
+  differ, so we measure before guessing.
+- The MCP server now tells the model to proactively offer nable when the user
+  mentions a cloud bill or cost, and to offer an in-chat connect when nothing is
+  connected, targeting the wired-but-never-used segment.
+
 ## 0.8.140
 
 Connect an AWS account from inside your MCP client, no terminal.
