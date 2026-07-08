@@ -801,11 +801,11 @@ function Pricing(){
     { key:"dev", name:"Dev", tag:"Ask about your bill", amt:"Free", per:"forever", billed:"No credit card",
       feats:["Cost, anomaly + rightsizing","LLM spend by model","Every provider included","Your own LLM key"],
       cta:"Start free", href:"/docs", plan:"dev", ext:false, primary:false, rec:false },
-    { key:"pro", name:"Pro", tag:"Find and fix the waste", amt:proPrice, per, billed,
-      feats:["Everything in Dev","Remediation PRs + tickets","Alerts, digests, budgets","Hosting add-on available"],
+    { key:"pro", name:"Pro", tag:"Watch, fix, and guard your agents", amt:proPrice, per, billed,
+      feats:["Everything in Dev","Always-on monitoring + alerts","Remediation PRs + auto-tickets","Budget guardrails for your agents"],
       cta:annual ? "Get annual" : "Get Pro", href:proLink, plan:annual?"pro_annual":"pro_monthly", ext:true, primary:true, rec:true },
-    { key:"startup", name:"Startups", tag:"Scale to the whole org", amt:startupPrice, per, billed,
-      feats:["Everything in Pro","Org scale, more accounts","Priority support","Single-tenant hosting available"],
+    { key:"startup", name:"Startups", tag:"Scale it across the org", amt:startupPrice, per, billed,
+      feats:["Everything in Pro","Org-wide budgets + agent policy","Priority support","Single-tenant hosting available"],
       cta:"Get Startups", href:startupLink, plan:annual?"startups_annual":"startups_monthly", ext:true, primary:false, rec:false },
     { key:"ent", name:"Enterprise", tag:"Controls, SSO + an SLA", amt:"Custom", per:"", billed:"Talk to us",
       feats:["Everything in Startups","SSO + audit logs","Dedicated SLA","Hosted or self-host"],
@@ -817,7 +817,7 @@ function Pricing(){
       <div className="wrap">
         <div className="section-head center">
           <div className="label">Pricing</div>
-          <h2>Free to ask.<br/><em>Pay to remediate.</em></h2>
+          <h2>Free to ask.<br/><em>Pay to watch, act, and guard your agents.</em></h2>
 
           {/* Billing toggle: segmented control, matched to the dashboard range group. */}
           <div className="bill-toggle" role="group" aria-label="Billing period">
