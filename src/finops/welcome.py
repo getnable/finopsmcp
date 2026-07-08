@@ -548,7 +548,10 @@ def _llm_admin_key_hint(provider: str) -> None:
 
 # ── Full onboarding flow (finops welcome) ──────────────────────────────────────
 
-_AMBIENT_AWS_TIMEOUT = 3.0  # seconds; cap on the first-run ambient credential probe
+_AMBIENT_AWS_TIMEOUT = 6.0  # seconds; cap on the first-run ambient credential probe.
+# 3s was too tight: AWS SSO token refresh often takes longer, so real creds read
+# as "none" and the user fell through to the connect menu. 6s catches SSO while
+# still bounded (the "Checking…" line is on screen, so it is not a silent hang).
 
 
 def _oneclick_aws_url() -> str | None:
@@ -812,7 +815,7 @@ def run_welcome_flow(demo: bool = False) -> None:
         _blank()
         choice = "5"
         try:
-            choice = input("  Choice [5]: ").strip() or "5"
+            choice = input("  Choice [1]: ").strip() or "1"
         except (KeyboardInterrupt, EOFError):
             choice = "5"
         _blank()

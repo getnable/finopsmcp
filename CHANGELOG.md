@@ -2,6 +2,24 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.146
+
+First-run activation: catch SSO creds, and stop defaulting to "skip."
+
+PostHog showed the wizard is the wall (199 open it, ~45 finish, 4 connect). Two
+first-run fixes, both in the welcome flow:
+
+- Ambient AWS probe timeout raised from 3s to 6s. 3s was too tight for an AWS SSO
+  token refresh, so real credentials read as "none" and the user fell through to
+  the connect menu instead of seeing their real bill. 6s catches SSO while staying
+  bounded (the "Checking..." line is on screen, so it is not a silent hang).
+- The no-ambient-creds connect menu no longer defaults to "Skip for now." Pressing
+  Enter now takes the AWS connect path; skipping is a deliberate choice. The old
+  default made not-connecting the path of least resistance.
+
+No fake data was added: the flow still leads with a real ambient scan and refuses
+to show invented numbers.
+
 ## 0.8.145
 
 Activate Pro in the editor, no terminal, no restart.

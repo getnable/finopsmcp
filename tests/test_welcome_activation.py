@@ -100,7 +100,8 @@ def test_skip_offers_real_connect_never_fake_numbers(monkeypatch, capsys):
         return False
 
     monkeypatch.setattr("finops.connectors.aws.AWSConnector.is_configured", _no_ambient)
-    monkeypatch.setattr("builtins.input", lambda *a, **k: "")  # Enter -> "4" skip
+    monkeypatch.setattr(w, "_llm_ambient_provider", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "5")  # explicitly skip the menu
 
     calls = []
     monkeypatch.setattr(w, "_show_value_moment", lambda demo=False: calls.append(demo) or (demo is True))
@@ -113,6 +114,26 @@ def test_skip_offers_real_connect_never_fake_numbers(monkeypatch, capsys):
     assert "No numbers yet, on purpose." in out  # honest empty state
     assert "finops setup aws" in out  # clear real next step offered
     assert "welcome --demo" in out  # demo stays available as an explicit opt-in
+
+
+def test_menu_default_enter_connects_not_skips(monkeypatch):
+    """The no-ambient-creds menu now defaults to AWS connect on Enter, not skip, so
+    the path of least resistance is to connect. Skip is a deliberate '5'."""
+    monkeypatch.setattr("finops.setup_wizard._configure_claude_desktop", lambda *a, **k: None)
+
+    async def _no_ambient(self):
+        return False
+
+    monkeypatch.setattr("finops.connectors.aws.AWSConnector.is_configured", _no_ambient)
+    monkeypatch.setattr(w, "_llm_ambient_provider", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "")  # Enter, take the default
+
+    connected = []
+    monkeypatch.setattr("finops.setup_wizard.setup_aws_account", lambda *a, **k: connected.append(True))
+    monkeypatch.setattr(w, "_show_value_moment", lambda demo=False: False)
+
+    w.run_welcome_flow(demo=False)
+    assert connected == [True]  # Enter routed into AWS connect, not the skip nudge
 
 
 def test_ambient_aws_offers_one_keystroke_real_scan(monkeypatch):
@@ -146,7 +167,8 @@ def test_slow_ambient_probe_does_not_hang_onboarding(monkeypatch):
         return True
 
     monkeypatch.setattr("finops.connectors.aws.AWSConnector.is_configured", _hang)
-    monkeypatch.setattr("builtins.input", lambda *a, **k: "")  # skip the menu
+    monkeypatch.setattr(w, "_llm_ambient_provider", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "5")  # skip the menu
 
     calls = []
     monkeypatch.setattr(w, "_show_value_moment", lambda demo=False: calls.append(demo) or (demo is True))
@@ -190,7 +212,8 @@ def test_ambient_aws_declined_falls_through_to_menu_then_connect_nudge(monkeypat
         return True
 
     monkeypatch.setattr("finops.connectors.aws.AWSConnector.is_configured", _ambient)
-    answers = iter(["n", ""])  # decline Y/n, then Enter -> skip menu
+    monkeypatch.setattr(w, "_llm_ambient_provider", lambda: None)
+    answers = iter(["n", "5"])  # decline Y/n, then explicitly skip the menu
     monkeypatch.setattr("builtins.input", lambda *a, **k: next(answers))
 
     calls = []
