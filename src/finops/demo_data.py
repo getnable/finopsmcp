@@ -74,6 +74,17 @@ def _real_provider_connected() -> bool:
             found = any(k in keys for k in _PROVIDER_CRED_KEYS)
         except Exception:
             found = False
+    if not found:
+        # A named-profile or role connect (e.g. via connect_aws or the wizard's
+        # profile path) writes accounts.yaml but sets no credential env var, so a
+        # configured account is also a real connection. Demo never writes this
+        # file, so any entry here is a genuine user connect.
+        try:
+            from .accounts import list_accounts
+
+            found = bool(list_accounts())
+        except Exception:
+            pass
     _real_provider_cache = (now + 30.0, found)
     return found
 

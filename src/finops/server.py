@@ -77,6 +77,23 @@ _COST_QUERY_TOOLS = {
     "get_cost_history", "get_top_cost_drivers", "get_total_spend_all_sources",
 }
 _first_cost_query_fired = False
+# Fired once per session when a cost tool runs with no real account connected, so
+# the "used a tool but never connected" wall is finally visible in the funnel.
+_unconnected_hint_fired = False
+# Injected into cost-tool responses when nothing is connected. Tells the user the
+# data is sample/empty and hands the model the exact tool to fix it in-client, so
+# they never have to leave the conversation for a terminal wizard.
+_CONNECT_HINT = {
+    "sample_data": True,
+    "message": (
+        "No cloud account is connected, so this is sample data, not your real "
+        "costs. To see your own numbers, call connect_aws. It detects AWS "
+        "credentials already on this machine and connects them right here, no "
+        "terminal needed. It only reads billing data; it never changes anything "
+        "in your AWS account."
+    ),
+    "action": "connect_aws",
+}
 
 
 def _first_run_onboarding_directive() -> dict:
@@ -203,6 +220,24 @@ def _instrumented_tool(*dargs, **dkwargs):
                 _tip = _maybe_team_tip(fn.__name__)
                 if _tip is not None:
                     result.setdefault("_team_tip", _tip)
+            # Cost tool with no real account connected: make the wall visible.
+            # Instead of silently returning demo/empty data that looks real, tell
+            # the user it's sample data and hand the model connect_aws so they can
+            # connect in-client. Record it once per session so the funnel finally
+            # shows the "used a tool, never connected" drop-off.
+            if fn.__name__ in _COST_QUERY_TOOLS and isinstance(result, dict):
+                from .demo_data import _real_provider_connected as _rpc
+                if not _rpc():
+                    result.setdefault("_connect_hint", _CONNECT_HINT)
+                    global _unconnected_hint_fired
+                    if not _unconnected_hint_fired:
+                        _unconnected_hint_fired = True
+                        _telemetry._send_event(
+                            _telemetry._get_install_id(),
+                            "unconnected_cost_tool",
+                            {"tool": fn.__name__,
+                             "plan": _telemetry._session.get("plan", "free")},
+                        )
             return result
 
         return decorator(_inner)
@@ -4982,6 +5017,116 @@ async def connect_opencost() -> dict:
         ],
         "note": ("nable only READS the OpenCost API. It never deploys or changes anything in your "
                  "cluster; you run the commands above."),
+    }
+
+
+@mcp.tool()
+async def connect_aws(account_id: str = "") -> dict:
+    """
+    Connect an AWS account from inside your MCP client, no terminal needed.
+
+    Propose-then-confirm and local-only. It reads AWS credentials that already
+    exist on this machine (named profiles, environment, the default chain),
+    verifies each against STS, and connects the one you choose. It never creates,
+    modifies, or deletes anything in your AWS account, and credentials stay on
+    this machine.
+
+    Call it with no arguments first to see which accounts are available (nothing
+    is stored). Then call it again with account_id set to the one to connect.
+
+    Examples:
+        - "Connect my AWS account"
+        - "Use the credentials on this machine to connect AWS"
+        - "I want to see my real costs, not the sample data"
+
+    Args:
+        account_id: The 12-digit account to connect, from the candidate list a
+            no-argument call returns. Omit to just list what's available.
+    """
+    from .setup_wizard import (
+        _detect_aws_candidates, _emit_provider_connected, _auto_aws_name,
+    )
+    from .accounts import AccountConfig, add_account, list_accounts
+
+    candidates = await asyncio.to_thread(_detect_aws_candidates)
+    connected_ids = {a.account_id for a in list_accounts() if a.account_id}
+
+    if not candidates:
+        return {
+            "connected": False,
+            "candidates": [],
+            "message": "No AWS credentials were found on this machine.",
+            "how_to_connect": [
+                "Fastest, in AWS CloudShell (already signed in): run "
+                "'pip install finops-mcp && finops welcome' and it uses CloudShell's own credentials.",
+                "Or create a read-only access key: AWS console -> IAM -> your user -> "
+                "Security credentials -> Create access key, then run 'finops setup aws'.",
+            ],
+            "note": ("connect_aws only reads credentials that already exist locally. It never "
+                     "creates or changes anything in your AWS account."),
+        }
+
+    # No account chosen yet: propose what was found and store nothing.
+    if not account_id:
+        return {
+            "connected": False,
+            "candidates": [
+                {
+                    "account_id": c["account_id"],
+                    "label": c["label"],
+                    "alias": c.get("alias") or "",
+                    "source": "profile" if c.get("profile") else "default_chain",
+                    "already_connected": c["account_id"] in connected_ids,
+                }
+                for c in candidates
+            ],
+            "message": (
+                f"Found working AWS credentials for {len(candidates)} account(s). "
+                "Call connect_aws again with account_id set to the one you want to connect."
+            ),
+            "note": ("Nothing was stored. connect_aws only reads local credentials and never "
+                     "changes your AWS account."),
+        }
+
+    match = next((c for c in candidates if c.get("account_id") == account_id), None)
+    if match is None:
+        return {
+            "connected": False,
+            "error": f"No detected credentials map to account {account_id}.",
+            "available": [c["account_id"] for c in candidates],
+        }
+
+    if account_id in connected_ids:
+        return {
+            "connected": True,
+            "account_id": account_id,
+            "message": f"Account {account_id} is already connected. Ask for your cost summary.",
+        }
+
+    taken = {a.name for a in list_accounts()}
+    name = _auto_aws_name(match, taken)
+    cfg = AccountConfig(
+        name=name,
+        account_id=match["account_id"],
+        region=match.get("region") or "us-east-1",
+        profile=match.get("profile") or None,
+    )
+    await asyncio.to_thread(add_account, cfg)
+    auth = "profile" if match.get("profile") else "default_chain"
+    _emit_provider_connected(auth)
+    # Drop the cached "no provider" answer so the next cost tool returns real data
+    # this session, not the demo stub.
+    from . import demo_data as _dd
+    _dd._real_provider_cache = None
+    return {
+        "connected": True,
+        "account_id": match["account_id"],
+        "saved_as": name,
+        "auth_method": auth,
+        "next": ("Connected. Ask me for your cost summary or top cost drivers to see your "
+                 "real numbers now."),
+        "note": ("Credentials stay on this machine. nable reads billing data only; it never "
+                 "changes your AWS account."),
     }
 
 

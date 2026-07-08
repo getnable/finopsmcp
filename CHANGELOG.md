@@ -2,6 +2,28 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.140
+
+Connect an AWS account from inside your MCP client, no terminal.
+
+The biggest activation leak was that connecting a cloud account required leaving
+Claude/Cursor for the terminal wizard, and until you connected, cost tools quietly
+returned sample data that looked real, so people never knew to connect.
+
+- New connect_aws tool: detect-then-confirm and local-only. Call it with no
+  arguments to see the AWS accounts whose credentials already exist on this
+  machine (verified via STS, nothing stored); call it again with account_id to
+  connect one. It never creates, modifies, or deletes anything in AWS, and
+  credentials stay local.
+- Cost tools now flag sample data. When no account is connected, every cost tool
+  adds a clear "this is sample data, call connect_aws to see your real numbers"
+  hint instead of passing off the demo dataset as real, and records the event
+  once per session so the "used a tool but never connected" wall is visible in
+  the funnel.
+- A named-profile or role connect now correctly counts as connected (it writes
+  accounts.yaml but sets no credential env var), so demo data steps aside the
+  moment you connect, not only on an access-key connect.
+
 ## 0.8.139
 
 More of the OpenCost wiring.
