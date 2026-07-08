@@ -123,6 +123,50 @@ def activations():
     return count(7), count(30)
 
 
+def _hogql(sql):
+    body = json.dumps({"query": {"kind": "HogQLQuery", "query": sql}}).encode()
+    res = _get_json(
+        f"{POSTHOG_HOST}/api/projects/{POSTHOG_PROJECT_ID}/query",
+        headers={"Authorization": f"Bearer {POSTHOG_API_KEY}", "Content-Type": "application/json"},
+        data=body,
+    )
+    return res.get("results", [])
+
+
+def timeline():
+    """When the 545 actually arrived. Recovers each machine's first-seen day
+    (earliest of any event) and buckets it, so you can lay the install curve over
+    your own memory of what you shipped when. Channel isn't tagged, but a spike on
+    the day you posted to HN is HN. Timestamps are day-granular by design, so this
+    is daily resolution, which is all campaign correlation needs.
+    """
+    if not (POSTHOG_PROJECT_ID and POSTHOG_API_KEY):
+        return None
+    run = ("'heartbeat', 'tool_called', 'provider_connected'")
+    # Weekly new-install cohorts (first-seen bucketed by ISO week).
+    weekly = _hogql(
+        "SELECT toStartOfWeek(first_day) AS wk, count() AS n FROM ("
+        f"  SELECT person_id, min(toDate(timestamp)) AS first_day FROM events "
+        f"  WHERE event IN ({run}) GROUP BY person_id"
+        ") GROUP BY wk ORDER BY wk"
+    )
+    # The biggest single arrival days, the ones worth matching to a campaign.
+    spikes = _hogql(
+        "SELECT first_day, count() AS n FROM ("
+        f"  SELECT person_id, min(toDate(timestamp)) AS first_day FROM events "
+        f"  WHERE event IN ({run}) GROUP BY person_id"
+        ") GROUP BY first_day ORDER BY n DESC, first_day DESC LIMIT 8"
+    )
+    # Every day a machine first connected a provider (only a handful, list them).
+    connects = _hogql(
+        "SELECT first_day, count() AS n FROM ("
+        "  SELECT person_id, min(toDate(timestamp)) AS first_day FROM events "
+        "  WHERE event = 'provider_connected' GROUP BY person_id"
+        ") GROUP BY first_day ORDER BY first_day"
+    )
+    return {"weekly": weekly, "spikes": spikes, "connects": connects}
+
+
 def reach(days=30):
     """The denominator the download count can't give you: distinct machines that
     actually RAN nable (fired a heartbeat) and that actually USED a tool, vs the
@@ -212,6 +256,29 @@ def main():
     else:
         print("  Activations: set POSTHOG_PROJECT_ID + POSTHOG_PERSONAL_API_KEY to show")
         print(f"    distinct '{ACTIVATION_EVENT}'. This is the real read; the rest is noise.")
+
+    try:
+        tl = timeline()
+    except Exception as e:  # noqa: BLE001
+        tl = None
+        print(f"  timeline: query failed ({e})")
+    if tl:
+        print()
+        print("  When they arrived (new machines by first-seen day; correlate to what you shipped):")
+        if tl["weekly"]:
+            peak = max(r[1] for r in tl["weekly"]) or 1
+            for wk, n in tl["weekly"]:
+                bar = "#" * round(24 * n / peak)
+                wk_s = str(wk)[:10]
+                print(f"    week of {wk_s}  {n:>4}  {bar}")
+        if tl["spikes"]:
+            print("  Biggest arrival days (match these to a post/send):")
+            for day, n in tl["spikes"]:
+                print(f"    {str(day)[:10]}  {n:>4} new")
+        if tl["connects"]:
+            print("  Days a machine first connected a provider:")
+            for day, n in tl["connects"]:
+                print(f"    {str(day)[:10]}  {n}")
 
     try:
         rc = reach(30)
