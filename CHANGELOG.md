@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.144
+
+Green CI and a cleaner README.
+
+- Fix a flaky-on-CI test: the two heartbeat-surface tests asserted on a patched
+  module-global `ping`, which cross-test ordering could leave pointing elsewhere
+  on Linux CI (passed locally, failed on CI). Extracted the surface logic into a
+  pure `_startup_surface()` and test that directly, no telemetry-send dependency.
+  Behavior unchanged.
+- README: tighter, cleaner intro and description. Same claims, less clutter.
+
 ## 0.8.143
 
 Fix the real issue behind 0.8.142: connect_azure no longer routes the Azure

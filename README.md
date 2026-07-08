@@ -1,6 +1,6 @@
 # nable
 
-**Cost controls, built into your agents. Ask about your whole cloud and AI bill inside Claude or Cursor, gate what your agents do against your budget, and get the fix as a pull request you approve. One connector to AWS, Azure, GCP and 15 more SaaS and AI providers.**
+**Ask your whole cloud and AI bill anything, right inside Claude or Cursor. Find the waste, and get the fix as a pull request you approve. One tool across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.**
 
 [![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/finops-mcp?color=4db8d4)](https://pypi.org/project/finops-mcp/)
@@ -8,7 +8,7 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/chaandannn/finopsmcp/badge)](https://scorecard.dev/viewer/?uri=github.com/chaandannn/finopsmcp)
 [![License: Elastic-2.0](https://img.shields.io/badge/license-Elastic--2.0-444)](LICENSE)
 
-nable is an MCP server that runs on **your machine** and connects to your real AWS, Azure, GCP, Kubernetes, and SaaS billing. It answers cost questions in your editor, finds waste, drafts the fix for your approval, and verifies the savings landed. Your credentials stay in your OS keychain and your bill never leaves your control, so the no-egress claim is something you can read in the code, not just take on faith. The local agent is open and auditable; a hosted platform is available for teams.
+nable is a local-first MCP server that connects to your real AWS, Azure, GCP, Kubernetes, and SaaS billing. It answers cost questions in your editor, finds idle and rightsizing waste, drafts the fix for your approval, and verifies the savings landed. Everything runs on **your machine**: your credentials stay in your OS keychain and your bill never leaves, so the no-egress claim is something you can read in the source, not take on faith. It is read-only by default and never changes your cloud on its own. The local agent is open and auditable; a hosted platform is available for teams.
 
 **[getnable.com](https://getnable.com)** · docs, quickstart, and the hosted platform
 

@@ -103,19 +103,15 @@ def test_connect_azure_reports_already_connected(monkeypatch):
 
 # ── heartbeat surface tag (the cliff split) ───────────────────────────────────
 
-def test_ping_startup_tags_surface_mcp_server():
+def test_startup_surface_mcp_server():
     import finops.telemetry as tel
-    with patch("finops.telemetry.ping") as ping, \
-         patch("sys.stdin") as stdin:
+    with patch("sys.stdin") as stdin:
         stdin.isatty.return_value = False  # piped stdin = MCP client launched us
-        tel.ping_startup(provider_count=3, plan="free")
-    assert ping.call_args[0][0]["surface"] == "mcp_server"
+        assert tel._startup_surface() == "mcp_server"
 
 
-def test_ping_startup_tags_surface_cli():
+def test_startup_surface_cli():
     import finops.telemetry as tel
-    with patch("finops.telemetry.ping") as ping, \
-         patch("sys.stdin") as stdin:
+    with patch("sys.stdin") as stdin:
         stdin.isatty.return_value = True  # a TTY = ran in a terminal
-        tel.ping_startup(provider_count=3, plan="free")
-    assert ping.call_args[0][0]["surface"] == "cli"
+        assert tel._startup_surface() == "cli"

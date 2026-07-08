@@ -224,6 +224,17 @@ def ping(extra: Optional[dict] = None) -> None:
     t.start()
 
 
+def _startup_surface() -> str:
+    """"cli" when a human ran nable in a terminal (TTY stdin), else "mcp_server"
+    (an MCP client launched the stdio server with a piped stdin). Pure and
+    side-effect free so it is testable without the telemetry send path."""
+    import sys
+    try:
+        return "cli" if sys.stdin.isatty() else "mcp_server"
+    except Exception:
+        return "mcp_server"
+
+
 def ping_startup(provider_count: int = 0, plan: str = "free") -> None:
     """Convenience wrapper called from server.py on startup.
 
@@ -236,9 +247,4 @@ def ping_startup(provider_count: int = 0, plan: str = "free") -> None:
     """
     set_provider_count(provider_count)
     set_plan(plan)
-    import sys
-    try:
-        surface = "cli" if sys.stdin.isatty() else "mcp_server"
-    except Exception:
-        surface = "mcp_server"
-    ping({"event_type": "startup", "surface": surface})
+    ping({"event_type": "startup", "surface": _startup_surface()})
