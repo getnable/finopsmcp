@@ -5302,7 +5302,11 @@ async def connect_azure(cloudshell_output: str = "") -> dict:
                                    {"provider": "azure", "error_type": type(exc).__name__})
         except Exception:
             pass
-        return {"connected": False, "error": f"Could not store Azure credentials: {exc}"}
+        # Return the exception type only, never the raw message: this path handles
+        # the client secret, so a raw interpolated exception must never echo it back.
+        return {"connected": False,
+                "error": (f"Could not store Azure credentials ({type(exc).__name__}). "
+                          "Re-run the Cloud Shell script and paste the line again.")}
 
     try:
         _telemetry._send_event(_telemetry._get_install_id(), "provider_connected", {

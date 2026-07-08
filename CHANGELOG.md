@@ -2,6 +2,16 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.142
+
+Security hardening from a scoped audit of the new connect tools.
+
+- connect_azure no longer interpolates a raw store exception into the response.
+  That path handles the Azure client secret, so it now returns the exception type
+  only, never a raw message that could echo the secret back. No leak was found
+  (the audit log never records tool arguments and telemetry sends only the error
+  type), this closes the theoretical echo path as defense in depth.
+
 ## 0.8.141
 
 Connect any provider in-chat, and start measuring the "ran it but never used it" cliff.
