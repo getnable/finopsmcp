@@ -2,6 +2,24 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.143
+
+Fix the real issue behind 0.8.142: connect_azure no longer routes the Azure
+secret through the model.
+
+- connect_azure used to take the Cloud Shell output (which contains the Azure
+  client secret) as a tool argument. For the model to fill that argument the
+  secret has to be pasted into the chat, which sends it to the model provider and
+  any MCP intermediary, breaking nable's local-first, no-egress promise. 0.8.142
+  only stopped the secret echoing in a local error string; it missed the actual
+  exposure.
+- connect_azure now takes no arguments and never accepts the secret. It returns
+  the Cloud Shell script and directs you to finish the connect in your own
+  terminal with `finops setup azure`, which encrypts the secret into your local
+  vault. The model never sees it. It also reports when Azure is already connected.
+- connect_aws and connect_gcp were already correct here: they read credentials
+  already on the machine, so nothing sensitive ever passes through the model.
+
 ## 0.8.142
 
 Security hardening from a scoped audit of the new connect tools.

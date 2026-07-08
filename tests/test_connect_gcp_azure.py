@@ -73,31 +73,32 @@ def test_connect_gcp_rejects_unknown_billing_account():
 
 # ── connect_azure ─────────────────────────────────────────────────────────────
 
-def test_connect_azure_no_arg_returns_script():
-    out = _run(server.connect_azure())
+def test_connect_azure_returns_script_and_routes_secret_local(monkeypatch):
+    # Not connected yet: returns the script but explicitly refuses the secret in-chat.
+    with patch("finops.security.vault.Vault") as V:
+        V.default.return_value.list_keys.return_value = []
+        out = _run(server.connect_azure())
     assert out["connected"] is False
-    assert "script" in out and out["script"]
-    assert "cloudshell_url" in out
-    assert any("Cloud Shell" in s for s in out["steps"])
+    assert out["script"]
+    # It must tell the user to finish in their own terminal via finops setup azure.
+    assert any("finops setup azure" in s for s in out["steps"])
+    assert "why_not_paste_here" in out
 
 
-def test_connect_azure_connects_on_valid_paste():
-    with patch("finops.security.oauth.azure.store_service_principal") as store, \
-         patch("finops.server._telemetry._send_event"):
-        out = _run(server.connect_azure(cloudshell_output=_AZURE_PASTE))
+def test_connect_azure_never_accepts_a_secret_argument():
+    # The whole point of the fix: no parameter can carry the client secret through
+    # the model. connect_azure must take zero arguments.
+    import inspect
+    sig = inspect.signature(server.connect_azure)
+    assert list(sig.parameters) == []
+
+
+def test_connect_azure_reports_already_connected(monkeypatch):
+    with patch("finops.security.vault.Vault") as V:
+        V.default.return_value.list_keys.return_value = ["AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_IDS"]
+        out = _run(server.connect_azure())
     assert out["connected"] is True
-    assert out["subscription_count"] == 1
-    store.assert_called_once()
-    args = store.call_args[0]
-    assert args[0] == _TENANT and args[1] == _CLIENT
-
-
-def test_connect_azure_rejects_bad_paste():
-    with patch("finops.security.oauth.azure.store_service_principal") as store:
-        out = _run(server.connect_azure(cloudshell_output="not-a-valid-line"))
-    assert out["connected"] is False
-    assert "error" in out
-    store.assert_not_called()
+    assert out["provider"] == "azure"
 
 
 # ── heartbeat surface tag (the cliff split) ───────────────────────────────────

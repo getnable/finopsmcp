@@ -5243,86 +5243,56 @@ async def connect_gcp(billing_account_id: str = "") -> dict:
 
 
 @mcp.tool()
-async def connect_azure(cloudshell_output: str = "") -> dict:
+async def connect_azure() -> dict:
     """
-    Connect Azure from inside your MCP client via the Cloud Shell one-paste.
+    Guide connecting Azure while keeping the service-principal secret off the model.
 
-    Azure has no local credentials nable can safely auto-detect, so this uses the
-    one-paste flow: it returns a short script to run in Azure Cloud Shell (you are
-    already signed in there, nothing to install). The script creates a read-only
-    service principal in YOUR tenant and prints one line. Paste that line back as
-    cloudshell_output and Azure is connected. Local-only: nable never runs the
-    script or changes anything in Azure; you run it in your own Cloud Shell.
+    Azure has no local credentials nable can safely auto-detect, so connecting
+    needs a client secret. Unlike connect_aws and connect_gcp (which read
+    credentials already on the machine, so nothing sensitive passes through this
+    conversation), an Azure secret would have to be pasted into the chat to reach
+    a tool argument, which routes it through the model provider. nable does not do
+    that. This tool returns the Cloud Shell script and has you finish the connect
+    in your OWN terminal with `finops setup azure`, which encrypts the secret into
+    your local vault. The model never sees the secret.
 
     Examples:
         - "Connect Azure"
         - "How do I connect my Azure subscription?"
-
-    Args:
-        cloudshell_output: The single line Azure Cloud Shell printed. Omit to get
-            the script and instructions first.
     """
-    from .security.azure_cloudshell import (
-        CLOUDSHELL_URL, generate_cloudshell_script, parse_combined_azure_paste,
-    )
-    from .security.oauth.azure import store_service_principal
-
-    if not cloudshell_output:
-        return {
-            "connected": False,
-            "cloudshell_url": CLOUDSHELL_URL,
-            "steps": [
-                f"1. Open Azure Cloud Shell (already signed in as you): {CLOUDSHELL_URL}",
-                "2. Paste the script below and wait ~30 seconds for it to finish.",
-                "3. Paste the single line it prints back to me and I'll connect Azure.",
-            ],
-            "script": generate_cloudshell_script(),
-            "note": ("The script creates a read-only service principal (Cost Management Reader, "
-                     "Reader, Monitoring Reader) in your own tenant. nable never runs it or "
-                     "changes anything in Azure; you run it in your Cloud Shell."),
-        }
-
-    parsed = parse_combined_azure_paste(cloudshell_output)
-    if not parsed:
-        return {
-            "connected": False,
-            "error": ("That did not look like the line Cloud Shell prints. Re-run the script and "
-                      "paste the single line it outputs, or call connect_azure with no argument "
-                      "to see the script again."),
-        }
-
-    tenant_id, client_id, client_secret, sub_ids = parsed
-    try:
-        await asyncio.to_thread(
-            store_service_principal, tenant_id, client_id, client_secret, sub_ids
-        )
-    except Exception as exc:  # noqa: BLE001
-        try:
-            _telemetry._send_event(_telemetry._get_install_id(), "provider_connect_failed",
-                                   {"provider": "azure", "error_type": type(exc).__name__})
-        except Exception:
-            pass
-        # Return the exception type only, never the raw message: this path handles
-        # the client secret, so a raw interpolated exception must never echo it back.
-        return {"connected": False,
-                "error": (f"Could not store Azure credentials ({type(exc).__name__}). "
-                          "Re-run the Cloud Shell script and paste the line again.")}
+    from .security.azure_cloudshell import CLOUDSHELL_URL, generate_cloudshell_script
+    from .security.vault import Vault
 
     try:
-        _telemetry._send_event(_telemetry._get_install_id(), "provider_connected", {
-            "provider": "azure", "auth_method": "cloudshell_paste",
-            "subscription_count": len(sub_ids),
-        })
+        already = "AZURE_TENANT_ID" in set(Vault.default().list_keys())
     except Exception:
-        pass
-    from . import demo_data as _dd
-    _dd._real_provider_cache = None
+        already = False
+    if already:
+        from . import demo_data as _dd
+        _dd._real_provider_cache = None
+        return {
+            "connected": True,
+            "provider": "azure",
+            "message": "Azure is already connected. Ask me for your Azure cost summary or top cost drivers.",
+        }
+
     return {
-        "connected": True,
-        "provider": "azure",
-        "subscription_count": len(sub_ids),
-        "next": "Connected. Ask me for your Azure cost summary or top cost drivers.",
-        "note": "Credentials stay on this machine. nable reads billing data only.",
+        "connected": False,
+        "cloudshell_url": CLOUDSHELL_URL,
+        "steps": [
+            f"1. Open Azure Cloud Shell (already signed in as you): {CLOUDSHELL_URL}",
+            "2. Paste the script below and wait ~30 seconds for it to finish.",
+            "3. In YOUR OWN terminal (not this chat) run:  finops setup azure",
+            "   choose the Cloud Shell option, and paste the line the script printed there.",
+        ],
+        "script": generate_cloudshell_script(),
+        "why_not_paste_here": (
+            "That line contains an Azure client secret. Pasting it into this chat would send it "
+            "to the model provider. nable keeps it local: you paste it into the finops CLI, which "
+            "encrypts it into your vault, and the model never sees it. AWS and GCP connect in-chat "
+            "because they read credentials already on your machine; Azure needs a secret, so it "
+            "stays in your terminal."
+        ),
     }
 
 
