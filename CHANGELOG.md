@@ -2,6 +2,21 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.145
+
+Activate Pro in the editor, no terminal, no restart.
+
+- New activate_pro tool: paste your license key from the receipt email into Claude
+  or Cursor and say "activate my license." nable validates it offline, stores it
+  locally, and unlocks Pro in the same session immediately. This works because the
+  tool runs inside the running MCP server process: store_license clears the cached
+  status and get_status re-reads, so the paid plan is live on the next call with no
+  editor restart. The old flow (activate in a separate terminal, then restart)
+  couldn't do that. The license is still the offline signed key, so the local-first
+  no-egress promise is intact.
+- Receipt email now leads with the in-editor path (paste the key, ask nable to
+  activate), with the terminal commands as the alternative.
+
 ## 0.8.144
 
 Green CI and a cleaner README.

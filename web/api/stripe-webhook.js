@@ -329,13 +329,11 @@ async function sendLicenseEmail(to, licenseKey, plan) {
   <!-- Step 1 -->
   <div style="margin-bottom:20px;">
     <p style="font-size:13px;color:#54524a;margin:0 0 8px;">
-      <strong style="color:#1a1915;">Step 1, </strong>Run this in your terminal and enter the email you used at checkout. We send a 6-digit code and activate you, no key to paste. (Prefer the key above? Run <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;">finops setup license &lt;key&gt;</code>.)
+      <strong style="color:#1a1915;">Fastest, </strong>paste the key above into Claude or Cursor and say "activate my nable license." nable stores it locally and unlocks Pro on the spot, no terminal, no restart.
     </p>
-    <div style="background:#ebe8e0;border-radius:7px;padding:12px 16px;">
-      <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:12px;color:#1a1915;word-break:break-all;">
-        finops login
-      </code>
-    </div>
+    <p style="font-size:13px;color:#54524a;margin:14px 0 8px;">
+      <strong style="color:#1a1915;">From a terminal instead, </strong>run <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;">finops setup license &lt;key&gt;</code>, or <code style="font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;">finops login</code> to sign in by email with no key to paste.
+    </p>
   </div>
 
   <!-- Step 2 -->

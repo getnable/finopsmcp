@@ -5297,6 +5297,55 @@ async def connect_azure() -> dict:
 
 
 @mcp.tool()
+async def activate_pro(license_key: str = "") -> dict:
+    """
+    Activate your nable Pro or Team license right here, no terminal, no restart.
+
+    Paste the license key from your receipt email (it starts with FINOPS-2-).
+    nable validates it locally, stores it on this machine, and unlocks the paid
+    features in this same session immediately. The key is verified offline with a
+    public key bundled in nable; nothing about it is sent anywhere.
+
+    Examples:
+        - "Activate my license FINOPS-2-..."
+        - "I just paid for Pro, here's my key"
+
+    Args:
+        license_key: Your license key from the receipt email (FINOPS-2-...).
+    """
+    from .license import store_license, get_status
+
+    key = (license_key or "").strip()
+    if not key:
+        return {
+            "activated": False,
+            "message": ("Paste your license key to activate (it starts with FINOPS-2- and is in "
+                        "your receipt email). No terminal or restart needed."),
+            "get_pro": _UPGRADE_URL,
+        }
+
+    status = store_license(key)
+    if status.mode in ("pro", "team", "enterprise", "trial"):
+        # store_license cleared the cached status, so get_status re-reads and this
+        # running server is Pro from the next call on. No restart required.
+        live = get_status()
+        return {
+            "activated": True,
+            "plan": live.mode,
+            "email": getattr(live, "email", "") or None,
+            "message": f"{live.mode.upper()} is active on this machine now. No restart needed.",
+            "note": "The key was verified offline and stored locally; nothing left your machine.",
+        }
+
+    return {
+        "activated": False,
+        "plan": status.mode,
+        "error": status.message or "That license key did not validate.",
+        "get_pro": _UPGRADE_URL,
+    }
+
+
+@mcp.tool()
 async def get_efficiency_scorecard(
     scope: str = "overall",
     team: str | None = None,
