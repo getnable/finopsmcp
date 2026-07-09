@@ -2,6 +2,29 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.153
+
+Savings are now priced on the customer's real rates, not list price.
+
+New shared effective-savings layer (effective_savings.py) that every savings tool
+can route through, so a saving is what the customer would actually save on their
+environment and their discounts:
+
+- Measured effective rate first: reuses rate_detector (derived from the customer's
+  CUR or Cost Explorer, amortized-vs-list), per-service, and already blends in EDP
+  / private pricing / negotiated rates that no free recommender sees.
+- Commitment coverage as a fallback when no rate data exists. Critically these are
+  not stacked: the amortized effective rate already includes the RI/SP discount, so
+  applying coverage on top would double-count.
+- List price as the last resort, clearly labelled low-confidence with a prompt to
+  connect CUR for exact rates.
+
+Rightsizing routes through it. get_rightsizing_recommendations now returns
+genuine_monthly_savings priced on real rates plus a pricing_basis block
+(effective_discount_pct, rate_source, commitment_coverage_pct, per-row basis +
+confidence counts). Token cost unchanged. Same pattern is ready to extend to idle,
+Graviton, spot, RDS/ECS, and the audit tools next.
+
 ## 0.8.152
 
 Rightsizing now judges genuine savings, not just underutilization.

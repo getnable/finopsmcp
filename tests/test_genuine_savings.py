@@ -7,7 +7,14 @@ from __future__ import annotations
 from finops.recommendations.genuine_savings import (
     Assessment, CommitmentContext, assess, _reset_cache_for_tests,
 )
+from finops.recommendations.effective_savings import SavingsContext
 from finops.recommendations.rightsizing import RightsizingRecommendation, rightsizing_summary
+
+
+def _commit_ctx(sp=0.0, ri=0.0):
+    """A SavingsContext with only commitment coverage (no measured rate)."""
+    return SavingsContext(rate=None, commitment=CommitmentContext(
+        available=True, sp_coverage_pct=sp, ri_coverage_pct=ri))
 
 
 def _rec(**kw):
@@ -58,11 +65,11 @@ def test_compute_optimizer_zero_max_cpu_not_treated_as_peak():
 
 
 def test_commitment_coverage_discounts_savings():
-    ctx = CommitmentContext(available=True, sp_coverage_pct=80.0, ri_coverage_pct=10.0)
-    a = assess(_rec(finding="VERY_OVER_PROVISIONED", avg_cpu_pct=6.0, monthly_savings=300.0), ctx)
+    a = assess(_rec(finding="VERY_OVER_PROVISIONED", avg_cpu_pct=6.0, monthly_savings=300.0),
+               _commit_ctx(sp=80.0, ri=10.0))
     # 80% covered -> real savings floored at ~20% of the on-demand estimate.
     assert a.adjusted_monthly_savings == 60.0
-    assert "covered" in a.why.lower()
+    assert a.basis == "commitment_coverage"
     # A genuinely idle box stays genuine: coverage shrinks the reward, it does not
     # make the box un-idle. $60/mo real is still worth doing.
     assert a.verdict == "genuine_savings"
@@ -71,15 +78,34 @@ def test_commitment_coverage_discounts_savings():
 def test_commitment_coverage_can_sink_a_marginal_rec():
     # Same coverage, but a small on-demand estimate: 80% off $50 = $10 real, which
     # is below the magnitude floor -> no longer genuine.
-    ctx = CommitmentContext(available=True, sp_coverage_pct=80.0, ri_coverage_pct=10.0)
-    a = assess(_rec(finding="OVER_PROVISIONED", avg_cpu_pct=9.0, monthly_savings=50.0), ctx)
+    a = assess(_rec(finding="OVER_PROVISIONED", avg_cpu_pct=9.0, monthly_savings=50.0),
+               _commit_ctx(sp=80.0, ri=10.0))
     assert a.adjusted_monthly_savings == 10.0
     assert a.verdict != "genuine_savings"
 
 
-def test_no_commitment_context_means_no_discount():
+def test_measured_effective_rate_prices_savings():
+    # A customer with a 30% measured EDP discount: $300 list -> $210 real, and the
+    # effective rate is preferred over commitment coverage (no double count).
+    class _Rate:
+        confidence = "high"; source = "cur_athena"; has_private_pricing = True
+        overall_discount_pct = 0.30
+        per_service_discount = {"Amazon Elastic Compute Cloud - Compute": 0.30}
+        def effective_multiplier(self, svc=None):
+            return 1.0 - self.per_service_discount.get(svc, self.overall_discount_pct)
+    ctx = SavingsContext(rate=_Rate(), commitment=CommitmentContext(
+        available=True, sp_coverage_pct=80.0))  # coverage present but must be ignored
+    a = assess(_rec(finding="VERY_OVER_PROVISIONED", avg_cpu_pct=6.0, monthly_savings=300.0), ctx)
+    assert a.basis == "effective_rate"
+    assert a.adjusted_monthly_savings == 210.0  # 30% off, NOT stacked with coverage
+    assert a.confidence == "high"
+
+
+def test_no_context_means_list_price_low_confidence():
     a = assess(_rec(finding="VERY_OVER_PROVISIONED", monthly_savings=300.0), None)
     assert a.adjusted_monthly_savings == 300.0
+    assert a.basis == "list_price"
+    assert a.confidence == "low"
 
 
 def test_action_is_resource_specific():
@@ -108,11 +134,28 @@ def test_summary_surfaces_genuine_total_and_verdicts():
     assert "title" not in row and "description" not in row
 
 
-def test_summary_with_commitment_context_block():
-    ctx = CommitmentContext(available=True, sp_coverage_pct=75.0, ri_coverage_pct=20.0)
-    out = rightsizing_summary([_rec(finding="VERY_OVER_PROVISIONED", monthly_savings=200.0)], ctx)
-    assert out["commitment_context"]["ec2_sp_coverage_pct"] == 75.0
+def test_summary_reports_pricing_basis():
+    out = rightsizing_summary(
+        [_rec(finding="VERY_OVER_PROVISIONED", monthly_savings=200.0)],
+        savings_ctx=_commit_ctx(sp=75.0, ri=20.0),
+    )
+    pb = out["pricing_basis"]
+    assert pb["commitment_coverage_pct"] == 75.0
+    assert pb["basis"].get("commitment_coverage", 0) == 1
     assert "genuine_monthly_savings" in out
+
+
+def test_summary_flags_list_price_when_no_rate_data():
+    out = rightsizing_summary([_rec(finding="OVER_PROVISIONED", monthly_savings=100.0)])
+    assert out["pricing_basis"]["basis"].get("list_price", 0) == 1
+    assert "CUR" in out["pricing_basis"]["note"]
+
+    # Backward compat: a bare CommitmentContext still works via commitment_ctx kwarg.
+    out2 = rightsizing_summary(
+        [_rec(finding="OVER_PROVISIONED", monthly_savings=100.0)],
+        commitment_ctx=CommitmentContext(available=True, sp_coverage_pct=50.0),
+    )
+    assert out2["pricing_basis"]["basis"].get("commitment_coverage", 0) == 1
 
 
 def test_token_cost_bounded_on_large_fleet():

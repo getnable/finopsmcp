@@ -384,19 +384,24 @@ def analyze_rightsizing(
 
 def rightsizing_summary(
     recommendations: list[RightsizingRecommendation],
+    savings_ctx: Any = None,
     commitment_ctx: Any = None,
 ) -> dict[str, Any]:
     """
     Summarize rightsizing recommendations with a genuine-savings judgment on each.
 
     Beyond raw "underutilized" totals, every recommendation is scored against the
-    reasons a rightsizing call is usually wrong (burst/peak, memory-bound, existing
-    RI/Savings Plan coverage, trivial magnitude) and bucketed into
-    genuine_savings / review / likely_false_positive. `commitment_ctx` is an
-    optional CommitmentContext (see genuine_savings.fetch_commitment_context); when
-    absent, coverage discounting is simply skipped.
+    reasons a rightsizing call is usually wrong (burst/peak, memory-bound, trivial
+    magnitude) and priced on the customer's real environment via `savings_ctx`
+    (effective_savings.SavingsContext: measured effective rate + commitment
+    coverage). `commitment_ctx` is accepted for backward compatibility and wrapped.
+    When both are absent, savings stay at list price with a low-confidence label.
     """
     from .genuine_savings import assess
+    from .effective_savings import SavingsContext
+
+    if savings_ctx is None and commitment_ctx is not None:
+        savings_ctx = SavingsContext(rate=None, commitment=commitment_ctx)
 
     total_savings = sum(r.monthly_savings for r in recommendations)
     co_count  = sum(1 for r in recommendations if r.source == "compute_optimizer")
@@ -408,7 +413,7 @@ def rightsizing_summary(
 
     # Judge each recommendation, then sort genuine-first and by adjusted savings so
     # the rows most worth acting on survive the token cap.
-    assessed = [(r, assess(r, commitment_ctx)) for r in recommendations]
+    assessed = [(r, assess(r, savings_ctx)) for r in recommendations]
     _rank = {"genuine_savings": 0, "review": 1, "likely_false_positive": 2}
     assessed.sort(key=lambda ra: (_rank.get(ra[1].verdict, 3), -ra[1].adjusted_monthly_savings))
 
@@ -468,17 +473,31 @@ def rightsizing_summary(
         "recommendations": kept,
     }
 
-    if commitment_ctx is not None and getattr(commitment_ctx, "available", False):
-        out["commitment_context"] = {
-            "ec2_sp_coverage_pct": round(commitment_ctx.sp_coverage_pct, 1),
-            "ec2_ri_coverage_pct": round(commitment_ctx.ri_coverage_pct, 1),
-            "note": (
-                "Savings are discounted by this account's commitment coverage: "
-                "on covered instance-hours the reservation is already paid, so a "
-                "downsize yields little or no marginal saving. 'genuine_monthly_savings' "
-                "reflects the discount."
-            ),
-        }
+    # How the savings were priced: measured effective rate (best), commitment
+    # coverage (fallback), or list price (no discount data). Bases present tell the
+    # customer how much to trust genuine_monthly_savings.
+    bases: dict[str, int] = {}
+    confidences: dict[str, int] = {}
+    for _, a in assessed:
+        bases[a.basis] = bases.get(a.basis, 0) + 1
+        confidences[a.confidence] = confidences.get(a.confidence, 0) + 1
+    pricing: dict[str, Any] = {"basis": bases, "confidence": confidences}
+    if savings_ctx is not None:
+        rate = getattr(savings_ctx, "rate", None)
+        if rate is not None and getattr(rate, "confidence", "low") in ("high", "medium"):
+            pricing["effective_discount_pct"] = round(
+                float(getattr(rate, "overall_discount_pct", 0.0)) * 100, 1
+            )
+            pricing["rate_source"] = getattr(rate, "source", "measured")
+        cc = getattr(savings_ctx, "commitment", None)
+        if cc is not None and getattr(cc, "available", False):
+            pricing["commitment_coverage_pct"] = round(cc.combined_pct, 1)
+    if "list_price" in bases:
+        pricing["note"] = (
+            "Some savings are shown at list price because no rate data was found. "
+            "Connect your Cost and Usage Report (CUR) to price them on your real rates."
+        )
+    out["pricing_basis"] = pricing
 
     if omitted:
         out["recommendations_truncated"] = True

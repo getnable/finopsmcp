@@ -63,7 +63,9 @@ class Assessment:
     score: int              # 0-100
     why: str                # one compact line
     action: str             # what applying it takes (blast radius / reversibility)
-    adjusted_monthly_savings: float   # commitment-aware, conservative
+    adjusted_monthly_savings: float   # priced on the customer's real rates
+    basis: str = "list_price"         # "effective_rate" | "commitment_coverage" | "list_price"
+    confidence: str = "low"           # confidence in the savings figure
 
 
 def fetch_commitment_context(ce_client: Any = None) -> CommitmentContext:
@@ -110,11 +112,14 @@ def _action_for(resource_type: str) -> str:
     return "Resize needs a stop/start (brief downtime); fully reversible."
 
 
-def assess(rec: Any, ctx: CommitmentContext | None = None) -> Assessment:
+def assess(rec: Any, ctx: Any = None) -> Assessment:
     """
     Score one RightsizingRecommendation. `rec` is duck-typed: it just needs the
     fields RightsizingRecommendation carries (monthly_savings, avg_cpu_pct,
     max_cpu_pct, avg_mem_pct, source, finding, resource_type).
+
+    `ctx` is a SavingsContext (effective_savings.SavingsContext). For backward
+    compatibility a bare CommitmentContext is accepted and wrapped.
     """
     savings = float(getattr(rec, "monthly_savings", 0.0) or 0.0)
     avg_cpu = float(getattr(rec, "avg_cpu_pct", 0.0) or 0.0)
@@ -157,23 +162,22 @@ def assess(rec: Any, ctx: CommitmentContext | None = None) -> Assessment:
             score -= 10
             reasons.append(f"memory at {mem:.0f}%")
 
-    # 4. Commitment coverage: discount the on-demand estimate to the marginal
-    #    saving a downsize actually yields on a committed account. This shrinks the
-    #    dollars, it does not make a genuinely-idle box un-idle, so the score nudge
-    #    stays small (added uncertainty only) and magnitude below judges the real
-    #    number. Discounting AND heavily penalizing would double-count.
-    adjusted = savings
-    if ctx and ctx.available and ctx.combined_pct > 0 and savings > 0:
-        cov = ctx.combined_pct
-        # Conservative floor: assume the covered fraction yields no marginal
-        # savings from downsizing (the commitment is already paid for).
-        adjusted = round(savings * max(0.0, 1.0 - cov / 100.0), 2)
-        if cov >= 40:
-            score -= 8
-            reasons.append(f"~{cov:.0f}% of this account's EC2 is commitment-covered, "
-                           f"real saving ≈${adjusted:,.0f}/mo")
+    # 4. Price the saving on the customer's real environment and discounts. The
+    #    shared layer prefers the measured effective rate (already blends in
+    #    commitment + EDP) and falls back to commitment coverage, so we never
+    #    double-count. It shrinks the dollars; it does not make an idle box un-idle,
+    #    so magnitude below judges the real number.
+    from .effective_savings import adjust_savings, SavingsContext
+    sctx = ctx
+    if ctx is not None and not isinstance(ctx, SavingsContext):
+        # Backward compat: a bare CommitmentContext was passed.
+        sctx = SavingsContext(rate=None, commitment=ctx)
+    adj = adjust_savings(savings, rtype, sctx)
+    adjusted = adj.effective_savings
+    if adj.basis != "list_price" and adj.discount_pct > 0:
+        reasons.append(f"real saving ≈${adjusted:,.0f}/mo {adj.note}")
 
-    # 5. Magnitude, judged on the REAL (commitment-adjusted) saving.
+    # 5. Magnitude, judged on the REAL (environment-adjusted) saving.
     if adjusted < 15:
         score -= 10
         reasons.append(f"only ~${adjusted:,.0f}/mo")
@@ -199,4 +203,6 @@ def assess(rec: Any, ctx: CommitmentContext | None = None) -> Assessment:
         why=why,
         action=_action_for(rtype),
         adjusted_monthly_savings=adjusted,
+        basis=adj.basis,
+        confidence=adj.confidence,
     )
