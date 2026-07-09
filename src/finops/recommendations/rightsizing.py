@@ -382,7 +382,22 @@ def analyze_rightsizing(
     return recommendations
 
 
-def rightsizing_summary(recommendations: list[RightsizingRecommendation]) -> dict[str, Any]:
+def rightsizing_summary(
+    recommendations: list[RightsizingRecommendation],
+    commitment_ctx: Any = None,
+) -> dict[str, Any]:
+    """
+    Summarize rightsizing recommendations with a genuine-savings judgment on each.
+
+    Beyond raw "underutilized" totals, every recommendation is scored against the
+    reasons a rightsizing call is usually wrong (burst/peak, memory-bound, existing
+    RI/Savings Plan coverage, trivial magnitude) and bucketed into
+    genuine_savings / review / likely_false_positive. `commitment_ctx` is an
+    optional CommitmentContext (see genuine_savings.fetch_commitment_context); when
+    absent, coverage discounting is simply skipped.
+    """
+    from .genuine_savings import assess
+
     total_savings = sum(r.monthly_savings for r in recommendations)
     co_count  = sum(1 for r in recommendations if r.source == "compute_optimizer")
     cw_count  = sum(1 for r in recommendations if r.source == "cloudwatch_fallback")
@@ -391,10 +406,22 @@ def rightsizing_summary(recommendations: list[RightsizingRecommendation]) -> dic
     for r in recommendations:
         by_type[r.resource_type] = by_type.get(r.resource_type, 0) + r.monthly_savings
 
-    # Build detail rows highest-savings-first, then cap to a token budget. Each row
-    # has 15 fields, so a large fleet would otherwise dump a heavy payload into the
-    # model context (re-read each turn). Totals above cover the full set; only this
-    # detail list is bounded.
+    # Judge each recommendation, then sort genuine-first and by adjusted savings so
+    # the rows most worth acting on survive the token cap.
+    assessed = [(r, assess(r, commitment_ctx)) for r in recommendations]
+    _rank = {"genuine_savings": 0, "review": 1, "likely_false_positive": 2}
+    assessed.sort(key=lambda ra: (_rank.get(ra[1].verdict, 3), -ra[1].adjusted_monthly_savings))
+
+    genuine_savings_total = sum(
+        a.adjusted_monthly_savings for _, a in assessed if a.verdict == "genuine_savings"
+    )
+    verdict_counts: dict[str, int] = {}
+    for _, a in assessed:
+        verdict_counts[a.verdict] = verdict_counts.get(a.verdict, 0) + 1
+
+    # Compact rows: dropped the verbose title/description/net fields in favour of a
+    # one-line `why` plus the verdict/score/action, so the judgment is richer AND
+    # the per-row token cost is no higher than before.
     rows = [
         {
             "instance_id":    r.instance_id,
@@ -405,15 +432,16 @@ def rightsizing_summary(recommendations: list[RightsizingRecommendation]) -> dic
             "current_type":   r.instance_type,
             "recommended_type": r.recommended_type,
             "avg_cpu_pct":    r.avg_cpu_pct,
+            "max_cpu_pct":    r.max_cpu_pct or None,
             "avg_mem_pct":    r.avg_mem_pct,
-            "avg_net_mbps":   r.avg_net_mbps,
             "monthly_savings": r.monthly_savings,
-            "confidence":     r.confidence,
-            "finding":        r.finding,
-            "title":          r.title,
-            "description":    r.description,
+            "adjusted_monthly_savings": a.adjusted_monthly_savings,
+            "verdict":        a.verdict,
+            "score":          a.score,
+            "why":            a.why,
+            "action":         a.action,
         }
-        for r in sorted(recommendations, key=lambda r: r.monthly_savings, reverse=True)
+        for r, a in assessed
     ]
     from ..token_budget import fit_to_budget
     kept, omitted = fit_to_budget(rows)
@@ -422,6 +450,10 @@ def rightsizing_summary(recommendations: list[RightsizingRecommendation]) -> dic
         "total_instances_flagged": len(recommendations),
         "total_monthly_savings":   round(total_savings, 2),
         "total_annual_savings":    round(total_savings * 12, 2),
+        # The number that actually matters: savings that survived the judgment.
+        "genuine_monthly_savings": round(genuine_savings_total, 2),
+        "genuine_annual_savings":  round(genuine_savings_total * 12, 2),
+        "verdicts": verdict_counts,
         "source": {
             "compute_optimizer": co_count,
             "cloudwatch_fallback": cw_count,
@@ -435,12 +467,25 @@ def rightsizing_summary(recommendations: list[RightsizingRecommendation]) -> dic
         "savings_by_resource_type": {k: round(v, 2) for k, v in by_type.items()},
         "recommendations": kept,
     }
+
+    if commitment_ctx is not None and getattr(commitment_ctx, "available", False):
+        out["commitment_context"] = {
+            "ec2_sp_coverage_pct": round(commitment_ctx.sp_coverage_pct, 1),
+            "ec2_ri_coverage_pct": round(commitment_ctx.ri_coverage_pct, 1),
+            "note": (
+                "Savings are discounted by this account's commitment coverage: "
+                "on covered instance-hours the reservation is already paid, so a "
+                "downsize yields little or no marginal saving. 'genuine_monthly_savings' "
+                "reflects the discount."
+            ),
+        }
+
     if omitted:
         out["recommendations_truncated"] = True
         out["recommendations_omitted"] = omitted
         out["hint"] = (
-            f"Showing the {len(kept)} highest-savings of {len(recommendations)} "
-            f"recommendations to bound token cost. Raise avg_cpu_threshold or scope "
-            f"to fewer accounts to see the rest."
+            f"Showing the {len(kept)} highest-value of {len(recommendations)} "
+            f"recommendations (genuine-savings first) to bound token cost. Raise "
+            f"avg_cpu_threshold or scope to fewer accounts to see the rest."
         )
     return out

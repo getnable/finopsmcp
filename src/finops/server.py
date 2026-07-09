@@ -2286,6 +2286,7 @@ async def get_rightsizing_recommendations(
 
     try:
         from .recommendations.rightsizing import analyze_rightsizing, rightsizing_summary
+        from .recommendations.genuine_savings import fetch_commitment_context
         # Offload the blocking CloudWatch/EC2 scan so it does not freeze the MCP
         # event loop (and the editor) for the tens of seconds it can take.
         recs = await asyncio.to_thread(
@@ -2293,7 +2294,11 @@ async def get_rightsizing_recommendations(
             avg_cpu_threshold=avg_cpu_threshold,
             max_cpu_threshold=max_cpu_threshold,
         )
-        result = rightsizing_summary(recs)
+        # Account-level commitment coverage, so on-demand savings estimates get
+        # discounted to what a downsize would actually save. Cached (~15 min) and
+        # off-thread; degrades to no discount if Cost Explorer is unavailable.
+        commitment_ctx = await asyncio.to_thread(fetch_commitment_context)
+        result = rightsizing_summary(recs, commitment_ctx=commitment_ctx)
 
         # Persist recommendations for savings tracking (fire-and-forget)
         try:
@@ -2324,13 +2329,13 @@ async def get_rightsizing_recommendations(
             pass  # never block the main response
 
         # Nudge free users toward ticket creation when there are real savings on the table
-        if isinstance(result, dict) and result.get("total_monthly_savings_usd", 0) > 0:
-            savings = result["total_monthly_savings_usd"]
-            count = result.get("count", len(recs))
+        if isinstance(result, dict) and result.get("genuine_monthly_savings", 0) > 0:
+            savings = result["genuine_monthly_savings"]
+            count = result.get("verdicts", {}).get("genuine_savings", 0)
             nudge = _team_nudge(
-                f"You have {count} rightsizing opportunit{'ies' if count != 1 else 'y'} "
-                f"worth ${savings:,.0f}/mo. To auto-create Jira, Linear, or GitHub tickets "
-                f"so these actually get fixed, upgrade to Pro:"
+                f"You have {count} genuine rightsizing opportunit{'ies' if count != 1 else 'y'} "
+                f"worth ${savings:,.0f}/mo after commitment coverage. To auto-create Jira, "
+                f"Linear, or GitHub tickets so these actually get fixed, upgrade to Pro:"
             , context="rightsizing_recommendations")
             if nudge:
                 result["_upgrade"] = nudge

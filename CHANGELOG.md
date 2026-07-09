@@ -2,6 +2,32 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.152
+
+Rightsizing now judges genuine savings, not just underutilization.
+
+First pass of deepening existing tools into proprietary reasoning. get_rightsizing_
+recommendations used to hand back "this instance is underutilized, here's the
+on-demand savings", the same commodity signal every cloud vendor ships free. It now
+scores every recommendation against the reasons a rightsizing call is usually wrong
+and returns a verdict (genuine_savings / review / likely_false_positive), a 0-100
+score, and a one-line rationale:
+
+- Burst/peak guard: low average with high peaks is a workload that needs headroom,
+  not a downsize (measured peaks only, so Compute Optimizer's unknown-peak is never
+  mistaken for a 0% peak).
+- Memory-bound guard: idle CPU with high memory means a CPU downsize starves RAM.
+- Commitment coverage: on-demand savings estimates are discounted by the account's
+  actual Reserved Instance + Savings Plan coverage, so a downsize on a committed
+  instance is not counted as a saving that is already paid for. New top-level
+  genuine_monthly_savings reflects the discount.
+- Magnitude: trivial changes are demoted on the real (adjusted) dollar figure.
+
+Token cost held flat: the verbose per-row title/description strings were dropped for
+the compact verdict/score/why/action, and commitment coverage is fetched once,
+cached ~15 min, off-thread, and degrades silently if Cost Explorer is unavailable.
+Fixed a dead upgrade nudge that read a key the summary never returned.
+
 ## 0.8.151
 
 Security audit pass across the whole codebase, one dependency floor raised.
