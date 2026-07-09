@@ -2,6 +2,25 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.157
+
+Performance audit: parallel scans, no more laptop hangs, a 2.6x faster suite.
+
+- Rightsizing's CloudWatch fallback no longer walks regions x instances serially
+  (a 100-instance fleet was 100+ sequential CloudWatch round-trips). Instance
+  discovery runs per-region in parallel and CPU metric fetches run through a
+  bounded worker pool. An instance whose metrics fail to load is treated as
+  fully utilized, so unknown utilization can never be recommended for downsizing.
+- GCP project_ids() no longer hangs ~9s on machines with no GCP credentials:
+  google.auth's GCE metadata probe (3s x retries) is skipped unless a local ADC
+  file or an explicit project env exists, bounded to 1s when it does happen, and
+  the answer is cached for the process. Several GCP tools call this per request.
+- Contributor DX: the test suite drops from ~42s to ~16s. Web-server test
+  teardowns no longer wait on serve_forever's 0.5s poll (26 tests x 0.5s), a
+  unit test no longer does a live GitHub org sweep on dev boxes with a real
+  GITHUB_TOKEN, and a suite-wide conftest guard strips ambient service
+  credentials so that class of leak cannot return.
+
 ## 0.8.156
 
 The agent team is Pro. Free stays read-only: talk to your bill.

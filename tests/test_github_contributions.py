@@ -100,7 +100,13 @@ def test_build_report_joins_fetched_prs_with_llm_spend(monkeypatch):
             {"label": "Claude Opus 4.8", "magnitude": "high", "lines": 400, "title": "x", "url": "", "repo": "o/r"},
         ]}
 
+    async def fake_commits(*, days, repos=None):
+        return {"configured": False, "reason": "not configured in tests"}
+
     monkeypatch.setattr(gc, "fetch_ai_contributions", fake_fetch)
+    # unit="auto" also awaits the commits fetch; without this patch the test does a
+    # LIVE GitHub org sweep on any dev box with GITHUB_TOKEN set (4-5s per run).
+    monkeypatch.setattr(gc, "fetch_ai_commits", fake_commits)
     monkeypatch.setattr(
         "finops.connectors.llm_costs.get_all_llm_costs",
         lambda **kw: {"by_model": {"claude-opus-4-8": 49.0}, "total_usd": 100.0},

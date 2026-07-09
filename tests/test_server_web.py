@@ -119,7 +119,7 @@ def running_server(mock_dashboard_data):
 
     port = _free_port()
     server = _make_server("127.0.0.1", port)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True)
     thread.start()
     time.sleep(0.1)
     yield server, port

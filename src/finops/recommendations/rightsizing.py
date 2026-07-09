@@ -275,58 +275,104 @@ def _monthly_cost(instance_type: str) -> float:
     return _HOURLY_PRICE.get(instance_type, 0.0) * _HOURS_PER_MONTH
 
 
+def _list_region_instances(region: str) -> list[dict]:
+    """All running EC2 instances in one region (one paginated describe call)."""
+    import boto3
+    ec2 = boto3.client("ec2", region_name=region)
+    out: list[dict] = []
+    for page in ec2.get_paginator("describe_instances").paginate(
+        Filters=[{"Name": "instance-state-name", "Values": ["running"]}]
+    ):
+        for reservation in page["Reservations"]:
+            for inst in reservation["Instances"]:
+                out.append({
+                    "region": region,
+                    "iid": inst["InstanceId"],
+                    "itype": inst["InstanceType"],
+                    "name": next(
+                        (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
+                    ),
+                })
+    return out
+
+
 def _analyze_cloudwatch_fallback(
     regions: list[str],
     account_id: str,
     avg_cpu_threshold: float,
     max_cpu_threshold: float,
 ) -> list[RightsizingRecommendation]:
-    """CPU-only EC2 scan when Compute Optimizer is not available."""
+    """CPU-only EC2 scan when Compute Optimizer is not available.
+
+    Two parallel phases instead of the old regions x instances serial walk (a
+    100-instance fleet was 100+ sequential CloudWatch round-trips): first list
+    instances across regions concurrently, then fetch each instance's CPU metrics
+    concurrently. Bounded workers keep well under CloudWatch API limits.
+    """
     import boto3
-    results = []
-    for region in regions:
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Phase 1: discover running instances, regions in parallel.
+    instances: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(regions)))) as pool:
+        for result in pool.map(_safe_list_instances, regions):
+            instances.extend(result)
+
+    if not instances:
+        return []
+
+    # Phase 2: per-instance CPU metrics, in parallel (one CloudWatch client per
+    # region, shared across that region's lookups; boto3 clients are thread-safe).
+    cw_by_region = {r: boto3.client("cloudwatch", region_name=r)
+                    for r in {i["region"] for i in instances}}
+
+    def _cpu(inst: dict) -> tuple[dict, float, float]:
         try:
-            ec2 = boto3.client("ec2",        region_name=region)
-            cw  = boto3.client("cloudwatch", region_name=region)
-            pag = ec2.get_paginator("describe_instances")
-            for page in pag.paginate(
-                Filters=[{"Name": "instance-state-name", "Values": ["running"]}]
-            ):
-                for reservation in page["Reservations"]:
-                    for inst in reservation["Instances"]:
-                        iid   = inst["InstanceId"]
-                        itype = inst["InstanceType"]
-                        name  = next(
-                            (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
-                        )
-                        avg_cpu, max_cpu = _get_cloudwatch_cpu(cw, iid, _LOOKBACK_DAYS)
-                        if avg_cpu >= avg_cpu_threshold or max_cpu >= max_cpu_threshold:
-                            continue
-                        recommended = _DOWNSIZE_MAP.get(itype)
-                        if not recommended or recommended == itype:
-                            continue
-                        savings = _monthly_cost(itype) - _monthly_cost(recommended)
-                        if savings <= 0:
-                            continue
-                        results.append(RightsizingRecommendation(
-                            instance_id=iid,
-                            instance_type=itype,
-                            name=name,
-                            region=region,
-                            account_id=account_id,
-                            resource_type="ec2",
-                            source="cloudwatch_fallback",
-                            avg_cpu_pct=round(avg_cpu, 1),
-                            max_cpu_pct=round(max_cpu, 1),
-                            recommended_type=recommended,
-                            current_monthly_cost=round(_monthly_cost(itype), 2),
-                            recommended_monthly_cost=round(_monthly_cost(recommended), 2),
-                            monthly_savings=round(savings, 2),
-                            confidence="high" if avg_cpu < 10 and max_cpu < 30 else "medium",
-                        ))
+            avg_cpu, max_cpu = _get_cloudwatch_cpu(
+                cw_by_region[inst["region"]], inst["iid"], _LOOKBACK_DAYS)
         except Exception as e:
-            log.warning("CloudWatch fallback failed for region %s: %s", region, e)
+            log.debug("CPU fetch failed for %s: %s", inst["iid"], e)
+            # Unknown utilization must never be recommended for downsizing.
+            avg_cpu, max_cpu = 100.0, 100.0
+        return inst, avg_cpu, max_cpu
+
+    results: list[RightsizingRecommendation] = []
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        for inst, avg_cpu, max_cpu in pool.map(_cpu, instances):
+            if avg_cpu >= avg_cpu_threshold or max_cpu >= max_cpu_threshold:
+                continue
+            itype = inst["itype"]
+            recommended = _DOWNSIZE_MAP.get(itype)
+            if not recommended or recommended == itype:
+                continue
+            savings = _monthly_cost(itype) - _monthly_cost(recommended)
+            if savings <= 0:
+                continue
+            results.append(RightsizingRecommendation(
+                instance_id=inst["iid"],
+                instance_type=itype,
+                name=inst["name"],
+                region=inst["region"],
+                account_id=account_id,
+                resource_type="ec2",
+                source="cloudwatch_fallback",
+                avg_cpu_pct=round(avg_cpu, 1),
+                max_cpu_pct=round(max_cpu, 1),
+                recommended_type=recommended,
+                current_monthly_cost=round(_monthly_cost(itype), 2),
+                recommended_monthly_cost=round(_monthly_cost(recommended), 2),
+                monthly_savings=round(savings, 2),
+                confidence="high" if avg_cpu < 10 and max_cpu < 30 else "medium",
+            ))
     return results
+
+
+def _safe_list_instances(region: str) -> list[dict]:
+    try:
+        return _list_region_instances(region)
+    except Exception as e:
+        log.warning("CloudWatch fallback failed for region %s: %s", region, e)
+        return []
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

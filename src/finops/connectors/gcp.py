@@ -4,6 +4,7 @@ import asyncio
 
 import os
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .base import BaseConnector, CostEntry, CostSummary
@@ -11,6 +12,10 @@ from .base import BaseConnector, CostEntry, CostSummary
 
 class GCPConnector(BaseConnector):
     provider = "gcp"
+
+    # Cached ADC default-project answer (class-level: several tools construct a
+    # fresh connector per call). None = not probed yet.
+    _adc_project_cache: list[str] | None = None
 
     def __init__(self) -> None:
         self._billing_account_ids: list[str] = [
@@ -34,17 +39,39 @@ class GCPConnector(BaseConnector):
         GCP resource scans (Compute, Monitoring) are per-project, not per-billing-
         account. Read GCP_PROJECT_IDS (comma-separated) first, then fall back to the
         default project on the Application Default Credentials.
+
+        The ADC fallback is guarded: with no ADC file and no explicit project env,
+        google.auth.default() probes the GCE metadata server with retries (~9s of
+        hang on a laptop) before failing, and several tools call this per request.
+        Only probe when a local credential source plausibly exists, cap the
+        metadata timeout, and cache the answer for the process.
         """
         ids = [p.strip() for p in os.getenv("GCP_PROJECT_IDS", "").split(",") if p.strip()]
         if ids:
             return ids
+        if GCPConnector._adc_project_cache is not None:
+            return list(GCPConnector._adc_project_cache)
+
+        adc_file = os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or str(
+            Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+        )
+        explicit_project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
+        if not (os.path.exists(adc_file) or explicit_project):
+            # No local credential source: skip the slow metadata probe entirely.
+            # A GCE VM can opt back in with GOOGLE_CLOUD_PROJECT. Not cached, so
+            # creating credentials mid-session is picked up on the next call.
+            return []
         try:
+            # Bound the metadata probe if one still happens (default 3s x retries).
+            os.environ.setdefault("GCE_METADATA_TIMEOUT", "1")
             import google.auth
 
             _, project = google.auth.default()
-            return [project] if project else []
+            result = [project] if project else []
         except Exception:
-            return []
+            result = []
+        GCPConnector._adc_project_cache = result
+        return list(result)
 
     # ── internal helpers ────────────────────────────────────────────────────
 

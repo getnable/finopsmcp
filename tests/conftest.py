@@ -34,3 +34,16 @@ def _no_real_keychain(monkeypatch):
     monkeypatch.setattr(license_mod, "_kr_cached_date", None)
     yield
     Vault._key_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_service_creds(monkeypatch):
+    """Unit tests must not inherit the developer's live service credentials.
+
+    A dev box with GITHUB_TOKEN + GITHUB_ORGS set made an unpatched code path do a
+    real GitHub org sweep inside a unit test (4-5s per run, network-flaky). Strip
+    the vars suite-wide; tests that need them set their own via monkeypatch, which
+    layers on top of this fixture for their duration.
+    """
+    for var in ("GITHUB_TOKEN", "GITHUB_ORGS"):
+        monkeypatch.delenv(var, raising=False)

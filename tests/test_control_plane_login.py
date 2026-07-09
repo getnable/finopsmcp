@@ -158,7 +158,7 @@ def _start_dashboard():
     port = s.getsockname()[1]
     s.close()
     server = _make_server("127.0.0.1", port)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True).start()
     time.sleep(0.1)
     return server, port
 

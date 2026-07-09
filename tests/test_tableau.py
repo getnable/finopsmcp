@@ -26,7 +26,7 @@ def _start_server() -> tuple[HTTPServer, str]:
     """Start the dashboard server on a random available port. Returns (server, base_url)."""
     server = HTTPServer(("127.0.0.1", 0), _Handler)
     port = server.server_address[1]
-    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05), daemon=True)
     t.start()
     return server, f"http://127.0.0.1:{port}"
 
