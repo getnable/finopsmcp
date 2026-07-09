@@ -14,32 +14,6 @@ nable is a local-first MCP server that connects to your real AWS, Azure, GCP, Ku
 
 ![nable demo: uvx nable welcome --demo shows a sample bill in seconds](https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docs/demo.gif)
 
-![nable in Claude Desktop](https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docs/claude-cost-answer.png)
-
-```
-User: Just downloaded nable: What's our cloud spend this month?
-
-Claude: Here's your spend breakdown:
-
-Total: $8,421.63 / month
-
-Provider    | Spend
-------------|----------
-AWS         | $7,284.17
-Datadog     | $847.20
-Snowflake   | $290.26
-
-Top AWS services:
-- EC2: $3,184.52
-- EKS: $1,821.34
-- RDS: $1,243.80
-- ElastiCache: $612.40
-- S3: $184.22
-
-Most spend is concentrated in us-east-1 ($5,841 of the $7,284 AWS total).
-```
-
-
 ---
 
 ## Quick start
