@@ -2116,17 +2116,85 @@ def main(args: list[str] | None = None) -> None:
     for _noisy in ("botocore", "boto3", "apscheduler", "httpx", "httpcore", "urllib3", "posthog"):
         logging.getLogger(_noisy).setLevel(logging.WARNING)
 
-    parser = argparse.ArgumentParser(
+    class _NableParser(argparse.ArgumentParser):
+        """argparse with two DX fixes: grouped --help instead of a 45-command
+        wall, and a did-you-mean error instead of dumping every choice."""
+
+        # Ordered groups. A command registered but not listed here auto-renders
+        # under "other", so new subcommands can never silently vanish from help.
+        _GROUPS = [
+            ("start here", ["welcome", "connect", "doctor", "tools", "serve", "upgrade"]),
+            ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
+            ("ai / llm providers", ["openai", "anthropic", "openrouter", "litellm",
+                                     "modal", "together", "replicate", "cohere", "mistral"]),
+            ("saas & observability", ["datadog", "newrelic", "databricks", "snowflake",
+                                       "mongodb", "twilio", "cloudflare", "vercel", "langfuse"]),
+            ("alerts & reports", ["slack", "teams", "notion", "n8n"]),
+            ("editor & agents", ["claude", "guard"]),
+            ("account & billing", ["login", "logout", "license", "license-status", "credits"]),
+            ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra"]),
+        ]
+
+        def _sub_action(self):
+            for a in self._actions:
+                if isinstance(a, argparse._SubParsersAction):
+                    return a
+            return None
+
+        def format_help(self) -> str:
+            sub = self._sub_action()
+            if sub is None:
+                return super().format_help()
+            helps = {c.dest: (c.help or "") for c in sub._choices_actions}
+            registered = list(sub.choices.keys())
+            lines = [self.format_usage().rstrip(), "", self.description or "", ""]
+            seen: set = set()
+            for title, names in self._GROUPS:
+                rows = [n for n in names if n in registered]
+                if not rows:
+                    continue
+                lines.append(title)
+                for n in rows:
+                    lines.append(f"  {n:<16} {helps.get(n, '')}")
+                    seen.add(n)
+                lines.append("")
+            leftovers = [n for n in registered if n not in seen]
+            if leftovers:
+                lines.append("other")
+                for n in leftovers:
+                    lines.append(f"  {n:<16} {helps.get(n, '')}")
+                lines.append("")
+            lines += [
+                "options",
+                "  -h, --help       show this help message and exit",
+                "  --version        show the installed nable version",
+                "",
+                self.epilog or "",
+            ]
+            return "\n".join(lines)
+
+        def error(self, message: str):
+            if "invalid choice" in message:
+                import difflib
+                import re as _re
+                import sys as _sys
+                m = _re.search(r"invalid choice: '([^']*)'", message)
+                bad = m.group(1) if m else ""
+                sub = self._sub_action()
+                choices = list(sub.choices.keys()) if sub else []
+                close = difflib.get_close_matches(bad, choices, n=3, cutoff=0.6)
+                print(f"finops: unknown command '{bad}'", file=_sys.stderr)
+                if close:
+                    print(f"Did you mean: {', '.join(close)}?", file=_sys.stderr)
+                print("Run 'finops --help' to see all commands.", file=_sys.stderr)
+                _sys.exit(2)
+            super().error(message)
+
+    parser = _NableParser(
         prog="finops",
         description="nable: connect your cloud + SaaS billing to Claude and ask cost questions in your editor.",
         epilog=(
-            "quick start\n"
-            "  finops welcome          guided setup: connect Claude + your first cloud account\n"
-            "  finops setup aws        connect one provider now (also: azure, gcp, datadog, ...)\n"
-            "  finops doctor           check that everything is wired up\n"
-            "  finops serve            open the local visual dashboard\n"
-            "  finops tools            see example questions you can ask nable in Claude\n"
-            "\n"
+            "first time? run: finops welcome\n"
             "then restart Claude Desktop and ask: \"What are my AWS costs this month?\"\n"
             "docs: https://getnable.com/docs\n"
         ),
@@ -2227,10 +2295,10 @@ def main(args: list[str] | None = None) -> None:
     guard_p.add_argument("--command", dest="guard_command", default="",
                          help="With 'check': a shell command to classify against your policy")
 
-    iam_p = sub.add_parser("iam-template")
+    iam_p = sub.add_parser("iam-template", help="Print the least-privilege IAM policy / CloudFormation nable needs")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
 
-    vault_p = sub.add_parser("vault")
+    vault_p = sub.add_parser("vault", help="Inspect the local credential vault (list, audit)")
     vault_p.add_argument("action", choices=["list", "delete", "rotate"])
     vault_p.add_argument("key", nargs="?", default="")
 

@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.150
+
+The CLI front door: grouped help and did-you-mean.
+
+- finops --help no longer prints a flat wall of 45 subcommands with connectors
+  first. Commands render in 8 groups with "start here" (welcome, connect, doctor,
+  tools, serve, upgrade) at the top. Self-healing: a future command nobody assigns
+  to a group auto-renders under "other" instead of vanishing, and a test flags it.
+- A typo'd command gets "unknown command 'welcom'. Did you mean: welcome?" instead
+  of argparse dumping all 45 choices in one line.
+- iam-template and vault gained the help text they were missing.
+
 ## 0.8.149
 
 doctor stops saying "all checks passed" when nothing is connected.
