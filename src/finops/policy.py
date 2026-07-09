@@ -74,21 +74,60 @@ def load_policy() -> dict[str, Any]:
     return pol
 
 
+def _apply_learning(out: dict[str, Any], action_type: str, signal: dict[str, Any] | None) -> dict[str, Any]:
+    """Fold this customer's decision history into the gate. Safety invariant: learning
+    is a one-way ratchet toward caution. It may tighten an ALLOW to ESCALATE when the
+    customer habitually declines this kind of action, or annotate an ALLOW they
+    habitually approve. It NEVER loosens a BLOCK or ESCALATE into ALLOW, so learning
+    can never become an excuse to act more aggressively than the static policy allows.
+
+    `signal` is a per-source signal (learning.signal.signal_for); its `verdict` is
+    "suppress" / "boost" only once there is enough history (WARM), otherwise "neutral",
+    so a sparse ledger is a silent no-op.
+    """
+    if not isinstance(signal, dict):
+        return out
+    verdict = signal.get("verdict")
+    if verdict not in ("suppress", "boost"):
+        return out
+
+    out["learned"] = {
+        "verdict": verdict,
+        "act_rate": signal.get("act_rate"),
+        "accuracy": signal.get("accuracy"),
+        "coverage": signal.get("coverage"),
+        "why": signal.get("why"),
+    }
+    if out["gate"] == GATE_ALLOW and verdict == "suppress":
+        out["gate"] = GATE_ESCALATE
+        out["reason"] = (
+            f"Policy would allow this, but your history shows you usually decline "
+            f"'{action_type}' actions like this, so a human should confirm it's wanted."
+        )
+        out["learned"]["adjustment"] = "allow_to_escalate"
+    elif out["gate"] == GATE_ALLOW and verdict == "boost":
+        out["reason"] += " Your history shows you usually approve these."
+        out["learned"]["adjustment"] = "confidence_added"
+    return out
+
+
 def evaluate_action_gate(
     action_type: str,
     monthly_delta_usd: float = 0.0,
     cost_verdict: str | None = None,
     *,
     policy: dict[str, Any] | None = None,
+    signal: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Advisory gate for a proposed remediation action.
 
     action_type: e.g. "rightsizing" (reversible) or "idle_cleanup" (one-way).
     monthly_delta_usd: the action's cost impact (negative = a saving).
     cost_verdict: the preflight verdict ("ok"/"warn"/"over_budget"/"no_budget"), if known.
+    signal: optional per-source learning signal; folded in caution-only (see _apply_learning).
 
-    Returns {gate, reason, action_type, door, monthly_delta_usd}. nable never
-    executes; this advises a human. Pure, never raises on normal input.
+    Returns {gate, reason, action_type, door, monthly_delta_usd, [learned]}. nable
+    never executes; this advises a human. Pure, never raises on normal input.
     """
     pol = policy or load_policy()
     delta = float(monthly_delta_usd or 0.0)
@@ -99,37 +138,33 @@ def evaluate_action_gate(
         "monthly_delta_usd": round(delta, 2),
     }
 
-    # 1. One-way doors always escalate (irreversible or a financial commitment).
+    # ---- Static policy (the floor of caution) ----
     if door == "one_way" and pol.get("escalate_one_way_doors", True):
+        # One-way doors always escalate (irreversible or a financial commitment).
         out["gate"] = GATE_ESCALATE
         out["reason"] = (f"'{action_type}' is a one-way door (irreversible or a financial "
                          "commitment); a human must review and apply it.")
-        return out
-
-    # 2. Not in the human's allowlist -> block.
-    if action_type not in set(pol.get("allowed_action_types", [])):
+    elif action_type not in set(pol.get("allowed_action_types", [])):
+        # Not in the human's allowlist -> block.
         out["gate"] = GATE_BLOCK
         out["reason"] = (f"'{action_type}' is not in your allowlist of permitted actions; "
                          "nable will not propose applying it.")
-        return out
-
-    # 3. Over budget (per the cost preflight) -> escalate.
-    if cost_verdict == "over_budget":
+    elif cost_verdict == "over_budget":
+        # Over budget (per the cost preflight) -> escalate.
         out["gate"] = GATE_ESCALATE
         out["reason"] = ("This change would push you over budget; a human should review it "
                          "before it is applied.")
-        return out
-
-    # 4. Cost increase above the auto threshold -> escalate (savings are always fine).
-    cap = float(pol.get("max_auto_monthly_usd", 500.0))
-    if delta > cap:
+    elif delta > float(pol.get("max_auto_monthly_usd", 500.0)):
+        # Cost increase above the auto threshold -> escalate (savings are always fine).
+        cap = float(pol.get("max_auto_monthly_usd", 500.0))
         out["gate"] = GATE_ESCALATE
         out["reason"] = (f"The +${delta:,.0f}/mo impact is over your ${cap:,.0f} auto threshold; "
                          "a human should review it.")
-        return out
+    else:
+        # Reversible, allowlisted, within budget and threshold.
+        out["gate"] = GATE_ALLOW
+        out["reason"] = (f"'{action_type}' is reversible, in your allowlist, and within budget; "
+                         "a human can apply it within your policy.")
 
-    # 5. Reversible, allowlisted, within budget and threshold.
-    out["gate"] = GATE_ALLOW
-    out["reason"] = (f"'{action_type}' is reversible, in your allowlist, and within budget; "
-                     "a human can apply it within your policy.")
-    return out
+    # ---- Learning layer (caution-only ratchet) ----
+    return _apply_learning(out, action_type, signal)

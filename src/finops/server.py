@@ -9097,7 +9097,18 @@ async def check_action_policy(
 
     delta = (cost or {}).get("monthly_delta_usd", 0.0)
     verdict = (cost or {}).get("verdict")
-    gate = evaluate_action_gate(action_type, delta, verdict, policy=load_policy())
+    # Learning: fold this customer's decision history for this action type into the
+    # gate. Caution-only ratchet (see policy._apply_learning). Deterministic math over
+    # the local ledger, no LLM loop, so it stays cheap and propose-only. Best-effort:
+    # any failure leaves the static gate untouched.
+    learn_signal = None
+    try:
+        from .recommendations.learning import customer_signal
+        from .recommendations.learning.signal import signal_for
+        learn_signal = signal_for(customer_signal(), action_type)
+    except Exception:
+        learn_signal = None
+    gate = evaluate_action_gate(action_type, delta, verdict, policy=load_policy(), signal=learn_signal)
     if cost is not None:
         # Label the budget verdict with the age of the cost data it rests on, so the
         # agent knows how fresh the "over budget" call is. Cached by design: no live

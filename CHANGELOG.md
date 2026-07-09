@@ -2,6 +2,23 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.155
+
+Agent 1 (Budget Guard): the action gate now learns from what you approve.
+
+First of the three agentic pieces. check_action_policy's allow/block/escalate gate
+was static (a human-authored allowlist + budget threshold). It now folds in this
+customer's decision history: if you habitually decline a kind of action, an action
+policy would ALLOW is tightened to ESCALATE so a human confirms it; actions you
+habitually approve get a confidence note. This is agent cost-control that learns
+from the actions you take, fusing the budget gate with the learning ledger.
+
+Safety invariant (tested): learning is a one-way ratchet toward caution. It can
+tighten ALLOW to ESCALATE, but it can NEVER loosen a BLOCK or ESCALATE into ALLOW,
+so it can never make an agent act more aggressively than the static policy permits.
+The learning is deterministic math over the local ledger, no LLM loop, so it stays
+propose-only and token-free.
+
 ## 0.8.154
 
 Demo mode now shows the genuine-savings judgment.
