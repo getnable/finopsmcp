@@ -1105,7 +1105,89 @@ function Reveal({ children }){
   return <div ref={ref} className="reveal">{children}</div>;
 }
 
-// The product, front and center: the recorded demo as the "see it work" moment.
+// The product, front and center. A scripted, native animation instead of a screen
+// recording: always crisp, no dead space, no real account ids, every beat staged.
+// Beats: question types -> tool chips -> filled cost table -> driver + offer ->
+// "Yes, open it" -> PR drafted card -> hold -> loop.
+const DT_ROWS = [
+  { svc: "EC2",   usd: "$5,184", d: "+21%", dir: "up" },
+  { svc: "EKS",   usd: "$3,821", d: "+34%", dir: "up" },
+  { svc: "RDS",   usd: "$2,244", d: "+3%",  dir: "flat" },
+  { svc: "S3",    usd: "$684",   d: "-2%",  dir: "down" },
+  { svc: "Other", usd: "$1,727", d: "+1%",  dir: "flat" },
+];
+const DT_Q = "Just downloaded nable, why is our AWS bill up this month?";
+
+function DemoTheater(){
+  const [step, setStep] = useState(0);       // timeline stage
+  const [typed, setTyped] = useState(0);     // chars of the question typed
+  const reduced = typeof window !== "undefined" &&
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  useEffect(() => {
+    if (reduced) { setStep(9); setTyped(DT_Q.length); return; }
+    let alive = true;
+    const timers = [];
+    const at = (ms, fn) => timers.push(setTimeout(() => { if (alive) fn(); }, ms));
+    const run = () => {
+      setStep(1); setTyped(0);
+      // type the question
+      for (let i = 1; i <= DT_Q.length; i++) at(300 + i * 24, () => setTyped(i));
+      at(2100, () => setStep(2));   // chip: get_cost_summary
+      at(2800, () => setStep(3));   // chip: explain_cost_change
+      at(3600, () => setStep(4));   // headline
+      at(4100, () => setStep(5));   // table rows (stagger via css)
+      at(6300, () => setStep(6));   // driver + offer
+      at(8600, () => setStep(7));   // user: yes, open it
+      at(9600, () => setStep(8));   // PR card
+      at(15000, () => setStep(0));  // fade out
+      at(15800, run);               // loop
+    };
+    run();
+    return () => { alive = false; timers.forEach(clearTimeout); };
+  }, [reduced]);
+
+  const s = (n) => step >= n ? " on" : "";
+  return (
+    <div className={"dt" + (step === 0 ? " dt-dim" : "")} aria-label="nable demo: ask why the AWS bill is up, get the driver and a drafted fix">
+      <div className="dt-bar">
+        <span className="dt-dot"/><span className="dt-dot"/><span className="dt-dot"/>
+        <span className="dt-title">your editor · nable connected</span>
+        <span className="dt-badge">read-only</span>
+      </div>
+      <div className="dt-body">
+        <div className={"dt-msg dt-user" + s(1)}>
+          {DT_Q.slice(0, typed)}<span className={"dt-caret" + (step >= 2 ? " off" : "")}/>
+        </div>
+        <div className={"dt-chip" + s(2)}><span className="dt-chip-dot"/>nable · get_cost_summary</div>
+        <div className={"dt-chip" + s(3)}><span className="dt-chip-dot"/>nable · explain_cost_change</div>
+        <div className={"dt-ans" + s(4)}>
+          <div className="dt-headline"><b>$13,660</b> on AWS, last 30 days · <span className="dt-up">up 18%</span> vs the prior 30 · account acme-prod</div>
+          <div className={"dt-table" + s(5)}>
+            {DT_ROWS.map((r, i) => (
+              <div className="dt-row" style={{transitionDelay: (i * 120) + "ms"}} key={r.svc}>
+                <span className="dt-svc">{r.svc}</span>
+                <span className="dt-usd">{r.usd}</span>
+                <span className={"dt-delta dt-" + r.dir}>{r.d}</span>
+              </div>
+            ))}
+          </div>
+          <div className={"dt-driver" + s(6)}>
+            Driver: the <b>EKS node pool doubled on Jun 12</b> and sits at 38% utilization,
+            about <b>$1,240/mo idle</b>. Want the rightsizing PR?
+          </div>
+        </div>
+        <div className={"dt-msg dt-user dt-short" + s(7)}>Yes, open it.</div>
+        <div className={"dt-pr" + s(8)}>
+          <span className="dt-pr-branch">⎇ rightsize-eks-nodepool</span>
+          <span className="dt-pr-stat"><i className="dt-add">+214</i> <i className="dt-del">-31</i></span>
+          <span className="dt-pr-label">PR drafted · you review, nothing auto-applies</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DemoVideo(){
   return (
     <section id="demo" className="demo-sec">
@@ -1116,7 +1198,7 @@ function DemoVideo(){
           <p>Just ask. nable reads your real bill, finds what changed, and drafts the fix, live.</p>
         </div>
         <div className="demo-video-frame">
-          <video className="demo-video" src="/nablepreview.mp4?v=2" autoPlay loop muted playsInline preload="auto" />
+          <DemoTheater/>
         </div>
         <div className="postdemo">
           <span className="postdemo-l">Same answers, on your real bill, in about a minute:</span>

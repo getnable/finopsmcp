@@ -666,8 +666,54 @@ function Reveal({ children }) {
   }, []);
   return /* @__PURE__ */ React.createElement("div", { ref, className: "reveal" }, children);
 }
+const DT_ROWS = [
+  { svc: "EC2", usd: "$5,184", d: "+21%", dir: "up" },
+  { svc: "EKS", usd: "$3,821", d: "+34%", dir: "up" },
+  { svc: "RDS", usd: "$2,244", d: "+3%", dir: "flat" },
+  { svc: "S3", usd: "$684", d: "-2%", dir: "down" },
+  { svc: "Other", usd: "$1,727", d: "+1%", dir: "flat" }
+];
+const DT_Q = "Just downloaded nable, why is our AWS bill up this month?";
+function DemoTheater() {
+  const [step, setStep] = useState(0);
+  const [typed, setTyped] = useState(0);
+  const reduced = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  useEffect(() => {
+    if (reduced) {
+      setStep(9);
+      setTyped(DT_Q.length);
+      return;
+    }
+    let alive = true;
+    const timers = [];
+    const at = (ms, fn) => timers.push(setTimeout(() => {
+      if (alive) fn();
+    }, ms));
+    const run = () => {
+      setStep(1);
+      setTyped(0);
+      for (let i = 1; i <= DT_Q.length; i++) at(300 + i * 24, () => setTyped(i));
+      at(2100, () => setStep(2));
+      at(2800, () => setStep(3));
+      at(3600, () => setStep(4));
+      at(4100, () => setStep(5));
+      at(6300, () => setStep(6));
+      at(8600, () => setStep(7));
+      at(9600, () => setStep(8));
+      at(15e3, () => setStep(0));
+      at(15800, run);
+    };
+    run();
+    return () => {
+      alive = false;
+      timers.forEach(clearTimeout);
+    };
+  }, [reduced]);
+  const s = (n) => step >= n ? " on" : "";
+  return /* @__PURE__ */ React.createElement("div", { className: "dt" + (step === 0 ? " dt-dim" : ""), "aria-label": "nable demo: ask why the AWS bill is up, get the driver and a drafted fix" }, /* @__PURE__ */ React.createElement("div", { className: "dt-bar" }, /* @__PURE__ */ React.createElement("span", { className: "dt-dot" }), /* @__PURE__ */ React.createElement("span", { className: "dt-dot" }), /* @__PURE__ */ React.createElement("span", { className: "dt-dot" }), /* @__PURE__ */ React.createElement("span", { className: "dt-title" }, "your editor \xB7 nable connected"), /* @__PURE__ */ React.createElement("span", { className: "dt-badge" }, "read-only")), /* @__PURE__ */ React.createElement("div", { className: "dt-body" }, /* @__PURE__ */ React.createElement("div", { className: "dt-msg dt-user" + s(1) }, DT_Q.slice(0, typed), /* @__PURE__ */ React.createElement("span", { className: "dt-caret" + (step >= 2 ? " off" : "") })), /* @__PURE__ */ React.createElement("div", { className: "dt-chip" + s(2) }, /* @__PURE__ */ React.createElement("span", { className: "dt-chip-dot" }), "nable \xB7 get_cost_summary"), /* @__PURE__ */ React.createElement("div", { className: "dt-chip" + s(3) }, /* @__PURE__ */ React.createElement("span", { className: "dt-chip-dot" }), "nable \xB7 explain_cost_change"), /* @__PURE__ */ React.createElement("div", { className: "dt-ans" + s(4) }, /* @__PURE__ */ React.createElement("div", { className: "dt-headline" }, /* @__PURE__ */ React.createElement("b", null, "$13,660"), " on AWS, last 30 days \xB7 ", /* @__PURE__ */ React.createElement("span", { className: "dt-up" }, "up 18%"), " vs the prior 30 \xB7 account acme-prod"), /* @__PURE__ */ React.createElement("div", { className: "dt-table" + s(5) }, DT_ROWS.map((r, i) => /* @__PURE__ */ React.createElement("div", { className: "dt-row", style: { transitionDelay: i * 120 + "ms" }, key: r.svc }, /* @__PURE__ */ React.createElement("span", { className: "dt-svc" }, r.svc), /* @__PURE__ */ React.createElement("span", { className: "dt-usd" }, r.usd), /* @__PURE__ */ React.createElement("span", { className: "dt-delta dt-" + r.dir }, r.d)))), /* @__PURE__ */ React.createElement("div", { className: "dt-driver" + s(6) }, "Driver: the ", /* @__PURE__ */ React.createElement("b", null, "EKS node pool doubled on Jun 12"), " and sits at 38% utilization, about ", /* @__PURE__ */ React.createElement("b", null, "$1,240/mo idle"), ". Want the rightsizing PR?")), /* @__PURE__ */ React.createElement("div", { className: "dt-msg dt-user dt-short" + s(7) }, "Yes, open it."), /* @__PURE__ */ React.createElement("div", { className: "dt-pr" + s(8) }, /* @__PURE__ */ React.createElement("span", { className: "dt-pr-branch" }, "\u2387 rightsize-eks-nodepool"), /* @__PURE__ */ React.createElement("span", { className: "dt-pr-stat" }, /* @__PURE__ */ React.createElement("i", { className: "dt-add" }, "+214"), " ", /* @__PURE__ */ React.createElement("i", { className: "dt-del" }, "-31")), /* @__PURE__ */ React.createElement("span", { className: "dt-pr-label" }, "PR drafted \xB7 you review, nothing auto-applies"))));
+}
 function DemoVideo() {
-  return /* @__PURE__ */ React.createElement("section", { id: "demo", className: "demo-sec" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head center" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "See it work"), /* @__PURE__ */ React.createElement("h2", null, "Watch nable", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "find the money.")), /* @__PURE__ */ React.createElement("p", null, "Just ask. nable reads your real bill, finds what changed, and drafts the fix, live.")), /* @__PURE__ */ React.createElement("div", { className: "demo-video-frame" }, /* @__PURE__ */ React.createElement("video", { className: "demo-video", src: "/nablepreview.mp4?v=2", autoPlay: true, loop: true, muted: true, playsInline: true, preload: "auto" })), /* @__PURE__ */ React.createElement("div", { className: "postdemo" }, /* @__PURE__ */ React.createElement("span", { className: "postdemo-l" }, "Same answers, on your real bill, in about a minute:"), /* @__PURE__ */ React.createElement("code", { className: "aicost-cmd postdemo-cmd", onClick: () => {
+  return /* @__PURE__ */ React.createElement("section", { id: "demo", className: "demo-sec" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head center" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "See it work"), /* @__PURE__ */ React.createElement("h2", null, "Watch nable", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "find the money.")), /* @__PURE__ */ React.createElement("p", null, "Just ask. nable reads your real bill, finds what changed, and drafts the fix, live.")), /* @__PURE__ */ React.createElement("div", { className: "demo-video-frame" }, /* @__PURE__ */ React.createElement(DemoTheater, null)), /* @__PURE__ */ React.createElement("div", { className: "postdemo" }, /* @__PURE__ */ React.createElement("span", { className: "postdemo-l" }, "Same answers, on your real bill, in about a minute:"), /* @__PURE__ */ React.createElement("code", { className: "aicost-cmd postdemo-cmd", onClick: () => {
     if (navigator.clipboard) navigator.clipboard.writeText("uvx nable");
     if (window.posthog) posthog.capture("install_copied", { location: "post_demo" });
   } }, "uvx nable"), /* @__PURE__ */ React.createElement("a", { className: "postdemo-docs", href: "/docs", onClick: () => {
