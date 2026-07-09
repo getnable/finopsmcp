@@ -16,6 +16,12 @@ Everything runs on **your machine**: your credentials stay in your OS keychain a
 
 ![nable demo: uvx nable welcome --demo shows a sample bill in seconds](https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docs/demo.gif)
 
+### Free to start, runs on your Claude membership
+
+`uvx nable` and ask away. nable runs as a local MCP server inside Claude Desktop, Claude Code, or Cursor, so **your existing Claude Pro/Max or Cursor membership is the model. There is no Anthropic API key and no per-token cost.** Tool calls count against your normal chat usage, the same as any long conversation, never a separate bill.
+
+Cost queries, anomaly detection, and rightsizing findings are **free forever**. The agent team (the budget guard your agents check before they act, remediation PRs, and the learning loop) is Pro.
+
 ---
 
 ## Quick start
