@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.150"
+version = "0.8.151"
 description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
 readme = "README.md"
 license = { text = "Elastic-2.0" }
@@ -45,7 +45,7 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "apscheduler>=3.10.0",
     # security
-    "cryptography>=42.0.0",
+    "cryptography>=48.0.1",  # 48.0.1 fixes GHSA-537c-gmf6-5ccf; keep the floor at or above it
     "keyring>=25.0.0",
     # shared utilities
     "python-dotenv>=1.0.0",

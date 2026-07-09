@@ -2,6 +2,21 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.151
+
+Security audit pass across the whole codebase, one dependency floor raised.
+
+- cryptography floor raised from >=42.0.0 to >=48.0.1 (48.0.0 has
+  GHSA-537c-gmf6-5ccf; fresh installs already resolved past it, the floor now
+  guarantees it).
+- Audited clean, no changes needed: zero hardcoded secrets in tree or git
+  history; all 7 CI workflows SHA-pinned with no pull_request_target; no
+  shell=True, eval, exec, pickle, or unsafe yaml anywhere; all SQL parameterized;
+  all subprocess calls list-args; TLS verification never disabled; vault and
+  accounts files chmod 600; dashboard requires a password by default with
+  separate full vs read-only session stores; Slack bot is Socket Mode (no public
+  endpoint); outbound hosts are exactly the provider APIs plus opt-out telemetry.
+
 ## 0.8.150
 
 The CLI front door: grouped help and did-you-mean.
