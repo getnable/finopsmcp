@@ -12,7 +12,9 @@ nable is a local-first MCP server that connects to your real AWS, Azure, GCP, Ku
 
 **[getnable.com](https://getnable.com)** · docs, quickstart, and the hosted platform
 
-![nable in Claude Desktop](docs/claude-cost-answer.png)
+![nable demo: uvx nable welcome --demo shows a sample bill in seconds](https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docs/demo.gif)
+
+![nable in Claude Desktop](https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docs/claude-cost-answer.png)
 
 ```
 User: Just downloaded nable: What's our cloud spend this month?
