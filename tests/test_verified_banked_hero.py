@@ -18,6 +18,11 @@ import pytest
 import finops.server as server
 
 
+@pytest.fixture(autouse=True)
+def _pro_gate(monkeypatch):
+    monkeypatch.setattr("finops.server.require_pro", lambda f: None)
+
+
 @pytest.fixture
 def ledger(monkeypatch):
     td = tempfile.TemporaryDirectory()

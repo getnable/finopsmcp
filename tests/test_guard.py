@@ -6,6 +6,7 @@ Invariants under test:
   - non-infra commands never produce output (zero friction)
   - the hook fails open: garbage input exits 0 with no verdict
   - install is idempotent and uninstall restores the settings file
+  - the Budget Guard is Pro: free tier is silent (fail open), never blocks a terminal
 """
 import io
 import json
@@ -13,6 +14,28 @@ import json
 import pytest
 
 import finops.guard as g
+
+
+@pytest.fixture(autouse=True)
+def _pro_license(monkeypatch):
+    """Gating tests run as Pro; the free-tier fail-open behavior has its own tests
+    below that override this."""
+    monkeypatch.setattr("finops.license.feature_available", lambda f: True)
+
+
+# ── free tier: the guard is silent, never blocks ──────────────────────────────
+
+def test_free_tier_gate_is_silent(monkeypatch):
+    monkeypatch.setattr("finops.license.feature_available", lambda f: False)
+    # Even a one-way door produces no verdict on the free tier: fail open.
+    assert g.gate_command("terraform destroy -auto-approve") is None
+
+
+def test_license_error_fails_open(monkeypatch):
+    def boom(f):
+        raise RuntimeError("keyring exploded")
+    monkeypatch.setattr("finops.license.feature_available", boom)
+    assert g.gate_command("terraform destroy -auto-approve") is None
 
 
 # ── classification ─────────────────────────────────────────────────────────────

@@ -6,7 +6,16 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from finops import server
+
+
+@pytest.fixture(autouse=True)
+def _pro(monkeypatch):
+    """These tests exercise the gate logic itself; run them as Pro. The free-tier
+    gating behavior has dedicated tests in test_agent_gating.py."""
+    monkeypatch.setattr("finops.server.require_pro", lambda f: None)
 
 
 def test_one_way_door_escalates_and_carries_cost(monkeypatch):

@@ -2,6 +2,30 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.156
+
+The agent team is Pro. Free stays read-only: talk to your bill.
+
+- New tier boundary, enforced: Budget Guard (check_action_policy + the guard
+  hook), the Savings Analyst's drafting (generate_terraform_tag_fixes joins the
+  already-gated PR tools), and the Ledger's learning loop (mark acted-on, verify
+  savings, the learned approval profile) all require Pro. Free keeps every
+  read-only surface: cost queries, anomalies, rightsizing findings, the savings
+  ledger view, and the estimate_change_cost preflight.
+- The guard hook fails open on the free tier and on any license error: a lapsed
+  license can never block someone's terminal. `finops guard install` says
+  plainly that the hook stays silent until Pro is active.
+- New: get_agent_team MCP tool + `finops agents` CLI. One compact view of the
+  three agents, what each does, its status on this install (active / needs
+  setup / pro required), and the exact next command: guard install, set a
+  budget, connect a cloud, or record a first decision. Ledger warmth
+  (COLD/WARMING/WARM) shown so "why isn't nable learning" answers itself.
+- Free users hitting a gated tool get one compact payload: what it does, the
+  agent-team pitch, the upgrade URL, and the in-chat activate path.
+- Pricing surfaces aligned: Dev = "Talk to your bill, read-only"; Pro = the
+  agent team (Budget Guard, Savings Analyst, the Ledger) on the site and in the
+  structured-data offers.
+
 ## 0.8.155
 
 Agent 1 (Budget Guard): the action gate now learns from what you approve.

@@ -94,6 +94,16 @@ def gate_command(command: str) -> dict[str, Any] | None:
     Returns None when the guard has no opinion (not infra, or an in-policy
     reversible action), else {decision: "ask"|"deny", reason, action_type}.
     """
+    # Budget Guard is a Pro agent. On the free tier the hook stays silent (fail
+    # open): a lapsed or missing license must never block someone's terminal. A
+    # license-check error counts as "unknown", and unknown also fails open.
+    try:
+        from .license import feature_available
+        if not feature_available("agent_gate"):
+            return None
+    except Exception:
+        return None
+
     hit = classify_command(command)
     if hit is None:
         return None

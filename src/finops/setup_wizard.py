@@ -1843,6 +1843,29 @@ def _handle_profile_cmd(parsed: object) -> None:
         return
 
 
+def _run_agents() -> None:
+    """`finops agents`: the agent team and each agent's setup status."""
+    from .agent_controls import agent_team_status
+    from .welcome import bold, cyan, dim, green
+
+    team = agent_team_status()
+    icon = {"active": green("*"), "needs_setup": cyan("~"), "pro_required": dim("-")}
+    print()
+    print(f"  {bold('The nable agent team')}   plan: {team['plan']}")
+    print(dim("  Propose-only: agents advise and draft; a human approves every change."))
+    print()
+    for a in team["agents"]:
+        print(f"  {icon.get(a['status'], ' ')} {bold(a['agent'])}  ({a['status'].replace('_', ' ')})")
+        print(f"      {a['does']}")
+        if a.get("learning"):
+            lrn = a["learning"]
+            print(dim(f"      learning: {lrn['state']} ({lrn['decisions_recorded']} decisions recorded)"))
+        for step in a.get("setup", []):
+            print(f"      {cyan('->')} {step}")
+        print(dim(f"      {a['try']}"))
+        print()
+
+
 def _run_guard(parsed) -> None:
     """`finops guard`: install / manage the seamless agent cost guardrail.
 
@@ -1863,9 +1886,20 @@ def _run_guard(parsed) -> None:
         raise SystemExit(guard.run_hook())
 
     if action == "install":
+        # Budget Guard is part of the Pro agent team. Install the hook either way
+        # (it is inert plumbing that fails open on the free tier), but be straight
+        # about what activates it so nobody thinks they wired up a dead switch.
+        from .license import feature_available
+        pro_active = feature_available("agent_gate")
         already = guard.is_installed(guard._settings_path(global_scope))
         path = guard.install(global_scope)
         print()
+        if not pro_active:
+            print(f"  {bold('Heads up:')} the Budget Guard is part of nable Pro.")
+            print("  The hook is installed but stays silent on the free tier.")
+            print(f"  Activate: {cyan('finops login')}  (or ask your AI to run activate_pro)")
+            print(dim("  7-day free trial included, no card: https://getnable.com/pricing"))
+            print()
         if already:
             print(f"  {green('✓')} Guard already installed in {path}")
         else:
@@ -2130,7 +2164,7 @@ def main(args: list[str] | None = None) -> None:
             ("saas & observability", ["datadog", "newrelic", "databricks", "snowflake",
                                        "mongodb", "twilio", "cloudflare", "vercel", "langfuse"]),
             ("alerts & reports", ["slack", "teams", "notion", "n8n"]),
-            ("editor & agents", ["claude", "guard"]),
+            ("editor & agents", ["claude", "guard", "agents"]),
             ("account & billing", ["login", "logout", "license", "license-status", "credits"]),
             ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra"]),
         ]
@@ -2282,6 +2316,7 @@ def main(args: list[str] | None = None) -> None:
     serve_p.add_argument("--open", action="store_true", help="Open browser on start")
 
     sub.add_parser("connect", help="Scan this machine for provider credentials and connect them all in one keystroke")
+    sub.add_parser("agents",  help="The agent team: Budget Guard, Savings Analyst, the Ledger, and their setup status")
     welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect Claude + your first cloud account")
     welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
     sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
@@ -2535,6 +2570,9 @@ def main(args: list[str] | None = None) -> None:
         return
     elif parsed.cmd == "tools":
         _print_tools_cheatsheet()
+        return
+    elif parsed.cmd == "agents":
+        _run_agents()
         return
     elif parsed.cmd == "guard":
         _run_guard(parsed)

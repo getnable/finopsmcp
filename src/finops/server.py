@@ -2716,6 +2716,9 @@ async def mark_recommendation_acted_on(recommendation_id: int) -> dict:
         - "We shut down the idle RDS, mark it acted on"
         - "Mark recommendation 7 as complete"
     """
+    # The acted-on/verify/learn loop is the Ledger agent (Pro). Free = read-only.
+    if (err := require_pro("agent_learning")):
+        return err
     from .recommendations.savings_tracker import mark_acted_on
     ok = mark_acted_on(recommendation_id)
     if ok:
@@ -2792,6 +2795,9 @@ async def verify_savings() -> dict:
         - "Confirm which recommendations actually happened"
         - "Check if our EC2 downsizes are done"
     """
+    # Verification is the Ledger agent's job (Pro): it proves the saving landed.
+    if (err := require_pro("agent_learning")):
+        return err
     from .recommendations.savings_tracker import auto_verify_acted_on, get_summary
     newly_verified = auto_verify_acted_on()
     summary = get_summary()
@@ -2967,6 +2973,9 @@ async def get_recommendation_learning() -> dict:
         - "What has nable learned from my accepted and dismissed recommendations?"
 
     """
+    # The learned approval profile is the Ledger agent (Pro).
+    if (err := require_pro("agent_learning")):
+        return err
     try:
         from .recommendations.learning import customer_signal
         return customer_signal()
@@ -7636,6 +7645,9 @@ async def generate_terraform_tag_fixes(
         - "Show me the tag fixes needed"
         - "What HCL changes are required to fix our tagging?"
     """
+    # Drafting fixes is remediation (Pro), same gate as opening the PR itself.
+    if (err := require_pro("remediation")):
+        return err
     if err := require_role("analyst"):
         return err
 
@@ -9081,6 +9093,10 @@ async def check_action_policy(
         - "Check this change against our cost guardrails"
 
     """
+    # Budget Guard is part of the Pro agent team. Free tier is read-only: talk to
+    # your bill, no gate, no PRs, no learning loop.
+    if (err := require_pro("agent_gate")):
+        return err
     from .policy import evaluate_action_gate, load_policy
 
     cost = None
@@ -13488,6 +13504,30 @@ async def publish_cost_report_to_notion(
         f"Share the page with your team from Notion. "
         f"They don't need nable installed to view it."
     )
+
+
+@mcp.tool()
+async def get_agent_team() -> dict:
+    """
+    The nable agent team: Budget Guard, Savings Analyst, and the Ledger, with
+    each agent's status on this install and the one step that finishes its setup.
+
+    Budget Guard gates agent actions (cost + budget + policy + your approval
+    history). Savings Analyst judges genuine savings on your real rates and
+    drafts the fix as a PR. The Ledger records decisions, verifies savings
+    landed, and teaches the other two. All propose-only.
+
+    Call this when the user asks about nable's agents, "set up the agent team",
+    "is the budget guard on?", "why isn't nable learning?", or after activating
+    a license, so they see what just unlocked and what to do next.
+
+    Examples:
+        - "Show me the agent team"
+        - "Set up nable's agents"
+        - "Is the budget guard active?"
+    """
+    from .agent_controls import agent_team_status
+    return agent_team_status()
 
 
 @mcp.tool()

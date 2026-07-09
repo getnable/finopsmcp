@@ -104,9 +104,13 @@ PRO_FEATURES: set[str] = {
     "ai_unit_economics",         # cost per PR by model, AI KPIs, the GitHub engineering-attribution report
     "remediation",               # drafting the fix: open rightsizing / terraform-tag PRs
     "cross_cloud",               # the unified multi-cloud view: compare providers, total spend all sources
+    # ── The agent team (watch, act, coordinate with agents) ──────────────────────
+    "agent_gate",                # Budget Guard: check_action_policy allow/block/escalate + the guard hook
+    "agent_learning",            # the Ledger: mark acted-on, verify savings landed, learned approval profile
     # Cost queries, anomaly detection, rightsizing findings, and single-provider
     # views are intentionally FREE: users see the value on demand, then pay for it
-    # to run continuously, act for them, and unify across clouds.
+    # to run continuously, act for them, and unify across clouds. Free = read-only,
+    # talk to your bill. The agent team (gate, remediation, learning) is Pro.
 }
 
 # ── Team-only features ($1k/mo flat) ─────────────────────────────────────────
@@ -631,6 +635,9 @@ def require_pro(feature: str) -> dict | None:
 
     # Build a concise FOMO block showing everything Team unlocks
     _TEAM_FEATURES = [
+        ("agent_gate",                 "🛡️  Budget Guard: your agents check cost, budget, and policy before they act"),
+        ("remediation",                "🔧 The fix as a pull request: rightsizing and tag PRs you approve"),
+        ("agent_learning",             "🧠 The Ledger: verified savings + a gate that learns what you approve"),
         ("ticket_creation",            "🎫 Auto-create Jira / Linear / GitHub Issues from anomalies & rightsizing"),
         ("scheduled_email_digests",    "📧 Scheduled email reports — weekly, monthly, or custom cadence"),
         ("commitment_recommendations", "💰 RI / Savings Plan recommendations with exact $ ROI"),

@@ -798,11 +798,11 @@ function Pricing(){
   const startupLink = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
 
   const tiers = [
-    { key:"dev", name:"Dev", tag:"Ask about your bill", amt:"Free", per:"forever", billed:"No credit card",
-      feats:["Cost, anomaly + rightsizing","LLM spend by model","Every provider included","Your own LLM key"],
+    { key:"dev", name:"Dev", tag:"Talk to your bill, read-only", amt:"Free", per:"forever", billed:"No credit card",
+      feats:["Ask anything: cost, anomalies, rightsizing","LLM spend by model","Every provider included","Your own LLM key"],
       cta:"Start free", href:"/docs", plan:"dev", ext:false, primary:false, rec:false },
-    { key:"pro", name:"Pro", tag:"Watch, fix, and guard your agents", amt:proPrice, per, billed,
-      feats:["Everything in Dev","Always-on monitoring + alerts","Remediation PRs + auto-tickets","Budget guardrails for your agents"],
+    { key:"pro", name:"Pro", tag:"The agent team: watch, act, learn", amt:proPrice, per, billed,
+      feats:["Everything in Dev","Budget Guard: agents check cost + policy before they act","Savings Analyst: the fix as a PR you approve","The Ledger: verified savings, a gate that learns you","Always-on monitoring, alerts + tickets"],
       cta:annual ? "Get annual" : "Get Pro", href:proLink, plan:annual?"pro_annual":"pro_monthly", ext:true, primary:true, rec:true },
     { key:"startup", name:"Startups", tag:"Scale it across the org", amt:startupPrice, per, billed,
       feats:["Everything in Pro","Org-wide budgets + agent policy","Priority support","Single-tenant hosting available"],
