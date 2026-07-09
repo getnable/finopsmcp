@@ -202,6 +202,89 @@ CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
     },
 }
 
+
+def org_stackset_template() -> "dict[str, Any]":
+    """CloudFormation template for the org-wide read-only role, deployed to every
+    member account at once via a service-managed StackSet.
+
+    Same least-privilege read set as the single-account role, but the trust policy
+    lets the Organizations management (payer) account assume it, so nable (running
+    with management-account credentials) can read every child account. Deploy this
+    once at the org root and AWS provisions it into all current and future member
+    accounts. Cost data does not need this role at all, the payer's Cost Explorer
+    already sees every linked account; this is only for per-account resource scans
+    (idle, rightsizing, tagging). See setup_aws_org() for the deploy commands.
+
+    RoleName defaults to FinOpsReadOnly to match discover_org_accounts and the
+    FINOPS_ORG_ROLE_NAME env var, so nable assumes the same name it deployed.
+    """
+    return {
+        "AWSTemplateFormatVersion": "2010-09-09",
+        "Description": (
+            "Org-wide least-privilege read-only role for nable (finops-mcp), one "
+            "per member account via a StackSet. Strictly read-only: no create, "
+            "modify, or delete of any kind. The management account assumes it to "
+            "read each account's resources for waste and rightsizing scans."
+        ),
+        "Parameters": {
+            "ManagementAccountId": {
+                "Type": "String",
+                "AllowedPattern": "^[0-9]{12}$",
+                "Description": "The Organizations management (payer) account ID that nable runs from and that assumes this role.",
+            },
+            "RoleName": {
+                "Type": "String",
+                "Default": "FinOpsReadOnly",
+                "Description": "Role name created in each member account. Must match what nable assumes (FINOPS_ORG_ROLE_NAME).",
+            },
+        },
+        "Resources": {
+            "NableOrgReadOnlyPolicy": {
+                "Type": "AWS::IAM::ManagedPolicy",
+                "Properties": {
+                    "ManagedPolicyName": "NableFinopsOrgReadOnlyPolicy",
+                    "Description": "Exact read APIs nable needs in each member account, nothing more.",
+                    "PolicyDocument": {
+                        "Version": "2012-10-17",
+                        "Statement": [{
+                            "Sid": "NableOrgReadOnly",
+                            "Effect": "Allow",
+                            "Action": _REQUIRED_ACTIONS,
+                            "Resource": "*",
+                        }],
+                    },
+                },
+            },
+            "NableOrgReadOnlyRole": {
+                "Type": "AWS::IAM::Role",
+                "Properties": {
+                    "RoleName": {"Ref": "RoleName"},
+                    "Description": "Read-only role nable's management account assumes to read this account.",
+                    "AssumeRolePolicyDocument": {
+                        "Version": "2012-10-17",
+                        "Statement": [{
+                            "Effect": "Allow",
+                            "Principal": {"AWS": {"Fn::Sub": "arn:aws:iam::${ManagementAccountId}:root"}},
+                            "Action": "sts:AssumeRole",
+                        }],
+                    },
+                    "ManagedPolicyArns": [{"Ref": "NableOrgReadOnlyPolicy"}],
+                    "Tags": [
+                        {"Key": "ManagedBy", "Value": "nable-finops"},
+                        {"Key": "Purpose", "Value": "cost-intelligence-read-only"},
+                    ],
+                },
+            },
+        },
+        "Outputs": {
+            "RoleArn": {
+                "Description": "ARN of the nable read-only role in this account",
+                "Value": {"Fn::GetAtt": ["NableOrgReadOnlyRole", "Arn"]},
+            },
+        },
+    }
+
+
 # The role template above needs you to already have AWS credentials on the box to
 # assume the role. Most people who get stuck in setup do NOT, so the one-click
 # activation path uses this template instead: it mints a read-only IAM user and an

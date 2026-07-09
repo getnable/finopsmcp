@@ -2,6 +2,23 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.147
+
+Whole-org AWS onboarding in one StackSet, not one grant per account.
+
+- New org StackSet template (iam_setup.org_stackset_template, rendered to
+  templates/aws-org-finops-role.yaml): a strictly read-only role deployed to every
+  member account at once via a service-managed StackSet, trusting the management
+  account. Same least-privilege action set as the single-account role, no write or
+  AssumeRole permissions. Auto-deploys to future accounts too.
+- finops setup aws --org rebuilt: identifies the payer account, writes the template
+  locally, prints the exact create-stack-set / create-stack-instances commands (with
+  your account id and org root filled in), then discovers and registers every account
+  and verifies the role actually assumes in one, so a missing or still-provisioning
+  role surfaces immediately instead of as silent empty scans.
+- Reminder in the flow: org-wide COST needs none of this (the payer's Cost Explorer
+  already sees every linked account); the role is only for per-account resource scans.
+
 ## 0.8.146
 
 First-run activation: catch SSO creds, and stop defaulting to "skip."

@@ -809,68 +809,107 @@ def _setup_aws_manual(taken: set) -> None:
 
 def setup_aws_org() -> None:
     """
-    Auto-discover accounts from AWS Organizations and add them to the registry.
+    Onboard an entire AWS Organization: deploy one read-only role across every
+    member account via a StackSet, then auto-discover and register all accounts.
     Called by: finops setup aws --org
     """
+    import boto3
+    from pathlib import Path
     from .accounts import discover_org_accounts, add_account, AccountConfig
+    from .security.iam_setup import org_stackset_template
 
-    _section("AWS Organizations: Auto-discover Accounts")
+    _section("AWS Organizations: whole-org setup")
 
-    print("  Calling AWS Organizations API with your current credentials...")
-
+    # 1. Identify the management (payer) account we're running from.
     try:
-        accounts = discover_org_accounts(add_all=False)
+        mgmt = boto3.client("sts").get_caller_identity()["Account"]
     except Exception as e:
-        _err(f"Could not list org accounts: {e}")
-        _warn("Make sure your credentials have organizations:ListAccounts permission.")
+        _err(f"Could not read your AWS identity: {e}")
+        _warn("Run this from the Organizations management (payer) account.")
         return
 
+    role_name = os.environ.get("FINOPS_ORG_ROLE_NAME", "FinOpsReadOnly")
+
+    # 2. Write the StackSet template locally and print the one-time deploy. Cost
+    #    across all accounts needs none of this (the payer's Cost Explorer already
+    #    sees every linked account); the role is only for per-account resource scans.
+    tpl_path = Path.home() / ".finops-mcp" / "aws-org-finops-role.yaml"
+    try:
+        import yaml
+        tpl_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tpl_path, "w") as f:
+            yaml.safe_dump(org_stackset_template(), f, sort_keys=False)
+    except Exception:
+        tpl_path = None
+
+    root_id = ""
+    try:
+        root_id = boto3.client("organizations", region_name="us-east-1").list_roots()["Roots"][0]["Id"]
+    except Exception:
+        pass
+
+    _ok("Org-wide cost already works from this payer account. No per-account role needed for spend.")
+    print("\n  For per-account waste scans (idle, rightsizing), deploy one read-only")
+    print(f"  role ('{role_name}') to every account at once, this covers future accounts too:\n")
+    if tpl_path:
+        print(f"    Template written to  {tpl_path}\n")
+    print("    aws cloudformation create-stack-set \\")
+    print("      --stack-set-name nable-finops-readonly \\")
+    print(f"      --template-body file://{tpl_path or '<template>.yaml'} \\")
+    print(f"      --parameters ParameterKey=ManagementAccountId,ParameterValue={mgmt} \\")
+    print("      --permission-model SERVICE_MANAGED \\")
+    print("      --auto-deployment Enabled=true,RetainStacksOnAccountRemoval=false \\")
+    print("      --capabilities CAPABILITY_NAMED_IAM\n")
+    print("    aws cloudformation create-stack-instances \\")
+    print("      --stack-set-name nable-finops-readonly \\")
+    print(f"      --deployment-targets OrganizationalUnitIds={root_id or '<org-root-id, r-xxxx>'} \\")
+    print("      --regions us-east-1\n")
+    print("  IAM is global, so us-east-1 is fine. Already have a read-only role in every")
+    print(f"  account? Set FINOPS_ORG_ROLE_NAME to its name and skip the deploy.\n")
+
+    ans = _prompt("  Role deployed (or already present)? Discover and register accounts now? [Y/n]",
+                  default="y").lower()
+    if ans not in ("y", "yes", ""):
+        print("  Run 'finops setup aws --org' again once the StackSet finishes.")
+        return
+
+    # 3. Discover + register every active account with role assumption.
+    try:
+        accounts = discover_org_accounts(add_all=False, role_name=role_name)
+    except Exception as e:
+        _err(f"Could not list org accounts: {e}")
+        _warn("Your credentials need organizations:ListAccounts (present in the payer account).")
+        return
     if not accounts:
         _warn("No active accounts found in your organization.")
         return
 
-    print(f"\n  Found {len(accounts)} active account(s):\n")
-    for i, acct in enumerate(accounts, 1):
-        print(f"    {i:3d}) {acct['account_id']}  {acct['account_name']}")
+    added: list[AccountConfig] = []
+    for acct in accounts:
+        cfg = AccountConfig(
+            name=(acct["account_name"].lower().replace(" ", "-") or acct["account_id"]),
+            account_id=acct["account_id"],
+            region="us-east-1",
+            role_arn=f"arn:aws:iam::{acct['account_id']}:role/{role_name}",
+        )
+        add_account(cfg)
+        added.append(cfg)
+    _ok(f"Registered {len(added)} account(s) with the '{role_name}' role.")
 
-    print()
-    role_name = _prompt("  IAM role name to assume in each account", default="FinOpsReadOnly")
-    add_all = _prompt("  Add all accounts to the registry? (y/N)", default="n").lower()
+    # 4. Verify the role actually assumes in one member account, so a missing or
+    #    still-provisioning StackSet surfaces now, not as silent empty scans later.
+    sample = next((c for c in added if c.account_id != mgmt), None)
+    if sample:
+        try:
+            boto3.client("sts").assume_role(RoleArn=sample.role_arn, RoleSessionName="finops-verify")
+            _ok(f"Verified: assumed '{role_name}' in {sample.account_id}. Org-wide scans are live.")
+        except Exception:
+            _warn(f"Could not assume '{role_name}' in {sample.account_id} yet. If you just deployed")
+            _warn("the StackSet, give it a minute and re-run. Org cost rollups work regardless.")
 
-    added = []
-    if add_all in ("y", "yes"):
-        for acct in accounts:
-            cfg = AccountConfig(
-                name=acct["account_name"].lower().replace(" ", "-"),
-                account_id=acct["account_id"],
-                region="us-east-1",
-                role_arn=f"arn:aws:iam::{acct['account_id']}:role/{role_name}",
-            )
-            add_account(cfg)
-            added.append(cfg.name)
-        _ok(f"Added {len(added)} account(s): {', '.join(added)}")
-    else:
-        raw = _prompt("  Enter account numbers to add (comma-separated, or blank to skip)")
-        indices = [int(x.strip()) - 1 for x in raw.split(",") if x.strip().isdigit()]
-        for i in indices:
-            if 0 <= i < len(accounts):
-                acct = accounts[i]
-                cfg = AccountConfig(
-                    name=acct["account_name"].lower().replace(" ", "-"),
-                    account_id=acct["account_id"],
-                    region="us-east-1",
-                    role_arn=f"arn:aws:iam::{acct['account_id']}:role/{role_name}",
-                )
-                add_account(cfg)
-                added.append(cfg.name)
-        if added:
-            _ok(f"Added {len(added)} account(s): {', '.join(added)}")
-        else:
-            _warn("No accounts added.")
-
-    if added:
-        print(f"\n  Accounts are stored in ~/.finops-mcp/accounts.yaml")
-        print("  Use list_aws_accounts() in Claude to see them, or get_cost_summary(account=...) to query one.")
+    _configure_claude_desktop()
+    print("\n  Accounts saved to ~/.finops-mcp/accounts.yaml.")
+    print("  Ask in your editor: \"give me an org-wide cost breakdown by account.\"")
 
 
 def setup_azure() -> None:
