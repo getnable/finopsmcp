@@ -93,8 +93,8 @@ _unconnected_hint_fired = False
 _CONNECT_HINT = {
     "sample_data": True,
     "message": (
-        "No cloud account is connected, so this is sample data, not your real "
-        "costs. To see your own numbers, connect in-chat, no terminal needed: "
+        "No cloud account is connected, so nable can only show sample data, not "
+        "your real costs. To see your own numbers, connect in-chat, no terminal needed: "
         "connect_aws or connect_gcp detect credentials already on this machine "
         "and connect them; connect_azure walks through the Cloud Shell one-paste. "
         "They only read billing data; they never change anything in your cloud."
@@ -302,10 +302,10 @@ async def connection_status() -> str:
 
     if not configured_names:
         return (
-            "nable is installed but no providers are configured yet.\n\n"
-            "Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, Datadog, "
-            "Snowflake, or any other supported provider.\n\n"
-            "After setup, restart this AI client and nable will be ready."
+            "nable is installed but no cloud accounts are connected yet.\n\n"
+            "Connect one right here in the chat: call connect_aws or connect_gcp (they "
+            "detect credentials already on this machine) or connect_azure. No terminal, "
+            "no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."
         )
 
     lic = get_status()
@@ -796,7 +796,7 @@ async def list_connected_providers() -> dict:
             result[name] = {
                 "category": category,
                 "configured": configured,
-                "status": "connected" if configured else "not configured: run uvx finops-mcp setup",
+                "status": "connected" if configured else "not connected: call connect_aws, or run 'uvx nable'",
             }
 
     # LLM / AI providers are module-level (not in the class registry above), so
@@ -820,7 +820,7 @@ async def list_connected_providers() -> dict:
         result[name] = {
             "category": "llm",
             "configured": configured,
-            "status": "connected" if configured else "not configured: run uvx finops-mcp setup",
+            "status": "connected" if configured else "not connected: call connect_aws, or run 'uvx nable'",
         }
     _llm_sync = {
         "modal": gpu_infra.modal_configured,
@@ -833,7 +833,7 @@ async def list_connected_providers() -> dict:
             "category": "llm",
             "configured": configured,
             "status": "connected (cost via invoice import)" if configured
-                      else "not configured: run uvx finops-mcp setup",
+                      else "not connected: call connect_aws, or run 'uvx nable'",
         }
 
     # Surface plan status so Claude can proactively mention upgrade when relevant
@@ -1041,7 +1041,7 @@ async def get_cost_summary(
         pool = _ALL_CONNECTORS
         targets = await _active(pool)
     if not targets:
-        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect a cloud provider, then restart your AI client."}
+        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed, granularity)
     # With several providers the per-provider service detail is the token-bloat driver.
@@ -1144,7 +1144,7 @@ async def get_costs_by_service(
     else:
         targets = await _active(_ALL_CONNECTORS)
     if not targets:
-        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, or another provider, then restart your AI client."}
+        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
 
     combined: dict[str, dict[str, float]] = {}
     errors: dict[str, str] = {}
@@ -1274,7 +1274,7 @@ async def compare_providers(
     pool = _CLOUD_CONNECTORS if category == "cloud" else _SAAS_CONNECTORS if category == "saas" else _ALL_CONNECTORS
     targets = await _active(pool)
     if not targets:
-        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, or another provider, then restart your AI client."}
+        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
 
     provider_totals: list[dict] = []
     grand_total = 0.0
@@ -1345,7 +1345,7 @@ async def get_cost_trends(
 
     targets = await _active(pool)
     if not targets:
-        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, or another provider, then restart your AI client."}
+        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
 
     grand_total, by_provider, _ = await _gather_costs(targets, start, end, granularity)
 
@@ -1556,7 +1556,7 @@ async def get_total_spend_all_sources(
 
     targets = await _active(_ALL_CONNECTORS)
     if not targets:
-        return {"error": "No providers configured. Run 'uvx finops-mcp setup' in your terminal to connect AWS, Azure, GCP, or another provider, then restart your AI client."}
+        return {"error": "No cloud accounts connected yet. Connect one right here in the chat: call connect_aws or connect_gcp (they detect credentials already on this machine) or connect_azure. No terminal, no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."}
 
     grand_total, by_provider, grand_by_service = await _gather_costs(targets, sd, ed)
     # Cross-provider tool: top_services already carries the ranked drivers, so cap the
@@ -2013,7 +2013,7 @@ async def get_costs_by_team(
     Return cloud costs broken down by engineering team, using tag attribution rules.
 
     Requires:
-    - Tag rules configured in ~/.finops/tag_rules.yaml (run 'uvx finops-mcp setup' → tags)
+    - Tag rules configured in ~/.finops/tag_rules.yaml (run 'uvx nable' → tags)
     - Cloud providers that support tag-based cost grouping (AWS, Azure, GCP)
 
     Args:
@@ -2199,7 +2199,7 @@ async def send_digest_now() -> dict:
     sent = await run_digest_now()
     return {
         "sent": sent,
-        "message": "Digest sent." if sent else "No notification channels configured. Run 'uvx finops-mcp setup slack' or 'uvx finops-mcp setup teams'.",
+        "message": "Digest sent." if sent else "No notification channels configured. Run 'uvx nable slack' or 'uvx nable teams' in a terminal.",
     }
 
 
@@ -2254,7 +2254,7 @@ async def list_vault_credentials() -> dict:
         return {
             "count": len(keys),
             "credentials": keys,
-            "note": "Values are never exposed. Run uvx finops-mcp setup to add or update credentials.",
+            "note": "Values are never exposed. Connect in-chat (connect_aws / connect_gcp) or run 'uvx nable' to add or update credentials.",
         }
     except Exception as e:
         return {"error": str(e)}
@@ -3055,7 +3055,7 @@ async def get_commitment_analysis() -> dict:
         from .recommendations.commitments import analyze_commitments, commitment_summary
         analysis = analyze_commitments()
         if analysis is None:
-            return {"error": "AWS not configured. Run: uvx finops-mcp setup aws"}
+            return {"error": "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."}
         result = commitment_summary(analysis)
 
         # Add actionable coverage gap analysis
@@ -3713,7 +3713,7 @@ async def audit_gcp_waste(
     """
     gcp = _CLOUD_CONNECTORS.get("gcp")
     if gcp is None or not await gcp.is_configured():
-        return {"error": "GCP is not configured. Run 'finops setup gcp' to connect."}
+        return {"error": "GCP is not connected. Call connect_gcp right here in the chat (it reads your gcloud login), or run 'uvx nable gcp' in a terminal."}
     try:
         from .recommendations.gcp_waste import audit_gcp_waste as _run
         report = await _run(
@@ -3803,7 +3803,7 @@ async def get_gcp_recommendations(
     """
     gcp = _CLOUD_CONNECTORS.get("gcp")
     if gcp is None or not await gcp.is_configured():
-        return {"error": "GCP is not configured. Run 'finops setup gcp' to connect."}
+        return {"error": "GCP is not connected. Call connect_gcp right here in the chat (it reads your gcloud login), or run 'uvx nable gcp' in a terminal."}
     try:
         from .recommendations.gcp_recommender import get_gcp_recommendations as _run
         report = await _run(gcp, projects=projects, recommenders=recommenders)
@@ -3874,7 +3874,7 @@ async def get_traffic_cost_breakdown(
 
     aws = _CLOUD_CONNECTORS.get("aws")
     if aws is None:
-        return {"error": "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."}
+        return {"error": "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."}
 
     end = _date.today()
     start = end - timedelta(days=days)
@@ -3914,7 +3914,7 @@ async def audit_public_ipv4_addresses(
         from .recommendations.public_ipv4 import audit_public_ipv4
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None:
-            return "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+            return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
         result = await audit_public_ipv4(aws, regions=regions)
 
@@ -11424,7 +11424,7 @@ async def identify_nonprod_scheduling_opportunities(
         from .recommendations.nonprod_scheduler import identify_nonprod_resources
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None or not await aws.is_configured():
-            return "AWS is not configured. Run 'uvx finops-mcp setup' to connect."
+            return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
         result = await identify_nonprod_resources(aws_client=aws, regions=regions)
 
@@ -11520,7 +11520,7 @@ async def audit_rds_manual_snapshots(
 
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None or not await aws.is_configured():
-            return "AWS is not configured. Run 'uvx finops-mcp setup' to connect."
+            return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
         result = await _audit(
             aws_client=aws,
@@ -11930,7 +11930,7 @@ async def scan_graviton_migration_opportunities(
 
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None or not await aws.is_configured():
-            return "AWS is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+            return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
         candidates = await scan_graviton_opportunities(aws, regions=regions)
 
@@ -12207,7 +12207,7 @@ async def audit_cloudwatch_metric_cardinality(
         from .recommendations.cloudwatch_cardinality import audit_cloudwatch_metric_cardinality as _audit
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None:
-            return "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+            return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
         result = await _audit(aws, regions=regions)
 
@@ -12284,7 +12284,7 @@ async def audit_cloudwatch_orphaned_alarms(
         from .recommendations.cloudwatch_alarms import audit_cloudwatch_orphaned_alarms as _audit
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None:
-            return "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+            return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
         result = await _audit(aws, regions=regions)
 
@@ -12364,7 +12364,7 @@ async def audit_cloudwatch_logs_ia_opportunities(
         from .recommendations.cloudwatch_logs_ia import audit_cloudwatch_logs_ia_opportunities as _audit
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None:
-            return "AWS connector is not configured. Run 'uvx finops-mcp setup' to connect AWS."
+            return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
         result = await _audit(aws, regions=regions)
 
@@ -12434,7 +12434,7 @@ async def recommend_database_savings_plans() -> dict:
 
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None or not await aws.is_configured():
-            return {"error": "AWS is not configured. Run 'uvx finops-mcp setup' to connect."}
+            return {"error": "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."}
 
         result = _recommend()
         if result is None:
@@ -12472,7 +12472,7 @@ async def audit_ebs_snapshot_replication(
 
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None or not await aws.is_configured():
-            return {"error": "AWS is not configured. Run 'uvx finops-mcp setup' to connect."}
+            return {"error": "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."}
 
         result = await _audit(aws_client=aws, regions=regions)
         if "error" in result:
@@ -12510,7 +12510,7 @@ async def audit_s3_transfer_acceleration() -> dict:
 
         aws = _CLOUD_CONNECTORS.get("aws")
         if aws is None or not await aws.is_configured():
-            return {"error": "AWS is not configured. Run 'uvx finops-mcp setup' to connect."}
+            return {"error": "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."}
 
         result = await _audit(aws_client=aws)
 
@@ -12574,7 +12574,7 @@ async def run_full_cost_audit(
 
     aws = _CLOUD_CONNECTORS.get("aws")
     if aws is None or not await aws.is_configured():
-        return "AWS is not configured. Run 'uvx finops-mcp setup' to connect."
+        return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
     import asyncio
 
@@ -12905,7 +12905,7 @@ async def export_cost_report_csv(
 
     aws = _CLOUD_CONNECTORS.get("aws")
     if aws is None or not await aws.is_configured():
-        return "AWS is not configured. Run 'uvx finops-mcp setup' to connect."
+        return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
     # Resolve output path
     today = date.today().isoformat()
@@ -13265,7 +13265,7 @@ async def publish_cost_report_to_notion(
 
     aws = _CLOUD_CONNECTORS.get("aws")
     if aws is None or not await aws.is_configured():
-        return "AWS is not configured. Run 'uvx finops-mcp setup' to connect."
+        return "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."
 
     import asyncio
     from datetime import datetime as _dt

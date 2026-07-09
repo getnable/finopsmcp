@@ -2,6 +2,25 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.148
+
+DX audit: every "not configured" error now points in-chat, not at the terminal.
+
+A live first-run audit found the worst possible contradiction at the exact spot a
+freshly wired-in user lands: ask your first cost question with nothing connected
+and the error said "Run 'uvx finops-mcp setup' in your terminal ... then restart
+your AI client" while the connect hint beside it said "connect in-chat, no
+terminal needed." The model repeats the error field, so new users were being sent
+back to the terminal-and-restart flow that connect_aws (0.8.140) removed.
+
+- All 27 stale error strings across server.py rewritten: cost tools, AWS tools,
+  GCP tools, provider status, vault note, digest message. They now lead with the
+  in-chat connect (connect_aws / connect_gcp / connect_azure) and offer
+  'uvx nable' as the terminal alternative. No more "restart your AI client."
+- The connect hint no longer claims "this is sample data" when it rides on an
+  error response with no data attached.
+- Dashboard (server_web) empty-state command modernized to 'uvx nable'.
+
 ## 0.8.147
 
 Whole-org AWS onboarding in one StackSet, not one grant per account.

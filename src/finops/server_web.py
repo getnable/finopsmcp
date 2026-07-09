@@ -218,7 +218,7 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
         result["connected_providers"] = list(configured.keys())
 
         if not configured:
-            result["error"] = "No providers configured. Run 'finops setup' to connect a provider."
+            result["error"] = "No cloud accounts connected yet. Run 'uvx nable' on the host to connect one."
             return result
 
         # MTD: first of this month to today
