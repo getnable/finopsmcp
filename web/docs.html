@@ -121,16 +121,16 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
 .checklist li .ck{color:var(--accent);font-weight:700;flex-shrink:0;line-height:1.45}
 .checklist li strong{color:var(--fg);font-weight:600}
 
-.callout{display:flex;gap:13px;border:1px solid var(--line);border-left-width:3px;border-radius:10px;padding:14px 17px;margin:18px 0;font-size:13.5px;color:var(--fg-2);line-height:1.6;background:var(--bg-2)}
-.callout .cico{flex-shrink:0;width:18px;height:18px;margin-top:1px}
+/* Quiet callouts: plain 1px border, no colored left bar or tinted fill, muted
+   icon. Accent is reserved for CTAs, labels, and links (DESIGN.md), so notes and
+   tips stay neutral. Only a genuine warning earns a touch of colour, on the
+   border alone, because a caution is the one case where the signal is worth it. */
+.callout{display:flex;gap:12px;border:1px solid var(--line);border-radius:8px;padding:14px 17px;margin:18px 0;font-size:13.5px;color:var(--fg-2);line-height:1.6;background:var(--bg-2)}
+.callout .cico{flex-shrink:0;width:16px;height:16px;margin-top:2px;color:var(--fg-3)}
 .callout strong{color:var(--fg);font-weight:600}
 .callout a{color:var(--accent)}
-.callout.note{border-left-color:var(--accent)}
-.callout.note .cico{color:var(--accent)}
-.callout.warn{border-left-color:var(--warn);background:color-mix(in oklab,var(--warn) 6%,var(--bg-2))}
+.callout.warn{border-color:color-mix(in oklab,var(--warn) 28%,var(--line))}
 .callout.warn .cico{color:var(--warn)}
-.callout.tip{border-left-color:var(--success)}
-.callout.tip .cico{color:var(--success)}
 .callout .ic{font-size:.82em}
 .callout code{font-family:var(--mono);font-size:.85em;background:var(--bg-3);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--fg)}
 
@@ -140,7 +140,7 @@ p.body a:hover,.ilink:hover{border-bottom-color:var(--accent)}
 /* ── steps ─────────────────────────── */
 .steps{display:flex;flex-direction:column;gap:22px;margin:18px 0}
 .step{display:flex;gap:14px;align-items:flex-start}
-.step-num{width:25px;height:25px;border-radius:50%;background:var(--bg-3);border:1px solid var(--accent-dim);color:var(--accent);font-family:var(--mono);font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-num{width:24px;height:24px;border-radius:50%;background:var(--bg-3);border:1px solid var(--line);color:var(--fg-3);font-family:var(--mono);font-size:12px;font-weight:500;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
 .step-body{flex:1;min-width:0}
 .step-body .step-t{font-size:14.5px;font-weight:600;color:var(--fg);margin-bottom:9px;letter-spacing:-.01em}
 .step-body p.body{margin-bottom:0;font-size:13.5px}
