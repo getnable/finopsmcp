@@ -1,6 +1,6 @@
 # nable
 
-**Ask your whole cloud and AI bill anything, right inside Claude or Cursor. Find the waste, and get the fix as a pull request you approve. One tool across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.**
+**The cost brain your AI agents check before they spend.** Ask your whole cloud and AI bill anything inside Claude or Cursor, get genuine savings priced on your real rates, and the fix as a pull request you approve. One tool across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.
 
 [![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/finops-mcp?color=4db8d4)](https://pypi.org/project/finops-mcp/)
@@ -8,7 +8,9 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/chaandannn/finopsmcp/badge)](https://scorecard.dev/viewer/?uri=github.com/chaandannn/finopsmcp)
 [![License: Elastic-2.0](https://img.shields.io/badge/license-Elastic--2.0-444)](LICENSE)
 
-nable is a local-first MCP server that connects to your real AWS, Azure, GCP, Kubernetes, and SaaS billing. It answers cost questions in your editor, finds idle and rightsizing waste, drafts the fix for your approval, and verifies the savings landed. Everything runs on **your machine**: your credentials stay in your OS keychain and your bill never leaves, so the no-egress claim is something you can read in the source, not take on faith. It is read-only by default and never changes your cloud on its own. The local agent is open and auditable; a hosted platform is available for teams.
+nable is FinOps that lives inside your AI. Ask Claude or Cursor about your cloud, SaaS, and AI spend and it answers with real numbers, priced on your actual rates, not list price. It finds the savings genuinely worth taking, proposes each fix as a pull request you approve, and checks the next bill to prove it worked. As your agents start spending real money, nable is the cost brain they check before they act.
+
+Everything runs on **your machine**: your credentials stay in your OS keychain and your bill never leaves, so the no-egress claim is something you can read in the source, not take on faith. It is read-only by default and never changes your cloud on its own. The local agent is open and auditable; a hosted platform is available for teams.
 
 **[getnable.com](https://getnable.com)** · docs, quickstart, and the hosted platform
 
