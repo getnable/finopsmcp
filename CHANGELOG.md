@@ -2,6 +2,23 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.149
+
+doctor stops saying "all checks passed" when nothing is connected.
+
+Full-terminal DX audit follow-up. `finops doctor` with zero providers connected
+reported "Status: all checks passed" and told the user to restart Claude and ask
+about their costs, a question that returns no data at that point. The verdict and
+next step now branch on the one thing that gates value: a connected provider.
+Unconnected machines get "healthy, but no cloud account is connected yet" and the
+exact connect commands (terminal and in-chat).
+
+Also verified in the same audit, no changes needed: all 45 subcommand --help
+screens work, Ctrl-C mid-wizard exits without a traceback, `finops serve` prints
+its URL and auto-generated password with clear overrides, `finops connect`'s
+ambient key scan lists per-provider key URLs, and empty states (vault, profile)
+all carry a next step.
+
 ## 0.8.148
 
 DX audit: every "not configured" error now points in-chat, not at the terminal.

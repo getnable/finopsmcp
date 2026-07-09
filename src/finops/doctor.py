@@ -664,9 +664,23 @@ def run_doctor(as_json: bool = False) -> int:
         print()
         return 0
     else:
-        print("  Status: all checks passed")
-        print("  Next:   restart Claude and ask \"What are my cloud costs this month?\"")
-        print("          or run `finops tools` for more example questions")
+        # "All checks passed" with zero providers connected sent people off to ask
+        # Claude a question that returns no data. Branch the verdict and the next
+        # step on the one thing that actually gates value: a connected provider.
+        connected = False
+        try:
+            from .demo_data import _real_provider_connected
+            connected = _real_provider_connected()
+        except Exception:
+            pass
+        if connected:
+            print("  Status: all checks passed")
+            print("  Next:   restart Claude and ask \"What are my cloud costs this month?\"")
+            print("          or run `finops tools` for more example questions")
+        else:
+            print("  Status: healthy, but no cloud account is connected yet")
+            print("  Next:   run `finops aws` (or gcp / azure) to connect one,")
+            print("          or ask your editor's AI to run connect_aws, no terminal needed")
         print(f"  Docs:   https://getnable.com/docs")
         print()
         return 0
