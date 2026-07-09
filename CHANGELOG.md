@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.154
+
+Demo mode now shows the genuine-savings judgment.
+
+The get_rightsizing_recommendations demo fixture was still the old flat "here are
+2 underutilized boxes, $828/mo" shape. It now mirrors the real output: per-rec
+verdict/score/why/action, savings priced on the customer's real rate (a 22%
+effective discount), and the headline that sells the product, $889/mo of raw
+"underutilized" collapsing to $218/mo of genuine savings once burst, memory-bound,
+and the real rate are accounted for. So a prospect poking the demo sees the
+judgment, not a generic list.
+
 ## 0.8.153
 
 Savings are now priced on the customer's real rates, not list price.

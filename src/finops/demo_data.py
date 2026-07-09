@@ -184,39 +184,90 @@ def anomalies() -> dict[str, Any]:
 
 
 def rightsizing() -> dict[str, Any]:
+    # Mirrors the real rightsizing_summary shape: every rec carries a genuine-
+    # savings verdict, and savings are priced on the customer's real rates (here a
+    # 22% effective discount measured from CUR), not list price. The demo shows the
+    # judgment doing its job: $889/mo of raw "underutilized" collapses to $218/mo of
+    # genuine savings once burst, memory-bound, and the real rate are accounted for.
     return {
+        "total_instances_flagged": 3,
+        "total_monthly_savings":   889.00,
+        "total_annual_savings":    10668.00,
+        "genuine_monthly_savings": 218.40,
+        "genuine_annual_savings":  2620.80,
+        "verdicts": {"genuine_savings": 1, "review": 1, "likely_false_positive": 1},
+        "source": {
+            "compute_optimizer": 2,
+            "cloudwatch_fallback": 1,
+            "note": "Compute Optimizer recommendations include CPU, memory, network, and disk. "
+                    "CloudWatch fallback is CPU-only.",
+        },
+        "savings_by_resource_type": {"ec2": 342.00, "rds": 547.00},
         "recommendations": [
             {
-                "resource_id":   "i-0a1b2c3d4e5f67890",
-                "resource_name": "data-platform-worker-01",
+                "instance_id":   "i-0a1b2c3d4e5f67890",
+                "name":          "data-platform-worker-01",
+                "region":        "us-east-1",
                 "resource_type": "ec2",
+                "source":        "compute_optimizer",
                 "current_type":  "m5.4xlarge",
                 "recommended_type": "m5.2xlarge",
-                "current_monthly_cost":    560.64,
-                "recommended_monthly_cost": 280.32,
-                "monthly_savings":         280.32,
-                "cpu_avg_pct":  12.4,
-                "mem_avg_pct":  31.2,
-                "reason": "CPU averaging 12% over 14 days. m5.2xlarge has sufficient headroom.",
-                "confidence": "high",
+                "avg_cpu_pct":   5.8,
+                "max_cpu_pct":   None,
+                "avg_mem_pct":   22.1,
+                "monthly_savings":          280.00,
+                "adjusted_monthly_savings": 218.40,
+                "verdict":       "genuine_savings",
+                "score":         90,
+                "why":           "sustained over-provisioning (CPU+mem+net+disk); "
+                                 "real saving ≈$218/mo on your effective rate, ~22% below list (cur_athena)",
+                "action":        "Resize needs a stop/start (brief downtime); fully reversible.",
             },
             {
-                "resource_id":   "db-prod-analytics-01",
-                "resource_name": "prod-analytics",
+                "instance_id":   "db-prod-analytics-01",
+                "name":          "prod-analytics",
+                "region":        "us-east-1",
                 "resource_type": "rds",
+                "source":        "compute_optimizer",
                 "current_type":  "db.r5.2xlarge",
                 "recommended_type": "db.r5.xlarge",
-                "current_monthly_cost":    1094.40,
-                "recommended_monthly_cost":  547.20,
-                "monthly_savings":           547.20,
-                "cpu_avg_pct":  8.1,
-                "mem_avg_pct": 42.3,
-                "reason": "CPU at 8% avg, memory at 42%. db.r5.xlarge covers both comfortably.",
-                "confidence": "medium",
+                "avg_cpu_pct":   8.1,
+                "max_cpu_pct":   None,
+                "avg_mem_pct":   78.4,
+                "monthly_savings":          547.00,
+                "adjusted_monthly_savings": 426.66,
+                "verdict":       "review",
+                "score":         42,
+                "why":           "over-provisioned; memory at 78%, likely memory-bound; "
+                                 "real saving ≈$427/mo on your effective rate, ~22% below list (cur_athena)",
+                "action":        "Modify the instance class in a maintenance window; reversible, brief failover.",
+            },
+            {
+                "instance_id":   "i-07f3c9a1b2d4e6f80",
+                "name":          "api-gateway-02",
+                "region":        "us-west-2",
+                "resource_type": "ec2",
+                "source":        "cloudwatch_fallback",
+                "current_type":  "c5.xlarge",
+                "recommended_type": "c5.large",
+                "avg_cpu_pct":   9.2,
+                "max_cpu_pct":   82.0,
+                "avg_mem_pct":   None,
+                "monthly_savings":          62.00,
+                "adjusted_monthly_savings": 48.36,
+                "verdict":       "likely_false_positive",
+                "score":         5,
+                "why":           "CPU-only avg 9%; peaks to 82% CPU, needs headroom; "
+                                 "real saving ≈$48/mo on your effective rate, ~22% below list (cur_athena)",
+                "action":        "Resize needs a stop/start (brief downtime); fully reversible.",
             },
         ],
-        "total_monthly_savings": 827.52,
-        "summary": "2 rightsizing opportunities found. Total potential savings: $828/month.",
+        "pricing_basis": {
+            "basis":      {"effective_rate": 3},
+            "confidence": {"high": 3},
+            "effective_discount_pct": 22.0,
+            "rate_source": "cur_athena",
+        },
     }
 
 
