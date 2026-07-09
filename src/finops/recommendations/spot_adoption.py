@@ -318,17 +318,24 @@ def recommend_spot_adoption(
 
     all_results: list[dict[str, Any]] = []
 
-    for region in regions:
+    def _one_region(region: str) -> list[dict[str, Any]]:
         try:
             ec2 = boto3.client("ec2",          region_name=region)
             cw  = boto3.client("cloudwatch",   region_name=region)
             asg = boto3.client("autoscaling",  region_name=region)
 
             asg_members = _get_asg_members(asg, [region])
-            region_results = _analyze_region(ec2, cw, asg_members, region)
-            all_results.extend(region_results)
+            return _analyze_region(ec2, cw, asg_members, region)
         except Exception as exc:
             log.warning("Region %s failed: %s", region, exc)
+            return []
+
+    # Regions are independent; scan them concurrently (blocking boto3 I/O
+    # releases the GIL) instead of paying the sum of every region's latency.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(regions)))) as pool:
+        for region_results in pool.map(_one_region, regions):
+            all_results.extend(region_results)
 
     all_results.sort(key=lambda r: r["monthly_savings"], reverse=True)
 

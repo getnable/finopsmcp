@@ -2,6 +2,26 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.158
+
+The scanner long tail goes parallel.
+
+Continues 0.8.157's audit across the remaining serial scanners:
+
+- Idle scan: one batched describe_volumes per 500 volumes instead of one call per
+  stopped instance, and load balancer tags fetched 20 ARNs per call instead of one
+  per LB. Per-LB target-health checks (no batch API exists) run through a bounded
+  pool. A failed health check counts as healthy so unknown state is never flagged
+  idle, and one bad LB no longer aborts the whole region's scan.
+- Spot adoption: regions scan concurrently instead of paying the sum of every
+  region's latency.
+- EFS cross-AZ audit: the async tool ran blocking boto3 serially, which both
+  serialized regions and froze the MCP event loop for the whole scan. Each region
+  now runs in a thread via asyncio.gather.
+
+Already parallel and left alone: idle's region fan-out, the public IPv4 and
+CloudWatch alarm audits, and the provider layer from 0.8.62.
+
 ## 0.8.157
 
 Performance audit: parallel scans, no more laptop hangs, a 2.6x faster suite.

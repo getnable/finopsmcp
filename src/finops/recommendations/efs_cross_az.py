@@ -10,6 +10,7 @@ monthly cross-AZ transfer costs using CloudWatch I/O byte metrics.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -144,21 +145,22 @@ async def audit_efs_cross_az_mounts(
 
     findings: list[dict] = []
 
-    for region in target_regions:
+    def _scan_region(region: str) -> list[dict]:
+        out: list[dict] = []
         try:
             efs_client = session.client("efs", region_name=region)
             ec2_client = session.client("ec2", region_name=region)
             cw_client = session.client("cloudwatch", region_name=region)
         except Exception as exc:
             log.debug("Could not create clients for region %s: %s", region, exc)
-            continue
+            return out
 
         # List EFS file systems
         try:
             fs_resp = efs_client.describe_file_systems()
         except Exception as exc:
             log.debug("describe_file_systems failed in %s: %s", region, exc)
-            continue
+            return out
 
         for fs in fs_resp.get("FileSystems", []):
             filesystem_id = fs["FileSystemId"]
@@ -257,7 +259,7 @@ async def audit_efs_cross_az_mounts(
                         },
                     )
 
-                findings.append({
+                out.append({
                     "efs_id": filesystem_id,
                     "efs_name": fs_name,
                     "region": region,
@@ -273,6 +275,16 @@ async def audit_efs_cross_az_mounts(
                     ),
                     "finding": finding.to_dict() if finding else None,
                 })
+        return out
+
+    # Each region's scan is blocking boto3 I/O. Run them in threads concurrently:
+    # the old serial loop both paid the sum of every region's latency AND blocked
+    # the event loop for the whole scan.
+    region_lists = await asyncio.gather(
+        *[asyncio.to_thread(_scan_region, r) for r in target_regions]
+    )
+    for sub in region_lists:
+        findings.extend(sub)
 
     findings.sort(key=lambda f: f["estimated_monthly_cost"], reverse=True)
     return findings

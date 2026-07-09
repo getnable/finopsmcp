@@ -231,6 +231,11 @@ def _scan_stopped_ec2(
 ) -> list[IdleResource]:
     """Stopped EC2 instances still paying for attached EBS volumes."""
     results = []
+    # Pass 1: collect qualifying stopped instances and their volume ids, then price
+    # ALL volumes in batched describe_volumes calls (500 ids max per call). The old
+    # shape made one describe_volumes call per instance, so a fleet with N stopped
+    # instances paid N serial round-trips.
+    candidates: list[tuple[dict, list, Any, int, list[str]]] = []
     paginator = ec2_client.get_paginator("describe_instances")
     for page in paginator.paginate(
         Filters=[{"Name": "instance-state-name", "Values": ["stopped"]}]
@@ -243,42 +248,41 @@ def _scan_stopped_ec2(
                 idle_days = _days_since(launch_time)
                 if idle_days < min_idle_days:
                     continue
+                vol_ids = [m["Ebs"]["VolumeId"] for m in inst.get("BlockDeviceMappings", [])
+                           if m.get("Ebs", {}).get("VolumeId")]
+                candidates.append((inst, tags, launch_time, idle_days, vol_ids))
 
-                # Estimate EBS cost for attached volumes
-                ebs_monthly = 0.0
-                vol_ids = []
-                for mapping in inst.get("BlockDeviceMappings", []):
-                    vol_id = mapping.get("Ebs", {}).get("VolumeId")
-                    if vol_id:
-                        vol_ids.append(vol_id)
-                if vol_ids:
-                    try:
-                        vol_resp = ec2_client.describe_volumes(VolumeIds=vol_ids)
-                        for vol in vol_resp.get("Volumes", []):
-                            vt = vol.get("VolumeType", "gp2")
-                            sg = vol.get("Size", 0)
-                            ebs_monthly += sg * _EBS_PRICE.get(vt, _EBS_GP2_PER_GB_MONTH)
-                    except Exception:
-                        pass
+    vol_monthly: dict[str, float] = {}
+    all_vol_ids = [v for _, _, _, _, vids in candidates for v in vids]
+    for i in range(0, len(all_vol_ids), 500):
+        try:
+            vol_resp = ec2_client.describe_volumes(VolumeIds=all_vol_ids[i:i + 500])
+            for vol in vol_resp.get("Volumes", []):
+                vt = vol.get("VolumeType", "gp2")
+                sg = vol.get("Size", 0)
+                vol_monthly[vol["VolumeId"]] = sg * _EBS_PRICE.get(vt, _EBS_GP2_PER_GB_MONTH)
+        except Exception:
+            pass
 
-                itype = inst.get("InstanceType", "")
-                iid = inst["InstanceId"]
-                results.append(IdleResource(
-                    resource_type="stopped_ec2",
-                    resource_id=iid,
-                    region=region,
-                    account_id=account_id,
-                    name=_tag_name(tags),
-                    idle_since=launch_time.date().isoformat(),
-                    idle_days=idle_days,
-                    monthly_cost_usd=round(ebs_monthly, 2),
-                    reason=(
-                        f"Stopped {itype} instance with {len(vol_ids)} attached EBS volume(s). "
-                        f"Paying ~${ebs_monthly:.2f}/mo for storage while stopped."
-                    ),
-                    protected=_is_protected(tags),
-                    metadata={"instance_type": itype, "volume_ids": vol_ids},
-                ))
+    for inst, tags, launch_time, idle_days, vol_ids in candidates:
+        ebs_monthly = sum(vol_monthly.get(v, 0.0) for v in vol_ids)
+        itype = inst.get("InstanceType", "")
+        results.append(IdleResource(
+            resource_type="stopped_ec2",
+            resource_id=inst["InstanceId"],
+            region=region,
+            account_id=account_id,
+            name=_tag_name(tags),
+            idle_since=launch_time.date().isoformat(),
+            idle_days=idle_days,
+            monthly_cost_usd=round(ebs_monthly, 2),
+            reason=(
+                f"Stopped {itype} instance with {len(vol_ids)} attached EBS volume(s). "
+                f"Paying ~${ebs_monthly:.2f}/mo for storage while stopped."
+            ),
+            protected=_is_protected(tags),
+            metadata={"instance_type": itype, "volume_ids": vol_ids},
+        ))
     return results
 
 
@@ -290,46 +294,67 @@ def _scan_idle_load_balancers(
     """ALBs/NLBs with no healthy targets in any target group."""
     results = []
     try:
+        lbs: list[dict] = []
         paginator = elbv2_client.get_paginator("describe_load_balancers")
         for page in paginator.paginate():
-            for lb in page["LoadBalancers"]:
-                lb_arn = lb["LoadBalancerArn"]
-                lb_name = lb.get("LoadBalancerName", "")
-                lb_type = lb.get("Type", "application")
-                tags_resp = elbv2_client.describe_tags(ResourceArns=[lb_arn])
-                tags = tags_resp.get("TagDescriptions", [{}])[0].get("Tags", [])
+            lbs.extend(page["LoadBalancers"])
+        if not lbs:
+            return results
 
-                # Check target groups
-                tg_resp = elbv2_client.describe_target_groups(LoadBalancerArn=lb_arn)
-                healthy = 0
+        # Tags: the API takes up to 20 ARNs per call; the old shape paid one call
+        # per load balancer.
+        tags_by_arn: dict[str, list] = {}
+        arns = [lb["LoadBalancerArn"] for lb in lbs]
+        for i in range(0, len(arns), 20):
+            try:
+                tags_resp = elbv2_client.describe_tags(ResourceArns=arns[i:i + 20])
+                for td in tags_resp.get("TagDescriptions", []):
+                    tags_by_arn[td.get("ResourceArn", "")] = td.get("Tags", [])
+            except Exception:
+                pass
+
+        # Health: no batch API exists (one describe_target_groups + one
+        # describe_target_health per target group), so run per-LB checks in a
+        # bounded pool instead of serially.
+        def _healthy_targets(lb: dict) -> tuple[dict, int]:
+            healthy = 0
+            try:
+                tg_resp = elbv2_client.describe_target_groups(
+                    LoadBalancerArn=lb["LoadBalancerArn"])
                 for tg in tg_resp.get("TargetGroups", []):
                     health_resp = elbv2_client.describe_target_health(
-                        TargetGroupArn=tg["TargetGroupArn"]
-                    )
+                        TargetGroupArn=tg["TargetGroupArn"])
                     healthy += sum(
                         1 for t in health_resp.get("TargetHealthDescriptions", [])
-                        if t.get("TargetHealth", {}).get("State") == "healthy"
-                    )
+                        if t.get("TargetHealth", {}).get("State") == "healthy")
+            except Exception:
+                healthy = 1  # unknown health must never be flagged as idle
+            return lb, healthy
 
-                if healthy > 0:
-                    continue  # has healthy targets, skip
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            checked = list(pool.map(_healthy_targets, lbs))
 
-                created = lb.get("CreatedTime", datetime.now(timezone.utc))
-                idle_days = _days_since(created)
-
-                results.append(IdleResource(
-                    resource_type="load_balancer",
-                    resource_id=lb_arn.split("/")[-2] + "/" + lb_arn.split("/")[-1],
-                    region=region,
-                    account_id=account_id,
-                    name=lb_name,
-                    idle_since=created.date().isoformat() if hasattr(created, "date") else str(created),
-                    idle_days=idle_days,
-                    monthly_cost_usd=_ALB_PER_MONTH,
-                    reason=f"{lb_type.upper()} load balancer with no healthy targets",
-                    protected=_is_protected(tags),
-                    metadata={"lb_type": lb_type, "lb_arn": lb_arn},
-                ))
+        for lb, healthy in checked:
+            if healthy > 0:
+                continue  # has healthy targets (or health unknown), skip
+            lb_arn = lb["LoadBalancerArn"]
+            lb_type = lb.get("Type", "application")
+            tags = tags_by_arn.get(lb_arn, [])
+            created = lb.get("CreatedTime", datetime.now(timezone.utc))
+            results.append(IdleResource(
+                resource_type="load_balancer",
+                resource_id=lb_arn.split("/")[-2] + "/" + lb_arn.split("/")[-1],
+                region=region,
+                account_id=account_id,
+                name=lb.get("LoadBalancerName", ""),
+                idle_since=created.date().isoformat() if hasattr(created, "date") else str(created),
+                idle_days=_days_since(created),
+                monthly_cost_usd=_ALB_PER_MONTH,
+                reason=f"{lb_type.upper()} load balancer with no healthy targets",
+                protected=_is_protected(tags),
+                metadata={"lb_type": lb_type, "lb_arn": lb_arn},
+            ))
     except Exception as e:
         log.warning("Load balancer scan failed in %s: %s", region, e)
     return results
