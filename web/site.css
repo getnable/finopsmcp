@@ -141,6 +141,10 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .copycmd .cmd{padding:0 12px;color:var(--fg);white-space:nowrap;overflow-x:auto;flex:1;display:flex;align-items:center}
 .copycmd .copylab{padding:0 14px;color:var(--fg-3);border-left:1px solid var(--line);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;transition:.15s;display:flex;align-items:center;white-space:nowrap}
 .copycmd:hover .copylab{color:var(--accent);background:var(--bg-1)}
+/* Copied state must be unmistakable: a buyer copied the command 5x and rageclicked
+   (Jul 8) because the old feedback was a dim gray text swap. Loud success flash. */
+.copycmd.copied{border-color:var(--success)}
+.copycmd.copied .copylab{color:#04140c;background:var(--success);font-weight:600;border-left-color:var(--success)}
 .install-more{display:inline-block;margin-top:13px;font-size:12px;color:var(--fg-3);border-bottom:1px solid transparent;transition:.15s}
 .install-more:hover{color:var(--fg-2);border-bottom-color:var(--line-2)}
 .conn-cloud{display:flex;flex-wrap:wrap;gap:16px 36px;align-items:center;max-width:980px}

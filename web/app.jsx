@@ -205,15 +205,15 @@ function Hero(){
 function CopyCmd({ cmd }){
   const [copied, setCopied] = useState(false);
   return (
-    <button className="copycmd" onClick={() => {
+    <button className={"copycmd" + (copied ? " copied" : "")} onClick={() => {
       navigator.clipboard?.writeText(cmd);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      setTimeout(() => setCopied(false), 1800);
       if(window.posthog) posthog.capture('install_copied');
     }}>
       <span className="prompt">$</span>
       <span className="cmd">{cmd}</span>
-      <span className="copylab">{copied ? "copied" : "copy"}</span>
+      <span className="copylab">{copied ? "✓ copied" : "copy"}</span>
     </button>
   );
 }

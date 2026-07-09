@@ -184,12 +184,12 @@ function Hero() {
 }
 function CopyCmd({ cmd }) {
   const [copied, setCopied] = useState(false);
-  return /* @__PURE__ */ React.createElement("button", { className: "copycmd", onClick: () => {
+  return /* @__PURE__ */ React.createElement("button", { className: "copycmd" + (copied ? " copied" : ""), onClick: () => {
     navigator.clipboard?.writeText(cmd);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setTimeout(() => setCopied(false), 1800);
     if (window.posthog) posthog.capture("install_copied");
-  } }, /* @__PURE__ */ React.createElement("span", { className: "prompt" }, "$"), /* @__PURE__ */ React.createElement("span", { className: "cmd" }, cmd), /* @__PURE__ */ React.createElement("span", { className: "copylab" }, copied ? "copied" : "copy"));
+  } }, /* @__PURE__ */ React.createElement("span", { className: "prompt" }, "$"), /* @__PURE__ */ React.createElement("span", { className: "cmd" }, cmd), /* @__PURE__ */ React.createElement("span", { className: "copylab" }, copied ? "\u2713 copied" : "copy"));
 }
 function fmtNum(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k";
