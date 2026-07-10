@@ -439,67 +439,43 @@ function PricingCards({ tiers, annual }) {
   ))));
 }
 function Pricing() {
-  const [annual, setAnnual] = useState(false);
-  const proPrice = annual ? "$250" : "$25";
-  const startupPrice = annual ? "$10,000" : "$1,000";
-  const per = annual ? "/yr" : "/mo";
-  const billed = annual ? "Billed annually" : "Billed monthly";
-  const proLink = annual ? PRO_ANNUAL_LINK : PRO_MONTHLY_LINK;
-  const startupLink = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
   const tiers = [
     {
-      key: "dev",
-      name: "Dev",
-      tag: "Talk to your bill, read-only",
+      key: "community",
+      name: "Community",
+      tag: "For engineers and their bill",
       amt: "Free",
-      per: "forever",
-      billed: "No credit card",
-      feats: ["Ask anything: cost, anomalies, rightsizing", "LLM spend by model", "Every provider included", "Your own LLM key"],
+      per: "",
+      billed: "No credit card, no expiry",
+      feats: [
+        "The full local product: cost queries, anomalies, rightsizing, every provider",
+        "The agent team: Budget Guard, the fix as a PR you approve, verified savings",
+        "AI/LLM spend tracking, forecasts + commitment recommendations",
+        "Self-host the dashboard with Docker",
+        "Runs on your machine, on your own Claude membership"
+      ],
       cta: "Start free",
       href: "/docs",
-      plan: "dev",
+      plan: "community",
       ext: false,
-      primary: false,
-      rec: false
-    },
-    {
-      key: "pro",
-      name: "Pro",
-      tag: "The agent team: watch, act, learn",
-      amt: proPrice,
-      per,
-      billed,
-      feats: ["Everything in Dev", "Budget Guard: agents check cost + policy before they act", "Savings Analyst: the fix as a PR you approve", "The Ledger: verified savings, a gate that learns you", "Always-on monitoring, alerts + tickets"],
-      cta: annual ? "Get annual" : "Get Pro",
-      href: proLink,
-      plan: annual ? "pro_annual" : "pro_monthly",
-      ext: true,
       primary: true,
-      rec: true
-    },
-    {
-      key: "startup",
-      name: "Startups",
-      tag: "Scale it across the org",
-      amt: startupPrice,
-      per,
-      billed,
-      feats: ["Everything in Pro", "Org-wide budgets + agent policy", "Priority support", "Single-tenant hosting available"],
-      cta: "Get Startups",
-      href: startupLink,
-      plan: annual ? "startups_annual" : "startups_monthly",
-      ext: true,
-      primary: false,
       rec: false
     },
     {
       key: "ent",
       name: "Enterprise",
-      tag: "Controls, SSO + an SLA",
+      tag: "For teams that need it always on",
       amt: "Custom",
       per: "",
-      billed: "Talk to us",
-      feats: ["Everything in Startups", "SSO + audit logs", "Dedicated SLA", "Hosted or self-host"],
+      billed: "Tailored to your team",
+      feats: [
+        "Everything in Community",
+        "Managed single-tenant hosting: always-on monitoring + push alerts",
+        "Dashboards + Slack for the whole team, no terminals",
+        "SSO, RBAC + audit logs",
+        "Your data never pooled with another customer's",
+        "Priority support + custom SLA"
+      ],
       cta: "Contact us",
       href: BOOK_CALL_LINK,
       plan: "enterprise",
@@ -508,10 +484,21 @@ function Pricing() {
       rec: false
     }
   ];
-  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head center" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to ask.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Pay to watch, act, and guard your agents.")), /* @__PURE__ */ React.createElement("div", { className: "bill-toggle", role: "group", "aria-label": "Billing period" }, /* @__PURE__ */ React.createElement("div", { className: "seg" }, /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? "" : " active"), onClick: () => setAnnual(false), "aria-pressed": !annual }, "Monthly"), /* @__PURE__ */ React.createElement("button", { className: "seg-btn" + (annual ? " active" : ""), onClick: () => setAnnual(true), "aria-label": "Toggle annual billing", "aria-pressed": annual }, "Annual")), /* @__PURE__ */ React.createElement("span", { className: "seg-save" }, "SAVE 17%"))), /* @__PURE__ */ React.createElement(PricingCards, { tiers, annual }), /* @__PURE__ */ React.createElement("div", { className: "phost" }, /* @__PURE__ */ React.createElement("div", { className: "phost-label" }, "Hosting add-on"), /* @__PURE__ */ React.createElement("p", { className: "phost-body" }, "Optional on Pro or Startups. We run nable single-tenant for you, with a managed AI agent and dashboards your team can use without a terminal. Your bill and credentials are never pooled with another customer's."), /* @__PURE__ */ React.createElement("div", { className: "phost-rows" }, /* @__PURE__ */ React.createElement("a", { className: "phost-demo", href: "https://calendar.app.google/2duYBqjLXaTmX5xC8", target: "_blank", rel: "noopener noreferrer", style: { display: "inline-flex", padding: "10px 20px", borderRadius: "8px", background: "var(--accent)", color: "#06181d", fontWeight: 600, fontSize: "14px", textDecoration: "none" } }, "Contact us for a demo \u2192"))), /* @__PURE__ */ React.createElement("details", { className: "pcompare" }, /* @__PURE__ */ React.createElement("summary", null, "Compare all features"), /* @__PURE__ */ React.createElement("div", { className: "ptable-wrap" }, /* @__PURE__ */ React.createElement("div", { className: "ptable ptable-4" }, /* @__PURE__ */ React.createElement("div", { className: "ph ph-corner" }), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Dev"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Free"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "forever"))), /* @__PURE__ */ React.createElement("div", { className: "ph pcol-team" }, /* @__PURE__ */ React.createElement("div", { className: "pt-rec" }, "Recommended"), /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Pro"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, proPrice), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, per))), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Startups"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, startupPrice), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, per))), /* @__PURE__ */ React.createElement("div", { className: "ph" }, /* @__PURE__ */ React.createElement("div", { className: "pt-name" }, "Enterprise"), /* @__PURE__ */ React.createElement("div", { className: "pt-price" }, /* @__PURE__ */ React.createElement("span", { className: "pt-amt" }, "Custom"), /* @__PURE__ */ React.createElement("span", { className: "pt-per" }, "annual"))), PRICE_ROWS.map((r, i) => /* @__PURE__ */ React.createElement(React.Fragment, { key: i }, /* @__PURE__ */ React.createElement("div", { className: "pr pr-label" }, r.label), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.dev })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell pcol-team" }, /* @__PURE__ */ React.createElement(PCell, { v: r.pro })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.startup })), /* @__PURE__ */ React.createElement("div", { className: "pr pr-cell" }, /* @__PURE__ */ React.createElement(PCell, { v: r.ent }))))))), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "No credit card for Dev. Pro and Startups trials require a card, cancel any time."), /* @__PURE__ */ React.createElement("p", { className: "pfoot pdemo" }, "Weighing Pro or Startups for your org?", " ", /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("section", { id: "pricing" }, /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "section-head center" }, /* @__PURE__ */ React.createElement("div", { className: "label" }, "Pricing"), /* @__PURE__ */ React.createElement("h2", null, "Free to run yourself.", /* @__PURE__ */ React.createElement("br", null), /* @__PURE__ */ React.createElement("em", null, "Enterprise when it runs for you."))), /* @__PURE__ */ React.createElement("div", { className: "pcards pcards-2" }, tiers.map((t) => /* @__PURE__ */ React.createElement("div", { className: "pcard" + (t.rec ? " pcard-rec" : ""), key: t.key }, /* @__PURE__ */ React.createElement("div", { className: "pcard-name" }, t.name), /* @__PURE__ */ React.createElement("div", { className: "pcard-tag" }, t.tag), /* @__PURE__ */ React.createElement("div", { className: "pcard-price" }, /* @__PURE__ */ React.createElement("span", { className: "pcard-amt" }, t.amt), t.per && /* @__PURE__ */ React.createElement("span", { className: "pcard-per" }, t.per)), /* @__PURE__ */ React.createElement("div", { className: "pcard-billed" }, t.billed), /* @__PURE__ */ React.createElement("ul", { className: "pcard-feats" }, t.feats.map((f, i) => /* @__PURE__ */ React.createElement("li", { key: i }, /* @__PURE__ */ React.createElement(CheckIcon, null), /* @__PURE__ */ React.createElement("span", null, f)))), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
+      className: "btn " + (t.primary ? "btn-primary" : "btn-ghost") + " pcard-cta",
+      href: t.href,
+      ...t.ext ? { target: "_blank", rel: "noopener noreferrer" } : {},
+      onClick: () => {
+        if (window.posthog) posthog.capture("cta_clicked", { location: "pricing", plan: t.plan });
+      }
+    },
+    t.cta
+  )))), /* @__PURE__ */ React.createElement("p", { className: "pfoot" }, "Community is free for real work, not a trial. Team pricing is being finalized; early users will get the best terms we ever offer."), /* @__PURE__ */ React.createElement("p", { className: "pfoot pdemo" }, "Want it hosted and always on?", " ", /* @__PURE__ */ React.createElement(
+    "a",
+    {
+      href: BOOK_CALL_LINK,
       target: "_blank",
       rel: "noopener noreferrer",
       onClick: () => {
@@ -528,7 +515,7 @@ const FAQ_QA = [
   ],
   [
     "Is nable free?",
-    "Yes. The Dev tier is free with no credit card and no expiry: cost queries, anomaly detection, rightsizing, LLM spend tracking, and every connector. Paid tiers add remediation pull requests, alerts, scheduled digests, with managed single-tenant hosting available as an optional add-on, contact us for a demo."
+    "Yes. The Community tier is free with no credit card and no expiry: cost queries, anomaly detection, rightsizing, the agent team, LLM spend tracking, and every connector, all running on your own machine. Enterprise adds managed single-tenant hosting with always-on monitoring, team dashboards, SSO and an SLA; contact us for a demo."
   ],
   [
     "Does nable see or store my cloud credentials?",

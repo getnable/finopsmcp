@@ -733,10 +733,9 @@ function CheckIcon(){
   );
 }
 
-// Paid checkout links. Pro = $25/mo flat or $250/yr (2 months free): local,
-// bring your own LLM key. Startups = $1,000/mo or $10,000/yr: org scale, local,
-// bring your own LLM key. Hosting (single-tenant + managed AI) is an optional
-// managed single-tenant add-on on either plan, billed on top; priced via a demo.
+// Stripe checkout links for the previous Pro/Startups tiers. NOT surfaced on the
+// site during the interim Community/Enterprise pricing (2026-07-10); kept because
+// the in-product upgrade path still uses them and reverting is one edit.
 const PRO_MONTHLY_LINK     = "https://buy.stripe.com/5kQeVc4PL9Vk4piaZ42Nq0a";
 const PRO_ANNUAL_LINK      = "https://buy.stripe.com/eVqaEW961aZocVO8QW2Nq0b";
 const STARTUP_MONTHLY_LINK = "https://buy.stripe.com/3cI3cucid6J85tm3wC2Nq08";
@@ -792,27 +791,29 @@ function PricingCards({ tiers, annual }){
 }
 
 function Pricing(){
-  const [annual, setAnnual] = useState(false);
-
-  const proPrice     = annual ? "$250" : "$25";
-  const startupPrice = annual ? "$10,000" : "$1,000";
-  const per    = annual ? "/yr" : "/mo";
-  const billed = annual ? "Billed annually" : "Billed monthly";
-  const proLink     = annual ? PRO_ANNUAL_LINK : PRO_MONTHLY_LINK;
-  const startupLink = annual ? STARTUP_ANNUAL_LINK : STARTUP_MONTHLY_LINK;
-
+  // Interim two-tier pricing (2026-07-10) while the outcome-based model is
+  // finalized: Community = the whole local product, free. Enterprise = managed
+  // hosting, always-on, SSO, contact us. The old Pro/Startups Stripe links stay
+  // live in-product; they are just not sold on the site right now.
   const tiers = [
-    { key:"dev", name:"Dev", tag:"Talk to your bill, read-only", amt:"Free", per:"forever", billed:"No credit card",
-      feats:["Ask anything: cost, anomalies, rightsizing","LLM spend by model","Every provider included","Your own LLM key"],
-      cta:"Start free", href:"/docs", plan:"dev", ext:false, primary:false, rec:false },
-    { key:"pro", name:"Pro", tag:"The agent team: watch, act, learn", amt:proPrice, per, billed,
-      feats:["Everything in Dev","Budget Guard: agents check cost + policy before they act","Savings Analyst: the fix as a PR you approve","The Ledger: verified savings, a gate that learns you","Always-on monitoring, alerts + tickets"],
-      cta:annual ? "Get annual" : "Get Pro", href:proLink, plan:annual?"pro_annual":"pro_monthly", ext:true, primary:true, rec:true },
-    { key:"startup", name:"Startups", tag:"Scale it across the org", amt:startupPrice, per, billed,
-      feats:["Everything in Pro","Org-wide budgets + agent policy","Priority support","Single-tenant hosting available"],
-      cta:"Get Startups", href:startupLink, plan:annual?"startups_annual":"startups_monthly", ext:true, primary:false, rec:false },
-    { key:"ent", name:"Enterprise", tag:"Controls, SSO + an SLA", amt:"Custom", per:"", billed:"Talk to us",
-      feats:["Everything in Startups","SSO + audit logs","Dedicated SLA","Hosted or self-host"],
+    { key:"community", name:"Community", tag:"For engineers and their bill", amt:"Free", per:"", billed:"No credit card, no expiry",
+      feats:[
+        "The full local product: cost queries, anomalies, rightsizing, every provider",
+        "The agent team: Budget Guard, the fix as a PR you approve, verified savings",
+        "AI/LLM spend tracking, forecasts + commitment recommendations",
+        "Self-host the dashboard with Docker",
+        "Runs on your machine, on your own Claude membership",
+      ],
+      cta:"Start free", href:"/docs", plan:"community", ext:false, primary:true, rec:false },
+    { key:"ent", name:"Enterprise", tag:"For teams that need it always on", amt:"Custom", per:"", billed:"Tailored to your team",
+      feats:[
+        "Everything in Community",
+        "Managed single-tenant hosting: always-on monitoring + push alerts",
+        "Dashboards + Slack for the whole team, no terminals",
+        "SSO, RBAC + audit logs",
+        "Your data never pooled with another customer's",
+        "Priority support + custom SLA",
+      ],
       cta:"Contact us", href:BOOK_CALL_LINK, plan:"enterprise", ext:true, primary:false, rec:false },
   ];
 
@@ -821,68 +822,33 @@ function Pricing(){
       <div className="wrap">
         <div className="section-head center">
           <div className="label">Pricing</div>
-          <h2>Free to ask.<br/><em>Pay to watch, act, and guard your agents.</em></h2>
-
-          {/* Billing toggle: segmented control, matched to the dashboard range group. */}
-          <div className="bill-toggle" role="group" aria-label="Billing period">
-            <div className="seg">
-              <button className={"seg-btn" + (annual ? "" : " active")} onClick={()=>setAnnual(false)} aria-pressed={!annual}>Monthly</button>
-              <button className={"seg-btn" + (annual ? " active" : "")} onClick={()=>setAnnual(true)} aria-label="Toggle annual billing" aria-pressed={annual}>Annual</button>
-            </div>
-            <span className="seg-save">SAVE 17%</span>
-          </div>
+          <h2>Free to run yourself.<br/><em>Enterprise when it runs for you.</em></h2>
         </div>
 
-        <PricingCards tiers={tiers} annual={annual} />
-
-        <div className="phost">
-          <div className="phost-label">Hosting add-on</div>
-          <p className="phost-body">Optional on Pro or Startups. We run nable single-tenant for you, with a managed AI agent and dashboards your team can use without a terminal. Your bill and credentials are never pooled with another customer's.</p>
-          <div className="phost-rows">
-            <a className="phost-demo" href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" style={{display:'inline-flex',padding:'10px 20px',borderRadius:'8px',background:'var(--accent)',color:'#06181d',fontWeight:600,fontSize:'14px',textDecoration:'none'}}>Contact us for a demo &rarr;</a>
-          </div>
+        <div className="pcards pcards-2">
+          {tiers.map(t => (
+            <div className={"pcard" + (t.rec ? " pcard-rec" : "")} key={t.key}>
+              <div className="pcard-name">{t.name}</div>
+              <div className="pcard-tag">{t.tag}</div>
+              <div className="pcard-price">
+                <span className="pcard-amt">{t.amt}</span>
+                {t.per && <span className="pcard-per">{t.per}</span>}
+              </div>
+              <div className="pcard-billed">{t.billed}</div>
+              <ul className="pcard-feats">
+                {t.feats.map((f,i) => (<li key={i}><CheckIcon /><span>{f}</span></li>))}
+              </ul>
+              <a className={"btn " + (t.primary ? "btn-primary" : "btn-ghost") + " pcard-cta"}
+                 href={t.href} {...(t.ext ? {target:"_blank", rel:"noopener noreferrer"} : {})}
+                 onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',plan:t.plan}); }}>
+                {t.cta}</a>
+            </div>
+          ))}
         </div>
 
-        <details className="pcompare">
-          <summary>Compare all features</summary>
-          <div className="ptable-wrap">
-            <div className="ptable ptable-4">
-              {/* header row */}
-              <div className="ph ph-corner"></div>
-              <div className="ph">
-                <div className="pt-name">Dev</div>
-                <div className="pt-price"><span className="pt-amt">Free</span><span className="pt-per">forever</span></div>
-              </div>
-              <div className="ph pcol-team">
-                <div className="pt-rec">Recommended</div>
-                <div className="pt-name">Pro</div>
-                <div className="pt-price"><span className="pt-amt">{proPrice}</span><span className="pt-per">{per}</span></div>
-              </div>
-              <div className="ph">
-                <div className="pt-name">Startups</div>
-                <div className="pt-price"><span className="pt-amt">{startupPrice}</span><span className="pt-per">{per}</span></div>
-              </div>
-              <div className="ph">
-                <div className="pt-name">Enterprise</div>
-                <div className="pt-price"><span className="pt-amt">Custom</span><span className="pt-per">annual</span></div>
-              </div>
-
-              {/* feature rows */}
-              {PRICE_ROWS.map((r,i) => (
-                <React.Fragment key={i}>
-                  <div className="pr pr-label">{r.label}</div>
-                  <div className="pr pr-cell"><PCell v={r.dev} /></div>
-                  <div className="pr pr-cell pcol-team"><PCell v={r.pro} /></div>
-                  <div className="pr pr-cell"><PCell v={r.startup} /></div>
-                  <div className="pr pr-cell"><PCell v={r.ent} /></div>
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-        </details>
-        <p className="pfoot">No credit card for Dev. Pro and Startups trials require a card, cancel any time.</p>
-        <p className="pfoot pdemo">Weighing Pro or Startups for your org?{" "}
-          <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer"
+        <p className="pfoot">Community is free for real work, not a trial. Team pricing is being finalized; early users will get the best terms we ever offer.</p>
+        <p className="pfoot pdemo">Want it hosted and always on?{" "}
+          <a href={BOOK_CALL_LINK} target="_blank" rel="noopener noreferrer"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'pricing',cta:'book_demo'}); }}>
             Book a 20-min demo</a> and we'll run it on your own bill.</p>
       </div>
@@ -895,7 +861,7 @@ const FAQ_QA = [
   ["What is nable?",
    "nable is a local-first, AI-native FinOps tool. It is an MCP server you install on your own machine to ask about your AWS, Azure, GCP, and AI or LLM spend right inside Claude, Cursor, or any MCP editor. Your credentials never leave your machine."],
   ["Is nable free?",
-   "Yes. The Dev tier is free with no credit card and no expiry: cost queries, anomaly detection, rightsizing, LLM spend tracking, and every connector. Paid tiers add remediation pull requests, alerts, scheduled digests, with managed single-tenant hosting available as an optional add-on, contact us for a demo."],
+   "Yes. The Community tier is free with no credit card and no expiry: cost queries, anomaly detection, rightsizing, the agent team, LLM spend tracking, and every connector, all running on your own machine. Enterprise adds managed single-tenant hosting with always-on monitoring, team dashboards, SSO and an SLA; contact us for a demo."],
   ["Does nable see or store my cloud credentials?",
    "No. nable runs on your machine and nothing is shipped to a vendor. If you connect with an AWS or GCP SSO login or a CLI profile, nable only references it and stores no secret. Keys you paste directly are encrypted in your OS keyring. Cost data caches in a local SQLite database, and there is no nable backend that holds any of it."],
   ["Can nable change my cloud infrastructure on its own?",

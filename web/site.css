@@ -474,6 +474,7 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 /* Pricing: card-first on every viewport. Full grid lives in the Compare disclosure. */
 .ptable-wrap{display:none}
 .pcards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:44px;align-items:stretch}
+.pcards-2{grid-template-columns:repeat(2,1fr);max-width:920px;margin-left:auto;margin-right:auto}
 .pcard{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--r-2xl);background:var(--bg-1);padding:26px 24px 24px;position:relative;transition:border-color .15s,transform .15s,background .15s}
 .pcard:hover{border-color:var(--line-2);transform:translateY(-2px)}
 .pcard-rec{background:var(--bg-2);border-color:rgba(77,184,212,.40);box-shadow:0 0 0 1px rgba(77,184,212,.18),0 18px 40px -24px rgba(77,184,212,.45)}

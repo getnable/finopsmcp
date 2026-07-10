@@ -37,10 +37,8 @@ nable proposes; a human decides. It drafts pull requests, opens tickets, and rai
 uvx nable
 
 ## Pricing summary
-- Dev: $0, no credit card, no expiry. Cost queries, anomaly detection, rightsizing, LLM spend tracking, every connector. Bring your own LLM key.
-- Pro: $100 per month, flat for the whole team, not per seat. Adds Terraform remediation pull requests, ticket creation, Slack and Teams alerts, digests, budgets, commitment recommendations, the conversational Slack bot, and root-cause analysis.
-- Startups: $1,000 per month flat. Everything in Pro, plus org scale and priority support. Local, bring your own LLM key.
-- Hosting (optional add-on, Pro or Startups): we run nable single-tenant with a managed AI agent, billed on top of your flat plan. Your bill is never pooled with another customer's. Contact us for a demo. nable never charges a percentage of your cloud spend.
+- Community: $0, no credit card, no expiry. The full local product: cost queries, anomaly detection, rightsizing, the agent team (Budget Guard, remediation PRs you approve, verified savings), LLM spend tracking, forecasts, commitment recommendations, every connector, and a self-hostable dashboard. Runs on your machine, on your existing Claude or Cursor membership.
+- Enterprise: custom pricing. Everything in Community, plus managed single-tenant hosting with always-on monitoring and push alerts, team dashboards and Slack without terminals, SSO, RBAC and audit logs, priority support and a custom SLA. Your bill is never pooled with another customer's. Contact us for a demo. nable never charges a percentage of your cloud spend.
 
 ## Contact
 - Site: https://getnable.com
