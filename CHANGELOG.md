@@ -2,6 +2,24 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.159
+
+Stale-build users now see the upgrade nudge IN CHAT, not just stderr.
+
+Funnel diagnosis (PostHog, 7 days): ~97% of active machines are running builds
+older than 0.8.141, so almost none of this month's onboarding work reaches them.
+The staleness self-check already existed but only wrote to a stderr log, which no
+human sees inside an editor, so the one channel meant to rescue stale users was
+silent.
+
+Now the server startup check stashes the note and the tool wrapper surfaces it on
+the first tool result of a session (once per session, only when a newer build
+exists): "nable X is out (you are on Y). To upgrade run `finops upgrade` (or `uvx
+finops-mcp upgrade` if not found), then restart your editor." The uvx fallback
+matters because most editor users launched via uvx and have no `finops` on PATH.
+No network in the hot path (the note is computed by the existing background
+thread), airgap/no-telemetry honored.
+
 ## 0.8.158
 
 The scanner long tail goes parallel.

@@ -87,6 +87,12 @@ _first_cost_query_fired = False
 # Fired once per session when a cost tool runs with no real account connected, so
 # the "used a tool but never connected" wall is finally visible in the funnel.
 _unconnected_hint_fired = False
+# Stale-version nudge. PostHog showed ~97% of weekly machines run pre-fix builds
+# and never see the staleness warning because it only goes to stderr, which no
+# human reads inside an editor. The startup thread stashes the note here and the
+# tool wrapper surfaces it IN CHAT once per session so the user actually sees it.
+_stale_note: str | None = None
+_stale_note_shown = False
 # Injected into cost-tool responses when nothing is connected. Tells the user the
 # data is sample/empty and hands the model the exact tool to fix it in-client, so
 # they never have to leave the conversation for a terminal wizard.
@@ -222,6 +228,24 @@ def _instrumented_tool(*dargs, **dkwargs):
                     # money" without slowing this query, and the scan it triggers records
                     # findings the upgrade nudge later cites. Once per session only.
                     result.setdefault("_onboarding", _first_run_onboarding_directive())
+            # Stale build: surface the upgrade path IN CHAT once per session. The
+            # startup thread stashes the note (no network in this hot path); the
+            # editor user never sees the stderr log, so this is the channel that
+            # actually reaches the ~97% running pre-fix builds.
+            global _stale_note_shown
+            if isinstance(result, dict) and _stale_note and not _stale_note_shown:
+                _stale_note_shown = True
+                # Robust recovery for the common install paths: `finops upgrade`
+                # when it is on PATH, else the uvx form (most editor users launched
+                # via uvx and have no `finops` on their shell PATH). Restarting the
+                # editor is the load-bearing second step for a pinned MCP config.
+                result.setdefault(
+                    "_update",
+                    f"{_stale_note} To upgrade, run in your terminal: `finops upgrade` "
+                    "(or `uvx finops-mcp upgrade` if that is not found), then fully "
+                    "restart your editor so the new nable loads. You are on an old "
+                    "build, so recent features and fixes are missing until you do.",
+                )
             # Contextual Team upsell for free users, once per topic per session.
             if isinstance(result, dict) and "error" not in result:
                 _tip = _maybe_team_tip(fn.__name__)
@@ -7998,6 +8022,10 @@ def main() -> None:
             note = staleness_note()
             if note:
                 logging.getLogger("finops").warning(note)
+                # Stash for the tool wrapper to surface in chat (see _wrap). The log
+                # line alone never reaches a human inside an editor.
+                global _stale_note
+                _stale_note = note
         except Exception:
             pass
     import threading as _threading
