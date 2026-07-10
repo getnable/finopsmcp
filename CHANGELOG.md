@@ -2,6 +2,23 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.165
+
+No more "a keychain cannot be found" popup, and clearer credential messaging.
+
+- On macOS, when there is no login keychain (an altered $HOME, a sandbox, or a
+  hardened setup), the OS pops a blocking "a keychain cannot be found to store
+  X" modal the instant keyring is called, and catching the Python exception does
+  not stop it. nable now checks for the login keychain first and, if it is
+  missing, uses its signed file store instead of touching the keychain. The
+  trial store (license.py) and the credential vault (vault.py) both carry the
+  guard. FINOPS_NO_KEYRING=1 still forces the file-only path everywhere.
+- Docs and the site FAQ now say plainly: connecting AWS or GCP by SSO login or
+  CLI profile stores no secret at all, nable only references it. Only keys you
+  paste directly are encrypted in the OS keyring. This corrects copy that read
+  as "nable puts your cloud credentials in your keychain" to security-conscious
+  users who keep an empty ~/.aws/credentials and only SSO profiles.
+
 ## 0.8.164
 
 AWS Identity Center (SSO) profiles are no longer dropped in silence.

@@ -13,6 +13,7 @@ import getpass
 import logging
 import os
 import stat
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +38,23 @@ def _keyring_service() -> str:
     return _KEYRING_SERVICE_DEFAULT
 
 
+def _macos_keychain_missing() -> bool:
+    """True on macOS when there is no login keychain to open.
+
+    Calling keyring against a missing login keychain pops a BLOCKING 'a keychain
+    cannot be found' modal from the OS before the Python exception is raised, so
+    we must avoid the call entirely, not just catch the error. Fall back to the
+    file-based key store, which is the default posture anyway. license.py carries
+    the identical guard for the trial store."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        kc = Path.home() / "Library" / "Keychains"
+        return not any(kc.glob("login.keychain*"))
+    except Exception:
+        return True
+
+
 def _keyring_disabled() -> bool:
     """FINOPS_NO_KEYRING=1 (or FINOPS_AIRGAP=1) forbids any OS keychain access.
 
@@ -45,10 +63,13 @@ def _keyring_disabled() -> bool:
     cold-run checks with a scratch HOME) that miss the key file would otherwise
     fall through to the developer's real keychain: a password prompt per run,
     and on first-run generation a write that clobbers the real recovery key.
-    license.py carries the same gate for the trial store."""
+    Also disabled when no macOS login keychain exists, to avoid the blocking
+    'cannot be found' modal. license.py carries the same gate for the trial
+    store."""
     return (
         os.environ.get("FINOPS_NO_KEYRING", "") == "1"
         or os.environ.get("FINOPS_AIRGAP", "") == "1"
+        or _macos_keychain_missing()
     )
 
 

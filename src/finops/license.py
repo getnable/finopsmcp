@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import platform
+import sys
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -204,16 +205,38 @@ def _sign_date(iso_date: str) -> str:
 _kr_cached_date: "date | None" = None
 
 
+def _macos_keychain_missing() -> bool:
+    """True on macOS when there is no login keychain to open.
+
+    When $HOME/Library/Keychains has no login keychain (an altered $HOME, a
+    sandbox, a hardened setup, or a genuinely deleted keychain), the OS Security
+    framework pops a BLOCKING 'a keychain cannot be found to store X' modal the
+    instant keyring is called, BEFORE the Python exception is raised, so the
+    except-and-pass around the call cannot suppress it. The only way to avoid the
+    modal is to not make the call. Detect the missing keychain and fall back to
+    the signed file store, which is the primary store anyway."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        kc = Path.home() / "Library" / "Keychains"
+        return not any(kc.glob("login.keychain*"))
+    except Exception:
+        return True  # cannot tell -> prefer the file store, never risk the modal
+
+
 def _keyring_disabled() -> bool:
     """FINOPS_NO_KEYRING=1 (or FINOPS_AIRGAP=1) forbids any OS keychain access.
 
     The keychain belongs to the macOS user, not to $HOME, so an ephemeral run
     (tests, demos, scratch-HOME cold runs) that misses the trial file would
     otherwise probe the developer's real keychain, including the legacy
-    disguised entry, and prompt. Mirrors security/vault.py."""
+    disguised entry, and prompt. Also disabled when no macOS login keychain
+    exists, to avoid the blocking 'cannot be found' modal. Mirrors
+    security/vault.py."""
     return (
         os.environ.get("FINOPS_NO_KEYRING", "") == "1"
         or os.environ.get("FINOPS_AIRGAP", "") == "1"
+        or _macos_keychain_missing()
     )
 
 

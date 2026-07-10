@@ -532,7 +532,7 @@ const FAQ_QA = [
   ],
   [
     "Does nable see or store my cloud credentials?",
-    "No. nable runs on your machine. Credentials stay in your OS keyring and cost data caches in a local SQLite database. There is no nable backend that holds your data, and nothing is shipped to a vendor."
+    "No. nable runs on your machine and nothing is shipped to a vendor. If you connect with an AWS or GCP SSO login or a CLI profile, nable only references it and stores no secret. Keys you paste directly are encrypted in your OS keyring. Cost data caches in a local SQLite database, and there is no nable backend that holds any of it."
   ],
   [
     "Can nable change my cloud infrastructure on its own?",
