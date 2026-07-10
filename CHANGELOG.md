@@ -2,6 +2,28 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.161
+
+Practitioner-driven guard and preflight refinements.
+
+Straight from a platform practitioner describing how their team actually runs
+agents ("auto-execute idempotent actions in staging, production still requires
+human approval" and "letting an agent tag resources with cost center and owner
+avoided billing surprises"):
+
+- The Budget Guard hook now recognizes a production context. A reversible
+  mutation aimed at prod (kubectl -n prod, terraform with a prod var, etc.)
+  gets a confirm instead of passing silently; staging stays zero-friction.
+  Word-boundary matching so "product" never trips it; patterns overridable via
+  FINOPS_GUARD_PROD_PATTERNS (set to "off" to disable).
+- The Terraform preflight flags newly created resources that support tags but
+  carry no owner/cost-attribution tag (owner, cost_center, team, ...), so
+  unattributed spend is caught before apply instead of on the bill. Resources
+  whose schema has no tags field are never flagged, so untaggable types produce
+  no noise.
+- Heartbeats now carry the running version, so build freshness is directly
+  queryable instead of inferred from the surface tag's absence.
+
 ## 0.8.160
 
 Connection-aware tool surface: the model only sees tools you can actually use.

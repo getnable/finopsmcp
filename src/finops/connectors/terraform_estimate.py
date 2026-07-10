@@ -516,7 +516,11 @@ def estimate_plan(plan_data: dict) -> dict[str, Any]:
     if unpriced:
         summary += f" · {len(unpriced)} resource(s) not priced"
 
-    return {
+    untagged = _untagged_creates(changes)
+    if untagged:
+        summary += f" · {len(untagged)} new resource(s) missing owner/cost tags"
+
+    out = {
         "monthly_delta_usd": round(total, 2),
         "adds":    round(adds,    2),
         "removes": round(removes, 2),
@@ -536,6 +540,48 @@ def estimate_plan(plan_data: dict) -> dict[str, Any]:
         "unpriced":   unpriced,
         "confidence": confidence,
     }
+    if untagged:
+        out["untagged_resources"] = untagged[:10]
+        out["untagged_note"] = (
+            "These new resources carry no owner or cost-allocation tag, so their "
+            "spend will land unattributed on the bill. Tag them at deploy time "
+            "(owner, cost_center, team) to avoid billing surprises later."
+        )
+    return out
+
+
+# Cost-attribution tag keys that make a resource traceable to a team/owner.
+_ATTRIBUTION_TAG_KEYS = frozenset({
+    "owner", "cost_center", "cost-center", "costcenter", "team", "project",
+    "cost_allocation", "business_unit",
+})
+
+
+def _untagged_creates(changes: list[ResourceChange]) -> list[dict]:
+    """Newly created resources that support tagging but carry no attribution tag.
+
+    Only resources whose planned config exposes a tags/labels key are judged
+    (the provider schema supports tagging); resources without the key at all
+    (e.g. bucket policies, rule attachments) are skipped rather than flagged,
+    so untaggable types never produce noise.
+    """
+    flagged: list[dict] = []
+    for rc in changes:
+        if not rc.is_create or not isinstance(rc.after, dict):
+            continue
+        tag_field = next((k for k in ("tags", "tags_all", "labels") if k in rc.after), None)
+        if tag_field is None:
+            continue
+        tags = rc.after.get(tag_field) or {}
+        keys = {str(k).lower() for k in tags} if isinstance(tags, dict) else set()
+        if not (keys & _ATTRIBUTION_TAG_KEYS):
+            flagged.append({
+                "address": rc.address,
+                "type": rc.type,
+                "missing": ("no tags at all" if not keys
+                            else "no owner/cost_center/team tag"),
+            })
+    return flagged
 
 
 def estimate_from_file(path: str) -> dict[str, Any]:

@@ -88,6 +88,28 @@ def _strict() -> bool:
     return os.getenv("FINOPS_GUARD_STRICT", "").strip().lower() in ("1", "true", "yes")
 
 
+def _prod_context(command: str) -> bool:
+    """Does this command look aimed at production?
+
+    Word-boundary match so 'product' never trips it. Patterns are overridable
+    (comma-separated regexes) via FINOPS_GUARD_PROD_PATTERNS; set it to 'off'
+    to disable production-context confirmation entirely. Over-matching costs an
+    unnecessary confirm, which is the tolerable failure direction here.
+    """
+    import re
+    raw = os.getenv("FINOPS_GUARD_PROD_PATTERNS", "")
+    if raw.strip().lower() == "off":
+        return False
+    patterns = [p.strip() for p in raw.split(",") if p.strip()] or [r"\bprod(uction)?\b"]
+    for pat in patterns:
+        try:
+            if re.search(pat, command, re.IGNORECASE):
+                return True
+        except re.error:
+            continue
+    return False
+
+
 def gate_command(command: str) -> dict[str, Any] | None:
     """Evaluate a shell command against the policy gate.
 
@@ -110,7 +132,9 @@ def gate_command(command: str) -> dict[str, Any] | None:
     door, action_type = hit
 
     if action_type == "infra_apply":
-        # Reversible mutation. Zero friction by default; strict mode confirms.
+        # Reversible mutation. Zero friction by default; strict mode confirms,
+        # and a production context always confirms: practitioners run agents
+        # loose in staging but want a human nod before prod changes.
         if _strict():
             return {
                 "decision": "ask",
@@ -118,6 +142,14 @@ def gate_command(command: str) -> dict[str, Any] | None:
                 "reason": ("nable guard (strict): this changes infrastructure and "
                            "therefore the bill. Cost it first (ask nable to "
                            "estimate_change_cost) or confirm to proceed."),
+            }
+        if _prod_context(command):
+            return {
+                "decision": "ask",
+                "action_type": action_type,
+                "reason": ("nable guard: this mutates infrastructure in what looks "
+                           "like a PRODUCTION context. Confirm to proceed, or cost "
+                           "it first (ask nable to estimate_change_cost)."),
             }
         return None
 

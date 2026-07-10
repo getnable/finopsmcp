@@ -247,4 +247,11 @@ def ping_startup(provider_count: int = 0, plan: str = "free") -> None:
     """
     set_provider_count(provider_count)
     set_plan(plan)
-    ping({"event_type": "startup", "surface": _startup_surface()})
+    # Version on the heartbeat makes build freshness directly queryable (the
+    # funnel read had to infer it from the surface tag's absence before).
+    try:
+        from importlib.metadata import version as _v
+        ver = _v("finops-mcp")
+    except Exception:
+        ver = ""
+    ping({"event_type": "startup", "surface": _startup_surface(), "version": ver})
