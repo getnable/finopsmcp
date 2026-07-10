@@ -40,6 +40,19 @@ def pro(monkeypatch):
     )
 
 
+@pytest.fixture
+def regated(monkeypatch):
+    # Free tier with the temporary AI ungate turned OFF: the agent features gate
+    # again. Proves the upgrade payload and the re-gate path survive the hold, so
+    # re-gating is one flag flip when the paid model ships.
+    monkeypatch.delenv("FINOPS_DEMO_MODE", raising=False)
+    monkeypatch.setattr("finops.license._HOLD_AI_UNGATE", False)
+    monkeypatch.setattr(
+        "finops.license.get_status",
+        lambda: LicenseStatus(mode="free", email="", issued="", message=""),
+    )
+
+
 def _assert_upgrade_payload(r, feature):
     assert r["error"] == "pro_required"
     assert r["feature"] == feature
@@ -49,11 +62,14 @@ def _assert_upgrade_payload(r, feature):
     assert "Budget Guard" in r["message"]
 
 
-# ── Budget Guard ───────────────────────────────────────────────────────────────
+# ── Under the temporary AI ungate (2026-07-10): the agent team runs for free ────
+# The features stay wired to require_pro; the hold just makes the gate pass. The
+# `regated` tests below flip the hold off and confirm the upgrade payload returns.
 
-def test_free_check_action_policy_returns_upgrade(free):
+def test_free_check_action_policy_runs_under_hold(free, monkeypatch):
+    monkeypatch.setattr("finops.budget.enforcer.list_budgets", lambda **k: [])
     r = _run(server.check_action_policy(action_type="rightsizing", monthly_delta_usd=-100.0))
-    _assert_upgrade_payload(r, "agent_gate")
+    assert "gate" in r and r.get("error") is None
 
 
 def test_pro_check_action_policy_passes(pro, monkeypatch):
@@ -62,23 +78,29 @@ def test_pro_check_action_policy_passes(pro, monkeypatch):
     assert "gate" in r and r.get("error") is None
 
 
-# ── The Ledger (learning loop) ─────────────────────────────────────────────────
+def test_free_ledger_and_remediation_run_under_hold(free):
+    # These just must not be gated anymore; they may still return other errors
+    # (a missing recommendation, an empty tf dir), so we only assert not-gated.
+    for r in (
+        _run(server.mark_recommendation_acted_on(1)),
+        _run(server.verify_savings()),
+        _run(server.get_recommendation_learning()),
+        _run(server.generate_terraform_tag_fixes(tf_dir="/tmp")),
+    ):
+        assert r.get("error") != "pro_required"
 
-def test_free_mark_acted_on_returns_upgrade(free):
+
+# ── Re-gate proof: flip the hold off and the upgrade payload returns ───────────
+
+def test_regated_check_action_policy_returns_upgrade(regated):
+    r = _run(server.check_action_policy(action_type="rightsizing", monthly_delta_usd=-100.0))
+    _assert_upgrade_payload(r, "agent_gate")
+
+
+def test_regated_ledger_and_remediation_gate(regated):
     _assert_upgrade_payload(_run(server.mark_recommendation_acted_on(1)), "agent_learning")
-
-
-def test_free_verify_savings_returns_upgrade(free):
     _assert_upgrade_payload(_run(server.verify_savings()), "agent_learning")
-
-
-def test_free_learning_returns_upgrade(free):
     _assert_upgrade_payload(_run(server.get_recommendation_learning()), "agent_learning")
-
-
-# ── Savings Analyst drafting ───────────────────────────────────────────────────
-
-def test_free_generate_tag_fixes_returns_upgrade(free):
     _assert_upgrade_payload(_run(server.generate_terraform_tag_fixes(tf_dir="/tmp")), "remediation")
 
 
@@ -100,7 +122,18 @@ def test_free_estimate_change_cost_stays_free(free, monkeypatch):
 
 # ── the agent-team surface ─────────────────────────────────────────────────────
 
-def test_agent_team_free_shows_unlock_path(free):
+def test_agent_team_free_under_hold_is_available(free, monkeypatch):
+    # Under the AI ungate, a free user's agents are available (needs_setup /
+    # active), not paywalled.
+    monkeypatch.setattr("finops.budget.enforcer.list_budgets", lambda **k: [])
+    r = _run(server.get_agent_team())
+    assert len(r["agents"]) == 3
+    for a in r["agents"]:
+        assert a["status"] != "pro_required"
+    assert "Propose-only" in r["note"]
+
+
+def test_agent_team_regated_shows_unlock_path(regated):
     r = _run(server.get_agent_team())
     assert r["plan"] == "free"
     assert len(r["agents"]) == 3

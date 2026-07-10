@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.168
+
+The AI and agent features are free for now.
+
+While we get the first users fully set up, the agent team (Budget Guard, the
+Ledger), remediation PRs, forecasting, proactive alerts, commitment
+recommendations, and AI unit economics all run free. Pricing for them is being
+decided separately. This is a deliberate, reversible hold: everything stays
+wired the way it was, one flag re-gates it when the paid model ships. Propose-only
+is unchanged: the agents still never execute on their own.
+
 ## 0.8.167
 
 Honor AWS_PROFILE for account naming, and never store expiring keys.

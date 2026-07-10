@@ -114,6 +114,30 @@ PRO_FEATURES: set[str] = {
     # talk to your bill. The agent team (gate, remediation, learning) is Pro.
 }
 
+# ── Temporary AI/agent ungate (2026-07-10) ───────────────────────────────────
+# While we get the first real users fully set up, the AI / agent features run
+# FREE. Pricing + subscription for them is being decided (the North-style flat +
+# % of savings model under review, see the pricing plan). This is a deliberate,
+# reversible hold, not a tier change: set _HOLD_AI_UNGATE = False (or empty the
+# set) to re-gate them the moment the paid model ships. Everything still lives in
+# PRO_FEATURES so the upgrade copy and the eventual re-gate stay one edit away.
+_HOLD_AI_UNGATE = True
+_UNGATED_AI_FEATURES: frozenset[str] = frozenset({
+    "agent_gate",                 # Budget Guard: policy gate + guard hook
+    "agent_learning",             # the Ledger: verify savings, learn approvals
+    "remediation",                # the fix as a pull request
+    "ai_unit_economics",          # AI cost per PR, AI KPIs
+    "forecasting",                # cost / Azure / LLM forecasts
+    "alerts",                     # proactive alert policies + scheduled push
+    "commitment_recommendations", # RI / SP purchase recommendations
+})
+
+
+def _is_ungated_now(feature: str) -> bool:
+    """True when a normally-Pro feature is on the temporary free hold above."""
+    return _HOLD_AI_UNGATE and feature in _UNGATED_AI_FEATURES
+
+
 # ── Team-only features ($1k/mo flat) ─────────────────────────────────────────
 # The conversational layer: team-shaped value gets team-shaped pricing. Hard
 # gate, no free questions. Trial includes Team so demos feel the full product.
@@ -624,6 +648,10 @@ def require_pro(feature: str) -> dict | None:
         log.warning("require_pro called for non-pro feature %r — allowing", feature)
         return None
 
+    # Temporary free hold on the AI / agent features while early users get set up.
+    if _is_ungated_now(feature):
+        return None
+
     # Demo mode shows every feature (with synthetic data) so the product demos in
     # full to anyone evaluating it. Gating only applies to real, free-tier accounts.
     try:
@@ -694,5 +722,7 @@ def feature_available(feature: str) -> bool:
     and for pro features only when the user has a pro/trial license.
     """
     if feature not in PRO_FEATURES:
+        return True
+    if _is_ungated_now(feature):
         return True
     return get_status().is_pro

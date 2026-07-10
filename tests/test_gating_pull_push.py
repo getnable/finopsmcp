@@ -80,9 +80,24 @@ def test_new_features_are_registered_pro():
         assert f in PRO_FEATURES, f
 
 
-def test_free_tier_is_blocked_on_each_new_feature(monkeypatch):
+def test_free_tier_gating_respects_the_ai_ungate_hold(monkeypatch):
+    # Temporary hold (2026-07-10): the AI/agent features run free while early
+    # users get set up; everything else still gates on the free tier.
     _free(monkeypatch)
     for f in NEW_PRO:
+        err = require_pro(f)
+        if f in L._UNGATED_AI_FEATURES:
+            assert err is None, f"{f} is on the temporary free hold, must not gate"
+        else:
+            assert err and err["error"] == "pro_required", f
+
+
+def test_regating_ai_features_restores_the_gate(monkeypatch):
+    # The hold is reversible: turn it off and the AI features gate again, proving
+    # they stay wired into PRO_FEATURES for when the paid model ships.
+    _free(monkeypatch)
+    monkeypatch.setattr(L, "_HOLD_AI_UNGATE", False)
+    for f in L._UNGATED_AI_FEATURES:
         err = require_pro(f)
         assert err and err["error"] == "pro_required", f
 
