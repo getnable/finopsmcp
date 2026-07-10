@@ -2,6 +2,16 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.166
+
+Connected accounts use your profile name, not a bare account id.
+
+When an account has no readable IAM account alias (the common case for an SSO
+role, which usually lacks iam:ListAccountAliases), nable was naming it
+aws-822638974044. It now falls back to the SSO / CLI profile name you already
+use, so accounts read as `fd-sapro` instead of `aws-822638974044`. Order is:
+account alias, then profile name, then aws-<account_id>.
+
 ## 0.8.165
 
 No more "a keychain cannot be found" popup, and clearer credential messaging.

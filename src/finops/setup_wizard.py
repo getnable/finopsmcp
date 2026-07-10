@@ -538,8 +538,19 @@ def _detect_sso_profiles_needing_login() -> list[dict]:
 
 
 def _auto_aws_name(candidate: dict, taken: set) -> str:
-    """Derive an account name from the alias or account id, kept unique."""
-    base = candidate.get("alias") or f"aws-{candidate['account_id']}"
+    """Human label for the account, kept unique.
+
+    Prefer the account's own alias (what the org named it), then the SSO / CLI
+    profile name (what the user named it locally, the label they actually
+    recognize), then aws-<account_id> as a last resort. A bare account id is the
+    worst option: an SSO role usually lacks iam:ListAccountAliases, so the alias
+    comes back empty and every account would otherwise read as aws-822638974044.
+    The profile the user picked is right there and means something to them."""
+    base = (
+        candidate.get("alias")
+        or (candidate.get("profile") or "").strip()
+        or f"aws-{candidate['account_id']}"
+    )
     name, i = base, 2
     while name in taken:
         name = f"{base}-{i}"

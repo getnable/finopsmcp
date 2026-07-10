@@ -96,7 +96,22 @@ def test_auto_name_prefers_alias():
     assert setup_wizard._auto_aws_name({"alias": "acme-prod", "account_id": "1"}, set()) == "acme-prod"
 
 
+def test_auto_name_prefers_profile_over_account_id():
+    # SSO roles usually lack iam:ListAccountAliases, so alias is empty. The
+    # profile the user named is a far better label than aws-<id>.
+    assert setup_wizard._auto_aws_name(
+        {"alias": "", "profile": "fd-sapro", "account_id": "822638974044"}, set()
+    ) == "fd-sapro"
+
+
+def test_auto_name_alias_still_beats_profile():
+    assert setup_wizard._auto_aws_name(
+        {"alias": "acme-prod", "profile": "prof", "account_id": "1"}, set()
+    ) == "acme-prod"
+
+
 def test_auto_name_falls_back_to_account_id():
+    # No alias and no profile (default credential chain) -> the id is all we have.
     assert setup_wizard._auto_aws_name({"alias": "", "account_id": "999"}, set()) == "aws-999"
 
 
