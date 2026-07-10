@@ -2,6 +2,17 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.169
+
+When your session expires, nable tells you to log in, not to re-setup.
+
+An expired SSO or MFA session now returns "log back in and ask again", naming the
+profile and giving the exact `aws sso login --profile X` command, instead of the
+old "re-run finops setup aws". Your account stays configured: nable stored a
+profile reference, so once you log back in, the next query just works, no
+reconfiguration. Also catches SSO-token expiry, which previously slipped through
+as a generic error.
+
 ## 0.8.168
 
 The AI and agent features are free for now.

@@ -7,6 +7,40 @@ from typing import Any
 
 from .base import BaseConnector, CostEntry, CostSummary
 
+# Error markers that mean "the session expired, log back in", across SSO,
+# MFA/session tokens, and an empty credential chain. Matched against both the
+# botocore error code and the exception text/type name.
+_EXPIRED_CREDENTIAL_MARKERS = (
+    "ExpiredToken", "ExpiredTokenException",
+    "SSOTokenLoadError", "UnauthorizedSSOTokenError", "TokenRetrievalError",
+    "NoCredentialsError", "CredentialRetrievalError",
+    "InvalidGrantException", "RefreshWithMFA",
+)
+
+
+def _reauth_hint(session) -> str:
+    """A friendly re-login instruction for an expired SSO / MFA session, naming
+    the profile so the user knows exactly what to run. The account is NOT lost:
+    nable stored a profile reference, so once they log back in, boto3 reads the
+    refreshed token from cache and the next query just works, no reconfiguration."""
+    prof = ""
+    try:
+        prof = getattr(session, "profile_name", "") or ""
+    except Exception:
+        prof = ""
+    if prof and prof != "default":
+        return (
+            f"Your AWS session for profile '{prof}' has expired. Nothing to "
+            f"reconfigure: log back in and ask again. For SSO run "
+            f"`aws sso login --profile {prof}`, or refresh that profile's MFA "
+            f"session. nable picks up the new session automatically."
+        )
+    return (
+        "Your AWS session has expired. Nothing to reconfigure: log back in and ask "
+        "again. Run `aws sso login` (or refresh your MFA session) and nable picks "
+        "up the new session automatically."
+    )
+
 
 class AWSConnector(BaseConnector):
     provider = "aws"
@@ -245,10 +279,12 @@ class AWSConnector(BaseConnector):
                         "AWS credentials are valid but missing Cost Explorer permissions. "
                         "Add ce:GetCostAndUsage to your IAM policy, or run: finops setup aws --iam-template"
                     ) from exc
-                if err_code == "ExpiredTokenException" or "ExpiredToken" in err_str:
-                    raise RuntimeError(
-                        "AWS session token has expired. Re-run: finops setup aws"
-                    ) from exc
+                if any(m in err_code or m in err_str for m in _EXPIRED_CREDENTIAL_MARKERS):
+                    # Expired SSO / MFA / session token. The account config is NOT
+                    # lost: nable stored a profile reference, so the user just logs
+                    # back in and the next query works. Name the profile and give
+                    # the exact command instead of telling them to re-setup.
+                    raise RuntimeError(_reauth_hint(self._session)) from exc
                 raise
 
             if results:
