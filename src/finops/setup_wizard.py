@@ -402,6 +402,20 @@ def _aws_account_alias(session) -> str:
         return ""
 
 
+def _active_profile_name(explicit_profile: str | None) -> str:
+    """The profile label to record for a probe. A named profile wins; otherwise
+    the AWS_PROFILE / AWS_DEFAULT_PROFILE the default chain resolved through, so
+    `AWS_PROFILE=crosstx-mfa finops setup aws` names the account crosstx-mfa and
+    stores that reference rather than the account id."""
+    import os as _os
+    return (
+        explicit_profile
+        or _os.environ.get("AWS_PROFILE")
+        or _os.environ.get("AWS_DEFAULT_PROFILE")
+        or ""
+    )
+
+
 def _detect_aws_candidates() -> list:
     """Probe the machine for working AWS credentials. No prompts, no writes.
 
@@ -420,7 +434,12 @@ def _detect_aws_candidates() -> list:
             session = boto3.Session(profile_name=profile) if profile else boto3.Session()
             ident = session.client("sts", config=_cfg).get_caller_identity()
             return {
-                "profile": profile or "",
+                # When creds resolve through the default chain, the AWS_PROFILE the
+                # user exported IS the profile they chose; record it. That names the
+                # account crosstx-mfa instead of aws-<id>, and makes us store a
+                # profile REFERENCE (never the expiring session keys) that boto3
+                # re-resolves next run, so tomorrow it just asks for a fresh login.
+                "profile": _active_profile_name(profile),
                 "account_id": ident["Account"],
                 "alias": _aws_account_alias(session),
                 "region": session.region_name or "us-east-1",

@@ -96,6 +96,25 @@ def test_auto_name_prefers_alias():
     assert setup_wizard._auto_aws_name({"alias": "acme-prod", "account_id": "1"}, set()) == "acme-prod"
 
 
+def test_active_profile_name_uses_named_profile(monkeypatch):
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    assert setup_wizard._active_profile_name("prod-sso") == "prod-sso"
+
+
+def test_active_profile_name_falls_back_to_aws_profile_env(monkeypatch):
+    # `AWS_PROFILE=crosstx-mfa finops setup aws`: the default chain resolves via
+    # that profile, so we must record crosstx-mfa, not "".
+    monkeypatch.setenv("AWS_PROFILE", "crosstx-mfa")
+    monkeypatch.delenv("AWS_DEFAULT_PROFILE", raising=False)
+    assert setup_wizard._active_profile_name(None) == "crosstx-mfa"
+
+
+def test_active_profile_name_empty_when_nothing_set(monkeypatch):
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_PROFILE", raising=False)
+    assert setup_wizard._active_profile_name(None) == ""
+
+
 def test_auto_name_prefers_profile_over_account_id():
     # SSO roles usually lack iam:ListAccountAliases, so alias is empty. The
     # profile the user named is a far better label than aws-<id>.

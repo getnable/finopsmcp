@@ -3,7 +3,7 @@
   "name": "io.github.chaandannn/finops-mcp",
   "title": "nable",
   "description": "Local-first FinOps copilot: ask AWS, Azure, GCP, Kubernetes and SaaS cost questions in your editor.",
-  "version": "0.8.166",
+  "version": "0.8.167",
   "repository": {
     "url": "https://github.com/chaandannn/finopsmcp",
     "source": "github"
@@ -30,7 +30,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "finops-mcp",
-      "version": "0.8.166",
+      "version": "0.8.167",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

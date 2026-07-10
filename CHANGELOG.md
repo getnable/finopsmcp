@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.167
+
+Honor AWS_PROFILE for account naming, and never store expiring keys.
+
+`AWS_PROFILE=crosstx-mfa finops setup aws` now names the account `crosstx-mfa`,
+not `aws-822638974044`. When credentials resolve through the default chain, nable
+records the AWS_PROFILE you exported and stores that profile reference, not the
+temporary session keys. So a workload account you don't own (no settable alias,
+MFA-gated) keeps the name you gave it, and when the session expires nable simply
+re-resolves the profile next run and asks you to log in again rather than holding
+stale keys. You can list and query these accounts by name with list_aws_accounts.
+
 ## 0.8.166
 
 Connected accounts use your profile name, not a bare account id.
