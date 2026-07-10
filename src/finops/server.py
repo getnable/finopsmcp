@@ -5131,17 +5131,48 @@ async def connect_aws(account_id: str = "") -> dict:
     """
     from .setup_wizard import (
         _detect_aws_candidates, _emit_provider_connected, _auto_aws_name,
+        _detect_sso_profiles_needing_login,
     )
     from .accounts import AccountConfig, add_account, list_accounts
 
     candidates = await asyncio.to_thread(_detect_aws_candidates)
     connected_ids = {a.account_id for a in list_accounts() if a.account_id}
 
-    if not candidates:
+    # AWS Identity Center (SSO) profiles that are configured in ~/.aws/config but
+    # not logged in. A plain STS probe drops these silently, so surface them with
+    # the exact `aws sso login` command instead of pretending they do not exist.
+    sso_pending = await asyncio.to_thread(_detect_sso_profiles_needing_login)
+    connected_profiles = {a.profile for a in list_accounts() if getattr(a, "profile", None)}
+    sso_pending = [s for s in sso_pending if s["profile"] not in connected_profiles]
+
+    def _sso_hint(sso_list):
+        """Shared block telling the user how to light up their SSO profiles."""
         return {
+            "sso_profiles_needing_login": [
+                {
+                    "profile": s["profile"],
+                    "account_id": s["account_id"] or "(unknown until login)",
+                    "login_command": s["login_command"],
+                }
+                for s in sso_list
+            ],
+            "sso_note": (
+                f"Found {len(sso_list)} AWS Identity Center (SSO) profile(s) in ~/.aws/config "
+                "that are not logged in yet. Run the login command for the one you want, then "
+                "call connect_aws again and it will appear as a connectable account. For example: "
+                f"`{sso_list[0]['login_command']}`."
+            ),
+        }
+
+    if not candidates:
+        result = {
             "connected": False,
             "candidates": [],
-            "message": "No AWS credentials were found on this machine.",
+            "message": (
+                "No logged-in AWS credentials were found on this machine."
+                + (" But nable did find SSO profiles that just need a login, see below."
+                   if sso_pending else "")
+            ),
             "how_to_connect": [
                 "Fastest, in AWS CloudShell (already signed in): run "
                 "'pip install finops-mcp && finops welcome' and it uses CloudShell's own credentials.",
@@ -5151,10 +5182,13 @@ async def connect_aws(account_id: str = "") -> dict:
             "note": ("connect_aws only reads credentials that already exist locally. It never "
                      "creates or changes anything in your AWS account."),
         }
+        if sso_pending:
+            result.update(_sso_hint(sso_pending))
+        return result
 
     # No account chosen yet: propose what was found and store nothing.
     if not account_id:
-        return {
+        result = {
             "connected": False,
             "candidates": [
                 {
@@ -5169,10 +5203,15 @@ async def connect_aws(account_id: str = "") -> dict:
             "message": (
                 f"Found working AWS credentials for {len(candidates)} account(s). "
                 "Call connect_aws again with account_id set to the one you want to connect."
+                + (f" Also found {len(sso_pending)} SSO profile(s) that need `aws sso login` first, see below."
+                   if sso_pending else "")
             ),
             "note": ("Nothing was stored. connect_aws only reads local credentials and never "
                      "changes your AWS account."),
         }
+        if sso_pending:
+            result.update(_sso_hint(sso_pending))
+        return result
 
     match = next((c for c in candidates if c.get("account_id") == account_id), None)
     if match is None:

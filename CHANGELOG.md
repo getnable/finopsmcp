@@ -2,6 +2,20 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.164
+
+AWS Identity Center (SSO) profiles are no longer dropped in silence.
+
+Detection probes each profile with STS GetCallerIdentity, which throws for an SSO
+profile whose token is not currently valid, so an Identity-Center-only account
+never surfaced and read as "nable only checks ~/.aws/credentials" (real user
+report). Now nable finds SSO profiles in ~/.aws/config that are configured but
+not logged in, and surfaces them with the exact `aws sso login --profile X`
+command, in both connect_aws (in your editor) and `finops setup aws`. Log in,
+call connect again, and the account appears. Both the modern sso_session and the
+legacy sso_start_url formats are detected; the sso_account_id is read from config
+so the account shows even before you log in.
+
 ## 0.8.163
 
 One command to a populated dashboard.

@@ -468,6 +468,75 @@ def _detect_aws_candidates() -> list:
     return candidates
 
 
+def _detect_sso_profiles_needing_login() -> list[dict]:
+    """AWS Identity Center (SSO) profiles in ~/.aws/config that are configured
+    but not currently logged in.
+
+    A plain STS probe (see _detect_aws_candidates) silently skips these: an SSO
+    profile with no valid cached token throws before it can call GetCallerIdentity,
+    so the profile never surfaces. To an Identity-Center-only user that reads as
+    "nable ignores ~/.aws/config", when really the profile just needs an
+    `aws sso login` first. This finds those profiles and hands back the exact
+    command, so nothing is dropped in silence.
+
+    Returns [{profile, account_id, region, login_command}]; account_id comes from
+    the profile's sso_account_id in config, so we can name the account without a
+    live token. Profiles that ARE logged in resolve fine and are omitted here
+    (they already show up as normal candidates).
+    """
+    import boto3
+    import concurrent.futures
+
+    _SSO_KEYS = ("sso_account_id", "sso_session", "sso_start_url", "sso_role_name")
+
+    def _probe_sso(p):
+        try:
+            session = boto3.Session(profile_name=p)
+            cfg = session._session.get_scoped_config()
+        except Exception:
+            return None
+        if not any(k in cfg for k in _SSO_KEYS):
+            return None  # not an SSO profile
+        # Already logged in? Then it resolves and is a normal working candidate;
+        # do not also list it as "needs login". A missing/expired token throws
+        # locally (fast, no network), which is exactly the case we want to catch.
+        try:
+            creds = session.get_credentials()
+            if creds is not None:
+                creds.get_frozen_credentials()
+                return None
+        except Exception:
+            pass
+        return {
+            "profile": p,
+            "account_id": cfg.get("sso_account_id", ""),
+            "region": cfg.get("region") or cfg.get("sso_region") or "us-east-1",
+            "login_command": f"aws sso login --profile {p}",
+        }
+
+    try:
+        profiles = list(boto3.Session().available_profiles)
+    except Exception:
+        return []
+    if not profiles:
+        return []
+
+    out: list[dict] = []
+    # Same bounded-deadline pattern as _detect_aws_candidates: a logged-in SSO
+    # profile's token exchange can touch the network, so cap the whole sweep.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(profiles))) as pool:
+        futs = [pool.submit(_probe_sso, p) for p in profiles]
+        try:
+            for fut in concurrent.futures.as_completed(futs, timeout=4.0):
+                r = fut.result()
+                if r:
+                    out.append(r)
+        except concurrent.futures.TimeoutError:
+            pass
+    out.sort(key=lambda d: d["profile"])
+    return out
+
+
 def _auto_aws_name(candidate: dict, taken: set) -> str:
     """Derive an account name from the alias or account id, kept unique."""
     base = candidate.get("alias") or f"aws-{candidate['account_id']}"
@@ -606,6 +675,23 @@ def setup_aws_account() -> None:
             "  That is fine. The next step can mint a read-only key in your own\n"
             "  AWS account with one click, no existing credentials needed.\n"
         )
+
+    # Identity Center (SSO) profiles that exist but are not logged in. Surface
+    # them with the exact login command so an SSO-only user does not conclude
+    # nable ignores ~/.aws/config.
+    if not chosen:
+        try:
+            sso_pending = [s for s in _detect_sso_profiles_needing_login()
+                           if s["account_id"] not in have_ids]
+        except Exception:
+            sso_pending = []
+        if sso_pending:
+            print("  Found AWS Identity Center (SSO) profiles that just need a login:")
+            for s in sso_pending:
+                acct = f" -> account {s['account_id']}" if s["account_id"] else ""
+                print(f"    {s['profile']}{acct}")
+            print(f"\n  Log in to the one you want, then re-run 'finops setup aws':")
+            print(f"    {sso_pending[0]['login_command']}\n")
 
     if chosen:
         _emit_step("ambient_confirmed", auth_method="profile" if chosen["profile"] else "default_chain")
