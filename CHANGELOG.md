@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.163
+
+One command to a populated dashboard.
+
+- New `finops serve --demo` (so `uvx nable serve --demo` works cold): serves the
+  fully populated sample dashboard with auth off and opens your browser. Demo is
+  forced, so a machine with a real account connected still shows the sample bill,
+  which also makes it the demo-recording path.
+- Terraform preflight fix: the untagged-resource check now unions keys across
+  tags/tags_all/labels. AWS provider default_tags land in tags_all, so shops
+  setting owner/team org-wide were falsely flagged on every resource.
+
 ## 0.8.162
 
 Self-hostable dashboard, packaged.

@@ -125,6 +125,14 @@ finops serve          # open the visual dashboard
 finops serve
 ```
 
+Just want to see it? One command, no account, no Docker:
+
+```bash
+uvx nable serve --demo
+```
+
+That serves a fully populated sample dashboard at http://localhost:8080 and opens your browser.
+
 Starts a local web dashboard your whole team can open in a browser, no Claude Desktop required. Share it with an exec, a FinOps analyst, or anyone who needs to see costs without using an AI interface.
 
 What it shows:

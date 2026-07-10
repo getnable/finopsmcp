@@ -70,6 +70,56 @@ def test_fetch_dashboard_data_uses_demo_when_demo_on(_demo_on):
     assert d["connected_providers"]  # demo advertises a connected provider
 
 
+def test_serve_demo_flag_wires_everything(monkeypatch):
+    # `finops serve --demo` must set demo mode (forced, so a machine with real
+    # creds still shows the sample bill), disable auth, and open the browser.
+    import os
+    from finops import server_web, setup_wizard
+
+    captured: dict = {}
+    monkeypatch.setattr(server_web, "run_server", lambda **kw: captured.update(kw))
+
+    _KEYS = ("FINOPS_DEMO_MODE", "FINOPS_DEMO_FORCE", "FINOPS_DASHBOARD_PASSWORD")
+    prior_env = {k: os.environ.get(k) for k in _KEYS}
+    prior_demo = demo_data.DEMO_MODE
+    # main() calls set_connectors, which fills the module-global shared-connector
+    # dict in place; snapshot it or the leak breaks later server_web tests.
+    prior_connectors = dict(server_web._SHARED_CONNECTORS)
+    for k in _KEYS:
+        os.environ.pop(k, None)
+    try:
+        setup_wizard.main(["serve", "--demo"])
+        assert os.environ["FINOPS_DEMO_MODE"] == "1"
+        assert os.environ["FINOPS_DEMO_FORCE"] == "1"
+        assert os.environ["FINOPS_DASHBOARD_PASSWORD"] == "off"
+        assert demo_data.DEMO_MODE is True
+        assert captured["open_browser"] is True
+    finally:
+        for k, v in prior_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        demo_data.DEMO_MODE = prior_demo
+        server_web._SHARED_CONNECTORS.clear()
+        server_web._SHARED_CONNECTORS.update(prior_connectors)
+
+
+def test_serve_without_demo_does_not_touch_demo_env(monkeypatch):
+    import os
+    from finops import server_web, setup_wizard
+
+    monkeypatch.setattr(server_web, "run_server", lambda **kw: None)
+    monkeypatch.delenv("FINOPS_DEMO_FORCE", raising=False)
+    prior_connectors = dict(server_web._SHARED_CONNECTORS)
+    try:
+        setup_wizard.main(["serve"])
+        assert "FINOPS_DEMO_FORCE" not in os.environ
+    finally:
+        server_web._SHARED_CONNECTORS.clear()
+        server_web._SHARED_CONNECTORS.update(prior_connectors)
+
+
 def test_fetch_dashboard_data_not_demo_does_not_serve_demo(monkeypatch):
     # Demo off => never the canned demo payload. On a machine with no provider
     # it's the empty "connect an account" state; on one with real creds it's real

@@ -2314,6 +2314,9 @@ def main(args: list[str] | None = None) -> None:
     serve_p.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     serve_p.add_argument("--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1, local only; use 0.0.0.0 to let your team reach it on the LAN)")
     serve_p.add_argument("--open", action="store_true", help="Open browser on start")
+    serve_p.add_argument("--demo", action="store_true",
+                         help="Serve a populated sample dashboard, no cloud account needed "
+                              "(demo data only, auth off, opens your browser)")
 
     sub.add_parser("connect", help="Scan this machine for provider credentials and connect them all in one keystroke")
     sub.add_parser("agents",  help="The agent team: Budget Guard, Savings Analyst, the Ledger, and their setup status")
@@ -2543,6 +2546,17 @@ def main(args: list[str] | None = None) -> None:
         _run_license_status()
         return
     elif parsed.cmd == "serve":
+        if getattr(parsed, "demo", False):
+            # `uvx nable serve --demo`: the one-command populated dashboard.
+            # FORCE keeps it demo even on a machine with a real account connected
+            # (the flag promises sample data, and it doubles as the demo-recording
+            # path). Env must be set before the server import below; demo_data may
+            # already be imported with the flag unset, so pin its module state too.
+            os.environ["FINOPS_DEMO_MODE"] = "1"
+            os.environ["FINOPS_DEMO_FORCE"] = "1"
+            os.environ.setdefault("FINOPS_DASHBOARD_PASSWORD", "off")
+            from . import demo_data as _dd
+            _dd.DEMO_MODE = True
         from .server_web import run_server, set_connectors
         # Importing the MCP server module hydrates vault/keyring credentials into
         # the environment (load_vault_to_env runs at its import) and exposes the
@@ -2554,7 +2568,7 @@ def main(args: list[str] | None = None) -> None:
         run_server(
             host=getattr(parsed, "host", "127.0.0.1"),
             port=getattr(parsed, "port", 8080),
-            open_browser=getattr(parsed, "open", False),
+            open_browser=getattr(parsed, "open", False) or getattr(parsed, "demo", False),
         )
         return
     elif parsed.cmd == "welcome":
