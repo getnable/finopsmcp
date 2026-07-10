@@ -2,6 +2,20 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.170
+
+A $0 cash bill no longer reads as free.
+
+When an AWS account is running on Activate (or other promotional) credits, the
+cost summary now volunteers the true burn without you having to ask: "Cash bill
+$0, but you burned $434 of AWS usage this month. Credits covered $434 (100%).
+Your steady-state bill is about $434/mo once the credits run out," plus a runway
+estimate when credits are declining. It only appears when credits are materially
+covering the bill, so a normal cash-paying account sees nothing extra. The credit
+query is cached per account, so it does not add a Cost Explorer round-trip to
+every summary. This is the first piece of the burn-comprehension view: gross vs
+effective vs cash, surfaced where you already look.
+
 ## 0.8.169
 
 When your session expires, nable tells you to log in, not to re-setup.

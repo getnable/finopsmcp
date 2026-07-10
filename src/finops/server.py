@@ -1044,6 +1044,37 @@ async def check_connector_health() -> dict:
     }
 
 
+# Credit heads-up cache. The credit RECORD_TYPE query is a Cost Explorer round
+# trip and credit posture does not shift within a day, so cache the result per
+# account instead of re-querying on every cost summary.
+_credit_ctx_cache: dict[str, tuple[float, dict | None]] = {}
+_CREDIT_CTX_TTL = 6 * 3600.0
+
+
+async def _credit_context(aws_connector, cache_key: str) -> dict | None:
+    """Best-effort 'your cash bill hides real burn' note for a credit-covered AWS
+    account, so a $0 cash bill flags itself without the user knowing to ask.
+    Returns None when credits are not materially in play, or on any error, and
+    never blocks or breaks the cost summary."""
+    import time as _t
+    now = _t.monotonic()
+    hit = _credit_ctx_cache.get(cache_key)
+    if hit and hit[0] > now:
+        return hit[1]
+    ctx = None
+    try:
+        from .connectors.credit_tracking import get_credit_status, credit_headsup
+        ce = aws_connector._make_client()
+        status = await asyncio.wait_for(
+            asyncio.to_thread(get_credit_status, 6, None, ce), timeout=12.0
+        )
+        ctx = credit_headsup(status)
+    except Exception:
+        ctx = None
+    _credit_ctx_cache[cache_key] = (now + _CREDIT_CTX_TTL, ctx)
+    return ctx
+
+
 @mcp.tool()
 async def get_cost_summary(
     provider: str | None = None,
@@ -1154,6 +1185,15 @@ async def get_cost_summary(
         , context="cost_summary")
         if nudge:
             result["_tip"] = nudge
+
+    # Credits: if this AWS account is running on Activate credits, volunteer the
+    # true burn so a near-$0 cash bill does not read as "free". Best-effort and
+    # cached; nothing shows for a normal cash-paying account.
+    aws_conn = targets.get("aws")
+    if aws_conn is not None:
+        ctx = await _credit_context(aws_conn, account or "default")
+        if ctx:
+            result["_credit_context"] = ctx
 
     return result
 

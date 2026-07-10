@@ -194,6 +194,8 @@ def analyze_credits(per_month: list[dict]) -> dict[str, Any]:
         # status and aren't skewed by the in-progress month's credit-posting lag.
         "latest_credit_coverage_pct": round(assess_cov * 100, 1),
         "latest_net_cash_usd": round(assess_net, 2),
+        "latest_gross_usd": round(grosses[assess_idx], 2),
+        "latest_credits_usd": round(credits[assess_idx], 2),
         "credit_trend": trend,
         "estimated_months_to_zero_credits": months_to_zero,
         "monthly": per_month,
@@ -214,6 +216,42 @@ def get_credit_status(months: int = 6, today: date | None = None, ce=None) -> di
         return {"status": "error", "error": str(e),
                 "note": "Cost Explorer RECORD_TYPE query failed (permissions or no data)."}
     return analyze_credits(per_month)
+
+
+def credit_headsup(status: dict[str, Any]) -> dict[str, Any] | None:
+    """A compact, plain-language "your cash bill hides real burn" note, for
+    injecting into cost summaries so a credit-covered account gets the truth
+    without having to know to ask. Returns None when credits are not materially
+    in play, so a normal cash-paying account sees nothing extra.
+
+    Takes an already-computed get_credit_status() result so the caller pays the
+    Cost Explorer round-trip once, not twice."""
+    if not status or not status.get("credits_active"):
+        return None
+    gross = float(status.get("latest_gross_usd", 0.0) or 0.0)
+    credits = float(status.get("latest_credits_usd", 0.0) or 0.0)
+    if gross <= 0 or credits <= 0:
+        return None
+    net = float(status.get("latest_net_cash_usd", 0.0) or 0.0)
+    cov = float(status.get("latest_credit_coverage_pct", 0.0) or 0.0)
+    m2z = status.get("estimated_months_to_zero_credits")
+    runway = (f" At the current pace, credits last about {m2z} more month"
+              f"{'s' if m2z != 1 else ''}." if m2z else "")
+    note = (
+        f"Cash bill ${net:,.0f}, but you burned ${gross:,.0f} of AWS usage this "
+        f"month. Credits covered ${credits:,.0f} ({cov:.0f}%). Your steady-state "
+        f"bill is about ${gross:,.0f}/mo once the credits run out.{runway}"
+    )
+    return {
+        "note": note,
+        "gross_burn_usd": round(gross, 2),
+        "credits_covered_usd": round(credits, 2),
+        "cash_bill_usd": round(net, 2),
+        "credit_coverage_pct": cov,
+        "steady_state_monthly_usd": round(gross, 2),
+        "estimated_months_to_zero_credits": m2z,
+        "cash_flip_detected": bool(status.get("cash_flip_detected", False)),
+    }
 
 
 # ── AI-billing blind spots ──────────────────────────────────────────────────
