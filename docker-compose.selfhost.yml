@@ -1,0 +1,67 @@
+# nable, self-hosted the simple way: one container, SQLite, no Postgres, no TLS.
+#
+#   docker compose -f docker-compose.selfhost.yml up
+#
+# Then open http://localhost:8080. The dashboard prints a login password to the
+# logs on first boot (or set FINOPS_DASHBOARD_PASSWORD below). This is the
+# lightweight path for a laptop or a homelab box. For a public, multi-user, or
+# team deploy (TLS, SSO, shared Postgres, the hosted control plane) use the full
+# docker-compose.yml instead.
+#
+# Want to see it work before connecting a real account? Run it in demo mode:
+#   docker run --rm -p 8080:8080 -e FINOPS_DEMO_MODE=1 -e FINOPS_DASHBOARD_PASSWORD=off \
+#     ghcr.io/chaandannn/finops:latest
+# and open http://localhost:8080 for a fully populated sample bill.
+
+services:
+  nable:
+    image: "ghcr.io/chaandannn/finops:${NABLE_VERSION:-latest}"
+    # Uncomment to build locally instead of pulling the public image:
+    # build: .
+    ports:
+      # Loopback only by default so the dashboard is never exposed to your
+      # network without you choosing to. For LAN access set FINOPS_BIND_HOST=0.0.0.0
+      # in a .env file next to this file (trusted networks only, set a password).
+      - "${FINOPS_BIND_HOST:-127.0.0.1}:${PORT:-8080}:8080"
+    environment:
+      # Cost history, snapshots, and the encrypted credential vault persist in the
+      # named volume below, so they survive a restart or image upgrade.
+      FINOPS_DATA_DIR: /data
+      # Dashboard login. Leave blank to have nable generate one and print it to the
+      # logs on first boot. Set a value to pick your own. Set to "off" to disable
+      # auth entirely (only on a machine no one else can reach).
+      FINOPS_DASHBOARD_PASSWORD: "${FINOPS_DASHBOARD_PASSWORD:-}"
+      # Scheduler pushes snapshots, anomaly alerts, and digests. On by default:
+      # this is an always-on box, not a laptop you close.
+      FINOPS_ENABLE_SCHEDULER: "${FINOPS_ENABLE_SCHEDULER:-1}"
+      # --- Connect a cloud account (pick the one you use) ---
+      # AWS: either mount ~/.aws read-only (see volumes below) or set keys here.
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
+      # Azure
+      AZURE_SUBSCRIPTION_ID: "${AZURE_SUBSCRIPTION_ID:-}"
+      AZURE_TENANT_ID: "${AZURE_TENANT_ID:-}"
+      AZURE_CLIENT_ID: "${AZURE_CLIENT_ID:-}"
+      AZURE_CLIENT_SECRET: "${AZURE_CLIENT_SECRET:-}"
+      # GCP: point this at a mounted service-account JSON (see volumes below).
+      GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+      # --- Optional: the Ask tab and Slack agent need an LLM key ---
+      # Bring your own Anthropic key. Without it, cost queries still work; only the
+      # natural-language Ask tab reports "no AI key configured".
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    volumes:
+      - nable-data:/data
+      # Read-only host credential mounts. Uncomment the one you use. Read-only
+      # (:ro) means the container can read your creds but never modify them.
+      # - "${HOME}/.aws:/home/nable/.aws:ro"
+      # - "${HOME}/.config/gcloud:/home/nable/.config/gcloud:ro"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  nable-data:

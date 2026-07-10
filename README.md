@@ -146,6 +146,29 @@ finops serve
 
 Light mode, dark mode, and 30/60/90-day lookback are built in.
 
+![nable dashboard: month-to-date spend, projected total, FinOps score, and ranked savings opportunities](https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docs/dashboard.png)
+
+### Run it on a server (Docker)
+
+Want the dashboard always on, or shared with finance without installing anything? Run nable as a container. The public image is on GHCR (`amd64` and `arm64`, so a Raspberry Pi or Apple Silicon box works too).
+
+See it first, no account needed:
+```bash
+docker run --rm -p 8080:8080 \
+  -e FINOPS_DEMO_MODE=1 -e FINOPS_DASHBOARD_PASSWORD=off \
+  ghcr.io/chaandannn/finops:latest
+```
+Open http://localhost:8080 for a fully populated sample bill.
+
+Then run it for real with SQLite, one container, no Postgres:
+```bash
+curl -O https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docker-compose.selfhost.yml
+docker compose -f docker-compose.selfhost.yml up -d
+```
+It binds to `127.0.0.1` by default and prints a generated dashboard password to the logs (`docker compose logs`). To connect a cloud account, either set provider env vars or mount your existing credentials read-only, both are documented inline in the compose file. Your credentials and your bill stay on that box; nable has no backend to send them to.
+
+For a public, multi-user, or team deployment (TLS via Caddy, SSO, shared Postgres, the hosted control plane), use the full [`docker-compose.yml`](docker-compose.yml) and [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ---
 
 ## Local-first and auditable

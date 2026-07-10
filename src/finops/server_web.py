@@ -145,6 +145,16 @@ def set_connectors(connectors: dict[str, Any]) -> None:
 
 async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
     """Pull live data from nable connectors. Returns zeros on any error."""
+    # Demo mode: a fully populated sample bill so `FINOPS_DEMO_MODE=1 finops serve`
+    # shows a real-looking dashboard with no account connected. Yields to real data
+    # the moment a provider is configured (is_demo() checks that).
+    try:
+        from . import demo_data
+        if demo_data.is_demo():
+            return demo_data.dashboard_data(days=days)
+    except Exception:
+        pass
+
     result: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "account_id": "",

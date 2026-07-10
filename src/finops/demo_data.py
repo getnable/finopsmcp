@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 _TRUTHY = ("1", "true", "yes")
@@ -488,6 +488,98 @@ def cost_drivers() -> dict[str, Any]:
             "$380. S3 fell $95. Start with the Data Transfer jump: it is the fastest "
             "to trace to a single change."
         ),
+    }
+
+
+def dashboard_data(days: int = 30) -> dict[str, Any]:
+    """Full payload for the `finops serve` dashboard in demo mode, in the exact
+    shape `_fetch_dashboard_data` returns. Same acme-production story as every
+    other demo helper: $12,847 this month, +23.4% vs last, a Data Transfer spike,
+    and a rightsizing find where $889 of raw 'underutilized' collapses to genuine
+    savings once burst and effective rate are accounted for. Lets someone see a
+    populated dashboard with `FINOPS_DEMO_MODE=1 finops serve`, no account needed.
+    """
+    cs = cost_summary()
+    by_service = cs["by_service"]
+    window_total = sum(by_service.values()) or 1.0
+    top_services = [
+        {"service": svc, "amount": round(amt, 2), "pct": round(amt / window_total * 100, 1)}
+        for svc, amt in sorted(by_service.items(), key=lambda x: -x[1])[:8]
+    ]
+
+    mtd = round(cs["total_usd"], 2)
+    last_month = round(mtd / (1 + cs["vs_last_month_pct"] / 100), 2)
+
+    # Open opportunities, priced on the customer's real rate (the rightsizing demo
+    # already collapses raw savings to genuine). A small, believable spread.
+    recent_opportunities = [
+        {"description": "Rightsize data-platform-worker-01 (m5.4xlarge to m5.2xlarge). "
+                        "Genuine after burst + memory check, priced on your ~22% effective discount.",
+         "monthly_saving": 218.40, "resource": "i-0a1b2c3d4e5f67890"},
+        {"description": "Buy a 1-year compute Savings Plan at your steady EC2 baseline.",
+         "monthly_saving": 412.00, "resource": "compute-savings-plan"},
+        {"description": "Delete 4 unattached gp2 EBS volumes, idle 30 to 90 days.",
+         "monthly_saving": 96.20, "resource": "vol-0f3d5a2c9b1e40718"},
+        {"description": "Move 2.1 TB of infrequently read S3 to Intelligent-Tiering.",
+         "monthly_saving": 61.80, "resource": "s3://acme-data-platform-logs"},
+    ]
+    opp_total = round(sum(o["monthly_saving"] for o in recent_opportunities), 2)
+    recent_savings = [
+        {"description": "Turned off 6 non-prod RDS instances on a nights/weekends schedule.",
+         "monthly_saving": 340.00, "resource": "nonprod-scheduler"},
+    ]
+
+    _today = date.today()
+    _mo = lambda back: (_today.replace(day=1) - timedelta(days=1) * (1 if back else 0))
+    # Two completed months + the current month as a projection.
+    m1 = (_today.replace(day=1) - timedelta(days=1)).replace(day=1)      # last month
+    m2 = (m1 - timedelta(days=1)).replace(day=1)                          # two months ago
+    trend = [
+        {"month": m2.strftime("%B"), "actual": 9420.00, "projected": None},
+        {"month": m1.strftime("%B"), "actual": last_month, "projected": last_month},
+        {"month": f"{_today.strftime('%B')} (projected)", "actual": None, "projected": 13980.00},
+    ]
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "account_id": _ACCOUNT_ID,
+        "total_spend_mtd": mtd,
+        "total_spend_last_month": last_month,
+        "projected_month_total": 13980.00,
+        "delta_pct": cs["vs_last_month_pct"],
+        "finops_grade": "B",
+        "finops_score": 74.0,
+        "top_services": top_services,
+        "opportunities_count": len(recent_opportunities),
+        "opportunities_total_saving": opp_total,
+        "savings_achieved_mtd": round(sum(s["monthly_saving"] for s in recent_savings), 2),
+        "anomalies_open": 2,
+        "budget_pct_used": 68.0,
+        "recent_opportunities": recent_opportunities,
+        "suppressed_opportunities": [
+            {"description": "RDS prod-analytics flagged underutilized, but memory sits at 78%. "
+                            "Held back: rightsizing it risks a memory-bound stall, not genuine savings.",
+             "monthly_saving": 0.0, "resource": "db-prod-analytics-01"},
+        ],
+        "learning_active": True,
+        "recent_savings": recent_savings,
+        "error": None,
+        "connected_providers": ["aws"],
+        "trend": trend,
+        "scorecard": {
+            "overall_grade": "B",
+            "overall_score": 74.0,
+            "dimensions": [
+                {"name": "Commitment coverage", "grade": "B", "score": 72,
+                 "detail": "68% of steady compute on Savings Plans; room for one more 1-yr plan."},
+                {"name": "Rightsizing", "grade": "C", "score": 61,
+                 "detail": "3 instances over-provisioned; 1 is a genuine, low-risk resize."},
+                {"name": "Idle & waste", "grade": "B", "score": 78,
+                 "detail": "4 unattached EBS volumes and 6 always-on non-prod databases."},
+                {"name": "Storage tiering", "grade": "A", "score": 90,
+                 "detail": "Most S3 already lifecycle-managed; 2.1 TB left to tier."},
+            ],
+        },
     }
 
 

@@ -2,6 +2,26 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.162
+
+Self-hostable dashboard, packaged.
+
+- `FINOPS_DEMO_MODE=1 finops serve` now shows a fully populated dashboard with no
+  cloud account connected: month-to-date spend, a projected total, a FinOps
+  score, ranked savings opportunities, and the spend trend. Previously demo mode
+  populated the MCP tools but left the web dashboard on the empty "connect an
+  account" state, so anyone trying it before connecting saw nothing. Demo still
+  yields to real data the moment a provider is configured.
+- New `docker-compose.selfhost.yml`: a single-container, SQLite, no-Postgres path
+  to run the dashboard on a laptop or homelab box. `docker compose -f
+  docker-compose.selfhost.yml up -d`, credentials mount read-only, generated
+  dashboard password printed to the logs. The full `docker-compose.yml` (TLS,
+  SSO, Postgres, control plane) stays for team deployments.
+- The public GHCR image now builds for `linux/arm64` as well as `amd64`, so a
+  Raspberry Pi or Apple Silicon box pulls it natively.
+- README and docs/DEPLOY.md gained a "run it on a server (Docker)" section with a
+  one-command demo and the committed dashboard screenshot.
+
 ## 0.8.161
 
 Practitioner-driven guard and preflight refinements.

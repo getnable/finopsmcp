@@ -13,6 +13,12 @@ interfaces, none of which require an install:
 - **Email** — daily and weekly cost digests land in their inbox.
 - **A web dashboard** — a browser view at a shared URL.
 
+> **Just want the dashboard on one box?** Skip this guide. The
+> [`docker-compose.selfhost.yml`](../docker-compose.selfhost.yml) at the repo root
+> is a single-container, SQLite, no-Postgres path: `docker compose -f
+> docker-compose.selfhost.yml up -d`. This guide is for the full team deployment
+> (TLS, SSO, shared Postgres, the always-on Slack/email interfaces).
+
 ## What you need
 
 - Docker and Docker Compose.
