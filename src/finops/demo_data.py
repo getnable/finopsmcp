@@ -530,7 +530,6 @@ def dashboard_data(days: int = 30) -> dict[str, Any]:
     ]
 
     _today = date.today()
-    _mo = lambda back: (_today.replace(day=1) - timedelta(days=1) * (1 if back else 0))
     # Two completed months + the current month as a projection.
     m1 = (_today.replace(day=1) - timedelta(days=1)).replace(day=1)      # last month
     m2 = (m1 - timedelta(days=1)).replace(day=1)                          # two months ago

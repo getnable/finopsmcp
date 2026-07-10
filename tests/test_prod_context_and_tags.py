@@ -93,6 +93,17 @@ def test_untaggable_resource_is_not_noise():
     assert "untagged_resources" not in estimate_plan(plan)
 
 
+def test_default_tags_in_tags_all_not_flagged():
+    # AWS provider default_tags land in tags_all, not tags. A shop that sets
+    # owner org-wide must not have every resource falsely flagged just because
+    # per-resource tags is empty.
+    plan = _plan([_create("aws_instance.web", "aws_instance",
+                          {"instance_type": "t3.micro",
+                           "tags": None,
+                           "tags_all": {"owner": "platform", "env": "prod"}})])
+    assert "untagged_resources" not in estimate_plan(plan)
+
+
 def test_deletes_not_flagged():
     plan = _plan([{"address": "aws_instance.old", "type": "aws_instance",
                    "change": {"actions": ["delete"],

@@ -569,11 +569,17 @@ def _untagged_creates(changes: list[ResourceChange]) -> list[dict]:
     for rc in changes:
         if not rc.is_create or not isinstance(rc.after, dict):
             continue
-        tag_field = next((k for k in ("tags", "tags_all", "labels") if k in rc.after), None)
-        if tag_field is None:
+        tag_fields = [k for k in ("tags", "tags_all", "labels") if k in rc.after]
+        if not tag_fields:
             continue
-        tags = rc.after.get(tag_field) or {}
-        keys = {str(k).lower() for k in tags} if isinstance(tags, dict) else set()
+        # Union across all present tag fields: AWS provider default_tags land in
+        # tags_all, not tags, so judging only the first field falsely flags every
+        # resource in a shop that sets owner/team org-wide via default_tags.
+        keys: set[str] = set()
+        for tf in tag_fields:
+            tags = rc.after.get(tf) or {}
+            if isinstance(tags, dict):
+                keys |= {str(k).lower() for k in tags}
         if not (keys & _ATTRIBUTION_TAG_KEYS):
             flagged.append({
                 "address": rc.address,

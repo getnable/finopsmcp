@@ -96,7 +96,6 @@ def _prod_context(command: str) -> bool:
     to disable production-context confirmation entirely. Over-matching costs an
     unnecessary confirm, which is the tolerable failure direction here.
     """
-    import re
     raw = os.getenv("FINOPS_GUARD_PROD_PATTERNS", "")
     if raw.strip().lower() == "off":
         return False
