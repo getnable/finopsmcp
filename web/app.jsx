@@ -642,6 +642,10 @@ function Architecture({ version }){
             <h4>Local-first, on your machine</h4>
             <p>Install with one command. Credentials, cache, and queries all stay on your machine, no nable backend in the path.</p>
             <div className="gate-cmd"><CopyCmd cmd="uvx nable" /></div>
+            <a className="host-alt" href="https://github.com/chaandannn/finopsmcp#run-it-on-a-server-docker" target="_blank" rel="noopener noreferrer"
+               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'architecture',cta:'selfhost_docker'}); }}>
+              Prefer a server? Self-host the dashboard with Docker <span className="arr">→</span>
+            </a>
           </div>
           <div className="host-opt">
             <span className="host-tag">Or let us host it</span>

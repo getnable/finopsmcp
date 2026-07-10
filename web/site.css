@@ -320,6 +320,8 @@ section:not(.alt)+section.alt{border-top-color:transparent}
 .host-opt p{font-size:14px;color:var(--fg-2);line-height:1.65;margin:0}
 .host-opt .gate-cmd{margin-top:6px;max-width:340px}
 .host-cta{margin-top:6px;align-self:flex-start}
+.host-alt{font-size:13px;color:var(--fg-3);text-decoration:none;margin-top:2px;align-self:flex-start;transition:color .15s}
+.host-alt:hover{color:var(--accent)}
 @media(max-width:760px){.host-opts{grid-template-columns:1fr}.host-opt{border-right:0;border-bottom:1px solid var(--line)}.host-opt:last-child{border-bottom:0}}
 /* connector logo marquee */
 .logo-marquee{margin-top:38px;overflow:hidden;position:relative;-webkit-mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent);mask-image:linear-gradient(90deg,transparent,#000 6%,#000 94%,transparent)}
