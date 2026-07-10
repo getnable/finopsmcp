@@ -700,6 +700,10 @@ def require_pro(feature: str) -> dict | None:
 
     lines = [f"⬡  nable Pro — everything in free, plus:\n"]
     for key, desc in _TEAM_FEATURES:
+        # Don't advertise a feature that is currently on the free hold as a paid
+        # unlock; it would list things the user already has for free.
+        if _is_ungated_now(key):
+            continue
         marker = "▶" if key == feature else " "
         lines.append(f"  {marker} {desc}")
     lines.append(f"\n  You hit this because '{friendly}' requires Pro.")

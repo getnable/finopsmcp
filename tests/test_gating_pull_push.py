@@ -92,6 +92,17 @@ def test_free_tier_gating_respects_the_ai_ungate_hold(monkeypatch):
             assert err and err["error"] == "pro_required", f
 
 
+def test_upsell_does_not_advertise_ungated_features(monkeypatch):
+    # A free user hitting a still-gated feature must not see the temporarily-free
+    # AI/agent features listed as paid unlocks (they already have them).
+    _free(monkeypatch)
+    msg = require_pro("ticket_creation")["message"]
+    for banned in ("Budget Guard", "The Ledger", "fix as a pull request",
+                   "Savings Plan recommendations"):
+        assert banned not in msg, f"upsell leaked ungated feature: {banned}"
+    assert "Auto-create Jira" in msg  # a genuinely gated feature still shows
+
+
 def test_regating_ai_features_restores_the_gate(monkeypatch):
     # The hold is reversible: turn it off and the AI features gate again, proving
     # they stay wired into PRO_FEATURES for when the paid model ships.

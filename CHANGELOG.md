@@ -2,6 +2,16 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.171
+
+Upgrade prompt no longer advertises features that are currently free.
+
+With the AI/agent features on the temporary free hold (0.8.168), the Pro upsell
+shown when you hit a still-gated feature was still listing Budget Guard, the
+Ledger, remediation, and commitment recommendations as paid unlocks. It now skips
+any feature that is currently free, so the pitch only lists what actually needs
+Pro. Found in the post-swing review.
+
 ## 0.8.170
 
 A $0 cash bill no longer reads as free.
