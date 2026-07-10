@@ -59,7 +59,47 @@ from .persona import get_persona, get_persona_mcp_context
 _persona = get_persona()
 _persona_ctx = get_persona_mcp_context()
 
-mcp = FastMCP("nable", instructions=f"""nable: cloud cost intelligence MCP server.
+
+class _SurfacedFastMCP(FastMCP):
+    """FastMCP that advertises only the tools this machine can actually use.
+
+    Overrides list_tools (the handler binds self.list_tools at __init__, so the
+    subclass override is picked up) and filters through tool_surface.advertise:
+    core tools always, provider families only when locally detected as connected,
+    everything under FINOPS_ALL_TOOLS=1 or demo mode. Advertisement-only: the
+    call path resolves against the full registry, so a hidden tool called by
+    name still runs, which keeps the in-chat connect flow intact.
+    """
+
+    async def list_tools(self):  # type: ignore[override]
+        from .tool_surface import advertise
+
+        tools = await super().list_tools()
+        try:
+            return [t for t in tools if advertise(t.name)]
+        except Exception:
+            # Filtering must never break tool listing.
+            return tools
+
+
+def _tool_surface_changed() -> None:
+    """After a successful in-chat connect: re-detect families and nudge the client
+    to refresh its tool list. Best-effort on both counts; hidden tools are callable
+    regardless, so correctness never depends on this."""
+    try:
+        from . import tool_surface as _ts
+        _ts._reset_cache_for_tests()  # same as a cache bust: force re-detection
+    except Exception:
+        pass
+    try:
+        import asyncio as _aio
+        session = mcp.get_context().session
+        _aio.get_running_loop().create_task(session.send_tool_list_changed())
+    except Exception:
+        pass
+
+
+mcp = _SurfacedFastMCP("nable", instructions=f"""nable: cloud cost intelligence MCP server.
 
 Connects to AWS, Azure, GCP, and 10+ SaaS providers to answer cost questions,
 detect anomalies, recommend rightsizing, and attribute spend to teams and services.
@@ -5164,6 +5204,7 @@ async def connect_aws(account_id: str = "") -> dict:
     # this session, not the demo stub.
     from . import demo_data as _dd
     _dd._real_provider_cache = None
+    _tool_surface_changed()
     return {
         "connected": True,
         "account_id": match["account_id"],
@@ -5269,6 +5310,7 @@ async def connect_gcp(billing_account_id: str = "") -> dict:
     _gcp_emit_connected([billing_account_id], bq_table, auth)
     from . import demo_data as _dd
     _dd._real_provider_cache = None
+    _tool_surface_changed()
     return {
         "connected": True,
         "billing_account_id": billing_account_id,
@@ -5309,6 +5351,7 @@ async def connect_azure() -> dict:
     if already:
         from . import demo_data as _dd
         _dd._real_provider_cache = None
+        _tool_surface_changed()
         return {
             "connected": True,
             "provider": "azure",

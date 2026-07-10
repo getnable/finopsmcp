@@ -1,0 +1,402 @@
+"""
+Connection-aware tool surface: which of the ~191 registered tools get ADVERTISED
+to the model.
+
+Every tool definition advertised over tools/list rides in the model's context on
+every message, so a user pays recurring tokens for tools they cannot use: an
+AWS-only machine has no use for the Azure, GCP, Kubernetes, or Databricks tools,
+and models pick tools worse as the surface grows. This module maps every tool to
+exactly one family and decides, from cheap LOCAL signals only, which families are
+worth advertising right now.
+
+Advertisement-only: nothing here unregisters a tool. The MCP call path resolves
+tools against the registry, not the advertised list (verified on mcp 1.27.2), so
+a hidden tool called by name still runs. That keeps the in-chat connect flow
+intact: connect_aws works, then the AWS tools are usable immediately and appear
+in the list after a tools/list_changed notification or an editor restart.
+
+Rules:
+  - core is always advertised (cross-provider cost/budget/anomaly/forecast tools,
+    connectors, meta).
+  - a provider family is advertised when local signals say it is connected
+    (env vars first, then vault key names, then accounts.yaml / kubeconfig).
+    Detection never touches the network and is cached ~30s.
+  - llm is advertised when LLM keys exist OR aws is connected, mirroring the
+    capabilities gate: Bedrock token tools work off the AWS account alone.
+  - FINOPS_ALL_TOOLS=1 (the existing escape hatch) and demo mode advertise
+    everything.
+  - an unmapped tool advertises with a warning (fail open); the completeness
+    test in tests/test_tool_surface.py is the real enforcement, so a new tool
+    that nobody classifies fails CI instead of silently hiding.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import time
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+# ── the family map (every registered tool, exactly once) ──────────────────────
+
+_CORE: frozenset[str] = frozenset({
+    "acknowledge_anomaly",
+    "activate_pro",
+    "audit_duplicate_spend",
+    "audit_terraform_tags",
+    "benchmark_costs",
+    "check_action_policy",
+    "check_budget_status",
+    "check_connector_health",
+    "check_notification_config",
+    "cleanup_idle_resources",
+    "compare_providers",
+    "connect_opencost",
+    # The provider connectors live in core deliberately: a machine with nothing
+    # connected exists to surface exactly these.
+    "connect_aws",
+    "connect_azure",
+    "connect_gcp",
+    "create_api_key",
+    "delete_alert_policy",
+    "delete_budget",
+    "dismiss_recommendation",
+    "estimate_change_cost",
+    "estimate_terraform_cost",
+    "explain_cost_change",
+    "explain_recent_cost_drivers",
+    "export_board_summary",
+    "export_cost_report",
+    "export_cost_report_csv",
+    "fetch_invoice_emails",
+    "forecast_costs",
+    "generate_account_dashboard",
+    "generate_terraform_tag_fixes",
+    "get_account_anomalies",
+    "get_agent_team",
+    "get_ai_engineering_report",
+    "get_ai_kpis",
+    "get_anomalies",
+    "get_business_metrics",
+    "get_commitment_analysis",
+    "get_commitment_coverage_by_tag",
+    "get_cost_history",
+    "get_cost_summary",
+    "get_cost_summary_all_accounts",
+    "get_cost_trends",
+    "get_costs_by_service",
+    "get_costs_by_team",
+    "get_credit_status",
+    "get_data_transfer_costs",
+    "get_effective_rate_profile",
+    "get_efficiency_scorecard",
+    "get_focus_costs",
+    "get_gpu_infra_costs",
+    "get_idle_load_balancers",
+    "get_instance_deep_analysis",
+    "get_label_costs",
+    "get_nable_roi",
+    "get_ou_cost_breakdown",
+    "get_pinned_view",
+    "get_recommendation_learning",
+    "get_recommendation_quality",
+    "get_ri_waste_detail",
+    "get_rightsizing_recommendations",
+    "get_saas_spend_summary",
+    "get_savings_ledger",
+    "get_savings_plan_showback",
+    "get_savings_summary",
+    "get_service_cost",
+    "get_storage_info",
+    "get_tableau_connection_info",
+    "get_top_cost_drivers",
+    "get_top_spending_accounts",
+    "get_total_spend_all_sources",
+    "get_traffic_cost_breakdown",
+    "get_unit_economics",
+    "get_view",
+    "get_workload_costs",
+    "identify_nonprod_scheduling_opportunities",
+    "list_accounts",
+    "list_active_services",
+    "list_alert_policies",
+    "list_api_keys",
+    "list_budgets",
+    "list_connected_providers",
+    "list_idle_resources",
+    "list_pinned_views",
+    "list_profiles",
+    "list_savings_recommendations",
+    "list_vault_credentials",
+    "list_views",
+    "mark_recommendation_acted_on",
+    "nable_setup_status",
+    "open_rightsizing_pr",
+    "open_terraform_tag_pr",
+    "pin_view",
+    "recommend_database_savings_plans",
+    "revoke_api_key",
+    "run_attribution_now",
+    "run_full_cost_audit",
+    "scan_waste_patterns",
+    "set_alert_policy",
+    "set_budget",
+    "set_business_metrics",
+    "slice_costs",
+    "start_dashboard_server",
+    "sync_budgets_from_yaml",
+    "take_snapshot_now",
+    "unpin_view",
+    "verify_savings",
+    "what_can_nable_do",
+    "whoami",
+})
+
+_AWS: frozenset[str] = frozenset({
+    "audit_aws_waste",
+    "audit_cloudwatch_logs_ia_opportunities",
+    "audit_cloudwatch_metric_cardinality",
+    "audit_cloudwatch_orphaned_alarms",
+    "audit_ebs_snapshot_replication",
+    "audit_efs_cross_az_mounts",
+    "audit_nlb_cross_zone_costs",
+    "audit_public_ipv4_addresses",
+    "audit_rds_manual_snapshots",
+    "audit_s3_intelligent_tiering",
+    "audit_s3_transfer_acceleration",
+    "audit_spot_diversification",
+    "audit_textract_environment_waste",
+    "get_ai_billing_blind_spots",
+    "get_documentdb_costs",
+    "get_ecr_cleanup_recommendations",
+    "get_ecs_rightsizing_recommendations",
+    "get_idle_rds_instances",
+    "get_kendra_costs",
+    "get_marketplace_costs",
+    "get_org_cost_summary",
+    "get_rds_rightsizing_recommendations",
+    "get_resource_cost_breakdown_aws",
+    "get_s3_incomplete_multipart_uploads",
+    "get_tag_cost_breakdown_cur",
+    "get_team_scorecards",
+    "get_textract_costs",
+    "list_aws_accounts",
+    "list_org_accounts",
+    "recommend_lambda_snapstart",
+    "recommend_spot_adoption",
+    "scan_cloudwatch_waste",
+    "scan_graviton_migration_opportunities",
+    "scan_lambda_concurrency_waste",
+    "scan_s3_bucket_key_opportunities",
+})
+
+_AZURE: frozenset[str] = frozenset({
+    "forecast_azure_costs",
+    "get_azure_advisor_recommendations",
+    "get_azure_budgets",
+    "get_azure_cost_by_dimension",
+    "get_azure_reservation_utilization",
+    "get_azure_vm_rightsizing",
+    "get_resource_cost_breakdown_azure",
+})
+
+_GCP: frozenset[str] = frozenset({
+    "audit_gcp_waste",
+    "get_gcp_recommendations",
+})
+
+_KUBERNETES: frozenset[str] = frozenset({
+    "compare_kubernetes_clusters",
+    "create_kubernetes_waste_tickets",
+    "estimate_helm_diff_cost",
+    "get_cluster_efficiency",
+    "get_databricks_cluster_efficiency",
+    "get_helm_release_costs",
+    "get_kubernetes_cost_trends",
+    "get_kubernetes_costs",
+    "get_kubernetes_namespace_breakdown",
+    "list_kubernetes_contexts",
+})
+
+_DATABRICKS: frozenset[str] = frozenset({
+    "get_databricks_costs",
+    "get_databricks_dbu_breakdown",
+    "get_databricks_job_costs",
+})
+
+_LLM: frozenset[str] = frozenset({
+    "forecast_llm_costs",
+    "get_ai_spend_monitor",
+    "get_bedrock_costs",
+    "get_langfuse_model_costs",
+    "get_langfuse_trace_volume",
+    "get_llm_commitment_analysis",
+    "get_llm_cost_by_model",
+    "get_llm_costs",
+    "get_llm_unit_economics",
+    "get_llm_unit_economics_full",
+    "optimize_ai_spend",
+    "recommend_bedrock_model_routing",
+})
+
+_NOTIFICATIONS: frozenset[str] = frozenset({
+    "cancel_report_subscription",
+    "list_report_subscriptions",
+    "publish_cost_report_to_notion",
+    "push_to_n8n",
+    "push_weekly_insight",
+    "send_digest_now",
+    "send_onboarding_email",
+    "send_report_now",
+    "send_weekly_digest_now",
+    "subscribe_to_report",
+})
+
+_TICKETS: frozenset[str] = frozenset({
+    "create_anomaly_tickets",
+    "create_rightsizing_tickets",
+    "create_scorecard_tickets",
+    "create_ticket",
+})
+
+FAMILY_TOOLS: dict[str, frozenset[str]] = {
+    "core": _CORE,
+    "aws": _AWS,
+    "azure": _AZURE,
+    "gcp": _GCP,
+    "kubernetes": _KUBERNETES,
+    "databricks": _DATABRICKS,
+    "llm": _LLM,
+    "notifications": _NOTIFICATIONS,
+    "tickets": _TICKETS,
+}
+
+_FAMILY_OF: dict[str, str] = {
+    name: family for family, names in FAMILY_TOOLS.items() for name in names
+}
+
+# ── local connection signals per family ────────────────────────────────────────
+# Env keys are exact matches (mirrored into os.environ by a connect); vault
+# prefixes match the key names a setup writes into the local vault.
+
+_ENV_KEYS: dict[str, tuple[str, ...]] = {
+    "aws": ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_PROFILE", "AWS_ROLE_ARNS"),
+    "azure": ("AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_SUBSCRIPTION_ID"),
+    "gcp": ("GOOGLE_APPLICATION_CREDENTIALS", "GCP_SERVICE_ACCOUNT_KEY_PATH",
+             "GCP_BILLING_ACCOUNT_IDS", "GCP_PROJECT_IDS"),
+    "databricks": ("DATABRICKS_HOST", "DATABRICKS_TOKEN"),
+    "llm": ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY",
+             "LITELLM_BASE_URL", "LANGFUSE_PUBLIC_KEY", "TOGETHER_API_KEY",
+             "REPLICATE_API_TOKEN", "COHERE_API_KEY", "MISTRAL_API_KEY"),
+    "notifications": ("SLACK_BOT_TOKEN", "SLACK_WEBHOOK_URL", "TEAMS_WEBHOOK_URL",
+                       "NOTION_API_KEY", "N8N_WEBHOOK_URL", "SMTP_HOST"),
+    "tickets": ("JIRA_URL", "JIRA_BASE_URL", "JIRA_API_TOKEN", "LINEAR_API_KEY",
+                 "GITHUB_TOKEN", "GITHUB_FINOPS_REPO"),
+}
+
+_VAULT_PREFIXES: dict[str, tuple[str, ...]] = {
+    "aws": ("AWS_",),
+    "azure": ("AZURE_",),
+    "gcp": ("GCP_", "GOOGLE_"),
+    "databricks": ("DATABRICKS_",),
+    "llm": ("OPENAI", "ANTHROPIC", "OPENROUTER", "LITELLM", "LANGFUSE",
+             "TOGETHER", "REPLICATE", "COHERE", "MISTRAL"),
+    "notifications": ("SLACK", "TEAMS", "NOTION", "N8N", "SMTP"),
+    "tickets": ("JIRA", "LINEAR", "GITHUB"),
+}
+
+_CACHE_TTL = 30.0
+_cache: tuple[float, frozenset[str]] | None = None
+
+
+def _reset_cache_for_tests() -> None:
+    global _cache
+    _cache = None
+
+
+def _kubeconfig_present() -> bool:
+    """Kubernetes looks usable on this machine. Separate function so tests can
+    stub it: the real check touches the developer's actual ~/.kube/config."""
+    try:
+        return bool(os.environ.get("KUBECONFIG")) or (Path.home() / ".kube" / "config").exists()
+    except Exception:
+        return False
+
+
+def _detect_families() -> frozenset[str]:
+    """Which provider families look connected, from local signals only."""
+    found: set[str] = set()
+
+    for family, keys in _ENV_KEYS.items():
+        if any(os.environ.get(k) for k in keys):
+            found.add(family)
+
+    remaining = set(_VAULT_PREFIXES) - found
+    if remaining:
+        try:
+            from .security.vault import Vault
+
+            vault_keys = [k.upper() for k in Vault.default().list_keys()]
+            for family in list(remaining):
+                prefixes = _VAULT_PREFIXES[family]
+                if any(k.startswith(prefixes) for k in vault_keys):
+                    found.add(family)
+        except Exception:
+            pass
+
+    if "aws" not in found:
+        # A role/profile connect writes accounts.yaml without credential envs.
+        try:
+            from .accounts import list_accounts
+
+            if list_accounts():
+                found.add("aws")
+        except Exception:
+            pass
+
+    if "kubernetes" not in found and _kubeconfig_present():
+        found.add("kubernetes")
+
+    # Bedrock token tools work off the AWS account alone (capabilities.py gate).
+    if "aws" in found:
+        found.add("llm")
+
+    return frozenset(found)
+
+
+def connected_families() -> frozenset[str]:
+    """Detected families, cached ~30s so tools/list stays effectively free."""
+    global _cache
+    now = time.monotonic()
+    if _cache is not None and _cache[0] > now:
+        return _cache[1]
+    families = _detect_families()
+    _cache = (now + _CACHE_TTL, families)
+    return families
+
+
+def _all_tools_forced() -> bool:
+    return os.getenv("FINOPS_ALL_TOOLS", "").strip().lower() in ("1", "true", "yes")
+
+
+def advertise(tool_name: str) -> bool:
+    """Should this tool appear in tools/list right now?"""
+    if _all_tools_forced():
+        return True
+    try:
+        from .demo_data import is_demo
+
+        if is_demo():
+            return True  # the demo showcases the whole product
+    except Exception:
+        pass
+
+    family = _FAMILY_OF.get(tool_name)
+    if family is None:
+        # Fail open at runtime; the completeness test is the enforcement.
+        log.warning("tool %r has no family in tool_surface; advertising it", tool_name)
+        return True
+    if family == "core":
+        return True
+    return family in connected_families()

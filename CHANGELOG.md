@@ -2,6 +2,34 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.160
+
+Connection-aware tool surface: the model only sees tools you can actually use.
+
+nable advertised every registered tool to the model in every conversation, and
+those definitions ride in the model's context on every message: ~44,500 tokens of
+recurring overhead for the default 165-tool surface, and models pick tools worse
+as the list grows. Now the advertised list is filtered by what this machine has
+actually connected, from purely local signals (env vars, vault key names,
+accounts.yaml, kubeconfig; cached ~30s; never the network).
+
+- A machine with nothing connected advertises the 105 core tools (cross-provider
+  cost/budget/anomaly/forecast plus the connectors), ~29,400 tokens: a 35% cut.
+  An AWS-only machine advertises 132 (a 19% cut); Azure, GCP, Kubernetes,
+  Databricks, Slack/Teams/Notion, and ticket tools appear only when their
+  provider or integration is detected. Bedrock token tools ride the AWS account,
+  so AWS alone reveals the LLM family.
+- Advertisement-only: nothing is unregistered, and a hidden tool called by name
+  still runs (verified against the SDK call path), so the in-chat connect flow
+  cannot break. After a successful connect_aws / connect_gcp / connect_azure the
+  server re-detects and nudges the client with tools/list_changed; a restart
+  also refreshes.
+- FINOPS_ALL_TOOLS=1 (the existing escape hatch) and demo mode advertise
+  everything.
+- Every tool is mapped to exactly one family and a completeness test enforces
+  it, so a future tool nobody classifies fails CI instead of silently
+  always-advertising.
+
 ## 0.8.159
 
 Stale-build users now see the upgrade nudge IN CHAT, not just stderr.
