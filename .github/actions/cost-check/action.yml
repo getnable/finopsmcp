@@ -3,11 +3,11 @@ description: "Estimate the monthly cloud cost impact of infrastructure changes i
 
 branding:
   icon: "dollar-sign"
-  color: "orange"
+  color: "blue"
 
 inputs:
   finops-license-key:
-    description: "nable Pro license key (FINOPS_LICENSE_KEY). Omit to run in trial mode."
+    description: "nable license key (FINOPS_LICENSE_KEY). Optional; the free Community tier works without one."
     required: false
     default: ""
 

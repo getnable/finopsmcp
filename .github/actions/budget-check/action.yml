@@ -3,9 +3,13 @@ description: >
   Checks current cloud spend against budgets defined in budget.yml.
   Fails the CI job if any budget is exceeded (configurable).
 
+branding:
+  icon: shield
+  color: blue
+
 inputs:
   finops-license-key:
-    description: nable license key (optional, free tier works)
+    description: nable license key (optional; the free Community tier works without one)
     required: false
     default: ""
   budget-yaml-path:
