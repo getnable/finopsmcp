@@ -75,10 +75,15 @@ function useScrollTracking() {
 }
 
 function LogoMark(){
+  // V2 mark (2026-07-10): the N's diagonal is a falling cost line, the node is
+  // where the saving lands. Canonical shapes live in web/favicon.svg.
   return (
     <svg width="26" height="26" viewBox="0 0 120 120" className="mark-img" aria-hidden="true">
       <rect x="2" y="2" width="116" height="116" rx="25" fill="#0a0a0c" stroke="#2c7d91" strokeOpacity=".55" strokeWidth="3"/>
-      <path d="M40 84 L40 55 A20 20 0 0 1 80 55 L80 84" fill="none" stroke="#4db8d4" strokeWidth="15" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M36 92 V30" stroke="#4db8d4" strokeWidth="14" strokeLinecap="round"/>
+      <path d="M36 32 L84 86" stroke="#4db8d4" strokeWidth="14" strokeLinecap="round"/>
+      <path d="M84 90 V28" stroke="#2c7d91" strokeWidth="14" strokeLinecap="round"/>
+      <circle cx="84" cy="88" r="9" fill="#4db8d4"/>
     </svg>
   );
 }
