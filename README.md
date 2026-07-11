@@ -3,6 +3,7 @@
 **The cost brain your AI agents check before they spend.** Ask your whole cloud and AI bill anything inside Claude or Cursor, get genuine savings priced on your real rates, and the fix as a pull request you approve. One tool across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.
 
 [![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/finops-mcp?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/finops-mcp)
 [![Python](https://img.shields.io/pypi/pyversions/finops-mcp?color=4db8d4)](https://pypi.org/project/finops-mcp/)
 [![Tests](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml/badge.svg)](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/chaandannn/finopsmcp/badge)](https://scorecard.dev/viewer/?uri=github.com/chaandannn/finopsmcp)
