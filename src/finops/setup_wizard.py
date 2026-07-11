@@ -3233,6 +3233,17 @@ def _run_infra_overview(provider: str = "") -> None:
 
 
 def _installed_version() -> str:
+    # finops.__version__ is bumped in every release and is correct even for
+    # editable/source installs, where dist metadata freezes at install time and
+    # went stale (it reported 0.8.36 on a 0.8.171 tree). Metadata is the fallback,
+    # not the source of truth. This string also feeds the editor-config version
+    # pin, so it must never be stale.
+    try:
+        from finops import __version__
+        if __version__:
+            return __version__
+    except Exception:
+        pass
     try:
         from importlib.metadata import version
         return version("finops-mcp")
