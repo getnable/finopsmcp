@@ -88,7 +88,7 @@ finops serve
 
 Serves a password-protected web dashboard at `http://localhost:8080`, local to your machine by default. To let your team or manager view it in a browser (no Claude required), add `--host 0.0.0.0` so it binds your network. It stays password-protected; share the URL and password with them.
 
-**7-day free trial, all features unlocked. No credit card required.**
+**Free. The full local product, including the agent team, costs nothing right now. No credit card, no trial clock.**
 
 ---
 
@@ -97,7 +97,7 @@ To add more providers later:
 finops setup aws      # add another AWS account
 finops setup azure    # add Azure
 finops setup slack    # configure alerts
-finops setup license  # activate a Team plan key
+finops setup license  # activate a license key (Enterprise)
 finops serve          # open the visual dashboard
 ```
 
@@ -309,7 +309,7 @@ The **local agent** is open-source and free: the MCP server, every connector, co
 
 A **hosted platform** is available for teams who would rather have it run for them: a managed, single-tenant workspace with dashboards anyone can use without a terminal, SSO and roles, scheduled reports, and a managed AI agent. Single-tenant by design, your bill is never pooled with anyone else's.
 
-See [getnable.com](https://getnable.com) for the current plans and a free trial.
+See [getnable.com/pricing](https://getnable.com/pricing) for current plans: Community is free, Enterprise is custom.
 
 ---
 
