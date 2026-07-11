@@ -4,14 +4,12 @@
 
 [![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/finops-mcp?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/finops-mcp)
-[![Python](https://img.shields.io/pypi/pyversions/finops-mcp?color=4db8d4)](https://pypi.org/project/finops-mcp/)
 [![Tests](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml/badge.svg)](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/chaandannn/finopsmcp/badge)](https://scorecard.dev/viewer/?uri=github.com/chaandannn/finopsmcp)
 [![License: Elastic-2.0](https://img.shields.io/badge/license-Elastic--2.0-444)](LICENSE)
 
 nable is FinOps that lives inside your AI. Ask Claude or Cursor about your cloud, SaaS, and AI spend and it answers with real numbers, priced on your actual rates, not list price. It finds the savings genuinely worth taking, proposes each fix as a pull request you approve, and checks the next bill to prove it worked. As your agents start spending real money, nable is the cost brain they check before they act.
 
-Everything runs on **your machine**: your credentials stay in your OS keychain and your bill never leaves, so the no-egress claim is something you can read in the source, not take on faith. It is read-only by default and never changes your cloud on its own. The local agent is open and auditable; a hosted platform is available for teams.
+Everything runs on **your machine** and your bill never leaves it, so the no-egress claim is something you can read in the source, not take on faith. Connect AWS or GCP by SSO login or a CLI profile and nable stores no secret at all, it just references your existing login; only keys you paste directly are encrypted in your OS keyring. It is read-only by default and never changes your cloud on its own. The local agent is open and auditable; a hosted platform is available for teams.
 
 **[getnable.com](https://getnable.com)** · docs, quickstart, and the hosted platform
 
