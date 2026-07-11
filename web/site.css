@@ -51,13 +51,13 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 
 /* nav */
 .nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 88%,transparent);backdrop-filter:saturate(140%) blur(16px);-webkit-backdrop-filter:saturate(140%) blur(16px);border-bottom:1px solid var(--line)}
-.nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px;padding:0 32px;max-width:1280px;margin:0 auto;position:relative}
+.nav-inner{display:flex;align-items:center;justify-content:space-between;height:72px;padding:0 40px;max-width:1280px;margin:0 auto;position:relative}
 /* Pin the menu to the true center axis: with space-between it sits wherever the
    asymmetric logo/CTA widths push it, visibly left of center on wide screens. */
 @media(min-width:1080px){.nav ul{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}}
 .logo{display:flex;align-items:center;gap:10px;font-family:'Geist',system-ui,sans-serif;font-weight:500;font-size:17px;letter-spacing:-.02em;color:var(--fg);min-height:44px}
 .logo .mark-img{width:26px;height:26px;border-radius:6px;display:block;flex-shrink:0}
-.nav ul{display:flex;list-style:none;gap:20px;color:var(--fg-2);font-size:13.5px;align-items:center}
+.nav ul{display:flex;list-style:none;gap:32px;color:var(--fg-2);font-size:14px;align-items:center}
 .nav ul a:hover,.nav ul .nav-link:hover{color:var(--fg)}
 .nav ul a{padding:12px 6px;display:inline-flex;align-items:center}
 .nav-link{background:none;border:none;color:var(--fg-2);font-size:13.5px;cursor:pointer;padding:12px 6px;font-family:'Geist',system-ui,sans-serif;font-weight:400;letter-spacing:-.005em;transition:color .18s}
@@ -69,15 +69,15 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .btn-ghost:hover{color:var(--fg);border-color:var(--fg-3);background:var(--bg-2)}
 .btn .arr{transition:transform .18s}
 .btn:hover .arr{transform:translateX(2px)}
-.nav .right{display:flex;align-items:center;gap:12px}
-.nav-signin{color:var(--fg-3);font-size:13.5px;font-family:'Geist',system-ui,sans-serif;padding:0 4px;transition:color .15s}
+.nav .right{display:flex;align-items:center;gap:20px}
+.nav-signin{color:var(--fg-3);font-size:14px;font-family:'Geist',system-ui,sans-serif;padding:0 4px;transition:color .15s}
 .nav-signin:hover{color:var(--fg)}
 @media(max-width:880px){.nav ul{display:none}.nav .right{display:none}}
 .nav-hamburger{display:none;align-items:center;justify-content:center;width:40px;height:40px;color:var(--fg-2);border-radius:var(--r-md);transition:color .18s,background .18s}
 .nav-hamburger:hover{color:var(--fg);background:var(--bg-2)}
 @media(max-width:880px){.nav-hamburger{display:flex}}
 @media(min-width:881px){.nav-hamburger{display:none}}
-.nav-mobile-menu{position:fixed;top:64px;left:0;right:0;bottom:0;background:var(--bg);z-index:49;display:flex;flex-direction:column;padding:32px;gap:8px;overflow-y:auto}
+.nav-mobile-menu{position:fixed;top:72px;left:0;right:0;bottom:0;background:var(--bg);z-index:49;display:flex;flex-direction:column;padding:32px;gap:8px;overflow-y:auto}
 .nav-mobile-item{font-family:'Geist',system-ui,sans-serif;font-size:18px;font-weight:400;color:var(--fg);padding:14px 0;border:none;border-bottom:1px solid var(--line);background:none;text-align:left;cursor:pointer;letter-spacing:-.015em;transition:color .18s;display:block;width:100%}
 .nav-mobile-item:last-of-type{border-bottom:none}
 .nav-mobile-item:hover{color:var(--accent)}

@@ -124,18 +124,6 @@ function Nav() {
   } }, "Docs"))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account", className: "nav-signin" }, "Sign in"), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "https://calendar.app.google/2duYBqjLXaTmX5xC8",
-      target: "_blank",
-      rel: "noopener noreferrer",
-      className: "btn btn-ghost",
-      onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "nav", cta: "book_demo" });
-      }
-    },
-    "Book a demo"
-  ), /* @__PURE__ */ React.createElement(
-    "a",
-    {
       href: "/docs",
       className: "btn btn-primary",
       onClick: () => {

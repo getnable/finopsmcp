@@ -137,8 +137,6 @@ function Nav(){
         </ul>
         <div className="right">
           <a href="/account" className="nav-signin">Sign in</a>
-          <a href="https://calendar.app.google/2duYBqjLXaTmX5xC8" target="_blank" rel="noopener noreferrer" className="btn btn-ghost"
-             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'book_demo'}); }}>Book a demo</a>
           <a href="/docs" className="btn btn-primary"
              onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'}); }}>
             Get started free <span className="arr">→</span>
