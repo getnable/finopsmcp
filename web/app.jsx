@@ -99,13 +99,13 @@ function Ticker({ installs, version }){
           <span>runtime healthy</span>
         </span>
         <span className="sep">·</span>
-        <span className="seg">4k+ PyPI downloads / mo</span>
+        <span className="seg">70k+ PyPI downloads</span>
         <span className="sep">·</span>
         <span className="seg">AWS · Azure · GCP · SaaS · AI spend, one bill</span>
         <span className="sep">·</span>
         <span className="seg">
           <a href="/about" style={{color:"var(--accent)",textDecoration:"none",fontWeight:500}}>
-            About &amp; investors →
+            About →
           </a>
         </span>
       </div>
@@ -952,7 +952,6 @@ function Footer({ version }){
           <div>
             <h5>Company</h5>
             <a href="/about">About</a>
-            <a href="/about#investors">Investors</a>
             <a href="mailto:hello@getnable.com" target="_blank" rel="noopener noreferrer">Contact</a>
             <a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="https://www.linkedin.com/company/getnable/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
