@@ -184,7 +184,7 @@ async function sendRotationEmail(to, licenseKey, resendKey) {
 
   <p style="font-size:13px;color:#8b8879;line-height:1.6;margin:0;">
     If you did not request this rotation, contact
-    <a href="mailto:hello@getnable.com" style="color:#1a1915;">hello@getnable.com</a> immediately.
+    <a href="mailto:chaandannn@gmail.com" style="color:#1a1915;">chaandannn@gmail.com</a> immediately.
   </p>
 
   <hr style="border:none;border-top:1px solid #e6e2d6;margin:28px 0 20px;"/>

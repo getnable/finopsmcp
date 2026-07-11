@@ -952,7 +952,7 @@ function Footer({ version }){
           <div>
             <h5>Company</h5>
             <a href="/about">About</a>
-            <a href="mailto:hello@getnable.com" target="_blank" rel="noopener noreferrer">Contact</a>
+            <a href="mailto:chaandannn@gmail.com" target="_blank" rel="noopener noreferrer">Contact</a>
             <a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="https://www.linkedin.com/company/getnable/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
           </div>

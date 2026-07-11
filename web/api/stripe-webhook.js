@@ -355,7 +355,7 @@ async function sendLicenseEmail(to, licenseKey, plan) {
   <hr style="border:none;border-top:1px solid #e6e2d6;margin:36px 0 20px;"/>
   <p style="font-size:12px;color:#8b8879;margin:0;line-height:1.6;">
     Questions? Reply here or email
-    <a href="mailto:hello@getnable.com" style="color:#1a1915;">hello@getnable.com</a>.
+    <a href="mailto:chaandannn@gmail.com" style="color:#1a1915;">chaandannn@gmail.com</a>.
     You can manage your subscription at any time from
     <a href="https://getnable.com/account" style="color:#1a1915;">your account</a>.
   </p>
@@ -371,7 +371,7 @@ async function sendLicenseEmail(to, licenseKey, plan) {
     },
     body: JSON.stringify({
       from: "nable <hello@getnable.com>",
-      reply_to: "hello@getnable.com",
+      reply_to: "chaandannn@gmail.com",
       to: [to],
       subject: `Your nable ${planLabel} license key`,
       html,

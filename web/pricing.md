@@ -17,7 +17,7 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 - SSO (Okta, Entra, Google), RBAC and audit logs
 - Your bill and credentials are never pooled with another customer's
 - Priority support and a custom SLA
-- Contact: hello@getnable.com or book a demo at https://calendar.app.google/2duYBqjLXaTmX5xC8
+- Contact: chaandannn@gmail.com or book a demo at https://calendar.app.google/2duYBqjLXaTmX5xC8
 
 ## Notes
 - Team pricing is being finalized; early users get the best terms we will ever offer
