@@ -113,7 +113,7 @@
   <div class="crumb"><a href="/">getnable.com</a> / security</div>
   <h1>Security, <span class="accent">by design</span>.</h1>
   <p class="lede">nable is not SaaS. It runs on your machine, holds credentials in your OS keyring, queries your cloud providers directly, and has no backend that receives your data. Most security questionnaires get shorter from here.</p>
-  <p class="updated">Last updated: June 28, 2026</p>
+  <p class="updated">Last updated: July 11, 2026</p>
 </div></header>
 <main><div class="wrap">
 
@@ -162,6 +162,21 @@
 
 <h2>Supply chain</h2>
 <p>Releases publish to PyPI via GitHub Actions trusted publishing (OIDC, no long-lived tokens). The source is public and the package is what the repo builds. Dependency updates are monitored automatically.</p>
+
+<h2>For your security review</h2>
+<p>Running a vendor review on nable? Most of it is shorter than usual, because the thing reviews normally probe, what happens to your data on the vendor's side, mostly does not exist here. The local product sends us nothing. The hosted product runs on an instance dedicated to you.</p>
+<div class="card"><h3>Data flow in one paragraph</h3>
+<p>Local: credentials in your OS keyring, cost data in a local SQLite cache, outbound traffic goes to your own cloud providers only, verifiable on the wire. Hosted: the same software on a single-tenant instance we operate for you; your billing data lives on that instance and is never pooled, aggregated, or used across customers.</p></div>
+<div class="card"><h3>Subprocessors (hosted tier only)</h3>
+<ul>
+<li><strong>AWS</strong>: runs your dedicated instance. Your cost data stays on it.</li>
+<li><strong>Anthropic</strong>: model calls for the hosted assistant. Cost figures only, never credentials. Anthropic does not train on API data.</li>
+<li><strong>Stripe</strong>: billing. Never sees cloud credentials or cost data.</li>
+</ul>
+<p>The local product has no subprocessors: there is no nable-side processing at all.</p></div>
+<div class="card"><h3>Compliance status, stated honestly</h3>
+<p>nable does not yet hold a SOC 2 report; it is planned alongside our first enterprise deployments. Two things matter in the meantime. First, the architecture removes most of what SOC 2 audits vendors for: we do not operate a multi-tenant data platform holding your data. Second, everything above is verifiable today: read-only IAM you can scope yourself, source you can read, egress you can watch. A completed security questionnaire, a data processing agreement, and architecture documentation are available on request.</p></div>
+<p>Request any of the above, or send your own questionnaire: <a href="mailto:chaandannn@gmail.com" style="color:var(--accent)">chaandannn@gmail.com</a>. Expect a completed response within three business days.</p>
 
 <h2>Disclosure</h2>
 <p>Report vulnerabilities to <a href="mailto:chaandannn@gmail.com" style="color:var(--accent)">chaandannn@gmail.com</a>. Acknowledgment within 48 hours, fixes for confirmed issues within 14 days. Disclosed issues are documented in the changelog: when the legacy v1 license signing secret appeared in public git history, the keypair was rotated within hours and v1 keys were permanently retired, documented in release notes rather than scrubbed.</p>
