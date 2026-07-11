@@ -189,9 +189,9 @@ function Hero(){
       <div className="wrap">
         <div className="hero-c">
           <h1 className="display">
-            The cost brain your AI agents <span className="h1-ask">check before they spend.</span>
+            Local-first FinOps <span className="h1-ask">for the AI era.</span>
           </h1>
-          <p className="hero-sub">It reads your real bill, flags what's genuinely worth fixing, and proposes each change as a pull request, without your data ever leaving your machine.</p>
+          <p className="hero-sub">Cloud and AI spend, queryable in Claude. Savings shipped as pull requests, without your data ever leaving your machine.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
             <a className="btn btn-primary" href="/docs" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
