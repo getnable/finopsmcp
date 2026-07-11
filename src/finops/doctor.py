@@ -36,19 +36,32 @@ def _check_python_version() -> dict:
     """
     v = sys.version_info
     ver = f"{v[0]}.{v[1]}.{v[2]}"
-    ok = (v[0], v[1]) >= (3, 10)
+    ok = (v[0], v[1]) >= (3, 11)
+    warnings: list[str] = []
+    rec = None
     if ok:
         detail = f"Python {ver} at {sys.executable}"
-        rec = None
+    elif (v[0], v[1]) == (3, 10):
+        # Current releases require 3.11+, so a 3.10 interpreter silently pins pip
+        # to a months-old build (the staleness trap): everything "works" but none
+        # of the recent fixes are present. Surface it loudly instead.
+        ok = True  # old builds do run; this is a warning, not a failure
+        detail = f"Python {ver} at {sys.executable}"
+        warnings.append(
+            "Python 3.10 can only install OLD nable builds (current releases "
+            "require 3.11+), so you are missing recent fixes."
+        )
+        rec = ("Run nable on a newer Python, e.g. "
+               "uvx --python 3.12 --from finops-mcp finops welcome")
     else:
-        detail = f"Python {ver} at {sys.executable}, nable requires Python 3.10 or newer"
-        rec = ("Reinstall on Python 3.10+, e.g. "
+        detail = f"Python {ver} at {sys.executable}, nable requires Python 3.11 or newer"
+        rec = ("Reinstall on Python 3.11+, e.g. "
                "uvx --python 3.12 --from finops-mcp finops welcome")
     return {
         "name": "Python version",
         "ok": ok,
         "detail": detail,
-        "warnings": [],
+        "warnings": warnings,
         "recommendation": rec,
     }
 

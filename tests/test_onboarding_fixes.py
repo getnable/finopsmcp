@@ -316,15 +316,23 @@ def test_doctor_license_check_reports_tier(monkeypatch):
 
 
 def test_doctor_python_version_check(monkeypatch):
-    """finops doctor reports the running Python and hard-fails below 3.10, so a user
-    on a stale interpreter sees the real reason rather than the cryptic pip error
+    """finops doctor reports the running Python: hard-fails below 3.10, and WARNS
+    on 3.10 (it can only install old builds, the staleness trap), so a user on a
+    stale interpreter sees the real reason rather than the cryptic pip error
     'No matching distribution found for finops-mcp'."""
     import finops.doctor as D
 
     monkeypatch.setattr(D.sys, "version_info", (3, 9, 18, "final", 0))
     res = D._check_python_version()
     assert res["ok"] is False
-    assert "3.9" in res["detail"] and "3.10" in res["detail"]
+    assert "3.9" in res["detail"] and "3.11" in res["detail"]
+    assert res["recommendation"]
+
+    # 3.10 runs old builds: passes, but with the staleness warning + upgrade path.
+    monkeypatch.setattr(D.sys, "version_info", (3, 10, 5, "final", 0))
+    res = D._check_python_version()
+    assert res["ok"] is True
+    assert res["warnings"] and "OLD" in res["warnings"][0]
     assert res["recommendation"]
 
     monkeypatch.setattr(D.sys, "version_info", (3, 12, 1, "final", 0))
