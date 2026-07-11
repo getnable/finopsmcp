@@ -57,8 +57,8 @@
     filter:blur(24px);z-index:0;pointer-events:none;animation:breathe 11s ease-in-out infinite}
   @keyframes breathe{0%,100%{opacity:.85;transform:translateX(-50%) scale(1)}50%{opacity:1;transform:translateX(-50%) scale(1.06)}}
   nav,header,main,footer{position:relative;z-index:1}
-  nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 82%,transparent);backdrop-filter:blur(16px);border-bottom:1px solid var(--line);padding:14px 0}
-  .nav-inner{display:flex;align-items:center;justify-content:space-between}
+  nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 82%,transparent);backdrop-filter:blur(16px);border-bottom:1px solid var(--line);padding:0}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:72px}
   .logo{font-weight:600;font-size:16px;letter-spacing:-.02em}
   .logo .n{color:var(--accent)}
   .nav-links{display:flex;gap:22px;align-items:center;font-size:13.5px;color:var(--fg-2)}

@@ -38,7 +38,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 
 /* nav */
 .nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 88%,transparent);backdrop-filter:saturate(140%) blur(16px);border-bottom:1px solid var(--line)}
-.nav-inner{display:flex;align-items:center;justify-content:space-between;height:64px;padding:0 32px;max-width:1280px;margin:0 auto}
+.nav-inner{display:flex;align-items:center;justify-content:space-between;height:72px;padding:0 40px;max-width:1280px;margin:0 auto}
 .logo{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:500;font-size:17px;letter-spacing:-.02em;color:var(--fg)}
 .nav-links{display:flex;list-style:none;gap:32px;color:var(--fg-2);font-size:13.5px}
 .nav-links a:hover{color:var(--fg)}
@@ -162,7 +162,7 @@ footer{padding:40px 0;border-top:1px solid var(--line);background:var(--bg-1)}
 <nav class="nav">
   <div class="nav-inner">
     <a href="/" class="logo">
-      <svg width="26" height="26" viewBox="0 0 120 120" fill="none" aria-hidden="true" style="border-radius:6px;flex-shrink:0"><rect x="2" y="2" width="116" height="116" rx="25" fill="#0a0a0c" stroke="#2c7d91" stroke-opacity=".55" stroke-width="3"/><path d="M40 84 L40 55 A20 20 0 0 1 80 55 L80 84" fill="none" stroke="#4db8d4" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg width="26" height="26" viewBox="0 0 120 120" fill="none" aria-hidden="true" style="border-radius:6px;flex-shrink:0"><rect x="2" y="2" width="116" height="116" rx="25" fill="#0a0a0c" stroke="#2c7d91" stroke-opacity=".55" stroke-width="3"/><path d="M36 92 V30" stroke="#4db8d4" stroke-width="14" stroke-linecap="round"/><path d="M36 32 L84 86" stroke="#4db8d4" stroke-width="14" stroke-linecap="round"/><path d="M84 90 V28" stroke="#2c7d91" stroke-width="14" stroke-linecap="round"/><circle cx="84" cy="88" r="9" fill="#4db8d4"/></svg>
       <span>nable</span>
     </a>
     <ul class="nav-links">
@@ -170,9 +170,9 @@ footer{padding:40px 0;border-top:1px solid var(--line);background:var(--bg-1)}
       <li><a href="/docs">Docs</a></li>
       <li><a href="/about" style="color:var(--fg)">About</a></li>
     </ul>
-    <div style="display:flex;align-items:center;gap:12px">
-      <a href="/account" class="btn btn-ghost">Sign in</a>
-      <a href="https://buy.stripe.com/3cIcN41Dz9Vk9JCd7c2Nq01" class="btn btn-primary">Start free trial →</a>
+    <div style="display:flex;align-items:center;gap:20px">
+      <a href="/account" style="color:var(--fg-3);font-size:14px">Sign in</a>
+      <a href="/docs" class="btn btn-primary">Get started free →</a>
     </div>
   </div>
 </nav>
