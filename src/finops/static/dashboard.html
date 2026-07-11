@@ -23,7 +23,7 @@
   --alert:#e05c4b; --alert-w:rgba(224,92,75,.10); --alert-b:rgba(224,92,75,.26);
   --lift:0 1px 0 rgba(255,255,255,.015),0 10px 34px rgba(0,0,0,.55);
   --r-xs:2px; --r-sm:4px; --r-md:6px; --r-lg:8px; --r-xl:12px; --r:12px;
-  --font:'Bricolage Grotesque',system-ui,sans-serif;
+  --font:'Geist',system-ui,sans-serif;
   --mono:'Geist Mono','JetBrains Mono',ui-monospace,monospace;
   --sidebar-w:236px;
 }
@@ -82,12 +82,27 @@ body{padding-left:var(--sidebar-w)}
 .btn-ask:hover{background:var(--accent2)}
 .btn-ask svg{width:15px;height:15px}
 
+/* ── Design bar: tell the agent what this dashboard should be ─────────────── */
+.design-bar{background:linear-gradient(180deg,rgba(77,184,212,.055),rgba(77,184,212,.015)),var(--bg1);border:1px solid var(--accent-b);border-radius:var(--r-xl);padding:16px 18px;margin-bottom:20px;box-shadow:var(--lift)}
+.db-row{display:flex;align-items:center;gap:12px}
+.db-ic{width:34px;height:34px;border-radius:9px;background:var(--accent-w);color:var(--accent);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.db-ic svg{width:17px;height:17px}
+.db-input{flex:1;background:transparent;border:none;outline:none;color:var(--fg);font-family:var(--font);font-size:14.5px;letter-spacing:-.01em;min-width:0}
+.db-input::placeholder{color:var(--fg3)}
+.db-send{display:flex;align-items:center;gap:7px;background:var(--accent);color:#04222b;font-weight:600;font-size:13px;border:none;border-radius:9px;padding:9px 15px;cursor:pointer;font-family:inherit;flex-shrink:0;transition:background .15s}
+.db-send:hover{background:var(--accent2)}
+.db-send svg{width:14px;height:14px}
+.db-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;padding-left:46px}
+.db-chip{font-size:12px;color:var(--fg2);background:var(--bg2);border:1px solid var(--line);border-radius:7px;padding:5px 11px;cursor:pointer;font-family:inherit;transition:border-color .15s,color .15s}
+.db-chip:hover{border-color:var(--accent-b);color:var(--accent)}
+@media(max-width:640px){.db-chips{padding-left:0}}
+
 /* ── Metric cards ──────────────────────────────────────────────────────────── */
 .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}
 @media(max-width:960px){.cards{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:520px){.cards{grid-template-columns:1fr}}
-.card{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);padding:17px 18px;transition:border-color .2s}
-.card:hover{border-color:var(--line2)}
+.card{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);padding:17px 18px;box-shadow:var(--lift);transition:border-color .2s,transform .2s}
+.card:hover{border-color:var(--line2);transform:translateY(-1px)}
 .card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
 .card-ic{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center}
 .card-ic svg{width:17px;height:17px}
@@ -105,7 +120,7 @@ body{padding-left:var(--sidebar-w)}
 .row{display:grid;grid-template-columns:1.7fr 1fr;gap:16px;margin-bottom:20px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
 @media(max-width:860px){.row,.row2{grid-template-columns:1fr}}
-.panel{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px}
+.panel{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;box-shadow:var(--lift)}
 .panel-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
 .panel-t{font-size:15px;font-weight:600;color:var(--fg)}
 .panel-s{font-size:12px;color:var(--fg3);margin-top:3px}
@@ -356,6 +371,22 @@ footer a:hover{color:var(--accent)}
     <div class="top-actions">
       <div class="pill">This month</div>
       <button class="btn-ask" id="btn-ask-top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>Ask nable</button>
+    </div>
+  </div>
+
+  <!-- Design bar: the agent shapes this dashboard -->
+  <div class="design-bar" id="design-bar">
+    <div class="db-row">
+      <div class="db-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.9L20 11l-6.1 2.1L12 19l-1.9-5.9L4 11l6.1-2.1z"/><path d="M19 3v4M17 5h4"/></svg></div>
+      <input class="db-input" id="db-input" type="text" autocomplete="off"
+             placeholder="Describe the dashboard you want. nable builds the view and pins it here.">
+      <button class="db-send" id="db-send">Build it<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+    </div>
+    <div class="db-chips">
+      <button class="db-chip" data-build="AI and GPU spend next to cloud spend, split by team">AI vs cloud, by team</button>
+      <button class="db-chip" data-build="our Kubernetes cost per namespace, weekly trend">K8s cost per namespace</button>
+      <button class="db-chip" data-build="a panel of this week's anomalies with what caused each">Anomalies with causes</button>
+      <button class="db-chip" data-build="commitment coverage and what we are leaving on the table">Commitment coverage</button>
     </div>
   </div>
 
@@ -777,27 +808,31 @@ function setCardVal(id,val){
   if(el) el.textContent=val;
 }
 
-// ── Service chart ─────────────────────────────────────────────────────────────
+// ── Service chart (doughnut + legend) ─────────────────────────────────────────
 function renderSvcChart(svcs){
   const c=document.getElementById('chart-svc'); if(!c) return;
-  const gridColor='rgba(45,45,50,.55)';
-  const tickColor='#56656d';
   const labels=svcs.map(s=>s.service);
   const amounts=svcs.map(s=>s.amount);
-  const colors=svcs.map((_,i)=>i===0?'#e05c4b':i===1?'#4db8d4':'rgba(86,101,109,.45)');
+  // Ice-blue family leads, semantic colors after, dims for the tail.
+  const palette=['#4db8d4','#3cba7a','#e6a840','#2c7d91','#e05c4b','#8ad4e8','#56656d','rgba(86,101,109,.45)'];
+  const colors=svcs.map((_,i)=>palette[Math.min(i,palette.length-1)]);
+  const total=amounts.reduce((a,b)=>a+(b||0),0)||1;
   if(svcChart){svcChart.destroy();svcChart=null;}
   const ctx=c.getContext('2d');
   svcChart=new Chart(ctx,{
-    type:'bar',
-    data:{labels,datasets:[{data:amounts,backgroundColor:colors,borderRadius:3,borderSkipped:false}]},
+    type:'doughnut',
+    data:{labels,datasets:[{data:amounts,backgroundColor:colors,borderColor:'#0a0a0c',borderWidth:3,hoverOffset:6,spacing:1}]},
     options:{
-      indexAxis:'y',responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+fmt(c.raw)}}},
-      scales:{
-        x:{ticks:{color:tickColor,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},
-           grid:{color:gridColor},border:{color:'transparent'}},
-        y:{ticks:{color:'#94a3ab',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12},padding:4},
-           grid:{display:false},border:{color:'transparent'}}
+      responsive:true,maintainAspectRatio:false,cutout:'68%',
+      layout:{padding:6},
+      plugins:{
+        legend:{position:'right',labels:{color:'#94a3ab',
+          font:{family:"'Geist',system-ui,sans-serif",size:12},
+          boxWidth:8,boxHeight:8,usePointStyle:true,pointStyle:'circle',padding:12,
+          generateLabels:(chart)=>chart.data.labels.map((l,i)=>({
+            text:l+'  '+Math.round((amounts[i]/total)*100)+'%',
+            fillStyle:colors[i],strokeStyle:'transparent',fontColor:'#94a3ab',index:i}))}},
+        tooltip:{callbacks:{label:c=>' '+c.label+': '+fmt(c.raw)+' ('+Math.round((c.raw/total)*100)+'%)'}}
       }
     }
   });
@@ -828,12 +863,12 @@ function renderTrendChart(trend){
       responsive:true,maintainAspectRatio:false,
       plugins:{
         legend:{labels:{color:'#94a3ab',
-          font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12},
+          font:{family:"'Geist',system-ui,sans-serif",size:12},
           boxWidth:16,usePointStyle:true,pointStyle:'line'}},
         tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.raw)}}
       },
       scales:{
-        x:{ticks:{color:'#94a3ab',font:{family:"'Bricolage Grotesque',system-ui,sans-serif",size:12}},
+        x:{ticks:{color:'#94a3ab',font:{family:"'Geist',system-ui,sans-serif",size:12}},
            grid:{color:gridColor},border:{color:'transparent'}},
         y:{ticks:{color:tickColor,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},
            grid:{color:gridColor},border:{color:'transparent'}}
@@ -1196,6 +1231,21 @@ setInterval(loadData,60000);
     if(typeof switchView==='function') switchView('agent');
     var inp=document.getElementById('agent-input');
     if(inp){ inp.value=_nv.dataset.prompt; inp.style.height='auto'; inp.style.height=Math.min(inp.scrollHeight,200)+'px'; inp.focus(); }
+  });
+  // Design bar: describe the dashboard you want; the agent builds the view and
+  // offers to pin it. Free text goes through a build-a-view framing so the
+  // agent knows this is a dashboard request, not a question.
+  function dbBuild(desc){
+    desc=(desc||'').trim(); if(!desc) return;
+    var prompt='Build a dashboard view: '+desc+'. Then pin it to my dashboard.';
+    if(typeof switchView==='function') switchView('agent');
+    if(typeof window.askAgent==='function') window.askAgent(prompt);
+  }
+  var _dbi=document.getElementById('db-input'), _dbs=document.getElementById('db-send');
+  if(_dbs) _dbs.addEventListener('click',function(){ dbBuild(_dbi&&_dbi.value); if(_dbi) _dbi.value=''; });
+  if(_dbi) _dbi.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); dbBuild(_dbi.value); _dbi.value=''; } });
+  document.querySelectorAll('.db-chip').forEach(function(ch){
+    ch.addEventListener('click',function(){ dbBuild(ch.dataset.build); });
   });
 })();
 </script>
