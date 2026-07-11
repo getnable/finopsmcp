@@ -10,5 +10,16 @@
 #   docker compose --profile tls up -d
 
 {$DOMAIN} {
+	header {
+		# Browsers pin HTTPS for a year; Caddy already redirects 80 to 443.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# The dashboard is self-contained: same-origin content, no embedding.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+		# Hide the server banner.
+		-Server
+	}
 	reverse_proxy nable:8080
 }
