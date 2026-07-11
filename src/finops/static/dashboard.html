@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<script>/* Apply the saved theme before first paint so there is no flash. */
+try{var _t=localStorage.getItem('nable-theme');if(_t==='light'||_t==='dark')document.documentElement.dataset.theme=_t;}catch(e){}</script>
 <title>nable | Cost Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Crect x='2' y='2' width='116' height='116' rx='25' fill='%230a0a0c' stroke='%232c7d91' stroke-opacity='.55' stroke-width='3'/%3E%3Cpath d='M36 92 V30' stroke='%234db8d4' stroke-width='14' stroke-linecap='round'/%3E%3Cpath d='M36 32 L84 86' stroke='%234db8d4' stroke-width='14' stroke-linecap='round'/%3E%3Cpath d='M84 90 V28' stroke='%232c7d91' stroke-width='14' stroke-linecap='round'/%3E%3Ccircle cx='84' cy='88' r='9' fill='%234db8d4'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/fonts/fonts.css">
@@ -27,6 +29,25 @@
   --mono:'Geist Mono','JetBrains Mono',ui-monospace,monospace;
   --sidebar-w:236px;
 }
+
+/* ── Light theme (cool white, same accent family, darker text-safe tones) ──── */
+html[data-theme="light"]{
+  --bg:#f3f5f6; --bg1:#ffffff; --bg2:#f0f3f4; --bg3:#e7ebed;
+  --line:#e3e8ea; --line2:#d3dbde;
+  --fg:#15191b; --fg2:#4e5e66; --fg3:#7d8b92; --fg4:#c3cdd1;
+  --accent:#1a86a6; --accent2:#15748f; --accent-dim:#5eb4cc;
+  --accent-w:rgba(26,134,166,.09); --accent-b:rgba(26,134,166,.28); --accent-soft:rgba(26,134,166,.12);
+  --success:#1e9e5f; --success-w:rgba(30,158,95,.09); --success-b:rgba(30,158,95,.28); --success-soft:rgba(30,158,95,.12);
+  --warn:#b97f14; --warn-w:rgba(185,127,20,.09); --warn-b:rgba(185,127,20,.30); --warn-soft:rgba(185,127,20,.12);
+  --alert:#cc4433; --alert-w:rgba(204,68,51,.08); --alert-b:rgba(204,68,51,.28);
+  --lift:0 1px 0 rgba(16,24,32,.02),0 8px 24px rgba(16,24,32,.07);
+}
+/* Filled-accent controls need white text on the darker light-mode accent. */
+html[data-theme="light"] .btn-ask,html[data-theme="light"] .db-send,
+html[data-theme="light"] .side-foot .cta{color:#fff}
+html[data-theme="light"] .ask-input .send svg{color:#fff}
+/* The brand mark keeps the ice-blue tile so the dark glyph stays legible. */
+html[data-theme="light"] .brand-mark{background:#4db8d4}
 
 /* ── Base ──────────────────────────────────────────────────────────────────── */
 html,body{
@@ -335,6 +356,11 @@ footer a:hover{color:var(--accent)}
     <div class="side-empty" id="side-history-empty">Ask something to start</div>
   </nav>
 
+  <div class="nav-cap">System</div>
+  <nav class="nav">
+    <button class="nav-item" id="theme-toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span id="theme-label">Light mode</span></button>
+  </nav>
+
   <div class="side-foot">
     <div class="t"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 3l1.8 6.2L20 11l-6.2 1.8L12 19l-1.8-6.2L4 11l6.2-1.8z"/></svg>Single-tenant</div>
     <div class="d">Your credentials and bill never leave this instance.</div>
@@ -528,6 +554,27 @@ function fmt(n){
   return '$'+Math.round(n).toLocaleString('en-US');
 }
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+// Chart colors follow the active theme; renderers read this at draw time.
+function chartTheme(){
+  const light=document.documentElement.dataset.theme==='light';
+  return light
+    ?{grid:'rgba(21,25,27,.08)',tick:'#7d8b92',label:'#4e5e66',ring:'#ffffff'}
+    :{grid:'rgba(45,45,50,.55)',tick:'#56656d',label:'#94a3ab',ring:'#0a0a0c'};
+}
+// Re-tint every live chart in place after a theme switch.
+function retintCharts(){
+  const T=chartTheme();
+  Object.values(Chart.instances||{}).forEach(function(ch){
+    const o=ch.options||{};
+    if(o.scales){for(const k in o.scales){const s=o.scales[k];
+      if(s.ticks&&s.ticks.color){const mono=s.ticks.font&&s.ticks.font.family&&String(s.ticks.font.family).indexOf('Mono')>=0;
+        s.ticks.color=mono?T.tick:T.label;}
+      if(s.grid&&s.grid.color) s.grid.color=T.grid;}}
+    if(o.plugins&&o.plugins.legend&&o.plugins.legend.labels) o.plugins.legend.labels.color=T.label;
+    if(ch.config.type==='doughnut'&&ch.data.datasets[0]) ch.data.datasets[0].borderColor=T.ring;
+    ch.update('none');
+  });
+}
 function barColor(s){
   if(s>=80) return 'var(--success)';
   if(s>=60) return 'var(--accent)';
@@ -821,17 +868,17 @@ function renderSvcChart(svcs){
   const ctx=c.getContext('2d');
   svcChart=new Chart(ctx,{
     type:'doughnut',
-    data:{labels,datasets:[{data:amounts,backgroundColor:colors,borderColor:'#0a0a0c',borderWidth:3,hoverOffset:6,spacing:1}]},
+    data:{labels,datasets:[{data:amounts,backgroundColor:colors,borderColor:chartTheme().ring,borderWidth:3,hoverOffset:6,spacing:1}]},
     options:{
       responsive:true,maintainAspectRatio:false,cutout:'68%',
       layout:{padding:6},
       plugins:{
-        legend:{position:'right',labels:{color:'#94a3ab',
+        legend:{position:'right',labels:{color:chartTheme().label,
           font:{family:"'Geist',system-ui,sans-serif",size:12},
           boxWidth:8,boxHeight:8,usePointStyle:true,pointStyle:'circle',padding:12,
           generateLabels:(chart)=>chart.data.labels.map((l,i)=>({
             text:l+'  '+Math.round((amounts[i]/total)*100)+'%',
-            fillStyle:colors[i],strokeStyle:'transparent',fontColor:'#94a3ab',index:i}))}},
+            fillStyle:colors[i],strokeStyle:'transparent',fontColor:chartTheme().label,index:i}))}},
         tooltip:{callbacks:{label:c=>' '+c.label+': '+fmt(c.raw)+' ('+Math.round((c.raw/total)*100)+'%)'}}
       }
     }
@@ -842,8 +889,9 @@ function renderSvcChart(svcs){
 function renderTrendChart(trend){
   const c=document.getElementById('chart-trend'); if(!c) return;
   if(!trend||trend.length===0) return;
-  const gridColor='rgba(45,45,50,.55)';
-  const tickColor='#56656d';
+  const T=chartTheme();
+  const gridColor=T.grid;
+  const tickColor=T.tick;
   const labels=trend.map(t=>t.month);
   const actual=trend.map(t=>t.actual);
   const projected=trend.map(t=>t.projected);
@@ -862,13 +910,13 @@ function renderTrendChart(trend){
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{
-        legend:{labels:{color:'#94a3ab',
+        legend:{labels:{color:T.label,
           font:{family:"'Geist',system-ui,sans-serif",size:12},
           boxWidth:16,usePointStyle:true,pointStyle:'line'}},
         tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmt(c.raw)}}
       },
       scales:{
-        x:{ticks:{color:'#94a3ab',font:{family:"'Geist',system-ui,sans-serif",size:12}},
+        x:{ticks:{color:T.label,font:{family:"'Geist',system-ui,sans-serif",size:12}},
            grid:{color:gridColor},border:{color:'transparent'}},
         y:{ticks:{color:tickColor,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},
            grid:{color:gridColor},border:{color:'transparent'}}
@@ -1066,7 +1114,7 @@ function renderAgentCard(card,data,opts){
 }
 function drawCardChart(canvas,card,rows,dims){
   const dim=dims[0];
-  const tick='#94a3ab', grid='rgba(45,45,50,.55)';
+  const T=chartTheme(); const tick=T.label, grid=T.grid;
   const labels=rows.map(r=>String(r[dim]==null?'':r[dim])); const vals=rows.map(r=>r.metric);
   const type=card.template==='line'?'line':'bar';
   new Chart(canvas.getContext('2d'),{
@@ -1247,6 +1295,18 @@ setInterval(loadData,60000);
   document.querySelectorAll('.db-chip').forEach(function(ch){
     ch.addEventListener('click',function(){ dbBuild(ch.dataset.build); });
   });
+  // Theme toggle: flip data-theme, persist, and re-tint live charts.
+  var _tt=document.getElementById('theme-toggle'), _tl=document.getElementById('theme-label');
+  function themeLabel(){ if(_tl) _tl.textContent=(document.documentElement.dataset.theme==='light')?'Dark mode':'Light mode'; }
+  if(_tt) _tt.addEventListener('click',function(){
+    var h=document.documentElement;
+    var next=(h.dataset.theme==='light')?'dark':'light';
+    h.dataset.theme=next;
+    try{localStorage.setItem('nable-theme',next);}catch(e){}
+    themeLabel();
+    if(typeof retintCharts==='function') retintCharts();
+  });
+  themeLabel();
 })();
 </script>
 </body>
