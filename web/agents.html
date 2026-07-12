@@ -257,8 +257,8 @@
 
 <section id="one-command"><div class="wrap" style="padding:0">
   <div class="label reveal">Seamless, not another prompt to babysit</div>
-  <h2 class="reveal">One command, and the gate enforces itself.</h2>
-  <p class="reveal">You don't have to hope your agent remembers to check costs. <code>finops guard install</code> writes a hook into Claude Code, and from then on every infrastructure command the agent runs is checked automatically, before it executes. Like <code>gh auth login</code>: run it once, and it's just on.</p>
+  <h2 class="reveal">One command, and it's on for the whole run.</h2>
+  <p class="reveal">You don't have to hope your agent remembers to check costs. <code>finops guard install</code> writes a hook into Claude Code, and from then on every infrastructure command the agent runs in Claude Code is checked automatically, before it executes. Like <code>gh auth login</code>: run it once, and it's just on.</p>
 
   <div class="install reveal">
     <div class="install-grid">
@@ -318,6 +318,7 @@
   <div class="label reveal">Propose-only, always</div>
   <h2 class="reveal">It can say no. It cannot act.</h2>
   <p class="reveal">The gate returns <code>allow</code>, <code>warn</code>, <code>block</code>, or <code>escalate</code> against your policy. One-way doors, deleting, terminating, buying a commitment, and any over-budget change always escalate to a human. nable proposes and a human approves. It never edits, deletes, or buys anything in your environment on its own, so you can wire an agent through it without handing it the keys.</p>
+  <p class="reveal" style="margin-top:16px;font-size:14px;color:var(--fg-3)"><b style="color:var(--fg-2)">What it is not:</b> a network-level egress intercept. The Claude Code hook is a chokepoint for your agent inside that harness, and it fails open by design, a guard bug never blocks your terminal. The hard guarantee isn't the hook, it's that nable is read-only and holds no execution credentials: it proposes every change as a PR a human merges, so there is nothing for a misaligned agent to route around.</p>
   <div class="grid">
     <div class="card reveal"><h3>Reversible and in budget</h3><p>Passes silently. The command runs as normal, with the dollar impact and a cheaper path on record.</p></div>
     <div class="card reveal"><h3>One-way or over budget</h3><p>Pauses for a human. The irreversible or expensive move is surfaced with the reason before anything happens.</p></div>
@@ -338,7 +339,7 @@
     <div class="col ours reveal">
       <h4>Automatic · the hook</h4>
       <div class="b" style="font-family:var(--mono);font-size:13px;color:var(--fg-2);margin-top:6px">$ finops guard install</div>
-      <p style="color:var(--fg-3);font-size:13.5px;margin-top:10px">Every infra command is checked before it runs. No prompt to maintain. Restart Claude Code and it's live.</p>
+      <p style="color:var(--fg-3);font-size:13.5px;margin-top:10px">Every infra command your agent runs in Claude Code is checked first. No prompt to maintain. Restart Claude Code and it's live.</p>
     </div>
     <div class="col reveal">
       <h4>Manual · the one-liner</h4>
