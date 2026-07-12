@@ -552,6 +552,44 @@ _PROVIDER_OPPS: dict[str, list[dict[str, Any]]] = {
 }
 
 
+# Demo accounts and regions, so Top Accounts and Spend by Region are real panels.
+_DEMO_ACCOUNTS = [
+    {"name": "Production",     "id": "111111111111", "share": 0.42},
+    {"name": "Data Platform",  "id": "222222222222", "share": 0.24},
+    {"name": "Staging",        "id": "333333333333", "share": 0.14},
+    {"name": "Shared Services","id": "444444444444", "share": 0.11},
+    {"name": "Sandbox",        "id": "555555555555", "share": 0.09},
+]
+_DEMO_REGIONS = [
+    {"region": "us-east-1",      "code": "US", "label": "N. Virginia",  "share": 0.38},
+    {"region": "us-west-2",      "code": "US", "label": "Oregon",       "share": 0.19},
+    {"region": "eu-west-1",      "code": "IE", "label": "Ireland",      "share": 0.16},
+    {"region": "eu-central-1",   "code": "DE", "label": "Frankfurt",    "share": 0.11},
+    {"region": "ap-southeast-1", "code": "SG", "label": "Singapore",    "share": 0.09},
+    {"region": "ap-northeast-1", "code": "JP", "label": "Tokyo",        "share": 0.07},
+]
+
+
+def _daily_series(days: int, provs: list[str]) -> list[dict[str, Any]]:
+    """A believable per-provider daily spend series over the window. Deterministic
+    (seeded by day index) so it does not jump on every refresh, with a gentle
+    upward drift and weekly ripple."""
+    import math
+    out = []
+    base = {p: sum(s["amount"] for s in _PROVIDER_SERVICES[p]) / 30.0 for p in provs}
+    today = date.today()
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        pos = (days - i) / max(days, 1)              # 0..1 across the window
+        drift = 0.85 + 0.30 * pos                    # ramps up over the window
+        ripple = 1.0 + 0.06 * math.sin(i / 7.0 * math.tau)  # weekly wobble
+        row: dict[str, Any] = {"date": d.isoformat()}
+        for p in provs:
+            row[p] = round(base[p] * drift * ripple, 2)
+        out.append(row)
+    return out
+
+
 def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
     """Full payload for the `finops serve` dashboard in demo mode, in the exact
     shape `_fetch_dashboard_data` returns. Provider- and range-aware: selecting a
@@ -621,17 +659,88 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
         {"month": f"{_today.strftime('%B')} (projected)", "actual": None, "projected": projected},
     ]
 
+    # Windowed total (what the range actually spans) and the daily provider series.
+    window_total_spend = round(window_total, 2)
+    daily = _daily_series(days, provs)
+    # Headline sparklines: last ~12 windowed daily totals, smoothed.
+    def _spark(scale: float) -> list[float]:
+        tail = daily[-12:] if len(daily) >= 12 else daily
+        return [round(sum(v for k, v in r.items() if k != "date") * scale, 2) for r in tail]
+
+    # Structured recommendations for the table (impact / effort / accounts / saving).
+    _rec_meta = {
+        "aws": [("High", "Low", 3), ("High", "Medium", 1), ("Medium", "Low", 2), ("Low", "Low", 1)],
+        "azure": [("High", "Medium", 1), ("Medium", "Low", 1)],
+        "gcp": [("Medium", "Low", 2), ("Low", "Low", 1)],
+    }
+    recommendations = []
+    for o in recent_opportunities:
+        p = o.get("provider", "aws")
+        meta = _rec_meta.get(p, [("Medium", "Low", 1)])
+        m = meta[len(recommendations) % len(meta)]
+        recommendations.append({
+            "title": o["description"].rstrip("."),
+            "subtitle": o.get("resource", ""),
+            "provider": p, "impact": m[0], "effort": m[1], "accounts": m[2],
+            "monthly_saving": o["monthly_saving"], "resource": o.get("resource", ""),
+        })
+
+    # AI Insights rail: the top three savings, phrased as insights.
+    ai_insights = [{
+        "title": r["title"], "body": r["subtitle"],
+        "monthly_saving": r["monthly_saving"], "provider": r["provider"],
+    } for r in recommendations[:3]]
+
+    # Top accounts and regions, scaled to the windowed total.
+    top_accounts = [{
+        "name": a["name"], "id": a["id"],
+        "amount": round(window_total_spend * a["share"], 2),
+    } for a in _DEMO_ACCOUNTS]
+    spend_by_region = [{
+        "region": r["region"], "code": r["code"], "label": r["label"],
+        "amount": round(window_total_spend * r["share"], 2),
+    } for r in _DEMO_REGIONS]
+
+    # Budgets & alerts.
+    budgets = [
+        {"name": "AWS Monthly Budget",   "provider": "aws",   "used": 3200000, "limit": 3600000},
+        {"name": "GCP Monthly Budget",   "provider": "gcp",   "used": 420000,  "limit": 500000},
+        {"name": "Azure Monthly Budget", "provider": "azure", "used": 780000,  "limit": 920000},
+    ]
+    for b in budgets:
+        b["pct"] = round(b["used"] / b["limit"] * 100, 1)
+        b["status"] = "over" if b["pct"] >= 100 else ("warn" if b["pct"] >= 85 else "ok")
+    alerts = [
+        {"kind": "warn",  "title": "Azure budget alert", "body": "85% of budget used"},
+        {"kind": "info",  "title": "Forecast alert",     "body": f"{provs[0].upper() if provs else 'AWS'} forecast tracking above run rate"},
+    ]
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "account_id": _ACCOUNT_ID,
+        "user": {"name": "Chandan B.", "role": "Admin", "email": "chandan@acme.io"},
         "total_spend_mtd": month_total,
+        "total_spend_window": window_total_spend,
         "total_spend_last_month": last_month,
         "projected_month_total": projected,
+        "forecast_delta_pct": -4.7,
         "delta_pct": delta_pct,
         "finops_grade": grade,
         "finops_score": score,
+        "sparklines": {
+            "spend": _spark(1.0), "mtd": _spark(0.62),
+            "forecast": _spark(1.09), "savings": _spark(0.065),
+        },
         "top_services": top_services,
         "active_services": active_services,
+        "daily_series": daily,
+        "series_providers": provs,
+        "top_accounts": top_accounts,
+        "spend_by_region": spend_by_region,
+        "recommendations_table": recommendations,
+        "ai_insights": ai_insights,
+        "budgets": budgets,
+        "alerts": alerts,
         "window_days": days,
         "provider": provider,
         "opportunities_count": len(recent_opportunities),

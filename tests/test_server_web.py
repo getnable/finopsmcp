@@ -208,7 +208,7 @@ def test_dashboard_has_spend_by_service(running_server):
 def test_dashboard_has_trend_chart(running_server):
     _, port = running_server
     _, body = _get(f"http://127.0.0.1:{port}/")
-    assert "Spend trend" in body
+    assert "Spend over time" in body
 
 
 def test_dashboard_has_efficiency_scorecard(running_server):
