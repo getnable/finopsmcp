@@ -342,7 +342,7 @@ def _license_gate() -> str | None:
 
 
 _HELP = """\
-nable Slack bot — ask your cloud bill anything, right in Slack.
+nable Slack bot: ask nable about your cloud and AI spend, right in Slack.
 
 Usage:
   finops-slack            Start the bot (Socket Mode, no public endpoint needed)

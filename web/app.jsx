@@ -503,7 +503,7 @@ function SeeItWork({ interaction }){
       <div className="wrap">
         <div className="section-head center">
           <div className="label">See it work</div>
-          <h2>Ask your bill like you'd<br/><em>ask a teammate.</em></h2>
+          <h2>Ask nable like you'd<br/><em>ask a teammate.</em></h2>
           <p>nable pulls every connected provider, normalizes to USD, and answers right in your editor. Watch it run through real questions, or ask your own.</p>
         </div>
         <div className="console-stage">
