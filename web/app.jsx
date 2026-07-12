@@ -203,8 +203,7 @@ function Hero(){
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
           </div>
-          <p className="hero-cmdnote">Runs locally. Reads your bill, changes nothing. No signup, no cloud keys to start.</p>
-          <p className="hero-trustline"><b>Clouds, SaaS and AI spend</b> normalized into one bill · works in any editor · free for solo use</p>
+          <p className="hero-cmdnote">Read-only · no signup · no cloud keys · free for solo use</p>
         </div>
       </div>
     </header>
