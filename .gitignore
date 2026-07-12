@@ -123,3 +123,4 @@ stripe-env-helper.mjs
 .env*
 internal/
 shim/dist/
+packaging/mcpb/*.mcpb
