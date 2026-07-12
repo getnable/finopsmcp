@@ -590,6 +590,21 @@ html[data-theme="light"] .rec-view{border-color:transparent}
 
 @media(max-width:860px){body{padding-left:0}.sidebar{display:none}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* ── Empty state: real mode, nothing connected ─────────────────────────────── */
+.main[data-empty="1"]>*:not(#empty-state){display:none!important}
+#empty-state{display:none;max-width:720px;margin:9vh auto 0;text-align:center;padding:0 24px}
+.main[data-empty="1"] #empty-state{display:block}
+#empty-state .es-mark{width:52px;height:52px;margin:0 auto 22px}
+#empty-state h2{font-size:26px;font-weight:600;letter-spacing:-.02em;margin:0 0 10px}
+#empty-state .es-sub{color:var(--fg2);font-size:14.5px;line-height:1.6;max-width:52ch;margin:0 auto 28px}
+#empty-state .es-paths{display:grid;grid-template-columns:1fr 1fr;gap:14px;text-align:left}
+@media(max-width:720px){#empty-state .es-paths{grid-template-columns:1fr}}
+#empty-state .es-card{border:1px solid var(--line);border-radius:12px;background:var(--bg1);padding:18px 20px}
+#empty-state .es-card h3{font-size:14px;font-weight:600;margin:0 0 8px}
+#empty-state .es-card p{color:var(--fg2);font-size:13px;line-height:1.55;margin:0}
+#empty-state .es-card code{font-family:var(--mono);font-size:12.5px;background:var(--bg2);border:1px solid var(--line);border-radius:4px;padding:1px 6px}
+#empty-state .es-foot{margin-top:24px;color:var(--fg3);font-size:12.5px}
+#empty-state .es-foot button{margin-left:10px;border:1px solid var(--line);background:var(--bg1);color:var(--fg);border-radius:8px;padding:6px 14px;font-size:12.5px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -632,6 +647,22 @@ html[data-theme="light"] .rec-view{border-color:transparent}
 
 <!-- Dashboard view -->
 <main class="main" id="view-dashboard">
+  <section id="empty-state">
+    <svg class="es-mark" viewBox="0 0 120 120" fill="none" aria-hidden="true"><rect x="2" y="2" width="116" height="116" rx="25" fill="none" stroke="#2c7d91" stroke-opacity=".55" stroke-width="3"/><path d="M36 92 V30" stroke="#4db8d4" stroke-width="14" stroke-linecap="round"/><path d="M36 32 L84 86" stroke="#4db8d4" stroke-width="14" stroke-linecap="round"/><path d="M84 90 V28" stroke="#2c7d91" stroke-width="14" stroke-linecap="round"/><circle cx="84" cy="88" r="9" fill="#4db8d4"/></svg>
+    <h2>Nothing connected yet.</h2>
+    <p class="es-sub">This dashboard lights up the moment a provider is connected. Everything is read-only, and your credentials stay on this machine.</p>
+    <div class="es-paths">
+      <div class="es-card">
+        <h3>In your editor</h3>
+        <p>Ask Claude or Cursor: <code>"connect my AWS account"</code>. nable finds credentials already on this machine and connects the one you pick. No terminal.</p>
+      </div>
+      <div class="es-card">
+        <h3>In a terminal</h3>
+        <p>Run <code>uvx nable</code> for the guided setup: AWS, Azure, GCP, or an OpenAI/Anthropic key for your token bill.</p>
+      </div>
+    </div>
+    <p class="es-foot">Just looking? Restart with <code>FINOPS_DEMO_MODE=1</code> for a sample bill.<button type="button" onclick="location.reload()">I connected, refresh</button></p>
+  </section>
   <div id="err-banner" class="err-banner"></div>
 
   <div id="loading-banner" class="loading-banner">
@@ -1043,6 +1074,13 @@ function render(d){
   const banner=document.getElementById('err-banner');
   if(banner){ if(d.error){banner.textContent=d.error;banner.style.display='block';} else banner.style.display='none'; }
   const provs=d.connected_providers||[];
+
+  // Real mode with nothing connected: show the designed connect state instead
+  // of a grid of zeros. Demo payloads always carry connected_providers, so this
+  // never fires in demo mode. Day one IS the empty state; design it.
+  const mainEl=document.getElementById('view-dashboard');
+  const noData=!provs.length && !((d.total_spend_window||0)||(d.total_spend_mtd||0)||(d.top_services||[]).length);
+  if(mainEl){ if(noData){ mainEl.dataset.empty='1'; return; } delete mainEl.dataset.empty; }
 
   // Greeting + user (RBAC chip). Professional: name, then a dated context line.
   const user=d.user||{}; const first=(user.name||'').split(' ')[0]||'';

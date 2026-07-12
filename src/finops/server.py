@@ -16,6 +16,7 @@ import os
 import statistics
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -127,6 +128,14 @@ connect_gcp, or connect_azure: they read credentials that already exist on the
 machine (or walk through a one-paste for Azure) and never change anything in the
 cloud. Do not make the user leave for a terminal.
 
+ANSWER SHAPE for cost answers, always in this order:
+1. The headline number first ($X total, or $X change), one line.
+2. Ranked drivers, largest first, each with its dollar figure.
+3. One recommended action with its monthly dollar impact, when the data
+   supports one. Not a list of maybes: the single best next move.
+4. Detail only after that, and only if it earns its place.
+Every claim carries a dollar figure. Never bury the number under prose.
+
 USER PERSONA: {_persona}
 RESPONSE FORMAT INSTRUCTION: {_persona_ctx}
 """)
@@ -163,6 +172,38 @@ _CONNECT_HINT = {
     ),
     "actions": ["connect_aws", "connect_gcp", "connect_azure"],
 }
+
+
+# ── First-contact confirmation (the restart cliff) ─────────────────────────────
+# MCP clients only load servers at startup, so setup ends with "fully restart
+# your editor" and the user restarts into uncertainty: nothing ever tells them
+# it worked. On the FIRST successful tool call of the first MCP session after
+# install, attach a one-line confirmation for the model to relay. Once per
+# install (sentinel), and only in a real MCP session (never a CLI-invoked call,
+# which would burn the sentinel before the editor ever loads).
+_MCP_SESSION = False          # set True in main() right before mcp.run()
+_EDITOR_CONFIRM_SENTINEL = Path.home() / ".config" / "finops" / ".editor_confirmed"
+_editor_confirmed_this_process = False
+
+
+def _maybe_editor_confirmation() -> str | None:
+    """Return the first-contact note once per install, MCP sessions only."""
+    global _editor_confirmed_this_process
+    if not _MCP_SESSION or _editor_confirmed_this_process:
+        return None
+    _editor_confirmed_this_process = True  # at most one sentinel stat per process
+    try:
+        if _EDITOR_CONFIRM_SENTINEL.exists():
+            return None
+        _EDITOR_CONFIRM_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+        _EDITOR_CONFIRM_SENTINEL.touch()
+    except Exception:
+        return None
+    return (
+        "First contact: nable just answered its first call from this editor, "
+        "so the user's setup worked. Open your reply with one short confirmation "
+        "(e.g. 'nable is wired in.') before answering their question."
+    )
 
 
 def _first_run_onboarding_directive() -> dict:
@@ -284,6 +325,13 @@ def _instrumented_tool(*dargs, **dkwargs):
                     # money" without slowing this query, and the scan it triggers records
                     # findings the upgrade nudge later cites. Once per session only.
                     result.setdefault("_onboarding", _first_run_onboarding_directive())
+            # First contact after install: confirm the editor wiring worked.
+            # Closes the restart cliff (setup ends in "restart and hope"; this
+            # is the "it worked"). Once per install, MCP sessions only.
+            if isinstance(result, dict) and "error" not in result:
+                _confirm = _maybe_editor_confirmation()
+                if _confirm:
+                    result.setdefault("_setup_confirmed", _confirm)
             # Stale build: surface the upgrade path IN CHAT once per session. The
             # startup thread stashes the note (no network in this hot path); the
             # editor user never sees the stderr log, so this is the channel that
@@ -8251,6 +8299,11 @@ def main() -> None:
 
     from .scheduler.jobs import start_scheduler
     start_scheduler()
+    # A real MCP session is starting: arm the one-time first-contact
+    # confirmation (never armed for CLI-invoked tool calls, which would burn
+    # the sentinel before the editor ever loads).
+    global _MCP_SESSION
+    _MCP_SESSION = True
     mcp.run()
 
 

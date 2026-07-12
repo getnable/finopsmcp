@@ -808,10 +808,13 @@ def run_welcome_flow(demo: bool = False) -> None:
             _line(f"    {link(_oneclick)}")
             _line(dim("    Click it, create the stack, then choose 1 below and paste the two outputs."))
             _blank()
+        # The model-key option sits at 2, not buried at 4: for the AI-native
+        # segment the token bill IS the first real number, and the key is
+        # usually one paste away (GTM: lead with AI cost).
         _line(f"  {dim('1)')} AWS          {dim('reads your existing AWS profile')}")
-        _line(f"  {dim('2)')} Azure")
-        _line(f"  {dim('3)')} GCP")
-        _line(f"  {dim('4)')} OpenAI / Anthropic   {dim('paste an API key, see your token bill')}")
+        _line(f"  {dim('2)')} OpenAI / Anthropic   {dim('paste an API key, see your token bill')}")
+        _line(f"  {dim('3)')} Azure")
+        _line(f"  {dim('4)')} GCP")
         _line(f"  {dim('5)')} Skip for now")
         _blank()
         choice = "5"
@@ -826,17 +829,17 @@ def run_welcome_flow(demo: bool = False) -> None:
             setup_aws_account()
             shown = _show_value_moment(demo=False)
         elif choice == "2":
-            from .setup_wizard import setup_azure
-            setup_azure()
-            shown = _show_value_moment(demo=False)
-        elif choice == "3":
-            from .setup_wizard import setup_gcp
-            setup_gcp()
-            shown = _show_value_moment(demo=False)
-        elif choice == "4":
             # AI-native fast path: connect a model provider and show the token
             # bill, the number that actually matters for this segment.
             shown = _connect_llm_provider()
+        elif choice == "3":
+            from .setup_wizard import setup_azure
+            setup_azure()
+            shown = _show_value_moment(demo=False)
+        elif choice == "4":
+            from .setup_wizard import setup_gcp
+            setup_gcp()
+            shown = _show_value_moment(demo=False)
 
     # Real data or nothing. If they skipped or the scan came up empty, never show
     # invented numbers, they teach nothing and undercut trust. Point at the fastest
@@ -852,7 +855,21 @@ def run_welcome_flow(demo: bool = False) -> None:
         else:
             _line(dim("  Connect an account to see it:  ") + cyan(_cli("setup aws")) + dim("  (read-only, ~1 min)"))
             _line(dim("  Or paste a model key:  ") + cyan(_cli("setup openai")) + dim("  for your AI / token bill."))
-        _line(dim("  Just exploring? ") + cyan(_cli("welcome --demo")) + dim("  walks a clearly-labeled sample bill."))
+        _blank()
+        # Do not end the run empty-handed: offer the clearly-labeled sample tour
+        # inline, one keystroke, instead of pointing at a command to re-run. The
+        # "real data or nothing" stance holds: sample never sets `shown`, and it
+        # is opt-in and labeled on every line it prints.
+        _demo_ans = "n"
+        try:
+            _demo_ans = input("  Want a 10-second tour on sample data instead? [Y/n]: ").strip().lower() or "y"
+        except (KeyboardInterrupt, EOFError):
+            _demo_ans = "n"
+        _blank()
+        if _demo_ans in ("y", "yes"):
+            _show_value_moment(demo=True)
+        else:
+            _line(dim("  Later: ") + cyan(_cli("welcome --demo")) + dim("  walks the same clearly-labeled sample bill."))
         _blank()
 
     # Cross-sell the rest of the machine: one scan, one prompt, and the OpenAI
@@ -910,6 +927,7 @@ def run_welcome_flow(demo: bool = False) -> None:
     # a week of snapshots. Plant the second-session question now.
     if shown:
         _line(dim("  nable is already watching for cost spikes. Tomorrow, ask:  ") + cyan('"any cost spikes I should know about?"'))
+        _line(dim("  Prefer it pushed? ") + cyan(_cli("setup slack")) + dim("  sends anomaly alerts and a weekly savings digest."))
         _blank()
 
     _line(dim("  Your agent runs terraform or kubectl?  ") + cyan(_cli("guard install")))

@@ -213,7 +213,8 @@ def test_ambient_aws_declined_falls_through_to_menu_then_connect_nudge(monkeypat
 
     monkeypatch.setattr("finops.connectors.aws.AWSConnector.is_configured", _ambient)
     monkeypatch.setattr(w, "_llm_ambient_provider", lambda: None)
-    answers = iter(["n", "5"])  # decline Y/n, then explicitly skip the menu
+    # decline Y/n, explicitly skip the menu, decline the inline sample tour
+    answers = iter(["n", "5", "n"])
     monkeypatch.setattr("builtins.input", lambda *a, **k: next(answers))
 
     calls = []
@@ -224,3 +225,27 @@ def test_ambient_aws_declined_falls_through_to_menu_then_connect_nudge(monkeypat
 
     assert calls == []  # declined real scan never ran, and no demo fallback either
     assert "No numbers yet, on purpose." in out  # honest empty state, real next step
+
+
+def test_no_creds_close_offers_inline_sample_tour(monkeypatch, capsys):
+    """Skipping everything offers the clearly-labeled sample tour inline; accepting
+    runs it (opt-in, so 'real data or nothing' holds: sample never sets shown)."""
+    monkeypatch.setattr("finops.setup_wizard._configure_claude_desktop", lambda *a, **k: None)
+
+    async def _no_ambient(self):
+        return False
+
+    monkeypatch.setattr("finops.connectors.aws.AWSConnector.is_configured", _no_ambient)
+    monkeypatch.setattr(w, "_llm_ambient_provider", lambda: None)
+    # skip the menu, then accept the inline sample tour (Enter defaults to yes)
+    answers = iter(["5", ""])
+    monkeypatch.setattr("builtins.input", lambda *a, **k: next(answers))
+
+    calls = []
+    monkeypatch.setattr(w, "_show_value_moment", lambda demo=False: calls.append(demo) or False)
+
+    w.run_welcome_flow(demo=False)
+    out = capsys.readouterr().out
+
+    assert calls == [True]  # the sample tour ran: demo-labeled, opt-in
+    assert "No numbers yet, on purpose." in out  # the honest close still printed first
