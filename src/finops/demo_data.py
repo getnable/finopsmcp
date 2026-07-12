@@ -646,6 +646,21 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
          "monthly_saving": 340.00, "resource": "nonprod-scheduler", "provider": "aws"},
     ] if "aws" in provs else []
 
+    # Verified savings ledger: only changes nable proposed AND confirmed landed on
+    # the resource (the cloud now matches nable's recommended config). This is the
+    # billable figure, kept strictly separate from "identified/potential".
+    verified_ledger = [
+        {"description": "Rightsized `data-platform-worker-01` m5.4xlarge -> m5.2xlarge",
+         "resource": "i-0a1b2c3d4e5f67890", "verified_monthly": 218.40,
+         "confirmed_on": (_TODAY - timedelta(days=4)).isoformat(),
+         "proof": "instance type now m5.2xlarge; next-day EC2 line fell $214"},
+        {"description": "Non-prod RDS on a nights/weekends schedule",
+         "resource": "nonprod-scheduler", "verified_monthly": 340.00,
+         "confirmed_on": (_TODAY - timedelta(days=9)).isoformat(),
+         "proof": "6 instances stopped off-hours; RDS run-hours down 41%"},
+    ] if "aws" in provs else []
+    verified_monthly = round(sum(v["verified_monthly"] for v in verified_ledger), 2)
+
     # Score nudges a little by footprint so switching providers visibly moves it.
     score = 74.0 if "aws" in provs else (81.0 if provs == ["azure"] else 69.0)
     grade = "B" if score >= 70 else "C"
@@ -805,6 +820,13 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
         "opportunities_count": len(recent_opportunities),
         "opportunities_total_saving": opp_total,
         "savings_achieved_mtd": round(sum(s["monthly_saving"] for s in recent_savings), 2),
+        "verified_savings": {
+            "monthly": verified_monthly,
+            "annual": round(verified_monthly * 12, 2),
+            "count": len(verified_ledger),
+            "delta_pct": 32.0,
+            "ledger": verified_ledger,
+        },
         "anomalies_open": 2 if "aws" in provs else 1,
         "budget_pct_used": 68.0,
         "recent_opportunities": recent_opportunities,

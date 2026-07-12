@@ -381,9 +381,11 @@ html[data-theme="light"] .agent-topbar .at-back{border-color:transparent;backgro
 .nav-ai{margin-left:auto;color:var(--accent);opacity:.55;display:flex;align-items:center;flex-shrink:0}
 .nav-ai svg{width:13px;height:13px}
 .nav-item:hover .nav-ai{opacity:1}
-.side-savings{margin-top:auto;border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;background:linear-gradient(180deg,var(--success-w),transparent),var(--bg2)}
+.side-savings{margin-top:auto;border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;background:linear-gradient(180deg,var(--success-w),transparent),var(--bg2);width:100%;text-align:left;font-family:inherit;cursor:pointer;transition:border-color .15s}
+.side-savings:hover{border-color:var(--success-b)}
 html[data-theme="light"] .side-savings{border-color:transparent;box-shadow:var(--lift)}
 .ss-cap{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--fg3);margin-bottom:8px}
+.ss-info{font-weight:500;letter-spacing:0;text-transform:none;color:var(--success);opacity:.85}
 .ss-row{display:flex;align-items:baseline;gap:9px}
 .ss-val{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.03em;color:var(--success);line-height:1}
 .ss-delta{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--success)}
@@ -613,11 +615,11 @@ html[data-theme="light"] .rec-view{border-color:transparent}
     <button class="nav-item nav-agent-link" data-prompt="Walk me through nable settings: budgets, alerts, RBAC roles and SSO."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.3l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2.2-1.3L14 2h-4l-.3 2.4a7 7 0 0 0-2.2 1.3l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.3l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2.2 1.3L10 22h4l.3-2.4a7 7 0 0 0 2.2-1.3l2.4 1 2-3.4-2-1.6c.1-.4.1-.9.1-1.3z"/></svg>Settings</button>
   </nav>
 
-  <div class="side-savings" id="side-savings">
-    <div class="ss-cap">Total savings</div>
+  <button class="side-savings" id="side-savings" title="See exactly what we verified, this is what billing is based on">
+    <div class="ss-cap">Verified savings <span class="ss-info">the billable figure</span></div>
     <div class="ss-row"><span class="ss-val" id="ss-val">&mdash;</span><span class="ss-delta" id="ss-delta"></span></div>
-    <div class="ss-sub">vs last 30 days</div>
-  </div>
+    <div class="ss-sub" id="ss-sub">confirmed off your bill · view ledger →</div>
+  </button>
 
   <div class="side-foot side-foot-min">
     <div class="sf-brand"><svg width="14" height="14" viewBox="0 0 120 120" aria-hidden="true"><path d="M36 92 V30" stroke="var(--accent)" stroke-width="16" stroke-linecap="round"/><path d="M36 32 L84 86" stroke="var(--accent)" stroke-width="16" stroke-linecap="round"/><path d="M84 90 V28" stroke="var(--accent-dim)" stroke-width="16" stroke-linecap="round"/><circle cx="84" cy="88" r="10" fill="var(--accent)"/></svg><span>nable</span><span class="sf-tag">FinOps, simplified</span></div>
@@ -1080,9 +1082,11 @@ function render(d){
   if(asSub) asSub.textContent='Live services and resource counts over the last '+selectedDays+' days'+(selectedProvider!=='all'?' · '+(PROV_LABELS[selectedProvider]||selectedProvider.toUpperCase()):'')+'.';
   renderScorecard(d.scorecard||{});
 
-  // Sidebar total savings
-  const sv=document.getElementById('ss-val'); if(sv) sv.textContent=fmt(d.opportunities_total_saving||0);
-  const svd=document.getElementById('ss-delta'); if(svd) svd.textContent='↑ 32%';
+  // Sidebar VERIFIED savings (the billable figure), not potential/identified.
+  const vs=d.verified_savings||{};
+  const sv=document.getElementById('ss-val'); if(sv) sv.textContent=fmt(vs.monthly||0);
+  const svd=document.getElementById('ss-delta'); if(svd) svd.textContent=vs.delta_pct?('↑ '+vs.delta_pct+'%'):'';
+  const vsub=document.getElementById('ss-sub'); if(vsub) vsub.textContent=(vs.count||0)+' change'+((vs.count===1)?'':'s')+' confirmed · view ledger →';
 }
 
 // ── "What changed" digest ─────────────────────────────────────────────────────
@@ -1716,6 +1720,8 @@ function initAgent(){
   });
   // Back button in the AI Analyst header returns to the dashboard.
   const aback=document.getElementById('agent-back'); if(aback) aback.addEventListener('click',()=>{ if(typeof switchView==='function') switchView('dashboard'); });
+  // Verified-savings card opens the ledger: full provenance for what we bill on.
+  const ssc=document.getElementById('side-savings'); if(ssc) ssc.addEventListener('click',()=>{ if(typeof switchView==='function')switchView('agent'); if(typeof window.askAgent==='function')window.askAgent('Show me the verified savings ledger: each change nable proposed that we confirmed landed, the resource, what changed, the confirmed monthly saving, and the date it was verified. This is what billing is based on.'); });
   // Spend-over-time group-by toggle re-renders the chart in place.
   const sg=document.getElementById('sot-group'); if(sg) sg.addEventListener('change',()=>{ if(_sotData) renderSpendOverTime(_sotData,_sotProvs); const sub=document.getElementById('sot-sub'); if(sub) sub.textContent=(sg.value==='total'?'Daily total across all clouds':'Daily, grouped by provider'); });
   // Insights "view all" + notifications open the agent.
