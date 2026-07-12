@@ -182,7 +182,7 @@ def test_dashboard_html_structure(running_server):
     assert "nable" in body
     assert "Spend" in body
     assert "getnable.com" in body  # footer link
-    assert "Bricolage Grotesque" in body  # correct font (DESIGN.md retired Instrument Sans)
+    assert "'Geist'" in body  # correct font (DESIGN.md: Geist Sans, retired Bricolage 2026-07-02)
 
 
 def test_dashboard_auto_refresh_script(running_server):

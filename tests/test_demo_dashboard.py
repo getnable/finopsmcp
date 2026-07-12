@@ -56,11 +56,25 @@ def test_demo_dashboard_is_populated():
     assert d["error"] is None
 
 
-def test_top_services_percentages_sum_to_100():
-    d = demo_data.dashboard_data(days=30)
-    total_pct = sum(s["pct"] for s in d["top_services"])
-    # top 8 of 7 demo services => all of them, so ~100%
+def test_active_services_percentages_sum_to_100():
+    # The full inventory's shares sum to 100; top_services is the top-8 subset.
+    d = demo_data.dashboard_data(days=30, provider="all")
+    total_pct = sum(s["pct"] for s in d["active_services"])
     assert 99.0 <= total_pct <= 101.0
+    # AWS-only: 7 services, all fit in top_services, so those sum to ~100 too.
+    a = demo_data.dashboard_data(days=30, provider="aws")
+    assert 99.0 <= sum(s["pct"] for s in a["top_services"]) <= 101.0
+
+
+def test_dashboard_provider_and_range_vary():
+    # Provider filter and range window both move the numbers (real controls).
+    aws = demo_data.dashboard_data(days=30, provider="aws")
+    allc = demo_data.dashboard_data(days=30, provider="all")
+    assert allc["total_spend_mtd"] > aws["total_spend_mtd"] > 0
+    assert set(demo_data.dashboard_data()["connected_providers"]) == {"aws", "azure", "gcp"}
+    wide = demo_data.dashboard_data(days=90, provider="aws")
+    narrow = demo_data.dashboard_data(days=7, provider="aws")
+    assert wide["active_services"][0]["amount"] > narrow["active_services"][0]["amount"]
 
 
 def test_fetch_dashboard_data_uses_demo_when_demo_on(_demo_on):

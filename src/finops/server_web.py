@@ -151,7 +151,7 @@ async def _fetch_dashboard_data(days: int = 30, provider: str = "all") -> dict[s
     try:
         from . import demo_data
         if demo_data.is_demo():
-            return demo_data.dashboard_data(days=days)
+            return demo_data.dashboard_data(days=days, provider=provider)
     except Exception:
         pass
 

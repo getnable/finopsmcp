@@ -491,92 +491,177 @@ def cost_drivers() -> dict[str, Any]:
     }
 
 
-def dashboard_data(days: int = 30) -> dict[str, Any]:
-    """Full payload for the `finops serve` dashboard in demo mode, in the exact
-    shape `_fetch_dashboard_data` returns. Same acme-production story as every
-    other demo helper: $12,847 this month, +23.4% vs last, a Data Transfer spike,
-    and a rightsizing find where $889 of raw 'underutilized' collapses to genuine
-    savings once burst and effective rate are accounted for. Lets someone see a
-    populated dashboard with `FINOPS_DEMO_MODE=1 finops serve`, no account needed.
-    """
-    cs = cost_summary()
-    by_service = cs["by_service"]
-    window_total = sum(by_service.values()) or 1.0
-    top_services = [
-        {"service": svc, "amount": round(amt, 2), "pct": round(amt / window_total * 100, 1)}
-        for svc, amt in sorted(by_service.items(), key=lambda x: -x[1])[:8]
-    ]
+# Per-provider monthly service inventory for the demo dashboard. Each entry:
+# monthly cost, live resource count, and the month-over-month delta. AWS is the
+# familiar acme-production story ($12,847, +23.4%); Azure and GCP are smaller,
+# realistic multi-cloud footprints so the provider toggle and the active-services
+# table have real, distinct data to show. Selecting AWS reproduces the classic
+# single-cloud demo numbers exactly.
+_PROVIDER_SERVICES: dict[str, list[dict[str, Any]]] = {
+    "aws": [
+        {"service": "Amazon EC2",         "amount": 7240.10, "resources": 42, "delta_pct": 18.7},
+        {"service": "Amazon RDS",         "amount": 2100.44, "resources": 8,  "delta_pct": 22.1},
+        {"service": "AWS Data Transfer",  "amount": 1890.33, "resources": 0,  "delta_pct": 60.2},
+        {"service": "Amazon S3",          "amount": 822.15,  "resources": 31, "delta_pct": -10.3},
+        {"service": "Amazon CloudWatch",  "amount": 412.88,  "resources": 0,  "delta_pct": 4.1},
+        {"service": "AWS Lambda",         "amount": 201.44,  "resources": 74, "delta_pct": 9.0},
+        {"service": "Amazon EKS",         "amount": 180.00,  "resources": 2,  "delta_pct": 1.2},
+    ],
+    "azure": [
+        {"service": "Virtual Machines",   "amount": 1980.00, "resources": 16, "delta_pct": 12.4},
+        {"service": "Azure SQL Database", "amount": 640.00,  "resources": 5,  "delta_pct": 6.8},
+        {"service": "Blob Storage",       "amount": 305.00,  "resources": 12, "delta_pct": -3.1},
+        {"service": "App Service",        "amount": 240.00,  "resources": 9,  "delta_pct": 14.0},
+        {"service": "Azure Monitor",      "amount": 110.00,  "resources": 0,  "delta_pct": 2.0},
+    ],
+    "gcp": [
+        {"service": "Compute Engine",     "amount": 1120.00, "resources": 22, "delta_pct": 9.5},
+        {"service": "BigQuery",           "amount": 640.00,  "resources": 0,  "delta_pct": 31.7},
+        {"service": "GKE",                "amount": 410.00,  "resources": 3,  "delta_pct": 5.4},
+        {"service": "Cloud Storage",      "amount": 250.00,  "resources": 18, "delta_pct": -2.2},
+        {"service": "Cloud Networking",   "amount": 140.00,  "resources": 0,  "delta_pct": 7.1},
+    ],
+}
+_DEMO_PROVIDERS = ["aws", "azure", "gcp"]
 
-    mtd = round(cs["total_usd"], 2)
-    last_month = round(mtd / (1 + cs["vs_last_month_pct"] / 100), 2)
-
-    # Open opportunities, priced on the customer's real rate (the rightsizing demo
-    # already collapses raw savings to genuine). A small, believable spread.
-    recent_opportunities = [
+# Per-provider open opportunities, priced on the customer's real rate.
+_PROVIDER_OPPS: dict[str, list[dict[str, Any]]] = {
+    "aws": [
         {"description": "Rightsize data-platform-worker-01 (m5.4xlarge to m5.2xlarge). "
                         "Genuine after burst + memory check, priced on your ~22% effective discount.",
-         "monthly_saving": 218.40, "resource": "i-0a1b2c3d4e5f67890"},
+         "monthly_saving": 218.40, "resource": "i-0a1b2c3d4e5f67890", "provider": "aws"},
         {"description": "Buy a 1-year compute Savings Plan at your steady EC2 baseline.",
-         "monthly_saving": 412.00, "resource": "compute-savings-plan"},
+         "monthly_saving": 412.00, "resource": "compute-savings-plan", "provider": "aws"},
         {"description": "Delete 4 unattached gp2 EBS volumes, idle 30 to 90 days.",
-         "monthly_saving": 96.20, "resource": "vol-0f3d5a2c9b1e40718"},
+         "monthly_saving": 96.20, "resource": "vol-0f3d5a2c9b1e40718", "provider": "aws"},
         {"description": "Move 2.1 TB of infrequently read S3 to Intelligent-Tiering.",
-         "monthly_saving": 61.80, "resource": "s3://acme-data-platform-logs"},
-    ]
-    opp_total = round(sum(o["monthly_saving"] for o in recent_opportunities), 2)
-    recent_savings = [
-        {"description": "Turned off 6 non-prod RDS instances on a nights/weekends schedule.",
-         "monthly_saving": 340.00, "resource": "nonprod-scheduler"},
+         "monthly_saving": 61.80, "resource": "s3://acme-data-platform-logs", "provider": "aws"},
+    ],
+    "azure": [
+        {"description": "Buy a 1-year Azure Reserved VM Instance for the steady D-series baseline.",
+         "monthly_saving": 176.00, "resource": "vm-reservation-dseries", "provider": "azure"},
+        {"description": "Downsize 2 over-provisioned App Service plans (P2v3 to P1v3).",
+         "monthly_saving": 88.00, "resource": "asp-web-frontend", "provider": "azure"},
+    ],
+    "gcp": [
+        {"description": "Apply a committed-use discount to the stable Compute Engine baseline.",
+         "monthly_saving": 132.00, "resource": "cud-compute-n2", "provider": "gcp"},
+        {"description": "Set a 90-day lifecycle rule on 1.4 TB of cold Cloud Storage.",
+         "monthly_saving": 44.00, "resource": "gs://acme-analytics-archive", "provider": "gcp"},
+    ],
+}
+
+
+def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
+    """Full payload for the `finops serve` dashboard in demo mode, in the exact
+    shape `_fetch_dashboard_data` returns. Provider- and range-aware: selecting a
+    provider filters every figure, and the range scales the windowed views. AWS
+    reproduces the classic acme-production story ($12,847 this month, +23.4% vs
+    last, a Data Transfer spike, a genuine rightsizing find); Azure and GCP are
+    smaller real footprints, so the provider toggle and active-services table
+    show distinct data. No account needed.
+    """
+    provider = (provider or "all").lower()
+    provs = _DEMO_PROVIDERS if provider == "all" else [provider]
+    provs = [p for p in provs if p in _PROVIDER_SERVICES] or ["aws"]
+
+    # Window scaling: figures for the selected lookback. 30d is the reference
+    # month; 7d shows ~a quarter of it, 90d ~three months. MTD/projection stay
+    # month-anchored (they are calendar figures, not lookback figures).
+    win_factor = max(days, 1) / 30.0
+
+    # Flatten selected providers' services into the active-services inventory.
+    active_services: list[dict[str, Any]] = []
+    for p in provs:
+        for s in _PROVIDER_SERVICES[p]:
+            active_services.append({
+                "service": s["service"],
+                "provider": p,
+                "resources": s["resources"],
+                "amount": round(s["amount"] * win_factor, 2),
+                "delta_pct": s["delta_pct"],
+            })
+    active_services.sort(key=lambda x: -x["amount"])
+    window_total = sum(s["amount"] for s in active_services) or 1.0
+    for s in active_services:
+        s["pct"] = round(s["amount"] / window_total * 100, 1)
+
+    top_services = [
+        {"service": s["service"], "amount": s["amount"], "pct": s["pct"]}
+        for s in active_services[:8]
     ]
 
+    # Month figures: sum the selected providers' full monthly service cost.
+    month_total = round(sum(s["amount"] for p in provs for s in _PROVIDER_SERVICES[p]), 2)
+    delta_pct = 23.4 if "aws" in provs else round(sum(
+        s["amount"] * s["delta_pct"] for p in provs for s in _PROVIDER_SERVICES[p]
+    ) / max(month_total, 1), 1)
+    last_month = round(month_total / (1 + delta_pct / 100), 2)
+    projected = round(month_total * 1.088, 2)
+
+    recent_opportunities = [o for p in provs for o in _PROVIDER_OPPS.get(p, [])]
+    recent_opportunities.sort(key=lambda o: -o["monthly_saving"])
+    opp_total = round(sum(o["monthly_saving"] for o in recent_opportunities), 2)
+
+    recent_savings = [
+        {"description": "Turned off 6 non-prod RDS instances on a nights/weekends schedule.",
+         "monthly_saving": 340.00, "resource": "nonprod-scheduler", "provider": "aws"},
+    ] if "aws" in provs else []
+
+    # Score nudges a little by footprint so switching providers visibly moves it.
+    score = 74.0 if "aws" in provs else (81.0 if provs == ["azure"] else 69.0)
+    grade = "B" if score >= 70 else "C"
+
     _today = date.today()
-    # Two completed months + the current month as a projection.
     m1 = (_today.replace(day=1) - timedelta(days=1)).replace(day=1)      # last month
     m2 = (m1 - timedelta(days=1)).replace(day=1)                          # two months ago
     trend = [
-        {"month": m2.strftime("%B"), "actual": 9420.00, "projected": None},
+        {"month": m2.strftime("%B"), "actual": round(last_month * 0.90, 2), "projected": None},
         {"month": m1.strftime("%B"), "actual": last_month, "projected": last_month},
-        {"month": f"{_today.strftime('%B')} (projected)", "actual": None, "projected": 13980.00},
+        {"month": f"{_today.strftime('%B')} (projected)", "actual": None, "projected": projected},
     ]
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "account_id": _ACCOUNT_ID,
-        "total_spend_mtd": mtd,
+        "total_spend_mtd": month_total,
         "total_spend_last_month": last_month,
-        "projected_month_total": 13980.00,
-        "delta_pct": cs["vs_last_month_pct"],
-        "finops_grade": "B",
-        "finops_score": 74.0,
+        "projected_month_total": projected,
+        "delta_pct": delta_pct,
+        "finops_grade": grade,
+        "finops_score": score,
         "top_services": top_services,
+        "active_services": active_services,
+        "window_days": days,
+        "provider": provider,
         "opportunities_count": len(recent_opportunities),
         "opportunities_total_saving": opp_total,
         "savings_achieved_mtd": round(sum(s["monthly_saving"] for s in recent_savings), 2),
-        "anomalies_open": 2,
+        "anomalies_open": 2 if "aws" in provs else 1,
         "budget_pct_used": 68.0,
         "recent_opportunities": recent_opportunities,
         "suppressed_opportunities": [
             {"description": "RDS prod-analytics flagged underutilized, but memory sits at 78%. "
                             "Held back: rightsizing it risks a memory-bound stall, not genuine savings.",
-             "monthly_saving": 0.0, "resource": "db-prod-analytics-01"},
-        ],
+             "monthly_saving": 0.0, "resource": "db-prod-analytics-01", "provider": "aws"},
+        ] if "aws" in provs else [],
         "learning_active": True,
         "recent_savings": recent_savings,
         "error": None,
-        "connected_providers": ["aws"],
+        "connected_providers": _DEMO_PROVIDERS,
         "trend": trend,
         "scorecard": {
-            "overall_grade": "B",
-            "overall_score": 74.0,
+            "overall_grade": grade,
+            "overall_score": score,
             "dimensions": [
                 {"name": "Commitment coverage", "grade": "B", "score": 72,
-                 "detail": "68% of steady compute on Savings Plans; room for one more 1-yr plan."},
+                 "detail": "68% of steady compute on commitments; room for one more 1-yr plan."},
                 {"name": "Rightsizing", "grade": "C", "score": 61,
                  "detail": "3 instances over-provisioned; 1 is a genuine, low-risk resize."},
                 {"name": "Idle & waste", "grade": "B", "score": 78,
-                 "detail": "4 unattached EBS volumes and 6 always-on non-prod databases."},
+                 "detail": "Unattached volumes and always-on non-prod databases."},
                 {"name": "Storage tiering", "grade": "A", "score": 90,
-                 "detail": "Most S3 already lifecycle-managed; 2.1 TB left to tier."},
+                 "detail": "Most object storage already lifecycle-managed."},
             ],
         },
     }

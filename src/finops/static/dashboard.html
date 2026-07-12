@@ -123,6 +123,14 @@ body{padding-left:var(--sidebar-w)}
 .sub{font-size:13px;color:var(--fg3);margin-top:5px;font-family:var(--mono);letter-spacing:0}
 .top-actions{display:flex;gap:10px;align-items:center}
 .pill{display:flex;align-items:center;gap:8px;border:1px solid var(--line2);border-radius:9px;padding:9px 13px;font-size:13px;color:var(--fg2);background:var(--bg1)}
+/* Global segmented controls (provider + range) in the top bar. */
+.seg{display:inline-flex;gap:2px;background:var(--bg1);border:1px solid var(--line2);border-radius:9px;padding:3px}
+.seg-btn{font-family:var(--font);font-size:12.5px;font-weight:500;color:var(--fg3);padding:6px 11px;border-radius:6px;cursor:pointer;border:none;background:transparent;letter-spacing:-.005em;transition:background .15s,color .15s;white-space:nowrap}
+.seg-btn:hover:not(.active){color:var(--fg2)}
+.seg-btn.active{background:var(--bg3);color:var(--fg)}
+.seg-lbl{font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);align-self:center;margin:0 8px 0 2px}
+html[data-theme="light"] .seg{border-color:transparent;background:var(--bg2)}
+html[data-theme="light"] .seg-btn.active{background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.08)}
 .btn-ask{display:flex;align-items:center;gap:8px;background:var(--accent);color:#04222b;font-weight:600;font-size:13px;border:none;border-radius:9px;padding:10px 15px;cursor:pointer;font-family:inherit;transition:background .15s}
 .btn-ask:hover{background:var(--accent2)}
 .btn-ask svg{width:15px;height:15px}
@@ -210,6 +218,21 @@ tr:last-child td{border-bottom:none}
 .amt{font-family:var(--mono);font-weight:600;color:var(--accent)}
 .review{font-size:12.5px;font-weight:600;color:var(--fg);border:1px solid var(--line2);background:var(--bg2);border-radius:7px;padding:6px 12px;cursor:pointer;font-family:inherit;transition:border-color .15s,color .15s}
 .review:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── Active services / resources inventory ─────────────────────────────────── */
+.as-prov{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;padding:3px 8px;border-radius:5px;background:var(--bg2);color:var(--fg2);border:1px solid var(--line)}
+.as-prov::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--dot,var(--fg3))}
+.as-prov[data-p="aws"]{--dot:#e6a840}
+.as-prov[data-p="azure"]{--dot:#4db8d4}
+.as-prov[data-p="gcp"]{--dot:#3cba7a}
+html[data-theme="light"] .as-prov{border-color:transparent}
+.as-res{font-family:var(--mono);font-size:12px;color:var(--fg3)}
+.as-delta{font-family:var(--mono);font-size:12px;font-weight:600}
+.as-delta.up{color:var(--alert)}
+.as-delta.down{color:var(--success)}
+.as-delta.flat{color:var(--fg3)}
+.as-bar{height:4px;border-radius:2px;background:var(--bg3);overflow:hidden;margin-top:6px;max-width:120px}
+.as-bar-fill{height:100%;background:var(--accent);border-radius:2px}
 
 /* ── Efficiency scorecard ──────────────────────────────────────────────────── */
 .sc-list{list-style:none;display:flex;flex-direction:column;gap:15px}
@@ -419,7 +442,13 @@ footer a:hover{color:var(--accent)}
       <div class="sub" id="greet-sub"></div>
     </div>
     <div class="top-actions">
-      <div class="pill">This month</div>
+      <div class="seg" id="prov-seg" aria-label="Cloud provider"></div>
+      <div class="seg" id="range-seg" aria-label="Date range">
+        <button class="seg-btn" data-days="7">7d</button>
+        <button class="seg-btn" data-days="30">30d</button>
+        <button class="seg-btn" data-days="60">60d</button>
+        <button class="seg-btn" data-days="90">90d</button>
+      </div>
       <button class="btn-ask" id="btn-ask-top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg>Ask nable</button>
     </div>
   </div>
@@ -473,14 +502,7 @@ footer a:hover{color:var(--accent)}
     <div class="panel">
       <div class="panel-hd">
         <div><div class="panel-t">Spend trend</div><div class="panel-s">Actual vs projected</div></div>
-        <div class="controls-row" style="display:flex;align-items:center">
-          <div class="range-group" id="range-group">
-            <button class="range-btn active" data-days="30">30d</button>
-            <button class="range-btn" data-days="60">60d</button>
-            <button class="range-btn" data-days="90">90d</button>
-          </div>
-          <div class="pf-group" id="pf-group" style="display:none"></div>
-        </div>
+        <span class="panel-chip" id="trend-window">30d</span>
       </div>
       <div class="chart-wrap">
         <canvas id="chart-trend"></canvas>
@@ -530,6 +552,18 @@ footer a:hover{color:var(--accent)}
         <li class="sc-item"><span style="color:var(--fg3);font-size:13px">Loading&hellip;</span></li>
       </ul>
     </div>
+  </div>
+
+  <!-- Active services / resources -->
+  <div class="panel" style="margin-bottom:20px">
+    <div class="opp-hd">
+      <div><div class="panel-t">Active services</div><div class="panel-s" id="as-sub">Live services and resource counts across your connected clouds.</div></div>
+      <span class="panel-chip" id="as-count">&mdash;</span>
+    </div>
+    <table>
+      <thead><tr><th>Service</th><th>Provider</th><th class="r">Resources</th><th class="r">Cost</th><th>Share</th><th class="r">vs prior</th></tr></thead>
+      <tbody id="as-tbody"><tr><td colspan="6" style="color:var(--fg3);padding:16px 0">Loading&hellip;</td></tr></tbody>
+    </table>
   </div>
 
   <!-- Pinned views: cards saved from the Ask tab -->
@@ -623,44 +657,79 @@ function initDate(){
   if(pm) pm.textContent=new Date().toLocaleDateString('en-US',{month:'long'});
 }
 
-// ── Range controls ───────────────────────────────────────────────────────────
+// ── Global top-bar controls: provider + date range ───────────────────────────
+const PROV_LABELS={aws:'AWS',azure:'Azure',gcp:'GCP',datadog:'Datadog',snowflake:'Snowflake'};
+function syncRangeUI(){
+  document.querySelectorAll('#range-seg .seg-btn').forEach(b=>
+    b.classList.toggle('active',parseInt(b.dataset.days,10)===selectedDays));
+  const tw=document.getElementById('trend-window'); if(tw) tw.textContent=selectedDays+'d';
+  const cd=document.getElementById('chart-days'); if(cd) cd.textContent=selectedDays;
+}
 function initRangeControls(){
-  document.querySelectorAll('#range-group .range-btn').forEach(btn=>{
-    const d=parseInt(btn.dataset.days,10);
-    if(d===selectedDays) btn.classList.add('active'); else btn.classList.remove('active');
+  document.querySelectorAll('#range-seg .seg-btn').forEach(btn=>{
     btn.addEventListener('click',()=>{
-      selectedDays=d;
-      localStorage.setItem('nable_days',String(d));
-      document.querySelectorAll('#range-group .range-btn').forEach(b=>b.classList.remove('active'));
+      selectedDays=parseInt(btn.dataset.days,10);
+      localStorage.setItem('nable_days',String(selectedDays));
+      syncRangeUI();
+      loadData();
+    });
+  });
+  syncRangeUI();
+}
+// Build the provider toggle from what's actually connected. One provider = no
+// toggle (nothing to switch); it appears the moment a second cloud connects.
+function initProviderToggle(providers){
+  const g=document.getElementById('prov-seg');
+  if(!g) return;
+  const list=(providers||[]).filter(Boolean);
+  if(list.length<=1){ g.style.display='none'; selectedProvider='all'; return; }
+  g.style.display='inline-flex';
+  if(!['all',...list].includes(selectedProvider)) selectedProvider='all';
+  g.innerHTML=['all',...list].map(p=>{
+    const lbl=p==='all'?'All clouds':(PROV_LABELS[p]||p.toUpperCase());
+    return `<button class="seg-btn${selectedProvider===p?' active':''}" data-provider="${p}">${lbl}</button>`;
+  }).join('');
+  g.querySelectorAll('.seg-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      selectedProvider=btn.dataset.provider;
+      localStorage.setItem('nable_provider',selectedProvider);
+      g.querySelectorAll('.seg-btn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
-      const cd=document.getElementById('chart-days'); if(cd) cd.textContent=d;
       loadData();
     });
   });
 }
-
-// ── Provider filter ──────────────────────────────────────────────────────────
-function initProviderFilters(providers){
-  const g=document.getElementById('pf-group');
-  if(!g) return;
-  if(!providers||providers.length<=1){g.style.display='none';return;}
-  g.style.display='flex';
-  const labels={aws:'AWS',azure:'Azure',gcp:'GCP',datadog:'Datadog',snowflake:'Snowflake'};
-  g.innerHTML=
-    ['all',...providers].map((p)=>{
-      const lbl=p==='all'?'All':labels[p]||p.toUpperCase();
-      const active=selectedProvider===p?' active':'';
-      return `<button class="pf-btn${active}" data-provider="${p}">${lbl}</button>`;
-    }).join('');
-  g.querySelectorAll('.pf-btn').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      selectedProvider=btn.dataset.provider;
-      localStorage.setItem('nable_provider',selectedProvider);
-      g.querySelectorAll('.pf-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      loadData();
-    });
-  });
+// ── Active services / resources table ─────────────────────────────────────────
+function renderActiveServices(rows){
+  const tb=document.getElementById('as-tbody'); if(!tb) return;
+  const cnt=document.getElementById('as-count');
+  if(!rows||!rows.length){
+    tb.innerHTML='<tr><td colspan="6" style="color:var(--fg3);padding:16px 0">No active services in this view.</td></tr>';
+    if(cnt) cnt.textContent='0 services';
+    return;
+  }
+  const maxPct=Math.max.apply(null,rows.map(r=>r.pct||0))||1;
+  tb.innerHTML=rows.map(r=>{
+    const p=(r.provider||'').toLowerCase();
+    const prov=p?`<span class="as-prov" data-p="${esc(p)}">${esc(PROV_LABELS[p]||p.toUpperCase())}</span>`:'—';
+    const res=(r.resources&&r.resources>0)?r.resources.toLocaleString('en-US'):'<span style="color:var(--fg4)">—</span>';
+    const dv=r.delta_pct||0;
+    const dcls=Math.abs(dv)<0.5?'flat':(dv>0?'up':'down');
+    const darr=Math.abs(dv)<0.5?'·':(dv>0?'▲':'▼');
+    const pct=r.pct||0;
+    return `<tr>
+      <td class="opp-name">${esc(r.service)}</td>
+      <td>${prov}</td>
+      <td class="r as-res">${res}</td>
+      <td class="r amt">${fmt(r.amount)}</td>
+      <td><div style="font-family:var(--mono);font-size:11.5px;color:var(--fg3)">${pct}%</div><div class="as-bar"><div class="as-bar-fill" style="width:${Math.round(pct/maxPct*100)}%"></div></div></td>
+      <td class="r"><span class="as-delta ${dcls}">${darr} ${Math.abs(dv).toFixed(1)}%</span></td>
+    </tr>`;
+  }).join('');
+  if(cnt){
+    const nres=rows.reduce((a,r)=>a+(r.resources||0),0);
+    cnt.textContent=rows.length+' service'+(rows.length===1?'':'s')+(nres?' · '+nres.toLocaleString('en-US')+' resources':'');
+  }
 }
 
 // ── Data load ────────────────────────────────────────────────────────────────
@@ -845,8 +914,9 @@ function render(d){
     else{scorePill.className='trend flat';scorePill.textContent='healthy';}
   }
 
-  // Provider filters
-  initProviderFilters(provs);
+  // Global provider toggle (from what's connected)
+  initProviderToggle(provs);
+  syncRangeUI();
 
   // Service badge
   const sb=document.getElementById('svc-badge');
@@ -862,6 +932,11 @@ function render(d){
   // Charts
   renderSvcChart(d.top_services||[]);
   renderTrendChart(d.trend||[]);
+
+  // Active services / resources inventory
+  renderActiveServices(d.active_services||[]);
+  const asSub=document.getElementById('as-sub');
+  if(asSub) asSub.textContent='Live services and resource counts over the last '+selectedDays+' days'+(selectedProvider!=='all'?' · '+(PROV_LABELS[selectedProvider]||selectedProvider.toUpperCase()):'')+'.';
 
   // Scorecard
   renderScorecard(d.scorecard||{});
