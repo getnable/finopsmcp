@@ -2,6 +2,14 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.172
+
+- **MCP tools now carry annotations.** Every tool advertises a title plus a read-only or destructive hint. nable is read-only and propose-only, so 153 of 191 tools are marked read-only, 38 write, and only 3 destructive. Your editor shows cleaner tool names and knows which tools only read.
+- **Best-in-class dashboard redesign.** Light mode is now the default (dark is the toggle), with an executive KPI band, an AI-efficiency panel, a what-changed digest, forecast-vs-budget, a saved-dashboards gallery, verified-savings visibility, and provider/date-range controls. The AI Analyst now keeps conversation context, and the what-changed digest is XSS-hardened.
+- **Clearer re-auth for expired Azure/GCP sessions.** An expired SSO/OAuth token now tells you how to log back in for that provider instead of surfacing a raw SDK error.
+- **First-run polish.** The API-key prompt notes keys are stored in your OS keychain and never sent anywhere; a `uvx` run tells you how to keep nable installed (`uv tool install nable`); and a real connection ends with a come-back nudge.
+- **The AI analyst no longer leaks internal tool or function names** into its answers.
+
 ## 0.8.171
 
 Upgrade prompt no longer advertises features that are currently free.
