@@ -72,6 +72,11 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .nav .right{display:flex;align-items:center;gap:20px}
 .nav-signin{color:var(--fg-3);font-size:14px;font-family:'Geist',system-ui,sans-serif;padding:0 4px;transition:color .15s}
 .nav-signin:hover{color:var(--fg)}
+.nav-star{display:inline-flex;align-items:center;gap:7px;color:var(--fg-2);font-size:13px;font-weight:500;
+  border:1px solid var(--line-2);border-radius:8px;padding:6px 12px;transition:color .15s,border-color .15s,background .15s}
+.nav-star:hover{color:var(--fg);border-color:var(--fg-3);background:var(--bg-2)}
+.nav-star svg{opacity:.85}
+.nav-star-glyph{color:var(--warn)}
 @media(max-width:880px){.nav ul{display:none}.nav .right{display:none}}
 .nav-hamburger{display:none;align-items:center;justify-content:center;width:40px;height:40px;color:var(--fg-2);border-radius:var(--r-md);transition:color .18s,background .18s}
 .nav-hamburger:hover{color:var(--fg);background:var(--bg-2)}
