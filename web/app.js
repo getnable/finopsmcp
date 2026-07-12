@@ -124,13 +124,13 @@ function Nav() {
   } }, "Docs"))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement("a", { href: "/account", className: "nav-signin" }, "Sign in"), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "/docs",
+      href: "/demo",
       className: "btn btn-primary",
       onClick: () => {
-        if (window.posthog) posthog.capture("cta_clicked", { location: "nav", cta: "start_free" });
+        if (window.posthog) posthog.capture("cta_clicked", { location: "nav", cta: "try_demo" });
       }
     },
-    "Get started free ",
+    "Try it free ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   )), /* @__PURE__ */ React.createElement(
     "button",
@@ -153,22 +153,22 @@ function Nav() {
   } }, "Docs"), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 24, display: "flex", flexDirection: "column", gap: 10 } }, /* @__PURE__ */ React.createElement("a", { href: "/account", className: "btn btn-ghost", style: { justifyContent: "center" }, onClick: () => setOpen(false) }, "Sign in"), /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "/docs",
+      href: "/demo",
       className: "btn btn-primary",
       style: { justifyContent: "center" },
       onClick: () => {
         setOpen(false);
-        if (window.posthog) posthog.capture("cta_clicked", { location: "nav_mobile", cta: "start_free" });
+        if (window.posthog) posthog.capture("cta_clicked", { location: "nav_mobile", cta: "try_demo" });
       }
     },
-    "Get started free ",
+    "Try it free ",
     /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192")
   ))));
 }
 function Hero() {
-  return /* @__PURE__ */ React.createElement("header", { className: "hero hero-centered", id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-c" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Local-first FinOps ", /* @__PURE__ */ React.createElement("span", { className: "h1-ask" }, "for the AI era.")), /* @__PURE__ */ React.createElement("p", { className: "hero-sub" }, "Cloud and AI spend, queryable in Claude. Savings shipped as pull requests, without your data ever leaving your machine."), /* @__PURE__ */ React.createElement("div", { className: "hero-actions" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" }), /* @__PURE__ */ React.createElement("a", { className: "btn btn-primary", href: "/docs", onClick: () => {
-    if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "start_free" });
-  } }, "Get started free ", /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192"))), /* @__PURE__ */ React.createElement("p", { className: "hero-trustline" }, /* @__PURE__ */ React.createElement("b", null, "Clouds, SaaS and AI spend"), " normalized into one bill \xB7 works in any editor \xB7 free for solo use"))));
+  return /* @__PURE__ */ React.createElement("header", { className: "hero hero-centered", id: "top" }, /* @__PURE__ */ React.createElement("div", { className: "hero-grid", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("div", { className: "wrap" }, /* @__PURE__ */ React.createElement("div", { className: "hero-c" }, /* @__PURE__ */ React.createElement("h1", { className: "display" }, "Local-first FinOps ", /* @__PURE__ */ React.createElement("span", { className: "h1-ask" }, "for the AI era.")), /* @__PURE__ */ React.createElement("p", { className: "hero-sub" }, "Cloud and AI spend, queryable in Claude. Savings shipped as pull requests, without your data ever leaving your machine."), /* @__PURE__ */ React.createElement("div", { className: "hero-actions" }, /* @__PURE__ */ React.createElement(CopyCmd, { cmd: "uvx nable" }), /* @__PURE__ */ React.createElement("a", { className: "btn btn-primary", href: "/demo", onClick: () => {
+    if (window.posthog) posthog.capture("cta_clicked", { location: "hero", cta: "try_demo" });
+  } }, "See it work, no install ", /* @__PURE__ */ React.createElement("span", { className: "arr" }, "\u2192"))), /* @__PURE__ */ React.createElement("p", { className: "hero-cmdnote" }, "Runs locally. Reads your bill, changes nothing. No signup, no cloud keys to start."), /* @__PURE__ */ React.createElement("p", { className: "hero-trustline" }, /* @__PURE__ */ React.createElement("b", null, "Clouds, SaaS and AI spend"), " normalized into one bill \xB7 works in any editor \xB7 free for solo use"))));
 }
 function CopyCmd({ cmd }) {
   const [copied, setCopied] = useState(false);
@@ -443,7 +443,7 @@ function Pricing() {
         "Runs on your machine, on your own Claude membership"
       ],
       cta: "Start free",
-      href: "/docs",
+      href: "/demo",
       plan: "community",
       ext: false,
       primary: true,

@@ -137,9 +137,9 @@ function Nav(){
         </ul>
         <div className="right">
           <a href="/account" className="nav-signin">Sign in</a>
-          <a href="/docs" className="btn btn-primary"
-             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'start_free'}); }}>
-            Get started free <span className="arr">→</span>
+          <a href="/demo" className="btn btn-primary"
+             onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'nav',cta:'try_demo'}); }}>
+            Try it free <span className="arr">→</span>
           </a>
         </div>
         <button
@@ -167,9 +167,9 @@ function Nav(){
           <a className="nav-mobile-item" href="/docs" onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('docs_clicked',{location:'nav_mobile'}); }}>Docs</a>
           <div style={{marginTop:24,display:"flex",flexDirection:"column",gap:10}}>
             <a href="/account" className="btn btn-ghost" style={{justifyContent:"center"}} onClick={()=>setOpen(false)}>Sign in</a>
-            <a href="/docs" className="btn btn-primary" style={{justifyContent:"center"}}
-              onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('cta_clicked',{location:'nav_mobile',cta:'start_free'}); }}>
-              Get started free <span className="arr">→</span>
+            <a href="/demo" className="btn btn-primary" style={{justifyContent:"center"}}
+              onClick={()=>{ setOpen(false); if(window.posthog) posthog.capture('cta_clicked',{location:'nav_mobile',cta:'try_demo'}); }}>
+              Try it free <span className="arr">→</span>
             </a>
           </div>
         </div>
@@ -194,10 +194,11 @@ function Hero(){
           <p className="hero-sub">Cloud and AI spend, queryable in Claude. Savings shipped as pull requests, without your data ever leaving your machine.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
-            <a className="btn btn-primary" href="/docs" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'start_free' }); }}>
-              Get started free <span className="arr">→</span>
+            <a className="btn btn-primary" href="/demo" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'try_demo' }); }}>
+              See it work, no install <span className="arr">→</span>
             </a>
           </div>
+          <p className="hero-cmdnote">Runs locally. Reads your bill, changes nothing. No signup, no cloud keys to start.</p>
           <p className="hero-trustline"><b>Clouds, SaaS and AI spend</b> normalized into one bill · works in any editor · free for solo use</p>
         </div>
       </div>
@@ -807,7 +808,7 @@ function Pricing(){
         "Self-host the dashboard with Docker",
         "Runs on your machine, on your own Claude membership",
       ],
-      cta:"Start free", href:"/docs", plan:"community", ext:false, primary:true, rec:false },
+      cta:"Start free", href:"/demo", plan:"community", ext:false, primary:true, rec:false },
     { key:"ent", name:"Enterprise", tag:"For teams that need it always on", amt:"Custom", per:"", billed:"Tailored to your team",
       feats:[
         "Everything in Community",

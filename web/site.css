@@ -693,3 +693,6 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
   .dt-msg{max-width:95%}
   .dt-row{grid-template-columns:1fr 90px 56px;font-size:12px}
 }
+
+/* Trust microcopy sitting directly on the hero install command. */
+.hero-cmdnote{font-size:13px;color:var(--fg-3);margin-top:12px;letter-spacing:.1px}
