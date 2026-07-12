@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <script>/* Apply the saved theme before first paint so there is no flash. */
-try{var _t=localStorage.getItem('nable-theme');if(_t==='light'||_t==='dark')document.documentElement.dataset.theme=_t;}catch(e){}</script>
+try{var _t=localStorage.getItem('nable-theme');document.documentElement.dataset.theme=(_t==='dark')?'dark':'light';}catch(e){}</script>
 <title>nable | Cost Dashboard</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 120'%3E%3Crect x='2' y='2' width='116' height='116' rx='25' fill='%230a0a0c' stroke='%232c7d91' stroke-opacity='.55' stroke-width='3'/%3E%3Cpath d='M36 92 V30' stroke='%234db8d4' stroke-width='14' stroke-linecap='round'/%3E%3Cpath d='M36 32 L84 86' stroke='%234db8d4' stroke-width='14' stroke-linecap='round'/%3E%3Cpath d='M84 90 V28' stroke='%232c7d91' stroke-width='14' stroke-linecap='round'/%3E%3Ccircle cx='84' cy='88' r='9' fill='%234db8d4'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/fonts/fonts.css">
@@ -909,8 +909,10 @@ let selectedProvider=localStorage.getItem('nable_provider')||'all';
 let svcChart=null,trendChart=null;
 
 // ── Theme ────────────────────────────────────────────────────────────────────
+// Light is the basis; dark is the opt-in toggle (persisted). The pre-paint
+// script in <head> already set data-theme, so don't override it here.
 const html=document.documentElement;
-html.setAttribute('data-theme','dark');
+if(!html.dataset.theme) html.setAttribute('data-theme','light');
 
 // ── Header date ──────────────────────────────────────────────────────────────
 function initDate(){
@@ -1042,11 +1044,17 @@ function render(d){
   if(banner){ if(d.error){banner.textContent=d.error;banner.style.display='block';} else banner.style.display='none'; }
   const provs=d.connected_providers||[];
 
-  // Greeting + user (RBAC chip)
-  const user=d.user||{}; const first=(user.name||'').split(' ')[0]||'there';
+  // Greeting + user (RBAC chip). Professional: name, then a dated context line.
+  const user=d.user||{}; const first=(user.name||'').split(' ')[0]||'';
   const hello=document.getElementById('greet-hello');
   if(hello){ const hr=new Date().getHours(); const part=hr<12?'Good morning':hr<18?'Good afternoon':'Good evening';
-    hello.innerHTML=part+', '+esc(first)+' <span aria-hidden="true">👋</span>'; }
+    hello.textContent=first?(part+', '+first):'Cost overview'; }
+  const gsub=document.getElementById('greet-sub');
+  if(gsub){
+    const dstr=new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+    const scope=selectedProvider==='all'?'All clouds':(PROV_LABELS[selectedProvider]||selectedProvider.toUpperCase());
+    gsub.textContent=dstr+'  ·  '+scope+'  ·  last '+selectedDays+' days';
+  }
   renderUser(user);
 
   // Headline stats
