@@ -276,6 +276,73 @@ _FAMILY_OF: dict[str, str] = {
     name: family for family, names in FAMILY_TOOLS.items() for name in names
 }
 
+# ── read/write classification for MCP tool annotations ─────────────────────────
+# The Anthropic Connectors Directory requires every tool to carry a title and a
+# readOnlyHint (or destructiveHint). nable is read-only + propose-only by design,
+# so the DEFAULT is read-only: only tools that actually mutate state (store creds,
+# persist to the local DB, open a PR, send a message, create a ticket) are writes,
+# and only the delete/revoke ones are destructive. A completeness test asserts
+# every name here is a real registered tool, so a rename can't silently mislabel.
+WRITE_TOOLS: frozenset[str] = frozenset({
+    "acknowledge_anomaly", "cancel_report_subscription",
+    "connect_aws", "connect_azure", "connect_gcp", "connect_opencost",
+    "create_anomaly_tickets", "create_api_key", "create_kubernetes_waste_tickets",
+    "create_rightsizing_tickets", "create_scorecard_tickets", "create_ticket",
+    "delete_alert_policy", "delete_budget", "dismiss_recommendation",
+    "generate_terraform_tag_fixes", "mark_recommendation_acted_on",
+    "open_rightsizing_pr", "open_terraform_tag_pr", "pin_view", "unpin_view",
+    "publish_cost_report_to_notion", "push_to_n8n", "push_weekly_insight",
+    "revoke_api_key", "run_attribution_now",
+    "send_digest_now", "send_onboarding_email", "send_report_now",
+    "send_weekly_digest_now", "set_alert_policy", "set_budget",
+    "set_business_metrics", "start_dashboard_server", "subscribe_to_report",
+    "sync_budgets_from_yaml", "take_snapshot_now", "verify_savings",
+})
+# The subset that removes/revokes something (destructiveHint = true). Additive
+# writes (create/set/send/pin/open-PR) are writes but NOT destructive.
+DESTRUCTIVE_TOOLS: frozenset[str] = frozenset({
+    "delete_alert_policy", "delete_budget", "revoke_api_key",
+})
+
+# Acronyms to upper-case when humanizing a tool name into a display title.
+_ACRONYMS = {
+    "aws": "AWS", "gcp": "GCP", "azure": "Azure", "gke": "GKE", "eks": "EKS",
+    "ec2": "EC2", "ecs": "ECS", "ecr": "ECR", "rds": "RDS", "s3": "S3",
+    "ebs": "EBS", "efs": "EFS", "nlb": "NLB", "elb": "ELB", "k8s": "K8s",
+    "llm": "LLM", "ai": "AI", "api": "API", "cur": "CUR", "ri": "RI",
+    "roi": "ROI", "kpi": "KPI", "sp": "SP", "pr": "PR", "iam": "IAM",
+    "gpu": "GPU", "dbu": "DBU", "ipv4": "IPv4", "sla": "SLA", "os": "OS",
+    "ou": "OU", "csv": "CSV", "n8n": "n8n", "focus": "FOCUS",
+}
+
+
+def tool_title(name: str) -> str:
+    """Humanize a snake_case tool name into a display title, upper-casing known
+    acronyms. e.g. get_cost_summary -> 'Get cost summary'; get_ai_kpis -> 'Get AI KPIs'."""
+    words = name.split("_")
+    out = []
+    for i, w in enumerate(words):
+        if w in _ACRONYMS:
+            out.append(_ACRONYMS[w])
+        elif w.endswith("s") and w[:-1] in _ACRONYMS:  # plural acronym: kpis -> KPIs
+            out.append(_ACRONYMS[w[:-1]] + "s")
+        elif i == 0:
+            out.append(w.capitalize())
+        else:
+            out.append(w)
+    return " ".join(out)
+
+
+def tool_annotation(name: str) -> dict:
+    """Annotation fields for a tool: (title, readOnlyHint, destructiveHint).
+    Read-only is the default; only WRITE_TOOLS mutate, only DESTRUCTIVE_TOOLS delete."""
+    write = name in WRITE_TOOLS
+    return {
+        "title": tool_title(name),
+        "readOnlyHint": not write,
+        "destructiveHint": name in DESTRUCTIVE_TOOLS,
+    }
+
 # ── local connection signals per family ────────────────────────────────────────
 # Env keys are exact matches (mirrored into os.environ by a connect); vault
 # prefixes match the key names a setup writes into the local vault.

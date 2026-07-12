@@ -1,0 +1,29 @@
+{
+  "manifest_version": "0.3",
+  "name": "nable",
+  "display_name": "nable",
+  "version": "0.8.171",
+  "description": "Local-first FinOps for the AI era: query your cloud and AI spend in Claude, get savings drafted as pull requests. Your bill never leaves your machine.",
+  "long_description": "nable reads your AWS, Azure, GCP, Kubernetes, SaaS, and AI/LLM (OpenAI, Anthropic, Bedrock) spend read-only and answers cost questions right in your editor: why spend moved, where the waste is, and what to cut. It judges which savings are real against your negotiated rates and drafts the fix as a pull request you approve. Read-only and propose-only: nable never changes your cloud on its own, and credentials and cost data stay on your machine, with no vendor backend in the path.",
+  "author": {
+    "name": "Chandan Bukkapatnam",
+    "email": "chaandannn@gmail.com",
+    "url": "https://getnable.com"
+  },
+  "repository": "https://github.com/chaandannn/finopsmcp",
+  "homepage": "https://getnable.com",
+  "documentation": "https://getnable.com/docs",
+  "support": "https://getnable.com/docs",
+  "license": "Elastic-2.0",
+  "keywords": ["finops", "cloud cost", "aws", "azure", "gcp", "kubernetes", "ai cost", "llm cost", "cost optimization", "rightsizing"],
+  "privacy_policies": ["https://getnable.com/privacy"],
+  "server": {
+    "type": "python",
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "uvx",
+      "args": ["nable"],
+      "env": {}
+    }
+  }
+}

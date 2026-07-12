@@ -188,6 +188,23 @@ None of this is take-our-word-for-it. Read the source, check the [OpenSSF Scorec
 
 ---
 
+## Privacy Policy
+
+Full policy: **https://getnable.com/privacy**
+
+nable runs locally and is private by design:
+
+- **Data collection.** In local mode, nable collects no personal data on a server. Your cloud, SaaS, and AI billing data is read from your own provider APIs and cached only on your machine.
+- **Usage and storage.** Credentials are encrypted (Fernet) and stored in your OS keyring; cost data is cached in a local SQLite database on your machine. There is no nable backend in the local path.
+- **Third-party sharing.** nable does not sell, rent, or share your data. Your billing data and credentials are never sent to a nable server. When you ask a question in your AI editor, the figures nable returns are answered by your editor's own AI provider (the same as any prompt), never routed through nable. Optional integrations you configure (Slack, Notion, Jira, GitHub, email) send only the specific findings you direct to them.
+- **Telemetry.** Anonymous, opt-outable product telemetry (no credentials, no cost data). Disable with `NABLE_NO_TELEMETRY=1`, or block all non-provider network calls with `FINOPS_AIRGAP=1`.
+- **Data retention.** Local data lives on your machine until you delete it. Uninstall or clear the local store to remove it.
+- **Contact.** chaandannn@gmail.com.
+
+The optional hosted/managed tier runs single-tenant with its own privacy terms at the link above; your data is never pooled with another customer's.
+
+---
+
 ## Manual Claude Desktop config
 
 If `finops setup` doesn't auto-configure, run:
