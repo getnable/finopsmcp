@@ -835,6 +835,32 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
     }
 
 
+def saved_views() -> list[dict[str, Any]]:
+    """Demo saved dashboards for the gallery, in the shape /api/views returns:
+    a list of {id, card, data, saved_by, saved_at}. Lets the Saved dashboards
+    surface show a populated shelf with no account connected."""
+    _today = date.today()
+    return [
+        {"id": 9001, "saved_by": "Chandan B.", "saved_at": (_today - timedelta(days=2)).isoformat(),
+         "card": {"title": "Spend by team, this quarter", "template": "bar", "metric": "EffectiveCost",
+                  "dimensions": ["team"]},
+         "data": {"rows": [{"team": "Platform", "metric": 1240000.0}, {"team": "Data", "metric": 820000.0},
+                           {"team": "ML", "metric": 610000.0}, {"team": "Web", "metric": 340000.0}],
+                  "total": 3010000.0, "record_count": 4}},
+        {"id": 9002, "saved_by": "Chandan B.", "saved_at": (_today - timedelta(days=6)).isoformat(),
+         "card": {"title": "AI spend by model", "template": "bar", "metric": "Cost", "dimensions": ["model"]},
+         "data": {"rows": [{"model": "gpt-4o", "metric": 2080.0}, {"model": "claude-sonnet-4-5", "metric": 620.0},
+                           {"model": "o1", "metric": 430.0}, {"model": "bedrock", "metric": 330.0}],
+                  "total": 3460.0, "record_count": 4}},
+        {"id": 9003, "saved_by": "Chandan B.", "saved_at": (_today - timedelta(days=11)).isoformat(),
+         "card": {"title": "Kubernetes cost by namespace", "template": "bar", "metric": "EffectiveCost",
+                  "dimensions": ["namespace"]},
+         "data": {"rows": [{"namespace": "data-platform", "metric": 1840.0}, {"namespace": "api-services", "metric": 1120.0},
+                           {"namespace": "monitoring", "metric": 620.0}, {"namespace": "staging", "metric": 220.0}],
+                  "total": 3800.0, "record_count": 4}},
+    ]
+
+
 def bedrock_split() -> dict[str, Any]:
     """Demo Bedrock input/output/cache split, consistent with the ~$330 Bedrock
     line in llm_costs(): input-heavy and uncached, which is the signature

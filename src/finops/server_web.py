@@ -2704,6 +2704,14 @@ button:hover{{filter:brightness(1.1)}}
         # Pinned views: re-run each saved card over its rolling window (one FOCUS
         # fetch for all of them) so the dashboard shows fresh numbers.
         elif path == "/api/views":
+            try:
+                from . import demo_data
+                if demo_data.is_demo():
+                    self._send(200, "application/json",
+                               json.dumps({"views": demo_data.saved_views()}, default=str).encode())
+                    return
+            except Exception:
+                pass
             from .slice.views import list_pinned_views as _list
             pins = _list(owner="instance")
             cards = []

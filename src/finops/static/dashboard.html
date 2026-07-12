@@ -400,6 +400,14 @@ html[data-theme="light"] .user-chip{border-color:transparent;background:var(--bg
 .uc-role{font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--accent)}
 .uc-chev{width:15px;height:15px;color:var(--fg3)}
 
+/* Saved dashboards gallery */
+#pinned-views{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r);padding:22px 24px;box-shadow:var(--lift)}
+html[data-theme="light"] #pinned-views{border-color:transparent}
+.sv-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px;flex-wrap:wrap}
+.sv-meta{font-size:11px;color:var(--fg3);margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.sv-empty{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;padding:34px 20px;color:var(--fg3);font-size:13.5px}
+.sv-empty svg{width:34px;height:34px;color:var(--fg4)}
+
 /* "What changed" digest strip */
 .digest{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px;margin-bottom:18px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg1);box-shadow:var(--lift)}
 html[data-theme="light"] .digest{border-color:transparent}
@@ -580,6 +588,7 @@ html[data-theme="light"] .rec-view{border-color:transparent}
 
   <nav class="nav" style="margin-top:6px">
     <button class="nav-item nav-tab active" data-view="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>Overview</button>
+    <button class="nav-item nav-scroll" data-scroll="pinned-views"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>Dashboards</button>
     <button class="nav-item nav-scroll" data-scroll="panel-analytics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Analytics</button>
     <button class="nav-item nav-scroll" data-scroll="panel-recs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1M12 2a7 7 0 0 1 4 12.7c-.6.5-1 1.3-1 2.1"/></svg>Recommendations<span class="nav-badge" id="nav-rec-count"></span></button>
     <button class="nav-item nav-agent-link" data-prompt="Show our commitment coverage and where we're under-committed across all clouds."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>Commitments</button>
@@ -1558,24 +1567,42 @@ async function unpinCard(id,el){
     if(r.ok&&el){el.style.transition='opacity .25s';el.style.opacity='0';setTimeout(()=>el.remove(),260);}
   }catch{}
 }
+function _agoLabel(iso){
+  if(!iso) return '';
+  const d=new Date(iso+'T00:00:00'), now=new Date();
+  const days=Math.round((now-d)/86400000);
+  if(days<=0) return 'today'; if(days===1) return 'yesterday';
+  if(days<7) return days+' days ago'; if(days<30) return Math.round(days/7)+'w ago';
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+}
 async function loadPinnedViews(highlightIds){
   const hl=new Set((highlightIds||[]).map(Number));
   const wrap=document.getElementById('pinned-views'); if(!wrap) return;
-  try{
-    const r=await fetch('/api/views'); if(!r.ok){wrap.style.display='none';return;}
-    const d=await r.json(); const views=(d&&d.views)||[];
-    if(!views.length){wrap.style.display='none';wrap.innerHTML='';return;}
-    wrap.style.display='block';
-    wrap.innerHTML='<div class="panel-t" style="margin-bottom:12px">Pinned views</div><div class="pv-grid" id="pv-grid"></div>';
+  wrap.style.display='block';
+  let views=[];
+  try{ const r=await fetch('/api/views'); if(r.ok){ const d=await r.json(); views=(d&&d.views)||[]; } }catch(e){}
+  const head='<div class="sv-head"><div><div class="panel-t">Saved dashboards <span class="count-chip" id="sv-count">'+views.length+'</span></div><div class="panel-s">Views you and your team have pinned. Open, or build a new one above.</div></div>'
+    +'<button class="rec-view" id="sv-new">+ New dashboard</button></div>';
+  if(!views.length){
+    wrap.innerHTML=head+'<div class="sv-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><div>No saved dashboards yet. Describe one in the bar at the top and pin it here.</div></div>';
+  }else{
+    wrap.innerHTML=head+'<div class="pv-grid" id="pv-grid"></div>';
     const grid=document.getElementById('pv-grid');
     let firstNew=null;
     views.forEach(v=>{
-      const el=renderAgentCard(Object.assign({},v.card,{id:v.id}),v.data||{},{unpinnable:!window._READONLY});
-      if(hl.has(Number(v.id))){el.classList.add('cc-justpinned'); if(!firstNew) firstNew=el;}
-      grid.appendChild(el);
+      const card=renderAgentCard(Object.assign({},v.card,{id:v.id}),v.data||{},{unpinnable:!window._READONLY});
+      if(v.saved_by||v.saved_at){
+        const meta=document.createElement('div'); meta.className='sv-meta';
+        meta.textContent=(v.saved_by?'by '+v.saved_by:'')+((v.saved_by&&v.saved_at)?' · ':'')+(v.saved_at?_agoLabel(v.saved_at):'');
+        card.appendChild(meta);
+      }
+      if(hl.has(Number(v.id))){card.classList.add('cc-justpinned'); if(!firstNew) firstNew=card;}
+      grid.appendChild(card);
     });
     if(firstNew) firstNew.scrollIntoView({behavior:'smooth',block:'nearest'});
-  }catch{wrap.style.display='none';}
+  }
+  const nb=document.getElementById('sv-new');
+  if(nb) nb.addEventListener('click',()=>{ if(typeof switchView==='function')switchView('dashboard'); const i=document.getElementById('db-input'); if(i){document.documentElement.style.scrollBehavior='smooth';i.scrollIntoView({block:'center'});i.focus();} });
 }
 
 let agentBusy=false;
