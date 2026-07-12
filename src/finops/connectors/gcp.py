@@ -214,7 +214,13 @@ class GCPConnector(BaseConnector):
             return _copy.deepcopy(_hit)
 
         async def _one(billing_account_id: str) -> CostSummary:
-            rows = await asyncio.to_thread(self._query_bigquery, billing_account_id, start_date, end_date)
+            try:
+                rows = await asyncio.to_thread(self._query_bigquery, billing_account_id, start_date, end_date)
+            except Exception as exc:
+                from ._reauth import is_auth_expiry, reauth_message
+                if is_auth_expiry(exc, "gcp"):
+                    raise RuntimeError(reauth_message("gcp", f"billing account {billing_account_id}")) from exc
+                raise
             return self._rows_to_summary(rows, billing_account_id, start_date, end_date)
 
         for summary in await asyncio.gather(*[_one(b) for b in self._billing_account_ids]):

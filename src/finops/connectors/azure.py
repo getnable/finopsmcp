@@ -139,7 +139,13 @@ class AzureConnector(BaseConnector):
         )
 
         async def _one(sub_id: str) -> CostSummary:
-            raw = await asyncio.to_thread(self._query_costs, sub_id, start_date, end_date, granularity)
+            try:
+                raw = await asyncio.to_thread(self._query_costs, sub_id, start_date, end_date, granularity)
+            except Exception as exc:
+                from ._reauth import is_auth_expiry, reauth_message
+                if is_auth_expiry(exc, "azure"):
+                    raise RuntimeError(reauth_message("azure", f"subscription {sub_id}")) from exc
+                raise
             return self._parse_result(raw, sub_id, start_date, end_date)
 
         for summary in await asyncio.gather(*[_one(s) for s in self._subscription_ids]):
