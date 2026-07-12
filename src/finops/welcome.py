@@ -499,6 +499,7 @@ def _connect_llm_provider() -> bool:
     """Prompt for an OpenAI or Anthropic key, store it, and show the token bill.
     The AI-native segment's first real number is its model spend, not a cloud bill."""
     from .setup_wizard import setup_saas_api_key
+    _line(dim("  Stored in your OS keychain, never sent anywhere. nable reads billing usage only."))
     try:
         pick = input("  Which? 1) OpenAI  2) Anthropic  [1]: ").strip() or "1"
     except (KeyboardInterrupt, EOFError):
@@ -895,6 +896,22 @@ def run_welcome_flow(demo: bool = False) -> None:
         _blank()
     _line(dim(f"  You should see nable in your editor's MCP tool list. Not there? Run '{_cli('doctor')}'."))
     _blank()
+
+    # Ran with uvx? That process was ephemeral, nothing persists on PATH. The MCP
+    # config still points at `uvx nable` so the editor keeps working, but the user
+    # has no `finops` command. Say so, and give the one line to make it permanent.
+    _prefix = (sys.prefix or "").replace("\\", "/").lower()
+    if any(s in _prefix for s in ("/.cache/uv", "/uv/archive", "/uv/environments", "/share/uv/", "/uv/tools")):
+        _line(dim("  You ran nable with uvx (temporary). Keep it on your machine:  ") + cyan("uv tool install nable"))
+        _blank()
+
+    # A reason to come back. Once connected, anomaly baselines seed from cost
+    # history in the background, so spike detection works the next day, not after
+    # a week of snapshots. Plant the second-session question now.
+    if shown:
+        _line(dim("  nable is already watching for cost spikes. Tomorrow, ask:  ") + cyan('"any cost spikes I should know about?"'))
+        _blank()
+
     _line(dim("  Your agent runs terraform or kubectl?  ") + cyan(_cli("guard install")))
     _line(dim("  auto-checks every infra command against your budget policy before it runs."))
     _blank()
