@@ -1502,6 +1502,10 @@ function scrollStream(){
 // ── Agent-built cost cards (the moldable view) ───────────────────────────────
 function appendCard(card,data){
   if(!card) return;
+  // Don't render a hollow card: if the view returned no rows and no total,
+  // the agent's prose already explains why. An empty card just reads as broken.
+  const rows=(data&&data.rows)||[]; const total=(data&&data.total)||0;
+  if(!rows.length && !total) return;
   const log=document.getElementById('agent-log');
   const empty=document.getElementById('agent-empty'); if(empty) empty.style.display='none';
   log.appendChild(renderAgentCard(card,data||{},{pinnable:!window._READONLY}));
@@ -1627,6 +1631,9 @@ async function loadPinnedViews(highlightIds){
 }
 
 let agentBusy=false;
+// Conversation memory: prior turns so follow-ups ("2.", "us-01 = us-east-1")
+// keep context. Sent with each request; the server sanitizes and bounds it.
+let convo=[];
 function setAgentBusy(b){agentBusy=b;const s=document.getElementById('agent-send');if(s)s.disabled=b;}
 
 async function askAgent(q){
@@ -1634,22 +1641,24 @@ async function askAgent(q){
   if(!q||agentBusy) return;
   const input=document.getElementById('agent-input');
   appendMsg('user',q);
+  const priorHistory=convo.slice(-12);
+  convo.push({role:'user',content:q});
   if(input){input.value='';input.style.height='auto';}
   const thinking=appendMsg('agent','',{thinking:true});
   setAgentBusy(true);
-  // After a few seconds, reassure instead of showing static dots: the first
-  // question pulls live cost data and a "what changed" question runs a longer pass.
+  const firstTurn=priorHistory.length===0;
+  // Only reassure on a genuinely slow turn, and word it for the actual case.
   const _reassure=setTimeout(function(){
     if(!agentBusy) return;
     const b=thinking.querySelector('.msg-bubble');
-    if(b) b.innerHTML='<span class="dots"><i></i><i></i><i></i></span><span style="color:var(--fg3);font-size:13px;margin-left:10px">Still working. The first question pulls live cost data, and a deeper question can take up to a minute.</span>';
-  },6000);
+    if(b) b.innerHTML='<span class="dots"><i></i><i></i><i></i></span><span style="color:var(--fg3);font-size:13px;margin-left:10px">'+(firstTurn?'Pulling your live cost data, this can take a few seconds.':'Working on it.')+'</span>';
+  },7000);
   try{
-    const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+    const r=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:priorHistory})});
     const data=await r.json().catch(()=>({}));
     thinking.remove();
     if(r.ok && data && (data.answer || (data.cards && data.cards.length) || data.views_changed)){
-      if(data.answer) appendMsg('agent',data.answer);
+      if(data.answer){ appendMsg('agent',data.answer); convo.push({role:'assistant',content:data.answer}); }
       (data.cards||[]).forEach((card,i)=>appendCard(card,(data.cardData||[])[i]));
       if(data.views_changed){
         loadPinnedViews(data.new_view_ids||[]);

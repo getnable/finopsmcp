@@ -2291,13 +2291,24 @@ button:hover{{filter:brightness(1.1)}}
             length = int(self.headers.get("Content-Length", 0))
             try:
                 raw = self.rfile.read(length).decode("utf-8") if length else "{}"
-                question = (json.loads(raw or "{}").get("question") or "").strip()[:1000]
+                body = json.loads(raw or "{}")
+                question = (body.get("question") or "").strip()[:1000]
             except (ValueError, TypeError):
                 self._send(400, "application/json", b'{"error":"Invalid JSON"}')
                 return
             if not question:
                 self._send(400, "application/json", b'{"error":"empty question"}')
                 return
+            # Conversation memory: the client sends prior turns so follow-ups like
+            # "2." or "us-01 = us-east-1" keep context. Sanitize hard: only the
+            # two known roles, string content, recent turns, bounded length.
+            history: list[dict] = []
+            for _t in (body.get("history") or [])[-12:]:
+                if not isinstance(_t, dict):
+                    continue
+                _r, _c = _t.get("role"), _t.get("content")
+                if _r in ("user", "assistant") and isinstance(_c, str) and _c.strip():
+                    history.append({"role": _r, "content": _c.strip()[:4000]})
             try:
                 from .slack_bot.llm import ask, model_for_tier, record_managed_ai_usage
                 from .billing import credits
@@ -2307,7 +2318,8 @@ button:hover{{filter:brightness(1.1)}}
                         "answer": "You're out of managed AI for this month. Add credits or "
                                   "bring your own key to keep going.", "cards": []}).encode())
                     return
-                result = ask(question, tier="chat", identity=self._session_identity())
+                result = ask(question, tier="chat", history=history,
+                             identity=self._session_identity())
                 side = result.side_effects or []
                 cards = [se["card"] for se in side
                          if isinstance(se, dict) and se.get("type") == "cost_card" and se.get("card")]
