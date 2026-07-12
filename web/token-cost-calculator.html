@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-3JM0X2KXHW"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-3JM0X2KXHW');
+</script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI / LLM Token Cost Calculator (GPT, Claude, Gemini) · nable</title>
+<meta name="description" content="Free AI token cost calculator. Enter monthly input and output tokens, compare estimated monthly cost across GPT-4o, Claude, Gemini and more, ranked cheapest first, with a prompt-caching slider." />
+<link rel="canonical" href="https://getnable.com/token-cost-calculator" />
+<meta property="og:title" content="AI / LLM Token Cost Calculator (GPT, Claude, Gemini) · nable" />
+<meta property="og:description" content="Free AI token cost calculator. Enter monthly input and output tokens, compare estimated monthly cost across GPT-4o, Claude, Gemini and more, ranked cheapest first, with a prompt-caching slider." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://getnable.com/token-cost-calculator" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@400;500&display=swap" />
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "How much do LLM API tokens cost?", "acceptedAnswer": {"@type": "Answer", "text": "LLM pricing is quoted per million tokens, split into input (prompt) and output (completion), with output usually 3-5x the input price. Costs range from well under $1 per million input tokens for small models to $15+ for frontier models. Your monthly bill is (input tokens x input price) + (output tokens x output price), summed across models."}}, {"@type": "Question", "name": "How do I estimate my monthly OpenAI or Anthropic bill?", "acceptedAnswer": {"@type": "Answer", "text": "Multiply your monthly input tokens by the model's input price per million, add your monthly output tokens times the output price per million. This calculator does that across popular models so you can compare. For your real bill split by model, connect your usage with nable."}}, {"@type": "Question", "name": "Does prompt caching reduce token cost?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Cached input tokens are billed at a large discount (often ~90% off) by OpenAI and Anthropic. If a big share of your input is repeated context, caching can cut a meaningful slice of the bill. The calculator's cache slider estimates the effect."}}, {"@type": "Question", "name": "What is the cheapest model for my workload?", "acceptedAnswer": {"@type": "Answer", "text": "It depends on your input/output mix. Output-heavy workloads punish expensive-output models; input-heavy workloads reward caching. Enter your volumes above and the calculator ranks models by monthly cost for your specific mix."}}]}</script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#000000;--bg-1:#121517;--bg-2:#16191c;
+    --fg:#f4f7f8;--fg-2:#aeb7bd;--fg-3:#6b7177;
+    --line:#1f2428;--line-2:#2a3036;--accent:#4db8d4;--ok:#3cba7a;--warn:#e6a840;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  html,body{background:var(--bg);color:var(--fg);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.6;font-size:15.5px;letter-spacing:-.005em}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 86%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:72px}
+  .logo{font-weight:600;font-size:16px;letter-spacing:-.02em}
+  .logo .n{color:var(--accent)}
+  .nav-cta{display:inline-flex;padding:8px 16px;border-radius:8px;background:var(--accent);color:#06181d;font-size:13.5px;font-weight:600}
+  header.hero{padding:60px 0 12px}
+  .crumb{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:20px}
+  h1{font-size:clamp(29px,4.2vw,42px);font-weight:500;letter-spacing:-.03em;line-height:1.12}
+  h1 .accent{color:var(--accent)}
+  .answer{margin-top:20px;font-size:17px;color:var(--fg);max-width:68ch;line-height:1.62;border-left:2px solid var(--accent);padding-left:18px}
+  .updated{margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--fg-3)}
+  main{padding:30px 0 56px}
+  h2{font-size:21px;font-weight:500;letter-spacing:-.02em;margin:40px 0 12px}
+  h3{font-size:16.5px;font-weight:600;margin:22px 0 6px;color:var(--fg)}
+  p,li{color:var(--fg-2);font-size:15px;max-width:72ch}
+  ul,ol{padding-left:22px;margin:10px 0}
+  li{margin:7px 0}
+  strong{color:var(--fg);font-weight:600}
+  code{font-family:var(--mono);font-size:13px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--fg)}
+  table.cmp{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  table.cmp th,table.cmp td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.cmp thead th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-3);font-weight:500}
+  table.cmp th.nb{color:var(--accent)}
+  table.cmp td.dim{color:var(--fg-3);font-family:var(--mono);font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  table.cmp td.nb{color:var(--fg)}
+  .col2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  @media(max-width:640px){.col2{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);padding:18px 20px}
+  .card h3{margin-top:0}
+  .card p{margin:0;max-width:none;font-size:14px}
+  .cta-card{border:1px solid var(--line-2);border-radius:14px;background:linear-gradient(180deg,rgba(77,184,212,.06),transparent 70%),var(--bg-1);padding:24px 26px;margin:28px 0}
+  .cta-row{margin-top:16px;display:flex;gap:12px;flex-wrap:wrap}
+  .btn{display:inline-flex;padding:10px 18px;border-radius:9px;font-size:14px;font-weight:600}
+  .btn-primary{background:var(--accent);color:#06181d}
+  .btn-ghost{border:1px solid var(--line-2);color:var(--fg)}
+  .faq h3{margin:20px 0 5px}
+  footer{border-top:1px solid var(--line);padding:26px 0;font-size:13px;color:var(--fg-3);margin-top:20px}
+  .foot-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  footer a{color:var(--fg-2)}
+  footer a:hover{color:var(--fg)}
+  a.inline{color:var(--accent)}
+  
+  .calc{border:1px solid var(--line-2);border-radius:14px;background:var(--bg-1);padding:22px 24px;margin:20px 0}
+  .calc .fields{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:640px){.calc .fields{grid-template-columns:1fr}}
+  .field label{display:block;font-size:12.5px;color:var(--fg-2);margin-bottom:6px}
+  .field .hint{font-size:11.5px;color:var(--fg-3);margin-top:4px}
+  .field input[type=number]{width:100%;background:var(--bg-2);border:1px solid var(--line-2);border-radius:8px;color:var(--fg);font-family:var(--mono);font-size:15px;padding:10px 12px}
+  .field input[type=range]{width:100%;accent-color:var(--accent)}
+  .headline{margin:20px 0 6px;font-size:15px;color:var(--fg)}
+  .headline b{color:var(--accent)}
+  table.rank{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}
+  table.rank th,table.rank td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+  table.rank thead th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-3);font-weight:500}
+  table.rank td.n{font-family:var(--mono);color:var(--fg)}
+  table.rank td.cost{font-family:var(--mono);text-align:right}
+  table.rank tr.best td{color:var(--fg)}
+  table.rank tr.best td.n::after{content:" · cheapest";color:var(--ok);font-size:11px}
+  .cheapest td{color:var(--fg)}
+  .editrow td{font-size:12px;color:var(--fg-3)}
+  .note{font-size:12px;color:var(--fg-3);margin-top:12px}
+
+</style>
+<script>
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  posthog.init("phc_zcaQqoAXrSghjtbE6VB83p4RjfmcpqezKWV9GdZy4dPv", {api_host:"https://us.i.posthog.com",person_profiles:"identified_only",capture_pageview:true,capture_pageleave:true});
+</script>
+</head>
+<body>
+<nav><div class="wrap nav-inner">
+  <a class="logo" href="/"><span class="n">n</span>able</a>
+  <a class="nav-cta" href="/#start">Get started free</a>
+</div></nav>
+<header class="hero"><div class="wrap">
+  <div class="crumb"><a href="/">getnable.com</a> / AI token cost calculator</div>
+  <h1>AI / LLM token <span class="accent">cost calculator</span></h1>
+  <p class="answer">Enter your monthly input and output tokens and see the estimated monthly cost across popular models, ranked cheapest first, with a prompt-caching slider. Free, no signup. Prices are list estimates; your real bill, split by model from your actual usage, is one command away with nable.</p>
+  <p class="updated">Prices: list estimates, July 2026. Verify against each provider before budgeting.</p>
+</div></header>
+<main><div class="wrap">
+<div class="calc">
+  <div class="fields">
+    <div class="field"><label>Monthly input tokens (millions)</label>
+      <input id="inTok" type="number" min="0" step="1" value="50"/>
+      <div class="hint">Prompts + context you send, per month, in millions.</div></div>
+    <div class="field"><label>Monthly output tokens (millions)</label>
+      <input id="outTok" type="number" min="0" step="1" value="10"/>
+      <div class="hint">Completions the model generates, per month, in millions.</div></div>
+    <div class="field"><label>Cache hit rate on input: <span id="cacheLbl">0%</span></label>
+      <input id="cache" type="range" min="0" max="90" step="5" value="0"/>
+      <div class="hint">Share of input served from cache (~90% cheaper). Repeated context = higher.</div></div>
+  </div>
+  <p class="headline" id="headline"></p>
+  <table class="rank"><thead><tr><th>Model</th><th style="text-align:right">Input/1M</th><th style="text-align:right">Output/1M</th><th style="text-align:right">Est. $/mo</th></tr></thead>
+  <tbody id="rankBody"></tbody></table>
+  <p class="note">List prices, estimates only. Cached input billed at ~10% of list. Output is not cached. This ignores volume discounts, committed-use, and fine-tuned/hosted overheads.</p>
+</div>
+<div class="cta-card">
+<p><strong>That is list price on numbers you typed. Your real AI bill is different.</strong> nable reads your actual OpenAI, Anthropic, and Bedrock usage, splits it by model and workload, flags calls a cheaper model would answer the same, and shows exactly what prompt caching would save, next to your cloud bill. It runs on your machine; your usage never leaves it.</p>
+<div class="cta-row">
+  <a class="btn btn-primary" href="/#start">See your real token bill: <code style="background:rgba(0,0,0,.15);color:#06181d;border:none">uvx nable</code></a>
+  <a class="btn btn-ghost" href="/demo">Try the demo, no install</a>
+</div>
+</div>
+<h2 class="faq">Common questions</h2>
+<div class="faq">
+<h3>How much do LLM API tokens cost?</h3>
+<p>Pricing is quoted per million tokens, split into input (your prompt) and output (the completion), with output usually 3 to 5 times the input price. Small models run well under $1 per million input tokens; frontier models reach $15 or more. Your monthly cost is input tokens times input price, plus output tokens times output price, across the models you use.</p>
+<h3>How do I estimate my monthly OpenAI or Anthropic bill?</h3>
+<p>Multiply monthly input tokens by the input price per million, add output tokens times the output price per million. This calculator does it across popular models so you can compare. For your actual bill split by model, connect your usage with <a class="inline" href="/#start">nable</a>.</p>
+<h3>Does prompt caching reduce token cost?</h3>
+<p>Yes. Cached input tokens are billed at a steep discount, often around 90 percent off, by OpenAI and Anthropic. If much of your input is repeated context, caching cuts a real slice of the bill. Use the cache slider above to estimate it.</p>
+<h3>What is the cheapest model for my workload?</h3>
+<p>It depends on your input-to-output ratio. Output-heavy workloads punish models with expensive output; input-heavy workloads benefit most from caching. Enter your volumes and the table ranks models for your specific mix.</p>
+</div>
+</div></main>
+<script>
+const MODELS = [{"name": "GPT-4o", "in": 2.5, "out": 10.0}, {"name": "GPT-4o mini", "in": 0.15, "out": 0.6}, {"name": "o3", "in": 10.0, "out": 40.0}, {"name": "Claude Opus 4.8", "in": 5.0, "out": 25.0}, {"name": "Claude Sonnet", "in": 3.0, "out": 15.0}, {"name": "Claude Haiku 4.5", "in": 1.0, "out": 5.0}, {"name": "Gemini 2.5 Pro", "in": 1.25, "out": 10.0}, {"name": "Gemini 2.5 Flash", "in": 0.3, "out": 2.5}, {"name": "DeepSeek-V3", "in": 0.27, "out": 1.1}, {"name": "Llama 3.1 405B (host)", "in": 0.9, "out": 0.9}];
+const inEl=document.getElementById('inTok'), outEl=document.getElementById('outTok'),
+      cacheEl=document.getElementById('cache'), cacheLbl=document.getElementById('cacheLbl'),
+      body=document.getElementById('rankBody'), head=document.getElementById('headline');
+function money(x){return '$'+x.toLocaleString('en-US',{maximumFractionDigits:x<100?2:0});}
+function render(){
+  const inM=Math.max(0,parseFloat(inEl.value)||0), outM=Math.max(0,parseFloat(outEl.value)||0);
+  const cache=(parseFloat(cacheEl.value)||0)/100; cacheLbl.textContent=Math.round(cache*100)+'%';
+  const rows=MODELS.map(m=>{
+    const effIn = inM*(1-cache) + inM*cache*0.1;      // cached input ~10% of list
+    const cost = effIn*m['in'] + outM*m['out'];
+    return {name:m.name, i:m['in'], o:m['out'], cost};
+  }).sort((a,b)=>a.cost-b.cost);
+  body.innerHTML = rows.map((r,idx)=>`<tr class="${idx===0?'best':''}"><td class="n">${r.name}</td><td class="cost">${money(r.i)}</td><td class="cost">${money(r.o)}</td><td class="cost">${money(r.cost)}</td></tr>`).join('');
+  if(rows.length){
+    const lo=rows[0], hi=rows[rows.length-1];
+    head.innerHTML = `For ${inM}M input + ${outM}M output tokens/mo: cheapest is <b>${lo.name}</b> at ${money(lo.cost)}/mo, vs ${money(hi.cost)}/mo for ${hi.name}. Same tokens, <b>${money(hi.cost-lo.cost)}/mo</b> apart.`;
+  }
+  if(window.posthog) posthog.capture('token_calc_used',{input_m:inM,output_m:outM,cache:Math.round(cache*100)});
+}
+[inEl,outEl,cacheEl].forEach(el=>el.addEventListener('input',render));
+render();
+</script><footer><div class="wrap foot-inner">
+  <span><span style="color:var(--accent)">n</span>able · local-first FinOps</span>
+  <span><a href="/">Home</a> · <a href="/finops-mcp-comparison">Compare</a> · <a href="/token-cost-calculator">Token calculator</a> · <a href="/security">Security</a> · <a href="/pricing">Pricing</a></span>
+</div></footer>
+</body></html>

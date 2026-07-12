@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-3JM0X2KXHW"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-3JM0X2KXHW');
+</script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>nable vs Kubecost: Kubernetes cost with no Prometheus, plus cloud + AI</title>
+<meta name="description" content="Kubecost monitors Kubernetes cost with an in-cluster agent. nable reads K8s cost from your kubeconfig with no Prometheus or agent to install, and also covers cloud and AI/LLM spend, in your editor." />
+<link rel="canonical" href="https://getnable.com/nable-vs-kubecost" />
+<meta property="og:title" content="nable vs Kubecost: Kubernetes cost with no Prometheus, plus cloud + AI" />
+<meta property="og:description" content="Kubecost monitors Kubernetes cost with an in-cluster agent. nable reads K8s cost from your kubeconfig with no Prometheus or agent to install, and also covers cloud and AI/LLM spend, in your editor." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://getnable.com/nable-vs-kubecost" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@400;500&display=swap" />
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "Can nable show Kubernetes cost without installing Prometheus or Kubecost?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. nable reads Kubernetes cost from your kubeconfig with nothing deployed in the cluster, so you get a cost picture in minutes without an agent or Prometheus. Kubecost's in-cluster agent goes deeper on per-pod real-time allocation."}}, {"@type": "Question", "name": "Is nable a Kubecost alternative?", "acceptedAnswer": {"@type": "Answer", "text": "For teams that want fast K8s cost visibility plus cloud and AI spend in one tool, yes. For deep, continuous in-cluster allocation at per-pod granularity, Kubecost is the specialist."}}, {"@type": "Question", "name": "Does nable cover more than Kubernetes?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Unlike Kubecost, nable covers AWS, Azure, GCP, SaaS connectors, and AI/LLM token spend in the same tool, so Kubernetes is one part of your whole bill, not a separate silo."}}, {"@type": "Question", "name": "Where does nable run?", "acceptedAnswer": {"@type": "Answer", "text": "On your machine, reading read-only. Your kubeconfig and bill stay local; there is no vendor backend in the path."}}]}</script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#000000;--bg-1:#121517;--bg-2:#16191c;
+    --fg:#f4f7f8;--fg-2:#aeb7bd;--fg-3:#6b7177;
+    --line:#1f2428;--line-2:#2a3036;--accent:#4db8d4;--ok:#3cba7a;--warn:#e6a840;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  html,body{background:var(--bg);color:var(--fg);font-family:'Geist',ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.6;font-size:15.5px;letter-spacing:-.005em}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:860px;margin:0 auto;padding:0 28px}
+  nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 86%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:72px}
+  .logo{font-weight:600;font-size:16px;letter-spacing:-.02em}
+  .logo .n{color:var(--accent)}
+  .nav-cta{display:inline-flex;padding:8px 16px;border-radius:8px;background:var(--accent);color:#06181d;font-size:13.5px;font-weight:600}
+  header.hero{padding:60px 0 12px}
+  .crumb{font-family:var(--mono);font-size:11px;color:var(--fg-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:20px}
+  h1{font-size:clamp(29px,4.2vw,42px);font-weight:500;letter-spacing:-.03em;line-height:1.12}
+  h1 .accent{color:var(--accent)}
+  .answer{margin-top:20px;font-size:17px;color:var(--fg);max-width:68ch;line-height:1.62;border-left:2px solid var(--accent);padding-left:18px}
+  .updated{margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--fg-3)}
+  main{padding:30px 0 56px}
+  h2{font-size:21px;font-weight:500;letter-spacing:-.02em;margin:40px 0 12px}
+  h3{font-size:16.5px;font-weight:600;margin:22px 0 6px;color:var(--fg)}
+  p,li{color:var(--fg-2);font-size:15px;max-width:72ch}
+  ul,ol{padding-left:22px;margin:10px 0}
+  li{margin:7px 0}
+  strong{color:var(--fg);font-weight:600}
+  code{font-family:var(--mono);font-size:13px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--fg)}
+  table.cmp{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  table.cmp th,table.cmp td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.cmp thead th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-3);font-weight:500}
+  table.cmp th.nb{color:var(--accent)}
+  table.cmp td.dim{color:var(--fg-3);font-family:var(--mono);font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  table.cmp td.nb{color:var(--fg)}
+  .col2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  @media(max-width:640px){.col2{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);padding:18px 20px}
+  .card h3{margin-top:0}
+  .card p{margin:0;max-width:none;font-size:14px}
+  .cta-card{border:1px solid var(--line-2);border-radius:14px;background:linear-gradient(180deg,rgba(77,184,212,.06),transparent 70%),var(--bg-1);padding:24px 26px;margin:28px 0}
+  .cta-row{margin-top:16px;display:flex;gap:12px;flex-wrap:wrap}
+  .btn{display:inline-flex;padding:10px 18px;border-radius:9px;font-size:14px;font-weight:600}
+  .btn-primary{background:var(--accent);color:#06181d}
+  .btn-ghost{border:1px solid var(--line-2);color:var(--fg)}
+  .faq h3{margin:20px 0 5px}
+  footer{border-top:1px solid var(--line);padding:26px 0;font-size:13px;color:var(--fg-3);margin-top:20px}
+  .foot-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  footer a{color:var(--fg-2)}
+  footer a:hover{color:var(--fg)}
+  a.inline{color:var(--accent)}
+  
+</style>
+<script>
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  posthog.init("phc_zcaQqoAXrSghjtbE6VB83p4RjfmcpqezKWV9GdZy4dPv", {api_host:"https://us.i.posthog.com",person_profiles:"identified_only",capture_pageview:true,capture_pageleave:true});
+</script>
+</head>
+<body>
+<nav><div class="wrap nav-inner">
+  <a class="logo" href="/"><span class="n">n</span>able</a>
+  <a class="nav-cta" href="/#start">Get started free</a>
+</div></nav>
+<header class="hero"><div class="wrap">
+  <div class="crumb"><a href="/">getnable.com</a> / nable vs Kubecost</div>
+  <h1>nable vs <span class="accent">Kubecost</span></h1>
+  <p class="answer">Kubecost is deep, real-time Kubernetes cost allocation that runs an agent in your cluster (typically alongside Prometheus). nable takes the zero-infrastructure path: it reads Kubernetes cost straight from your kubeconfig with nothing to install in the cluster, and it does not stop at K8s, it covers AWS, Azure, GCP, SaaS, and AI/LLM token spend in the same tool, from your editor. If you need per-pod, per-second in-cluster allocation, Kubecost is deeper. If you want a fast cross-cloud picture including K8s without deploying anything, that is nable.</p>
+  <p class="updated">Last updated: July 12, 2026 · written by the nable team, check every claim.</p>
+</div></header>
+<main><div class="wrap">
+<h2>The difference in one table</h2>
+<table class="cmp"><thead><tr><th>Dimension</th><th class="nb">nable</th><th>Kubecost</th></tr></thead><tbody><tr><td class="dim">Setup</td><td class="nb">Reads your <code>kubeconfig</code>. No Prometheus, no agent, no Helm install.</td><td>Deploy the Kubecost agent (and usually Prometheus) into the cluster.</td></tr><tr><td class="dim">Scope</td><td class="nb">Kubernetes plus AWS, Azure, GCP, SaaS, and AI/LLM spend.</td><td>Kubernetes cost allocation (multi-cluster on paid tiers).</td></tr><tr><td class="dim">Where your data lives</td><td class="nb">On your machine, read-only.</td><td>In-cluster, plus the Kubecost cloud on hosted tiers.</td></tr><tr><td class="dim">Surface</td><td class="nb">In Claude, Cursor, Zed via MCP, plus a local dashboard.</td><td>A dashboard in your cluster / hosted.</td></tr><tr><td class="dim">AI / LLM spend</td><td class="nb">Yes, token cost by model, alongside K8s and cloud.</td><td>No, Kubernetes-focused.</td></tr><tr><td class="dim">Ships the fix</td><td class="nb">Drafts a Terraform PR, propose-only.</td><td>Rightsizing recommendations you action yourself.</td></tr></tbody></table>
+<p style="font-size:13px;color:var(--fg-3)">This is our page, so weigh it accordingly. Everything above is checkable against Kubecost's own docs and ours.</p>
+<div class="col2">
+  <div class="card"><h3>When Kubecost is the right call</h3><p>You need deep, continuous, in-cluster Kubernetes cost allocation, per-namespace and per-pod, in real time, and you are fine running an agent (and Prometheus) in the cluster. That in-cluster depth is Kubecost's strength.</p></div>
+  <div class="card"><h3>When nable fits better</h3><p>You want Kubernetes cost without installing anything in the cluster, and you want it alongside your cloud and AI spend in one place, answered in your editor. nable reads kubeconfig directly and covers the whole bill, not just K8s.</p></div>
+</div>
+<div class="cta-card">
+<p><strong>Try nable in 30 seconds, free, no signup.</strong> It runs on your machine, reads your cloud and AI bill read-only, answers cost questions in Claude or Cursor, and drafts the fix as a pull request you approve. Nothing leaves your laptop.</p>
+<div class="cta-row">
+  <a class="btn btn-primary" href="/#start">Install free: <code style="background:rgba(0,0,0,.15);color:#06181d;border:none">uvx nable</code></a>
+  <a class="btn btn-ghost" href="/demo">See it work, no install</a>
+</div>
+</div>
+<h2 class="faq">Common questions</h2>
+<div class="faq"><h3>Can nable show Kubernetes cost without installing Prometheus or Kubecost?</h3><p>Yes. nable reads Kubernetes cost from your kubeconfig with nothing deployed in the cluster, so you get a cost picture in minutes without an agent or Prometheus. Kubecost's in-cluster agent goes deeper on per-pod real-time allocation.</p><h3>Is nable a Kubecost alternative?</h3><p>For teams that want fast K8s cost visibility plus cloud and AI spend in one tool, yes. For deep, continuous in-cluster allocation at per-pod granularity, Kubecost is the specialist.</p><h3>Does nable cover more than Kubernetes?</h3><p>Yes. Unlike Kubecost, nable covers AWS, Azure, GCP, SaaS connectors, and AI/LLM token spend in the same tool, so Kubernetes is one part of your whole bill, not a separate silo.</p><h3>Where does nable run?</h3><p>On your machine, reading read-only. Your kubeconfig and bill stay local; there is no vendor backend in the path.</p></div>
+</div></main><footer><div class="wrap foot-inner">
+  <span><span style="color:var(--accent)">n</span>able · local-first FinOps</span>
+  <span><a href="/">Home</a> · <a href="/finops-mcp-comparison">Compare</a> · <a href="/token-cost-calculator">Token calculator</a> · <a href="/security">Security</a> · <a href="/pricing">Pricing</a></span>
+</div></footer>
+</body></html>
