@@ -189,9 +189,9 @@ function Hero(){
       <div className="wrap">
         <div className="hero-c">
           <h1 className="display">
-            Local-first FinOps <span className="h1-ask">for the AI era.</span>
+            Finds the waste in your cloud and AI bill. <span className="h1-ask">Ships the fix as a PR.</span>
           </h1>
-          <p className="hero-sub">Cloud and AI spend, queryable in Claude. Savings shipped as pull requests, without your data ever leaving your machine.</p>
+          <p className="hero-sub">Local-first FinOps for the AI era: ask nable in Claude or Cursor, and your data never leaves your machine.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
           </div>
