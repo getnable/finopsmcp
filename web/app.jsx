@@ -194,9 +194,6 @@ function Hero(){
           <p className="hero-sub">Cloud and AI spend, queryable in Claude. Savings shipped as pull requests, without your data ever leaving your machine.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
-            <a className="btn btn-primary" href="/demo" onClick={() => { if(window.posthog) posthog.capture('cta_clicked', { location:'hero', cta:'try_demo' }); }}>
-              See it work, no install <span className="arr">→</span>
-            </a>
           </div>
           <p className="hero-cmdnote">Runs locally. Reads your bill, changes nothing. No signup, no cloud keys to start.</p>
           <p className="hero-trustline"><b>Clouds, SaaS and AI spend</b> normalized into one bill · works in any editor · free for solo use</p>
