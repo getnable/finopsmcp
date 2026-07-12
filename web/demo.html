@@ -275,7 +275,7 @@
       <div class="ktitle">Like what you see?</div>
       <h2>Point nable at your own bill</h2>
       <p>This demo runs on fake data. To ask these questions about <strong>your</strong> AWS, Azure, GCP and AI spend, run nable in your terminal. One line, read-only, on your machine.</p>
-      <div class="cmd"><code id="cmd">uvx --python 3.12 --from finops-mcp finops welcome</code><button id="copy" type="button">Copy</button></div>
+      <div class="cmd"><code id="cmd">uvx nable</code><button id="copy" type="button">Copy</button></div>
       <div class="meta"><span>Read-only</span><span>Runs locally</span><span>Free to start</span></div>
       <button class="keep" id="keep" type="button">Keep exploring the demo</button>
     </div>
@@ -483,7 +483,7 @@ async function fallbackMessage(body, reason){
     { t:'p', html: rl
         ? "You've asked a lot in a short window, give it a minute. In the meantime, these answer instantly:"
         : "I answer the common questions about this demo bill instantly. For anything else, point nable at your **real** bill and ask there:" },
-    { t:'code', lang:'bash', src:"uvx --python 3.12 --from finops-mcp finops welcome" },
+    { t:'code', lang:'bash', src:"uvx nable" },
     { t:'p', html:"Or try one of these:" },
     { t:'ul', items:["What's driving my spend?","Where can I save money?","What's my AI/LLM bill?","How do I fix my Textract costs?"] },
   ]);
