@@ -400,6 +400,29 @@ html[data-theme="light"] .user-chip{border-color:transparent;background:var(--bg
 .uc-role{font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--accent)}
 .uc-chev{width:15px;height:15px;color:var(--fg3)}
 
+/* "What changed" digest strip */
+.digest{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px;margin-bottom:18px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg1);box-shadow:var(--lift)}
+html[data-theme="light"] .digest{border-color:transparent}
+.digest-lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3);white-space:nowrap;display:flex;align-items:center;gap:7px}
+.digest-lbl svg{width:14px;height:14px;color:var(--accent)}
+.digest-items{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.dg{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--fg2);background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:6px 11px;cursor:pointer;transition:border-color .15s,color .15s}
+html[data-theme="light"] .dg{border-color:transparent}
+.dg:hover{border-color:var(--line2);color:var(--fg)}
+.dg .dgd{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.dg.up .dgd{background:var(--alert)}.dg.alert .dgd{background:var(--alert)}.dg.warn .dgd{background:var(--warn)}.dg.good .dgd{background:var(--success)}
+.dg code{font-family:var(--mono);font-size:11.5px;color:var(--fg2);background:none;padding:0}
+
+/* Forecast vs budget panel */
+.fc-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:6px;flex-wrap:wrap}
+.fc-proj{text-align:right}
+.fc-proj .fp-v{font-family:var(--mono);font-size:24px;font-weight:600;letter-spacing:-.03em;color:var(--fg);line-height:1}
+.fc-proj .fp-l{font-size:11.5px;color:var(--fg3);margin-top:5px}
+.fc-note{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--fg2);background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;margin-bottom:14px}
+html[data-theme="light"] .fc-note{border-color:transparent}
+.fc-note .nd{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.fc-note.under .nd{background:var(--success)}.fc-note.over .nd{background:var(--alert)}
+
 /* Executive KPI band (tier-1, the board-slide row) */
 .kpi-band{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:22px;box-shadow:var(--lift)}
 html[data-theme="light"] .kpi-band{border-color:transparent;background:var(--bg2)}
@@ -632,6 +655,12 @@ html[data-theme="light"] .rec-view{border-color:transparent}
     </div>
   </div>
 
+  <!-- What changed digest -->
+  <div class="digest" id="digest" style="display:none">
+    <span class="digest-lbl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg><span id="digest-since">What changed</span></span>
+    <div class="digest-items" id="digest-items"></div>
+  </div>
+
   <!-- Executive KPI band (tier-1) -->
   <div class="kpi-band" id="kpi-band"></div>
 
@@ -700,6 +729,16 @@ html[data-theme="light"] .rec-view{border-color:transparent}
       <span class="c-t" id="aieff-callout-t"></span>
       <button class="c-a" id="aieff-fix">Fix this →</button>
     </div>
+  </div>
+
+  <!-- Forecast vs budget with confidence band -->
+  <div class="panel" id="panel-forecast" style="margin-bottom:22px">
+    <div class="fc-hd">
+      <div><div class="panel-t">Forecast vs budget</div><div class="panel-s">Actual, projected, and the confidence range for the rest of the month.</div></div>
+      <div class="fc-proj"><div class="fp-v" id="fc-proj-v">&mdash;</div><div class="fp-l">projected month-end</div></div>
+    </div>
+    <div class="fc-note" id="fc-note" style="display:none"><span class="nd"></span><span id="fc-note-t"></span></div>
+    <div class="chart-wrap" style="height:240px"><canvas id="chart-forecast"></canvas></div>
   </div>
 
   <!-- Service / accounts / region -->
@@ -992,9 +1031,11 @@ function render(d){
   const sb=document.getElementById('svc-badge'); if(sb) sb.textContent=(selectedProvider==='all'?'ALL CLOUDS':selectedProvider.toUpperCase());
   ['sk-svc','sk-trend','loading-hint'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
 
-  // Executive KPI band + AI efficiency
+  // Digest, KPI band, AI efficiency, forecast
+  renderDigest(d.whats_changed||{});
   renderExecKpis(d.exec_kpis||[]);
   renderAiEfficiency(d.ai_efficiency||{});
+  renderForecast(d.forecast_panel||{});
 
   // Panels
   renderSvcChart(d.top_services||[]);
@@ -1013,6 +1054,56 @@ function render(d){
   const sv=document.getElementById('ss-val'); if(sv) sv.textContent=fmt(d.opportunities_total_saving||0);
   const svd=document.getElementById('ss-delta'); if(svd) svd.textContent='↑ 32%';
 }
+
+// ── "What changed" digest ─────────────────────────────────────────────────────
+function renderDigest(w){
+  const el=document.getElementById('digest'); const items=document.getElementById('digest-items');
+  if(!el||!items) return;
+  if(!w.items||!w.items.length){el.style.display='none';return;}
+  el.style.display='';
+  const since=document.getElementById('digest-since'); if(since) since.textContent='Since '+(w.since||'last visit');
+  items.innerHTML=w.items.map((it,i)=>`<button class="dg ${it.kind||'good'}" data-i="${i}"><span class="dgd"></span>${it.text.replace(/`([^`]+)`/g,'<code>$1</code>')}</button>`).join('');
+  items.querySelectorAll('.dg').forEach(b=>b.addEventListener('click',()=>{
+    const it=w.items[+b.dataset.i]; if(!it) return;
+    if(typeof switchView==='function')switchView('agent');
+    if(typeof window.askAgent==='function')window.askAgent(it.prompt||it.text);
+  }));
+}
+
+// ── Forecast vs budget (confidence band) ──────────────────────────────────────
+let fcChart=null;
+function renderForecast(fp){
+  const c=document.getElementById('chart-forecast'); if(!c||!fp.history||!fp.history.length) return;
+  const T=chartTheme();
+  const hist=fp.history, fc=fp.forecast||[], band=fp.band_pct||0.08;
+  const n=hist.length, m=fc.length;
+  // Actual over history, null over forecast; forecast continues from the last actual.
+  const actual=hist.concat(new Array(m).fill(null));
+  const fcast=new Array(n-1).fill(null).concat([hist[n-1]]).concat(fc);
+  const upper=new Array(n).fill(null).concat(fc.map(v=>round2(v*(1+band))));
+  const lower=new Array(n).fill(null).concat(fc.map(v=>round2(v*(1-band))));
+  const budget=fp.budget?new Array(n+m).fill(round2(fp.budget/30)):null; // daily budget line
+  const labels=[]; for(let i=0;i<n+m;i++){labels.push(i<n?('D'+(i+1)):('+'+(i-n+1)));}
+  const ds=[
+    {label:'Upper',data:upper,borderColor:'transparent',backgroundColor:hexA('#4db8d4',.10),pointRadius:0,fill:'+1',tension:.35},
+    {label:'Lower',data:lower,borderColor:'transparent',backgroundColor:'transparent',pointRadius:0,fill:false,tension:.35},
+    {label:'Actual',data:actual,borderColor:'#4db8d4',borderWidth:2.5,pointRadius:0,tension:.35,fill:false},
+    {label:'Forecast',data:fcast,borderColor:'#8ad4e8',borderWidth:2,borderDash:[5,4],pointRadius:0,tension:.35,fill:false},
+  ];
+  if(budget) ds.push({label:'Budget',data:budget,borderColor:'#e6a840',borderWidth:1.5,borderDash:[2,3],pointRadius:0,fill:false});
+  if(fcChart) fcChart.destroy();
+  fcChart=new Chart(c.getContext('2d'),{type:'line',data:{labels,datasets:ds},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{filter:i=>['Actual','Forecast','Budget'].includes(i.dataset.label)&&i.raw!=null,
+        backgroundColor:T.ring==='#ffffff'?'#fff':'#0a0a0c',borderColor:T.grid,borderWidth:1,titleColor:T.label,bodyColor:T.label,padding:10,cornerRadius:8,
+        callbacks:{label:x=>' '+x.dataset.label+': '+fmt(x.raw)}}},
+      scales:{x:{grid:{display:false},ticks:{color:T.tick,maxTicksLimit:8,font:{family:"'Geist Mono',monospace",size:10}},border:{color:'transparent'}},
+              y:{grid:{color:T.grid},ticks:{color:T.tick,font:{family:"'Geist Mono',monospace",size:10},callback:v=>fmt(v)},border:{color:'transparent'}}}}});
+  const pv=document.getElementById('fc-proj-v'); if(pv) pv.textContent=fmt(fp.projected_end||0);
+  const note=document.getElementById('fc-note'), nt=document.getElementById('fc-note-t');
+  if(note&&nt&&fp.note){ nt.textContent=fp.note; note.className='fc-note '+((fp.vs_budget_pct||0)>0?'over':'under'); note.style.display=''; }
+}
+function round2(v){return Math.round(v*100)/100;}
 
 // ── Executive KPI band ────────────────────────────────────────────────────────
 function renderExecKpis(kpis){

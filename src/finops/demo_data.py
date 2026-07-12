@@ -736,12 +736,48 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
         "callout": "GPU utilization is 44% and prompt caching is off. About $740/mo is recoverable by right-sizing the GPU pool and turning on caching.",
     }
 
+    # "What changed since you last looked": the always-on loop as a glance.
+    whats_changed = {
+        "since": "Monday",
+        "items": [
+            {"kind": "up",    "text": "Data Transfer up $710 (60%)", "prompt": "Why did data transfer spend jump 60% this week?"},
+            {"kind": "alert", "text": "New anomaly on `Amazon EC2`", "prompt": "Explain this week's EC2 anomaly and what caused it."},
+            {"kind": "warn",  "text": "AWS budget crossed 85%",      "prompt": "Show our AWS budget status and what's driving it toward the cap."},
+            {"kind": "good",  "text": "$340/mo saved, non-prod schedule", "prompt": "Show the savings we've realized in the last week."},
+        ],
+    }
+
+    # Forecast vs budget with a confidence band.
+    def _money(n: float) -> str:
+        if n >= 1e6: return f"${n/1e6:.1f}M"
+        if n >= 1e3: return f"${n/1e3:.1f}k"
+        return f"${n:,.0f}"
+    hist = [round(sum(v for k, v in row.items() if k != "date"), 2) for row in daily]
+    last = hist[-1] if hist else (month_total / 30.0)
+    forecast = [round(last * (1.0 + 0.012 * i), 2) for i in range(1, 13)]
+    budget = round(month_total * 1.14, 2)
+    proj_end = round(month_total * 1.088, 2)
+    vs_budget = round((proj_end - budget) / budget * 100, 1)
+    forecast_panel = {
+        "history": hist,
+        "forecast": forecast,
+        "band_pct": 0.08,
+        "budget": budget,
+        "projected_end": proj_end,
+        "vs_budget_pct": vs_budget,
+        "note": f"Projected to finish the month at {_money(proj_end)}, "
+                f"{abs(vs_budget)}% {'over' if proj_end > budget else 'under'} "
+                f"the {_money(budget)} budget.",
+    }
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "account_id": _ACCOUNT_ID,
         "user": {"name": "Chandan B.", "role": "Admin", "email": "chandan@acme.io"},
         "exec_kpis": exec_kpis,
         "ai_efficiency": ai_efficiency,
+        "whats_changed": whats_changed,
+        "forecast_panel": forecast_panel,
         "total_spend_mtd": month_total,
         "total_spend_window": window_total_spend,
         "total_spend_last_month": last_month,
