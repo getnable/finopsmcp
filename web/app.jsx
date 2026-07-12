@@ -944,6 +944,7 @@ function Footer({ version }){
           <div>
             <h5>Resources</h5>
             <a href="/docs">Docs</a>
+            <a href="/guides">Guides &amp; comparisons</a>
             <a href="/docs#quickstart">Quickstart</a>
             <a href="/docs#iam">IAM templates</a>
             <a href="/security">Security</a>
