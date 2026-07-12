@@ -288,6 +288,16 @@ footer a:hover{color:var(--accent)}
 
 /* ── Ask (agent) console ───────────────────────────────────────────────────── */
 .agent-screen{display:flex;flex-direction:column;height:100vh;max-width:100%}
+.agent-topbar{flex-shrink:0;display:flex;align-items:center;gap:12px;padding:16px 28px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--accent-w),transparent)}
+.agent-topbar .at-ic{width:32px;height:32px;border-radius:9px;background:var(--accent-w);border:1px solid var(--accent-b);display:flex;align-items:center;justify-content:center;color:var(--accent);flex-shrink:0}
+.agent-topbar .at-ic svg{width:17px;height:17px}
+.agent-topbar .at-t{font-size:15px;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:8px}
+.agent-topbar .at-live{font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:var(--accent-w);border:1px solid var(--accent-b);border-radius:var(--r-xs);padding:2px 6px}
+.agent-topbar .at-s{font-size:12px;color:var(--fg3);margin-top:2px}
+.agent-topbar .at-back{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-family:inherit;font-size:13px;font-weight:600;color:var(--fg2);background:var(--bg1);border:1px solid var(--line2);border-radius:9px;padding:8px 13px;cursor:pointer;transition:color .15s,border-color .15s}
+.agent-topbar .at-back:hover{color:var(--fg);border-color:var(--fg3)}
+.agent-topbar .at-back svg{width:15px;height:15px}
+html[data-theme="light"] .agent-topbar .at-back{border-color:transparent;background:var(--bg2)}
 .agent-stream{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
 .agent-stream::-webkit-scrollbar{width:10px}
 .agent-stream::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px;border:3px solid var(--bg)}
@@ -368,6 +378,9 @@ footer a:hover{color:var(--accent)}
 
 /* ══ Best-in-class redesign ══════════════════════════════════════════════════ */
 .nav-badge{margin-left:auto;font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-w);border:1px solid var(--accent-b);border-radius:20px;padding:1px 7px;min-width:20px;text-align:center}
+.nav-ai{margin-left:auto;color:var(--accent);opacity:.55;display:flex;align-items:center;flex-shrink:0}
+.nav-ai svg{width:13px;height:13px}
+.nav-item:hover .nav-ai{opacity:1}
 .side-savings{margin-top:auto;border:1px solid var(--line);border-radius:var(--r);padding:15px 16px;background:linear-gradient(180deg,var(--success-w),transparent),var(--bg2)}
 html[data-theme="light"] .side-savings{border-color:transparent;box-shadow:var(--lift)}
 .ss-cap{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--fg3);margin-bottom:8px}
@@ -813,6 +826,14 @@ html[data-theme="light"] .rec-view{border-color:transparent}
 <!-- Ask (agent) view: full-screen AI console -->
 <div id="view-agent" style="display:none">
   <div class="agent-screen">
+    <div class="agent-topbar">
+      <div class="at-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.9L20 11l-6.1 2.1L12 19l-1.9-5.9L4 11l6.1-2.1z"/></svg></div>
+      <div>
+        <div class="at-t">AI Analyst <span class="at-live">Live</span></div>
+        <div class="at-s">Reads your connected cost data and proposes changes. It never executes on its own.</div>
+      </div>
+      <button class="at-back" id="agent-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>Back to dashboard</button>
+    </div>
     <div class="agent-stream" id="agent-stream">
       <div class="agent-log" id="agent-log">
         <div class="agent-empty" id="agent-empty">
@@ -1671,10 +1692,21 @@ function initAgent(){
     const t=document.getElementById(b.dataset.scroll); if(t){document.documentElement.style.scrollBehavior='smooth';t.scrollIntoView({block:'start'});}
   }));
   // Nav items that ask the agent a scoped question (Commitments, Reports, etc.).
-  document.querySelectorAll('.nav-agent-link[data-prompt]').forEach(b=>b.addEventListener('click',()=>{
-    if(typeof switchView==='function') switchView('agent');
-    if(typeof window.askAgent==='function') window.askAgent(b.dataset.prompt);
-  }));
+  // Mark them so it is clear BEFORE clicking that they open the AI Analyst.
+  document.querySelectorAll('.nav-agent-link[data-prompt]').forEach(b=>{
+    b.title='Opens the AI Analyst';
+    if(!b.querySelector('.nav-ai')){
+      const s=document.createElement('span'); s.className='nav-ai';
+      s.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.9L20 11l-6.1 2.1L12 19l-1.9-5.9L4 11l6.1-2.1z"/></svg>';
+      b.appendChild(s);
+    }
+    b.addEventListener('click',()=>{
+      if(typeof switchView==='function') switchView('agent');
+      if(typeof window.askAgent==='function') window.askAgent(b.dataset.prompt);
+    });
+  });
+  // Back button in the AI Analyst header returns to the dashboard.
+  const aback=document.getElementById('agent-back'); if(aback) aback.addEventListener('click',()=>{ if(typeof switchView==='function') switchView('dashboard'); });
   // Spend-over-time group-by toggle re-renders the chart in place.
   const sg=document.getElementById('sot-group'); if(sg) sg.addEventListener('change',()=>{ if(_sotData) renderSpendOverTime(_sotData,_sotProvs); const sub=document.getElementById('sot-sub'); if(sub) sub.textContent=(sg.value==='total'?'Daily total across all clouds':'Daily, grouped by provider'); });
   // Insights "view all" + notifications open the agent.
