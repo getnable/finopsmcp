@@ -1104,7 +1104,7 @@ function renderDigest(w){
   if(!w.items||!w.items.length){el.style.display='none';return;}
   el.style.display='';
   const since=document.getElementById('digest-since'); if(since) since.textContent='Since '+(w.since||'last visit');
-  items.innerHTML=w.items.map((it,i)=>`<button class="dg ${it.kind||'good'}" data-i="${i}"><span class="dgd"></span>${it.text.replace(/`([^`]+)`/g,'<code>$1</code>')}</button>`).join('');
+  items.innerHTML=w.items.map((it,i)=>`<button class="dg ${it.kind||'good'}" data-i="${i}"><span class="dgd"></span>${esc(it.text).replace(/`([^`]+)`/g,'<code>$1</code>')}</button>`).join('');
   items.querySelectorAll('.dg').forEach(b=>b.addEventListener('click',()=>{
     const it=w.items[+b.dataset.i]; if(!it) return;
     if(typeof switchView==='function')switchView('agent');
