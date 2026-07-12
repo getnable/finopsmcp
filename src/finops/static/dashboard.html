@@ -400,6 +400,40 @@ html[data-theme="light"] .user-chip{border-color:transparent;background:var(--bg
 .uc-role{font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--accent)}
 .uc-chev{width:15px;height:15px;color:var(--fg3)}
 
+/* Executive KPI band (tier-1, the board-slide row) */
+.kpi-band{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:22px;box-shadow:var(--lift)}
+html[data-theme="light"] .kpi-band{border-color:transparent;background:var(--bg2)}
+@media(max-width:1080px){.kpi-band{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:560px){.kpi-band{grid-template-columns:1fr 1fr}}
+.kpi{background:var(--bg1);padding:16px 18px}
+.kpi-l{font-size:11.5px;color:var(--fg3);font-weight:500;letter-spacing:.01em;margin-bottom:9px}
+.kpi-v{font-family:var(--mono);font-size:23px;font-weight:600;letter-spacing:-.03em;color:var(--fg);line-height:1;font-variant-numeric:tabular-nums}
+.kpi-f{display:flex;align-items:baseline;gap:8px;margin-top:8px}
+.kpi-d{font-family:var(--mono);font-size:11.5px;font-weight:600}
+.kpi-d.good{color:var(--success)}.kpi-d.bad{color:var(--alert)}.kpi-d.flat{color:var(--fg3)}
+.kpi-s{font-size:11px;color:var(--fg3)}
+
+/* AI efficiency panel */
+.aieff{margin-bottom:22px;background:linear-gradient(180deg,var(--accent-w),transparent),var(--bg1)}
+.aieff-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.aieff-pct{display:flex;align-items:baseline;gap:8px}
+.aieff-pct b{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--accent);letter-spacing:-.02em}
+.aieff-pct span{font-size:12.5px;color:var(--fg3)}
+.aieff-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px}
+@media(max-width:760px){.aieff-grid{grid-template-columns:1fr 1fr}}
+.aeff{background:var(--bg2);border:1px solid var(--line);border-radius:11px;padding:14px 16px}
+html[data-theme="light"] .aeff{border-color:transparent}
+.aeff.warn{border-color:var(--warn-b);background:linear-gradient(180deg,var(--warn-w),transparent),var(--bg2)}
+.aeff-l{font-size:11.5px;color:var(--fg3);margin-bottom:8px}
+.aeff-v{font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:-.02em;color:var(--fg);line-height:1}
+.aeff-d{font-family:var(--mono);font-size:11px;font-weight:600;margin-top:7px}
+.aeff-d.good{color:var(--success)}.aeff-d.bad{color:var(--alert)}.aeff-d.warn{color:var(--warn)}.aeff-d.flat{color:var(--fg3)}
+.aieff-callout{display:flex;gap:11px;align-items:flex-start;padding:13px 15px;border-radius:11px;background:var(--warn-w);border:1px solid var(--warn-b)}
+.aieff-callout svg{width:17px;height:17px;color:var(--warn);flex-shrink:0;margin-top:1px}
+.aieff-callout .c-t{font-size:13px;color:var(--fg);line-height:1.5}
+.aieff-callout .c-a{color:var(--accent);font-weight:600;cursor:pointer;white-space:nowrap;margin-left:auto;font-size:12.5px;background:none;border:none;font-family:inherit}
+.aieff-callout .c-a:hover{text-decoration:underline}
+
 /* Headline stat cards */
 .stats4{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-bottom:22px}
 @media(max-width:1080px){.stats4{grid-template-columns:repeat(2,1fr)}}
@@ -598,6 +632,9 @@ html[data-theme="light"] .rec-view{border-color:transparent}
     </div>
   </div>
 
+  <!-- Executive KPI band (tier-1) -->
+  <div class="kpi-band" id="kpi-band"></div>
+
   <!-- Headline stat cards with sparklines -->
   <div class="stats4">
     <div class="stat">
@@ -649,6 +686,20 @@ html[data-theme="light"] .rec-view{border-color:transparent}
       <div class="ins-list" id="ai-insights"><div style="color:var(--fg3);font-size:13px">Analyzing&hellip;</div></div>
       <button class="ins-all" id="ins-all">View all recommendations <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
     </aside>
+  </div>
+
+  <!-- AI efficiency (the wedge) -->
+  <div class="panel aieff" id="panel-aieff">
+    <div class="aieff-hd">
+      <div><div class="panel-t">AI efficiency</div><div class="panel-s">Token, GPU and model economics, the part no cloud bill shows you.</div></div>
+      <div class="aieff-pct"><b id="aieff-pct">&mdash;</b><span id="aieff-sub">of total spend is AI</span></div>
+    </div>
+    <div class="aieff-grid" id="aieff-grid"></div>
+    <div class="aieff-callout" id="aieff-callout" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 20h20L12 2zM12 9v5M12 17.5v.5"/></svg>
+      <span class="c-t" id="aieff-callout-t"></span>
+      <button class="c-a" id="aieff-fix">Fix this →</button>
+    </div>
   </div>
 
   <!-- Service / accounts / region -->
@@ -941,6 +992,10 @@ function render(d){
   const sb=document.getElementById('svc-badge'); if(sb) sb.textContent=(selectedProvider==='all'?'ALL CLOUDS':selectedProvider.toUpperCase());
   ['sk-svc','sk-trend','loading-hint'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
 
+  // Executive KPI band + AI efficiency
+  renderExecKpis(d.exec_kpis||[]);
+  renderAiEfficiency(d.ai_efficiency||{});
+
   // Panels
   renderSvcChart(d.top_services||[]);
   renderSpendOverTime(d.daily_series||[], d.series_providers||provs);
@@ -957,6 +1012,43 @@ function render(d){
   // Sidebar total savings
   const sv=document.getElementById('ss-val'); if(sv) sv.textContent=fmt(d.opportunities_total_saving||0);
   const svd=document.getElementById('ss-delta'); if(svd) svd.textContent='↑ 32%';
+}
+
+// ── Executive KPI band ────────────────────────────────────────────────────────
+function renderExecKpis(kpis){
+  const el=document.getElementById('kpi-band'); if(!el) return;
+  if(!kpis.length){el.style.display='none';return;}
+  el.style.display='';
+  el.innerHTML=kpis.map(k=>{
+    const dv=k.delta_pct||0;
+    const good=(dv<0)===!!k.good_down; // down-is-good vs up-is-good
+    const cls=Math.abs(dv)<0.05?'flat':(good?'good':'bad');
+    const arr=Math.abs(dv)<0.05?'':(dv>0?'↑':'↓');
+    return `<div class="kpi">
+      <div class="kpi-l">${esc(k.label)}</div>
+      <div class="kpi-v">${esc(k.value)}</div>
+      <div class="kpi-f"><span class="kpi-d ${cls}">${arr} ${Math.abs(dv).toFixed(1)}%</span><span class="kpi-s">${esc(k.sub||'')}</span></div>
+    </div>`;
+  }).join('');
+}
+
+// ── AI efficiency panel ───────────────────────────────────────────────────────
+function renderAiEfficiency(ai){
+  const grid=document.getElementById('aieff-grid');
+  const panel=document.getElementById('panel-aieff');
+  if(!ai||!ai.metrics||!ai.metrics.length){ if(panel) panel.style.display='none'; return; }
+  if(panel) panel.style.display='';
+  const pct=document.getElementById('aieff-pct'); if(pct) pct.textContent=(ai.ai_pct_of_spend||0)+'%';
+  if(grid) grid.innerHTML=ai.metrics.map(m=>{
+    const dv=m.delta_pct||0; const good=(dv<0)===!!m.good_down;
+    const cls=m.warn?'warn':(Math.abs(dv)<0.05?'flat':(good?'good':'bad'));
+    const arr=Math.abs(dv)<0.05?'':(dv>0?'↑':'↓');
+    return `<div class="aeff${m.warn?' warn':''}"><div class="aeff-l">${esc(m.label)}</div><div class="aeff-v">${esc(m.value)}</div><div class="aeff-d ${cls}">${arr?arr+' '+Math.abs(dv).toFixed(1)+'%':(m.warn?'needs attention':'steady')}</div></div>`;
+  }).join('');
+  const co=document.getElementById('aieff-callout'), cot=document.getElementById('aieff-callout-t');
+  if(co&&cot){ if(ai.callout){cot.textContent=ai.callout;co.style.display='';} else co.style.display='none'; }
+  const fix=document.getElementById('aieff-fix');
+  if(fix) fix.onclick=()=>{ if(typeof switchView==='function')switchView('agent'); if(typeof window.askAgent==='function')window.askAgent('Show me how to cut our AI spend: prompt caching, GPU right-sizing and model routing, with the monthly savings for each.'); };
 }
 
 // ── User / RBAC chip ──────────────────────────────────────────────────────────

@@ -715,10 +715,33 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
         {"kind": "info",  "title": "Forecast alert",     "body": f"{provs[0].upper() if provs else 'AWS'} forecast tracking above run rate"},
     ]
 
+    # Executive KPI band (tier-1): unit economics + posture, the board-slide row.
+    exec_kpis = [
+        {"label": "Cost per customer", "value": "$6.98", "delta_pct": -8.0, "good_down": True, "sub": "1,840 active customers"},
+        {"label": "Infra % of revenue", "value": "7.8%", "delta_pct": -1.2, "good_down": True, "sub": "$164K MRR"},
+        {"label": "Effective savings rate", "value": "22%", "delta_pct": 3.0, "good_down": False, "sub": "vs on-demand list"},
+        {"label": "Commitment coverage", "value": "68%", "delta_pct": 5.0, "good_down": False, "sub": "target 80%"},
+        {"label": "Cost per 1M tokens", "value": "$3.10", "delta_pct": -14.0, "good_down": True, "sub": "blended across models"},
+    ]
+    # AI efficiency panel: the wedge no incumbent shows.
+    ai_efficiency = {
+        "ai_pct_of_spend": 22.0,
+        "ai_spend": round(month_total * 0.22, 2),
+        "metrics": [
+            {"label": "Cost / 1M tokens", "value": "$3.10", "delta_pct": -14.0, "good_down": True},
+            {"label": "Cost / AI-authored PR", "value": "$4.20", "delta_pct": 6.0, "good_down": True},
+            {"label": "GPU utilization", "value": "44%", "delta_pct": 2.0, "good_down": False, "warn": True},
+            {"label": "Cache hit rate", "value": "0%", "delta_pct": 0.0, "good_down": False, "warn": True},
+        ],
+        "callout": "GPU utilization is 44% and prompt caching is off. About $740/mo is recoverable by right-sizing the GPU pool and turning on caching.",
+    }
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "account_id": _ACCOUNT_ID,
         "user": {"name": "Chandan B.", "role": "Admin", "email": "chandan@acme.io"},
+        "exec_kpis": exec_kpis,
+        "ai_efficiency": ai_efficiency,
         "total_spend_mtd": month_total,
         "total_spend_window": window_total_spend,
         "total_spend_last_month": last_month,
