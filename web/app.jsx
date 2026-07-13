@@ -197,9 +197,9 @@ function Hero(){
       <div className="wrap">
         <div className="hero-c">
           <h1 className="display">
-            Finds the waste in your cloud and AI bill. <span className="h1-ask">Ships the fix as a PR.</span>
+            The cost brain <span className="h1-ask">for the AI era.</span>
           </h1>
-          <p className="hero-sub">Local-first FinOps for the AI era: ask nable in Claude or Cursor, and your data never leaves your machine.</p>
+          <p className="hero-sub">Cloud and AI cost management, where you code. Find the waste in Claude or Cursor, ship the fix as a PR, all on your machine.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
           </div>
@@ -540,22 +540,9 @@ function AiCost(){
           <li><span className="ee-plus">+</span><span>Flags <b>frontier-model calls</b> a cheaper model handles the same</span></li>
           <li><span className="ee-plus">+</span><span>Separates <b>what you can bank today</b> from what needs a closer look</span></li>
         </ul>
-        <div className="aicost-panel aicost-panel-center">
-          <div className="aicost-tag">Real numbers · real dollars · first scan</div>
-          <div className="aicost-stat">
-            <div className="aicost-big">89<span className="aicost-unit">%</span></div>
-            <p>of an early user's Bedrock bill was input tokens, billed at full price with <b>no caching</b></p>
-          </div>
-          <div className="aicost-rule"></div>
-          <div className="aicost-stat">
-            <div className="aicost-big accent">$10.7k<span className="aicost-unit">/yr</span></div>
-            <p><b>= $896/mo</b> in prompt-caching savings, about a quarter of the AI bill, on the first scan</p>
-          </div>
-          <div className="aicost-foot">From an early user's first scan. Real numbers, name withheld for now.</div>
-          <div className="aicost-cta">
-            <span className="aicost-cta-l">This is a small account. See your own number, free:</span>
-            <code className="aicost-cmd" onClick={copy}>uvx nable</code>
-          </div>
+        <div className="aicost-cta aicost-panel-center" style={{justifyContent:"center"}}>
+          <span className="aicost-cta-l">See your own AI bill, split by model, free:</span>
+          <code className="aicost-cmd" onClick={copy}>uvx nable</code>
         </div>
       </div>
     </section>
