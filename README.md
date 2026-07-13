@@ -1,5 +1,7 @@
 # nable
 
+*FinOps MCP server for Claude and Cursor, across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.*
+
 **The cost brain your AI agents check before they spend.** Ask your whole cloud and AI bill anything inside Claude or Cursor, get genuine savings priced on your real rates, and the fix as a pull request you approve. One tool across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.
 
 [![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
