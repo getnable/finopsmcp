@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LicenseRef-Elastic-2.0
+# This file is licensed under the Elastic License 2.0 (see LICENSE.enterprise), NOT Apache-2.0.
 """Managed-AI credit ledger.
 
 Meters what an account spends on *managed AI* (the model calls nable makes on the

@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/finops-mcp?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/finops-mcp)
 [![Tests](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml/badge.svg)](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml)
-[![License: Elastic-2.0](https://img.shields.io/badge/license-Elastic--2.0-444)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-4db8d4)](LICENSE)
 
 nable is FinOps that lives inside your AI. Ask Claude or Cursor about your cloud, SaaS, and AI spend and it answers with real numbers, priced on your actual rates, not list price. It finds the savings genuinely worth taking, proposes each fix as a pull request you approve, and checks the next bill to prove it worked. As your agents start spending real money, nable is the cost brain they check before they act.
 
@@ -327,6 +327,12 @@ The **local agent** is open-source and free: the MCP server, every connector, co
 A **hosted platform** is available for teams who would rather have it run for them: a managed, single-tenant workspace with dashboards anyone can use without a terminal, SSO and roles, scheduled reports, and a managed AI agent. Single-tenant by design, your bill is never pooled with anyone else's.
 
 See [getnable.com/pricing](https://getnable.com/pricing) for current plans: Community is free, Enterprise is custom.
+
+### License
+
+Everything a local `uvx nable` user runs is **Apache-2.0**: the MCP server and all tools, every connector, FOCUS normalization, anomaly detection, rightsizing, the cost-to-code blame engine, the propose-only PR loop, and the learning loop. Fork it, build on it.
+
+The hosted control plane is licensed under the **Elastic License 2.0** (see [`LICENSE.enterprise`](LICENSE.enterprise)) and may not be offered as a competing hosted service: `src/finops/server_web.py`, `src/finops/auth/`, `src/finops/billing/`. Those files carry an `SPDX-License-Identifier: LicenseRef-Elastic-2.0` header; see [`NOTICE`](NOTICE) for the full boundary.
 
 ---
 
