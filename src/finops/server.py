@@ -1935,6 +1935,7 @@ from .tools.recommendations import (  # noqa: E402,F401
     get_savings_ledger,
     mark_recommendation_acted_on,
     remember_cost_context,
+    suggest_cost_policies,
     verify_savings,
 )
 from .tools.tickets import (  # noqa: E402,F401
