@@ -587,6 +587,13 @@ async def generate_account_dashboard(
         expire_stale()
         savings_summary = get_summary()
         opportunities = list_recommendations(status="open", limit=20)
+        # Honor the learned operating model: don't re-surface findings a human
+        # already marked intentional (DR standbys, SLA-critical boxes, etc.).
+        try:
+            from ..recommendations.context_memory import partition
+            opportunities, _ctx_suppressed = partition(opportunities)
+        except Exception:
+            pass
         ledger_raw = list_recommendations(status="acted_on", limit=10)
         ledger_raw += list_recommendations(status="verified", limit=10)
         savings_ledger = sorted(

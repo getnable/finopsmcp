@@ -27,13 +27,29 @@ def rescore(
     savings_key: str = "estimated_monthly_savings_usd",
     source_key: str = "source",
     bucket_key: str = "environment_bucket",
+    use_context: bool = True,
 ) -> dict[str, Any]:
     """Reorder + annotate + suppress recommendations for this customer. Propose-only.
 
-    Returns {ranked: [...], suppressed_for_you: [...], suppressed_count: int}. Input
-    recs are never mutated (each output is a copy with a `learned` block added);
-    statuses are preserved exactly.
+    Returns {ranked, suppressed_for_you, suppressed_count, suppressed_by_context}.
+    Input recs are never mutated (each output is a copy with a `learned` block
+    added); statuses are preserved exactly.
+
+    `suppressed_by_context` holds findings a human already marked intentional (the
+    learned operating model). They are pulled out first and never ranked, so nable
+    stops re-flagging what it was told is fine. Set use_context=False to skip it.
     """
+    suppressed_by_context: list[dict] = []
+    if use_context:
+        # Lazy relative import keeps this module's import surface pure (the propose-only
+        # guarantee test inspects rescorer's own imports); partition only reads a local
+        # table and touches no cloud.
+        try:
+            from ..context_memory import partition
+            recs, suppressed_by_context = partition(recs)
+        except Exception:
+            suppressed_by_context = []
+
     ranked_candidates: list[tuple[float, int, dict]] = []
     suppressed: list[dict] = []
 
@@ -75,4 +91,5 @@ def rescore(
         "ranked": ranked,
         "suppressed_for_you": suppressed,
         "suppressed_count": len(suppressed),
+        "suppressed_by_context": suppressed_by_context,
     }
