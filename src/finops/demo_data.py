@@ -521,8 +521,46 @@ _PROVIDER_SERVICES: dict[str, list[dict[str, Any]]] = {
         {"service": "Cloud Storage",      "amount": 250.00,  "resources": 18, "delta_pct": -2.2},
         {"service": "Cloud Networking",   "amount": 140.00,  "resources": 0,  "delta_pct": 7.1},
     ],
+    # AI / LLM token spend, genuinely separate from cloud (the AI-native wedge).
+    "openai": [
+        {"service": "GPT-4o",             "amount": 3100.00, "resources": 0,  "delta_pct": 41.2},
+        {"service": "o3",                 "amount": 1900.00, "resources": 0,  "delta_pct": 88.0},
+        {"service": "GPT-4o mini",        "amount": 420.00,  "resources": 0,  "delta_pct": 12.5},
+        {"service": "Embeddings",         "amount": 180.00,  "resources": 0,  "delta_pct": 6.0},
+    ],
+    "anthropic": [
+        {"service": "Claude Opus",        "amount": 2400.00, "resources": 0,  "delta_pct": 33.4},
+        {"service": "Claude Sonnet",      "amount": 1050.00, "resources": 0,  "delta_pct": 9.1},
+        {"service": "Claude Haiku",       "amount": 290.00,  "resources": 0,  "delta_pct": 4.0},
+    ],
+    # Kubernetes, read from kubeconfig (allocation view; namespaces as lines).
+    "kubernetes": [
+        {"service": "ml-inference (ns)",  "amount": 1600.00, "resources": 34, "delta_pct": 27.3},
+        {"service": "checkout (ns)",      "amount": 940.00,  "resources": 18, "delta_pct": 6.2},
+        {"service": "search (ns)",        "amount": 610.00,  "resources": 12, "delta_pct": 3.8},
+        {"service": "platform (ns)",      "amount": 380.00,  "resources": 9,  "delta_pct": 1.1},
+    ],
+    # SaaS + data platforms.
+    "datadog": [
+        {"service": "Infrastructure",     "amount": 1240.00, "resources": 0,  "delta_pct": 14.2},
+        {"service": "Log Management",     "amount": 890.00,  "resources": 0,  "delta_pct": 22.7},
+        {"service": "APM & Tracing",      "amount": 560.00,  "resources": 0,  "delta_pct": 8.0},
+    ],
+    "snowflake": [
+        {"service": "Compute (warehouses)","amount": 1850.00,"resources": 6,  "delta_pct": 19.5},
+        {"service": "Storage",            "amount": 340.00,  "resources": 0,  "delta_pct": 3.2},
+    ],
+    "databricks": [
+        {"service": "Jobs Compute",       "amount": 1420.00, "resources": 0,  "delta_pct": 11.8},
+        {"service": "SQL Warehouses",     "amount": 680.00,  "resources": 0,  "delta_pct": 5.5},
+    ],
+    "mongodb": [
+        {"service": "Atlas Clusters",     "amount": 920.00,  "resources": 4,  "delta_pct": 7.4},
+        {"service": "Atlas Search",       "amount": 210.00,  "resources": 0,  "delta_pct": 2.9},
+    ],
 }
-_DEMO_PROVIDERS = ["aws", "azure", "gcp"]
+_DEMO_PROVIDERS = ["aws", "azure", "gcp", "openai", "anthropic",
+                   "kubernetes", "datadog", "snowflake", "databricks", "mongodb"]
 
 # Per-provider open opportunities, priced on the customer's real rate.
 _PROVIDER_OPPS: dict[str, list[dict[str, Any]]] = {
@@ -548,6 +586,29 @@ _PROVIDER_OPPS: dict[str, list[dict[str, Any]]] = {
          "monthly_saving": 132.00, "resource": "cud-compute-n2", "provider": "gcp"},
         {"description": "Set a 90-day lifecycle rule on 1.4 TB of cold Cloud Storage.",
          "monthly_saving": 44.00, "resource": "gs://acme-analytics-archive", "provider": "gcp"},
+    ],
+    "openai": [
+        {"description": "Cache the shared system prompt: 71% of GPT-4o input is repeated context, "
+                        "billed at full price. Prompt caching recovers most of it.",
+         "monthly_saving": 640.00, "resource": "prompt-cache-gpt4o", "provider": "openai"},
+        {"description": "Route the classifier calls from o3 to GPT-4o mini. Same output on a "
+                        "sampled eval, 1/20th the price.",
+         "monthly_saving": 880.00, "resource": "model-route-classifier", "provider": "openai"},
+    ],
+    "anthropic": [
+        {"description": "Move the summarization workload from Claude Opus to Sonnet. Quality holds "
+                        "on your eval set at a fraction of the cost.",
+         "monthly_saving": 610.00, "resource": "model-route-summarize", "provider": "anthropic"},
+    ],
+    "kubernetes": [
+        {"description": "Right-size the ml-inference namespace: requests are 3x actual usage across "
+                        "12 pods. Trim CPU/memory requests to the p95.",
+         "monthly_saving": 470.00, "resource": "ns/ml-inference", "provider": "kubernetes"},
+    ],
+    "snowflake": [
+        {"description": "Auto-suspend two idle warehouses after 60s (currently 10 min). They sit "
+                        "warm most of the day.",
+         "monthly_saving": 305.00, "resource": "wh/analytics_xl", "provider": "snowflake"},
     ],
 }
 

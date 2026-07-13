@@ -71,7 +71,9 @@ def test_dashboard_provider_and_range_vary():
     aws = demo_data.dashboard_data(days=30, provider="aws")
     allc = demo_data.dashboard_data(days=30, provider="all")
     assert allc["total_spend_mtd"] > aws["total_spend_mtd"] > 0
-    assert set(demo_data.dashboard_data()["connected_providers"]) == {"aws", "azure", "gcp"}
+    conn = set(demo_data.dashboard_data()["connected_providers"])
+    assert {"aws", "azure", "gcp", "openai", "anthropic"} <= conn  # cloud + AI, richly wired
+    assert len(conn) >= 10
     wide = demo_data.dashboard_data(days=90, provider="aws")
     narrow = demo_data.dashboard_data(days=7, provider="aws")
     assert wide["active_services"][0]["amount"] > narrow["active_services"][0]["amount"]

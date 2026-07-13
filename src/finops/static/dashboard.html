@@ -954,7 +954,7 @@ function initDate(){
 }
 
 // ── Global top-bar controls: provider + date range ───────────────────────────
-const PROV_LABELS={aws:'AWS',azure:'Azure',gcp:'GCP',datadog:'Datadog',snowflake:'Snowflake'};
+const PROV_LABELS={aws:'AWS',azure:'Azure',gcp:'GCP',openai:'OpenAI',anthropic:'Anthropic',kubernetes:'Kubernetes',datadog:'Datadog',snowflake:'Snowflake',databricks:'Databricks',mongodb:'MongoDB'};
 function syncRangeUI(){
   document.querySelectorAll('#range-seg .seg-btn').forEach(b=>
     b.classList.toggle('active',parseInt(b.dataset.days,10)===selectedDays));
@@ -1285,7 +1285,7 @@ function renderSvcChart(svcs){
 }
 
 // ── Spend over time (stacked multi-provider area) ─────────────────────────────
-const PROV_COLOR={aws:'#4db8d4',azure:'#6f8ff5',gcp:'#3cba7a',other:'#8891a0',datadog:'#8a63d2',snowflake:'#4db8d4'};
+const PROV_COLOR={aws:'#4db8d4',azure:'#6f8ff5',gcp:'#3cba7a',openai:'#14b8a6',anthropic:'#d4915b',kubernetes:'#8b7ff0',datadog:'#8a63d2',snowflake:'#56a9e0',databricks:'#e0645a',mongodb:'#a7c957',other:'#8891a0'};
 let _sotData=null,_sotProvs=null;
 function renderSpendOverTime(daily,provs){
   _sotData=daily; _sotProvs=provs;
@@ -1302,7 +1302,7 @@ function renderSpendOverTime(daily,provs){
     datasets=provs.map(p=>{
       const col=PROV_COLOR[p]||'#8891a0';
       totals[p]=daily.reduce((a,r)=>a+(r[p]||0),0);
-      return {label:p.toUpperCase(),data:daily.map(r=>r[p]||0),borderColor:col,
+      return {label:PROV_LABELS[p]||p.toUpperCase(),data:daily.map(r=>r[p]||0),borderColor:col,
         backgroundColor:mkFill(col),borderWidth:2,pointRadius:0,tension:.35,fill:true,stack:'s'};
     });
   }
@@ -1319,7 +1319,7 @@ function renderSpendOverTime(daily,provs){
   const leg=document.getElementById('sot-legend');
   if(leg){ leg.innerHTML=(group==='total')
     ? '<div class="sot-leg"><span class="dot" style="background:#4db8d4"></span>Total <b>'+fmt(datasets[0].data.reduce((a,b)=>a+b,0))+'</b></div>'
-    : provs.map(p=>'<div class="sot-leg"><span class="dot" style="background:'+(PROV_COLOR[p]||'#8891a0')+'"></span>'+p.toUpperCase()+' <b>'+fmt(totals[p]||0)+'</b></div>').join(''); }
+    : provs.map(p=>'<div class="sot-leg"><span class="dot" style="background:'+(PROV_COLOR[p]||'#8891a0')+'"></span>'+(PROV_LABELS[p]||p.toUpperCase())+' <b>'+fmt(totals[p]||0)+'</b></div>').join(''); }
   const win=document.getElementById('sot-window'); if(win) win.textContent=selectedDays+'d';
 }
 function hexA(hex,a){const h=hex.replace('#','');const r=parseInt(h.substr(0,2),16),g=parseInt(h.substr(2,2),16),b=parseInt(h.substr(4,2),16);return 'rgba('+r+','+g+','+b+','+a+')';}
