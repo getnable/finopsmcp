@@ -2,6 +2,12 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.174
+
+- **nable now remembers why a finding is intentional.** Tell it once ("that idle box is our DR standby", "spot is fine on batch"), and it stops re-flagging that thing instead of nagging you every cycle. Dismiss a recommendation with a business reason and nable learns it automatically; or teach it directly with `remember_cost_context`. Suppressed findings are never deleted, they move to a `suppressed_by_context` list with your reason, so nothing is hidden without a trail.
+- **Generalize the exception, not just the instance.** A learned rule can be one resource, a resource type ("all NAT gateways"), an environment ("anything in dr"), a finding type ("ignore rightsizing"), or a whole provider, optionally scoped to one account. `get_learned_cost_context` shows the operating model nable has built up for your environment; `forget_cost_context` removes a rule.
+- This is the local learning loop, and it is free. It shapes which proposals surface and never touches a cloud.
+
 ## 0.8.173
 
 - **nable is now open source (Apache-2.0).** The full local product, every MCP tool, connector, the agent team, and the new cost-to-code blame, is Apache-2.0. Read it, fork it, build on it. The hosted control plane is a separate product.
