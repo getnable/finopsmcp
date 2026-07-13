@@ -96,9 +96,6 @@ PRO_FEATURES: set[str] = {
     "scheduled_email_digests",   # email delivery of scheduled reports
     "commitment_recommendations", # RI / SP purchase recommendations with $ amounts + ROI
     "org_reports",               # full org-wide cost rollup across all accounts / OUs
-    "cur_athena_detail",         # line-item CUR data via Athena (per-resource, RI waste, tag breakdown)
-    "azure_detail",              # Azure resource-level cost detail and reservation utilization
-    "business_metrics",          # unit economics: hosting % of MRR, cost per customer, "so what?" analysis
     # ── The pull/push line: free = ask on demand, Pro = it runs for you ───────────
     "alerts",                    # proactive alert policies + scheduled push (set_alert_policy, weekly push)
     "forecasting",               # forward projections: cost / Azure / LLM forecasts

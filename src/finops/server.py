@@ -7118,8 +7118,6 @@ async def get_resource_cost_breakdown_aws(
         - "Which S3 buckets are costing the most this month?"
         - "Break down costs by resource for account 123456789012"
     """
-    if err := require_pro("cur_athena_detail"):
-        return err
 
     sd, ed = _default_dates()
     if start_date:
@@ -7181,8 +7179,6 @@ async def get_ri_waste_detail(
         - "How much are we wasting on unused RIs?"
         - "Show RI waste for this quarter"
     """
-    if err := require_pro("cur_athena_detail"):
-        return err
 
     sd, ed = _default_dates()
     if start_date:
@@ -7239,8 +7235,6 @@ async def get_tag_cost_breakdown_cur(
         - "What is each environment costing us in CUR?"
         - "Break down amortized costs by project tag"
     """
-    if err := require_pro("cur_athena_detail"):
-        return err
 
     sd, ed = _default_dates()
     if start_date:
@@ -7296,8 +7290,6 @@ async def get_savings_plan_showback(
         - "What's the effective discount rate per team from our commitments?"
         - "Which team is getting the most benefit from our reserved instances?"
     """
-    if err := require_pro("cur_athena_detail"):
-        return err
 
     sd, ed = _default_dates()
     if start_date:
@@ -7351,8 +7343,6 @@ async def get_resource_cost_breakdown_azure(
         - "Which Azure resources are most expensive in the production resource group?"
         - "Break down costs by resource across all subscriptions"
     """
-    if err := require_pro("azure_detail"):
-        return err
 
     sd, ed = _default_dates()
     if start_date:
@@ -7412,8 +7402,6 @@ async def get_azure_reservation_utilization(
         - "Which Azure reservations are underutilized?"
         - "Show wasted Azure reserved capacity this quarter"
     """
-    if err := require_pro("azure_detail"):
-        return err
 
     sd, ed = _default_dates()
     if start_date:
@@ -9727,8 +9715,6 @@ async def set_business_metrics(
         - "Update business metrics: ARR $2.4M, 340 paying customers, 8,200 MAU"
         - "Set cash on hand to $2.4M and monthly opex to $210k"
     """
-    if err := require_pro("business_metrics"):
-        return err
 
     # Validation: reject nonsensical values loudly instead of storing them.
     for name, val in (
@@ -9797,8 +9783,6 @@ async def get_business_metrics(history_days: int = 90) -> dict:
         - "What business metrics do we have on file?"
         - "Show MRR and MAU history for the last 6 months"
     """
-    if err := require_pro("business_metrics"):
-        return err
 
     from .connectors.business_metrics import resolve_business_metrics, get_metrics_history
 
@@ -9851,8 +9835,6 @@ async def get_unit_economics(period_days: int = 30) -> dict:
         - "What's our cost per API call?"
         - "Show me our infrastructure unit economics"
     """
-    if err := require_pro("business_metrics"):
-        return err
 
     from .connectors.business_metrics import (
         resolve_business_metrics, compute_unit_economics, compute_runway,
@@ -9940,8 +9922,6 @@ async def explain_cost_change(
         - "What do the cost changes mean for our gross margin?"
         - "Are we scaling efficiently?"
     """
-    if err := require_pro("business_metrics"):
-        return err
 
     from .connectors.business_metrics import (
         get_latest_metrics, get_metrics_history,
@@ -10049,8 +10029,6 @@ async def export_board_summary(period_days: int = 30) -> dict:
         period_days: Reporting period in days (default 30).
 
     """
-    if err := require_pro("business_metrics"):
-        return err
 
     econ = await get_unit_economics(period_days=period_days)
     if econ.get("error"):
