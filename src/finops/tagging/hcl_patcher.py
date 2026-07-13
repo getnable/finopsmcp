@@ -337,6 +337,61 @@ def find_resource_file(tf_dir: str, resource_type: str, resource_name: str) -> s
     return None
 
 
+def _locate_sizing(
+    content: str, resource_type: str, resource_name: str
+) -> tuple[int, str] | None:
+    """Locate the instance-sizing attribute for a resource block in HCL source.
+
+    Returns (line_number_1based, current_value) for the literal sizing attribute
+    (instance_type / instance_class / node_type) of the given resource, or None if
+    the block is absent, has no size-attr mapping, or the value is not a quoted
+    literal (e.g. references a variable or module output).
+    """
+    attr = _INSTANCE_SIZE_ATTR.get(resource_type)
+    if not attr:
+        return None
+    for match in _TF_RESOURCE_SOURCE_RE.finditer(content):
+        if match.group("type") != resource_type or match.group("name") != resource_name:
+            continue
+        open_pos = content.index("{", match.start())
+        close_pos = _find_matching_brace(content, open_pos)
+        if close_pos == -1:
+            continue
+        block = content[match.start():close_pos + 1]
+        pat = re.compile(
+            rf'^(?P<prefix>\s+{re.escape(attr)}\s*=\s*")(?P<val>[^"]+)"',
+            re.MULTILINE,
+        )
+        m = pat.search(block)
+        if not m:
+            continue
+        val_offset = match.start() + m.start("val")
+        line_no = content.count("\n", 0, val_offset) + 1
+        return line_no, m.group("val")
+    return None
+
+
+def find_sizing_attr_line(
+    file_path: str, resource_type: str, resource_name: str
+) -> tuple[int, str] | None:
+    """Return (1-based line number, current value) of a resource's sizing literal,
+    or None if the block or a literal sizing attribute cannot be found."""
+    try:
+        content = Path(file_path).read_text()
+    except OSError:
+        return None
+    return _locate_sizing(content, resource_type, resource_name)
+
+
+def extract_sizing_value(
+    content: str, resource_type: str, resource_name: str
+) -> str | None:
+    """Return the sizing literal for a resource from in-memory HCL content, or None.
+    Used to read the pre-change value from `git show <sha>^:<file>` output."""
+    result = _locate_sizing(content, resource_type, resource_name)
+    return result[1] if result else None
+
+
 def generate_rightsizing_diff(
     file_path: str,
     resource_type: str,
