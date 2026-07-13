@@ -104,14 +104,15 @@ PRO_FEATURES: set[str] = {
     "forecasting",               # forward projections: cost / Azure / LLM forecasts
     "ai_unit_economics",         # cost per PR by model, AI KPIs, the GitHub engineering-attribution report
     "remediation",               # drafting the fix: open rightsizing / terraform-tag PRs
-    "cross_cloud",               # the unified multi-cloud view: compare providers, total spend all sources
     # ── The agent team (watch, act, coordinate with agents) ──────────────────────
     "agent_gate",                # Budget Guard: check_action_policy allow/block/escalate + the guard hook
     "agent_learning",            # the Ledger: mark acted-on, verify savings landed, learned approval profile
-    # Cost queries, anomaly detection, rightsizing findings, and single-provider
-    # views are intentionally FREE: users see the value on demand, then pay for it
-    # to run continuously, act for them, and unify across clouds. Free = read-only,
-    # talk to your bill. The agent team (gate, remediation, learning) is Pro.
+    # Cost queries, anomaly detection, rightsizing findings, and the full
+    # multi-cloud normalized view (compare_providers, total-spend-all-sources) are
+    # intentionally FREE: breadth across every cloud/SaaS/AI provider is the wedge,
+    # not the upsell. Users see the value on demand, then pay for it to run
+    # continuously and act for them. The agent team (gate, remediation, learning)
+    # and the always-on push layer are Pro.
 }
 
 # ── Temporary AI/agent ungate (2026-07-10) ───────────────────────────────────

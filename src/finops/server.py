@@ -1431,8 +1431,6 @@ async def compare_providers(
         - "Compare our SaaS tool spending"
         - "How does AWS compare to Azure and GCP?"
     """
-    if (err := require_pro("cross_cloud")):
-        return err
     sd, ed = _default_dates()
     if start_date:
         sd = date.fromisoformat(start_date)
@@ -1714,8 +1712,6 @@ async def get_total_spend_all_sources(
         end_date: ISO date (YYYY-MM-DD). Defaults to today.
 
     """
-    if (err := require_pro("cross_cloud")):
-        return err
     sd, ed = _default_dates()
     if start_date:
         sd = date.fromisoformat(start_date)

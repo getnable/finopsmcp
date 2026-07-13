@@ -1,8 +1,8 @@
 """The pull/push licensing line.
 
-Free = ask on demand (cost queries, anomalies, rightsizing findings, single-cloud
-views). Pro = it runs for you: proactive alerts + scheduled push, forecasting,
-AI unit economics, drafting the fix, and the unified cross-cloud view.
+Free = ask on demand (cost queries, anomalies, rightsizing findings, and the full
+multi-cloud normalized view across every provider). Pro = it runs for you:
+proactive alerts + scheduled push, forecasting, AI unit economics, drafting the fix.
 
 These tests lock in the gates so the free tier can't silently drift back to
 giving the whole product away, and so the first value moment stays free.
@@ -16,12 +16,10 @@ import finops.demo_data as D
 import finops.license as L
 from finops.license import LicenseStatus, PRO_FEATURES, require_pro
 
-NEW_PRO = ["alerts", "forecasting", "ai_unit_economics", "remediation", "cross_cloud"]
+NEW_PRO = ["alerts", "forecasting", "ai_unit_economics", "remediation"]
 
 # Every tool that must refuse to run on the free tier, and the feature it gates on.
 GATED_TOOLS = {
-    "compare_providers": "cross_cloud",
-    "get_total_spend_all_sources": "cross_cloud",
     "set_alert_policy": "alerts",
     "push_weekly_insight": "alerts",
     "send_weekly_digest_now": "alerts",
@@ -49,6 +47,9 @@ FREE_AHA_TOOLS = [
     "get_rightsizing_recommendations",
     "get_llm_costs",
     "scan_waste_patterns",
+    # Breadth is the wedge, not the upsell: the unified multi-cloud view is free.
+    "compare_providers",
+    "get_total_spend_all_sources",
 ]
 
 
