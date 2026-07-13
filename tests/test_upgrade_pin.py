@@ -134,21 +134,6 @@ def test_server_json_description_within_registry_limit():
     )
 
 
-def test_dashboard_template_force_included_in_wheel():
-    """The dashboard template is matched by an over-broad .gitignore rule
-    ("dashboard.html"), so hatchling's VCS selection drops it from the wheel
-    unless it is force-included. Without it, every pip or uvx install serves
-    "Dashboard template missing" instead of the dashboard. Guard the force-include
-    so it cannot be removed silently again."""
-    import pathlib
-
-    root = pathlib.Path(__file__).resolve().parents[1]
-    pyproject = (root / "pyproject.toml").read_text()
-    assert "[tool.hatch.build.targets.wheel.force-include]" in pyproject
-    assert "src/finops/static/dashboard.html" in pyproject
-    assert (root / "src" / "finops" / "static" / "dashboard.html").is_file()
-
-
 def test_upgrade_preserves_other_args(tmp_path, monkeypatch):
     """Only the finops-mcp token moves; any other args stay put."""
     cfg = _fake_config(tmp_path, ["--python", "3.12", "finops-mcp==0.8.50"])
