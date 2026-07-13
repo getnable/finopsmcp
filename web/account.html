@@ -408,18 +408,18 @@
         <div class="host-choices">
           <button type="button" class="host-card" data-choice="self" id="host-card-self" aria-pressed="false">
             <div class="host-card-head"><span class="host-card-title">Run it yourself</span><span class="host-badge">Free</span></div>
-            <p>Run <code style="font-family:var(--mono);font-size:11px">finops serve</code> on a box you control. Credentials never leave your environment.</p>
+            <p>The MCP server in Claude, Cursor, or Zed, on your own machine. Credentials never leave your environment.</p>
           </button>
           <button type="button" class="host-card" data-choice="hosted" id="host-card-hosted" aria-pressed="false">
             <div class="host-card-head"><span class="host-card-title">Let us host it</span><span class="host-badge">Managed</span></div>
-            <p>We run a single-tenant instance for your team. Your raw bill stays in your connector, never pooled.</p>
+            <p>We run a single-tenant instance for your team, always on, with a dashboard anyone can open in a browser. Your raw bill stays in your connector, never pooled.</p>
           </button>
         </div>
         <div class="inline-error" role="alert" id="host-msg" style="margin-top:6px"></div>
 
         <div class="host-detail" id="host-self-detail" style="display:none">
-          <div class="host-cmd"><code>pip install finops-mcp &amp;&amp; finops serve</code></div>
-          <p>Opens a password-protected dashboard your team reaches by URL. <a href="/docs#quickstart">Setup guide</a></p>
+          <div class="host-cmd"><code>uvx nable</code></div>
+          <p>Runs locally in your AI editor. No separate service to host. <a href="/docs#quickstart">Setup guide</a></p>
         </div>
 
         <div class="host-detail" id="host-managed-detail" style="display:none">
