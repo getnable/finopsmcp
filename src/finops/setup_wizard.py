@@ -2086,7 +2086,14 @@ def _run_credits(parsed) -> None:
     `budget` sets the recurring monthly allowance instead. `show` prints the
     meter the dashboard uses.
     """
-    from .billing import credits as _credits
+    try:
+        from .billing import credits as _credits
+    except ImportError:
+        print(
+            "Managed-AI credits are a hosted/enterprise feature and aren't part of the\n"
+            "open-source nable package. See https://getnable.com."
+        )
+        return
     action = getattr(parsed, "action", "show")
     usd = getattr(parsed, "usd", None)
     if action == "grant":
@@ -2673,7 +2680,16 @@ def main(args: list[str] | None = None) -> None:
             os.environ.setdefault("FINOPS_DASHBOARD_PASSWORD", "off")
             from . import demo_data as _dd
             _dd.DEMO_MODE = True
-        from .server_web import run_server, set_connectors
+        try:
+            from .server_web import run_server, set_connectors
+        except ImportError:
+            print(
+                "The local web dashboard has been removed from the open-source nable package.\n"
+                "It's now a hosted/enterprise feature. The local product is the MCP server that\n"
+                "runs inside your editor (Claude, Cursor, etc.). For a hosted dashboard, see\n"
+                "https://getnable.com."
+            )
+            return
         # Importing the MCP server module hydrates vault/keyring credentials into
         # the environment (load_vault_to_env runs at its import) and exposes the
         # canonical connector set. Without this the serve process ran with an empty

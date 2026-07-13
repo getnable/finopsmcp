@@ -7,7 +7,7 @@ name = "finops-mcp"
 version = "0.8.172"
 description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
 readme = "README.md"
-license = { text = "Apache-2.0 AND LicenseRef-Elastic-2.0" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Chandan Bukkapatnam", email = "chbu0285@colorado.edu" }]
 maintainers = [{ name = "Chandan Bukkapatnam", email = "chbu0285@colorado.edu" }]
 keywords = [
@@ -29,7 +29,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: Apache Software License",
-    "License :: Other/Proprietary License",
     "Environment :: Console",
     "Operating System :: OS Independent",
 ]

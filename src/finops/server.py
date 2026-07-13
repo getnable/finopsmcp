@@ -14157,8 +14157,18 @@ async def start_dashboard_server(
 
     """
     try:
-        from .server_web import start_server_background, _local_ip, set_connectors
-        from . import server_web as _sw
+        try:
+            from .server_web import start_server_background, _local_ip, set_connectors
+            from . import server_web as _sw
+        except ImportError:
+            return {
+                "status": "unavailable",
+                "message": (
+                    "The local web dashboard is a hosted/enterprise feature and is not part of the "
+                    "open-source nable package. The local product is the MCP server you're using right "
+                    "now in your editor. For a hosted dashboard, see https://getnable.com."
+                ),
+            }
         # Inject the MCP server's already-initialized connectors so the
         # dashboard uses the correct vault/keyring credentials.
         set_connectors({**_CLOUD_CONNECTORS, **_SAAS_CONNECTORS})
@@ -14219,7 +14229,14 @@ async def get_tableau_connection_info(port: int = 8080) -> str:
 
     """
     try:
-        from .server_web import _local_ip
+        try:
+            from .server_web import _local_ip
+        except ImportError:
+            return (
+                "Tableau access runs through the local web dashboard, which is a hosted/enterprise "
+                "feature and is not part of the open-source nable package. The local product is the MCP "
+                "server you're using now in your editor. For a hosted dashboard, see https://getnable.com."
+            )
         ip = _local_ip()
         base = f"http://{ip}:{port}"
         return f"""## Connecting Tableau to nable

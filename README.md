@@ -322,7 +322,7 @@ Every finding is classified by how sure we are. A **recommendation** is somethin
 
 ## Open-core
 
-The **local agent** is open-source and free: the MCP server, every connector, cost queries, anomaly detection, rightsizing, AI and LLM spend tracking, the local dashboard, and remediation drafts (the PRs and tickets you approve). Run it on your machine, audit it, fork the connectors.
+The **local agent** is open-source and free: the MCP server, every connector, cost queries, anomaly detection, rightsizing, AI and LLM spend tracking, and remediation drafts (the PRs and tickets you approve). Run it on your machine, audit it, fork the connectors.
 
 A **hosted platform** is available for teams who would rather have it run for them: a managed, single-tenant workspace with dashboards anyone can use without a terminal, SSO and roles, scheduled reports, and a managed AI agent. Single-tenant by design, your bill is never pooled with anyone else's.
 
@@ -330,9 +330,9 @@ See [getnable.com/pricing](https://getnable.com/pricing) for current plans: Comm
 
 ### License
 
-Everything a local `uvx nable` user runs is **Apache-2.0**: the MCP server and all tools, every connector, FOCUS normalization, anomaly detection, rightsizing, the cost-to-code blame engine, the propose-only PR loop, and the learning loop. Fork it, build on it.
+This repository is **Apache-2.0** in full: the MCP server and all tools, every connector, FOCUS normalization, anomaly detection, rightsizing, the cost-to-code blame engine, the propose-only PR loop, and the learning loop. Fork it, build on it.
 
-The hosted control plane is licensed under the **Elastic License 2.0** (see [`LICENSE.enterprise`](LICENSE.enterprise)) and may not be offered as a competing hosted service: `src/finops/server_web.py`, `src/finops/auth/`, `src/finops/billing/`. Those files carry an `SPDX-License-Identifier: LicenseRef-Elastic-2.0` header; see [`NOTICE`](NOTICE) for the full boundary.
+The hosted enterprise layer (the web dashboard, SSO, the control plane, and managed-AI billing) is not part of this repo. It lives in a separate private repository and is offered as the hosted platform above.
 
 ---
 
