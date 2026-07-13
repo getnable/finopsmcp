@@ -50,6 +50,17 @@ def rescore(
         except Exception:
             suppressed_by_context = []
 
+    # Cross-org priors give day-one ranking when the install has no signal of its
+    # own. Loaded once, lazily (keeps this module's import surface pure), and only
+    # applied to COLD sources, where observed act-rate hasn't taken over yet.
+    _prior_for = _segment = None
+    if use_context:  # same guard: skip in the pure-ranking unit path
+        try:
+            from ..priors import prior_for as _prior_for, segment_of
+            _segment = segment_of()
+        except Exception:
+            _prior_for = None
+
     ranked_candidates: list[tuple[float, int, dict]] = []
     suppressed: list[dict] = []
 
@@ -74,6 +85,20 @@ def rescore(
             "original_rank": i,
             "rank_score": round(score, 4),
         }
+
+        # Day-one prior: on a cold source, tilt ranking toward what teams like this
+        # one actually accept, and say so. Fades automatically as the source warms.
+        if _prior_for is not None and s["coverage"] == "COLD":
+            pr = _prior_for(src, _segment)
+            if pr:
+                from ..priors import NEUTRAL_P_ACCEPT
+                score *= pr["p_accept"] / NEUTRAL_P_ACCEPT
+                annotated["learned"]["prior"] = {
+                    "p_accept": pr["p_accept"],
+                    "segment": pr["segment"],
+                    "rationale": pr["rationale"],
+                }
+                annotated["learned"]["rank_score"] = round(score, 4)
         if s["verdict"] == "suppress":
             suppressed.append(annotated)
         else:
