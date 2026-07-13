@@ -2963,8 +2963,8 @@ def _run_license_status() -> None:
 
 def _run_login(email: str = "") -> None:
     """
-    Activate Pro by email, with no license key to copy or remember. Sends a
-    6-digit code to your inbox, verifies it, and stores the license locally so
+    Activate Pro by email, with no license key to copy or remember. Sends an
+    8-digit code to your inbox, verifies it, and stores the license locally so
     the server picks it up automatically.
     Called by: finops login [email]
     """
@@ -3012,7 +3012,7 @@ def _run_login(email: str = "") -> None:
     except Exception as e:  # genuine network / DNS / timeout
         _err(f"Could not reach getnable.com. Check your connection and try again. ({e})")
         return
-    print(f"  ✓  Sent a 6-digit code to {email}. It expires in 10 minutes.\n")
+    print(f"  ✓  Sent an 8-digit code to {email}. It expires in 10 minutes.\n")
 
     # 2) verify the code -> the server returns the license for this email
     code = _prompt("  Enter the code").strip()

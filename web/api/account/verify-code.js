@@ -1,7 +1,7 @@
 /**
  * POST /api/account/verify-code
  *
- * Verifies a 6-digit OTP and returns a session token plus license info.
+ * Verifies an 8-digit OTP and returns a session token plus license info.
  * Uses time-bucketed HMAC (no KV required). Checks both the current and
  * the previous time bucket to handle code entry at the 10-minute boundary.
  *
@@ -55,12 +55,13 @@ function timingSafeEqual(a, b) {
 }
 
 // ── Attempt throttling ────────────────────────────────────────────────────────
-// The OTP is 6 digits and fixed for a ~20 minute window, so unlimited guesses
+// The OTP is 8 digits and fixed for a ~20 minute window, so unlimited guesses
 // would make it brute-forceable. Edge module scope is per-isolate (per PoP,
 // per cold start), so an in-memory cap alone multiplies by the number of
 // isolates an attacker can reach. The real cap therefore lives in Vercel KV
 // (shared, durable); the in-memory map is only a fallback when KV is not
-// configured.
+// configured. 8 digits (90M space) is what keeps brute-force infeasible even
+// in that fallback state: ~90x more windows to expect a hit than 6 digits.
 const attemptMap = new Map();
 const ATTEMPT_WINDOW_S = 600; // matches one OTP bucket
 const ATTEMPT_MAX = 5;
@@ -110,7 +111,7 @@ async function tooManyAttempts(key) {
 // ── OTP verification ──────────────────────────────────────────────────────────
 
 async function verifyOtp(secret, email, code) {
-  if (!code || !/^\d{6}$/.test(code)) return false;
+  if (!code || !/^\d{8}$/.test(code)) return false;
   const now = Date.now();
   // Check current bucket and the previous one to handle boundary edge cases
   const buckets = [
@@ -119,7 +120,8 @@ async function verifyOtp(secret, email, code) {
   ];
   for (const bucket of buckets) {
     const mac = await hmacHex(secret, `otp:${email}:${bucket}`);
-    const expected = (parseInt(mac.slice(0, 8), 16) % 900000 + 100000).toString();
+    // MUST match send-code.js exactly (8-digit derived OTP).
+    const expected = (parseInt(mac.slice(0, 12), 16) % 90000000 + 10000000).toString();
     if (timingSafeEqual(expected, code)) return true;
   }
   return false;
@@ -244,7 +246,7 @@ export default async function handler(req) {
     });
   }
 
-  if (!code || !/^\d{6}$/.test(code)) {
+  if (!code || !/^\d{8}$/.test(code)) {
     return new Response(JSON.stringify({ error: "Invalid code format" }), {
       status: 400,
       headers: { "Content-Type": "application/json", ...CORS_HEADERS },

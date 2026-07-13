@@ -310,12 +310,12 @@
     <div id="state-code" class="auth-card">
       <div class="card-head">
         <h1>Check your email</h1>
-        <p id="code-subtext">We sent a 6-digit code to your email. It expires in 10 minutes.</p>
+        <p id="code-subtext">We sent an 8-digit code to your email. It expires in 10 minutes.</p>
       </div>
       <form id="code-form" novalidate>
         <div class="field-group">
-          <label class="field-label" for="code-input">6-digit code</label>
-          <input class="field-input code-input" type="text" id="code-input" name="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="one-time-code" />
+          <label class="field-label" for="code-input">8-digit code</label>
+          <input class="field-input code-input" type="text" id="code-input" name="code" placeholder="00000000" maxlength="8" inputmode="numeric" autocomplete="one-time-code" />
         </div>
         <div class="inline-error" role="alert" id="code-error"></div>
         <div class="form-action">
@@ -627,7 +627,7 @@
       await apiFetch('/api/account/send-code', { email });
       currentEmail = email;
       document.getElementById('code-subtext').textContent =
-        'We sent a 6-digit code to ' + email + '. It expires in 10 minutes.';
+        'We sent an 8-digit code to ' + email + '. It expires in 10 minutes.';
       showState('code');
       setTimeout(function () { document.getElementById('code-input').focus(); }, 60);
     } catch (err) {
@@ -645,15 +645,15 @@
   codeSubmitBtn.dataset.label = 'Verify';
 
   codeInput.addEventListener('input', function () {
-    this.value = this.value.replace(/\D/g, '').slice(0, 6);
+    this.value = this.value.replace(/\D/g, '').slice(0, 8);
   });
 
   codeForm.addEventListener('submit', async function (e) {
     e.preventDefault();
     clearError('code-error');
     const code = codeInput.value.trim();
-    if (code.length !== 6) {
-      showError('code-error', 'Please enter the 6-digit code from your email.');
+    if (code.length !== 8) {
+      showError('code-error', 'Please enter the 8-digit code from your email.');
       return;
     }
     setLoading('code-submit-btn', true);
