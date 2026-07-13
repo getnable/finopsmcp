@@ -64,9 +64,18 @@ def _func_src(src: str, name: str) -> str | None:
 
 
 def _server_src() -> str:
+    # Tools now live in server.py AND the per-family modules under finops/tools/
+    # (server.py was split up). Concatenate all of them so a tool's body is found
+    # wherever it was extracted to.
     import finops.server
 
-    return pathlib.Path(finops.server.__file__).read_text()
+    server_path = pathlib.Path(finops.server.__file__)
+    src = server_path.read_text()
+    tools_dir = server_path.parent / "tools"
+    for f in sorted(tools_dir.glob("*.py")):
+        if f.name != "__init__.py":
+            src += "\n" + f.read_text()
+    return src
 
 
 def _free(monkeypatch):
