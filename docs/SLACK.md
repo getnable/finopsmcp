@@ -66,7 +66,7 @@ New App** → **From a manifest** → pick your workspace, paste the manifest be
 ```yaml
 display_information:
   name: nable
-  description: Cloud cost intelligence. Ask your bill anything.
+  description: Cloud cost intelligence. Ask nable about your cloud and AI spend.
   background_color: "#0d0f10"
 features:
   bot_user:
