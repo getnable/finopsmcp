@@ -2,6 +2,12 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.175
+
+- **nable proposes standing cost rules from what you keep rejecting.** Dismiss the same class of finding for a business reason a few times ("spot on prod, no") and nable offers one durable rule instead of nagging per finding, with the evidence and a one-call confirm. It has an over-suppression guard: a broad rule (a whole provider or environment) only fires when your rejections span multiple finding types, so a run of one type never becomes "ignore all of AWS." New tool: `suggest_cost_policies`.
+- **Day-one ranking that already knows your kind of environment.** A brand-new install had no history, so it could only rank findings by raw dollars. Now it starts from expert-seeded priors per segment and finding type (AI-native teams kill idle GPUs first, graviton migrations usually land), then those fade as your own accept/reject history takes over. Findings carry a short rationale for why they're ranked where they are.
+- Both are the local learning loop, free. They only shape which proposals surface and never touch a cloud.
+
 ## 0.8.174
 
 - **nable now remembers why a finding is intentional.** Tell it once ("that idle box is our DR standby", "spot is fine on batch"), and it stops re-flagging that thing instead of nagging you every cycle. Dismiss a recommendation with a business reason and nable learns it automatically; or teach it directly with `remember_cost_context`. Suppressed findings are never deleted, they move to a `suppressed_by_context` list with your reason, so nothing is hidden without a trail.
