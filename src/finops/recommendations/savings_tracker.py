@@ -425,6 +425,7 @@ def list_recommendations(
             "provider": r.provider,
             "account_id": r.account_id,
             "resource_id": r.resource_id,
+            "resource_type": r.resource_type,
             "resource_name": r.resource_name,
             "description": r.description,
             "estimated_monthly_savings_usd": r.estimated_monthly_savings_usd,
@@ -440,6 +441,26 @@ def list_recommendations(
             "environment_bucket": getattr(r, "environment_bucket", None),
         })
     return _dedup_rows(result)[:limit]
+
+
+def get_recommendation(rec_id: int) -> dict[str, Any] | None:
+    """Fetch one recommendation by id, or None. Same dict shape as list_recommendations."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        r = conn.execute(
+            select(savings_recommendations).where(savings_recommendations.c.id == rec_id)
+        ).fetchone()
+    if r is None:
+        return None
+    return {
+        "id": r.id, "source": r.source, "provider": r.provider,
+        "account_id": r.account_id, "resource_id": r.resource_id,
+        "resource_type": r.resource_type, "resource_name": r.resource_name,
+        "description": r.description,
+        "estimated_monthly_savings_usd": r.estimated_monthly_savings_usd,
+        "status": r.status,
+        "environment_bucket": getattr(r, "environment_bucket", None),
+    }
 
 
 # ── Verification: check if changes were actually made ────────────────────────

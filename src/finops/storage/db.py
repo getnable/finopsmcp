@@ -392,6 +392,33 @@ savings_recommendations = Table(
     Column("environment_bucket", String(64), nullable=True),
 )
 
+# ── Learned cost context — the operating model nable remembers ────────────────
+# When a human answers "why this is fine" once ("that idle box is our DR standby"),
+# we store the answer as an annotation so nable never re-flags the same thing and
+# can generalize it. Each row is one learned exception. scope says how broadly it
+# applies: 'resource' (this exact resource_id), 'source' (this finding type, e.g.
+# spot recs), 'bucket' (an environment_bucket like dr/nonprod), 'resource_type'
+# (all NAT gateways), or 'provider'. Optional provider/account_id narrow a broad
+# scope to one org boundary. verdict is 'intentional' today (suppress the finding);
+# the column leaves room for future verdicts. Nothing here calls a cloud; it only
+# shapes which proposals surface. Soft-deleted via active=False so forget() keeps
+# the audit trail of what was learned and unlearned.
+context_annotations = Table(
+    "context_annotations", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("scope", String(32), nullable=False),          # resource|source|bucket|resource_type|provider
+    Column("match_value", String(512), nullable=False),   # the value that scope matches on
+    Column("provider", String(64), nullable=True),        # optional extra narrowing
+    Column("account_id", String(128), nullable=True),     # optional extra narrowing
+    Column("verdict", String(32), nullable=False, default="intentional"),
+    Column("reason", Text, nullable=False, default=""),   # the human's "why it's fine"
+    Column("created_by", String(128), nullable=False, default=""),
+    Column("source_rec_id", Integer, nullable=True),      # the finding that prompted it, for provenance
+    Column("created_at", DateTime, nullable=False),
+    Column("active", Boolean, nullable=False, default=True),
+    Index("ix_context_active_scope", "active", "scope"),
+)
+
 # ── Moldable dashboard — pinned views (agent-built cost cards) ────────────────
 # A pinned view stores the SliceSpec that regenerates its data, not the data
 # itself, so each card re-runs live on load. owner is a local identity or

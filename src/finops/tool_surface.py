@@ -150,6 +150,9 @@ _CORE: frozenset[str] = frozenset({
     "take_snapshot_now",
     "unpin_view",
     "verify_savings",
+    "remember_cost_context",
+    "get_learned_cost_context",
+    "forget_cost_context",
     "what_can_nable_do",
     "whoami",
 })
@@ -298,6 +301,7 @@ WRITE_TOOLS: frozenset[str] = frozenset({
     "send_weekly_digest_now", "set_alert_policy", "set_budget",
     "set_business_metrics", "start_dashboard_server", "subscribe_to_report",
     "sync_budgets_from_yaml", "take_snapshot_now", "verify_savings",
+    "remember_cost_context", "forget_cost_context",
 })
 # The subset that removes/revokes something (destructiveHint = true). Additive
 # writes (create/set/send/pin/open-PR) are writes but NOT destructive.

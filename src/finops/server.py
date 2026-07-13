@@ -2858,6 +2858,15 @@ async def list_savings_recommendations(
             if rs["suppressed_count"]:
                 out["suppressed_for_you"] = rs["suppressed_for_you"]
                 out["suppressed_count"] = rs["suppressed_count"]
+            # Context memory: findings a human already marked intentional. Held out of
+            # the ranked list so nable stops re-flagging them; shown separately with why.
+            ctx_suppressed = rs.get("suppressed_by_context") or []
+            if ctx_suppressed:
+                out["suppressed_by_context"] = ctx_suppressed
+                out["suppressed_by_context_count"] = len(ctx_suppressed)
+                out["open_potential_usd"] = round(
+                    sum(r["estimated_monthly_savings_usd"] for r in rs["ranked"]
+                        if r["status"] == "open"), 2)
             if any(s.get("coverage") != "COLD" for s in sig.get("by_source", [])):
                 out["learning_note"] = ("Ranked for you from which recommendation types you act on. "
                                         "Call get_recommendation_learning() for the why.")
@@ -2934,6 +2943,35 @@ async def dismiss_recommendation(recommendation_id: int, reason: str = "") -> di
                 "Recorded as a business reason, so this will not count against this "
                 "recommendation type when nable ranks future proposals for you."
             )
+            # Context memory: a business reason means "this is fine." Remember it so
+            # nable never re-flags this exact resource, and note that the user can
+            # generalize the rule (e.g. to the whole environment) if they want.
+            try:
+                from .recommendations.savings_tracker import get_recommendation
+                from .recommendations import context_memory
+                rec = get_recommendation(recommendation_id)
+                if rec and rec.get("resource_id"):
+                    ann = context_memory.remember(
+                        scope="resource",
+                        match_value=rec["resource_id"],
+                        reason=reason,
+                        provider=rec.get("provider"),
+                        account_id=rec.get("account_id"),
+                        created_by="dismiss",
+                        source_rec_id=recommendation_id,
+                    )
+                    out["context_learned"] = {
+                        "annotation_id": ann["id"],
+                        "scope": "resource",
+                        "match_value": rec["resource_id"],
+                        "message": (
+                            f"nable will stop flagging {rec['resource_id']} for this. "
+                            "To generalize (e.g. every resource in this environment, or "
+                            "all findings of this type), use remember_cost_context."
+                        ),
+                    }
+            except Exception as exc:
+                log.debug("context_memory.remember skipped on dismiss: %s", exc)
         elif not reason:
             out["learning_note"] = (
                 "No reason captured. A short reason helps nable learn what fits your "
@@ -2943,6 +2981,111 @@ async def dismiss_recommendation(recommendation_id: int, reason: str = "") -> di
     return {
         "error": f"Recommendation {recommendation_id} not found or already in a terminal state.",
     }
+
+
+@mcp.tool()
+async def remember_cost_context(
+    scope: str,
+    match_value: str,
+    reason: str,
+    provider: str | None = None,
+    account_id: str | None = None,
+) -> dict:
+    """
+    Teach nable a standing fact about how THIS environment runs, so it stops
+    flagging what you've already decided is fine and can generalize the rule.
+
+    This is nable's memory. Answer once ("that idle box is our DR standby", "spot
+    is never OK on prod"), and nable will not re-surface matching findings. Findings
+    it silences are still shown under `suppressed_by_context` with your reason, never
+    deleted, so nothing is hidden without a trail.
+
+    scope, narrowest to broadest:
+      - "resource"       one exact resource id (match_value = the resource id)
+      - "resource_type"  every resource of a type (e.g. "nat_gateway", "ec2")
+      - "bucket"         an environment bucket (e.g. "dr", "nonprod")
+      - "source"         a finding type (e.g. "rightsizing", "idle", "spot")
+      - "provider"       a whole provider (e.g. "snowflake")
+
+    Narrow a broad scope to one org boundary with provider and/or account_id.
+
+    Args:
+        scope: One of resource | resource_type | bucket | source | provider.
+        match_value: The value that scope matches (a resource id, type, bucket, source, or provider).
+        reason: Why it's intentional, in the user's words ("DR standby, must stay warm").
+        provider: Optional, restrict a broad rule to one provider.
+        account_id: Optional, restrict a broad rule to one account.
+
+    Examples:
+        - "Remember that i-0abc123 is fine, it's our DR standby"  -> scope=resource
+        - "Stop flagging anything in the dr environment"           -> scope=bucket, match_value=dr
+        - "We never want spot recommendations on prod"             -> scope=source, match_value=rightsizing
+    """
+    from .recommendations import context_memory
+    try:
+        ann = context_memory.remember(
+            scope=scope, match_value=match_value, reason=reason,
+            provider=provider, account_id=account_id, created_by="user",
+        )
+    except ValueError as exc:
+        return {"error": str(exc),
+                "valid_scopes": sorted(context_memory.VALID_SCOPES)}
+    return {
+        "status": "remembered",
+        "annotation": ann,
+        "message": (
+            f"nable will stop flagging {scope}={match_value}. "
+            "See it anytime with get_learned_cost_context(); undo with "
+            f"forget_cost_context({ann['id']})."
+        ),
+    }
+
+
+@mcp.tool()
+async def get_learned_cost_context() -> dict:
+    """
+    Show the operating model nable has learned about this environment: every
+    standing exception a human has taught it, newest first, with the reason.
+
+    This is "what does nable know about how we run" in one place: the DR standbys,
+    the SLA-critical boxes, the finding types you've told it to ignore. Each entry
+    is what is being suppressed, at what scope, and why.
+
+    Examples:
+        - "What has nable learned about our environment?"
+        - "Show the cost exceptions we've told nable about"
+    """
+    from .recommendations import context_memory
+    entries = context_memory.list_context()
+    return {
+        "count": len(entries),
+        "learned_context": entries,
+        "message": (
+            "No standing context learned yet. Dismiss a finding with a business "
+            "reason, or use remember_cost_context, to teach nable how you run."
+            if not entries else
+            f"{len(entries)} learned exception(s) shaping which findings nable surfaces."
+        ),
+    }
+
+
+@mcp.tool()
+async def forget_cost_context(annotation_id: int) -> dict:
+    """
+    Remove a learned exception so nable resumes flagging matching findings.
+
+    Args:
+        annotation_id: The id from get_learned_cost_context().
+
+    Examples:
+        - "Forget that context rule 4, we decommissioned that DR box"
+    """
+    from .recommendations import context_memory
+    ok = context_memory.forget(annotation_id)
+    if ok:
+        return {"status": "forgotten",
+                "message": f"Context {annotation_id} removed. nable will flag matching findings again."}
+    return {"error": f"Context {annotation_id} not found or already inactive."}
 
 
 @mcp.tool()
