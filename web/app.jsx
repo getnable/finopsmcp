@@ -192,18 +192,21 @@ function Nav(){
 // accepted for compatibility but no longer switches the arrangement.
 function Hero(){
   return (
-    <header className="hero hero-centered" id="top">
+    <header className="hero hero-split-wrap" id="top">
       <div className="hero-grid" aria-hidden="true"></div>
-      <div className="wrap">
+      <div className="wrap hero-split">
         <div className="hero-c">
           <h1 className="display">
             The cost brain <span className="h1-ask">for the AI era.</span>
           </h1>
-          <p className="hero-sub">Cloud and AI cost management, where you code. Find the waste in Claude or Cursor, ship the fix as a PR, all on your machine.</p>
+          <p className="hero-sub">Ask nable about your cloud and AI bill right in Claude or Cursor. It finds the waste, prices it on your real rates, and ships the fix as a PR you approve.</p>
           <div className="hero-actions">
             <CopyCmd cmd="uvx nable" />
           </div>
           <p className="hero-cmdnote">Read-only · no signup · no cloud keys · free for solo use</p>
+        </div>
+        <div className="hero-demo">
+          <Console interaction="cycling" />
         </div>
       </div>
     </header>
