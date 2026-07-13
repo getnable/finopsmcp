@@ -2,6 +2,13 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.173
+
+- **nable is now open source (Apache-2.0).** The full local product, every MCP tool, connector, the agent team, and the new cost-to-code blame, is Apache-2.0. Read it, fork it, build on it. The hosted control plane is a separate product.
+- **New tool: `find_cost_culprit` (cost-to-code blame).** Point it at a resource and it traces the instance-size change to the git commit and pull request that made it, prices the increase at your effective rate, and drafts a propose-only revert. No cloud-native cost tool can do this, because it reads your repo.
+- **More is free.** The unified multi-cloud view (compare providers, total spend across every source), unit economics and business metrics, line-item CUR detail, and Azure resource detail are no longer gated. Breadth and insight into your own spend are free; you pay for it to run always-on for a team.
+- **The web dashboard moved to the hosted product.** `finops serve` is no longer part of the open tool; the local product is the MCP server in Claude or Cursor.
+
 ## 0.8.172
 
 - **MCP tools now carry annotations.** Every tool advertises a title plus a read-only or destructive hint. nable is read-only and propose-only, so 153 of 191 tools are marked read-only, 38 write, and only 3 destructive. Your editor shows cleaner tool names and knows which tools only read.
