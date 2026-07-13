@@ -109,6 +109,23 @@ async def dismiss_recommendation(recommendation_id: int, reason: str = "") -> di
                             "all findings of this type), use remember_cost_context."
                         ),
                     }
+                    # Policy inference: has this dismissal pushed a whole class over the
+                    # threshold? If so, offer to generalize the exception into one rule.
+                    try:
+                        from ..recommendations.learning.policy_inference import policy_for_rec
+                        cand = policy_for_rec(rec)
+                        if cand:
+                            out["policy_suggestion"] = {
+                                "scope": cand["scope"],
+                                "match_value": cand["match_value"],
+                                "evidence": cand["evidence"],
+                                "confirm": cand["confirm"],
+                                "message": ("You've rejected this whole class repeatedly. "
+                                            "Call suggest_cost_policies() to turn it into one "
+                                            "standing rule instead of dismissing each finding."),
+                            }
+                    except Exception as exc:
+                        log.debug("policy_inference nudge skipped: %s", exc)
             except Exception as exc:
                 log.debug("context_memory.remember skipped on dismiss: %s", exc)
         elif not reason:
@@ -119,6 +136,43 @@ async def dismiss_recommendation(recommendation_id: int, reason: str = "") -> di
         return out
     return {
         "error": f"Recommendation {recommendation_id} not found or already in a terminal state.",
+    }
+
+
+@mcp.tool()
+async def suggest_cost_policies() -> dict:
+    """
+    Propose standing cost rules nable has inferred from what your team keeps rejecting.
+
+    When you dismiss the same CLASS of finding for the same business reason again and
+    again (spot on prod, idle in the dr environment, a whole provider you don't
+    optimize), nable notices and proposes one durable rule instead of nagging every
+    time. Each proposal shows the evidence and the exact remember_cost_context() call
+    that enacts it. Nothing is applied until you confirm one, so you stay in control.
+
+    Examples:
+        - "What cost rules has nable figured out about how we work?"
+        - "Turn my repeated dismissals into standing policies"
+    """
+    from ..recommendations.learning.policy_inference import infer_policies
+    cands = infer_policies()
+    if not cands:
+        return {
+            "candidates": [],
+            "message": (
+                "No standing rules to propose yet. As your team dismisses recurring "
+                "findings with a business reason, nable will spot the pattern and offer "
+                "to generalize it. Confirm any proposal with remember_cost_context()."
+            ),
+        }
+    return {
+        "count": len(cands),
+        "candidates": cands,
+        "message": (
+            f"{len(cands)} inferred cost policy proposal(s) from your dismissal history. "
+            "Confirm one with the remember_cost_context() call in its `confirm` field; "
+            "nable then stops surfacing that whole class."
+        ),
     }
 
 

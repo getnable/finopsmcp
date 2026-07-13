@@ -153,6 +153,7 @@ _CORE: frozenset[str] = frozenset({
     "remember_cost_context",
     "get_learned_cost_context",
     "forget_cost_context",
+    "suggest_cost_policies",
     "what_can_nable_do",
     "whoami",
 })
