@@ -256,9 +256,11 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 /* sections */
 section{padding:80px 0;position:relative}
 section.tight{padding:56px 0}
-section.alt{background:transparent}
-section.alt+section:not(.alt){border-top-color:transparent}
-section:not(.alt)+section.alt{border-top-color:transparent}
+/* Sections flow as soft bands, not hard slabs: a faint top-glow on alt sections
+   and a center-weighted fading hairline between any two stacked sections (reads
+   premium and connective, replaces the inconsistent inline 1px borders). */
+section.alt{background:linear-gradient(180deg, rgba(255,255,255,.016), transparent 240px)}
+section + section::before, .foot-cta::before{content:"";position:absolute;top:0;left:8%;right:8%;height:1px;background:linear-gradient(90deg,transparent,var(--line-2),transparent);opacity:.75;pointer-events:none}
 .section-head{margin-bottom:64px;max-width:780px}
 .section-head .label{font-family:'Geist',system-ui,sans-serif;font-size:11px;font-weight:500;color:var(--accent-dim);letter-spacing:.08em;text-transform:uppercase;display:flex;align-items:center;gap:10px;margin-bottom:18px}
 .section-head .label::before{content:"";width:24px;height:1px;background:var(--accent-dim)}
