@@ -37,7 +37,7 @@ nable proposes; a human decides. It drafts pull requests, opens tickets, and rai
 uvx nable
 
 ## Pricing summary
-- Community: $0, no credit card, no expiry. The full local product: cost queries, anomaly detection, rightsizing, the agent team (Budget Guard, remediation PRs you approve, verified savings), LLM spend tracking, forecasts, commitment recommendations, every connector, and a self-hostable dashboard. Runs on your machine, on your existing Claude or Cursor membership.
+- Community: $0, no credit card, no expiry. The full local product: cost queries, anomaly detection, rightsizing, the agent team (Budget Guard, remediation PRs you approve, verified savings), LLM spend tracking, forecasts, commitment recommendations, and every connector. Runs on your machine, in Claude or Cursor, on your existing membership.
 - Enterprise: custom pricing. Everything in Community, plus managed single-tenant hosting with always-on monitoring and push alerts, team dashboards and Slack without terminals, SSO, RBAC and audit logs, priority support and a custom SLA. Your bill is never pooled with another customer's. Contact us for a demo. nable never charges a percentage of your cloud spend.
 
 ## Contact

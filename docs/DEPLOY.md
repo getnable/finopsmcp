@@ -165,6 +165,6 @@ SSO via OIDC: set the issuer/client env vars and roles map from your IdP.
 - `FINOPS_AIRGAP=1` forbids all non-provider traffic; `NABLE_NO_TELEMETRY=1`
   disables telemetry alone.
 - Cost figures are composed by the AI editor each engineer already uses; for
-  zero model exposure use the local dashboard or CLI. nable adds no new
+  zero model exposure use the CLI. nable adds no new
   model endpoint.
 - Full architecture writeup: https://getnable.com/security

@@ -637,10 +637,7 @@ function Architecture({ version }){
             <h4>Local-first, on your machine</h4>
             <p>Install with one command. Credentials, cache, and queries all stay on your machine, no nable backend in the path.</p>
             <div className="gate-cmd"><CopyCmd cmd="uvx nable" /></div>
-            <a className="host-alt" href="https://github.com/chaandannn/finopsmcp#run-it-on-a-server-docker" target="_blank" rel="noopener noreferrer"
-               onClick={()=>{ if(window.posthog) posthog.capture('cta_clicked',{location:'architecture',cta:'selfhost_docker'}); }}>
-              Prefer a server? Self-host the dashboard with Docker <span className="arr">→</span>
-            </a>
+            <p className="host-note">Lives in Claude, Cursor, or Zed. No separate dashboard to run.</p>
           </div>
           <div className="host-opt">
             <span className="host-tag">Or let us host it</span>
@@ -743,7 +740,7 @@ const PRICE_ROWS = [
   { label: "Users",                                         dev: "Just you",     pro: "Your team",    startup: "Your org",              ent: "Your org" },
   { label: "Cost queries, anomalies, rightsizing, every provider", dev: true,   pro: true,           startup: true,                    ent: true },
   { label: "Remediation PRs, alerts, dashboards, Slack bot", dev: false,         pro: true,           startup: true,                    ent: true },
-  { label: "Runs",                                          dev: "Your machine", pro: "Your machine", startup: "Your machine",          ent: "Hosted or self-host" },
+  { label: "Runs",                                          dev: "Your machine", pro: "Your machine", startup: "Your machine",          ent: "Hosted" },
   { label: "Managed AI",                                    dev: "Your own key", pro: "Your own key", startup: "Your own key",          ent: "Custom" },
   { label: "Hosting + managed AI (add-on)",                 dev: false,          pro: "Contact us", startup: "Contact us", ent: "Custom" },
   { label: "SSO + audit logs",                              dev: false,          pro: false,          startup: false,                   ent: true },
@@ -796,8 +793,7 @@ function Pricing(){
         "The full local product: cost queries, anomalies, rightsizing, every provider",
         "The agent team: Budget Guard, the fix as a PR you approve, verified savings",
         "AI/LLM spend tracking, forecasts + commitment recommendations",
-        "Self-host the dashboard with Docker",
-        "Runs on your machine, on your own Claude membership",
+        "Runs on your machine, in Claude or Cursor, on your own membership",
       ],
       cta:"Start free", href:"/demo", plan:"community", ext:false, primary:true, rec:false },
     { key:"ent", name:"Enterprise", tag:"For teams that need it always on", amt:"Custom", per:"", billed:"Tailored to your team",

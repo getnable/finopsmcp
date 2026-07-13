@@ -80,14 +80,6 @@ What are my AWS costs this month?
 
 Once you see a real cost breakdown, you're live. Also works with Cursor, Windsurf, and VS Code.
 
-**Step 4 (optional): Open the visual dashboard**
-
-```bash
-finops serve
-```
-
-Serves a password-protected web dashboard at `http://localhost:8080`, local to your machine by default. To let your team or manager view it in a browser (no Claude required), add `--host 0.0.0.0` so it binds your network. It stays password-protected; share the URL and password with them.
-
 **Free. The full local product, including the agent team, costs nothing right now. No credit card, no trial clock.**
 
 ---
@@ -98,7 +90,6 @@ finops setup aws      # add another AWS account
 finops setup azure    # add Azure
 finops setup slack    # configure alerts
 finops setup license  # activate a license key (Enterprise)
-finops serve          # open the visual dashboard
 ```
 
 ---
@@ -116,71 +107,9 @@ finops serve          # open the visual dashboard
 - "Show me RDS instances with low CPU that we could right-size"
 - "What's our effective discount rate from Savings Plans?"
 
----
-
-## Visual dashboard
-
-```bash
-finops serve
-```
-
-Just want to see it? One command, no account, no Docker:
-
-```bash
-uvx nable serve --demo
-```
-
-That serves a fully populated sample dashboard at http://localhost:8080 and opens your browser.
-
-Starts a local web dashboard your whole team can open in a browser, no Claude Desktop required. Share it with an exec, a FinOps analyst, or anyone who needs to see costs without using an AI interface.
-
-What it shows:
-- **MTD spend** and projected month total
-- **Cost trend**: 3-month historical with run-rate projection
-- **Efficiency score**: composite of waste, commitment coverage, anomaly response, and tag hygiene
-- **Savings opportunities**: ranked by dollar impact, each with a one-click "Mark done" to track actions taken
-- **Savings pipeline**: how much has been identified vs acted on vs verified
-
-The dashboard reads from your local provider connections. Your data stays on your machine.
-
-```bash
-# Secure with a password (recommended when sharing on a network)
-FINOPS_DASHBOARD_PASSWORD=yourpassword finops serve
-
-# Default: auto-generates a random password and prints it at startup
-finops serve
-```
-
-Light mode, dark mode, and 30/60/90-day lookback are built in.
-
-![nable dashboard: month-to-date spend, projected total, FinOps score, and ranked savings opportunities](https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docs/dashboard.png)
-
-### Run it on a server (Docker)
-
-Want the dashboard always on, or shared with finance without installing anything? Run nable as a container. The public image is on GHCR (`amd64` and `arm64`, so a Raspberry Pi or Apple Silicon box works too).
-
-See it first, no account needed:
-```bash
-docker run --rm -p 8080:8080 \
-  -e FINOPS_DEMO_MODE=1 -e FINOPS_DASHBOARD_PASSWORD=off \
-  ghcr.io/chaandannn/finops:latest
-```
-Open http://localhost:8080 for a fully populated sample bill.
-
-Then run it for real with SQLite, one container, no Postgres:
-```bash
-curl -O https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docker-compose.selfhost.yml
-docker compose -f docker-compose.selfhost.yml up -d
-```
-It binds to `127.0.0.1` by default and prints a generated dashboard password to the logs (`docker compose logs`). To connect a cloud account, either set provider env vars or mount your existing credentials read-only, both are documented inline in the compose file. Your credentials and your bill stay on that box; nable has no backend to send them to.
-
-For a public, multi-user, or team deployment (TLS via Caddy, SSO, shared Postgres, the hosted control plane), use the full [`docker-compose.yml`](docker-compose.yml) and [docs/DEPLOY.md](docs/DEPLOY.md).
-
----
-
 ## Local-first and auditable
 
-Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine. Cost data is cached in a local SQLite database, and nable has no backend, so we never see your cost data or credentials. One honest caveat: when you ask a question in your AI editor, the figures nable returns go to your editor's own AI to answer it, the same as any prompt, never to a nable server. If you need zero AI exposure, use the local dashboard (`finops serve`) or CLI, which never touch a model. Teams share findings via Slack alerts, Notion publishing, and CSV exports. No shared database required.
+Your credentials are encrypted with Fernet and stored in your OS keyring (macOS Keychain, Windows Credential Manager, or libsecret on Linux). They never leave your machine. Cost data is cached in a local SQLite database, and nable has no backend, so we never see your cost data or credentials. One honest caveat: when you ask a question in your AI editor, the figures nable returns go to your editor's own AI to answer it, the same as any prompt, never to a nable server. If you need zero AI exposure, use the CLI (`finops` commands), which never touches a model. Teams share findings via Slack alerts, Notion publishing, and CSV exports. No shared database required.
 
 nable is read-only by default. It never writes to your AWS account unless you explicitly enable cleanup mode. Run `finops setup aws --iam-template` to generate a least-privilege IAM policy with exactly the permissions nable needs.
 

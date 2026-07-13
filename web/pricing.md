@@ -5,7 +5,7 @@ nable is a local-first FinOps tool. It runs on your own machine as an MCP server
 ## Community
 - Price: $0, no credit card, no expiry
 - Runs: local, on your own machine, on your existing Claude or Cursor membership (no separate LLM key required)
-- Includes: cost queries across AWS, Azure, GCP and 15 more SaaS and AI providers; anomaly detection; rightsizing recommendations; the agent team (Budget Guard, remediation PRs you approve, verified savings); AI/LLM spend tracking by model; forecasts and commitment recommendations; every connector; a self-hostable dashboard (Docker)
+- Includes: cost queries across AWS, Azure, GCP and 15 more SaaS and AI providers; anomaly detection; rightsizing recommendations; the agent team (Budget Guard, remediation PRs you approve, verified savings); AI/LLM spend tracking by model; forecasts and commitment recommendations; every connector, all in Claude or Cursor
 - Propose-only: nable never changes your cloud on its own
 - Install: `uvx nable`
 
