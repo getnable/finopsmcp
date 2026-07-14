@@ -130,7 +130,7 @@ nable runs locally and is private by design:
 - **Third-party sharing.** nable does not sell, rent, or share your data. Your billing data and credentials are never sent to a nable server. When you ask a question in your AI editor, the figures nable returns are answered by your editor's own AI provider (the same as any prompt), never routed through nable. Optional integrations you configure (Slack, Notion, Jira, GitHub, email) send only the specific findings you direct to them.
 - **Telemetry.** Anonymous, opt-outable product telemetry (no credentials, no cost data). Disable with `NABLE_NO_TELEMETRY=1`, or block all non-provider network calls with `FINOPS_AIRGAP=1`.
 - **Data retention.** Local data lives on your machine until you delete it. Uninstall or clear the local store to remove it.
-- **Contact.** chaandannn@gmail.com.
+- **Contact.** chaaandannn@gmail.com.
 
 The optional hosted/managed tier runs single-tenant with its own privacy terms at the link above; your data is never pooled with another customer's.
 
