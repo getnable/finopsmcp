@@ -65,48 +65,58 @@ def first_paragraph(doc: str | None) -> str:
 
 
 def extract_tools() -> list[dict]:
-    tree = ast.parse(SERVER.read_text())
+    # Tools live across server.py (a few inline) and the split-out tools/*.py
+    # modules (the bulk, decorated @_srv.mcp.tool()). Parse them all so the
+    # reference matches what actually ships after the server-split + open-core
+    # extractions, otherwise this emits an empty page.
+    sources = [SERVER, *sorted((ROOT / "src" / "finops" / "tools").glob("*.py"))]
     tools: list[dict] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        is_tool = any(
-            isinstance(d, ast.Call)
-            and isinstance(d.func, ast.Attribute)
-            and d.func.attr == "tool"
-            for d in node.decorator_list
-        )
-        if not is_tool:
-            continue
-
-        doc = ast.get_docstring(node)
-        params = []
-        args = node.args
-        n_defaults = len(args.defaults)
-        for i, a in enumerate(args.args):
-            if a.arg in ("self", "ctx"):
+    seen: set[str] = set()
+    for src in sources:
+        tree = ast.parse(src.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            required = i < len(args.args) - n_defaults
-            ann = ast.unparse(a.annotation) if a.annotation else ""
-            params.append({"name": a.arg, "type": ann, "required": required})
+            is_tool = any(
+                isinstance(d, ast.Call)
+                and isinstance(d.func, ast.Attribute)
+                and d.func.attr == "tool"
+                for d in node.decorator_list
+            )
+            if not is_tool or node.name in seen:
+                continue
+            seen.add(node.name)
 
-        pro = False
-        for sub in ast.walk(node):
-            if (isinstance(sub, ast.Call)
-                    and isinstance(sub.func, ast.Name)
-                    and sub.func.id == "require_pro"):
-                pro = True
-                break
+            doc = ast.get_docstring(node)
+            params = []
+            args = node.args
+            n_defaults = len(args.defaults)
+            for i, a in enumerate(args.args):
+                if a.arg in ("self", "ctx"):
+                    continue
+                required = i < len(args.args) - n_defaults
+                ann = ast.unparse(a.annotation) if a.annotation else ""
+                params.append({"name": a.arg, "type": ann, "required": required})
 
-        summary = first_paragraph(doc)
-        tools.append({
-            "name": node.name,
-            "summary": summary,
-            "params": params,
-            "pro": pro,
-            "category": categorize(node.name),
-            "lineno": node.lineno,
-        })
+            # Pro-gated if the body calls require_pro(...) — as a bare name
+            # (server.py) or as _srv.require_pro(...) (the split tools/* modules).
+            pro = False
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call) and (
+                    (isinstance(sub.func, ast.Name) and sub.func.id == "require_pro")
+                    or (isinstance(sub.func, ast.Attribute) and sub.func.attr == "require_pro")
+                ):
+                    pro = True
+                    break
+
+            tools.append({
+                "name": node.name,
+                "summary": first_paragraph(doc),
+                "params": params,
+                "pro": pro,
+                "category": categorize(node.name),
+                "lineno": node.lineno,
+            })
     tools.sort(key=lambda t: (t["category"], t["name"]))
     return tools
 

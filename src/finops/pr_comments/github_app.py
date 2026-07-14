@@ -255,7 +255,7 @@ def _format_comment(analysis: dict, repo: str, pr_number: int) -> str:
     lines += [
         "",
         "---",
-        f"_[nable](https://github.com/chaandannn/finopsmcp) · prices: AWS on-demand us-east-1 · "
+        f"_[nable](https://github.com/getnable/finopsmcp) · prices: AWS on-demand us-east-1 · "
         f"[configure cost gate](https://nable.dev/docs/cost-gate)_",
     ]
     return "\n".join(lines)

@@ -57,7 +57,7 @@ ext install nable.nable-finops
 
 ## Part of nable finops
 
-This extension is part of [nable](https://github.com/chaandannn/finopsmcp), ask Claude about your cloud costs.
+This extension is part of [nable](https://github.com/getnable/finopsmcp), ask Claude about your cloud costs.
 
 Requires Python 3.10 or newer. Check yours with `python --version` before installing. On older Python, pip reports `No matching distribution found for finops-mcp`.
 

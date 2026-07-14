@@ -142,7 +142,7 @@ class CostHoverProvider implements vscode.HoverProvider {
       md.appendMarkdown(`\n> 💡 **Savings tip:** ${entry.note}\n\n`);
     }
 
-    md.appendMarkdown(`\n---\n_[nable finops](https://github.com/chaandannn/finopsmcp) · prices are estimates, us-east-1 on-demand_`);
+    md.appendMarkdown(`\n---\n_[nable finops](https://github.com/getnable/finopsmcp) · prices are estimates, us-east-1 on-demand_`);
     return new vscode.Hover(md);
   }
 }
@@ -332,7 +332,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand("nable.openDocs", () => {
-      vscode.env.openExternal(vscode.Uri.parse("https://github.com/chaandannn/finopsmcp"));
+      vscode.env.openExternal(vscode.Uri.parse("https://github.com/getnable/finopsmcp"));
     }),
   );
 }

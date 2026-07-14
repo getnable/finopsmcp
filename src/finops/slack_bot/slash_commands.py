@@ -358,7 +358,7 @@ def cmd_help() -> list[dict]:
             "• `/budget` — budget status\n"
             "• `/nable help` — this message"
         ),
-        _context("nable · [Docs](https://github.com/chaandannn/finopsmcp) · EL2 license"),
+        _context("nable · [Docs](https://github.com/getnable/finopsmcp) · EL2 license"),
     ]
 
 

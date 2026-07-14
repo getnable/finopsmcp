@@ -32,7 +32,7 @@ dependencies = ["finops-mcp>=0.8.122"]
 [project.urls]
 Homepage = "https://getnable.com"
 Documentation = "https://getnable.com/docs"
-Repository = "https://github.com/chaandannn/finopsmcp"
+Repository = "https://github.com/getnable/finopsmcp"
 
 [project.scripts]
 nable = "finops.server:main"

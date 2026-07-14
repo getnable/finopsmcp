@@ -32,7 +32,7 @@ chmod +x "${DOCKER_CONFIG}/cli-plugins/docker-buildx"
 
 # Public repo, no credentials needed to clone. Check out the latest RELEASE TAG,
 # not arbitrary main HEAD, so the box runs a tested release.
-git clone https://github.com/chaandannn/finopsmcp /opt/nable
+git clone https://github.com/getnable/finopsmcp /opt/nable
 git -C /opt/nable checkout "$(git -C /opt/nable describe --tags --abbrev=0)"
 
 # The clone runs as root (cloud-init); hand /opt/nable to ec2-user so the

@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: chaandannn/finopsmcp/.github/actions/cost-check@main
+      - uses: getnable/finopsmcp/.github/actions/cost-check@main
         with:
           finops-license-key: ${{ secrets.FINOPS_LICENSE_KEY }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}

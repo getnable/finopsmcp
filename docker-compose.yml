@@ -9,7 +9,7 @@ services:
     # version with NABLE_VERSION in .env (recommended per tenant); blank = latest.
     # `build: .` stays as a local-dev fallback (docker compose up --build).
     build: .
-    image: "ghcr.io/chaandannn/finops:${NABLE_VERSION:-latest}"
+    image: "ghcr.io/getnable/finops:${NABLE_VERSION:-latest}"
     ports:
       # Bind the raw app port to loopback by default so it is never publicly
       # exposed. Under the tls profile Caddy reaches nable over the compose

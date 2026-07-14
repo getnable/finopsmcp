@@ -6,7 +6,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/finops-mcp?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/finops-mcp)
-[![Tests](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml/badge.svg)](https://github.com/chaandannn/finopsmcp/actions/workflows/test.yml)
+[![Tests](https://github.com/getnable/finopsmcp/actions/workflows/test.yml/badge.svg)](https://github.com/getnable/finopsmcp/actions/workflows/test.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-4db8d4)](LICENSE)
 
 nable is FinOps that lives inside your AI. Ask Claude or Cursor about your cloud, SaaS, and AI spend and it answers with real numbers, priced on your actual rates, not list price. It finds the savings genuinely worth taking, proposes each fix as a pull request you approve, and checks the next bill to prove it worked. As your agents start spending real money, nable is the cost brain they check before they act.
@@ -15,7 +15,7 @@ Everything runs on **your machine** and your bill never leaves it, so the no-egr
 
 **[getnable.com](https://getnable.com)** · docs, quickstart, and the hosted platform
 
-![nable demo: uvx nable welcome --demo shows a sample bill in seconds](https://raw.githubusercontent.com/chaandannn/finopsmcp/main/docs/demo.gif)
+![nable demo: uvx nable welcome --demo shows a sample bill in seconds](https://raw.githubusercontent.com/getnable/finopsmcp/main/docs/demo.gif)
 
 ### Free to start, runs on your Claude membership
 
@@ -115,7 +115,7 @@ Your credentials are encrypted with Fernet and stored in your OS keyring (macOS 
 
 nable is read-only by default. It never writes to your AWS account unless you explicitly enable cleanup mode. Run `finops setup aws --iam-template` to generate a least-privilege IAM policy with exactly the permissions nable needs.
 
-None of this is take-our-word-for-it. Read the source, check the [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/chaandannn/finopsmcp), run `finops-doctor` to see exactly what nable touches, and set `NABLE_NO_TELEMETRY=1` (or `FINOPS_AIRGAP=1` to forbid every non-provider request) if you want it locked down.
+None of this is take-our-word-for-it. Read the source, check the [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/getnable/finopsmcp), run `finops-doctor` to see exactly what nable touches, and set `NABLE_NO_TELEMETRY=1` (or `FINOPS_AIRGAP=1` to forbid every non-provider request) if you want it locked down.
 
 ---
 
@@ -293,4 +293,4 @@ finops setup claude    # re-run Claude Desktop configuration only
 Full setup guide: [getnable.com/docs](https://getnable.com/docs)
 
 ---
-<sub>mcp-name: io.github.chaandannn/finops-mcp</sub>
+<sub>mcp-name: io.github.getnable/finops-mcp</sub>

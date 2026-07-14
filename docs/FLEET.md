@@ -9,7 +9,7 @@ The model has three parts:
 1. **The image is built once, in CI, not on each box.** Every release tag triggers
    [`.github/workflows/image.yml`](../.github/workflows/image.yml), which builds the
    container from source and pushes it to GHCR as
-   `ghcr.io/chaandannn/finops:<version>` and `:latest`. Every tenant runs the
+   `ghcr.io/getnable/finops:<version>` and `:latest`. Every tenant runs the
    identical, tested artifact, which also makes support and security review sane.
 
 2. **Boxes pull, they do not build.** [`docker-compose.yml`](../docker-compose.yml)

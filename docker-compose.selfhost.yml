@@ -10,12 +10,12 @@
 #
 # Want to see it work before connecting a real account? Run it in demo mode:
 #   docker run --rm -p 8080:8080 -e FINOPS_DEMO_MODE=1 -e FINOPS_DASHBOARD_PASSWORD=off \
-#     ghcr.io/chaandannn/finops:latest
+#     ghcr.io/getnable/finops:latest
 # and open http://localhost:8080 for a fully populated sample bill.
 
 services:
   nable:
-    image: "ghcr.io/chaandannn/finops:${NABLE_VERSION:-latest}"
+    image: "ghcr.io/getnable/finops:${NABLE_VERSION:-latest}"
     # Uncomment to build locally instead of pulling the public image:
     # build: .
     ports:

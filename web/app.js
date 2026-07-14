@@ -124,7 +124,7 @@ function Nav() {
   } }, "Docs"))), /* @__PURE__ */ React.createElement("div", { className: "right" }, /* @__PURE__ */ React.createElement(
     "a",
     {
-      href: "https://github.com/chaandannn/finopsmcp",
+      href: "https://github.com/getnable/finopsmcp",
       target: "_blank",
       rel: "noopener noreferrer",
       className: "nav-star",
@@ -165,7 +165,7 @@ function Nav() {
   } }, "Pricing"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "/docs", onClick: () => {
     setOpen(false);
     if (window.posthog) posthog.capture("docs_clicked", { location: "nav_mobile" });
-  } }, "Docs"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "https://github.com/chaandannn/finopsmcp", target: "_blank", rel: "noopener noreferrer", onClick: () => {
+  } }, "Docs"), /* @__PURE__ */ React.createElement("a", { className: "nav-mobile-item", href: "https://github.com/getnable/finopsmcp", target: "_blank", rel: "noopener noreferrer", onClick: () => {
     setOpen(false);
     if (window.posthog) posthog.capture("github_star_clicked", { location: "nav_mobile" });
   } }, "Star on GitHub ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--warn)" } }, "\u2605")), /* @__PURE__ */ React.createElement("div", { style: { marginTop: 24, display: "flex", flexDirection: "column", gap: 10 } }, /* @__PURE__ */ React.createElement("a", { href: "/account", className: "btn btn-ghost", style: { justifyContent: "center" }, onClick: () => setOpen(false) }, "Sign in"), /* @__PURE__ */ React.createElement(
@@ -565,7 +565,7 @@ function Footer({ version }) {
       }
     },
     "Book a demo"
-  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Resources"), /* @__PURE__ */ React.createElement("a", { href: "/docs" }, "Docs"), /* @__PURE__ */ React.createElement("a", { href: "/guides" }, "Guides & comparisons"), /* @__PURE__ */ React.createElement("a", { href: "/docs#quickstart" }, "Quickstart"), /* @__PURE__ */ React.createElement("a", { href: "/docs#iam" }, "IAM templates"), /* @__PURE__ */ React.createElement("a", { href: "/security" }, "Security")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Company"), /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About"), /* @__PURE__ */ React.createElement("a", { href: "mailto:chaaandannn@gmail.com", target: "_blank", rel: "noopener noreferrer" }, "Contact"), /* @__PURE__ */ React.createElement("a", { href: "https://github.com/chaandannn/finopsmcp", target: "_blank", rel: "noopener noreferrer", onClick: () => {
+  )), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Resources"), /* @__PURE__ */ React.createElement("a", { href: "/docs" }, "Docs"), /* @__PURE__ */ React.createElement("a", { href: "/guides" }, "Guides & comparisons"), /* @__PURE__ */ React.createElement("a", { href: "/docs#quickstart" }, "Quickstart"), /* @__PURE__ */ React.createElement("a", { href: "/docs#iam" }, "IAM templates"), /* @__PURE__ */ React.createElement("a", { href: "/security" }, "Security")), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h5", null, "Company"), /* @__PURE__ */ React.createElement("a", { href: "/about" }, "About"), /* @__PURE__ */ React.createElement("a", { href: "mailto:chaaandannn@gmail.com", target: "_blank", rel: "noopener noreferrer" }, "Contact"), /* @__PURE__ */ React.createElement("a", { href: "https://github.com/getnable/finopsmcp", target: "_blank", rel: "noopener noreferrer", onClick: () => {
     if (window.posthog) posthog.capture("github_star_clicked", { location: "footer" });
   } }, "Star on GitHub ", /* @__PURE__ */ React.createElement("span", { style: { color: "var(--warn)" } }, "\u2605")), /* @__PURE__ */ React.createElement("a", { href: "https://www.linkedin.com/company/getnable/", target: "_blank", rel: "noopener noreferrer" }, "LinkedIn"))), /* @__PURE__ */ React.createElement("div", { className: "foot-meta" }, /* @__PURE__ */ React.createElement("span", null, "2026 nable \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/privacy", style: { color: "var(--fg-3)" } }, "Privacy"), " \xB7 ", /* @__PURE__ */ React.createElement("a", { href: "/terms", style: { color: "var(--fg-3)" } }, "Terms")), /* @__PURE__ */ React.createElement("span", null, "nable \xB7 runtime healthy"))));
 }
