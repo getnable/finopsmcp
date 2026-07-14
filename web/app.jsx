@@ -942,7 +942,7 @@ function Footer({ version }){
           <div>
             <h5>Company</h5>
             <a href="/about">About</a>
-            <a href="mailto:chaandannn@gmail.com" target="_blank" rel="noopener noreferrer">Contact</a>
+            <a href="mailto:chaaandannn@gmail.com" target="_blank" rel="noopener noreferrer">Contact</a>
             <a href="https://github.com/chaandannn/finopsmcp" target="_blank" rel="noopener noreferrer" onClick={()=>{ if(window.posthog) posthog.capture('github_star_clicked',{location:'footer'}); }}>Star on GitHub <span style={{color:'var(--warn)'}}>★</span></a>
             <a href="https://www.linkedin.com/company/getnable/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
           </div>
