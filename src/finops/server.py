@@ -1865,7 +1865,6 @@ from .tools.kubernetes import (  # noqa: E402,F401
 )
 from .tools.llm import (  # noqa: E402,F401
     forecast_llm_costs,
-    get_ai_billing_blind_spots,
     get_ai_engineering_report,
     get_ai_kpis,
     get_ai_spend_monitor,
@@ -1875,8 +1874,6 @@ from .tools.llm import (  # noqa: E402,F401
     get_llm_commitment_analysis,
     get_llm_cost_by_model,
     get_llm_costs,
-    get_llm_unit_economics,
-    get_llm_unit_economics_full,
     optimize_ai_spend,
     recommend_bedrock_model_routing,
 )

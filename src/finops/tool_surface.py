@@ -171,7 +171,6 @@ _AWS: frozenset[str] = frozenset({
     "audit_s3_transfer_acceleration",
     "audit_spot_diversification",
     "audit_textract_environment_waste",
-    "get_ai_billing_blind_spots",
     "get_documentdb_costs",
     "get_ecr_cleanup_recommendations",
     "get_ecs_rightsizing_recommendations",
@@ -238,8 +237,6 @@ _LLM: frozenset[str] = frozenset({
     "get_llm_commitment_analysis",
     "get_llm_cost_by_model",
     "get_llm_costs",
-    "get_llm_unit_economics",
-    "get_llm_unit_economics_full",
     "optimize_ai_spend",
     "recommend_bedrock_model_routing",
 })

@@ -97,7 +97,6 @@ ALLOWED_TOOLS: dict[str, str] = {
     # AI spend
     "get_llm_costs": "viewer",
     "get_llm_cost_by_model": "viewer",
-    "get_llm_unit_economics": "viewer",
     "get_ai_kpis": "viewer",
     "optimize_ai_spend": "viewer",
     "get_bedrock_costs": "viewer",
