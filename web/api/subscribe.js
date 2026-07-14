@@ -110,7 +110,7 @@ function welcomeHtml(email) {
   <div class="footer">
     You're getting this because you signed up at getnable.com.
     Reply to this email with any questions.<br>
-    <a href="https://getnable.com">getnable.com</a> · <a href="mailto:chaandannn@gmail.com">chaandannn@gmail.com</a>
+    <a href="https://getnable.com">getnable.com</a> · <a href="mailto:chaaandannn@gmail.com">chaaandannn@gmail.com</a>
   </div>
 </div>
 </body>
@@ -266,7 +266,7 @@ export default async function handler(req) {
       headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         from: "nable <hello@getnable.com>",
-        reply_to: "chaandannn@gmail.com",
+        reply_to: "chaaandannn@gmail.com",
         to: [email],
         subject: "Your finops-mcp setup (2 min)",
         html: welcomeHtml(email),
