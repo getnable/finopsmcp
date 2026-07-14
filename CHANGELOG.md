@@ -2073,7 +2073,7 @@ an IAM key in the console.
   any model that already has a routing rec so nothing double-counts. It also
   decomposes spend into its real driver: model choice, token size, or request
   volume. Read-only intelligence, never a runtime proxy.
-- **nable is now a Claude Code plugin.** Run `/plugin marketplace add chaandannn/finopsmcp`
+- **nable is now a Claude Code plugin.** Run `/plugin marketplace add getnable/finopsmcp`
   then `/plugin install nable@nable` to register the MCP server with no
   hand-edited config. Ships a `/nable:connect` command that connects a cloud
   account and shows your first cost number inside the editor.

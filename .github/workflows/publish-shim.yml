@@ -6,7 +6,7 @@ name: Publish nable shim (PyPI)
 #
 # ONE-TIME HUMAN STEP before the first CI publish: on pypi.org, project `nable`
 # -> Settings -> Publishing -> add a trusted publisher for this repo
-# (chaandannn/finopsmcp, workflow publish-shim.yml, environment blank).
+# (getnable/finopsmcp, workflow publish-shim.yml, environment blank).
 # Until that click happens, publish manually from shim/ with:  uv publish
 on:
   push:

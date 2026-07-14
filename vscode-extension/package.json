@@ -7,7 +7,7 @@
   "icon": "assets/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chaandannn/finopsmcp"
+    "url": "https://github.com/getnable/finopsmcp"
   },
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other", "Linters"],

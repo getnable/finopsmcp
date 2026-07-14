@@ -5,7 +5,7 @@ Thanks for your interest in contributing.
 ## Running locally
 
 ```bash
-git clone https://github.com/chaandannn/finopsmcp
+git clone https://github.com/getnable/finopsmcp
 cd finopsmcp
 pip install -e ".[dev]"
 finops setup          # connect at least one provider

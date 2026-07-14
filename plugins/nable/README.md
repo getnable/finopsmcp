@@ -11,7 +11,7 @@ Run them **one at a time**, waiting for the first to finish before the second. P
 1. Add the marketplace:
 
 ```
-/plugin marketplace add chaandannn/finopsmcp
+/plugin marketplace add getnable/finopsmcp
 ```
 
 2. Once it says the marketplace was added, install the plugin:
