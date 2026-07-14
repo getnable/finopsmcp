@@ -691,52 +691,6 @@ async def get_storage_info() -> dict:
 
 
 @_srv.mcp.tool()
-async def find_cost_culprit(
-    resource_id: str,
-    tf_dir: str,
-    resource_name: str | None = None,
-    github_repo: str | None = None,
-    dry_run: bool = True,
-) -> dict:
-    """
-    Trace a resource's cost-driving instance-size change to the commit/PR that made it.
-
-    Given a cloud resource id (e.g. an EC2 instance id from a rightsizing rec or a
-    cost drill-down), nable resolves it to its Terraform block via state, blames the
-    sizing line to the commit that last changed it, resolves that commit to its
-    GitHub PR + author, prices the bump at your effective rate, and drafts a
-    propose-only revert restoring the previous size.
-
-    Propose-only: with dry_run=True (default) nothing is written to your repo and no
-    PR is opened — you get the culprit commit/PR, the monthly cost the bump added,
-    and the revert diff. Set dry_run=False (and pass github_repo) to open the revert
-    PR. nable never merges.
-
-    v1 scope: Terraform-managed instance-size changes (instance_type / instance_class
-    / node_type) for the supported resource types, in the IaC repo at tf_dir.
-
-    Args:
-        resource_id:   Cloud resource id to blame (e.g. "i-0abc123").
-        tf_dir:        Terraform working directory (a git repo with state available).
-        resource_name: Optional human-readable name, used as a resolution fallback.
-        github_repo:   "owner/repo" for PR resolution and (dry_run=False) PR opening.
-        dry_run:       Report only, do not open a PR. Defaults to True.
-
-    Examples:
-        - "What commit caused the cost jump on i-0abc123?"
-        - "Who bumped this instance's size and in which PR?"
-    """
-    safe_dir = _srv._resolve_safe_path(tf_dir, must_exist=True)
-    if isinstance(safe_dir, dict):
-        return safe_dir
-    from ..blame.culprit import find_cost_culprit as _find
-    return _find(
-        resource_id=resource_id, tf_dir=safe_dir, resource_name=resource_name,
-        github_repo=github_repo, dry_run=dry_run,
-    )
-
-
-@_srv.mcp.tool()
 async def get_credit_status(months: int = 6) -> dict:
     """
     Track AWS promotional-credit (Activate) burn-down and detect the moment

@@ -104,8 +104,7 @@ CATALOG: list[dict[str, Any]] = [
             ("Set a budget and alert me at 80%", "two-tier: warn at 80%, block at 100%"),
             ("What AI spend is AWS not watching?", "Bedrock/Marketplace blind spots"),
         ],
-        "tools": ["get_anomalies", "get_account_anomalies", "set_budget", "check_budget_status",
-                  "get_ai_billing_blind_spots"],
+        "tools": ["get_anomalies", "get_account_anomalies", "set_budget", "check_budget_status"],
     },
     {
         "id": "forecast_cloud",
@@ -129,7 +128,7 @@ CATALOG: list[dict[str, Any]] = [
             ("Are our AWS credits about to run out?", "runway from observed burn, no API for balance"),
             ("When do credits flip to cash?", "the cliff alert AWS never sends"),
         ],
-        "tools": ["get_credit_status", "get_ai_billing_blind_spots"],
+        "tools": ["get_credit_status"],
     },
     {
         "id": "ai_cost",
@@ -143,7 +142,7 @@ CATALOG: list[dict[str, Any]] = [
             ("Where's the AI waste?", "cache hit rate, model sprawl, prompt efficiency"),
             ("Cut our AI spend", "model-routing and caching recommendations"),
         ],
-        "tools": ["get_llm_costs", "get_llm_cost_by_model", "get_llm_unit_economics_full",
+        "tools": ["get_llm_costs", "get_llm_cost_by_model",
                   "get_ai_kpis", "optimize_ai_spend", "recommend_bedrock_model_routing",
                   "get_gpu_infra_costs", "get_bedrock_costs"],
     },

@@ -30,8 +30,6 @@ GATED_TOOLS = {
     "forecast_costs": "forecasting",
     "forecast_azure_costs": "forecasting",
     "forecast_llm_costs": "forecasting",
-    "get_llm_unit_economics": "ai_unit_economics",
-    "get_llm_unit_economics_full": "ai_unit_economics",
     "get_ai_kpis": "ai_unit_economics",
     "get_ai_engineering_report": "ai_unit_economics",
     "get_ai_spend_monitor": "ai_unit_economics",

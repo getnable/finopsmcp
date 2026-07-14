@@ -261,7 +261,7 @@ See [getnable.com/pricing](https://getnable.com/pricing) for current plans: Comm
 
 ### License
 
-This repository is **Apache-2.0** in full: the MCP server and all tools, every connector, FOCUS normalization, anomaly detection, rightsizing, the cost-to-code blame engine, the propose-only PR loop, and the learning loop. Fork it, build on it.
+This repository is **Apache-2.0** in full: the MCP server and all tools, every connector, FOCUS normalization, anomaly detection, rightsizing, and the propose-only PR loop. Fork it, build on it. Cost-to-code attribution is part of the separate nable enterprise product.
 
 The hosted enterprise layer (the web dashboard, SSO, the control plane, and managed-AI billing) is not part of this repo. It lives in a separate private repository and is offered as the hosted platform above.
 
