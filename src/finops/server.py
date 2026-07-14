@@ -1949,3 +1949,11 @@ from .tools.tickets import (  # noqa: E402,F401
     start_dashboard_server,
 )
 # <<< EXTRACTED TOOL REGISTRATION
+
+# Enterprise plugin seam. Every built-in tool above is now registered on `mcp`
+# (and `mcp.tool` is the instrumented shim), so an installed provider package
+# such as nable-enterprise can contribute its proprietary tools on top. No-op
+# when nothing is installed; a failing plugin is logged and skipped, never fatal.
+from .plugins import load_plugins  # noqa: E402
+
+load_plugins(mcp)
