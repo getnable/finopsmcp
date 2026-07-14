@@ -1814,7 +1814,6 @@ from .tools.cost_queries import (  # noqa: E402,F401
     estimate_terraform_cost,
     explain_cost_change,
     explain_recent_cost_drivers,
-    find_cost_culprit,
     get_business_metrics,
     get_cost_history,
     get_cost_summary,
