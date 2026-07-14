@@ -1,7 +1,7 @@
 /**
  * POST /api/account/send-code
  *
- * Sends a 6-digit OTP to the given email address using Resend.
+ * Sends an 8-digit OTP to the given email address using Resend.
  * Uses a time-bucketed HMAC approach so no external KV store is required.
  *
  * Required env vars:
@@ -188,12 +188,16 @@ export default async function handler(req) {
     });
   }
 
-  // Generate deterministic 6-digit OTP from HMAC(secret, email:bucket).
+  // Generate deterministic 8-digit OTP from HMAC(secret, email:bucket).
   // Because it's derived, not random, verify-code.js can recompute it
   // without any KV store. Valid for a 10-minute bucket window.
+  // 8 digits (90M space) instead of 6 (900k): the attempt cap degrades to a
+  // per-edge-isolate in-memory count when Vercel KV is not configured, so the
+  // extra 100x of entropy is what keeps the code non-brute-forceable in that
+  // fallback state. verify-code.js MUST use this exact formula.
   const timeBucket = Math.floor(Date.now() / 600000);
   const mac = await hmacHex(ACCOUNT_SECRET, `otp:${email}:${timeBucket}`);
-  const code = (parseInt(mac.slice(0, 8), 16) % 900000 + 100000).toString();
+  const code = (parseInt(mac.slice(0, 12), 16) % 90000000 + 10000000).toString();
 
   if (RESEND_KEY) {
     try {
