@@ -2,6 +2,11 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.176
+
+- **The advanced intelligence layer is now part of the nable enterprise product.** Cost-to-code blame (`find_cost_culprit`) and the deep LLM cost-intelligence tools (`get_ai_billing_blind_spots`, `get_llm_unit_economics`) move to the enterprise package. Everything else stays Apache-2.0 and free: the full MCP server, every connector, cost queries, anomaly detection, rightsizing, budgets, forecasting, and the local learning loop.
+- **Plugin seam.** The open core loads enterprise tools through the `finops.plugins` entry point when that package is installed; with nothing installed it runs exactly as before.
+
 ## 0.8.175
 
 - **nable proposes standing cost rules from what you keep rejecting.** Dismiss the same class of finding for a business reason a few times ("spot on prod, no") and nable offers one durable rule instead of nagging per finding, with the evidence and a one-call confirm. It has an over-suppression guard: a broad rule (a whole provider or environment) only fires when your rejections span multiple finding types, so a run of one type never becomes "ignore all of AWS." New tool: `suggest_cost_policies`.
