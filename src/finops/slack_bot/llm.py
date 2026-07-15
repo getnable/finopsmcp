@@ -272,8 +272,15 @@ def _run_agent_loop_sync(
     history: list[dict] | None = None,
     requested_by: str = "",
     max_tool_calls: int | None = None,
+    on_event: Any = None,
 ) -> LoopResult:
-    """The agentic loop. Runs inside the worker thread; sets identity there."""
+    """The agentic loop. Runs inside the worker thread; sets identity there.
+
+    on_event: optional callable(dict) fed live progress for streaming UIs:
+      {"type": "text", "text": <delta>}   model text as it generates
+      {"type": "tool", "name": <tool>}    a tool round is starting
+    Default None keeps behavior identical (single blocking result). Events are
+    best-effort: a raising sink is swallowed, never fails the loop."""
     try:
         import anthropic
     except ImportError:
@@ -356,18 +363,35 @@ def _run_agent_loop_sync(
         usage["input"] += int(getattr(u, "input_tokens", 0) or 0)
         usage["output"] += int(getattr(u, "output_tokens", 0) or 0)
 
+    def _emit(event: dict) -> None:
+        if on_event is None:
+            return
+        try:
+            on_event(event)
+        except Exception:  # noqa: BLE001 — a dead stream sink must not kill the answer
+            pass
+
     client = anthropic.Anthropic(api_key=api_key)
     messages: list[dict] = list(history or []) + [{"role": "user", "content": user_message}]
     model = model_for_tier(tier)
 
     for _ in range(max_tool_calls):
-        response = client.messages.create(
+        _kwargs = dict(
             model=model,
             max_tokens=2048,
             system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             tools=tools,
             messages=messages,
         )
+        if on_event is not None:
+            # Stream text deltas to the sink as they generate, then recover the
+            # full Message so the tool loop below is identical to the blocking path.
+            with client.messages.stream(**_kwargs) as _stream:
+                for _delta in _stream.text_stream:
+                    _emit({"type": "text", "text": _delta})
+                response = _stream.get_final_message()
+        else:
+            response = client.messages.create(**_kwargs)
         _accumulate_usage(response)
         text_parts = [b.text for b in response.content if hasattr(b, "text")]
         if response.stop_reason == "end_turn":
@@ -384,6 +408,8 @@ def _run_agent_loop_sync(
         # they mutate side_effects, then append side effects in block order so
         # ordering stays deterministic.
         tool_blocks = [b for b in response.content if b.type == "tool_use"]
+        for _b in tool_blocks:
+            _emit({"type": "tool", "name": _b.name})
         read_blocks = [b for b in tool_blocks if b.name not in remediation_names]
         results_by_id: dict[str, str] = {}
 
@@ -433,8 +459,12 @@ def ask(
     history: list[dict] | None = None,
     requested_by: str = "",
     max_tool_calls: int | None = None,
+    on_event: Any = None,
 ) -> LoopResult:
-    """Run the agentic loop with a wall-clock timeout."""
+    """Run the agentic loop with a wall-clock timeout.
+
+    on_event: optional callable(dict); see _run_agent_loop_sync. Called from the
+    worker thread, so a streaming HTTP handler must tolerate cross-thread writes."""
     import concurrent.futures
 
     timeout = _RCA_TIMEOUT if tier == "rca" else _QUERY_TIMEOUT
@@ -447,6 +477,7 @@ def ask(
             history=history,
             requested_by=requested_by,
             max_tool_calls=max_tool_calls,
+            on_event=on_event,
         )
         try:
             return future.result(timeout=timeout)

@@ -186,6 +186,21 @@ def execute_bridge_tool(name: str, arguments: dict[str, Any] | None, role: str =
             {"error": f"Your role ({role}) cannot run '{name}'. Requires {min_role} or above."}
         )
 
+    # Demo safety: in demo mode no agent tool call may reach real credentials.
+    # demo_bridge_result returns demo data (or a safe placeholder) for anything
+    # not already demo-safe, and None to let the self-demo/local tools run.
+    try:
+        from ..demo_data import is_demo, demo_bridge_result
+        if is_demo():
+            demo = demo_bridge_result(name, arguments or {})
+            if demo is not None:
+                payload = json.dumps(demo, default=str)
+                if len(payload) > _MAX_RESULT_CHARS:
+                    payload = payload[:_MAX_RESULT_CHARS] + '"... [truncated]'
+                return payload
+    except Exception as e:  # never let the demo guard break a real call
+        log.debug("demo bridge guard skipped for %s: %s", name, e)
+
     try:
         result = asyncio.run(_get_tool_manager().call_tool(name, arguments or {}))
     except Exception as e:  # noqa: BLE001 — tool errors go back to the model as data
