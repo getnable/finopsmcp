@@ -2,6 +2,10 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.177
+
+- Maintenance: republish the MCP registry entry under the current namespace so directories that mirror the registry stay current. No functional changes to the package.
+
 ## 0.8.176
 
 - **The advanced intelligence layer is now part of the nable enterprise product.** Cost-to-code blame (`find_cost_culprit`) and the deep LLM cost-intelligence tools (`get_ai_billing_blind_spots`, `get_llm_unit_economics`) move to the enterprise package. Everything else stays Apache-2.0 and free: the full MCP server, every connector, cost queries, anomaly detection, rightsizing, budgets, forecasting, and the local learning loop.
