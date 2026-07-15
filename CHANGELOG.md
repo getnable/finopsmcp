@@ -2,6 +2,11 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.178
+
+- **Demo mode now shows a realistic mid-large company.** The built-in demo dataset (`FINOPS_DEMO=1`) models a CTV/streaming business at ~$673k/mo across 9 providers (AWS, GCP, Azure, Kubernetes, OpenAI, Anthropic, Datadog, Snowflake, Databricks), with a CDN-egress-driven cost story, so a no-credentials walkthrough looks like a real environment instead of a toy account. Every figure is internally consistent across tools.
+- **The "what am I connected to" view is populated in demo mode.** `list_connected_providers`, `list_accounts`, `check_connector_health`, and `compare_providers` previously probed real credentials, so with none present they showed nothing connected. In demo mode they now advertise the seeded provider set.
+
 ## 0.8.177
 
 - Maintenance: republish the MCP registry entry under the current namespace so directories that mirror the registry stay current. No functional changes to the package.

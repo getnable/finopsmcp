@@ -22,7 +22,29 @@ async def list_connected_providers() -> dict:
         - "Is GCP set up yet?"
         - "What plan am I on?"
     """
+    from ..demo_data import is_demo, connected_providers as _demo_connected
+
     result: dict[str, dict] = {}
+
+    # Demo mode: advertise the seeded provider set as connected. The live probes
+    # below read real credentials, which a demo instance does not have, so without
+    # this the "what am I connected to" view would show everything not-configured.
+    if is_demo():
+        for entry in _demo_connected():
+            result[entry["name"]] = {
+                "category": entry["category"],
+                "configured": True,
+                "status": "connected",
+            }
+        status = _srv.get_status()
+        if status.mode == "trial":
+            result["_plan"] = {"plan": "trial", "days_remaining": status.days_remaining}
+        elif status.mode == "pro":
+            result["_plan"] = {"plan": "pro", "email": status.email}
+        else:
+            result["_plan"] = {"plan": status.mode}
+        return result
+
     for category, pool in [("cloud", _srv._CLOUD_CONNECTORS), ("saas", _srv._SAAS_CONNECTORS)]:
         for name, connector in pool.items():
             configured = await connector.is_configured()
@@ -108,6 +130,22 @@ async def check_connector_health() -> dict:
         - "Which connectors are broken or stale?"
         - "Why am I not getting data from Datadog?"
     """
+    from ..demo_data import is_demo, connected_providers as _demo_connected
+    if is_demo():
+        probes = [{
+            "name": e["name"], "configured": True, "healthy": True,
+            "last_data": "12m ago", "response_ms": 180, "error": None, "fix": None,
+        } for e in _demo_connected()]
+        return {
+            "summary": f"{len(probes)} healthy",
+            "healthy_count": len(probes),
+            "broken_count": 0,
+            "unconfigured_count": 0,
+            "connectors": probes,
+            "broken": [],
+            "tip": None,
+        }
+
     import asyncio
     import time
     from datetime import datetime, timezone
@@ -232,6 +270,44 @@ async def compare_providers(
         - "Compare our SaaS tool spending"
         - "How does AWS compare to Azure and GCP?"
     """
+    from ..demo_data import (
+        is_demo, _PROVIDER_SERVICES, _DEMO_PROVIDERS, _DEMO_PROVIDER_CATEGORY,
+    )
+    if is_demo():
+        want = None
+        if category == "cloud":
+            want = {"cloud"}
+        elif category == "saas":
+            want = {"saas", "llm"}
+        provs = [p for p in _DEMO_PROVIDERS
+                 if want is None or _DEMO_PROVIDER_CATEGORY.get(p) in want]
+        rows: list[dict] = []
+        grand = 0.0
+        for p in provs:
+            svcs = _PROVIDER_SERVICES[p]
+            total = round(sum(s["amount"] for s in svcs), 2)
+            grand += total
+            rows.append({
+                "provider": p,
+                "category": _DEMO_PROVIDER_CATEGORY.get(p, "cloud"),
+                "total_usd": total,
+                "total_formatted": _srv._fmt_usd(total),
+                "top_services": [
+                    {"service": s["service"], "amount_usd": round(s["amount"], 2)}
+                    for s in sorted(svcs, key=lambda x: -x["amount"])[:5]
+                ],
+            })
+        for r in rows:
+            r["pct_of_total"] = round(r["total_usd"] / grand * 100, 1) if grand else 0
+        rows.sort(key=lambda x: -x["total_usd"])
+        return {
+            "period": {"start": _srv._default_dates()[0].isoformat(),
+                       "end": _srv._default_dates()[1].isoformat()},
+            "grand_total_usd": round(grand, 2),
+            "grand_total_formatted": _srv._fmt_usd(grand),
+            "providers": rows,
+        }
+
     sd, ed = _srv._default_dates()
     if start_date:
         sd = _srv.date.fromisoformat(start_date)
@@ -297,6 +373,11 @@ async def list_accounts(provider: str | None = None) -> dict:
         - "What accounts is nable connected to?"
         - "List my Azure subscriptions"
     """
+    from ..demo_data import is_demo, demo_accounts as _demo_accounts
+    if is_demo():
+        accts = _demo_accounts()
+        return {provider: accts[provider]} if provider and provider in accts else accts
+
     pool = {provider: _srv._ALL_CONNECTORS[provider]} if provider and provider in _srv._ALL_CONNECTORS else _srv._ALL_CONNECTORS
     targets = await _srv._active(pool)
     async def _one_accts(name: str, connector: _srv.Any):
