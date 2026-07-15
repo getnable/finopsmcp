@@ -531,7 +531,7 @@ function AiCost(){
     if(window.posthog) posthog.capture('cta_clicked',{location:'ai_cost',cta:'copy_install'});
   };
   return (
-    <section id="ai" className="alt" style={{borderTop:"1px solid var(--line)"}}>
+    <section id="ai" className="alt">
       <div className="wrap">
         <div className="section-head center">
           <div className="label">Your AI bill</div>
@@ -1013,7 +1013,7 @@ function Tweaks(){
 /* The loop: what makes nable an agent, not a dashboard */
 function Loop(){
   return (
-    <section id="loop" className="alt" style={{borderTop:"1px solid var(--line)"}}>
+    <section id="loop" className="alt">
       <div className="wrap">
         <div className="section-head center">
           <div className="label">How it works</div>
