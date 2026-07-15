@@ -109,8 +109,8 @@ def is_demo() -> bool:
 
 # ── Shared demo constants (internally consistent across all tools) ────────────
 
-_ACCOUNT_ID   = "123456789012"
-_ACCOUNT_NAME = "acme-production"
+_ACCOUNT_ID   = "481516234203"
+_ACCOUNT_NAME = "streamco-production"
 _REGION       = "us-east-1"
 
 _TODAY = date.today()
@@ -123,22 +123,25 @@ _YESTERDAY   = (_TODAY - timedelta(days=1)).isoformat()
 def cost_summary() -> dict[str, Any]:
     return {
         "period": f"{_MONTH_START} to {_YESTERDAY}",
-        "total_usd": 12847.22,
-        "vs_last_month_pct": 23.4,
+        "total_usd": 286402.34,
+        "vs_last_month_pct": 19.2,
         "by_service": {
-            "Amazon EC2":                  7240.10,
-            "Amazon RDS":                  2100.44,
-            "AWS Data Transfer":           1890.33,
-            "Amazon S3":                    822.15,
-            "Amazon CloudWatch":            412.88,
-            "AWS Lambda":                   201.44,
-            "Amazon EKS":                   180.00,
+            "Amazon CloudFront":            84200.10,
+            "Amazon EC2":                   52400.00,
+            "AWS Data Transfer":            46800.33,
+            "Amazon S3":                    38600.15,
+            "AWS Elemental MediaConvert":   24900.00,
+            "AWS Elemental MediaLive":      18300.00,
+            "Amazon RDS":                   12700.44,
+            "Amazon CloudWatch":             5400.88,
+            "AWS Lambda":                    3100.44,
         },
         "account_id":   _ACCOUNT_ID,
         "account_name": _ACCOUNT_NAME,
         "summary": (
-            "Total AWS spend this month: $12,847 (+23% vs last month). "
-            "EC2 is the top driver at $7,240, up $1,890 from last month."
+            "Total AWS spend this month: $286,402 (+19% vs last month). "
+            "CloudFront is the top driver at $84,200, up $18,400 as streaming "
+            "egress rose after the new season dropped."
         ),
     }
 
@@ -148,19 +151,20 @@ def anomalies() -> dict[str, Any]:
         "anomalies": [
             {
                 "id":          "anom-001",
-                "service":     "Amazon EC2",
+                "service":     "Amazon CloudFront",
                 "account_id":  _ACCOUNT_ID,
                 "severity":    "high",
                 "detected_at": f"{(_TODAY - timedelta(days=3)).isoformat()}T14:22:00Z",
                 "description": (
-                    "EC2 spend in us-east-1 spiked $1,890 (+35%) between May 18-21. "
-                    "A new m5.4xlarge was added to the data-platform node group."
+                    "CloudFront egress spiked $18,400 (+28%) after the new season "
+                    "dropped Friday. Delivery to SmartCast devices in us-east-1 and "
+                    "eu-west-1 drove the increase."
                 ),
-                "daily_cost_before": 234.10,
-                "daily_cost_after":  315.80,
-                "projected_monthly_impact": 2481.00,
-                "resource_ids":  ["i-0a1b2c3d4e5f67890"],
-                "tags":          {"team": "data-platform", "env": "production"},
+                "daily_cost_before": 2190.00,
+                "daily_cost_after":  3050.00,
+                "projected_monthly_impact": 18400.00,
+                "resource_ids":  ["E2QK8S1TREAM01"],
+                "tags":          {"team": "streaming-delivery", "env": "production"},
             },
             {
                 "id":          "anom-002",
@@ -169,17 +173,17 @@ def anomalies() -> dict[str, Any]:
                 "severity":    "medium",
                 "detected_at": f"{(_TODAY - timedelta(days=2)).isoformat()}T09:15:00Z",
                 "description": (
-                    "Data transfer out increased $640 (+51%) — likely correlated "
-                    "with the EC2 node group change on May 18."
+                    "Origin-to-edge data transfer rose $13,600 (+41%), tracking the "
+                    "CloudFront egress jump from the season launch."
                 ),
-                "daily_cost_before":         42.10,
-                "daily_cost_after":          63.40,
-                "projected_monthly_impact":  640.00,
+                "daily_cost_before":         1105.00,
+                "daily_cost_after":          1560.00,
+                "projected_monthly_impact":  13600.00,
             },
         ],
         "total_anomalies": 2,
         "high_severity":   1,
-        "summary": "2 cost anomalies detected. EC2 spike is the primary concern at +$1,890/mo.",
+        "summary": "2 cost anomalies detected. The season launch drove CloudFront and data-transfer egress up ~$32,000/mo combined.",
     }
 
 
@@ -191,10 +195,10 @@ def rightsizing() -> dict[str, Any]:
     # genuine savings once burst, memory-bound, and the real rate are accounted for.
     return {
         "total_instances_flagged": 3,
-        "total_monthly_savings":   889.00,
-        "total_annual_savings":    10668.00,
-        "genuine_monthly_savings": 218.40,
-        "genuine_annual_savings":  2620.80,
+        "total_monthly_savings":   6180.00,
+        "total_annual_savings":    74160.00,
+        "genuine_monthly_savings": 2140.00,
+        "genuine_annual_savings":  25680.00,
         "verdicts": {"genuine_savings": 1, "review": 1, "likely_false_positive": 1},
         "source": {
             "compute_optimizer": 2,
@@ -202,70 +206,70 @@ def rightsizing() -> dict[str, Any]:
             "note": "Compute Optimizer recommendations include CPU, memory, network, and disk. "
                     "CloudWatch fallback is CPU-only.",
         },
-        "savings_by_resource_type": {"ec2": 342.00, "rds": 547.00},
+        "savings_by_resource_type": {"ec2": 4380.00, "rds": 1800.00},
         "recommendations": [
             {
                 "instance_id":   "i-0a1b2c3d4e5f67890",
-                "name":          "data-platform-worker-01",
+                "name":          "vod-encoder-07",
                 "region":        "us-east-1",
                 "resource_type": "ec2",
                 "source":        "compute_optimizer",
-                "current_type":  "m5.4xlarge",
-                "recommended_type": "m5.2xlarge",
-                "avg_cpu_pct":   5.8,
+                "current_type":  "g5.4xlarge",
+                "recommended_type": "g5.2xlarge",
+                "avg_cpu_pct":   11.2,
                 "max_cpu_pct":   None,
-                "avg_mem_pct":   22.1,
-                "monthly_savings":          280.00,
-                "adjusted_monthly_savings": 218.40,
+                "avg_mem_pct":   24.0,
+                "monthly_savings":          3200.00,
+                "adjusted_monthly_savings": 2140.00,
                 "verdict":       "genuine_savings",
-                "score":         90,
-                "why":           "sustained over-provisioning (CPU+mem+net+disk); "
-                                 "real saving ≈$218/mo on your effective rate, ~22% below list (cur_athena)",
-                "action":        "Resize needs a stop/start (brief downtime); fully reversible.",
+                "score":         88,
+                "why":           "GPU encoders sit near-idle off-peak (11% avg util); "
+                                 "real saving ≈$2,140/mo on your effective rate, ~26% below list (cur_athena)",
+                "action":        "Move off-peak encodes to a scheduled g5.2xlarge pool; fully reversible.",
             },
             {
-                "instance_id":   "db-prod-analytics-01",
-                "name":          "prod-analytics",
+                "instance_id":   "db-metadata-catalog-01",
+                "name":          "metadata-catalog-01",
                 "region":        "us-east-1",
                 "resource_type": "rds",
                 "source":        "compute_optimizer",
-                "current_type":  "db.r5.2xlarge",
-                "recommended_type": "db.r5.xlarge",
-                "avg_cpu_pct":   8.1,
+                "current_type":  "db.r6g.4xlarge",
+                "recommended_type": "db.r6g.2xlarge",
+                "avg_cpu_pct":   9.4,
                 "max_cpu_pct":   None,
-                "avg_mem_pct":   78.4,
-                "monthly_savings":          547.00,
-                "adjusted_monthly_savings": 426.66,
+                "avg_mem_pct":   81.0,
+                "monthly_savings":          1800.00,
+                "adjusted_monthly_savings": 1420.00,
                 "verdict":       "review",
-                "score":         42,
-                "why":           "over-provisioned; memory at 78%, likely memory-bound; "
-                                 "real saving ≈$427/mo on your effective rate, ~22% below list (cur_athena)",
+                "score":         40,
+                "why":           "over-provisioned; memory at 81%, likely memory-bound; "
+                                 "real saving ≈$1,420/mo on your effective rate, ~26% below list (cur_athena)",
                 "action":        "Modify the instance class in a maintenance window; reversible, brief failover.",
             },
             {
                 "instance_id":   "i-07f3c9a1b2d4e6f80",
-                "name":          "api-gateway-02",
+                "name":          "playback-api-04",
                 "region":        "us-west-2",
                 "resource_type": "ec2",
                 "source":        "cloudwatch_fallback",
-                "current_type":  "c5.xlarge",
-                "recommended_type": "c5.large",
-                "avg_cpu_pct":   9.2,
-                "max_cpu_pct":   82.0,
+                "current_type":  "c6i.2xlarge",
+                "recommended_type": "c6i.xlarge",
+                "avg_cpu_pct":   12.0,
+                "max_cpu_pct":   84.0,
                 "avg_mem_pct":   None,
-                "monthly_savings":          62.00,
-                "adjusted_monthly_savings": 48.36,
+                "monthly_savings":          1180.00,
+                "adjusted_monthly_savings": 780.00,
                 "verdict":       "likely_false_positive",
-                "score":         5,
-                "why":           "CPU-only avg 9%; peaks to 82% CPU, needs headroom; "
-                                 "real saving ≈$48/mo on your effective rate, ~22% below list (cur_athena)",
+                "score":         6,
+                "why":           "CPU-only avg 12%; peaks to 84% at prime-time, needs headroom; "
+                                 "real saving ≈$780/mo on your effective rate, ~26% below list (cur_athena)",
                 "action":        "Resize needs a stop/start (brief downtime); fully reversible.",
             },
         ],
         "pricing_basis": {
             "basis":      {"effective_rate": 3},
             "confidence": {"high": 3},
-            "effective_discount_pct": 22.0,
+            "effective_discount_pct": 26.0,
             "rate_source": "cur_athena",
         },
     }
@@ -273,87 +277,88 @@ def rightsizing() -> dict[str, Any]:
 
 def kubernetes_costs() -> dict[str, Any]:
     return {
-        "cluster":               "prod-eks-cluster",
+        "cluster":               "prod-eks-streaming",
         "provider":              "aws",
-        "node_count":            8,
-        "pod_count":             47,
-        "total_monthly_cost_usd": 4180.00,
-        "wasted_monthly_cost_usd": 890.00,
-        "waste_pct":             21.3,
-        "cpu_efficiency_pct":    44.2,
-        "mem_efficiency_pct":    61.8,
+        "node_count":            24,
+        "pod_count":             186,
+        "total_monthly_cost_usd": 78000.00,
+        "wasted_monthly_cost_usd": 14200.00,
+        "waste_pct":             18.2,
+        "cpu_efficiency_pct":    41.0,
+        "mem_efficiency_pct":    58.4,
         "cost_by_namespace": {
-            "data-platform":  1840.00,
-            "api-services":   1120.00,
-            "monitoring":      620.00,
-            "kube-system":     380.00,
-            "staging":         220.00,
+            "recommendations": 31200.00,
+            "ad-decisioning":  18400.00,
+            "playback-api":    12600.00,
+            "search":           8100.00,
+            "platform":         4900.00,
+            "kube-system":      2800.00,
         },
         "top_workloads": [
             {
-                "namespace":          "data-platform",
-                "workload":           "Deployment/spark-worker",
-                "pods":               6,
-                "monthly_cost_usd":   1240.00,
-                "wasted_usd":         480.00,
-                "cpu_efficiency_pct": 28.4,
-                "mem_efficiency_pct": 52.1,
+                "namespace":          "recommendations",
+                "workload":           "Deployment/ranker-inference",
+                "pods":               18,
+                "monthly_cost_usd":   22400.00,
+                "wasted_usd":         8600.00,
+                "cpu_efficiency_pct": 29.0,
+                "mem_efficiency_pct": 51.0,
             },
             {
-                "namespace":          "api-services",
-                "workload":           "Deployment/payments-api",
-                "pods":               4,
-                "monthly_cost_usd":   560.00,
-                "wasted_usd":         80.00,
-                "cpu_efficiency_pct": 71.2,
-                "mem_efficiency_pct": 68.4,
+                "namespace":          "ad-decisioning",
+                "workload":           "Deployment/bid-service",
+                "pods":               12,
+                "monthly_cost_usd":   11800.00,
+                "wasted_usd":         1600.00,
+                "cpu_efficiency_pct": 68.0,
+                "mem_efficiency_pct": 63.0,
             },
         ],
-        "idle_nodes":    ["ip-10-0-1-44.ec2.internal"],
-        "idle_node_cost_usd": 280.32,
+        "idle_nodes":    ["ip-10-2-4-91.ec2.internal"],
+        "idle_node_cost_usd": 3250.00,
         "summary": (
-            "Cluster 'prod-eks-cluster' (AWS, 8 nodes): $4,180/month. "
-            "~$890/month wasted — spark-worker is 28% CPU efficient."
+            "Cluster 'prod-eks-streaming' (AWS, 24 nodes): $78,000/month. "
+            "~$14,200/month wasted — the recommendations ranker is 29% CPU efficient."
         ),
     }
 
 
 def cluster_efficiency() -> dict[str, Any]:
     return {
-        "cluster":  "prod-eks-cluster",
+        "cluster":  "prod-eks-streaming",
         "provider": "aws",
-        "score":    58.4,
+        "score":    55.8,
         "grade":    "C",
-        "total_monthly_cost_usd":   4180.00,
-        "wasted_monthly_cost_usd":   890.00,
+        "total_monthly_cost_usd":   78000.00,
+        "wasted_monthly_cost_usd":  14200.00,
         "has_metrics_server": True,
         "dimensions": {
-            "cpu_efficiency_pct":  44.2,
-            "cpu_score":           13.3,
-            "mem_efficiency_pct":  61.8,
-            "mem_score":           18.5,
-            "idle_node_pct":       12.5,
+            "cpu_efficiency_pct":  41.0,
+            "cpu_score":           12.3,
+            "mem_efficiency_pct":  58.4,
+            "mem_score":           17.5,
+            "idle_node_pct":       8.3,
             "idle_node_score":     15.0,
-            "waste_pct":           21.3,
-            "waste_score":         11.6,
+            "waste_pct":           18.2,
+            "waste_score":         11.0,
         },
         "headline": (
-            "Cluster 'prod-eks-cluster' scores 58/100 (Grade C) — "
-            "$4,180/mo total, $890/mo estimated waste. "
-            "Moderate waste. Tackle idle nodes and top rightsizing candidates first."
+            "Cluster 'prod-eks-streaming' scores 56/100 (Grade C) — "
+            "$78,000/mo total, $14,200/mo estimated waste. "
+            "Moderate waste. Tackle the recommendations ranker and idle nodes first."
         ),
         "top_recommendations": [
             {
                 "priority": "high",
                 "category": "idle_nodes",
-                "action":   "Drain ip-10-0-1-44 (idle node, <10% CPU/mem) — saving ~$252/mo.",
-                "potential_savings_usd": 252.0,
+                "action":   "Drain ip-10-2-4-91 (idle node, <10% CPU/mem) — saving ~$3,250/mo.",
+                "potential_savings_usd": 3250.0,
             },
             {
                 "priority": "medium",
                 "category": "rightsizing",
-                "action":   "Rightsize data-platform/spark-worker: CPU requests 24 cores, using 6.8 (28%) — reduce to 9 cores.",
-                "potential_savings_usd": 336.0,
+                "action":   "Rightsize recommendations/ranker-inference: CPU requests 96 cores, using 28 (29%) — reduce to 40 cores.",
+                "potential_savings_usd": 5200.0,
             },
         ],
     }
@@ -364,100 +369,103 @@ def cost_summary_cur() -> dict[str, Any]:
     return {
         "source":  "AWS Cost and Usage Report (Athena)",
         "period":  f"{_MONTH_START} to {_YESTERDAY}",
-        "total_usd": 12847.22,
+        "total_usd": 286402.34,
         "top_resources": [
             {
-                "resource_id":   "i-0a1b2c3d4e5f67890",
-                "resource_name": "data-platform-worker-01",
-                "service":       "Amazon EC2",
-                "instance_type": "m5.4xlarge",
-                "region":        "us-east-1",
-                "monthly_cost":  560.64,
-                "tags": {"team": "data-platform", "env": "production"},
+                "resource_id":   "E2QK8S1TREAM01",
+                "resource_name": "smartcast-cdn",
+                "service":       "Amazon CloudFront",
+                "instance_type": "distribution",
+                "region":        "global",
+                "monthly_cost":  84200.10,
+                "tags": {"team": "streaming-delivery", "env": "production"},
             },
             {
-                "resource_id":   "db-prod-analytics-01",
-                "resource_name": "prod-analytics",
-                "service":       "Amazon RDS",
-                "instance_type": "db.r5.2xlarge",
+                "resource_id":   "i-0a1b2c3d4e5f67890",
+                "resource_name": "vod-encoder-07",
+                "service":       "Amazon EC2",
+                "instance_type": "g5.4xlarge",
                 "region":        "us-east-1",
-                "monthly_cost":  1094.40,
-                "tags": {"team": "data", "env": "production"},
+                "monthly_cost":  4380.00,
+                "tags": {"team": "content-platform", "env": "production"},
             },
         ],
         "by_tag_team": {
-            "data-platform": 3840.10,
-            "api":           2100.44,
-            "data":          1890.33,
-            "platform":       822.15,
-            "untagged":      4194.20,
+            "streaming-delivery": 131000.00,
+            "content-platform":    58400.00,
+            "ad-platform":         41200.00,
+            "data-analytics":      24600.00,
+            "recommendations":     18900.00,
+            "untagged":            12302.34,
         },
-        "untagged_pct": 32.6,
-        "note": "32% of spend is untagged — add 'team' tags to reduce allocation blind spots.",
+        "untagged_pct": 4.3,
+        "note": "Only 4% of spend is untagged — add 'team' tags on the remaining shared services to close the last allocation gap.",
     }
 
 
 # ── Registry: maps tool name → demo response function ─────────────────────────
 
 def llm_costs() -> dict[str, Any]:
-    # AI/LLM spend, consistent with the acme-production story: ~$4,120/mo,
-    # which is ~32% of the $12,847 infra bill. gpt-4o dominates. The wedge:
-    # show the money answer AND the switch that recovers it, with zero creds.
+    # AI/LLM spend for the streamco-production story: ~$66,000/mo, ~10% of the
+    # ~$673k total bill. AI powers recommendations, content metadata auto-tagging,
+    # search relevance, and moderation. gpt-4o leads. The wedge: show the money
+    # answer AND the switch that recovers it, with zero creds.
     daily = []
     for i in range(13, -1, -1):
         d = (_TODAY - timedelta(days=i)).isoformat()
-        # gentle upward drift, ~$135/day average
-        daily.append({"date": d, "total_usd": round(118 + (13 - i) * 2.6, 2)})
+        # gentle upward drift, ~$2,150/day average
+        daily.append({"date": d, "total_usd": round(2000 + (13 - i) * 24.0, 2)})
     return {
         "period": f"{_MONTH_START} to {_YESTERDAY}",
-        "total_usd": 4120.00,
-        "pct_of_total_cloud_spend": 32.1,
+        "total_usd": 66000.00,
+        "pct_of_total_cloud_spend": 9.8,
         "by_provider": {
-            "openai":    2920.00,
-            "anthropic":  870.00,
-            "bedrock":    330.00,
+            "openai":    38000.00,
+            "anthropic": 22000.00,
+            "bedrock":    6000.00,
         },
         "by_model": {
-            "gpt-4o":                       2080.00,
-            "claude-sonnet-4-5-20250929":    620.00,
-            "o1":                            430.00,
-            "gpt-4o-mini":                   410.00,
-            "bedrock/anthropic.claude":      330.00,
-            "claude-haiku-4-5-20251001":     250.00,
+            "gpt-4o":                       24000.00,
+            "claude-sonnet-4-5-20250929":   15000.00,
+            "o3":                            9200.00,
+            "claude-haiku-4-5-20251001":     7000.00,
+            "bedrock/anthropic.claude":      6000.00,
+            "gpt-4o-mini":                   4800.00,
         },
         "model_count": 6,
         "top_spenders": [
-            {"model": "gpt-4o",            "provider": "openai",    "cost_usd": 2080.00},
-            {"model": "claude-sonnet-4-5", "provider": "anthropic", "cost_usd":  620.00},
-            {"model": "o1",                "provider": "openai",    "cost_usd":  430.00},
+            {"model": "gpt-4o",            "provider": "openai",    "cost_usd": 24000.00},
+            {"model": "claude-sonnet-4-5", "provider": "anthropic", "cost_usd": 15000.00},
+            {"model": "o3",                "provider": "openai",    "cost_usd":  9200.00},
         ],
         "daily": daily,
         "recommendations": [
             {
-                "title": "Route short-context requests off gpt-4o",
+                "title": "Route title auto-tagging off o3",
                 "detail": (
-                    "gpt-4o is 71% of AI spend ($2,920/mo). About 60% of those requests "
-                    "use under 4K context and don't need it. Routing them to gpt-4o-mini "
-                    "saves an estimated $1,640/mo."
+                    "The nightly metadata auto-tagging job runs on o3 ($9,200/mo). On a "
+                    "sampled eval, gpt-4o-mini matches its labels at ~1/15th the price. "
+                    "Routing it saves an estimated $7,800/mo."
                 ),
-                "estimated_savings_usd": 1640.00,
+                "estimated_savings_usd": 7800.00,
                 "effort": "medium",
             },
             {
-                "title": "Turn on prompt caching",
+                "title": "Cache the shared catalog context on gpt-4o",
                 "detail": (
-                    "Prompt cache hit rate is 8%. Caching system prompts and few-shot "
-                    "examples could recover an estimated $740/mo at current volume."
+                    "Every recommendation call carries the same 8K-token catalog/system "
+                    "context, billed uncached (6% cache hit rate). Prompt caching recovers "
+                    "an estimated $5,400/mo at current volume."
                 ),
-                "estimated_savings_usd": 740.00,
+                "estimated_savings_usd": 5400.00,
                 "effort": "low",
             },
         ],
         "sources": {"openai": "ok", "anthropic": "ok", "bedrock": "ok"},
         "summary": (
-            "AI/LLM spend this month: $4,120 (32% of total cloud cost). gpt-4o drives "
-            "71% of it. Two changes recover ~$2,380/mo: route short-context calls to "
-            "gpt-4o-mini ($1,640) and enable prompt caching ($740)."
+            "AI/LLM spend this month: $66,000 (~10% of total cloud cost). gpt-4o drives "
+            "36% of it. Two changes recover ~$13,200/mo: route metadata auto-tagging off "
+            "o3 to gpt-4o-mini ($7,800) and cache the catalog context ($5,400)."
         ),
     }
 
@@ -468,25 +476,26 @@ def cost_drivers() -> dict[str, Any]:
     return {
         "period": f"{_MONTH_START} to {_TODAY}",
         "comparison_period": "prior 30 days",
-        "total_current_usd": 12847.22,
-        "total_previous_usd": 10410.00,
-        "net_change_usd": 2437.22,
-        "net_change_pct": 23.4,
+        "total_current_usd": 286402.34,
+        "total_previous_usd": 240300.00,
+        "net_change_usd": 46102.34,
+        "net_change_pct": 19.2,
         "top_increases": [
-            {"key": "AWS Data Transfer", "current": 1890.33, "previous": 1180.00, "delta": 710.33, "delta_pct": 60.2, "direction": "increase"},
-            {"key": "Amazon EC2", "current": 7240.10, "previous": 6100.00, "delta": 1140.10, "delta_pct": 18.7, "direction": "increase"},
-            {"key": "Amazon RDS", "current": 2100.44, "previous": 1720.00, "delta": 380.44, "delta_pct": 22.1, "direction": "increase"},
+            {"key": "Amazon CloudFront", "current": 84200.10, "previous": 65800.00, "delta": 18400.10, "delta_pct": 28.0, "direction": "increase"},
+            {"key": "AWS Data Transfer", "current": 46800.33, "previous": 33200.00, "delta": 13600.33, "delta_pct": 41.0, "direction": "increase"},
+            {"key": "Amazon EC2", "current": 52400.00, "previous": 46800.00, "delta": 5600.00, "delta_pct": 12.0, "direction": "increase"},
+            {"key": "AWS Elemental MediaLive", "current": 18300.00, "previous": 15000.00, "delta": 3300.00, "delta_pct": 22.0, "direction": "increase"},
         ],
         "top_decreases": [
-            {"key": "Amazon S3", "current": 822.15, "previous": 917.00, "delta": -94.85, "delta_pct": -10.3, "direction": "decrease"},
+            {"key": "Amazon S3", "current": 38600.15, "previous": 40800.00, "delta": -2199.85, "delta_pct": -5.4, "direction": "decrease"},
         ],
         "all_drivers": [],
         "summary": (
-            "Costs rose $2,437 (+23.4%) vs the prior 30 days. The standout is "
-            "Data Transfer, up 60% ($710), which usually means a new cross-AZ or "
-            "egress path went live. EC2 added $1,140 from on-demand growth, and RDS "
-            "$380. S3 fell $95. Start with the Data Transfer jump: it is the fastest "
-            "to trace to a single change."
+            "Costs rose $46,102 (+19.2%) vs the prior 30 days. The season launch is the "
+            "story: CloudFront egress up $18,400 (28%) and data transfer up $13,600 (41%) "
+            "as delivery to SmartCast devices spiked. EC2 added $5,600 and MediaLive $3,300 "
+            "from more live channels. S3 fell $2,200 on Glacier tiering. Start with "
+            "CloudFront: it is the fastest to trace to the launch."
         ),
     }
 
@@ -499,133 +508,138 @@ def cost_drivers() -> dict[str, Any]:
 # single-cloud demo numbers exactly.
 _PROVIDER_SERVICES: dict[str, list[dict[str, Any]]] = {
     "aws": [
-        {"service": "Amazon EC2",         "amount": 7240.10, "resources": 42, "delta_pct": 18.7},
-        {"service": "Amazon RDS",         "amount": 2100.44, "resources": 8,  "delta_pct": 22.1},
-        {"service": "AWS Data Transfer",  "amount": 1890.33, "resources": 0,  "delta_pct": 60.2},
-        {"service": "Amazon S3",          "amount": 822.15,  "resources": 31, "delta_pct": -10.3},
-        {"service": "Amazon CloudWatch",  "amount": 412.88,  "resources": 0,  "delta_pct": 4.1},
-        {"service": "AWS Lambda",         "amount": 201.44,  "resources": 74, "delta_pct": 9.0},
-        {"service": "Amazon EKS",         "amount": 180.00,  "resources": 2,  "delta_pct": 1.2},
-    ],
-    "azure": [
-        {"service": "Virtual Machines",   "amount": 1980.00, "resources": 16, "delta_pct": 12.4},
-        {"service": "Azure SQL Database", "amount": 640.00,  "resources": 5,  "delta_pct": 6.8},
-        {"service": "Blob Storage",       "amount": 305.00,  "resources": 12, "delta_pct": -3.1},
-        {"service": "App Service",        "amount": 240.00,  "resources": 9,  "delta_pct": 14.0},
-        {"service": "Azure Monitor",      "amount": 110.00,  "resources": 0,  "delta_pct": 2.0},
+        {"service": "Amazon CloudFront",          "amount": 84200.10, "resources": 0,   "delta_pct": 28.0},
+        {"service": "Amazon EC2",                 "amount": 52400.00, "resources": 118, "delta_pct": 12.0},
+        {"service": "AWS Data Transfer",          "amount": 46800.33, "resources": 0,   "delta_pct": 41.0},
+        {"service": "Amazon S3",                  "amount": 38600.15, "resources": 64,  "delta_pct": -5.4},
+        {"service": "AWS Elemental MediaConvert", "amount": 24900.00, "resources": 0,   "delta_pct": 15.0},
+        {"service": "AWS Elemental MediaLive",    "amount": 18300.00, "resources": 12,  "delta_pct": 22.0},
+        {"service": "Amazon RDS",                 "amount": 12700.44, "resources": 9,   "delta_pct": 8.0},
+        {"service": "Amazon CloudWatch",          "amount": 5400.88,  "resources": 0,   "delta_pct": 4.0},
+        {"service": "AWS Lambda",                 "amount": 3100.44,  "resources": 220, "delta_pct": 9.0},
     ],
     "gcp": [
-        {"service": "Compute Engine",     "amount": 1120.00, "resources": 22, "delta_pct": 9.5},
-        {"service": "BigQuery",           "amount": 640.00,  "resources": 0,  "delta_pct": 31.7},
-        {"service": "GKE",                "amount": 410.00,  "resources": 3,  "delta_pct": 5.4},
-        {"service": "Cloud Storage",      "amount": 250.00,  "resources": 18, "delta_pct": -2.2},
-        {"service": "Cloud Networking",   "amount": 140.00,  "resources": 0,  "delta_pct": 7.1},
+        {"service": "BigQuery",           "amount": 61000.00, "resources": 0,  "delta_pct": 24.0},
+        {"service": "Compute Engine",     "amount": 18400.00, "resources": 40, "delta_pct": 7.0},
+        {"service": "GKE",                "amount": 7200.00,  "resources": 4,  "delta_pct": 5.0},
+        {"service": "Cloud Storage",      "amount": 4100.00,  "resources": 52, "delta_pct": -2.0},
+        {"service": "Cloud CDN",          "amount": 1300.00,  "resources": 0,  "delta_pct": 11.0},
     ],
-    # AI / LLM token spend, genuinely separate from cloud (the AI-native wedge).
-    "openai": [
-        {"service": "GPT-4o",             "amount": 3100.00, "resources": 0,  "delta_pct": 41.2},
-        {"service": "o3",                 "amount": 1900.00, "resources": 0,  "delta_pct": 88.0},
-        {"service": "GPT-4o mini",        "amount": 420.00,  "resources": 0,  "delta_pct": 12.5},
-        {"service": "Embeddings",         "amount": 180.00,  "resources": 0,  "delta_pct": 6.0},
-    ],
-    "anthropic": [
-        {"service": "Claude Opus",        "amount": 2400.00, "resources": 0,  "delta_pct": 33.4},
-        {"service": "Claude Sonnet",      "amount": 1050.00, "resources": 0,  "delta_pct": 9.1},
-        {"service": "Claude Haiku",       "amount": 290.00,  "resources": 0,  "delta_pct": 4.0},
+    "azure": [
+        {"service": "Virtual Machines",   "amount": 9800.00, "resources": 12, "delta_pct": 6.0},
+        {"service": "Azure SQL Database", "amount": 2600.00, "resources": 4,  "delta_pct": 4.0},
+        {"service": "Blob Storage",       "amount": 1400.00, "resources": 9,  "delta_pct": -1.0},
+        {"service": "App Service",        "amount": 900.00,  "resources": 5,  "delta_pct": 3.0},
     ],
     # Kubernetes, read from kubeconfig (allocation view; namespaces as lines).
     "kubernetes": [
-        {"service": "ml-inference (ns)",  "amount": 1600.00, "resources": 34, "delta_pct": 27.3},
-        {"service": "checkout (ns)",      "amount": 940.00,  "resources": 18, "delta_pct": 6.2},
-        {"service": "search (ns)",        "amount": 610.00,  "resources": 12, "delta_pct": 3.8},
-        {"service": "platform (ns)",      "amount": 380.00,  "resources": 9,  "delta_pct": 1.1},
+        {"service": "recommendations (ns)", "amount": 31200.00, "resources": 62, "delta_pct": 22.0},
+        {"service": "ad-decisioning (ns)",  "amount": 18400.00, "resources": 44, "delta_pct": 9.0},
+        {"service": "playback-api (ns)",    "amount": 12600.00, "resources": 28, "delta_pct": 4.0},
+        {"service": "search (ns)",          "amount": 8100.00,  "resources": 20, "delta_pct": 3.0},
+        {"service": "platform (ns)",        "amount": 4900.00,  "resources": 18, "delta_pct": 1.0},
+        {"service": "kube-system (ns)",     "amount": 2800.00,  "resources": 14, "delta_pct": 0.5},
+    ],
+    # AI / LLM token spend, genuinely separate from cloud (the AI-native wedge).
+    "openai": [
+        {"service": "GPT-4o",             "amount": 24000.00, "resources": 0,  "delta_pct": 33.0},
+        {"service": "o3",                 "amount": 9200.00,  "resources": 0,  "delta_pct": 61.0},
+        {"service": "GPT-4o mini",        "amount": 4800.00,  "resources": 0,  "delta_pct": 12.0},
+    ],
+    "anthropic": [
+        {"service": "Claude Sonnet",      "amount": 15000.00, "resources": 0,  "delta_pct": 28.0},
+        {"service": "Claude Haiku",       "amount": 7000.00,  "resources": 0,  "delta_pct": 9.0},
     ],
     # SaaS + data platforms.
     "datadog": [
-        {"service": "Infrastructure",     "amount": 1240.00, "resources": 0,  "delta_pct": 14.2},
-        {"service": "Log Management",     "amount": 890.00,  "resources": 0,  "delta_pct": 22.7},
-        {"service": "APM & Tracing",      "amount": 560.00,  "resources": 0,  "delta_pct": 8.0},
+        {"service": "Infrastructure",     "amount": 16800.00, "resources": 0,  "delta_pct": 12.0},
+        {"service": "Log Management",     "amount": 11400.00, "resources": 0,  "delta_pct": 19.0},
+        {"service": "APM & Tracing",      "amount": 5800.00,  "resources": 0,  "delta_pct": 7.0},
     ],
     "snowflake": [
-        {"service": "Compute (warehouses)","amount": 1850.00,"resources": 6,  "delta_pct": 19.5},
-        {"service": "Storage",            "amount": 340.00,  "resources": 0,  "delta_pct": 3.2},
+        {"service": "Compute (warehouses)","amount": 52000.00,"resources": 14, "delta_pct": 17.0},
+        {"service": "Storage",            "amount": 9000.00,  "resources": 0,  "delta_pct": 4.0},
     ],
     "databricks": [
-        {"service": "Jobs Compute",       "amount": 1420.00, "resources": 0,  "delta_pct": 11.8},
-        {"service": "SQL Warehouses",     "amount": 680.00,  "resources": 0,  "delta_pct": 5.5},
-    ],
-    "mongodb": [
-        {"service": "Atlas Clusters",     "amount": 920.00,  "resources": 4,  "delta_pct": 7.4},
-        {"service": "Atlas Search",       "amount": 210.00,  "resources": 0,  "delta_pct": 2.9},
+        {"service": "Jobs Compute",       "amount": 33000.00, "resources": 0,  "delta_pct": 14.0},
+        {"service": "SQL Warehouses",     "amount": 14000.00, "resources": 0,  "delta_pct": 6.0},
     ],
 }
-_DEMO_PROVIDERS = ["aws", "azure", "gcp", "openai", "anthropic",
-                   "kubernetes", "datadog", "snowflake", "databricks", "mongodb"]
+_DEMO_PROVIDERS = ["aws", "gcp", "azure", "kubernetes", "openai", "anthropic",
+                   "datadog", "snowflake", "databricks"]
 
 # Per-provider open opportunities, priced on the customer's real rate.
 _PROVIDER_OPPS: dict[str, list[dict[str, Any]]] = {
     "aws": [
-        {"description": "Rightsize data-platform-worker-01 (m5.4xlarge to m5.2xlarge). "
-                        "Genuine after burst + memory check, priced on your ~22% effective discount.",
-         "monthly_saving": 218.40, "resource": "i-0a1b2c3d4e5f67890", "provider": "aws"},
-        {"description": "Buy a 1-year compute Savings Plan at your steady EC2 baseline.",
-         "monthly_saving": 412.00, "resource": "compute-savings-plan", "provider": "aws"},
-        {"description": "Delete 4 unattached gp2 EBS volumes, idle 30 to 90 days.",
-         "monthly_saving": 96.20, "resource": "vol-0f3d5a2c9b1e40718", "provider": "aws"},
-        {"description": "Move 2.1 TB of infrequently read S3 to Intelligent-Tiering.",
-         "monthly_saving": 61.80, "resource": "s3://acme-data-platform-logs", "provider": "aws"},
+        {"description": "Move the CloudFront egress baseline to a committed private-pricing tier. "
+                        "Steady streaming volume qualifies; priced on your ~26% effective discount.",
+         "monthly_saving": 4200.00, "resource": "cloudfront-commit", "provider": "aws"},
+        {"description": "Buy a 1-year compute Savings Plan at your steady encoder + services baseline.",
+         "monthly_saving": 5800.00, "resource": "compute-savings-plan", "provider": "aws"},
+        {"description": "Move 640 TB of cold VOD masters to S3 Glacier Deep Archive.",
+         "monthly_saving": 3100.00, "resource": "s3://streamco-vod-masters", "provider": "aws"},
+        {"description": "Schedule the off-peak VOD encoder pool (g5.4xlarge to g5.2xlarge off-hours). "
+                        "Genuine after burst + memory check.",
+         "monthly_saving": 2140.00, "resource": "vod-encoder-07", "provider": "aws"},
+    ],
+    "gcp": [
+        {"description": "Switch the viewership rollups to BigQuery flat-rate slots at this query volume.",
+         "monthly_saving": 4600.00, "resource": "bq-flat-slots", "provider": "gcp"},
+        {"description": "Set a 90-day lifecycle rule on 220 TB of cold Cloud Storage.",
+         "monthly_saving": 1200.00, "resource": "gs://streamco-analytics-archive", "provider": "gcp"},
     ],
     "azure": [
         {"description": "Buy a 1-year Azure Reserved VM Instance for the steady D-series baseline.",
-         "monthly_saving": 176.00, "resource": "vm-reservation-dseries", "provider": "azure"},
-        {"description": "Downsize 2 over-provisioned App Service plans (P2v3 to P1v3).",
-         "monthly_saving": 88.00, "resource": "asp-web-frontend", "provider": "azure"},
-    ],
-    "gcp": [
-        {"description": "Apply a committed-use discount to the stable Compute Engine baseline.",
-         "monthly_saving": 132.00, "resource": "cud-compute-n2", "provider": "gcp"},
-        {"description": "Set a 90-day lifecycle rule on 1.4 TB of cold Cloud Storage.",
-         "monthly_saving": 44.00, "resource": "gs://acme-analytics-archive", "provider": "gcp"},
+         "monthly_saving": 1100.00, "resource": "vm-reservation-dseries", "provider": "azure"},
     ],
     "openai": [
-        {"description": "Cache the shared system prompt: 71% of GPT-4o input is repeated context, "
-                        "billed at full price. Prompt caching recovers most of it.",
-         "monthly_saving": 640.00, "resource": "prompt-cache-gpt4o", "provider": "openai"},
-        {"description": "Route the classifier calls from o3 to GPT-4o mini. Same output on a "
-                        "sampled eval, 1/20th the price.",
-         "monthly_saving": 880.00, "resource": "model-route-classifier", "provider": "openai"},
+        {"description": "Route the nightly title auto-tagging job from o3 to GPT-4o mini. Same labels "
+                        "on a sampled eval, ~1/15th the price.",
+         "monthly_saving": 7800.00, "resource": "model-route-autotag", "provider": "openai"},
+        {"description": "Cache the shared catalog context on GPT-4o: the same 8K-token context rides "
+                        "every recommendation call, billed uncached. Prompt caching recovers most of it.",
+         "monthly_saving": 5400.00, "resource": "prompt-cache-gpt4o", "provider": "openai"},
     ],
     "anthropic": [
-        {"description": "Move the summarization workload from Claude Opus to Sonnet. Quality holds "
-                        "on your eval set at a fraction of the cost.",
-         "monthly_saving": 610.00, "resource": "model-route-summarize", "provider": "anthropic"},
+        {"description": "Move content-moderation summaries from Claude Sonnet to Haiku where quality "
+                        "holds on your eval set.",
+         "monthly_saving": 3200.00, "resource": "model-route-moderation", "provider": "anthropic"},
     ],
     "kubernetes": [
-        {"description": "Right-size the ml-inference namespace: requests are 3x actual usage across "
-                        "12 pods. Trim CPU/memory requests to the p95.",
-         "monthly_saving": 470.00, "resource": "ns/ml-inference", "provider": "kubernetes"},
+        {"description": "Right-size the recommendations ranker: requests are 3x actual usage across "
+                        "18 pods. Trim CPU/memory requests to the p95.",
+         "monthly_saving": 5200.00, "resource": "ns/recommendations", "provider": "kubernetes"},
     ],
     "snowflake": [
-        {"description": "Auto-suspend two idle warehouses after 60s (currently 10 min). They sit "
-                        "warm most of the day.",
-         "monthly_saving": 305.00, "resource": "wh/analytics_xl", "provider": "snowflake"},
+        {"description": "Auto-suspend two idle ad-analytics warehouses after 60s (currently 5 min). "
+                        "They sit warm most of the day.",
+         "monthly_saving": 3400.00, "resource": "wh/ad_analytics_xl", "provider": "snowflake"},
+    ],
+    "datadog": [
+        {"description": "Drop custom-metric cardinality on the playback fleet: unused per-device tags "
+                        "triple the metric count.",
+         "monthly_saving": 2600.00, "resource": "dd-playback-metrics", "provider": "datadog"},
+    ],
+    "databricks": [
+        {"description": "Move nightly recommendation-model training to spot job clusters.",
+         "monthly_saving": 4100.00, "resource": "dbx-reco-training", "provider": "databricks"},
     ],
 }
 
 
 # Demo accounts and regions, so Top Accounts and Spend by Region are real panels.
 _DEMO_ACCOUNTS = [
-    {"name": "Production",     "id": "111111111111", "share": 0.42},
-    {"name": "Data Platform",  "id": "222222222222", "share": 0.24},
-    {"name": "Staging",        "id": "333333333333", "share": 0.14},
-    {"name": "Shared Services","id": "444444444444", "share": 0.11},
-    {"name": "Sandbox",        "id": "555555555555", "share": 0.09},
+    {"name": "Production",         "id": "481516234203", "share": 0.38},
+    {"name": "Streaming Delivery", "id": "481516234211", "share": 0.24},
+    {"name": "Ad Platform",        "id": "481516234229", "share": 0.16},
+    {"name": "Data & Analytics",   "id": "481516234237", "share": 0.13},
+    {"name": "Staging",            "id": "481516234245", "share": 0.09},
 ]
 _DEMO_REGIONS = [
-    {"region": "us-east-1",      "code": "US", "label": "N. Virginia",  "share": 0.38},
-    {"region": "us-west-2",      "code": "US", "label": "Oregon",       "share": 0.19},
-    {"region": "eu-west-1",      "code": "IE", "label": "Ireland",      "share": 0.16},
-    {"region": "eu-central-1",   "code": "DE", "label": "Frankfurt",    "share": 0.11},
+    {"region": "us-east-1",      "code": "US", "label": "N. Virginia",  "share": 0.34},
+    {"region": "us-west-2",      "code": "US", "label": "Oregon",       "share": 0.20},
+    {"region": "eu-west-1",      "code": "IE", "label": "Ireland",      "share": 0.18},
+    {"region": "eu-central-1",   "code": "DE", "label": "Frankfurt",    "share": 0.12},
     {"region": "ap-southeast-1", "code": "SG", "label": "Singapore",    "share": 0.09},
     {"region": "ap-northeast-1", "code": "JP", "label": "Tokyo",        "share": 0.07},
 ]
@@ -692,7 +706,7 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
 
     # Month figures: sum the selected providers' full monthly service cost.
     month_total = round(sum(s["amount"] for p in provs for s in _PROVIDER_SERVICES[p]), 2)
-    delta_pct = 23.4 if "aws" in provs else round(sum(
+    delta_pct = 19.2 if "aws" in provs else round(sum(
         s["amount"] * s["delta_pct"] for p in provs for s in _PROVIDER_SERVICES[p]
     ) / max(month_total, 1), 1)
     last_month = round(month_total / (1 + delta_pct / 100), 2)
@@ -703,22 +717,22 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
     opp_total = round(sum(o["monthly_saving"] for o in recent_opportunities), 2)
 
     recent_savings = [
-        {"description": "Turned off 6 non-prod RDS instances on a nights/weekends schedule.",
-         "monthly_saving": 340.00, "resource": "nonprod-scheduler", "provider": "aws"},
+        {"description": "Moved off-peak VOD encodes to a scheduled g5 pool.",
+         "monthly_saving": 2140.00, "resource": "vod-encoder-schedule", "provider": "aws"},
     ] if "aws" in provs else []
 
     # Verified savings ledger: only changes nable proposed AND confirmed landed on
     # the resource (the cloud now matches nable's recommended config). This is the
     # billable figure, kept strictly separate from "identified/potential".
     verified_ledger = [
-        {"description": "Rightsized `data-platform-worker-01` m5.4xlarge -> m5.2xlarge",
-         "resource": "i-0a1b2c3d4e5f67890", "verified_monthly": 218.40,
+        {"description": "CloudFront egress moved to a committed private-pricing tier",
+         "resource": "cloudfront-commit", "verified_monthly": 4200.00,
          "confirmed_on": (_TODAY - timedelta(days=4)).isoformat(),
-         "proof": "instance type now m5.2xlarge; next-day EC2 line fell $214"},
-        {"description": "Non-prod RDS on a nights/weekends schedule",
-         "resource": "nonprod-scheduler", "verified_monthly": 340.00,
+         "proof": "egress now billed at the commit rate; CloudFront line down 5%"},
+        {"description": "Rightsized `vod-encoder-07` g5.4xlarge -> g5.2xlarge off-peak",
+         "resource": "vod-encoder-07", "verified_monthly": 2140.00,
          "confirmed_on": (_TODAY - timedelta(days=9)).isoformat(),
-         "proof": "6 instances stopped off-hours; RDS run-hours down 41%"},
+         "proof": "instance now g5.2xlarge off-hours; next-day EC2 line fell $71/day"},
     ] if "aws" in provs else []
     verified_monthly = round(sum(v["verified_monthly"] for v in verified_ledger), 2)
 
@@ -779,47 +793,47 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
 
     # Budgets & alerts.
     budgets = [
-        {"name": "AWS Monthly Budget",   "provider": "aws",   "used": 3200000, "limit": 3600000},
-        {"name": "GCP Monthly Budget",   "provider": "gcp",   "used": 420000,  "limit": 500000},
-        {"name": "Azure Monthly Budget", "provider": "azure", "used": 780000,  "limit": 920000},
+        {"name": "AWS Monthly Budget",       "provider": "aws",       "used": 286402, "limit": 320000},
+        {"name": "Snowflake Monthly Budget", "provider": "snowflake", "used": 61000,  "limit": 60000},
+        {"name": "GCP Monthly Budget",       "provider": "gcp",       "used": 92000,  "limit": 110000},
     ]
     for b in budgets:
         b["pct"] = round(b["used"] / b["limit"] * 100, 1)
         b["status"] = "over" if b["pct"] >= 100 else ("warn" if b["pct"] >= 85 else "ok")
     alerts = [
-        {"kind": "warn",  "title": "Azure budget alert", "body": "85% of budget used"},
-        {"kind": "info",  "title": "Forecast alert",     "body": f"{provs[0].upper() if provs else 'AWS'} forecast tracking above run rate"},
+        {"kind": "warn",  "title": "Snowflake budget exceeded", "body": "102% of budget used, ad-analytics warehouses running hot"},
+        {"kind": "info",  "title": "Forecast alert",            "body": f"{provs[0].upper() if provs else 'AWS'} forecast tracking above run rate after the season launch"},
     ]
 
     # Executive KPI band (tier-1): unit economics + posture, the board-slide row.
     exec_kpis = [
-        {"label": "Cost per customer", "value": "$6.98", "delta_pct": -8.0, "good_down": True, "sub": "1,840 active customers"},
-        {"label": "Infra % of revenue", "value": "7.8%", "delta_pct": -1.2, "good_down": True, "sub": "$164K MRR"},
-        {"label": "Effective savings rate", "value": "22%", "delta_pct": 3.0, "good_down": False, "sub": "vs on-demand list"},
-        {"label": "Commitment coverage", "value": "68%", "delta_pct": 5.0, "good_down": False, "sub": "target 80%"},
-        {"label": "Cost per 1M tokens", "value": "$3.10", "delta_pct": -14.0, "good_down": True, "sub": "blended across models"},
+        {"label": "Cost per 1K active viewers", "value": "$0.42", "delta_pct": -6.0, "good_down": True, "sub": "18.4M monthly active viewers"},
+        {"label": "CDN cost per TB delivered", "value": "$8.10", "delta_pct": 4.0, "good_down": True, "sub": "season-launch spike"},
+        {"label": "Infra % of revenue", "value": "6.2%", "delta_pct": -0.8, "good_down": True, "sub": "$10.9M MRR"},
+        {"label": "Effective savings rate", "value": "26%", "delta_pct": 3.0, "good_down": False, "sub": "vs on-demand list"},
+        {"label": "Commitment coverage", "value": "64%", "delta_pct": 5.0, "good_down": False, "sub": "target 80%"},
     ]
     # AI efficiency panel: the wedge no incumbent shows.
     ai_efficiency = {
-        "ai_pct_of_spend": 22.0,
-        "ai_spend": round(month_total * 0.22, 2),
+        "ai_pct_of_spend": 9.8,
+        "ai_spend": round(month_total * 0.098, 2),
         "metrics": [
-            {"label": "Cost / 1M tokens", "value": "$3.10", "delta_pct": -14.0, "good_down": True},
-            {"label": "Cost / AI-authored PR", "value": "$4.20", "delta_pct": 6.0, "good_down": True},
-            {"label": "GPU utilization", "value": "44%", "delta_pct": 2.0, "good_down": False, "warn": True},
-            {"label": "Cache hit rate", "value": "0%", "delta_pct": 0.0, "good_down": False, "warn": True},
+            {"label": "Cost / 1M tokens", "value": "$2.80", "delta_pct": -12.0, "good_down": True},
+            {"label": "Cost / 1M recs served", "value": "$1.90", "delta_pct": -8.0, "good_down": True},
+            {"label": "GPU encoder utilization", "value": "41%", "delta_pct": 2.0, "good_down": False, "warn": True},
+            {"label": "Cache hit rate", "value": "6%", "delta_pct": 0.0, "good_down": False, "warn": True},
         ],
-        "callout": "GPU utilization is 44% and prompt caching is off. About $740/mo is recoverable by right-sizing the GPU pool and turning on caching.",
+        "callout": "GPU encoders sit at 41% utilization and prompt caching is nearly off. About $7,500/mo is recoverable by scheduling the encoder pool and caching the catalog context.",
     }
 
     # "What changed since you last looked": the always-on loop as a glance.
     whats_changed = {
         "since": "Monday",
         "items": [
-            {"kind": "up",    "text": "Data Transfer up $710 (60%)", "prompt": "Why did data transfer spend jump 60% this week?"},
-            {"kind": "alert", "text": "New anomaly on `Amazon EC2`", "prompt": "Explain this week's EC2 anomaly and what caused it."},
-            {"kind": "warn",  "text": "AWS budget crossed 85%",      "prompt": "Show our AWS budget status and what's driving it toward the cap."},
-            {"kind": "good",  "text": "$340/mo saved, non-prod schedule", "prompt": "Show the savings we've realized in the last week."},
+            {"kind": "up",    "text": "CloudFront egress up $18,400 (28%)", "prompt": "Why did CloudFront egress jump after the season launch?"},
+            {"kind": "alert", "text": "New anomaly on `AWS Data Transfer`", "prompt": "Explain this week's data-transfer anomaly and what caused it."},
+            {"kind": "warn",  "text": "Snowflake budget crossed 100%",      "prompt": "Show our Snowflake budget status and what's driving it over the cap."},
+            {"kind": "good",  "text": "$2,140/mo saved, off-peak encoder schedule", "prompt": "Show the savings we've realized in the last week."},
         ],
     }
 
@@ -849,7 +863,7 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "account_id": _ACCOUNT_ID,
-        "user": {"name": "Chandan B.", "role": "Admin", "email": "chandan@acme.io"},
+        "user": {"name": "Alex R.", "role": "Admin", "email": "alex@streamco.tv"},
         "exec_kpis": exec_kpis,
         "ai_efficiency": ai_efficiency,
         "whats_changed": whats_changed,
@@ -892,9 +906,9 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
         "budget_pct_used": 68.0,
         "recent_opportunities": recent_opportunities,
         "suppressed_opportunities": [
-            {"description": "RDS prod-analytics flagged underutilized, but memory sits at 78%. "
+            {"description": "RDS metadata-catalog-01 flagged underutilized, but memory sits at 81%. "
                             "Held back: rightsizing it risks a memory-bound stall, not genuine savings.",
-             "monthly_saving": 0.0, "resource": "db-prod-analytics-01", "provider": "aws"},
+             "monthly_saving": 0.0, "resource": "metadata-catalog-01", "provider": "aws"},
         ] if "aws" in provs else [],
         "learning_active": True,
         "recent_savings": recent_savings,
@@ -906,16 +920,52 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
             "overall_score": score,
             "dimensions": [
                 {"name": "Commitment coverage", "grade": "B", "score": 72,
-                 "detail": "68% of steady compute on commitments; room for one more 1-yr plan."},
-                {"name": "Rightsizing", "grade": "C", "score": 61,
-                 "detail": "3 instances over-provisioned; 1 is a genuine, low-risk resize."},
-                {"name": "Idle & waste", "grade": "B", "score": 78,
-                 "detail": "Unattached volumes and always-on non-prod databases."},
-                {"name": "Storage tiering", "grade": "A", "score": 90,
-                 "detail": "Most object storage already lifecycle-managed."},
+                 "detail": "64% of steady compute + CDN on commitments; room for a CloudFront egress commit."},
+                {"name": "Rightsizing", "grade": "C", "score": 58,
+                 "detail": "GPU encoders over-provisioned off-peak; 1 genuine, low-risk resize."},
+                {"name": "Idle & waste", "grade": "B", "score": 76,
+                 "detail": "Idle EKS nodes and always-warm Snowflake warehouses."},
+                {"name": "Storage tiering", "grade": "A", "score": 88,
+                 "detail": "Most VOD masters already lifecycle-managed to Glacier."},
             ],
         },
     }
+
+
+# Category per demo provider, so the MCP connected-view tools can group them the
+# same way the live registry does (cloud / llm / saas). Kubernetes reads from a
+# kubeconfig, grouped with cloud.
+_DEMO_PROVIDER_CATEGORY: dict[str, str] = {
+    "aws": "cloud", "gcp": "cloud", "azure": "cloud", "kubernetes": "cloud",
+    "openai": "llm", "anthropic": "llm",
+    "datadog": "saas", "snowflake": "saas", "databricks": "saas",
+}
+
+
+def connected_providers() -> list[dict[str, str]]:
+    """The providers a demo instance advertises as connected, in display order.
+    Used by list_connected_providers / check_connector_health so the MCP "what am
+    I connected to" view is populated in demo mode instead of showing everything
+    as not-configured (those tools otherwise probe real credentials)."""
+    return [
+        {"name": p, "category": _DEMO_PROVIDER_CATEGORY.get(p, "cloud")}
+        for p in _DEMO_PROVIDERS
+    ]
+
+
+def demo_accounts() -> dict[str, list[dict[str, Any]]]:
+    """Per-provider account/subscription/org identifiers for the demo, in the
+    shape list_accounts returns (provider -> list of account dicts)."""
+    out: dict[str, list[dict[str, Any]]] = {
+        "aws": [{"id": a["id"], "name": a["name"]} for a in _DEMO_ACCOUNTS],
+        "gcp": [{"billing_account_id": "01A2B3-C4D5E6-F7G8H9", "name": "streamco-billing"}],
+        "azure": [{"subscription_id": "9f8e7d6c-5b4a-3210-fedc-ba9876543210",
+                   "name": "streamco-prod"}],
+        "kubernetes": [{"context": "prod-eks-streaming", "name": "prod-eks-streaming"}],
+    }
+    for p in ("openai", "anthropic", "datadog", "snowflake", "databricks"):
+        out[p] = [{"org": "streamco", "name": f"streamco ({p})"}]
+    return out
 
 
 def saved_views() -> list[dict[str, Any]]:
@@ -924,23 +974,23 @@ def saved_views() -> list[dict[str, Any]]:
     surface show a populated shelf with no account connected."""
     _today = date.today()
     return [
-        {"id": 9001, "saved_by": "Chandan B.", "saved_at": (_today - timedelta(days=2)).isoformat(),
+        {"id": 9001, "saved_by": "Alex R.", "saved_at": (_today - timedelta(days=2)).isoformat(),
          "card": {"title": "Spend by team, this quarter", "template": "bar", "metric": "EffectiveCost",
                   "dimensions": ["team"]},
-         "data": {"rows": [{"team": "Platform", "metric": 1240000.0}, {"team": "Data", "metric": 820000.0},
-                           {"team": "ML", "metric": 610000.0}, {"team": "Web", "metric": 340000.0}],
-                  "total": 3010000.0, "record_count": 4}},
-        {"id": 9002, "saved_by": "Chandan B.", "saved_at": (_today - timedelta(days=6)).isoformat(),
+         "data": {"rows": [{"team": "Streaming Delivery", "metric": 393000.0}, {"team": "Content Platform", "metric": 175200.0},
+                           {"team": "Ad Platform", "metric": 123600.0}, {"team": "Data & Analytics", "metric": 73800.0}],
+                  "total": 765600.0, "record_count": 4}},
+        {"id": 9002, "saved_by": "Alex R.", "saved_at": (_today - timedelta(days=6)).isoformat(),
          "card": {"title": "AI spend by model", "template": "bar", "metric": "Cost", "dimensions": ["model"]},
-         "data": {"rows": [{"model": "gpt-4o", "metric": 2080.0}, {"model": "claude-sonnet-4-5", "metric": 620.0},
-                           {"model": "o1", "metric": 430.0}, {"model": "bedrock", "metric": 330.0}],
-                  "total": 3460.0, "record_count": 4}},
-        {"id": 9003, "saved_by": "Chandan B.", "saved_at": (_today - timedelta(days=11)).isoformat(),
-         "card": {"title": "Kubernetes cost by namespace", "template": "bar", "metric": "EffectiveCost",
-                  "dimensions": ["namespace"]},
-         "data": {"rows": [{"namespace": "data-platform", "metric": 1840.0}, {"namespace": "api-services", "metric": 1120.0},
-                           {"namespace": "monitoring", "metric": 620.0}, {"namespace": "staging", "metric": 220.0}],
-                  "total": 3800.0, "record_count": 4}},
+         "data": {"rows": [{"model": "gpt-4o", "metric": 24000.0}, {"model": "claude-sonnet-4-5", "metric": 15000.0},
+                           {"model": "o3", "metric": 9200.0}, {"model": "bedrock", "metric": 6000.0}],
+                  "total": 54200.0, "record_count": 4}},
+        {"id": 9003, "saved_by": "Alex R.", "saved_at": (_today - timedelta(days=11)).isoformat(),
+         "card": {"title": "CDN egress by region", "template": "bar", "metric": "EffectiveCost",
+                  "dimensions": ["region"]},
+         "data": {"rows": [{"region": "us-east-1", "metric": 31200.0}, {"region": "eu-west-1", "metric": 22800.0},
+                           {"region": "us-west-2", "metric": 18400.0}, {"region": "ap-southeast-1", "metric": 9600.0}],
+                  "total": 82000.0, "record_count": 4}},
     ]
 
 
@@ -950,8 +1000,8 @@ def bedrock_split() -> dict[str, Any]:
     caching finding. Lets optimize_ai_spend fire the prompt-caching lever with
     no credentials."""
     return {
-        "input_cost": 294.0,       # ~89% of the $330 Bedrock bill
-        "output_cost": 36.0,
+        "input_cost": 5340.0,      # ~89% of the $6,000 Bedrock bill
+        "output_cost": 660.0,
         "cache_read_cost": 0.0,
         "cache_write_cost": 0.0,
         "input_share_pct": 89.0,
@@ -964,37 +1014,37 @@ def ai_engineering_report() -> dict:
     return {
         "configured": True,
         "window_days": 30,
-        "total_pr_count": 23,
-        "ai_pr_count": 18,
-        "human_pr_count": 5,
-        "ai_share_pct": 78.3,
-        "total_llm_spend_usd": 1240.0,
+        "total_pr_count": 34,
+        "ai_pr_count": 27,
+        "human_pr_count": 7,
+        "ai_share_pct": 79.4,
+        "total_llm_spend_usd": 2100.0,
         "by_label": {
             "Claude Opus 4.8": {
-                "label": "Claude Opus 4.8", "pr_count": 10, "high": 3, "medium": 5, "low": 2,
-                "lines_changed": 4200, "llm_spend_usd": 608.0, "spend_share_pct": 49.0,
-                "cost_per_pr_usd": 60.8,
+                "label": "Claude Opus 4.8", "pr_count": 15, "high": 4, "medium": 8, "low": 3,
+                "lines_changed": 6200, "llm_spend_usd": 1040.0, "spend_share_pct": 49.5,
+                "cost_per_pr_usd": 69.3,
                 "examples": [
-                    {"title": "Parallelize the cost audit", "magnitude": "high", "lines": 540, "url": "", "repo": "acme/infra"},
-                    {"title": "Add the managed-AI credit ledger", "magnitude": "high", "lines": 430, "url": "", "repo": "acme/platform"},
+                    {"title": "Add per-title CDN egress attribution", "magnitude": "high", "lines": 620, "url": "", "repo": "streamco/streaming-platform"},
+                    {"title": "Cache catalog context on the recommender", "magnitude": "high", "lines": 480, "url": "", "repo": "streamco/recommendations"},
                 ],
             },
             "Claude Sonnet 4.6": {
-                "label": "Claude Sonnet 4.6", "pr_count": 6, "high": 0, "medium": 4, "low": 2,
-                "lines_changed": 910, "llm_spend_usd": 372.0, "spend_share_pct": 30.0,
-                "cost_per_pr_usd": 62.0,
+                "label": "Claude Sonnet 4.6", "pr_count": 9, "high": 0, "medium": 6, "low": 3,
+                "lines_changed": 1400, "llm_spend_usd": 640.0, "spend_share_pct": 30.5,
+                "cost_per_pr_usd": 71.1,
                 "examples": [
-                    {"title": "Tighten the onboarding copy", "magnitude": "medium", "lines": 120, "url": "", "repo": "acme/web"},
+                    {"title": "Tune the ad-decisioning bid timeout", "magnitude": "medium", "lines": 150, "url": "", "repo": "streamco/ad-platform"},
                 ],
             },
             "OpenAI Codex": {
-                "label": "OpenAI Codex", "pr_count": 2, "high": 0, "medium": 1, "low": 1,
-                "lines_changed": 180, "llm_spend_usd": None, "spend_share_pct": None,
+                "label": "OpenAI Codex", "pr_count": 3, "high": 0, "medium": 1, "low": 2,
+                "lines_changed": 240, "llm_spend_usd": None, "spend_share_pct": None,
                 "cost_per_pr_usd": None, "examples": [],
             },
             "Human": {
-                "label": "Human", "pr_count": 5, "high": 1, "medium": 2, "low": 2,
-                "lines_changed": 1500, "examples": [],
+                "label": "Human", "pr_count": 7, "high": 1, "medium": 3, "low": 3,
+                "lines_changed": 2100, "examples": [],
             },
         },
         "_demo_mode": True,
