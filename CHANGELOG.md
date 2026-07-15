@@ -2,6 +2,13 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.179
+
+- **Demo mode is now safe for the AI assistant end to end.** In demo mode, no assistant tool call can reach a real cloud account: cost slices, forecasts, commitments, budgets, and savings all answer from the sample dataset, and anything outside it returns a clear "not in the sample" note instead of live data. Previously a free-text question could route to a tool that read real credentials.
+- **Demo scale now matches a mid-to-large company.** The sample environment models ~$5.1M/mo across 312 linked accounts and 9 providers, with a realistic 29% untagged share, a mixed-verdict rightsizing set (47 flagged, 12 genuine), and an anomaly with no identified cause. Sample data that looks like a real environment, not a toy account.
+- **Saved views ship populated in demo mode**, including tag (`env`), monthly, and untagged-by-account views, so the dashboards gallery answers granularity and attribution questions out of the box.
+- **The assistant loop can stream.** `ask()` accepts an `on_event` callback that emits text deltas and tool-start events, so web surfaces can render answers as they generate instead of blocking on the full response. Default behavior is unchanged.
+
 ## 0.8.178
 
 - **Demo mode now shows a realistic mid-large company.** The built-in demo dataset (`FINOPS_DEMO=1`) models a CTV/streaming business at ~$673k/mo across 9 providers (AWS, GCP, Azure, Kubernetes, OpenAI, Anthropic, Datadog, Snowflake, Databricks), with a CDN-egress-driven cost story, so a no-credentials walkthrough looks like a real environment instead of a toy account. Every figure is internally consistent across tools.
