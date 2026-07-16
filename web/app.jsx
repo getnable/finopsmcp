@@ -1260,9 +1260,8 @@ function App(){
       <div className="page-content">
       <Nav />
       <Hero />
-      <Reveal><DemoVideo /></Reveal>
-      <Reveal><Loop /></Reveal>
       <Reveal><DashboardShowcase /></Reveal>
+      <Reveal><Loop /></Reveal>
       <Reveal><AiCost /></Reveal>
       <Reveal><Connectors /></Reveal>
       <Reveal><Architecture version={version} /></Reveal>
