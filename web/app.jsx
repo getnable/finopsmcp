@@ -197,9 +197,9 @@ function Nav(){
 // accepted for compatibility but no longer switches the arrangement.
 function Hero(){
   return (
-    <header className="hero hero-split-wrap" id="top">
+    <header className="hero hero-centered" id="top">
       <div className="hero-grid" aria-hidden="true"></div>
-      <div className="wrap hero-split">
+      <div className="wrap">
         <div className="hero-c">
           <h1 className="display">
             The cost brain <span className="h1-ask">for the AI era.</span>
@@ -210,9 +210,9 @@ function Hero(){
           </div>
           <p className="hero-cmdnote">Read-only · no signup · no cloud keys · free for solo use</p>
         </div>
-        <div className="hero-demo">
-          <Console interaction="cycling" />
-        </div>
+      </div>
+      <div className="wrap hero-stage">
+        <Console interaction="cycling" />
       </div>
     </header>
   );
@@ -421,6 +421,9 @@ function Console({ interaction }){
   const [phase, setPhase] = useState("answered");      // typing | thinking | answered
   const [typed, setTyped] = useState(QUERIES[0].q);
   const [answer, setAnswer] = useState(QUERIES[0].response);
+  // The answer currently painted in the console. It holds the *previous* answer
+  // while the next question types, so the console is never an empty void mid-cycle.
+  const [shownAnswer, setShownAnswer] = useState(QUERIES[0].response);
   const [asked, setAsked] = useState(false);
   const [focused, setFocused] = useState(false);
   const [input, setInput] = useState("");
@@ -441,7 +444,7 @@ function Console({ interaction }){
         timers.current.push(setTimeout(step, 16 + Math.random()*20));
       } else {
         timers.current.push(setTimeout(() => setPhase("thinking"), 280));
-        timers.current.push(setTimeout(() => setPhase("answered"), 1000));
+        timers.current.push(setTimeout(() => { setPhase("answered"); setShownAnswer(ansJSX); }, 1000));
       }
     })();
   }
@@ -494,18 +497,15 @@ function Console({ interaction }){
             <p>{typed}<span className="cursor"></span></p>
           </div>
         </div>
-        {phase === "thinking" && (
-          <div className="msg">
-            <div className="av ai">nable</div>
-            <div className="bubble"><div className="thinking"><i></i><i></i><i></i></div></div>
+        <div className="msg">
+          <div className="av ai">nable</div>
+          <div className="bubble">
+            {phase === "thinking" && (
+              <div className="thinking" style={{marginBottom:16}}><i></i><i></i><i></i></div>
+            )}
+            {shownAnswer}
           </div>
-        )}
-        {phase === "answered" && (
-          <div className="msg">
-            <div className="av ai">nable</div>
-            <div className="bubble">{answer}</div>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );

@@ -50,7 +50,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .ticker .sep{color:var(--fg-4)}
 
 /* nav */
-.nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 88%,transparent);backdrop-filter:saturate(140%) blur(16px);-webkit-backdrop-filter:saturate(140%) blur(16px);border-bottom:1px solid var(--line)}
+.nav{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 72%,transparent);backdrop-filter:saturate(140%) blur(18px);-webkit-backdrop-filter:saturate(140%) blur(18px);border-bottom:1px solid var(--line)}
 .nav-inner{display:flex;align-items:center;justify-content:space-between;height:72px;padding:0 40px;max-width:1280px;margin:0 auto;position:relative}
 /* Pin the menu to the true center axis: with space-between it sits wherever the
    asymmetric logo/CTA widths push it, visibly left of center on wide screens. */
@@ -90,7 +90,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 /* hero */
 .hero{position:relative;padding:80px 0 80px;overflow:hidden}
 /* Split hero: copy left, live console right so the product is in the first screen */
-.hero-split-wrap{padding:52px 0 72px;background:radial-gradient(ellipse 62% 72% at 30% 32%, rgba(77,184,212,.06), transparent 68%)}
+.hero-split-wrap{padding:64px 0 80px;background:radial-gradient(ellipse 72% 82% at 26% 26%, rgba(77,184,212,.11), transparent 64%), radial-gradient(ellipse 50% 60% at 80% 20%, rgba(77,184,212,.05), transparent 70%)}
 .hero-split{display:grid;grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);gap:clamp(32px,4vw,60px);align-items:center;position:relative;z-index:1}
 .hero-split .hero-c{width:100%;max-width:none;align-items:flex-start;text-align:left}
 .hero-split .display{text-align:left}
@@ -102,15 +102,15 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 @media(max-width:920px){.hero-split{grid-template-columns:1fr;gap:40px}.hero-split .hero-c{align-items:center;text-align:center}.hero-split .display,.hero-split .hero-cmdnote{text-align:center}.hero-split .hero-actions{justify-content:center}.hero-split .hero-sub{margin-left:auto;margin-right:auto}}
 .eyebrow{display:inline-flex;align-items:center;gap:10px;font-family:'Geist',system-ui,sans-serif;font-size:11px;color:var(--fg-3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:28px;padding:5px 11px;border:1px solid var(--line-2);border-radius:var(--r-xs);background:var(--bg-1)}
 .eyebrow .d{width:5px;height:5px;border-radius:50%;background:var(--accent)}
-h1.display{font-size:clamp(46px,5.2vw,86px);line-height:1.03;letter-spacing:-.043em;font-weight:440;font-family:'Geist',system-ui,sans-serif}
-h1.display .h1-ask{display:block;color:var(--accent);font-weight:500}
+h1.display{font-size:clamp(52px,6.2vw,98px);line-height:.98;letter-spacing:-.046em;font-weight:560;font-family:'Geist',system-ui,sans-serif}
+h1.display .h1-ask{display:block;color:var(--accent);font-weight:560}
 h1.display .accent{display:block;font-style:normal;font-weight:600;color:var(--accent);font-family:'Geist',system-ui,sans-serif}
 h1.display .strike{position:relative;color:var(--fg-3);font-style:normal;font-weight:300;white-space:nowrap}
 h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52%;height:2px;background:var(--accent);transform:rotate(-2deg)}
 .install{display:inline-flex;align-items:stretch;background:var(--bg-1);border:1px solid var(--line-2);border-radius:var(--r-md);font-family:'Geist Mono','JetBrains Mono',monospace;font-size:13px;color:var(--fg-2);overflow:hidden;height:42px;max-width:100%}
 @media(max-width:640px){.install{overflow-x:auto;width:100%}.install .cmd{font-size:11px;padding:0 10px}}
 /* Centered hero (stripped to one promise) */
-.hero-centered{min-height:calc(100vh - 64px);display:flex;align-items:center;padding:48px 0 72px;text-align:center;position:relative;background:radial-gradient(ellipse 70% 56% at 50% 40%, rgba(77,184,212,.055), transparent 66%)}
+.hero-centered{display:flex;flex-direction:column;align-items:center;padding:72px 0 88px;text-align:center;position:relative;background:radial-gradient(ellipse 68% 52% at 50% 26%, rgba(77,184,212,.09), transparent 64%)}
 .hero-centered::after{content:"";position:absolute;left:0;right:0;bottom:0;height:280px;pointer-events:none;z-index:0;background:radial-gradient(ellipse 54% 100% at 50% 108%, rgba(77,184,212,.07), transparent 72%)}
 /* hero: a centered light that breathes behind the headline. It never translates:
    a drifting glow caught mid-transit reads as an off-center smear, not light. */
@@ -125,14 +125,19 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
    to fade out. Founder request 2026-07-03, an intentional exception to the
    site-wide no-grid rule, scoped to the hero and kept faint. */
 .hero-grid{position:absolute;inset:0;z-index:0;pointer-events:none;
-  background-image:linear-gradient(to right, rgba(77,184,212,.07) 1px, transparent 1px),
-                   linear-gradient(to bottom, rgba(77,184,212,.07) 1px, transparent 1px);
-  background-size:54px 54px;
-  -webkit-mask-image:radial-gradient(ellipse 58% 54% at 50% 42%, #000 12%, transparent 74%);
-  mask-image:radial-gradient(ellipse 58% 54% at 50% 42%, #000 12%, transparent 74%)}
+  background-image:linear-gradient(to right, rgba(77,184,212,.025) 1px, transparent 1px),
+                   linear-gradient(to bottom, rgba(77,184,212,.025) 1px, transparent 1px);
+  background-size:64px 64px;
+  -webkit-mask-image:radial-gradient(ellipse 60% 44% at 50% 30%, #000 2%, transparent 68%);
+  mask-image:radial-gradient(ellipse 60% 44% at 50% 30%, #000 2%, transparent 68%)}
 .hero-centered .wrap{display:flex;justify-content:center;width:100%;position:relative;z-index:1}
 .hero-c{width:100%;max-width:900px;display:flex;flex-direction:column;align-items:center}
 .hero-centered .display{text-align:center}
+.hero-centered .hero-sub{max-width:34em;margin-left:auto;margin-right:auto}
+.hero-centered .hero-cmdnote{text-align:center}
+.hero-stage{margin-top:56px}
+.hero-stage .console{max-width:1000px;width:100%;margin:0 auto;text-align:left}
+@media(max-width:640px){.hero-stage{margin-top:40px}}
 .hero-actions{margin-top:38px;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap}
 .hero-actions .copycmd{width:auto;min-width:190px;height:44px}
 .hero-actions .btn{min-height:44px}
@@ -753,7 +758,7 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 @media(prefers-reduced-motion:reduce){.dash-stage::before{animation:none}.dash-frame,.js .dash-feats .dash-feat{transition:none;opacity:1;transform:none}}
 
 /* Announcement banner (Kestrel-style header strip) */
-.announce{display:flex;align-items:center;justify-content:center;gap:11px;height:38px;background:var(--bg-1);border-bottom:1px solid var(--line);font-size:13px;color:var(--fg-2);text-align:center;padding:0 16px;transition:color .18s;position:relative;z-index:51}
+.announce{display:flex;align-items:center;justify-content:center;gap:11px;height:38px;background:color-mix(in oklab,var(--bg-1) 68%,transparent);backdrop-filter:saturate(140%) blur(18px);-webkit-backdrop-filter:saturate(140%) blur(18px);border-bottom:1px solid var(--line);font-size:13px;color:var(--fg-2);text-align:center;padding:0 16px;transition:color .18s;position:relative;z-index:51}
 .announce:hover{color:var(--fg)}
 .announce-chip{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.07em;color:var(--accent);border:1px solid color-mix(in oklab,var(--accent) 42%,transparent);border-radius:var(--r-xs);padding:2px 7px;background:color-mix(in oklab,var(--accent) 12%,transparent);flex-shrink:0}
 .announce-txt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
