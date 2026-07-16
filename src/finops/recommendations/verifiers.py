@@ -85,7 +85,18 @@ def verify_ec2_change(resource_id: str, recommended_config: dict, row: Any = Non
             old_type = recommended_config.get("from_instance_type", "")
             old_hourly = _EC2_HOURLY.get(old_type, 0.0)
             new_hourly = _EC2_HOURLY.get(target_type, 0.0)
-            return round((old_hourly - new_hourly) * HOURS_PER_MONTH, 2)
+            delta = round((old_hourly - new_hourly) * HOURS_PER_MONTH, 2)
+            if delta > 0:
+                return delta
+            # A type missing from the static price table used to verify the
+            # change at $0 and silently bank nothing. The change IS confirmed;
+            # fall back to the recommendation's own estimate and let
+            # measure_realized_savings refine it against the bill.
+            est = getattr(row, "estimated_monthly_savings_usd", None)
+            try:
+                return round(float(est), 2) if est else 0.0
+            except (TypeError, ValueError):
+                return 0.0
         return None
     except Exception as e:
         log.debug("verify_ec2_change error: %s", e)
@@ -263,6 +274,37 @@ def verify_idle_cleanup(resource_id: str, recommended_config: dict, row: Any = N
         return 0.0
 
 
+# ── RDS rightsizing verifier ──────────────────────────────────────────────────
+
+def verify_rds_change(resource_id: str, recommended_config: dict, row: Any = None) -> float | None:
+    """
+    Confirm an RDS instance was actually downsized to the recommended class.
+    Reads only: a single describe_db_instances call. Returns the estimate once
+    the class matches (measure_realized_savings refines it against the bill),
+    None until then.
+    """
+    try:
+        import boto3
+        region = getattr(row, "region", "") or None
+        rds = boto3.client("rds", region_name=region) if region else boto3.client("rds")
+        resp = rds.describe_db_instances(DBInstanceIdentifier=resource_id)
+        instances = resp.get("DBInstances", [])
+        if not instances:
+            return None
+        current_class = instances[0].get("DBInstanceClass", "")
+        target_class = recommended_config.get("instance_class", "")
+        if not target_class or current_class != target_class:
+            return None
+        est = getattr(row, "estimated_monthly_savings_usd", None)
+        try:
+            return round(float(est), 2) if est else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+    except Exception as e:
+        log.debug("verify_rds_change error: %s", e)
+        return None
+
+
 # ── Default registrations ─────────────────────────────────────────────────────
 
 def _register_defaults() -> None:
@@ -272,6 +314,8 @@ def _register_defaults() -> None:
     register("graviton", "ec2", verify_graviton_change)
     # One verifier covers every idle resource type via the source-wide fallback.
     register("idle", None, verify_idle_cleanup)
+    # RDS downsizing: same describe-only pattern, keyed on DBInstanceClass.
+    register("rightsizing", "rds", verify_rds_change)
 
 
 _register_defaults()

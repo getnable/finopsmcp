@@ -2,6 +2,13 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.180
+
+- **Verified savings are now priced off the bill, not the price sheet.** When the scheduled verifier confirms a change landed (EC2 resize, Graviton migration, idle cleanup, RDS downsize), nable measures the realized saving from CUR: the resource's actual daily cost in the two weeks before the change vs after it settled. When CUR is not connected it falls back to the customer's measured effective rate (EDP/commitment discount), then to list price, and every verified row records which basis produced its number (`verified_basis`). The savings ledger reports `verified_bill_measured_monthly_usd` separately, so "measured off your bill" is only claimed when it is true.
+- **Fixed: a confirmed change could bank $0.** If a resized instance's type was missing from the static price table, verification recorded a $0 saving. Confirmed changes now fall back to the recommendation's own estimate and are refined against the bill on later runs.
+- **RDS rightsizing joined the verified loop.** RDS downsizing recommendations are now persisted to the savings tracker, and a read-only verifier confirms the `DBInstanceClass` switch, so database rightsizing earns verified, bill-measured savings the same way EC2 does.
+- CUR per-resource queries accept a `resource_id` filter (matches bare ids and full ARNs).
+
 ## 0.8.179
 
 - **Demo mode is now safe for the AI assistant end to end.** In demo mode, no assistant tool call can reach a real cloud account: cost slices, forecasts, commitments, budgets, and savings all answer from the sample dataset, and anything outside it returns a clear "not in the sample" note instead of live data. Previously a free-text question could route to a tool that read real credentials.

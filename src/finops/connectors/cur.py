@@ -222,6 +222,7 @@ def get_resource_costs(
     account_id: str | None = None,
     min_cost_usd: float = 1.0,
     limit: int = 100,
+    resource_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Return per-resource cost data from the CUR Athena table.
@@ -261,6 +262,15 @@ def get_resource_costs(
     if account_id:
         safe_account = account_id.replace("'", "''")
         extra_filters += f"\n         AND line_item_usage_account_id = '{safe_account}'"
+    if resource_id:
+        # CUR stores some resource ids as full ARNs and others bare; match the
+        # tail so callers can pass either form (e.g. "i-0abc..." matches
+        # "arn:aws:ec2:...:instance/i-0abc...").
+        safe_rid = resource_id.replace("'", "''")
+        extra_filters += (
+            f"\n         AND (line_item_resource_id = '{safe_rid}'"
+            f" OR line_item_resource_id LIKE '%{safe_rid}')"
+        )
 
     sql = f"""
 SELECT

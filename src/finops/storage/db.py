@@ -374,6 +374,11 @@ savings_recommendations = Table(
     # Economics
     Column("estimated_monthly_savings_usd", Float, nullable=False, default=0.0),
     Column("verified_monthly_savings_usd", Float, nullable=True),      # actual measured after change
+    # How the verified figure was obtained: bill_measured (CUR before/after),
+    # effective_rate (type delta at the customer's measured discount), or
+    # list_price (public on-demand delta). The ledger says "measured off your
+    # bill" only when the basis actually is.
+    Column("verified_basis", String(24), nullable=True),
     # Lifecycle
     Column("status", String(16), nullable=False, default="open"),  # open|acted_on|verified|dismissed|expired
     Column("generated_at", DateTime, nullable=False),
@@ -645,6 +650,9 @@ def _run_sqlite_migrations(engine: Engine) -> None:
         # Learning loop: canonical dismiss category, so business-reason dismissals don't
         # count against a source's act-rate the way a quality miss does.
         ("savings_recommendations", "dismiss_reason_category", "ALTER TABLE savings_recommendations ADD COLUMN dismiss_reason_category VARCHAR(32)"),
+        # Verified-savings loop: how the verified dollar figure was obtained
+        # (bill_measured | effective_rate | list_price).
+        ("savings_recommendations", "verified_basis", "ALTER TABLE savings_recommendations ADD COLUMN verified_basis VARCHAR(24)"),
     ]
 
     with engine.connect() as conn:

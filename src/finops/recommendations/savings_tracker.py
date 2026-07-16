@@ -182,7 +182,7 @@ def mark_acted_on(rec_id: int) -> bool:
         return r.rowcount > 0
 
 
-def mark_verified(rec_id: int, actual_monthly_savings_usd: float) -> bool:
+def mark_verified(rec_id: int, actual_monthly_savings_usd: float, basis: str = "list_price") -> bool:
     engine = get_engine()
     with engine.begin() as conn:
         r = conn.execute(
@@ -192,6 +192,7 @@ def mark_verified(rec_id: int, actual_monthly_savings_usd: float) -> bool:
                 status="verified",
                 verified_at=datetime.now(timezone.utc),
                 verified_monthly_savings_usd=actual_monthly_savings_usd,
+                verified_basis=basis,
             )
         )
         return r.rowcount > 0
@@ -261,6 +262,7 @@ def get_summary() -> dict[str, Any]:
             select(
                 sr.c.status, sr.c.source, sr.c.resource_id, sr.c.description,
                 sr.c.estimated_monthly_savings_usd, sr.c.verified_monthly_savings_usd,
+                sr.c.verified_basis,
             )
         ).fetchall()
 
@@ -270,6 +272,7 @@ def get_summary() -> dict[str, Any]:
             "description": r.description,
             "estimated_monthly_savings_usd": r.estimated_monthly_savings_usd,
             "verified_monthly_savings_usd": r.verified_monthly_savings_usd,
+            "verified_basis": r.verified_basis,
         }
         for r in raw
     ])
@@ -280,6 +283,7 @@ def get_summary() -> dict[str, Any]:
     potential = 0.0
     acted_estimated = 0.0
     verified_actual = 0.0
+    verified_bill_measured = 0.0
     by_status: dict[str, int] = {}
     by_source: dict[str, dict] = {}
 
@@ -307,12 +311,17 @@ def get_summary() -> dict[str, Any]:
             acted_estimated += est
         elif s == "verified":
             verified_actual += ver
+            if row.get("verified_basis") == "bill_measured":
+                verified_bill_measured += ver
 
     return {
         "potential_monthly_usd": round(potential, 2),
         "acted_on_monthly_usd": round(acted_estimated, 2),   # estimated, not yet verified
         "verified_monthly_usd": round(verified_actual, 2),   # confirmed actual savings
         "verified_annual_usd": round(verified_actual * 12, 2),
+        # The subset of verified savings measured directly off the bill (CUR
+        # before/after), as opposed to rate-based estimates of a confirmed change.
+        "verified_bill_measured_monthly_usd": round(verified_bill_measured, 2),
         "total_recommendations": total_count,
         "by_status": by_status,
         "by_source": by_source,
@@ -500,12 +509,18 @@ def auto_verify_acted_on() -> list[dict]:
             actual_savings = verifier(r.resource_id, rec_config, r)
 
             if actual_savings is not None:
-                mark_verified(r.id, actual_savings)
+                # The verifier confirmed the change happened. Now price it on
+                # the best available data: the bill itself, then the customer's
+                # effective rate, then list price. The basis rides the row.
+                from .measure import measure_realized_savings
+                usd, basis = measure_realized_savings(r, actual_savings)
+                mark_verified(r.id, usd, basis)
                 newly_verified.append({
                     "id": r.id,
                     "resource_id": r.resource_id,
                     "description": r.description,
-                    "verified_monthly_savings_usd": actual_savings,
+                    "verified_monthly_savings_usd": usd,
+                    "verified_basis": basis,
                 })
         except Exception as e:
             log.debug("auto_verify row %s: %s", r.id, e)

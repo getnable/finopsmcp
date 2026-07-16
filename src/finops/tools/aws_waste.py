@@ -442,6 +442,31 @@ async def get_rds_rightsizing_recommendations(
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
 
+        # Persist for savings tracking so the acted-on -> verified loop covers
+        # RDS downsizes the same way it covers EC2 (verify_rds_change confirms
+        # the DBInstanceClass switch, measure_realized_savings prices it).
+        try:
+            from ..recommendations.savings_tracker import record_recommendation
+            for f in all_findings:
+                if f.get("estimated_monthly_savings", 0) > 0 and f.get("recommended_class"):
+                    record_recommendation(
+                        source="rightsizing",
+                        provider="aws",
+                        resource_id=f["resource_id"],
+                        resource_type="rds",
+                        resource_name=f["resource_id"],
+                        current_config={"instance_class": f.get("current_class", "")},
+                        recommended_config={
+                            "instance_class": f["recommended_class"],
+                            "from_instance_class": f.get("current_class", ""),
+                        },
+                        description=(f.get("detail", "") or "")[:500],
+                        estimated_monthly_savings_usd=f["estimated_monthly_savings"],
+                        region=f.get("region", "") or "",
+                    )
+        except Exception as exc:
+            _srv.log.debug("RDS rec tracking skipped: %s", exc)
+
         kept, omitted = _srv.fit_to_budget(all_findings)
         return {
             "count": len(all_findings),
