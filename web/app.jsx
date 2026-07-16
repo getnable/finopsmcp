@@ -114,6 +114,17 @@ function Ticker({ installs, version }){
 }
 
 /* Nav */
+function AnnounceBar(){
+  return (
+    <a className="announce" href="/#dashboard"
+       onClick={()=>{ if(window.posthog) posthog.capture('announce_clicked'); }}>
+      <span className="announce-chip">NEW</span>
+      <span className="announce-txt">The nable dashboard is here &mdash; your whole cloud and AI bill, always on.</span>
+      <span className="announce-arr" aria-hidden="true">&rarr;</span>
+    </a>
+  );
+}
+
 function Nav(){
   const [open, setOpen] = useState(false);
 
@@ -1258,6 +1269,7 @@ function App(){
         </svg>
       </div>
       <div className="page-content">
+      <AnnounceBar />
       <Nav />
       <Hero />
       <Reveal><DashboardShowcase /></Reveal>
