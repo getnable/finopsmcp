@@ -726,11 +726,13 @@ function DashboardShowcase(){
           <h2>Engineers ask in the editor.<br/><em>Finance lives here.</em></h2>
           <p>The same cost brain, as an always-on dashboard the whole team reads, no terminal. A cross-cloud overview, unit economics, an efficiency grade, and an AI analyst anyone can ask. Single-tenant, in your environment, never pooled with another customer.</p>
         </div>
-        <div className="dash-frame">
-          <div className="dash-bar"><i></i><i></i><i></i><span>nable · cost dashboard</span></div>
-          <img src="/marketing/img/dashboard-overview.png"
-               alt="nable dashboard: cross-cloud overview at $5.1M per month across nine providers, with exec KPIs, forecast and potential savings"
-               loading="lazy" width="1440" height="920" />
+        <div className="dash-stage">
+          <div className="dash-frame">
+            <div className="dash-bar"><i></i><i></i><i></i><span>nable · cost dashboard</span></div>
+            <img src="/marketing/img/dashboard-overview.png"
+                 alt="nable dashboard: cross-cloud overview at $5.1M per month across nine providers, with exec KPIs, forecast and potential savings"
+                 loading="lazy" width="1440" height="920" />
+          </div>
         </div>
         <div className="dash-feats">
           <div className="dash-feat"><b>Ask anything, streamed.</b><span>The AI analyst answers across every provider and drafts the fix as a pull request. It never changes your cloud on its own.</span></div>
