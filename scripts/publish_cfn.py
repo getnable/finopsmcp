@@ -45,7 +45,7 @@ def main() -> int:
     body = generate_cloudformation_key() + "\n"
 
     # Always refresh the committed, auditable copy so the repo never drifts.
-    committed = REPO / "web" / "cloudformation" / "readonly-key.json"
+    committed = REPO / "cloudformation" / "readonly-key.json"
     committed.parent.mkdir(parents=True, exist_ok=True)
     committed.write_text(body)
     print(f"wrote {committed} ({len(body)} bytes)")

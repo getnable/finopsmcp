@@ -76,9 +76,9 @@ def test_quick_create_url_points_console_at_published_template(monkeypatch):
 
 
 def test_committed_template_matches_source_of_truth():
-    # web/cloudformation/readonly-key.json is what users audit and what gets
+    # cloudformation/readonly-key.json is what users audit and what gets
     # published to S3. It must never drift from the generated template.
-    committed = pathlib.Path(__file__).resolve().parent.parent / "web" / "cloudformation" / "readonly-key.json"
+    committed = pathlib.Path(__file__).resolve().parent.parent / "cloudformation" / "readonly-key.json"
     assert committed.exists(), "run scripts/publish_cfn.py --dry-run to regenerate"
     assert json.loads(committed.read_text()) == json.loads(I.generate_cloudformation_key())
 
