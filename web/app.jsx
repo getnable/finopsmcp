@@ -119,7 +119,7 @@ function AnnounceBar(){
     <a className="announce" href="https://github.com/getnable/finopsmcp" target="_blank" rel="noopener noreferrer"
        onClick={()=>{ if(window.posthog) posthog.capture('announce_clicked',{item:'open_source'}); }}>
       <span className="announce-chip">NEW</span>
-      <span className="announce-txt">nable is now open source &mdash; free to run, yours to read.</span>
+      <span className="announce-txt">nable, now open source.</span>
       <span className="announce-arr" aria-hidden="true">&rarr;</span>
     </a>
   );

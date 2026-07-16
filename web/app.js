@@ -122,7 +122,7 @@ function AnnounceBar() {
       }
     },
     /* @__PURE__ */ React.createElement("span", { className: "announce-chip" }, "NEW"),
-    /* @__PURE__ */ React.createElement("span", { className: "announce-txt" }, "nable is now open source \u2014 free to run, yours to read."),
+    /* @__PURE__ */ React.createElement("span", { className: "announce-txt" }, "nable, now open source."),
     /* @__PURE__ */ React.createElement("span", { className: "announce-arr", "aria-hidden": "true" }, "\u2192")
   );
 }
