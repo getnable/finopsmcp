@@ -275,13 +275,18 @@ section + section::before, .foot-cta::before{content:"";position:absolute;top:0;
 .section-head.center .bill-toggle{margin-left:auto;margin-right:auto}
 .section-head.center p{margin-left:auto;margin-right:auto}
 /* The loop: propose -> verify -> learn */
-.loop-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
-.loop-step{padding:28px 26px;background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-xl);display:flex;flex-direction:column;gap:10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03);transition:border-color .2s,background .2s}
-.loop-step:hover{border-color:var(--line-2);background:var(--bg-2)}
-.loop-n{font-family:var(--font-mono);font-size:12px;color:var(--accent);letter-spacing:.06em}
+.loop-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;position:relative}
+.loop-step{position:relative;padding:30px 26px 28px;background:linear-gradient(180deg,color-mix(in oklab,var(--accent) 3.5%,var(--bg-1)),var(--bg-1) 62%);border:1px solid var(--line);border-radius:var(--r-xl);display:flex;flex-direction:column;gap:13px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03);transition:border-color .25s,transform .3s cubic-bezier(.2,.7,.2,1),box-shadow .3s}
+/* accent bar that wipes in on hover */
+.loop-step::before{content:"";position:absolute;left:-1px;right:-1px;top:-1px;height:2px;border-radius:var(--r-xl) var(--r-xl) 0 0;background:linear-gradient(90deg,var(--accent),transparent 70%);transform:scaleX(0);transform-origin:left;transition:transform .35s cubic-bezier(.2,.7,.2,1)}
+/* flow arrow in the gutter, cause -> fix -> prove */
+.loop-step:not(:last-child)::after{content:"→";position:absolute;right:-15px;top:52px;color:var(--fg-3);font-size:15px;font-family:var(--font-mono);z-index:2}
+.loop-step:hover{transform:translateY(-5px);border-color:color-mix(in oklab,var(--accent) 34%,var(--line-2));box-shadow:0 26px 54px -26px rgba(0,0,0,.72),0 0 44px -20px color-mix(in oklab,var(--accent) 65%,transparent)}
+.loop-step:hover::before{transform:scaleX(1)}
+.loop-n{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--accent);letter-spacing:.04em;display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;background:color-mix(in oklab,var(--accent) 11%,transparent);border:1px solid color-mix(in oklab,var(--accent) 26%,transparent)}
 .loop-step h3{font-size:19px;font-weight:500;letter-spacing:-.02em;margin:0;color:var(--fg)}
 .loop-step p{font-size:14px;line-height:1.6;color:var(--fg-2);margin:0}
-@media(max-width:760px){.loop-grid{grid-template-columns:1fr}}
+@media(max-width:760px){.loop-grid{grid-template-columns:1fr}.loop-step:not(:last-child)::after{content:"↓";right:auto;left:44px;top:auto;bottom:-16px}}
 /* Plain-language data guarantees (local vs hosted) */
 .arch-tabs{display:flex;width:fit-content;max-width:100%;margin:6px auto 34px;background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-lg);padding:3px;gap:3px}
 .arch-tab{padding:9px 18px;border:1px solid transparent;border-radius:var(--r-md);background:transparent;color:var(--fg-3);font-family:'Geist',system-ui,sans-serif;font-size:13.5px;font-weight:500;cursor:pointer;transition:background .15s,color .15s,border-color .15s;white-space:nowrap}
@@ -632,11 +637,17 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 .js .reveal{opacity:0;transform:translateY(28px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);will-change:opacity,transform}
 .js .reveal.in{opacity:1;transform:none}
 /* Card grids stagger in behind their section head, one beat apart */
-.js .reveal .loop-step{opacity:0;transform:translateY(18px);transition:opacity .6s cubic-bezier(.2,.7,.2,1),transform .6s cubic-bezier(.2,.7,.2,1),border-color .2s,background-color .2s}
+.js .reveal .loop-step{opacity:0;transform:translateY(26px) scale(.975);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1),border-color .25s,box-shadow .3s}
 .js .reveal.in .loop-step{opacity:1;transform:none}
-.js .reveal.in .loop-step:nth-child(2){transition-delay:.09s}
-.js .reveal.in .loop-step:nth-child(3){transition-delay:.18s}
-@media(prefers-reduced-motion:reduce){.js .reveal,.js .reveal .loop-step{opacity:1 !important;transform:none !important;transition:none}}
+.js .reveal.in .loop-step:nth-child(2){transition-delay:.13s}
+.js .reveal.in .loop-step:nth-child(3){transition-delay:.26s}
+/* the flow arrows fade in after their card lands */
+.js .reveal .loop-step::after{opacity:0;transition:opacity .4s ease}
+.js .reveal.in .loop-step::after{opacity:1;transition-delay:.4s}
+/* the agents band slides in last */
+.js .reveal .agents-band{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.2,.7,.2,1) .34s,transform .7s cubic-bezier(.2,.7,.2,1) .34s,border-color .25s,box-shadow .3s}
+.js .reveal.in .agents-band{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){.js .reveal,.js .reveal .loop-step,.js .reveal .agents-band{opacity:1 !important;transform:none !important;transition:none}}
 
 /* ── Hero load-in choreography: one promise, four beats ── */
 @keyframes heroRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
@@ -649,8 +660,8 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 /* ── Agent cost controls band: the piece no dashboard has ── */
 /* Now a closing coda inside Loop's section (folded in during the density
    pass), not its own top-level section, so it needs its own top spacing. */
-.agents-band{margin-top:40px;border:1px solid var(--line);border-radius:var(--r-2xl);background:linear-gradient(180deg,var(--bg-2),var(--bg-1));padding:40px 44px;display:flex;align-items:center;justify-content:space-between;gap:36px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);transition:border-color .2s}
-.agents-band:hover{border-color:var(--line-2)}
+.agents-band{position:relative;margin-top:40px;border:1px solid var(--line);border-radius:var(--r-2xl);background:radial-gradient(120% 140% at 100% 0%,color-mix(in oklab,var(--accent) 8%,transparent),transparent 55%),linear-gradient(180deg,var(--bg-2),var(--bg-1));padding:40px 44px;display:flex;align-items:center;justify-content:space-between;gap:36px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);transition:border-color .25s,transform .3s cubic-bezier(.2,.7,.2,1),box-shadow .3s}
+.agents-band:hover{border-color:color-mix(in oklab,var(--accent) 28%,var(--line-2));transform:translateY(-3px);box-shadow:0 30px 64px -30px rgba(0,0,0,.7),0 0 60px -26px color-mix(in oklab,var(--accent) 55%,transparent)}
 .agents-band-copy{max-width:640px}
 .band-tag{display:inline-flex;font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-dim);border:1px solid var(--line-2);border-radius:var(--r-xs);padding:3px 8px;margin-bottom:16px}
 .agents-band h3{font-size:clamp(22px,2.6vw,30px);font-weight:400;letter-spacing:-.025em;line-height:1.15;color:var(--fg)}
