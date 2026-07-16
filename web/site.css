@@ -174,9 +174,9 @@ h1.display .strike::after{content:"";position:absolute;left:-2%;right:-2%;top:52
 .conn-legend .cc-soon-note{color:var(--fg-3);opacity:.8}
 @media(max-width:880px){.conn-cloud{gap:12px 24px}.cc-item{font-size:17px}}
 .logo-band{margin-top:8px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:34px 40px}
-.logo-img{height:38px;width:auto;flex:none;opacity:.8;transition:opacity .18s}
-.logo-img:hover{opacity:1}
-.logo-img.is-icon{height:44px}
+.logo-img{height:34px;width:auto;flex:none;opacity:.6;filter:grayscale(1) brightness(0) invert(.62);transition:opacity .2s,filter .2s}
+.logo-img:hover{opacity:1;filter:grayscale(1) brightness(0) invert(.92)}
+.logo-img.is-icon{height:40px}
 .logo-band-note{margin-top:28px;font-size:13px;color:var(--fg-3)}
 @media(max-width:880px){.logo-band{justify-content:flex-start;gap:26px 38px}.logo-img{height:28px}.logo-img.is-icon{height:32px}}
 
@@ -717,6 +717,10 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 
 /* Dashboard showcase */
 .dash-stage{position:relative;max-width:1080px;margin:0 auto}
+/* Scroll-in: the frame scales up into place as the section reveals. */
+.js .dash-stage{transform:scale(.955);transition:transform .95s cubic-bezier(.2,.7,.2,1)}
+.js .reveal.in .dash-stage{transform:scale(1)}
+@media(prefers-reduced-motion:reduce){.js .dash-stage{transform:none;transition:none}}
 .dash-stage::before{content:"";position:absolute;left:50%;top:-8%;width:88%;height:80%;transform:translateX(-50%);border-radius:50%;z-index:0;pointer-events:none;background:radial-gradient(closest-side,rgba(77,184,212,.32),rgba(77,184,212,.08) 55%,transparent 76%);filter:blur(48px);animation:dashGlow 7s ease-in-out infinite}
 .dash-frame{position:relative;z-index:1;border:1px solid var(--line-2);border-radius:var(--r-2xl);overflow:hidden;background:var(--bg-1);box-shadow:0 40px 90px -24px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.03),0 0 60px -22px rgba(77,184,212,.28);transition:transform .5s cubic-bezier(.2,.7,.2,1),box-shadow .5s cubic-bezier(.2,.7,.2,1)}
 .dash-frame:hover{transform:translateY(-5px);box-shadow:0 54px 120px -24px rgba(0,0,0,.78),0 0 0 1px rgba(77,184,212,.2),0 0 90px -14px rgba(77,184,212,.42)}
