@@ -1,8 +1,0 @@
-# Security disclosure policy for getnable.com and the finops-mcp package.
-# https://getnable.com/security
-
-Contact: mailto:chaaandannn@gmail.com
-Expires: 2027-06-13T00:00:00.000Z
-Preferred-Languages: en
-Canonical: https://getnable.com/.well-known/security.txt
-Policy: https://getnable.com/security
