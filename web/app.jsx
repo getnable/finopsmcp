@@ -983,7 +983,6 @@ function Footer({ version }){
         </div>
         <div className="foot-meta">
           <span>2026 nable · <a href="/privacy" style={{color:"var(--fg-3)"}}>Privacy</a> · <a href="/terms" style={{color:"var(--fg-3)"}}>Terms</a></span>
-          <span>nable · runtime healthy</span>
         </div>
       </div>
     </footer>
