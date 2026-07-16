@@ -114,13 +114,15 @@ function AnnounceBar() {
     "a",
     {
       className: "announce",
-      href: "/#dashboard",
+      href: "https://github.com/getnable/finopsmcp",
+      target: "_blank",
+      rel: "noopener noreferrer",
       onClick: () => {
-        if (window.posthog) posthog.capture("announce_clicked");
+        if (window.posthog) posthog.capture("announce_clicked", { item: "open_source" });
       }
     },
     /* @__PURE__ */ React.createElement("span", { className: "announce-chip" }, "NEW"),
-    /* @__PURE__ */ React.createElement("span", { className: "announce-txt" }, "The nable dashboard is here \u2014 your whole cloud and AI bill, always on."),
+    /* @__PURE__ */ React.createElement("span", { className: "announce-txt" }, "nable is now open source \u2014 free to run, yours to read."),
     /* @__PURE__ */ React.createElement("span", { className: "announce-arr", "aria-hidden": "true" }, "\u2192")
   );
 }

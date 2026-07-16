@@ -116,10 +116,10 @@ function Ticker({ installs, version }){
 /* Nav */
 function AnnounceBar(){
   return (
-    <a className="announce" href="/#dashboard"
-       onClick={()=>{ if(window.posthog) posthog.capture('announce_clicked'); }}>
+    <a className="announce" href="https://github.com/getnable/finopsmcp" target="_blank" rel="noopener noreferrer"
+       onClick={()=>{ if(window.posthog) posthog.capture('announce_clicked',{item:'open_source'}); }}>
       <span className="announce-chip">NEW</span>
-      <span className="announce-txt">The nable dashboard is here &mdash; your whole cloud and AI bill, always on.</span>
+      <span className="announce-txt">nable is now open source &mdash; free to run, yours to read.</span>
       <span className="announce-arr" aria-hidden="true">&rarr;</span>
     </a>
   );
