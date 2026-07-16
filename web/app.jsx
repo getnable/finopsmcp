@@ -716,6 +716,33 @@ function Connectors(){
 }
 
 
+/* Dashboard showcase */
+function DashboardShowcase(){
+  return (
+    <section id="dashboard" className="alt dash-sec">
+      <div className="wrap">
+        <div className="section-head center">
+          <div className="label">The dashboard</div>
+          <h2>Engineers ask in the editor.<br/><em>Finance lives here.</em></h2>
+          <p>The same cost brain, as an always-on dashboard the whole team reads, no terminal. A cross-cloud overview, unit economics, an efficiency grade, and an AI analyst anyone can ask. Single-tenant, in your environment, never pooled with another customer.</p>
+        </div>
+        <div className="dash-frame">
+          <div className="dash-bar"><i></i><i></i><i></i><span>nable · cost dashboard</span></div>
+          <img src="/marketing/img/dashboard-overview.png"
+               alt="nable dashboard: cross-cloud overview at $5.1M per month across nine providers, with exec KPIs, forecast and potential savings"
+               loading="lazy" width="1440" height="920" />
+        </div>
+        <div className="dash-feats">
+          <div className="dash-feat"><b>Ask anything, streamed.</b><span>The AI analyst answers across every provider and drafts the fix as a pull request. It never changes your cloud on its own.</span></div>
+          <div className="dash-feat"><b>Click, don't wait.</b><span>Every tile drills into instant detail. The end of dashboards nobody opens.</span></div>
+          <div className="dash-feat"><b>Exec-ready.</b><span>Cost per unit, commitment coverage, an efficiency grade, and the untagged spend finance actually asks about.</span></div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
 /* Pricing */
 
 
@@ -1233,6 +1260,7 @@ function App(){
       <Hero />
       <Reveal><DemoVideo /></Reveal>
       <Reveal><Loop /></Reveal>
+      <Reveal><DashboardShowcase /></Reveal>
       <Reveal><AiCost /></Reveal>
       <Reveal><Connectors /></Reveal>
       <Reveal><Architecture version={version} /></Reveal>
