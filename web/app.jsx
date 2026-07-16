@@ -17,8 +17,8 @@ const PALETTES = {
     "--grid":"rgba(255,255,255,.03)"
   },
   graphite: {
-    "--bg":"#000000","--bg-1":"#0a0a0c","--bg-2":"#121214","--bg-3":"#1a1a1d",
-    "--line":"#232327","--line-2":"#2d2d32",
+    "--bg":"#0a0a0b","--bg-1":"#111114","--bg-2":"#17171c","--bg-3":"#1f1f26",
+    "--line":"#24242c","--line-2":"#31313b",
     "--fg":"#f0f2f3","--fg-2":"#94a3ab","--fg-3":"#56656d","--fg-4":"#2d3a40",
     "--accent":"#4db8d4","--accent-dim":"#2c7d91",
     "--warn":"#e6a840","--alert":"#e05c4b",
@@ -992,7 +992,7 @@ function Footer({ version }){
 /* Tweaks panel */
 const PALETTE_OPTIONS = [
   {value:"onyx",     label:"Onyx",     swatch:["#0a0a0c","#5fe8a0","#15151a"]},
-  {value:"graphite", label:"Graphite", swatch:["#000000","#4db8d4","#121214"]},
+  {value:"graphite", label:"Graphite", swatch:["#0a0a0b","#4db8d4","#17171c"]},
   {value:"paper",    label:"Paper",    swatch:["#fbfaf7","#1f8a5b","#e3dfcf"]},
   {value:"mono",     label:"Mono",     swatch:["#ffffff","#0a0a0a","#e6e6e3"]},
 ];

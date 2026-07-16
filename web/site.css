@@ -10,12 +10,12 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 /* graphite default (matches TWEAK_DEFAULTS) */
 :root{
   color-scheme:dark;
-  --bg:#000000;
-  --bg-1:#0a0a0c;
-  --bg-2:#121214;
-  --bg-3:#1a1a1d;
-  --line:#232327;
-  --line-2:#2d2d32;
+  --bg:#0a0a0b;
+  --bg-1:#111114;
+  --bg-2:#17171c;
+  --bg-3:#1f1f26;
+  --line:#24242c;
+  --line-2:#31313b;
   --fg:#f0f2f3;
   --fg-2:#94a3ab;
   --fg-3:#56656d;
@@ -749,3 +749,13 @@ footer{border-top:1px solid var(--line);padding:48px 0 64px;background:var(--bg-
 .announce-arr{color:var(--accent);transition:transform .18s}
 .announce:hover .announce-arr{transform:translateX(3px)}
 @media(max-width:560px){.announce{font-size:12px;gap:8px}.announce-chip{display:none}}
+
+/* Atmospheric depth: a faint accent glow behind the hero + a subtle top lift,
+   so the dark reads layered instead of flat pure-black. */
+body{background-image:radial-gradient(1150px 560px at 50% -40px, color-mix(in oklab, var(--accent) 7%, transparent), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.016), rgba(255,255,255,0) 220px);background-repeat:no-repeat;background-attachment:fixed}
+/* Subtle elevation on the key surfaces so panels sit above the base. */
+.console,.dash-frame,.stat,.pcard,.demo-video-frame{box-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 24px 60px -30px rgba(0,0,0,.7)}
+
+/* Film grain: faint tactile texture so the dark reads rich, not flat. */
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.04;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:180px 180px}
+@media(prefers-reduced-motion:reduce){body::before{opacity:.03}}
