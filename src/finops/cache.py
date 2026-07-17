@@ -25,8 +25,11 @@ TTLs are tuned to how fast the source actually changes:
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import pickle
+import secrets
 import sqlite3
 import threading
 import time
@@ -148,6 +151,42 @@ async def aget_or_set(key: str, ttl: int, producer: Callable[[], Awaitable[Any]]
 # entry causes a re-fetch, never a wrong answer.
 
 
+_hmac_key: bytes | None = None
+_hmac_key_loaded = False
+
+
+def _cache_hmac_key() -> bytes | None:
+    """Per-install key that authenticates the on-disk pickle blobs. Read from a
+    0600 file in the data dir, created once. Returns None if it cannot be
+    established, in which case disk persistence is skipped entirely rather than
+    writing an unauthenticated pickle a tampered file could weaponize."""
+    global _hmac_key, _hmac_key_loaded
+    if _hmac_key_loaded:
+        return _hmac_key
+    _hmac_key_loaded = True
+    data_dir = os.getenv("FINOPS_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".nable")
+    path = os.path.join(data_dir, "cache.key")
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        if os.path.exists(path):
+            with open(path, "rb") as fh:
+                key = fh.read()
+            if len(key) >= 32:
+                _hmac_key = key
+                return _hmac_key
+        # Create a fresh key, readable only by the owner.
+        key = secrets.token_bytes(32)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, key)
+        finally:
+            os.close(fd)
+        _hmac_key = key
+    except Exception:
+        _hmac_key = None
+    return _hmac_key
+
+
 def _disk_conn() -> "sqlite3.Connection | None":
     """Open the on-disk cache DB, or None if persistence is off or unavailable."""
     global _disk_ready
@@ -186,7 +225,17 @@ def _disk_get(key: str, now: float) -> "tuple[float, Any] | None":
             with conn:
                 conn.execute("DELETE FROM kv WHERE key = ?", (key,))
             return None
-        return (float(expires_at), pickle.loads(blob))
+        # Authenticate the blob before unpickling. A row is `tag(32) || pickle`.
+        # If the tag is missing/wrong (tampered file, or a pre-HMAC legacy entry),
+        # treat it as a miss and re-fetch — never feed an unverified pickle to
+        # pickle.loads, which would be code execution from a writable cache file.
+        hkey = _cache_hmac_key()
+        if hkey is None or not isinstance(blob, (bytes, bytearray)) or len(blob) < 32:
+            return None
+        tag, payload = bytes(blob[:32]), bytes(blob[32:])
+        if not hmac.compare_digest(tag, hmac.new(hkey, payload, hashlib.sha256).digest()):
+            return None
+        return (float(expires_at), pickle.loads(payload))
     except Exception:
         return None
     finally:
@@ -203,10 +252,16 @@ def _disk_set(key: str, expires_at: float, value: Any, now: float) -> None:
     conn = _disk_conn()
     if conn is None:
         return
+    # No key means we cannot authenticate what we write, so we do not persist an
+    # unsigned pickle (it would be trusted on read). Degrade to memory-only.
+    hkey = _cache_hmac_key()
+    if hkey is None:
+        return
     try:
-        blob = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
+        payload = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
     except Exception:
         return
+    blob = hmac.new(hkey, payload, hashlib.sha256).digest() + payload
     try:
         with conn:
             conn.execute("DELETE FROM kv WHERE expires_at <= ?", (now,))
