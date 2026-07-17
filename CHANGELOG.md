@@ -2,6 +2,18 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.181
+
+- **`nable scan`: the terminal front door, free by default.** One command against your existing AWS credentials prints the recoverable dollars and the top findings ranked by monthly savings, in under a minute, no MCP client involved. It makes **zero paid API calls**: every check reads only free AWS APIs (Describe\*, Compute Optimizer, CloudWatch), so a tool we call free never puts a charge on your AWS bill. It scans all opted-in regions on a 45s budget, returning partial results with a banner instead of hanging, and a clean account gets a proud "no material waste found" instead of an apology.
+- **`--spend` is the opt-in spend breakdown.** Month-to-date total + top 3 services + % of bill, added above the recoverable line. It uses Cost Explorer, which AWS meters at ~$0.02 per scan, so `--spend` discloses that cost before making the call. The default scan never touches it.
+- **Four typed failure states, zero stack traces.** No credentials (exit 6, offers `--demo`), expired SSO session (exit 3, prints the exact `aws sso login` command), permission denied (exit 4, prints the IAM actions + `nable iam-template`), and partial-with-nothing (exit 5). Partial WITH results exits 0 so `set -e` scripts keep working. Exit 2 stays argparse's for usage errors.
+- **`--json` for scripts and CI** (stable schema, chrome on stderr), **`--demo`** (StreamCo sample data, every headline dollar labeled), **`--debug`**, **`--profile`**.
+- Caught and fixed on the first real-account run: the EBS-snapshot check crashed in every region on a dead `ClientMeta.client` reference; least-privilege permission errors (ELB/ECR/ECS) flooded stderr instead of staying quiet; and a timed-out scan hung ~45s past its deadline because interpreter shutdown joined the still-running boto3 threads. Snapshot check fixed, analyzer warnings silenced unless `--debug`, and a timed-out scan now hard-exits cleanly the moment it has rendered.
+- **First print in well under 2 seconds.** `nable` and `finops-mcp` now route through a light dispatcher (`finops/entry.py`) that lazy-imports the wizard or the MCP server, so a human typing a command never pays the server's import cost first. Piped no-args invocations reach the MCP server exactly as before; a regression test pins both dispatchers.
+- **Engine: `run_deep_audit` grew optional `progress_callback` and `deadline_seconds`** for streaming per-region progress and partial-results deadlines. Defaults keep the MCP tool path byte-identical; timed-out regions are reported in `regions_timed_out`.
+- `nable --help` now leads with a "get answers" group: the commands that produce value outrank the ones that configure them.
+- The `nable` shim is 0.1.2: entry point repointed to the light dispatcher, dependency floor raised to 0.8.181 so cached uv environments can never resolve a build without `scan`.
+
 ## 0.8.180
 
 - **Verified savings are now priced off the bill, not the price sheet.** When the scheduled verifier confirms a change landed (EC2 resize, Graviton migration, idle cleanup, RDS downsize), nable measures the realized saving from CUR: the resource's actual daily cost in the two weeks before the change vs after it settled. When CUR is not connected it falls back to the customer's measured effective rate (EDP/commitment discount), then to list price, and every verified row records which basis produced its number (`verified_basis`). The savings ledger reports `verified_bill_measured_monthly_usd` separately, so "measured off your bill" is only claimed when it is true.

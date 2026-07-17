@@ -151,8 +151,7 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
     cutoff = _now_utc() - timedelta(days=older_than_days)
 
     try:
-        # Get the current account ID to filter to owned snapshots
-        sts = ec2_client.meta.client if hasattr(ec2_client, "meta") else None
+        # Get the current account ID to filter to owned snapshots.
         account_id = None
         try:
             import boto3
@@ -448,18 +447,15 @@ def check_cloudtrail_waste(
         trail_arn = trail.get("TrailARN", "")
         trail_name = trail.get("Name", "unknown")
         is_multi_region = trail.get("IsMultiRegionTrail", False)
-        has_data_events = False
 
         # Check event selectors for data events
         try:
             sel_resp = cloudtrail_client.get_event_selectors(TrailName=trail_arn)
             event_selectors = sel_resp.get("EventSelectors", [])
-            advanced_selectors = sel_resp.get("AdvancedEventSelectors", [])
 
             for selector in event_selectors:
                 data_resources = selector.get("DataResources", [])
                 if data_resources:
-                    has_data_events = True
                     # Estimate: data events are expensive — flag as high severity
                     findings.append({
                         "resource_id": trail_arn,

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "finops-mcp"
-version = "0.8.180"
+version = "0.8.181"
 description = "Ask Claude about your AWS, Azure, GCP, and SaaS costs. MCP server with anomaly detection, rightsizing, and Jira ticketing."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -127,12 +127,16 @@ dev = [
 ]
 
 [project.scripts]
-finops-mcp        = "finops.server:main"
+# nable + finops-mcp route through the light dispatcher (finops/entry.py) so
+# `nable scan` prints in under 2s instead of paying the ~0.9s server import
+# first. Piped no-args invocations reach the MCP server exactly as before;
+# finops.server:main keeps identical routing for old `nable` shim installs.
+finops-mcp        = "finops.entry:main"
 finops            = "finops.setup_wizard:main"
 # Brand alias: the site teaches `uvx nable`, so a pip install of finops-mcp must
 # also answer to `nable`. Same target as the shim package's entry point, so when
 # both are installed the duplicate script name resolves to identical behavior.
-nable             = "finops.server:main"
+nable             = "finops.entry:main"
 finops-slack      = "finops.slack_bot.app:main"
 finops-pr-webhook = "finops.pr_comments.webhook:main"
 finops-doctor     = "finops.doctor:main"

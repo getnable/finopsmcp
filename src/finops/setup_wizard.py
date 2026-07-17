@@ -2280,6 +2280,9 @@ def main(args: list[str] | None = None) -> None:
         # Ordered groups. A command registered but not listed here auto-renders
         # under "other", so new subcommands can never silently vanish from help.
         _GROUPS = [
+            # "get answers" leads: help text is the CLI's homepage, and the
+            # commands that produce value outrank the ones that configure it.
+            ("get answers", ["scan"]),
             ("start here", ["welcome", "connect", "doctor", "tools", "serve", "upgrade"]),
             ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
             ("ai / llm providers", ["openai", "anthropic", "openrouter", "litellm",
@@ -2362,6 +2365,10 @@ def main(args: list[str] | None = None) -> None:
         version=f"nable (finops-mcp) {_installed_version() or 'unknown'}",
     )
     sub = parser.add_subparsers(dest="cmd", metavar="<command>")
+
+    # The value-producing commands register first (module is light: stdlib only).
+    from .cli_scan import add_parser as _add_scan_parser
+    _add_scan_parser(sub)
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -2480,7 +2487,11 @@ def main(args: list[str] | None = None) -> None:
         from .guard import run_hook
         raise SystemExit(run_hook())
 
-    print("\n  nable setup: all credentials stay on your machine\n")
+    # Answer commands own their whole output: no setup banner ahead of `scan`,
+    # its branded first line must be the first thing on screen (and in --json
+    # mode stdout must stay a single parseable document).
+    if parsed.cmd != "scan":
+        print("\n  nable setup: all credentials stay on your machine\n")
 
     dispatch = {
         "aws": setup_aws_account,
@@ -2703,6 +2714,9 @@ def main(args: list[str] | None = None) -> None:
             open_browser=getattr(parsed, "open", False) or getattr(parsed, "demo", False),
         )
         return
+    elif parsed.cmd == "scan":
+        from .cli_scan import run as _scan_run
+        raise SystemExit(_scan_run(parsed))
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))

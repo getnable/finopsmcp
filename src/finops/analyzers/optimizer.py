@@ -18,8 +18,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import time
+from collections.abc import Callable
+from concurrent.futures import TimeoutError as _FuturesTimeout
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -390,6 +392,8 @@ def run_deep_audit(
     checks: list[str] | None = None,
     role_arn: str | None = None,
     max_workers: int = 8,
+    progress_callback: Callable[[str, int, int, int], None] | None = None,
+    deadline_seconds: float | None = None,
 ) -> dict:
     """
     Run a full deep AWS waste audit and return a structured report.
@@ -402,6 +406,18 @@ def run_deep_audit(
         role_arn: Optional IAM role ARN to assume (for cross-account audits).
                   Defaults to AWS_ROLE_ARNS env var first role if not provided.
         max_workers: Thread pool size for parallel region scanning.
+        progress_callback: Optional hook fired after each region completes:
+                callback(region, findings_in_region, regions_done, regions_total).
+                Exceptions from the callback are swallowed; progress reporting
+                must never kill a scan. None (the default, and the MCP tool
+                path) keeps behavior byte-identical to before this parameter.
+        deadline_seconds: Optional wall-clock budget for the region fan-out.
+                When it expires, pending regions are cancelled, completed
+                regions are returned as partial results, and the timed-out
+                region names land in "regions_timed_out". In-flight boto3
+                calls cannot be interrupted; their threads finish in the
+                background and their results are discarded. None (default)
+                means no deadline, exactly the prior behavior.
 
     Returns:
         {
@@ -460,31 +476,94 @@ def run_deep_audit(
 
     all_findings: list[dict] = []
     errors: list[str] = []
+    regions_timed_out: list[str] = []
+    threads_abandoned = False  # True when the deadline left live boto3 threads running
 
     # ── Parallel region scans ────────────────────────────────────────────────
-    with ThreadPoolExecutor(max_workers=min(max_workers, len(regions))) as pool:
+    #
+    #   regions ──▶ ThreadPoolExecutor(≤8) ──▶ as_completed ──▶ findings
+    #                                              │
+    #                    deadline_seconds ─────────┤ (remaining budget per wait)
+    #                    progress_callback ────────┘ (per completed region)
+    #
+    # With a deadline, each as_completed wait gets only the remaining budget;
+    # on expiry we cancel pending futures and keep what finished (partials).
+    _deadline_at = (
+        time.monotonic() + deadline_seconds if deadline_seconds else None
+    )
+    pool = ThreadPoolExecutor(max_workers=min(max_workers, len(regions)))
+    try:
         future_to_region = {
             pool.submit(_audit_region, session, region, active_checks): region
             for region in regions
         }
-        for future in as_completed(future_to_region):
-            region = future_to_region[future]
+        pending = set(future_to_region)
+        done_count = 0
+        while pending:
+            timeout = None
+            if _deadline_at is not None:
+                timeout = _deadline_at - time.monotonic()
+                if timeout <= 0:
+                    break
             try:
-                region_findings = future.result()
-                # Stamp account_id onto all findings from this region
-                for f in region_findings:
-                    if f.get("account_id") is None:
-                        f["account_id"] = account_id
-                all_findings.extend(region_findings)
-                log.info("Region %s: %d findings", region, len(region_findings))
-            except Exception as exc:
-                msg = f"Region {region} failed: {exc}"
-                log.warning(msg)
-                errors.append(msg)
+                for future in as_completed(pending, timeout=timeout):
+                    pending.discard(future)
+                    region = future_to_region[future]
+                    done_count += 1
+                    try:
+                        region_findings = future.result()
+                        # Stamp account_id onto all findings from this region
+                        for f in region_findings:
+                            if f.get("account_id") is None:
+                                f["account_id"] = account_id
+                        all_findings.extend(region_findings)
+                        log.info(
+                            "Region %s: %d findings", region, len(region_findings)
+                        )
+                        if progress_callback is not None:
+                            try:
+                                progress_callback(
+                                    region, len(region_findings),
+                                    done_count, len(regions),
+                                )
+                            except Exception:  # progress must never kill a scan
+                                pass
+                    except Exception as exc:
+                        msg = f"Region {region} failed: {exc}"
+                        log.warning(msg)
+                        errors.append(msg)
+            except (_FuturesTimeout, TimeoutError):
+                # concurrent.futures.TimeoutError is the builtin only on 3.11+;
+                # catch both so a 3.10 interpreter (tests, old shims) behaves.
+                break
+        if pending:
+            regions_timed_out = sorted(
+                future_to_region[f] for f in pending
+            )
+            # Cancel every queued future (best-effort); the ones whose thread is
+            # already blocked in a boto3 call can't be cancelled and outlive this
+            # function. List-comp, not any(), so short-circuiting never skips a
+            # cancel. The caller (CLI) uses the flag to hard-exit instead of
+            # letting interpreter shutdown join those threads, which would hang.
+            uncancellable = [f for f in pending if not f.cancel()]
+            threads_abandoned = bool(uncancellable)
+            log.warning(
+                "Deadline of %ss hit; %d region(s) not scanned: %s",
+                deadline_seconds, len(regions_timed_out), regions_timed_out,
+            )
+    finally:
+        # cancel_futures drops queued work; threads mid-boto3-call finish in
+        # the background (wait=False) and their results are discarded.
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # ── Compute Optimizer (global, not per-region) ───────────────────────────
+    # Skipped when the deadline already expired: CO is a bonus enrichment, and
+    # a partial-results return should not blow further past the budget.
+    _deadline_expired = (
+        _deadline_at is not None and time.monotonic() >= _deadline_at
+    )
     co_count = 0
-    if active_checks & {"ec2", "lambda", "rds"}:
+    if active_checks & {"ec2", "lambda", "rds"} and not _deadline_expired:
         co_findings = _fetch_compute_optimizer_recommendations(session)
         for f in co_findings:
             if f.get("account_id") is None:
@@ -531,7 +610,8 @@ def run_deep_audit(
 
     return {
         "account_id": account_id,
-        "regions_scanned": sorted(regions),
+        "regions_scanned": sorted(set(regions) - set(regions_timed_out)),
+        "regions_timed_out": regions_timed_out,
         "checks_run": sorted(active_checks),
         "total_findings": len(all_findings),
         "total_estimated_monthly_savings": round(total_savings, 2),
@@ -542,6 +622,7 @@ def run_deep_audit(
         "by_region": by_region,
         "compute_optimizer_findings": co_count,
         "errors": errors,
+        "_threads_abandoned": threads_abandoned,
     }
 
 

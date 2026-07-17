@@ -1,15 +1,35 @@
 # nable
 
-*FinOps MCP server for Claude and Cursor, across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.*
+*Cross-cloud and AI cost intelligence from your terminal, across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.*
 
-**The cost brain your AI agents check before they spend.** Ask your whole cloud and AI bill anything inside Claude or Cursor, get genuine savings priced on your real rates, and the fix as a pull request you approve. One tool across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.
+**Dashboards show you the bill. nable is how you cut it: find the spend, ship the fix, prove it on the next invoice. Runs local.**
 
 [![PyPI](https://img.shields.io/pypi/v/finops-mcp?label=pypi&color=4db8d4)](https://pypi.org/project/finops-mcp/)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/finops-mcp?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/finops-mcp)
 [![Tests](https://github.com/getnable/finopsmcp/actions/workflows/test.yml/badge.svg)](https://github.com/getnable/finopsmcp/actions/workflows/test.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-4db8d4)](LICENSE)
 
-nable is FinOps that lives inside your AI. Ask Claude or Cursor about your cloud, SaaS, and AI spend and it answers with real numbers, priced on your actual rates, not list price. It finds the savings genuinely worth taking, proposes each fix as a pull request you approve, and checks the next bill to prove it worked. As your agents start spending real money, nable is the cost brain they check before they act.
+One command, your existing AWS credentials, recoverable dollars in under a minute. No dashboard, no signup, nothing leaves your machine.
+
+```bash
+uvx nable scan
+```
+
+```text
+nable scan · profile prod
+account 3521… · this account only
+scanning 17 regions …
+  us-east-1 ......... 3 findings
+  eu-west-1 ......... 1 finding
+────────────────────────────────────────────
+$2,140/mo recoverable
+    $1,200/mo  3 idle NAT gateways, us-east-1
+      $610/mo  14 unattached EBS volumes (2.1 TB), us-east-1
+      $330/mo  idle RDS instance (db.r5.xlarge, <2% CPU), eu-west-1
+run `nable scan --spend` for the spend breakdown (uses Cost Explorer, ~$0.02)
+```
+
+Every check reads only free AWS APIs, so scanning never puts a charge on your bill. And nable does not stop at the finding: it proposes each fix as a pull request you approve, then checks your next bill to prove the saving landed, priced on your real rates, not list price. `--json` wires it into CI, `--demo` runs on sample data with no account at all, `--spend` adds a Cost Explorer breakdown when you want it. One tool across AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers.
 
 Everything runs on **your machine** and your bill never leaves it, so the no-egress claim is something you can read in the source, not take on faith. Connect AWS or GCP by SSO login or a CLI profile and nable stores no secret at all, it just references your existing login; only keys you paste directly are encrypted in your OS keyring. It is read-only by default and never changes your cloud on its own. The local agent is open and auditable; a hosted platform is available for teams.
 
@@ -17,11 +37,11 @@ Everything runs on **your machine** and your bill never leaves it, so the no-egr
 
 ![nable demo: uvx nable welcome --demo shows a sample bill in seconds](https://raw.githubusercontent.com/getnable/finopsmcp/main/docs/demo.gif)
 
-### Free to start, runs on your Claude membership
+### Also works in your editor, free, on your Claude membership
 
-`uvx nable` and ask away. nable runs as a local MCP server inside Claude Desktop, Claude Code, or Cursor, so **your existing Claude Pro/Max or Cursor membership is the model. There is no Anthropic API key and no per-token cost.** Tool calls count against your normal chat usage, the same as any long conversation, never a separate bill.
+Prefer to ask in chat? `uvx nable` runs as a local MCP server inside Claude Desktop, Claude Code, or Cursor, so you can ask about your whole cloud and AI bill and get answers with real numbers. **Your existing Claude Pro/Max or Cursor membership is the model. There is no Anthropic API key and no per-token cost.** Tool calls count against your normal chat usage, the same as any long conversation, never a separate bill.
 
-Cost queries, anomaly detection, and rightsizing findings are **free forever**. The agent team (the budget guard your agents check before they act, remediation PRs, and the learning loop) is Pro.
+The terminal scan, cost queries, anomaly detection, and rightsizing findings are **free forever**. The agent team (the budget guard your agents check before they act, remediation PRs, and the learning loop) is Pro.
 
 ---
 

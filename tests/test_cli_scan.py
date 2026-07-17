@@ -1,0 +1,356 @@
+"""
+`nable scan` unit tests: the four failure states with their exit codes, the
+free-by-default recoverable headline (NO paid Cost Explorer call), the opt-in
+`--spend` breakdown and its cost disclosure, the proud low-waste state,
+--json schema, --demo labeling, and telemetry event classes.
+
+All AWS calls are mocked; the engine is patched at the optimizer boundary.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+from botocore.exceptions import ClientError, NoCredentialsError, SSOTokenLoadError
+
+from finops import cli_scan
+
+
+@pytest.fixture(autouse=True)
+def _isolate_aws_profile():
+    # cli_scan.run() intentionally exports AWS_PROFILE for its own process;
+    # tests must not leak that into the rest of the suite. monkeypatch cannot
+    # help here: it only reverts its OWN changes, and the export happens inside
+    # the code under test. Snapshot and restore around each test explicitly.
+    before = os.environ.get("AWS_PROFILE")
+    os.environ.pop("AWS_PROFILE", None)
+    yield
+    if before is None:
+        os.environ.pop("AWS_PROFILE", None)
+    else:
+        os.environ["AWS_PROFILE"] = before
+
+
+def _args(**kw):
+    base = dict(json=False, demo=False, spend=False, debug=False, profile=None, regions=None)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def _client_error(code: str, op: str = "GetCallerIdentity") -> ClientError:
+    return ClientError({"Error": {"Code": code, "Message": code}}, op)
+
+
+def _ce_response(groups: dict[str, float]):
+    return {
+        "ResultsByTime": [
+            {
+                "Groups": [
+                    {"Keys": [k], "Metrics": {"UnblendedCost": {"Amount": str(v)}}}
+                    for k, v in groups.items()
+                ]
+            }
+        ]
+    }
+
+
+def _session(
+    creds=True,
+    sts_exc=None,
+    services=None,
+    regions=None,
+    ce_exc=None,
+):
+    session = MagicMock()
+    session.get_credentials.return_value = object() if creds else None
+
+    sts = MagicMock()
+    if sts_exc:
+        sts.get_caller_identity.side_effect = sts_exc
+    else:
+        sts.get_caller_identity.return_value = {"Account": "352112345678"}
+
+    ce = MagicMock()
+    if ce_exc:
+        ce.get_cost_and_usage.side_effect = ce_exc
+    else:
+        ce.get_cost_and_usage.side_effect = [
+            _ce_response(services or {"Amazon Bedrock": 19200.0, "Amazon EC2": 11400.0, "Amazon S3": 4100.0}),
+            _ce_response(regions or {"us-east-1": 30000.0, "eu-west-1": 4700.0, "NoRegion": 12.0, "global": 3.0}),
+        ]
+
+    session.client.side_effect = lambda name, **kw: {"sts": sts, "ce": ce}[name]
+    return session
+
+
+def _report(findings=None, timed_out=None, scanned=None):
+    findings = findings if findings is not None else [
+        {
+            "waste_type": "idle_nat_gateway",
+            "description": "2 idle NAT gateways",
+            "region": "us-east-1",
+            "estimated_monthly_savings": 1200.0,
+        },
+        {
+            "waste_type": "unattached_ebs",
+            "description": "14 unattached EBS volumes",
+            "region": "eu-west-1",
+            "estimated_monthly_savings": 610.0,
+        },
+        {
+            "waste_type": "tiny",
+            "description": "one $3 bucket",
+            "region": "us-east-1",
+            "estimated_monthly_savings": 3.0,  # below the $25 floor: hidden
+        },
+    ]
+    total = sum(f["estimated_monthly_savings"] for f in findings)
+    return {
+        "account_id": "352112345678",
+        "regions_scanned": scanned if scanned is not None else ["us-east-1", "eu-west-1"],
+        "regions_timed_out": timed_out or [],
+        "total_findings": len(findings),
+        "total_estimated_monthly_savings": total,
+        "total_estimated_annual_savings": total * 12,
+        "findings": findings,
+        "errors": [],
+    }
+
+
+def _run(args, session, report=None, capsys=None, discovered=("us-east-1", "eu-west-1")):
+    # The default (free) scan gets its regions from _discover_regions, not CE,
+    # so patch it deterministically for every test. The --spend path calls it
+    # too and then reorders by CE spend weight.
+    events: list[tuple[str, dict]] = []
+    with (
+        patch.object(cli_scan, "_emit", side_effect=lambda e, p, wait: events.append((e, p))),
+        patch("boto3.Session", return_value=session),
+        patch("finops.analyzers.optimizer._discover_regions", return_value=list(discovered)),
+        patch("finops.analyzers.optimizer.run_deep_audit", return_value=report or _report()) as engine,
+    ):
+        code = cli_scan.run(args)
+    return code, events, engine
+
+
+# ── happy path ────────────────────────────────────────────────────────────────
+
+def test_happy_path_output_order_and_exit(capsys):
+    code, events, _ = _run(_args(), _session())
+    out = capsys.readouterr().out
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+
+    assert code == cli_scan.EXIT_OK
+    assert lines[0].startswith("nable scan")                       # first line, no network needed
+    assert "account 352112345678 · this account only" in lines[1]  # scope always labeled
+    # Free default: recoverable-led, NO paid spend headline.
+    assert "on AWS this month" not in out
+    assert "$1,813/mo recoverable" in out
+    assert "nable scan --spend" in out          # points at the opt-in breakdown
+    assert cli_scan.DOCS_LINE in out
+    assert [e for e, _ in events] == ["cli_scan_started", "cli_scan_completed"]
+
+
+def test_default_scan_makes_no_paid_ce_call():
+    # The load-bearing promise: a free tool never bills the user's AWS account.
+    session = _session()
+    _run(_args(), session)
+    ce = session.client("ce")  # resolve the mock without triggering a query
+    ce.get_cost_and_usage.assert_not_called()
+
+
+def test_findings_ranked_and_floored(capsys):
+    code, _, _ = _run(_args(), _session())
+    out = capsys.readouterr().out
+    assert "idle NAT gateways" in out
+    assert "unattached EBS" in out
+    assert "one $3 bucket" not in out  # below the $25/mo floor
+    assert out.index("idle NAT") < out.index("unattached EBS")  # ranked by dollars
+
+
+def test_proud_low_waste_state(capsys):
+    tiny = _report(findings=[{
+        "waste_type": "tiny", "description": "a $4 thing",
+        "region": "us-east-1", "estimated_monthly_savings": 4.0,
+    }])
+    code, _, _ = _run(_args(), _session(), report=tiny)
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK
+    assert "no material waste found, nice" in out
+    assert "recoverable" not in out  # never an apologetic near-zero headline
+
+
+def test_spend_flag_shows_headline_discloses_cost_and_weights_regions(capsys):
+    # --spend is the ONLY path that calls Cost Explorer. It must: disclose the
+    # cost up front, show the spend headline, and order regions by spend so a
+    # budget cutoff does the valuable ones first.
+    _, _, engine = _run(
+        _args(spend=True), _session(), discovered=["eu-west-1", "us-east-1"]
+    )
+    out = capsys.readouterr().out
+    assert "about $0.02" in out and "Cost Explorer" in out   # cost disclosed before the call
+    assert "on AWS this month" in out and "Bedrock" in out    # spend headline present
+    passed = engine.call_args.kwargs["regions"]
+    assert passed[0] == "us-east-1"   # reordered: $30k spend outranks eu-west-1's $4.7k
+
+
+def test_default_scan_never_charges(capsys):
+    # The default may HINT that --spend costs ~$0.02, but it must never print
+    # the pre-charge disclosure, because it makes no paid call itself.
+    _run(_args(), _session())
+    assert "on your AWS bill" not in capsys.readouterr().out
+
+
+def test_partial_with_results_exits_zero_with_banner(capsys):
+    rep = _report(timed_out=["ap-south-1"])
+    code, _, _ = _run(_args(), _session(), report=rep)
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK
+    assert "budget hit" in out and "ap-south-1" in out
+
+
+def test_partial_with_nothing_exits_five(capsys):
+    rep = _report(findings=[], timed_out=["us-east-1", "eu-west-1"], scanned=[])
+    code, events, _ = _run(_args(), _session(), report=rep)
+    assert code == cli_scan.EXIT_PARTIAL_EMPTY
+    assert ("cli_scan_failed", ) [0] in [e for e, _ in events]
+    failed = [p for e, p in events if e == "cli_scan_failed"]
+    assert failed and failed[0]["error_class"] == "timeout"
+    assert cli_scan.DOCS_LINE in capsys.readouterr().out
+
+
+def test_regions_override_skips_pick_and_validates():
+    _, _, engine = _run(_args(regions=["eu-central-1"]), _session())
+    assert engine.call_args.kwargs["regions"] == ["eu-central-1"]
+
+    code, _, _ = _run(_args(regions=["not-a-region!"]), _session())
+    assert code == 1
+
+
+# ── failure states ────────────────────────────────────────────────────────────
+
+def test_no_creds_exit_six_offers_demo(capsys):
+    code, events, _ = _run(_args(), _session(creds=False))
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_NO_CREDS
+    assert "nable scan --demo" in out
+    assert cli_scan.DOCS_LINE in out
+    assert [p["error_class"] for e, p in events if e == "cli_scan_failed"] == ["no-creds"]
+
+
+def test_expired_sso_exit_three_prints_refresh_command(capsys):
+    code, events, _ = _run(
+        _args(profile="prod"),
+        _session(sts_exc=SSOTokenLoadError(error_msg="token expired")),
+    )
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_EXPIRED
+    assert "aws sso login --profile prod" in out
+    assert [p["error_class"] for e, p in events if e == "cli_scan_failed"] == ["expired"]
+
+
+def test_expired_token_client_error_exit_three():
+    code, _, _ = _run(_args(), _session(sts_exc=_client_error("ExpiredToken")))
+    assert code == cli_scan.EXIT_EXPIRED
+
+
+def test_access_denied_exit_four_names_iam_template(capsys):
+    code, _, _ = _run(_args(), _session(sts_exc=_client_error("AccessDenied")))
+    assert code == cli_scan.EXIT_DENIED
+    assert "nable iam-template" in capsys.readouterr().out
+
+
+def test_no_creds_error_from_sts_exit_six():
+    code, _, _ = _run(_args(), _session(sts_exc=NoCredentialsError()))
+    assert code == cli_scan.EXIT_NO_CREDS
+
+
+def test_spend_flag_ce_denied_degrades_and_still_scans(capsys):
+    # Under --spend, if CE is billing-locked, degrade to the free recoverable
+    # headline rather than failing the whole scan.
+    session = _session(ce_exc=_client_error("AccessDeniedException", "GetCostAndUsage"))
+    code, _, engine = _run(_args(spend=True), session)
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK
+    assert "spend summary unavailable" in out and "iam-template" in out
+    assert "recoverable" in out           # recoverable-led headline instead
+    assert engine.called                  # the scan still ran
+
+
+# ── --json ────────────────────────────────────────────────────────────────────
+
+def test_json_schema_and_stdout_purity(capsys):
+    code, _, _ = _run(_args(json=True), _session())
+    captured = capsys.readouterr()
+    doc = json.loads(captured.out)  # stdout parses as a single document
+    assert code == cli_scan.EXIT_OK
+    assert doc["schema_version"] == 1
+    assert doc["command"] == "scan" and doc["demo"] is False
+    assert doc["account_id"] == "352112345678"
+    assert doc["spend"] is None            # free default: no CE, no spend block
+    assert doc["recoverable"]["monthly_usd"] == 1813.0
+    assert doc["recoverable"]["pct_of_spend"] is None
+    assert doc["scan"]["partial"] is False
+    assert "nable scan" in captured.err   # chrome moved to stderr
+
+
+def test_json_with_spend_flag_includes_breakdown(capsys):
+    code, _, _ = _run(_args(json=True, spend=True), _session())
+    doc = json.loads(capsys.readouterr().out)
+    assert code == cli_scan.EXIT_OK
+    assert doc["spend"]["top_services"][0]["service"] == "Amazon Bedrock"
+    assert doc["recoverable"]["pct_of_spend"] is not None
+
+
+# ── --demo ────────────────────────────────────────────────────────────────────
+
+def test_demo_labels_and_event_flag(capsys):
+    events: list[tuple[str, dict]] = []
+    with patch.object(cli_scan, "_emit", side_effect=lambda e, p, wait: events.append((e, p))):
+        code = cli_scan.run(_args(demo=True))
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK
+    assert "(demo data)" in out
+    assert "StreamCo" in out
+    completed = [p for e, p in events if e == "cli_scan_completed"]
+    assert completed and completed[0]["demo"] is True
+
+
+def test_demo_needs_no_aws(capsys):
+    # --demo must work on a machine with no boto3 credentials configured at all.
+    with (
+        patch.object(cli_scan, "_emit"),
+        patch("boto3.Session", side_effect=AssertionError("must not touch AWS")),
+    ):
+        code = cli_scan.run(_args(demo=True))
+    assert code == cli_scan.EXIT_OK
+
+
+# ── deadline hard-exit (regression: live scan hung 45s past its deadline) ──────
+
+def test_finish_returns_normally_without_lingering_threads():
+    # The common case: threads drained, no abandonment flag, normal return.
+    assert cli_scan._finish(cli_scan.EXIT_OK, lingering=False) == cli_scan.EXIT_OK
+
+
+def test_finish_hard_exits_when_threads_abandoned():
+    # When the deadline left live boto3 threads running, we must os._exit rather
+    # than return, or interpreter shutdown joins them and the shell hangs.
+    with patch("os._exit", side_effect=SystemExit(0)) as hard_exit:
+        with pytest.raises(SystemExit):
+            cli_scan._finish(cli_scan.EXIT_OK, lingering=True)
+    hard_exit.assert_called_once_with(cli_scan.EXIT_OK)
+
+
+def test_partial_scan_with_abandoned_threads_hard_exits(capsys):
+    # End to end: a report carrying _threads_abandoned must drive the hard exit
+    # AFTER rendering + completion telemetry, so nothing is lost.
+    rep = _report(timed_out=["ap-south-1"])
+    rep["_threads_abandoned"] = True
+    with patch("os._exit", side_effect=SystemExit(0)) as hard_exit:
+        with pytest.raises(SystemExit):
+            _run(_args(), _session(), report=rep)
+    hard_exit.assert_called_once_with(cli_scan.EXIT_OK)
