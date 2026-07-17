@@ -50,3 +50,15 @@ def test_pick_tier_routes_lookups_to_chat():
     ]
     for q in chat_questions:
         assert llm.pick_tier(q) == "chat", q
+
+
+def test_thinking_config_gates_by_model_family():
+    # Deliberative tiers get adaptive summarized thinking; Haiku/older get none.
+    from finops.slack_bot import llm as _llm
+    assert _llm._thinking_config("claude-opus-4-8") == {"type": "adaptive", "display": "summarized"}
+    assert _llm._thinking_config("claude-sonnet-4-6") == {"type": "adaptive", "display": "summarized"}
+    assert _llm._thinking_config("claude-fable-5") == {"type": "adaptive", "display": "summarized"}
+    # Haiku 4.5 and unknown/older models: no thinking (stay fast / avoid 400).
+    assert _llm._thinking_config("claude-haiku-4-5") is None
+    assert _llm._thinking_config("claude-sonnet-3-5") is None
+    assert _llm._thinking_config("") is None

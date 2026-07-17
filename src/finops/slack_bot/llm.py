@@ -131,6 +131,21 @@ def model_for_tier(tier: str) -> str:
     return TIER_DEFAULTS.get(tier, TIER_DEFAULTS["chat"])
 
 
+# Models that support adaptive thinking with a readable summary. Haiku 4.5 and
+# older use the deprecated budget_tokens path and are deliberately excluded: the
+# "simple" tier stays fast, and thinking is for the deliberative analyst. When
+# on, we ask for `display: "summarized"` so the reasoning is renderable (the
+# default is "omitted", which streams empty thinking text).
+_ADAPTIVE_THINKING_FAMILIES = ("opus-4-6", "opus-4-7", "opus-4-8", "sonnet-4-6", "sonnet-5", "fable-5")
+
+
+def _thinking_config(model: str) -> dict | None:
+    m = (model or "").lower()
+    if any(fam in m for fam in _ADAPTIVE_THINKING_FAMILIES):
+        return {"type": "adaptive", "display": "summarized"}
+    return None
+
+
 def pick_tier(text: str) -> str:
     """Route free text to a tier. Investigation language escalates to rca."""
     lowered = text.lower()
@@ -376,19 +391,35 @@ def _run_agent_loop_sync(
     model = model_for_tier(tier)
 
     for _ in range(max_tool_calls):
+        # Adaptive thinking (summarized) on the deliberative tiers, so a streaming
+        # UI can show the analyst's reasoning instead of a spinner. Thinking tokens
+        # share max_tokens, so give the answer headroom when it's on. The tool loop
+        # below re-appends response.content verbatim, so thinking blocks round-trip
+        # correctly across turns (required by the API).
+        _think = _thinking_config(model)
         _kwargs = dict(
             model=model,
-            max_tokens=2048,
+            max_tokens=4096 if _think else 2048,
             system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             tools=tools,
             messages=messages,
         )
+        if _think is not None:
+            _kwargs["thinking"] = _think
         if on_event is not None:
-            # Stream text deltas to the sink as they generate, then recover the
-            # full Message so the tool loop below is identical to the blocking path.
+            # Stream reasoning + answer deltas to the sink as they generate, then
+            # recover the full Message so the tool loop below is identical to the
+            # blocking path.
             with client.messages.stream(**_kwargs) as _stream:
-                for _delta in _stream.text_stream:
-                    _emit({"type": "text", "text": _delta})
+                for _event in _stream:
+                    if _event.type != "content_block_delta":
+                        continue
+                    _d = _event.delta
+                    _dtype = getattr(_d, "type", "")
+                    if _dtype == "thinking_delta":
+                        _emit({"type": "thinking", "text": _d.thinking})
+                    elif _dtype == "text_delta":
+                        _emit({"type": "text", "text": _d.text})
                 response = _stream.get_final_message()
         else:
             response = client.messages.create(**_kwargs)
