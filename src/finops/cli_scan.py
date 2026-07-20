@@ -644,7 +644,29 @@ def run(args) -> int:
     lingering = bool(report.get("_threads_abandoned"))
 
     if not has_results:
-        # every region timed out or failed: partial with nothing usable
+        # AWS produced nothing (budget hit). Don't blank the whole cross-provider
+        # frame: if other providers are connected, still gather and show them, with
+        # AWS degraded to a note. AWS failing is one row, not the whole scan.
+        extra_blocks, extra_abandoned = ([], False)
+        if _extra_fams:
+            from .scan_assembler import gather_extra_providers
+            extra_blocks, extra_abandoned = gather_extra_providers(_fams, spend=want_spend)
+        lingering = lingering or extra_abandoned
+        if any(b.status == "ok" for b in extra_blocks):
+            print(_dim("AWS: hit the 45s budget, no regions finished; showing your other providers"), file=out)
+            _render(out, None, None, demo=False, ce_denied=False, extra_blocks=extra_blocks)
+            if as_json:
+                print(json.dumps(_json_payload(
+                    None, None, demo=False, profile=profile, account_id=account_id,
+                    duration_s=time.time() - t0, extra_blocks=extra_blocks,
+                ), indent=2))
+            _emit("cli_scan_completed", {
+                "demo": False, "aws_timeout": True,
+                "providers": len([b for b in extra_blocks if b.status == "ok"]),
+                "duration_s": round(time.time() - t0, 1),
+            }, wait=True)
+            return _finish(EXIT_OK, lingering)
+        # truly nothing usable anywhere
         code = _fail(out, EXIT_PARTIAL_EMPTY, [
             "the scan hit its 45s budget before any region finished",
             "  try a narrower run: `nable scan --regions us-east-1`",

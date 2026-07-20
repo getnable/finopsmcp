@@ -171,6 +171,24 @@ def test_default_scan_makes_no_paid_ce_call():
     ce.get_cost_and_usage.assert_not_called()
 
 
+def test_aws_timeout_still_shows_other_providers(capsys, monkeypatch):
+    # AWS hitting its budget must not blank the cross-provider frame: if other
+    # providers are connected and gathered, show them (AWS degraded to a note).
+    from finops import scan_assembler as sa
+    monkeypatch.setattr("finops.tool_surface.connected_families",
+                        lambda: frozenset({"aws", "llm"}))
+    ai = sa.ProviderBlock(family="ai", label="AI & GPU", status="ok",
+                          spend_usd=13300.0, estimated=True, detail="OpenAI $9.2k")
+    monkeypatch.setattr("finops.scan_assembler.gather_extra_providers",
+                        lambda fams, *, spend, **kw: ([ai], False))
+    empty = _report(scanned=[])   # no regions finished (budget hit)
+    code, events, _ = _run(_args(), _session(), report=empty)
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK                 # NOT EXIT_PARTIAL_EMPTY
+    assert "AI & GPU" in out
+    assert "showing your other providers" in out
+
+
 def test_findings_ranked_and_floored(capsys):
     code, _, _ = _run(_args(), _session())
     out = capsys.readouterr().out
