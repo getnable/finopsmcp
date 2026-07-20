@@ -74,4 +74,4 @@ def test_typo_gets_did_you_mean():
 def test_garbage_points_at_help():
     r = _bad_cmd("frobnicate9000")
     assert r.returncode == 2
-    assert "finops --help" in r.stderr
+    assert "nable --help" in r.stderr
