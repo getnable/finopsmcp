@@ -35,6 +35,15 @@ def _isolate_aws_profile():
         os.environ["AWS_PROFILE"] = before
 
 
+@pytest.fixture(autouse=True)
+def _aws_only_by_default(monkeypatch):
+    # scan v2 is connection-aware: run() reads connected_families(). Keep the
+    # existing AWS-only unit tests hermetic by defaulting to no extra providers,
+    # so their output stays byte-identical to v1. The multi-provider tests
+    # override this explicitly.
+    monkeypatch.setattr("finops.tool_surface.connected_families", lambda: frozenset())
+
+
 def _args(**kw):
     base = dict(json=False, demo=False, spend=False, debug=False, profile=None, regions=None)
     base.update(kw)
@@ -160,6 +169,24 @@ def test_default_scan_makes_no_paid_ce_call():
     _run(_args(), session)
     ce = session.client("ce")  # resolve the mock without triggering a query
     ce.get_cost_and_usage.assert_not_called()
+
+
+def test_aws_timeout_still_shows_other_providers(capsys, monkeypatch):
+    # AWS hitting its budget must not blank the cross-provider frame: if other
+    # providers are connected and gathered, show them (AWS degraded to a note).
+    from finops import scan_assembler as sa
+    monkeypatch.setattr("finops.tool_surface.connected_families",
+                        lambda: frozenset({"aws", "llm"}))
+    ai = sa.ProviderBlock(family="ai", label="AI & GPU", status="ok",
+                          spend_usd=13300.0, estimated=True, detail="OpenAI $9.2k")
+    monkeypatch.setattr("finops.scan_assembler.gather_extra_providers",
+                        lambda fams, *, spend, **kw: ([ai], False))
+    empty = _report(scanned=[])   # no regions finished (budget hit)
+    code, events, _ = _run(_args(), _session(), report=empty)
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK                 # NOT EXIT_PARTIAL_EMPTY
+    assert "AI & GPU" in out
+    assert "showing your other providers" in out
 
 
 def test_findings_ranked_and_floored(capsys):
