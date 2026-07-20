@@ -2343,19 +2343,23 @@ def main(args: list[str] | None = None) -> None:
                 sub = self._sub_action()
                 choices = list(sub.choices.keys()) if sub else []
                 close = difflib.get_close_matches(bad, choices, n=3, cutoff=0.6)
-                print(f"finops: unknown command '{bad}'", file=_sys.stderr)
+                print(f"nable: unknown command '{bad}'", file=_sys.stderr)
                 if close:
                     print(f"Did you mean: {', '.join(close)}?", file=_sys.stderr)
-                print("Run 'finops --help' to see all commands.", file=_sys.stderr)
+                print("Run 'nable --help' to see all commands.", file=_sys.stderr)
                 _sys.exit(2)
             super().error(message)
 
     parser = _NableParser(
-        prog="finops",
-        description="nable: connect your cloud + SaaS billing to Claude and ask cost questions in your editor.",
+        prog="nable",
+        description=(
+            "nable: find and cut cloud, AI, and SaaS spend from your terminal, across "
+            "AWS, Azure, GCP, Kubernetes, and 15+ providers. Local and read-only; also "
+            "answers in Claude and Cursor."
+        ),
         epilog=(
-            "first time? run: finops welcome\n"
-            "then restart Claude Desktop and ask: \"What are my AWS costs this month?\"\n"
+            "first time? run: nable connect   (finds every provider you already have)\n"
+            "then:            nable scan      (recoverable spend, ranked, free)\n"
             "docs: https://getnable.com/docs\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2450,7 +2454,7 @@ def main(args: list[str] | None = None) -> None:
 
     sub.add_parser("connect", help="Scan this machine for provider credentials and connect them all in one keystroke")
     sub.add_parser("agents",  help="The agent team: Budget Guard, Savings Analyst, the Ledger, and their setup status")
-    welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect Claude + your first cloud account")
+    welcome_p = sub.add_parser("welcome", help="Guided onboarding: connect your first provider (and your editor)")
     welcome_p.add_argument("--demo", action="store_true", help="Show nable on sample data, no account needed")
     sub.add_parser("doctor",       help="Check all connectors and credentials (alias for finops-doctor)")
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
