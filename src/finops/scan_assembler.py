@@ -26,6 +26,7 @@ Two invariants, both load-bearing:
 from __future__ import annotations
 
 import concurrent.futures
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -224,9 +225,9 @@ def gather_extra_providers(
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
         futs = {pool.submit(fn, spend): fam for fam, fn in jobs}
-        deadline = __import__("time").monotonic() + overall_budget
+        deadline = time.monotonic() + overall_budget
         for fut, fam in futs.items():
-            remaining = max(0.5, min(per_provider_timeout, deadline - __import__("time").monotonic()))
+            remaining = max(0.5, min(per_provider_timeout, deadline - time.monotonic()))
             try:
                 blocks.append(fut.result(timeout=remaining))
             except concurrent.futures.TimeoutError:

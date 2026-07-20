@@ -352,8 +352,9 @@ class AWSConnector(BaseConnector):
                         break
                     kwargs["NextPageToken"] = token
             except Exception as exc:
-                log = __import__("logging").getLogger(__name__)
-                log.warning("get_network_breakdown failed (role=%s): %s", role_arn, exc)
+                import logging
+                logging.getLogger(__name__).warning(
+                    "get_network_breakdown failed (role=%s): %s", role_arn, exc)
         return rows
 
     async def get_costs_as_focus(

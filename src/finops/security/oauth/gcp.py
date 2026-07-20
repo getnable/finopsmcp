@@ -40,7 +40,8 @@ def import_service_account_key(key_path: str | Path) -> None:
             key_data,
             scopes=["https://www.googleapis.com/auth/cloud-billing.readonly"],
         )
-        creds.refresh(__import__("google.auth.transport.requests", fromlist=["Request"]).Request())
+        from google.auth.transport.requests import Request
+        creds.refresh(Request())
     except Exception as e:
         raise RuntimeError(f"Service account key validation failed: {e}") from e
 
