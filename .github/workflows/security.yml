@@ -42,6 +42,10 @@ jobs:
 
       - name: Dependency audit (fail on known-vulnerable deps)
         run: |
+          # Upgrade build tooling first: the runner ships an older pip/setuptools/
+          # wheel whose own advisories are not nable dependencies and would
+          # otherwise fail this step. Audit nable's actual dependency tree.
+          python -m pip install --upgrade pip setuptools wheel
           pip install .
           pip-audit --progress-spinner off
 
