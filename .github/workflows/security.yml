@@ -42,12 +42,14 @@ jobs:
 
       - name: Dependency audit (fail on known-vulnerable deps)
         run: |
-          # Upgrade build tooling first: the runner ships an older pip/setuptools/
-          # wheel whose own advisories are not nable dependencies and would
-          # otherwise fail this step. Audit nable's actual dependency tree.
-          python -m pip install --upgrade pip setuptools wheel
-          pip install .
-          pip-audit --progress-spinner off
+          # Audit ONLY nable's dependency tree, in an isolated venv. The scanners
+          # installed above (semgrep etc.) drag in their own older transitive deps
+          # (mcp 1.23.3, click), which would otherwise be flagged as if they were
+          # nable's. Upgrading pip/setuptools/wheel keeps the runner tooling clean too.
+          python -m venv /tmp/auditenv
+          /tmp/auditenv/bin/pip install --upgrade pip setuptools wheel
+          /tmp/auditenv/bin/pip install .
+          pip-audit --path /tmp/auditenv/lib/python*/site-packages --progress-spinner off
 
       - name: Semgrep (report-only; promote to blocking after FP triage)
         continue-on-error: true
