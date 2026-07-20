@@ -180,7 +180,7 @@ def _check_oversized_rds(ctx: PatternContext) -> PatternMatch | None:
         monthly_waste=monthly_waste,
         evidence=[
             f"{len(oversized)} RDS instance(s) with <20% CPU and <10 connections",
-            f"Estimated 40% savings by downsizing one instance class",
+            "Estimated 40% savings by downsizing one instance class",
         ],
         remediation=(
             "Downsize to the next smaller instance class. "

@@ -109,9 +109,9 @@ def _print_aws_accounts() -> None:
             auth = "  IAM key"
         print(f"   {marker} {acct.name}{acct_id}{auth}")
 
-    print(f"\n  * = default account")
-    print(f"  Add another: finops setup aws --add")
-    print(f"  Org import:  finops setup aws --org")
+    print("\n  * = default account")
+    print("  Add another: finops setup aws --add")
+    print("  Org import:  finops setup aws --org")
 
 
 # ── Provider wizards ──────────────────────────────────────────────────────────
@@ -294,7 +294,7 @@ def setup_aws() -> None:
             region = _prompt("  AWS region (press Enter for us-east-1)", default="us-east-1")
             if region in _VALID_AWS_REGIONS:
                 if region in _GOVCLOUD_REGIONS:
-                    print(f"  GovCloud region detected. nable works with AWS GovCloud out of the box. All data stays on your machine.")
+                    print("  GovCloud region detected. nable works with AWS GovCloud out of the box. All data stays on your machine.")
                 break
             _warn(f"'{region}' is not a valid AWS region. Examples: us-east-1, us-west-2, eu-west-1, us-gov-west-1")
 
@@ -720,7 +720,7 @@ def setup_aws_account() -> None:
             for s in sso_pending:
                 acct = f" -> account {s['account_id']}" if s["account_id"] else ""
                 print(f"    {s['profile']}{acct}")
-            print(f"\n  Log in to the one you want, then re-run 'finops setup aws':")
+            print("\n  Log in to the one you want, then re-run 'finops setup aws':")
             print(f"    {sso_pending[0]['login_command']}\n")
 
     if chosen:
@@ -981,7 +981,7 @@ def setup_aws_org() -> None:
     print(f"      --deployment-targets OrganizationalUnitIds={root_id or '<org-root-id, r-xxxx>'} \\")
     print("      --regions us-east-1\n")
     print("  IAM is global, so us-east-1 is fine. Already have a read-only role in every")
-    print(f"  account? Set FINOPS_ORG_ROLE_NAME to its name and skip the deploy.\n")
+    print("  account? Set FINOPS_ORG_ROLE_NAME to its name and skip the deploy.\n")
 
     ans = _prompt("  Role deployed (or already present)? Discover and register accounts now? [Y/n]",
                   default="y").lower()
@@ -1835,7 +1835,7 @@ def _wizard_select_persona() -> None:
         print(f"  [{i}] {label}{p['description']}")
 
     current = get_persona()
-    print(f"\n  (You can change this later with: finops config --persona <role>)")
+    print("\n  (You can change this later with: finops config --persona <role>)")
 
     raw = _prompt("\n  Choice", default="1")
     chosen, matched = _resolve_persona_choice(raw, persona_keys, current)
@@ -2026,7 +2026,7 @@ def _run_guard(parsed) -> None:
         print("  commitment purchase), nable checks it against your policy:")
         print(f"    one-way door      → {cyan('ask')}   you confirm, with the reason shown")
         print(f"    not in allowlist  → {cyan('deny')}  the agent is told why")
-        print(f"    reversible + safe → silent, zero friction")
+        print("    reversible + safe → silent, zero friction")
         print()
         print(dim("  Policy knobs: FINOPS_POLICY_MAX_AUTO_USD, FINOPS_POLICY_ALLOWED_ACTIONS"))
         print(dim("  Strict mode (also confirm terraform apply / helm upgrade): FINOPS_GUARD_STRICT=1"))
@@ -2653,7 +2653,7 @@ def main(args: list[str] | None = None) -> None:
             for a in result["required_denied"]:
                 print(f"    ✗ {a}")
         if result.get("dangerous_allowed"):
-            print(f"\n  ⚠ Over-provisioned: write permissions detected:")
+            print("\n  ⚠ Over-provisioned: write permissions detected:")
             for a in result["dangerous_allowed"]:
                 print(f"    ⚠ {a}")
             print()
@@ -2919,7 +2919,7 @@ def _run_license_setup(key: str = "") -> None:
     _inject_license_into_claude_config(key)
 
     print(f"\n  ✓  Pro plan active, {status.email or 'license validated'}")
-    print(f"  ✓  Key stored in vault.")
+    print("  ✓  Key stored in vault.")
     print(f"  ✓  Plan: {status.mode.upper()}")
     if status.issued:
         print(f"  ✓  Issued: {status.issued}")
@@ -3749,7 +3749,7 @@ def _configure_claude_desktop_inner() -> bool:
 def _print_manual_config(mcp_entry: dict) -> None:
     import json
     snippet = json.dumps({"mcpServers": {"nable": mcp_entry}}, indent=2)
-    print(f"\n  Add to your claude_desktop_config.json:\n")
+    print("\n  Add to your claude_desktop_config.json:\n")
     for line in snippet.splitlines():
         print(f"    {line}")
     print()

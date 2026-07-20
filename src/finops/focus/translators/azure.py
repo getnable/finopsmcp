@@ -209,7 +209,7 @@ def translate(row: dict[str, Any]) -> FocusRecord:
     ) or None
     if region_id:
         region_id = region_id.lower().replace(" ", "")
-    region_name = _REGION_NAMES.get(region_id or "", None)
+    region_name = _REGION_NAMES.get(region_id or "")
 
     # Dates
     billing_start = _parse_dt(

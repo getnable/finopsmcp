@@ -266,7 +266,7 @@ def cmd_rightsizing(account_id: str) -> list[dict]:
 
         total_saving = sum(r.get("estimated_monthly_savings", 0) for r in recs)
         blocks = [
-            _header_block(f"📐 Top rightsizing opportunities"),
+            _header_block("📐 Top rightsizing opportunities"),
             _section(f"*Estimated total saving: ${total_saving:,.2f}/mo (${total_saving*12:,.0f}/yr)*"),
         ]
 
