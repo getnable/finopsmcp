@@ -285,6 +285,36 @@ This repository is **Apache-2.0** in full: the MCP server and all tools, every c
 
 The hosted enterprise layer (the web dashboard, SSO, the control plane, and managed-AI billing) is not part of this repo. It lives in a separate private repository and is offered as the hosted platform above.
 
+Full tool list: [CAPABILITIES.md](CAPABILITIES.md) (194 MCP tools, ~40 connectors, ~48 CLI commands).
+
+---
+
+## How nable compares
+
+Single-cloud waste (idle EBS, oversized RDS) is available free from the cloud's own tools like AWS Cost Optimization Hub. nable's difference is being the open-source, local-first option that unifies every cloud plus AI and GPU spend in one place, in the terminal and in Claude.
+
+| | nable | AWS Cost Explorer | Infracost | Vantage / CloudHealth |
+|---|---|---|---|---|
+| Open source, runs locally | Yes (Apache-2.0) | No | Partly | No |
+| Cross-cloud (AWS + Azure + GCP) | Yes | AWS only | Pre-deploy IaC | Yes |
+| AI / LLM / GPU cost | Yes | No | No | Limited |
+| Terminal + CI + Claude/Cursor (MCP) | Yes | Console only | CI only | Dashboard |
+| Proposes fixes as PRs | Yes | No | No | No |
+
+## FAQ
+
+**Is nable free?** Yes. The terminal scan, every cost query, anomaly detection, all waste and rightsizing findings, and every connector are free forever. The agent team, ticket auto-creation, scheduled digests, and commitment recommendations are Pro.
+
+**Does my billing data leave my machine?** No. nable is local-first and read-only by default. It reads your cost data on your machine and never uploads it, and the no-egress claim is something you can read in the source.
+
+**What clouds and providers does it support?** AWS, Azure, GCP, and Vertex; Kubernetes (Kubecost, OpenCost); AI and LLM providers (OpenAI, Anthropic, Bedrock, OpenRouter, LiteLLM, Modal, Together, Replicate, Cohere, Mistral, Langfuse); data platforms (Databricks, Snowflake, MongoDB); and SaaS (Datadog, New Relic, Cloudflare, Twilio, Vercel, Stripe).
+
+**How is it different from AWS Cost Explorer?** Cost Explorer is AWS-only and console-bound. nable is cross-cloud, runs in your terminal and in Claude/Cursor, covers AI and GPU spend no cloud console shows, and proposes fixes as pull requests. `nable scan` also makes zero paid API calls by default, so it never charges your AWS bill to show you your own costs.
+
+**Is there an open-source alternative to Vantage or CloudHealth?** nable is an open-source (Apache-2.0), local-first alternative for cost queries, waste detection, rightsizing, and AI/GPU cost, running on your machine instead of a hosted SaaS.
+
+**How do I track LLM and GPU cost?** Connect your AI providers and ask nable for spend by model, unit economics, token forecasting, and billing blind spots across OpenAI, Anthropic, Bedrock, Modal, and more, in one view.
+
 ---
 
 ## Troubleshooting
