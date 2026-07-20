@@ -281,63 +281,133 @@ def _demo_payload() -> tuple[dict, dict]:
 
 # ── rendering ──────────────────────────────────────────────────────────────────
 
-def _render(out, spend, report, *, demo: bool, ce_denied: bool):
+def _render_extra(out, b) -> None:
+    """Render one AI/GCP/Azure provider block. A non-ok block is a quiet note,
+    never a failure of the whole scan."""
+    if b.status != "ok":
+        print(f"  {_dim(b.label + ':')} {_dim(b.note or b.status)}", file=out)
+        return
+    bits = []
+    if b.spend_usd is not None:
+        tag = _dim(" [estimated]") if b.estimated else ""
+        bits.append(f"{_usd(b.spend_usd)}/mo" + tag)
+    if b.recoverable_usd:
+        tag = _dim(" [early]") if b.early_recoverable else ""
+        bits.append(_green(f"{_usd(b.recoverable_usd)}/mo recoverable") + tag)
+    head = "   ".join(bits) if bits else _dim("connected")
+    print(_bold(b.label) + f"   {head}", file=out)
+    if b.detail:
+        print(f"      {_dim(b.detail)}", file=out)
+    if b.note:
+        print(f"      {_dim(b.note)}", file=out)
+
+
+def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=None):
+    extra_blocks = extra_blocks or []
     demo_tag = _dim(" (demo data)") if demo else ""
     print("─" * 60, file=out)
 
-    recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+    total_spend = 0.0
+    total_recoverable = 0.0
+    providers_ok = 0
+    _has_aws = report is not None
 
-    if spend and spend["total"] > 0:
-        top = " · ".join(f"{name} {_short_usd(v)}" for name, v in spend["services"])
-        print(
-            _bold(f"{_usd(spend['total'])} on AWS this month.") + f" Top: {top}{demo_tag}",
-            file=out,
-        )
-        if recoverable >= _FINDING_FLOOR_USD:
-            pct = f" ({recoverable / spend['total'] * 100:.1f}% of spend)" if spend["total"] else ""
-            print(_green(_bold(f"{_usd(recoverable)}/mo recoverable{pct}")) + demo_tag, file=out)
-    else:
-        if ce_denied:
+    if _has_aws:
+        providers_ok += 1
+        recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+        total_recoverable += recoverable
+
+        if spend and spend["total"] > 0:
+            total_spend += spend["total"]
+            top = " · ".join(f"{name} {_short_usd(v)}" for name, v in spend["services"])
             print(
-                _dim(
-                    "spend summary unavailable (missing ce:GetCostAndUsage; "
-                    "run `nable iam-template` to fix)"
-                ),
+                _bold(f"{_usd(spend['total'])} on AWS this month.") + f" Top: {top}{demo_tag}",
                 file=out,
             )
-        if recoverable >= _FINDING_FLOOR_USD:
-            print(_green(_bold(f"{_usd(recoverable)}/mo recoverable")) + demo_tag, file=out)
+            if recoverable >= _FINDING_FLOOR_USD:
+                pct = f" ({recoverable / spend['total'] * 100:.1f}% of spend)" if spend["total"] else ""
+                print(_green(_bold(f"{_usd(recoverable)}/mo recoverable{pct}")) + demo_tag, file=out)
+        else:
+            if ce_denied:
+                print(
+                    _dim(
+                        "spend summary unavailable (missing ce:GetCostAndUsage; "
+                        "run `nable iam-template` to fix)"
+                    ),
+                    file=out,
+                )
+            if recoverable >= _FINDING_FLOOR_USD:
+                print(_green(_bold(f"{_usd(recoverable)}/mo recoverable")) + demo_tag, file=out)
 
-    findings = [
-        f
-        for f in report.get("findings", [])
-        if float(f.get("estimated_monthly_savings") or 0) >= _FINDING_FLOOR_USD
-    ][:_MAX_FINDINGS_SHOWN]
+        findings = [
+            f
+            for f in report.get("findings", [])
+            if float(f.get("estimated_monthly_savings") or 0) >= _FINDING_FLOOR_USD
+        ][:_MAX_FINDINGS_SHOWN]
 
-    if recoverable < _FINDING_FLOOR_USD:
-        # The proud state: a clean account is a result, not an apology.
-        print(_green("no material waste found, nice") + demo_tag, file=out)
-    else:
-        for f in findings:
-            monthly = float(f.get("estimated_monthly_savings") or 0)
-            desc = f.get("description") or f.get("waste_type", "finding")
-            region = f.get("region", "")
-            print(f"  {_usd(monthly) + '/mo':>12}  {desc}" + (f", {region}" if region else ""), file=out)
+        if recoverable < _FINDING_FLOOR_USD:
+            # The proud state: a clean account is a result, not an apology.
+            print(_green("no material waste found, nice") + demo_tag, file=out)
+        else:
+            for f in findings:
+                monthly = float(f.get("estimated_monthly_savings") or 0)
+                desc = f.get("description") or f.get("waste_type", "finding")
+                region = f.get("region", "")
+                print(f"  {_usd(monthly) + '/mo':>12}  {desc}" + (f", {region}" if region else ""), file=out)
 
-    timed_out = report.get("regions_timed_out") or []
-    if timed_out:
-        done = len(report.get("regions_scanned") or [])
+        timed_out = report.get("regions_timed_out") or []
+        if timed_out:
+            done = len(report.get("regions_scanned") or [])
+            print(
+                _dim(f"scanned {done} of {done + len(timed_out)} regions "
+                     f"(budget hit; unscanned: {', '.join(timed_out)})"),
+                file=out,
+            )
+
+    # ── extra providers (AI / GCP / Azure), the cross-provider frame ──
+    for b in extra_blocks:
+        _render_extra(out, b)
+        if b.status == "ok":
+            providers_ok += 1
+            if b.spend_usd:
+                total_spend += b.spend_usd
+            if b.recoverable_usd:
+                total_recoverable += b.recoverable_usd
+
+    # Unified summary only when the scan spans more than the AWS block, so an
+    # AWS-only run stays byte-identical to v1.
+    if extra_blocks:
+        # Dedup cloud-native AI (Bedrock/Vertex): under --spend it is counted in
+        # BOTH the AI block and the cloud spend total, so subtract it from the
+        # grand total once. On the default path the AI block excludes it, so this
+        # is 0 and the total is unchanged.
+        cloud_native_ai = sum(
+            amt
+            for b in extra_blocks if b.family == "ai"
+            for prov, amt in b.by_provider.items() if prov in ("bedrock", "vertex")
+        )
+        if cloud_native_ai and total_spend > cloud_native_ai:
+            total_spend -= cloud_native_ai
+
+        print("─" * 60, file=out)
+        parts = []
+        if total_spend > 0:
+            parts.append(f"{_usd(total_spend)}/mo visible")
+        parts.append(_green(f"{_usd(total_recoverable)}/mo recoverable"))
         print(
-            _dim(f"scanned {done} of {done + len(timed_out)} regions "
-                 f"(budget hit; unscanned: {', '.join(timed_out)})"),
+            _bold(" · ".join(parts))
+            + _dim(f"  across {providers_ok} provider{'s' if providers_ok != 1 else ''}"),
             file=out,
         )
-    if not (spend and spend.get("total")):
+
+    if _has_aws and not (spend and spend.get("total")):
         print(_dim("run `nable scan --spend` for the spend breakdown (uses Cost Explorer, ~$0.02)"), file=out)
     print(_dim(DOCS_LINE), file=out)
 
 
-def _json_payload(spend, report, *, demo, profile, account_id, duration_s):
+def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra_blocks=None):
+    extra_blocks = extra_blocks or []
+    report = report or {}
     recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
     return {
         "schema_version": 1,
@@ -373,6 +443,17 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s):
             "duration_s": round(duration_s, 1),
             "partial": bool(report.get("regions_timed_out")),
         },
+        "providers": [
+            {
+                "family": b.family,
+                "status": b.status,
+                "spend_usd": round(b.spend_usd, 2) if b.spend_usd is not None else None,
+                "recoverable_usd": round(b.recoverable_usd, 2) if b.recoverable_usd is not None else None,
+                "estimated": b.estimated,
+                "note": b.note,
+            }
+            for b in extra_blocks
+        ],
     }
 
 
@@ -424,6 +505,39 @@ def run(args) -> int:
         import botocore.exceptions  # noqa: F401
     except ImportError:
         return _fail(out, 1, ["boto3 is not installed; reinstall with `pip install finops-mcp`"], "other", t0)
+
+    # Connection-aware: what else is configured besides AWS? Detection uses the
+    # same connected_families() the MCP server reads, so connecting on either
+    # surface is immediately visible to the other.
+    from .tool_surface import connected_families
+    try:
+        _fams = connected_families()
+    except Exception:
+        _fams = frozenset()
+    _extra_fams = _fams & {"llm", "gcp", "azure"}
+
+    # No AWS credentials at all, but other providers connected: scan those instead
+    # of failing. A pure AI-startup box may have OPENAI_API_KEY and no ~/.aws.
+    try:
+        _no_aws_creds = boto3.Session().get_credentials() is None
+    except Exception:
+        _no_aws_creds = False
+    if _no_aws_creds and _extra_fams:
+        from .scan_assembler import gather_extra_providers
+        print(_dim("no AWS credentials found · scanning your other connected providers"), file=out)
+        blocks, abandoned = gather_extra_providers(_fams, spend=want_spend)
+        _render(out, None, None, demo=False, ce_denied=False, extra_blocks=blocks)
+        if as_json:
+            print(json.dumps(_json_payload(
+                None, None, demo=False, profile=profile, account_id=None,
+                duration_s=time.time() - t0, extra_blocks=blocks,
+            ), indent=2))
+        _emit("cli_scan_completed", {
+            "demo": False, "no_aws": True,
+            "providers": len([b for b in blocks if b.status == "ok"]),
+            "duration_s": round(time.time() - t0, 1),
+        }, wait=True)
+        return _finish(EXIT_OK, abandoned)
 
     try:
         session = boto3.Session()
@@ -532,11 +646,20 @@ def run(args) -> int:
         ], "timeout", t0)
         return _finish(code, lingering)
 
-    _render(out, spend, report, demo=False, ce_denied=ce_denied)
+    # Cross-provider frame: gather AI/GCP/Azure alongside the AWS block. Each has
+    # its own timeout and degrades to a note; free-by-default holds (only --spend
+    # touches Cost Explorer / the BigQuery export / cloud-native AI).
+    extra_blocks, extra_abandoned = ([], False)
+    if _extra_fams:
+        from .scan_assembler import gather_extra_providers
+        extra_blocks, extra_abandoned = gather_extra_providers(_fams, spend=want_spend)
+    lingering = lingering or extra_abandoned
+
+    _render(out, spend, report, demo=False, ce_denied=ce_denied, extra_blocks=extra_blocks)
     if as_json:
         print(json.dumps(_json_payload(
             spend, report, demo=False, profile=profile, account_id=account_id,
-            duration_s=time.time() - t0,
+            duration_s=time.time() - t0, extra_blocks=extra_blocks,
         ), indent=2))
 
     _emit("cli_scan_completed", {
@@ -553,7 +676,7 @@ def add_parser(sub) -> None:
     """Register the scan subcommand on the wizard's argparse tree."""
     p = sub.add_parser(
         "scan",
-        help="Find recoverable spend on your AWS account in under a minute (free)",
+        help="Find spend and recoverable waste across your connected cloud and AI providers, free",
     )
     p.add_argument("--json", action="store_true", help="machine-readable output on stdout")
     p.add_argument("--demo", action="store_true", help="run on the StreamCo sample dataset")

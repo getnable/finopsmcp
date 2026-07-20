@@ -35,6 +35,15 @@ def _isolate_aws_profile():
         os.environ["AWS_PROFILE"] = before
 
 
+@pytest.fixture(autouse=True)
+def _aws_only_by_default(monkeypatch):
+    # scan v2 is connection-aware: run() reads connected_families(). Keep the
+    # existing AWS-only unit tests hermetic by defaulting to no extra providers,
+    # so their output stays byte-identical to v1. The multi-provider tests
+    # override this explicitly.
+    monkeypatch.setattr("finops.tool_surface.connected_families", lambda: frozenset())
+
+
 def _args(**kw):
     base = dict(json=False, demo=False, spend=False, debug=False, profile=None, regions=None)
     base.update(kw)

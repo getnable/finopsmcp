@@ -2,6 +2,13 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.183
+
+- **`nable scan` is now cross-provider, not AWS-only.** When you have AI providers, GCP, or Azure connected, one scan shows spend and recoverable waste across all of them in one frame, the normalized cross-provider picture no cloud console gives you. A pure-AWS user sees exactly the v1 output; a machine with only AI keys and no AWS still scans. Built as an assembler over the existing aggregators (`scan_assembler.py`), self-tailoring to `connected_families()`.
+- **Free-by-default holds across every provider.** Without `--spend`, the scan touches only free signals: usage-API AI spend (OpenAI/Anthropic/gateways), AWS waste, GCP Recommender, and the free Azure Cost Management + Advisor APIs. Nothing calls AWS Cost Explorer or the GCP BigQuery billing export. Under `--spend`, the cloud spend totals and cloud-native AI (Bedrock/Vertex) fill in, and Bedrock/Vertex are deduped out of the cloud totals so nothing double-counts. A test asserts the default AI path runs with `exclude_cloud_native=True`.
+- **One provider never sinks the scan.** Each provider is gathered with its own timeout inside an overall budget; a provider that times out, auth-fails, errors, or returns nothing degrades to a per-provider note while the others still render.
+- AI spend is always tagged `[estimated]` and AI recoverable `[early]`, per-provider promotion to trusted comes later.
+
 ## 0.8.181
 
 - **`nable scan`: the terminal front door, free by default.** One command against your existing AWS credentials prints the recoverable dollars and the top findings ranked by monthly savings, in under a minute, no MCP client involved. It makes **zero paid API calls**: every check reads only free AWS APIs (Describe\*, Compute Optimizer, CloudWatch), so a tool we call free never puts a charge on your AWS bill. It scans all opted-in regions on a 45s budget, returning partial results with a banner instead of hanging, and a clean account gets a proud "no material waste found" instead of an apology.
