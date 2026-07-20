@@ -275,7 +275,7 @@ def compute_unit_economics(total_cost_usd: float, metrics: dict) -> dict:
             result["hosting_pct_mrr_note"] = "15-25% of MRR. High. Infrastructure is a meaningful drag on gross margin."
         else:
             result["hosting_pct_mrr_health"] = "critical"
-            result["hosting_pct_mrr_note"] = f"Over 25% of MRR. This is a gross margin problem that needs immediate attention."
+            result["hosting_pct_mrr_note"] = "Over 25% of MRR. This is a gross margin problem that needs immediate attention."
 
     if arr:
         pct_arr = (total_cost_usd * 12 / arr) * 100
@@ -476,7 +476,7 @@ def explain_cost_change(
             mrr_delta = pct_mrr_now - pct_mrr_before
             if mrr_pct > cost_pct if cost_pct else False:
                 signals.append({"type": "positive", "metric": "hosting_pct_mrr",
-                                 "label": f"Revenue growing faster than costs"})
+                                 "label": "Revenue growing faster than costs"})
                 findings.append(
                     f"MRR grew {mrr_pct:.1f}% while hosting grew {pct_str}. "
                     f"Hosting as % of MRR improved from {pct_mrr_before:.1f}% to {pct_mrr_now:.1f}%. "
@@ -484,7 +484,7 @@ def explain_cost_change(
                 )
             elif mrr_delta > 2:
                 signals.append({"type": "negative", "metric": "hosting_pct_mrr",
-                                 "label": f"Hosting rising faster than revenue"})
+                                 "label": "Hosting rising faster than revenue"})
                 findings.append(
                     f"Hosting as % of MRR worsened from {pct_mrr_before:.1f}% to {pct_mrr_now:.1f}%. "
                     f"Costs are growing faster than revenue. "

@@ -145,7 +145,7 @@ class KendraAnalyzer:
                 block.append(f"  Queries last 30d: {query_count:,}")
                 if query_count > 0:
                     cq = monthly_cost / query_count
-                    flag_str = f"  [HIGH - consider DEVELOPER edition]" if cq > 1.00 and edition_raw == "ENTERPRISE_EDITION" else ""
+                    flag_str = "  [HIGH - consider DEVELOPER edition]" if cq > 1.00 and edition_raw == "ENTERPRISE_EDITION" else ""
                     block.append(f"  Cost per query: ${cq:.2f}{flag_str}")
             else:
                 block.append("  Queries last 30d: no CloudWatch data")

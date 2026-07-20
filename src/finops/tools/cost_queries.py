@@ -2204,7 +2204,7 @@ async def get_nable_roi(
                 f"**Solo plan is free.** You're getting ${found_total:,.0f}/mo in recommendations at zero cost.",
                 f"Annualized opportunity: ${found_annualized:,.0f}.",
                 "",
-                f"Upgrade to Pro ($25/mo) to unlock auto-remediation and verified savings tracking.",
+                "Upgrade to Pro ($25/mo) to unlock auto-remediation and verified savings tracking.",
                 f"At ${verified_total:,.0f}/mo verified savings, payback is "
                 f"{'less than 1 week' if verified_total > 0 else 'immediate once first savings are verified'}.",
             ]
@@ -2222,9 +2222,9 @@ async def get_nable_roi(
             if verified_total > monthly_cost * 5:
                 lines.append(f"\n**nable is paying for itself {verified_total / monthly_cost:.0f}x over.**")
             elif verified_total > 0:
-                lines.append(f"\n**Verified savings cover tool cost.** Act on remaining recommendations to grow ROI.")
+                lines.append("\n**Verified savings cover tool cost.** Act on remaining recommendations to grow ROI.")
             else:
-                lines.append(f"\n**No verified savings yet.** Run verify_savings() after acting on recommendations.")
+                lines.append("\n**No verified savings yet.** Run verify_savings() after acting on recommendations.")
 
         lines += [
             "",

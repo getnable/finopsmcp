@@ -196,7 +196,7 @@ def translate(row: dict[str, Any]) -> FocusRecord:
 
     # Location
     region_id = _str(row.get("product_region") or row.get("product_location_region")) or None
-    region_name = _REGION_NAMES.get(region_id or "", None)
+    region_name = _REGION_NAMES.get(region_id or "")
 
     # Sub-account
     sub_account_id = _str(row.get("line_item_usage_account_id")) or None

@@ -251,7 +251,7 @@ def translate(row: dict[str, Any]) -> FocusRecord:
         or _str(row.get("location_region"))
         or _str(row.get("RegionId"))
     ) or None
-    region_name = _REGION_NAMES.get(region_id or "", None)
+    region_name = _REGION_NAMES.get(region_id or "")
 
     project_id = (
         _str(project_info.get("id") if isinstance(project_info, dict) else row.get("project_id"))

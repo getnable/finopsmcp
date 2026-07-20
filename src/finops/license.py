@@ -489,7 +489,7 @@ def validate_key(key: str) -> LicenseStatus:
             mode="invalid",
             email=email,
             issued="",
-            message=f"License key contains an unrecognised plan. Contact support.",
+            message="License key contains an unrecognised plan. Contact support.",
         )
 
     try:
@@ -696,7 +696,7 @@ def require_pro(feature: str) -> dict | None:
         ("business_metrics",           "📈 Unit economics — cost per customer, hosting % of MRR"),
     ]
 
-    lines = [f"⬡  nable Pro — everything in free, plus:\n"]
+    lines = ["⬡  nable Pro — everything in free, plus:\n"]
     for key, desc in _TEAM_FEATURES:
         # Don't advertise a feature that is currently on the free hold as a paid
         # unlock; it would list things the user already has for free.
