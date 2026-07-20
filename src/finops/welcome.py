@@ -199,9 +199,9 @@ def show_welcome() -> None:
     _line(bold("Ask your AI about cloud costs:"))
     _blank()
     for q in [
-        '"What drove our AWS costs up 40% this month?"',
+        '"What drove our cloud costs up 40% this month?"',
         '"Which team is spending the most on Datadog?"',
-        '"Show me EC2 rightsizing opportunities."',
+        '"What are we spending on OpenAI and Anthropic tokens?"',
         '"Create a Jira ticket for any anomaly over $500."',
     ]:
         _line(f"  {cyan(q)}")
@@ -235,7 +235,7 @@ def show_welcome() -> None:
 
 # ── The payoff: surface a real number right after connecting ───────────────────
 
-_MAGIC_Q = '"What is driving my AWS bill this month?"'
+_MAGIC_Q = '"What is driving my cloud bill this month?"'
 
 # AWS service names that are AI/ML spend (Cost Explorer labels them many ways).
 _AI_KEYWORDS = (

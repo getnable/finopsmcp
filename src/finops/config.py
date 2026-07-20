@@ -43,7 +43,8 @@ def is_fips_mode() -> bool:
         # Check for FIPS via hashlib — SHA-1 is disabled in FIPS mode
         import hashlib
         try:
-            hashlib.md5(b"test")
+            # FIPS-mode probe, not security hashing (md5 raises under FIPS).
+            hashlib.md5(b"test")  # nosec B324
             return False  # MD5 available = not FIPS
         except ValueError:
             return True   # MD5 blocked = FIPS mode active

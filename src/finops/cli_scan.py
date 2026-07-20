@@ -553,7 +553,7 @@ def add_parser(sub) -> None:
     """Register the scan subcommand on the wizard's argparse tree."""
     p = sub.add_parser(
         "scan",
-        help="Find recoverable spend on your AWS account in under a minute (free)",
+        help="Find recoverable AWS spend in under a minute, free (AWS-first on-ramp; add providers with 'nable connect')",
     )
     p.add_argument("--json", action="store_true", help="machine-readable output on stdout")
     p.add_argument("--demo", action="store_true", help="run on the StreamCo sample dataset")
