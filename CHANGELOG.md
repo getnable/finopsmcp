@@ -9,6 +9,12 @@ All notable changes to finops-mcp (nable).
 - **One provider never sinks the scan.** Each provider is gathered with its own timeout inside an overall budget; a provider that times out, auth-fails, errors, or returns nothing degrades to a per-provider note while the others still render.
 - AI spend is always tagged `[estimated]` and AI recoverable `[early]`, per-provider promotion to trusted comes later.
 
+## 0.8.182
+
+- **One name, one behavior.** `nable`, `finops`, and `finops-mcp` now route through the same dispatcher, so they behave identically. `nable` is the canonical command; the other two are aliases. Previously `finops` skipped the dispatcher and could not act as the MCP server, so it silently diverged from `nable`.
+- **Language cleaned up so nable no longer reads as an AWS-only tool.** The CLI `--help`, the onboarding banner, and the PyPI package description now lead with the cross-provider story (AWS, Azure, GCP, Kubernetes, and 15+ SaaS and AI providers) and treat the editor/MCP mode as one way to use nable, not its identity. `nable scan` is stated honestly as the AWS-first on-ramp, with `nable connect` for everything else.
+- Onboarding example questions no longer all say "AWS"; they span cloud, Datadog, and AI token spend.
+
 ## 0.8.181
 
 - **`nable scan`: the terminal front door, free by default.** One command against your existing AWS credentials prints the recoverable dollars and the top findings ranked by monthly savings, in under a minute, no MCP client involved. It makes **zero paid API calls**: every check reads only free AWS APIs (Describe\*, Compute Optimizer, CloudWatch), so a tool we call free never puts a charge on your AWS bill. It scans all opted-in regions on a 45s budget, returning partial results with a banner instead of hanging, and a clean account gets a proud "no material waste found" instead of an apology.
