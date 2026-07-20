@@ -243,3 +243,29 @@ def gather_extra_providers(
     order = {"ai": 0, "gcp": 1, "azure": 2}
     blocks.sort(key=lambda b: order.get(b.family, 9))
     return blocks, abandoned
+
+
+def demo_extra_blocks(spend: bool) -> list[ProviderBlock]:
+    """Fixed cross-provider blocks for `nable scan --demo` (StreamCo sample), so
+    the no-account demo showcases the whole cross-provider frame deterministically.
+    Mirrors the real free/--spend boundary: without --spend the AI block shows
+    usage-API providers only (Bedrock waits for --spend)."""
+    if spend:
+        ai = ProviderBlock(
+            family="ai", label="AI & GPU", status="ok", spend_usd=18400.0,
+            estimated=True, early_recoverable=True,
+            detail="OpenAI $9.2k · Bedrock $5.1k · Modal $4.1k",
+            by_provider={"openai": 9200.0, "bedrock": 5100.0, "modal": 4100.0})
+    else:
+        ai = ProviderBlock(
+            family="ai", label="AI & GPU", status="ok", spend_usd=13300.0,
+            estimated=True, early_recoverable=True,
+            detail="OpenAI $9.2k · Modal $4.1k",
+            note="usage-API providers; Bedrock/Vertex under --spend",
+            by_provider={"openai": 9200.0, "modal": 4100.0})
+    gcp = ProviderBlock(family="gcp", label="GCP", status="ok",
+                        recoverable_usd=410.0, detail="3 waste findings")
+    azure = ProviderBlock(family="azure", label="Azure", status="ok",
+                          spend_usd=6300.0, recoverable_usd=220.0,
+                          detail="AKS $2.1k · Blob Storage $1.4k")
+    return [ai, gcp, azure]

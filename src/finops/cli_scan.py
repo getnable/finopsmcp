@@ -489,14 +489,19 @@ def run(args) -> int:
         demo_spend, report = _demo_payload()
         # Demo mirrors real behavior: the spend headline only appears with --spend.
         spend = demo_spend if want_spend else None
+        from .scan_assembler import demo_extra_blocks
+        extra = demo_extra_blocks(want_spend)
         print(_dim("account demo · StreamCo demo dataset (demo data)"), file=out)
-        _render(out, spend, report, demo=True, ce_denied=False)
+        _render(out, spend, report, demo=True, ce_denied=False, extra_blocks=extra)
         if as_json:
             print(json.dumps(_json_payload(
                 spend, report, demo=True, profile=profile, account_id="demo",
-                duration_s=time.time() - t0,
+                duration_s=time.time() - t0, extra_blocks=extra,
             ), indent=2))
-        _emit("cli_scan_completed", {"demo": True, "duration_s": round(time.time() - t0, 1)}, wait=True)
+        _emit("cli_scan_completed", {
+            "demo": True, "providers": len(extra) + 1,
+            "duration_s": round(time.time() - t0, 1),
+        }, wait=True)
         return EXIT_OK
 
     # ── pre-flight typed probes: these drive exit codes, never engine strings ──

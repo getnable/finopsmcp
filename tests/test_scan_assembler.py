@@ -159,6 +159,16 @@ def test_spend_grand_total_dedups_cloud_native_ai():
     assert "$57,410" not in out      # the double-counted total must not appear
 
 
+def test_demo_blocks_mirror_free_spend_boundary():
+    # Default demo AI shows usage-API only (no Bedrock); --spend demo AI includes it.
+    free = {b.family: b for b in sa.demo_extra_blocks(spend=False)}
+    paid = {b.family: b for b in sa.demo_extra_blocks(spend=True)}
+    assert set(free) == {"ai", "gcp", "azure"}
+    assert "bedrock" not in free["ai"].by_provider     # free path excludes cloud-native AI
+    assert "bedrock" in paid["ai"].by_provider          # --spend includes it
+    assert free["azure"].spend_usd and free["azure"].recoverable_usd  # Azure free both ways
+
+
 def test_timeout_marks_abandoned_and_notes():
     async def _slow(client, *a, **k):
         await asyncio.sleep(2.0)
