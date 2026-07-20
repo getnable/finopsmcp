@@ -558,10 +558,10 @@ def _check_path_and_install() -> dict:
     scripts_dir = Path(sys.executable).parent
 
     if not finops_in_path:
-        issues.append(f"'finops' not in PATH — shell cannot find the setup command")
+        issues.append("'finops' not in PATH — shell cannot find the setup command")
         recommendations.append(f"Add to PATH: export PATH=\"{scripts_dir}:$PATH\"  (then add to ~/.zshrc)")
     if not mcp_in_path:
-        issues.append(f"'finops-mcp' not in PATH — Claude Desktop may fail to start the MCP server")
+        issues.append("'finops-mcp' not in PATH — Claude Desktop may fail to start the MCP server")
         recommendations.append(
             f"Add to PATH: export PATH=\"{scripts_dir}:$PATH\"  or use uvx: run 'finops setup claude'"
         )
@@ -668,12 +668,12 @@ def run_doctor(as_json: bool = False) -> int:
 
     if has_failure:
         print("  Status: issues found — see recommendations above")
-        print(f"  Docs:   https://getnable.com/docs")
+        print("  Docs:   https://getnable.com/docs")
         print()
         return 1
     elif has_warning:
         print("  Status: warnings only — review above")
-        print(f"  Docs:   https://getnable.com/docs")
+        print("  Docs:   https://getnable.com/docs")
         print()
         return 0
     else:
@@ -694,7 +694,7 @@ def run_doctor(as_json: bool = False) -> int:
             print("  Status: healthy, but no cloud account is connected yet")
             print("  Next:   run `finops aws` (or gcp / azure) to connect one,")
             print("          or ask your editor's AI to run connect_aws, no terminal needed")
-        print(f"  Docs:   https://getnable.com/docs")
+        print("  Docs:   https://getnable.com/docs")
         print()
         return 0
 

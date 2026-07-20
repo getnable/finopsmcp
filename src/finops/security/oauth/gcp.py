@@ -53,7 +53,7 @@ def import_service_account_key(key_path: str | Path) -> None:
     creds_path = Path(os.environ.get("FINOPS_DATA_DIR", Path.home() / ".finops")) / "gcp_sa.json"
     vault.store("GOOGLE_APPLICATION_CREDENTIALS", str(creds_path))
 
-    print(f"  ✓ GCP service account stored in vault")
+    print("  ✓ GCP service account stored in vault")
     print(f"    Project: {project_id}")
     print(f"    Account: {sa_email}")
 

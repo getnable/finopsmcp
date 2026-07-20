@@ -223,15 +223,15 @@ def _format_comment(analysis: dict, repo: str, pr_number: int) -> str:
         f"<!-- {COMMENT_TAG} -->",
         f"## {color_emoji} nable Cost Estimate",
         "",
-        f"| | Monthly | Annual |",
-        f"|---|---|---|",
+        "| | Monthly | Annual |",
+        "|---|---|---|",
         f"| **Cost delta** | {delta_str} | **{sign}${abs(delta*12):,.0f}/yr** |",
     ]
 
     if adds:
         lines += ["", "### ➕ Added resources", "", "| Resource | Monthly | Detail |", "|---|---|---|"]
         for a in sorted(adds, key=lambda x: x["monthly"], reverse=True):
-            tip = f" ⚠️" if a.get("note") else ""
+            tip = " ⚠️" if a.get("note") else ""
             lines.append(f"| `{a['resource']}`{tip} | ${a['monthly']:,.2f} | {a['detail']} |")
 
     if removes:
@@ -255,8 +255,8 @@ def _format_comment(analysis: dict, repo: str, pr_number: int) -> str:
     lines += [
         "",
         "---",
-        f"_[nable](https://github.com/getnable/finopsmcp) · prices: AWS on-demand us-east-1 · "
-        f"[configure cost gate](https://nable.dev/docs/cost-gate)_",
+        "_[nable](https://github.com/getnable/finopsmcp) · prices: AWS on-demand us-east-1 · "
+        "[configure cost gate](https://nable.dev/docs/cost-gate)_",
     ]
     return "\n".join(lines)
 

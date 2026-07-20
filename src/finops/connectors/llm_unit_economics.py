@@ -184,7 +184,7 @@ def get_deployment_cost_correlation(
 
         # 24 h post-deploy spend (the deploy date itself)
         post_day = deploy_date.isoformat()
-        ai_spend_post = daily_lookup.get(post_day, None)
+        ai_spend_post = daily_lookup.get(post_day)
 
         # Baseline: mean of preceding baseline_days
         baseline_values: list[float] = []

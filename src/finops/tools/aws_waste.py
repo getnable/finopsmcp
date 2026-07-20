@@ -1474,8 +1474,8 @@ async def audit_rds_manual_snapshots(
         )
 
         nudge = _srv._team_nudge(
-            f"To auto-create Jira, Linear, or GitHub tickets for these snapshot findings, "
-            f"upgrade to Pro:"
+            "To auto-create Jira, Linear, or GitHub tickets for these snapshot findings, "
+            "upgrade to Pro:"
         , context="rds_manual_snapshots")
         if nudge:
             lines.append("")

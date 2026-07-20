@@ -256,7 +256,7 @@ def _open_cf_console(template_body: str, account_id: str) -> dict[str, str]:
     _print("Option B — CloudFormation Console:", 1)
     _print(f"  1. Go to: {console_url}", 2)
     _print(f"  2. Upload template: {tmp}", 2)
-    _print(f"  3. Click through defaults and deploy", 2)
+    _print("  3. Click through defaults and deploy", 2)
 
     try_deploy = _prompt(
         "\nDeploy now via AWS CLI? [Y/n]", default="y"
@@ -629,8 +629,8 @@ LIMIT 5;
         _print("  Add to your finops-mcp config:", 1)
         _print(f"    SNOWFLAKE_ACCOUNT={account}", 2)
         _print(f"    SNOWFLAKE_USER={user_name}", 2)
-        _print(f"    SNOWFLAKE_PASSWORD=<password-you-set>", 2)
-        _print(f"    SNOWFLAKE_ROLE=NABLE_COST_READER", 2)
+        _print("    SNOWFLAKE_PASSWORD=<password-you-set>", 2)
+        _print("    SNOWFLAKE_ROLE=NABLE_COST_READER", 2)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -647,7 +647,6 @@ SAAS_SETUP_PACKAGES: dict[str, dict] = {
             "Create an API key and Application key with 'Usage Read' scope. "
             "App keys should be scoped to a service account, not a personal account."
         ),
-        "validation": lambda keys: _validate_datadog(**keys),
     },
     "stripe": {
         "name": "Stripe",

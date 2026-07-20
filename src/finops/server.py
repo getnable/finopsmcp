@@ -1333,12 +1333,12 @@ def main() -> None:
 
         else:
             print(f"\n  {border}")
-            print(f"  nable  ·  free tier")
+            print("  nable  ·  free tier")
             print(f"  {border}")
             for f in _FREE:
                 print(f"  {f}")
             print(f"  {'─' * W}")
-            print(f"  Locked on free tier  ↓")
+            print("  Locked on free tier  ↓")
             for t in _TEAM:
                 print(f"  {t}")
             print(f"  {'─' * W}")
