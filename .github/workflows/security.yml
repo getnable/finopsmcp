@@ -1,0 +1,56 @@
+name: Security scan
+
+# SAST + secret + dependency scanning on every PR. Complements the existing
+# CodeQL (deep SAST) and Scorecard (supply-chain posture) workflows: this adds
+# fast bandit SAST, secret detection, and dependency-vuln auditing (pip-audit),
+# which CodeQL does not cover. Semgrep runs report-only until its false positives
+# are triaged with inline nosemgrep annotations, then it can be made blocking.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1"   # weekly, Monday 05:17 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: SAST, secrets, dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install scanners
+        run: pip install bandit pip-audit detect-secrets semgrep
+
+      - name: Bandit SAST (fail on high severity + high confidence)
+        run: bandit -r src -q --severity-level high --confidence-level high
+
+      - name: Secret scan (fail on new secrets vs baseline)
+        # detect-secrets-hook checks tracked files against the baseline and exits
+        # non-zero on any secret not already baselined, without rewriting the
+        # baseline (so no spurious timestamp diff). To accept a new false positive,
+        # run `detect-secrets scan --baseline .secrets.baseline` locally and commit.
+        run: detect-secrets-hook --baseline .secrets.baseline $(git ls-files)
+
+      - name: Dependency audit (fail on known-vulnerable deps)
+        run: |
+          # Audit ONLY nable's dependency tree, in an isolated venv. The scanners
+          # installed above (semgrep etc.) drag in their own older transitive deps
+          # (mcp 1.23.3, click), which would otherwise be flagged as if they were
+          # nable's. Upgrading pip/setuptools/wheel keeps the runner tooling clean too.
+          python -m venv /tmp/auditenv
+          /tmp/auditenv/bin/pip install --upgrade pip setuptools wheel
+          /tmp/auditenv/bin/pip install .
+          pip-audit --path /tmp/auditenv/lib/python*/site-packages --progress-spinner off
+
+      - name: Semgrep (report-only; promote to blocking after FP triage)
+        continue-on-error: true
+        run: semgrep scan --config p/python --config p/security-audit --config p/secrets --metrics off --error
