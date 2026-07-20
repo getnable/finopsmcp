@@ -248,9 +248,15 @@ def get_all_llm_costs(
     end_date: date | None = None,
     days: int = 30,
     include_provider_results: bool = False,
+    exclude_cloud_native: bool = False,
 ) -> dict[str, Any]:
     """
     Aggregate LLM costs across all configured providers.
+
+    exclude_cloud_native: skip the Bedrock and Vertex fetchers. Both are metered
+    (Bedrock fires Cost Explorer calls, Vertex queries the BigQuery billing
+    export), so the free-by-default `nable scan` path sets this and leaves the
+    cloud-native AI spend to the --spend path.
 
     Returns:
       {
@@ -282,7 +288,7 @@ def get_all_llm_costs(
     # product and agentic sessions re-ask constantly.
     import copy as _copy
     from .. import cache as _cache
-    _ck = _cache.make_key("llm.get_all", start_date.isoformat(), end_date.isoformat())
+    _ck = _cache.make_key("llm.get_all", start_date.isoformat(), end_date.isoformat(), f"xcn={exclude_cloud_native}")
     _hit = _cache.get(_ck)
     if _hit is not None:
         out = _copy.deepcopy(_hit)
@@ -360,6 +366,12 @@ def get_all_llm_costs(
         "openrouter": _fetch_openrouter,
         "litellm": _fetch_litellm,
     }
+    if exclude_cloud_native:
+        # The free scan path must not touch the cloud-native AI legs: bedrock
+        # fires Cost Explorer calls and vertex queries the BigQuery billing
+        # export, both metered. Leave them to the --spend path.
+        for _cn in _CLOUD_NATIVE_LLM:
+            _fetchers.pop(_cn, None)
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(_fetchers)) as _pool:
         _futs = {name: _pool.submit(fn) for name, fn in _fetchers.items()}
         for name, fut in _futs.items():
