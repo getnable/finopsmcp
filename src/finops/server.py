@@ -1879,6 +1879,9 @@ from .tools.llm import (  # noqa: E402,F401
 )
 from .tools.meta import (  # noqa: E402,F401
     check_action_policy,
+    check_ai_budget,
+    get_ai_budget_status,
+    set_ai_budget,
     check_connector_health,
     compare_providers,
     create_api_key,

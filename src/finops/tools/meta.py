@@ -807,6 +807,44 @@ def whoami() -> dict:
 
 
 @_srv.mcp.tool()
+async def get_ai_budget_status() -> dict:
+    """Where your AI coding agent stands against its budget, right now.
+
+    Reads your agent's real token usage locally (Claude Code session logs) plus any
+    metered API spend, and reports this rolling window, month-to-date, your budget,
+    burn rate, and a verdict (ok / warn / over). Nothing leaves your machine. It does
+    NOT claim a percentage of a Claude/Cursor plan's hidden rate limit (no API exposes
+    that); it reports your real usage against the budget you set with set_ai_budget."""
+    from ..ai_budget import status
+    return status()
+
+
+@_srv.mcp.tool()
+async def check_ai_budget(estimated_next_tokens: int = 0) -> dict:
+    """Advisory gate: before a big task, is the agent about to blow its AI budget?
+
+    Call this before an expensive run. Returns a verdict (ok / warn / over), the
+    reason, and a recommendation. Advice only, it never blocks; relay the verdict and
+    let the human decide. Pass estimated_next_tokens to test whether the next task
+    would tip a token budget over."""
+    from ..ai_budget import check
+    return check(estimated_next_tokens=int(estimated_next_tokens or 0))
+
+
+@_srv.mcp.tool()
+async def set_ai_budget(monthly_usd: float | None = None,
+                        monthly_tokens: int | None = None,
+                        plan: str | None = None) -> dict:
+    """Set your monthly AI budget for the coding agent. Pass a dollar cap
+    (monthly_usd), a token cap (monthly_tokens), and/or a plan label
+    ('claude-max-20x', 'api', ...). Stored locally in ~/.nable, nothing uploaded."""
+    from ..ai_budget import set_budget
+    return {"budget": set_budget(monthly_usd=monthly_usd,
+                                 monthly_tokens=monthly_tokens, plan=plan),
+            "note": "Saved. Call get_ai_budget_status to see where you stand."}
+
+
+@_srv.mcp.tool()
 async def check_action_policy(
     action_type: str,
     terraform_plan_json: str | None = None,
