@@ -668,14 +668,15 @@ _DEMO_REGIONS = [
 ]
 
 
-def _daily_series(days: int, provs: list[str]) -> list[dict[str, Any]]:
+def _daily_series(days: int, provs: list[str], end: date | None = None) -> list[dict[str, Any]]:
     """A believable per-provider daily spend series over the window. Deterministic
     (seeded by day index) so it does not jump on every refresh, with a gentle
-    upward drift and weekly ripple."""
+    upward drift and weekly ripple. `end` anchors the last day (defaults to today),
+    so a custom date range that ends in the past renders its own window."""
     import math
     out = []
     base = {p: sum(s["amount"] for s in _PROVIDER_SERVICES[p]) / 30.0 for p in provs}
-    today = date.today()
+    today = end or date.today()
     for i in range(days - 1, -1, -1):
         d = today - timedelta(days=i)
         pos = (days - i) / max(days, 1)              # 0..1 across the window
@@ -688,18 +689,29 @@ def _daily_series(days: int, provs: list[str]) -> list[dict[str, Any]]:
     return out
 
 
-def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
+def dashboard_data(
+    days: int = 30,
+    provider: str = "all",
+    start: date | None = None,
+    end: date | None = None,
+) -> dict[str, Any]:
     """Full payload for the `finops serve` dashboard in demo mode, in the exact
     shape `_fetch_dashboard_data` returns. Provider- and range-aware: selecting a
-    provider filters every figure, and the range scales the windowed views. AWS
-    reproduces the classic acme-production story ($12,847 this month, +23.4% vs
-    last, a Data Transfer spike, a genuine rightsizing find); Azure and GCP are
-    smaller real footprints, so the provider toggle and active-services table
-    show distinct data. No account needed.
+    provider filters every figure, and the range scales the windowed views. A
+    custom `start`/`end` (Vantage-style date range) overrides `days`: the window
+    spans those dates and the daily series ends on `end`. AWS reproduces the
+    classic acme-production story; Azure and GCP are smaller real footprints, so
+    the provider toggle and active-services table show distinct data. MTD and the
+    projection stay month-anchored (calendar figures, not lookback figures).
     """
     provider = (provider or "all").lower()
     provs = _DEMO_PROVIDERS if provider == "all" else [provider]
     provs = [p for p in provs if p in _PROVIDER_SERVICES] or ["aws"]
+
+    # A custom date range overrides the preset lookback. Clamp to sane bounds so a
+    # malformed range cannot produce a giant or empty series.
+    if start and end and end >= start:
+        days = max(1, min((end - start).days + 1, 366))
 
     # Window scaling: figures for the selected lookback. 30d is the reference
     # month; 7d shows ~a quarter of it, 90d ~three months. MTD/projection stay
@@ -774,7 +786,7 @@ def dashboard_data(days: int = 30, provider: str = "all") -> dict[str, Any]:
 
     # Windowed total (what the range actually spans) and the daily provider series.
     window_total_spend = round(window_total, 2)
-    daily = _daily_series(days, provs)
+    daily = _daily_series(days, provs, end=end)
     # Headline sparklines: last ~12 windowed daily totals, smoothed.
     def _spark(scale: float) -> list[float]:
         tail = daily[-12:] if len(daily) >= 12 else daily

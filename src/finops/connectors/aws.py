@@ -314,6 +314,47 @@ class AWSConnector(BaseConnector):
         _cache.set(_ck, _copy.deepcopy(merged), _cache.COST_TTL)
         return merged
 
+    async def get_daily_totals(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
+        """Per-day unblended cost across all connected accounts, for the spend-over-time
+        chart's custom date range. One DAILY Cost Explorer call per account (not one
+        per day), summed across accounts. Returns [{"date": "YYYY-MM-DD", "total": float}]
+        ordered oldest-first. CE's DAILY End is exclusive, so callers pass end+1 to
+        include the final day."""
+        from .. import cache as _cache
+        _ck = _cache.make_key(
+            "aws.get_daily_totals",
+            ",".join(sorted(self._role_arns)) if self._role_arns else "default",
+            start_date.isoformat(), end_date.isoformat(),
+        )
+        _hit = _cache.get(_ck)
+        if _hit is not None:
+            return [dict(r) for r in _hit]
+
+        by_day: dict[str, float] = {}
+        targets = self._role_arns if self._role_arns else [None]
+        for role_arn in targets:
+            ce = self._make_client(role_arn)
+            kwargs: dict[str, Any] = dict(
+                TimePeriod={"Start": start_date.isoformat(), "End": end_date.isoformat()},
+                Granularity="DAILY",
+                Metrics=["UnblendedCost"],
+            )
+            while True:
+                resp = await asyncio.to_thread(ce.get_cost_and_usage, **kwargs)
+                for period in resp.get("ResultsByTime", []):
+                    day = period.get("TimePeriod", {}).get("Start", "")
+                    amt = float(period.get("Total", {}).get("UnblendedCost", {}).get("Amount", 0.0) or 0.0)
+                    if day:
+                        by_day[day] = by_day.get(day, 0.0) + amt
+                token = resp.get("NextPageToken")
+                if not token:
+                    break
+                kwargs["NextPageToken"] = token
+
+        out = [{"date": d, "total": round(v, 2)} for d, v in sorted(by_day.items())]
+        _cache.set(_ck, [dict(r) for r in out], _cache.COST_TTL)
+        return out
+
     async def get_network_breakdown(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
         """
         Return per-usage-type cost rows for the period, grouped by USAGE_TYPE.
