@@ -6,6 +6,7 @@ All notable changes to finops-mcp (nable).
 
 - **`finops ai-budget` now just asks you.** Run it once and it asks two questions, flat subscription or metered API, and what you pay per month, then remembers. No flags to memorize, and any plan cost works, not a hardcoded $200. Flags (`--plan-cost`, `--spend-cap`, `--tokens`) still work for scripts, and the agent can set the budget conversationally through `set_ai_budget`.
 - **Two lenses, because the two cases are different.** On a flat subscription the game is not running out: you see how much subsidized compute you pull for your fixed fee (a heavy month can be 20x+ your plan), the cost per 1M tokens on your plan versus list price, and an optional usage cap that warns before you run low. On a metered API key you set a dollar spend cap and the agent gates on estimated spend against it, also with cost per 1M tokens. A subscription is still never called "over budget" off a dollar estimate: the fee is what you pay.
+- **`finops upgrade` now actually upgrades the `finops` command.** It used to only warm the uvx cache and repin Claude Desktop, so a `pip install`ed CLI stayed on the old version and the new command still failed right after a "success" message. It now runs `pip install -U` on the environment you are in, then does the editor/Claude Desktop pin as a separate, clearly labeled step. Editable/source checkouts are detected and left untouched; a non-pip install (uv tool, pipx) prints the exact upgrade command instead.
 
 ## 0.8.184
 

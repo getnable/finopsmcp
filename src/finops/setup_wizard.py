@@ -2410,7 +2410,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("newrelic",     help="Connect New Relic data ingest and seat costs")
     sub.add_parser("databricks",   help="Connect Databricks DBU consumption and job costs")
     sub.add_parser("claude",       help="Register nable in Claude Desktop config")
-    up_p = sub.add_parser("upgrade", help="Upgrade nable: cache the new version, then move the config pin")
+    up_p = sub.add_parser("upgrade", help="Upgrade nable: the finops CLI, plus the editor/Claude Desktop MCP pin")
     up_p.add_argument("version", nargs="?", default="", help="Target version (default: latest on PyPI)")
     cr_p = sub.add_parser("credits", help="Managed-AI credit balance for this instance (show / grant / budget)")
     cr_p.add_argument("action", nargs="?", default="show", choices=["show", "grant", "budget"],
@@ -3357,13 +3357,55 @@ def _claude_config_file() -> "Path | None":
     return None
 
 
-def _run_upgrade(target: str = "") -> None:
-    """Move the nable version pin forward, deliberately.
+def _upgrade_running_cli(current: str, target: str) -> bool:
+    """Upgrade the `finops` command in the environment running right now.
 
-    Wizard-written configs pin finops-mcp==X so a PyPI release never slows or
-    breaks a working install. This command is the explicit opt-in: resolve the
-    target version, download it into the uvx cache now (outside any client
-    startup window), rewrite the pin, then ask for one Claude Desktop restart.
+    `finops upgrade` used to only warm the uvx cache and repin Claude Desktop. A
+    normal `pip install finops-mcp` of the CLI stayed on the old version, so
+    `finops <newcommand>` still failed right after a "success" message. This
+    upgrades the actual command you type. Returns True if the CLI is now at target.
+    """
+    import subprocess
+
+    if current == target:
+        _ok(f"finops CLI already on {target}")
+        return True
+
+    py = sys.executable
+    show = subprocess.run([py, "-m", "pip", "show", "finops-mcp"],
+                          capture_output=True, text=True)
+    if show.returncode != 0:
+        # Not a pip install in this env (uv tool, pipx, or a shim). Be honest.
+        _warn(f"This `finops` command is {current}; I can't upgrade it in place.")
+        print("  Upgrade the CLI with whatever you installed it with:")
+        print("    uv tool upgrade finops-mcp     # if you used `uv tool install`")
+        print("    pipx upgrade finops-mcp        # if you used pipx")
+        print(f"    pip install -U 'finops-mcp=={target}'")
+        return False
+    if "Editable project location" in show.stdout:
+        _warn(f"This finops is an editable/source install ({current}); leaving it alone.")
+        print(f"  It tracks your working tree. For a real install:  pip install -U 'finops-mcp=={target}'")
+        return False
+
+    print(f"  Upgrading this finops CLI: {current} -> {target} ...")
+    res = subprocess.run([py, "-m", "pip", "install", "-U", f"finops-mcp=={target}"],
+                         capture_output=True, text=True, timeout=600)
+    if res.returncode != 0:
+        _err(f"pip could not upgrade the CLI: {(res.stderr or res.stdout).strip()[:300]}")
+        print(f"  Do it manually:  pip install -U 'finops-mcp=={target}'")
+        return False
+    _ok(f"finops CLI upgraded to {target}")
+    return True
+
+
+def _run_upgrade(target: str = "") -> None:
+    """Upgrade nable, deliberately, in two places.
+
+    (1) The `finops` CLI in the current environment, the command you type.
+    (2) The MCP server that editors/Claude Desktop launch via uvx: wizard-written
+        configs pin finops-mcp==X so a PyPI release never slows a working client, so
+        this warms the new version into the uvx cache now (outside any startup
+        window) and moves the pin. One Claude Desktop restart picks it up.
     """
     import json
     import shutil
@@ -3384,17 +3426,18 @@ def _run_upgrade(target: str = "") -> None:
             return
 
     print(f"  Installed: {current}")
-    print(f"  Latest:    {target}")
+    print(f"  Latest:    {target}\n")
 
+    # 1. The CLI you are typing right now.
+    _upgrade_running_cli(current, target)
+
+    # 2. The MCP server editors launch via uvx.
     uvx_bin = shutil.which("uvx")
     if not uvx_bin:
-        _warn("uvx not found, so there is no cache to warm or pin to move.")
-        print("  If you installed with pip, upgrade with:")
-        print(f"    pip install -U 'finops-mcp=={target}'")
+        print("\n  No uvx found, so there is no editor/Claude Desktop cache to warm.")
         return
 
-    # The slow part happens HERE, on purpose, not at Claude Desktop startup.
-    print("  Downloading and caching the new version (so Claude never waits on it)...")
+    print("\n  Caching the new version for editors (so Claude never waits on it)...")
     try:
         res = subprocess.run(
             [uvx_bin, "--from", f"finops-mcp=={target}", "finops", "--help"],

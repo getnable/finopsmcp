@@ -79,6 +79,47 @@ def test_failed_cache_warm_leaves_config_untouched(tmp_path, monkeypatch, capsys
     assert "NOT changed" in capsys.readouterr().out
 
 
+def test_upgrade_actually_upgrades_the_running_cli(monkeypatch, capsys):
+    """The bug: `finops upgrade` warmed the uvx cache but left the pip-installed
+    `finops` command on the old version, so `finops <newcmd>` still failed right
+    after a 'success' message. It must run pip install -U on the current env."""
+    monkeypatch.setattr(sw, "_installed_version", lambda: "0.8.158")
+    ran = []
+
+    def fake_run(cmd, **kw):
+        ran.append(cmd)
+        # `pip show finops-mcp` -> a normal (non-editable) install
+        if "show" in cmd:
+            return SimpleNamespace(returncode=0, stdout="Name: finops-mcp\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    assert sw._upgrade_running_cli("0.8.158", "0.8.185") is True
+    installs = [c for c in ran if "install" in c and "-U" in c]
+    assert installs and "finops-mcp==0.8.185" in " ".join(installs[0])
+    assert "upgraded to 0.8.185" in capsys.readouterr().out
+
+
+def test_upgrade_never_clobbers_an_editable_checkout(monkeypatch, capsys):
+    def fake_run(cmd, **kw):
+        assert "install" not in cmd, "must not pip-install over an editable dev tree"
+        return SimpleNamespace(returncode=0, stdout="Editable project location: /src\n", stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    assert sw._upgrade_running_cli("0.8.185", "0.9.0") is False
+    assert "editable" in capsys.readouterr().out.lower()
+
+
+def test_upgrade_non_pip_install_prints_manual_command(monkeypatch, capsys):
+    def fake_run(cmd, **kw):
+        return SimpleNamespace(returncode=1, stdout="", stderr="not found")  # pip show fails
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    assert sw._upgrade_running_cli("0.8.158", "0.8.185") is False
+    out = capsys.readouterr().out
+    assert "pip install -U 'finops-mcp==0.8.185'" in out
+
+
 def test_plugin_pin_matches_package_version():
     """The Claude Code plugin pins the server version. If a release bumps
     pyproject but forgets the plugin pin, installs would silently run an old
