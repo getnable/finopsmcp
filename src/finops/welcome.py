@@ -180,6 +180,33 @@ def _is_interactive_install() -> bool:
         return False
 
 
+def _agent_usage_teaser() -> "list[str] | None":
+    """First-run hook for the Claude Code crowd: their agent's real token usage,
+    read locally, before they connect anything. This is the cheap front door, every
+    coding-agent user has usage even with no cloud connected. Capped so a big log
+    history can never stall the banner. Returns display lines, or None if empty."""
+    import time
+    try:
+        from . import ai_budget as ab
+        win = ab._WINDOW_HOURS
+        u = _run_capped(lambda: ab.read_agent_usage(time.time() - win * 3600), 1.5)
+    except Exception:
+        return None
+    if not u or not u.get("source_present") or u.get("billable_tokens", 0) <= 0:
+        return None
+
+    def _t(n: int) -> str:
+        if n >= 1_000_000:
+            return f"{n / 1e6:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1e3:.0f}K"
+        return str(n)
+
+    tok = u["billable_tokens"]
+    per_hr = round(tok / max(win, 0.1))
+    return [f"~{_t(tok)} tokens in the last {win:g}h  ·  ~{_t(per_hr)}/hour"]
+
+
 def show_welcome() -> None:
     """Print on the very first interactive CLI invocation, then never again."""
     if not _is_first_run():
@@ -195,6 +222,23 @@ def show_welcome() -> None:
     # slow network that wait should happen behind visible output, not before it.
     _print_header()
     _fire_telemetry("install_completed", {"source": "finops_welcome"})
+
+    # Front door for the coding-agent crowd: light up their own agent's usage on
+    # run 1, before any cloud is connected, then bridge to the real thing, guarding
+    # the infra that agent touches. Only shows when Claude Code logs are present.
+    teaser = _agent_usage_teaser()
+    if teaser:
+        _line(bold("Your AI coding agent, measured locally:"))
+        for ln in teaser:
+            _line(f"  {white(ln)}")
+        _line(dim("   from Claude Code usage on your machine, nothing uploaded"))
+        _line(f"   Budget it:  {cyan('nable ai-budget')}")
+        _blank()
+        _line(dim("   That same agent can touch real infra. Guard what it changes,"))
+        _line(dim("   cost preflight + policy gate, propose-only:  ") + cyan("nable guard install"))
+        _blank()
+        _line(_rule())
+        _blank()
 
     _line(bold("Ask your AI about cloud costs:"))
     _blank()

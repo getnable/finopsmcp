@@ -142,6 +142,17 @@ def test_reset_forgets_budget(tmp_path):
     assert ab.get_budget()["mode"] == ""
 
 
+def test_welcome_teaser_is_the_front_door(tmp_path):
+    # The first-run banner leads with the agent's own usage when Claude Code logs
+    # exist, and shows nothing (no empty block) when they don't.
+    from finops import welcome
+    assert welcome._agent_usage_teaser() is None       # no logs -> no teaser
+    now = time.time()
+    _write_session(tmp_path / "claude", [_assistant(now - 60, tin=500_000, tout=250_000)])
+    line = welcome._agent_usage_teaser()
+    assert line and "last 5h" in line[0] and "/hour" in line[0]
+
+
 def test_no_logs_is_graceful(tmp_path):
     # No claude dir at all: empty, source_present False, no crash.
     u = ab.read_agent_usage(time.time() - 3600)
