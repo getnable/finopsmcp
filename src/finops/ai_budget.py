@@ -51,18 +51,6 @@ _USD_PER_MTOK_OUT = float(os.getenv("FINOPS_AI_USD_PER_MTOK_OUT", "15.0"))
 _USD_PER_MTOK_CACHE_WRITE = float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE", "3.75"))
 _USD_PER_MTOK_CACHE_READ = float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_READ", "0.30"))
 
-# Reference plans. `price` is the flat monthly fee (what you actually pay on a
-# subscription); `kind` decides how the budget is framed. Never used to fake a
-# remaining-rate-limit number.
-_PLANS = {
-    "claude-pro":    {"label": "Claude Pro ($20/mo)",      "price": 20.0,  "kind": "subscription"},
-    "claude-max-5x": {"label": "Claude Max 5x ($100/mo)",  "price": 100.0, "kind": "subscription"},
-    "claude-max-20x":{"label": "Claude Max 20x ($200/mo)", "price": 200.0, "kind": "subscription"},
-    "cursor":        {"label": "Cursor",                   "price": 0.0,   "kind": "subscription"},
-    "api":           {"label": "Metered API key",          "price": 0.0,   "kind": "api"},
-}
-
-
 def _data_dir() -> Path:
     d = Path(os.getenv("FINOPS_DATA_DIR") or (Path.home() / ".nable"))
     d.mkdir(parents=True, exist_ok=True)
@@ -76,8 +64,13 @@ def _budget_path() -> Path:
 # ── Budget config ────────────────────────────────────────────────────────────
 
 def get_budget() -> dict[str, Any]:
-    """The user's AI budget. Empty/zero fields mean 'not set'."""
-    default = {"monthly_usd": 0.0, "monthly_tokens": 0, "plan": "", "set_at": 0.0}
+    """The user's AI budget. Empty/zero fields mean 'not set'.
+
+    mode: 'flat' (a subscription, budget = plan_cost + optional usage cap) or
+    'metered' (pay-per-token, budget = spend_cap). monthly_tokens is a usage cap
+    that works in either mode ("warn before I burn N tokens")."""
+    default = {"mode": "", "plan_cost": 0.0, "spend_cap": 0.0,
+               "monthly_tokens": 0, "plan_label": "", "set_at": 0.0}
     try:
         data = json.loads(_budget_path().read_text())
         if isinstance(data, dict):
@@ -87,21 +80,40 @@ def get_budget() -> dict[str, Any]:
     return default
 
 
-def set_budget(monthly_usd: float | None = None, monthly_tokens: int | None = None,
-               plan: str | None = None) -> dict[str, Any]:
-    """Set the monthly AI budget. Pass a dollar cap, a token cap, a plan, or any mix."""
+def set_budget(mode: str | None = None, plan_cost: float | None = None,
+               spend_cap: float | None = None, monthly_tokens: int | None = None,
+               plan_label: str | None = None) -> dict[str, Any]:
+    """Set the AI budget. `mode` is 'flat' (subscription: pass plan_cost) or
+    'metered' (pay-per-token: pass spend_cap). Passing plan_cost/spend_cap infers
+    the mode. monthly_tokens is an optional usage cap for either. Any subset."""
     b = get_budget()
-    if monthly_usd is not None:
-        b["monthly_usd"] = max(0.0, float(monthly_usd))
+    if mode in ("flat", "metered"):
+        b["mode"] = mode
+    if plan_cost is not None:
+        b["plan_cost"] = max(0.0, float(plan_cost))
+        if not b["mode"]:
+            b["mode"] = "flat"
+    if spend_cap is not None:
+        b["spend_cap"] = max(0.0, float(spend_cap))
+        if not b["mode"]:
+            b["mode"] = "metered"
     if monthly_tokens is not None:
         b["monthly_tokens"] = max(0, int(monthly_tokens))
-    if plan is not None:
-        b["plan"] = plan if plan in _PLANS else ""
+    if plan_label is not None:
+        b["plan_label"] = plan_label
     b["set_at"] = time.time()
     fd = os.open(_budget_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         json.dump(b, fh)
     return b
+
+
+def reset_budget() -> None:
+    """Forget the saved budget (so the next run re-asks)."""
+    try:
+        _budget_path().unlink()
+    except OSError:
+        pass
 
 
 # ── Local usage meter (Claude Code session logs) ─────────────────────────────
@@ -214,87 +226,96 @@ def _month_start_epoch() -> float:
 
 def status() -> dict[str, Any]:
     """Where you stand. Honest by construction: tokens and burn rate are exact
-    (read from local logs). Dollars are ONLY ever an estimate at list price, never
-    presented as your actual bill (nable's provider $ can be far off the real
-    invoice for subscription/credit usage). A flat subscription's fee is what you
-    pay, so its verdict is driven by usage, not by an estimated-dollar overage."""
+    (read from local logs); dollars are ONLY ever an estimate at list price, never
+    your real bill. Two lenses:
+      - metered (pay-per-token / enterprise): a dollar spend budget, gate on it.
+      - flat (subscription): budget your USAGE so you do not run out, and see how
+        much subsidized compute you are pulling for your fixed fee."""
     now = time.time()
     window = read_agent_usage(now - _WINDOW_HOURS * 3600)
     mtd = read_agent_usage(_month_start_epoch())
     budget = get_budget()
-    plan = _PLANS.get(budget["plan"], {})
-    plan_kind = plan.get("kind", "unknown")
+    mode = budget["mode"]
 
     tokens_mtd = mtd["billable_tokens"]        # exact
     est_usd_mtd = mtd["usd_equivalent"]        # ESTIMATE at list price, not a bill
 
-    # Verdict only off things we measure honestly: a token budget (exact), or a
-    # dollar budget on a metered API plan (labeled estimate). Never off a list-price
-    # estimate for a flat subscription, where the fee is what you actually pay.
+    mtok = tokens_mtd / 1e6 if tokens_mtd else 0.0
+    cost_per_1m_list = round(est_usd_mtd / mtok, 2) if mtok else None
+    cost_per_1m_effective = (round(budget["plan_cost"] / mtok, 2)
+                             if mode == "flat" and budget["plan_cost"] > 0 and mtok else None)
+
+    # Verdict off the honest dial for the lens: metered → the dollar spend cap
+    # (labeled estimate until a real Cost API is wired); either mode → a usage cap.
     verdict, pct, basis = BUDGET_OK, None, "none"
-    if budget["monthly_tokens"] > 0:
+    if mode == "metered" and budget["spend_cap"] > 0:
+        pct, basis = est_usd_mtd / budget["spend_cap"], "spend"
+    elif budget["monthly_tokens"] > 0:
         pct, basis = tokens_mtd / budget["monthly_tokens"], "tokens"
-    elif plan_kind == "api" and budget["monthly_usd"] > 0:
-        pct, basis = est_usd_mtd / budget["monthly_usd"], "usd_estimate"
     if pct is not None:
         verdict = BUDGET_OVER if pct >= 1.0 else (BUDGET_WARN if pct >= _WARN_AT else BUDGET_OK)
 
     burn = round(window["billable_tokens"] / max(_WINDOW_HOURS, 0.1))
 
     subsidy = None
-    if plan_kind == "subscription" and plan.get("price", 0) > 0:
+    if mode == "flat" and budget["plan_cost"] > 0:
         subsidy = {
-            "plan_price_usd": plan["price"],
+            "plan_cost_usd": budget["plan_cost"],
             "compute_value_est_usd": est_usd_mtd,
-            "multiple": round(est_usd_mtd / plan["price"], 1) if plan["price"] else None,
+            "multiple": round(est_usd_mtd / budget["plan_cost"], 1) if budget["plan_cost"] else None,
         }
 
     return {
         "verdict": verdict,
         "verdict_basis": basis,
+        "mode": mode,
         "window_hours": _WINDOW_HOURS,
         "window": window,
         "month_to_date": mtd,
         "billable_tokens_mtd": tokens_mtd,
         "est_usd_mtd_list_price": est_usd_mtd,
         "budget": budget,
-        "plan_kind": plan_kind,
-        "plan_label": plan.get("label", ""),
+        "plan_label": budget["plan_label"],
         "pct_of_budget": round(pct, 3) if pct is not None else None,
         "burn_tokens_per_hour": burn,
         "subsidy": subsidy,
-        "summary": _summary_line(verdict, basis, tokens_mtd, est_usd_mtd, budget,
-                                 plan_kind, subsidy, window),
+        "cost_per_1m_list": cost_per_1m_list,
+        "cost_per_1m_effective": cost_per_1m_effective,
+        "summary": _summary_line(verdict, basis, mode, tokens_mtd, est_usd_mtd, budget,
+                                 subsidy, window, cost_per_1m_effective),
     }
 
 
-def _summary_line(verdict, basis, tokens_mtd, est_usd, budget, plan_kind, subsidy, window) -> str:
+def _summary_line(verdict, basis, mode, tokens_mtd, est_usd, budget, subsidy, window,
+                  eff_per_1m) -> str:
     tag = {BUDGET_OK: "on track", BUDGET_WARN: "approaching your budget",
            BUDGET_OVER: "over budget"}[verdict]
+    if basis == "spend":
+        return (f"~${est_usd:,.0f} estimated at list price of your "
+                f"${budget['spend_cap']:,.0f} spend cap, {tag}. "
+                f"Connect an Admin key for exact spend.")
     if basis == "tokens":
         return f"{tokens_mtd:,} of {budget['monthly_tokens']:,} tokens this month, {tag}."
-    if basis == "usd_estimate":
-        return (f"~${est_usd:,.0f} estimated at list price of your "
-                f"${budget['monthly_usd']:,.0f} metered budget, {tag}.")
     if subsidy and subsidy["multiple"]:
-        return (f"You pay ${subsidy['plan_price_usd']:,.0f}/mo and have pulled "
-                f"~${est_usd:,.0f} of compute this month (estimated at list price), "
-                f"~{subsidy['multiple']:g}x your plan. The provider covers the rest.")
+        extra = f" ~${eff_per_1m:g}/1M effective." if eff_per_1m else ""
+        return (f"You pay ${subsidy['plan_cost_usd']:,.0f}/mo and have pulled "
+                f"~${est_usd:,.0f} of compute (estimated at list price), "
+                f"~{subsidy['multiple']:g}x your plan.{extra} The provider covers the rest.")
     return (f"{window['billable_tokens']:,} tokens in the last {_WINDOW_HOURS:g}h "
-            f"(~${window['usd_equivalent']:,.0f} at list price). Set a budget with "
-            f"`finops ai-budget --tokens N` or `--monthly N`.")
+            f"(~${window['usd_equivalent']:,.0f} at list price). "
+            f"Run `finops ai-budget` to set a budget.")
 
 
 def check(estimated_next_tokens: int = 0) -> dict[str, Any]:
     """The gate the agent calls before a big task. Advice only, never blocks.
 
-    On a metered API plan it is about dollars (estimated). On a flat subscription it
-    is about usage and not getting rate-limited, so it speaks in tokens and burn
-    rate, never a fake dollar overage. Mirrors policy.py: a verdict and a reason."""
+    Metered plan: about dollars against your spend cap (estimated). Flat plan: about
+    usage and not getting rate-limited, spoken in tokens and burn rate, never a fake
+    dollar overage. Mirrors policy.py: a verdict and a reason, the human decides."""
     st = status()
     verdict, reason = st["verdict"], st["summary"]
 
-    # A token budget is exact, so a next-task estimate can honestly tip it.
+    # A token/usage budget is exact, so a next-task estimate can honestly tip it.
     if estimated_next_tokens and st["budget"]["monthly_tokens"] > 0:
         after = st["billable_tokens_mtd"] + estimated_next_tokens
         pct_after = after / st["budget"]["monthly_tokens"]
@@ -303,17 +324,17 @@ def check(estimated_next_tokens: int = 0) -> dict[str, Any]:
             reason = (f"this task (~{estimated_next_tokens:,} tokens) would push you to "
                       f"{pct_after * 100:.0f}% of your monthly token budget.")
 
-    if st["plan_kind"] == "subscription":
+    if st["mode"] == "metered":
+        rec = {
+            BUDGET_OK: "Proceed.",
+            BUDGET_WARN: "Proceed, but you are close to your spend cap. Consider a tighter scope.",
+            BUDGET_OVER: "You are over your AI spend cap. Confirm with the human before continuing.",
+        }[verdict]
+    else:
         rec = {
             BUDGET_OK: f"Proceed. Flat plan, so this is about pace, not a bill: ~{st['burn_tokens_per_hour']:,} tok/hr.",
             BUDGET_WARN: "Proceed, but you are near the usage budget you set for the month.",
             BUDGET_OVER: "You are past the usage budget you set. Confirm with the human first.",
-        }[verdict]
-    else:
-        rec = {
-            BUDGET_OK: "Proceed.",
-            BUDGET_WARN: "Proceed, but you are close to your budget. Consider a tighter scope.",
-            BUDGET_OVER: "You are over your AI budget. Confirm with the human before continuing.",
         }[verdict]
 
     return {
@@ -321,7 +342,7 @@ def check(estimated_next_tokens: int = 0) -> dict[str, Any]:
         "reason": reason,
         "recommendation": rec,
         "advice_only": True,
-        "plan_kind": st["plan_kind"],
+        "mode": st["mode"],
         "billable_tokens_mtd": st["billable_tokens_mtd"],
         "est_usd_mtd_list_price": st["est_usd_mtd_list_price"],
         "burn_tokens_per_hour": st["burn_tokens_per_hour"],

@@ -123,10 +123,12 @@ monthly and annual dollar impact, and a spot alternative when the change is comp
 One-way doors (delete, terminate, buy a commitment) and over-budget changes always
 escalate to a human.
 
-**And a budget for the agent itself.** Set one with `finops ai-budget --monthly 200`,
-then `check_ai_budget` does the same for what your agent spends on tokens. It reads
-your Claude Code usage locally (nothing uploaded) plus any metered API spend. Add to
-your system prompt:
+**And a budget for the agent itself.** Run `finops ai-budget` once, it asks whether
+you are on a flat plan or a metered API and what you pay, then remembers. On a flat
+plan it tracks how much subsidized compute you pull for your fixed fee and warns
+before you run low; on metered it gates on a dollar spend cap. `check_ai_budget` does
+the same for the agent mid-task. It reads your Claude Code usage locally, nothing
+uploaded. Add to your system prompt:
 
 > Before starting a large task, call `check_ai_budget`. If it returns `warn` or
 > `over`, tell me where I stand before continuing.

@@ -95,17 +95,51 @@ def test_subscription_never_over_on_dollar_estimate(tmp_path):
     _write_session(tmp_path / "claude", [
         _assistant(now - 60, tin=1_000_000, tout=500_000, cwrite=100_000_000),
     ])
-    ab.set_budget(monthly_usd=200, plan="claude-max-20x")
+    ab.set_budget(mode="flat", plan_cost=200)         # arbitrary plan cost, any number
     st = ab.status()
-    assert st["plan_kind"] == "subscription"
+    assert st["mode"] == "flat"
     assert st["verdict"] == ab.BUDGET_OK              # never OVER off a list-price estimate
     assert st["subsidy"] is not None
-    assert st["subsidy"]["plan_price_usd"] == 200.0
+    assert st["subsidy"]["plan_cost_usd"] == 200.0
     assert st["subsidy"]["multiple"] and st["subsidy"]["multiple"] > 1
+    assert st["cost_per_1m_effective"] is not None    # $200 spread over the tokens pulled
     # the gate also must not cry "over budget" on a subscription
     g = ab.check()
     assert g["verdict"] == ab.BUDGET_OK
-    assert g["plan_kind"] == "subscription"
+    assert g["mode"] == "flat"
+
+
+def test_plan_cost_infers_flat_mode(tmp_path):
+    # Passing a plan cost alone is enough; mode falls out of it (matches the wizard).
+    ab.set_budget(plan_cost=100)
+    assert ab.get_budget()["mode"] == "flat"
+    ab.reset_budget()
+    ab.set_budget(spend_cap=2500)
+    assert ab.get_budget()["mode"] == "metered"
+
+
+def test_metered_gates_on_spend_cap(tmp_path):
+    # Metered API lens: an estimated-dollar spend cap does drive the verdict, and we
+    # surface a cost-per-1M rate. (For metered, the list-price estimate IS the basis
+    # until an Admin key is wired for exact spend.)
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 60, tin=2_000_000, tout=1_000_000),   # ~$ of list-price compute
+    ])
+    ab.set_budget(mode="metered", spend_cap=1)        # tiny cap so any usage trips it
+    st = ab.status()
+    assert st["mode"] == "metered"
+    assert st["verdict_basis"] == "spend"
+    assert st["verdict"] == ab.BUDGET_OVER
+    assert st["cost_per_1m_list"] is not None
+    assert st["subsidy"] is None                      # no subsidy story on metered
+
+
+def test_reset_forgets_budget(tmp_path):
+    ab.set_budget(mode="flat", plan_cost=100)
+    assert ab.get_budget()["mode"] == "flat"
+    ab.reset_budget()
+    assert ab.get_budget()["mode"] == ""
 
 
 def test_no_logs_is_graceful(tmp_path):

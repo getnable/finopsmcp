@@ -810,11 +810,12 @@ def whoami() -> dict:
 async def get_ai_budget_status() -> dict:
     """Where your AI coding agent stands against its budget, right now.
 
-    Reads your agent's real token usage locally (Claude Code session logs) plus any
-    metered API spend, and reports this rolling window, month-to-date, your budget,
-    burn rate, and a verdict (ok / warn / over). Nothing leaves your machine. It does
-    NOT claim a percentage of a Claude/Cursor plan's hidden rate limit (no API exposes
-    that); it reports your real usage against the budget you set with set_ai_budget."""
+    Reads your agent's real token usage locally (Claude Code session logs) and reports
+    this rolling window, month-to-date, your budget, burn rate, cost per 1M tokens, and
+    a verdict (ok / warn / over). Nothing leaves your machine. It does NOT claim a
+    percentage of a Claude/Cursor plan's hidden rate limit (no API exposes that); it
+    reports your real usage against the budget you set with set_ai_budget. Token counts
+    are exact; any dollar figure is a list-price estimate, never presented as your bill."""
     from ..ai_budget import status
     return status()
 
@@ -832,15 +833,26 @@ async def check_ai_budget(estimated_next_tokens: int = 0) -> dict:
 
 
 @_srv.mcp.tool()
-async def set_ai_budget(monthly_usd: float | None = None,
+async def set_ai_budget(mode: str | None = None,
+                        plan_cost: float | None = None,
+                        spend_cap: float | None = None,
                         monthly_tokens: int | None = None,
-                        plan: str | None = None) -> dict:
-    """Set your monthly AI budget for the coding agent. Pass a dollar cap
-    (monthly_usd), a token cap (monthly_tokens), and/or a plan label
-    ('claude-max-20x', 'api', ...). Stored locally in ~/.nable, nothing uploaded."""
+                        plan_label: str | None = None) -> dict:
+    """Set the coding agent's monthly AI budget. Two lenses:
+
+    - Flat subscription (Claude Pro/Max, Cursor): pass plan_cost = what you pay per
+      month (any number). The verdict is about usage, not a dollar overage: a flat
+      fee is what you actually pay, so the agent tracks how much subsidized compute
+      it is pulling and, if you add monthly_tokens, warns before you run low.
+    - Metered API / enterprise: pass spend_cap = your monthly dollar cap. The agent
+      gates on estimated spend against it, and reports cost per 1M tokens.
+
+    monthly_tokens is an optional usage cap for either lens. Ask the human which
+    lens fits and what they pay rather than assuming. Stored locally in ~/.nable,
+    nothing uploaded."""
     from ..ai_budget import set_budget
-    return {"budget": set_budget(monthly_usd=monthly_usd,
-                                 monthly_tokens=monthly_tokens, plan=plan),
+    return {"budget": set_budget(mode=mode, plan_cost=plan_cost, spend_cap=spend_cap,
+                                 monthly_tokens=monthly_tokens, plan_label=plan_label),
             "note": "Saved. Call get_ai_budget_status to see where you stand."}
 
 
