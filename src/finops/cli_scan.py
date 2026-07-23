@@ -201,15 +201,27 @@ def _spend_snapshot(session) -> dict | None:
     }
 
 
+# Regions most AWS accounts concentrate spend in. Absent paid Cost Explorer data
+# to rank by, scan these first so a deadline cutoff trims the empty long tail,
+# not the region actually holding the waste (usually us-east-1).
+_DEFAULT_REGION_PRIORITY = [
+    "us-east-1", "us-west-2", "us-east-2", "eu-west-1",
+    "eu-central-1", "eu-west-2", "ap-southeast-1", "ap-southeast-2",
+    "ap-northeast-1", "ap-south-1", "us-west-1", "ca-central-1",
+]
+
+
 def _pick_regions(spend: dict | None, session) -> list[str]:
-    """All opted-in regions, deadline-bounded by the caller.
+    """All opted-in regions, ordered so the caller's deadline trims the tail.
 
     We do NOT cap or drop regions: without the (paid) CE spend data there is no
     free way to know which regions carry cost, and capping to an arbitrary N
     risks skipping the exact region holding the waste. Empty regions scan fast,
-    and run_deep_audit's 45s deadline bounds the worst case. When `--spend` did
-    fetch CE region data, order by spend descending so a budget cutoff does the
-    valuable regions first.
+    and run_deep_audit's deadline bounds the worst case. Ordering is what keeps
+    that deadline from cutting off the region that matters: with `--spend` CE
+    data, scan by spend descending; without it, fall back to a default prior
+    (the regions most accounts spend the most in) so the long tail is trimmed,
+    never us-east-1.
     """
     from .analyzers.optimizer import _discover_regions
 
@@ -217,6 +229,9 @@ def _pick_regions(spend: dict | None, session) -> list[str]:
     if spend and spend.get("regions"):
         weight = {r: v for r, v in spend["regions"].items() if _REGION_RE.match(r)}
         discovered.sort(key=lambda r: weight.get(r, 0.0), reverse=True)
+    else:
+        rank = {r: i for i, r in enumerate(_DEFAULT_REGION_PRIORITY)}
+        discovered.sort(key=lambda r: rank.get(r, len(_DEFAULT_REGION_PRIORITY)))
     return discovered
 
 
@@ -360,7 +375,7 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
             done = len(report.get("regions_scanned") or [])
             print(
                 _dim(f"scanned {done} of {done + len(timed_out)} regions "
-                     f"(budget hit; unscanned: {', '.join(timed_out)})"),
+                     f"(reached the {_SCAN_DEADLINE_S}s time limit; skipped: {', '.join(timed_out)})"),
                 file=out,
             )
 
@@ -644,7 +659,7 @@ def run(args) -> int:
     lingering = bool(report.get("_threads_abandoned"))
 
     if not has_results:
-        # AWS produced nothing (budget hit). Don't blank the whole cross-provider
+        # AWS produced nothing (hit the time limit). Don't blank the whole cross-provider
         # frame: if other providers are connected, still gather and show them, with
         # AWS degraded to a note. AWS failing is one row, not the whole scan.
         extra_blocks, extra_abandoned = ([], False)
@@ -653,7 +668,7 @@ def run(args) -> int:
             extra_blocks, extra_abandoned = gather_extra_providers(_fams, spend=want_spend)
         lingering = lingering or extra_abandoned
         if any(b.status == "ok" for b in extra_blocks):
-            print(_dim("AWS: hit the 45s budget, no regions finished; showing your other providers"), file=out)
+            print(_dim("AWS: hit the 45s time limit, no regions finished; showing your other providers"), file=out)
             _render(out, None, None, demo=False, ce_denied=False, extra_blocks=extra_blocks)
             if as_json:
                 print(json.dumps(_json_payload(
@@ -668,7 +683,7 @@ def run(args) -> int:
             return _finish(EXIT_OK, lingering)
         # truly nothing usable anywhere
         code = _fail(out, EXIT_PARTIAL_EMPTY, [
-            "the scan hit its 45s budget before any region finished",
+            "the scan hit its 45s time limit before any region finished",
             "  try a narrower run: `nable scan --regions us-east-1`",
         ], "timeout", t0)
         return _finish(code, lingering)

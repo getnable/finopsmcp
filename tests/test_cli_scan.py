@@ -181,7 +181,7 @@ def test_aws_timeout_still_shows_other_providers(capsys, monkeypatch):
                           spend_usd=13300.0, estimated=True, detail="OpenAI $9.2k")
     monkeypatch.setattr("finops.scan_assembler.gather_extra_providers",
                         lambda fams, *, spend, **kw: ([ai], False))
-    empty = _report(scanned=[])   # no regions finished (budget hit)
+    empty = _report(scanned=[])   # no regions finished (hit the time limit)
     code, events, _ = _run(_args(), _session(), report=empty)
     out = capsys.readouterr().out
     assert code == cli_scan.EXIT_OK                 # NOT EXIT_PARTIAL_EMPTY
@@ -236,7 +236,7 @@ def test_partial_with_results_exits_zero_with_banner(capsys):
     code, _, _ = _run(_args(), _session(), report=rep)
     out = capsys.readouterr().out
     assert code == cli_scan.EXIT_OK
-    assert "budget hit" in out and "ap-south-1" in out
+    assert "time limit" in out and "ap-south-1" in out
 
 
 def test_partial_with_nothing_exits_five(capsys):
