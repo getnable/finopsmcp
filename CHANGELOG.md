@@ -2,6 +2,11 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.184
+
+- **A local budget for your AI coding agent.** New `finops ai-budget` command and the `check_ai_budget` MCP tool put a budget on the agent itself, not just your cloud. It reads your Claude Code token usage locally (nothing uploaded) and shows where you stand: this window, month to date, burn rate, and a verdict. On a metered API key you set a dollar cap; on a flat plan (Claude Max, Cursor) it shows how much compute you are pulling for your fixed fee, a heavy month can be 20x+ your plan, and the provider covers the difference. Your agent can call `check_ai_budget` before a big task and relay where you stand. Advisory only, it never blocks.
+- **Honest by construction.** Token counts and burn rate are exact, read straight from the logs. Dollar figures are always labeled a list-price estimate, never your actual bill, and a flat plan is never called "over budget" off an estimate, because the fee is what you pay. It also does not invent a percentage of a plan's hidden rate limit, no API exposes that. Billable tokens are counted separately from cheap cache re-reads, so the meter measures real work.
+
 ## 0.8.183
 
 - **`nable scan` is now cross-provider, not AWS-only.** When you have AI providers, GCP, or Azure connected, one scan shows spend and recoverable waste across all of them in one frame, the normalized cross-provider picture no cloud console gives you. A pure-AWS user sees exactly the v1 output; a machine with only AI keys and no AWS still scans. Built as an assembler over the existing aggregators (`scan_assembler.py`), self-tailoring to `connected_families()`.
