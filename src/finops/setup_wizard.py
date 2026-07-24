@@ -832,6 +832,29 @@ def _watch_for_aws_creds(have_ids: set, timeout_s: float = 900.0) -> list:
     return []
 
 
+def _offer_run_aws_login(cmd: list[str]) -> None:
+    """gh-style: offer to run the AWS login command right here instead of sending the
+    user to a second terminal. Runs it sharing this process's stdio, so `aws configure
+    sso`'s prompts and its browser device-flow work exactly as if they ran it by hand.
+    Best-effort and consent-gated; whatever credentials it produces, the watcher that
+    runs next connects automatically."""
+    import subprocess
+
+    shown = " ".join(cmd)
+    ans = _prompt(f"  Run `{shown}` for you now? [Y/n]", default="y").lower()
+    if ans not in ("y", "yes", ""):
+        return
+    _emit_step("ran_aws_login_inline", cmd=cmd[0] + " " + (cmd[1] if len(cmd) > 1 else ""))
+    print()
+    try:
+        subprocess.run(cmd)  # inherits stdio: interactive prompts + SSO browser flow
+    except KeyboardInterrupt:
+        pass
+    except (FileNotFoundError, OSError) as e:
+        _warn(f"Could not run it ({e}). Run `{shown}` yourself, this will keep watching.")
+    print()
+
+
 def _guide_and_watch_for_creds(have_ids: set):
     """No credentials on this machine: give ONE tailored next step, then watch.
 
@@ -842,7 +865,7 @@ def _guide_and_watch_for_creds(have_ids: set):
     that fits, and connect automatically when it lands. Returns a candidate or None."""
     import shutil
 
-    from .welcome import dim  # module-scope name does not exist here; import locally
+    from .welcome import bold, dim  # module-scope names; import locally
 
     print("  No AWS credentials found on this machine.\n")
     try:
@@ -851,16 +874,17 @@ def _guide_and_watch_for_creds(have_ids: set):
     except Exception:
         sso_pending = []
 
+    run_cmd: list[str] | None = None
     if sso_pending:
         _emit_step("guided_sso_login")
         print("  You already have an AWS Identity Center (SSO) profile. It just needs a login.")
-        print("  Run this in another terminal:\n")
-        print(f"      {sso_pending[0]['login_command']}\n")
+        run_cmd = str(sso_pending[0]["login_command"]).split()
     elif shutil.which("aws"):
         _emit_step("guided_aws_configure")
-        print("  Set credentials up in another terminal, whichever fits:\n")
-        print("      aws configure sso     (company SSO / Identity Center)")
-        print("      aws configure         (an IAM access key)\n")
+        print("  Set up AWS access, whichever fits:")
+        print(f"      {bold('aws configure sso')}     company SSO / Identity Center (recommended)")
+        print( "      aws configure         an IAM access key")
+        run_cmd = ["aws", "configure", "sso"]
     else:
         _emit_step("guided_install_cli")
         print("  The AWS CLI is not installed. Fastest path:\n")
@@ -872,6 +896,12 @@ def _guide_and_watch_for_creds(have_ids: set):
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("  Then re-run this command.\n")
         return None
+
+    # gh-style: offer to run the login right here rather than making them open a
+    # second terminal. Sharing this terminal lets the interactive prompts and the
+    # SSO browser device-flow work; the watcher below connects the instant it lands.
+    if run_cmd:
+        _offer_run_aws_login(run_cmd)
 
     # Ctrl-C is the expected way out of this screen, so it must exit clean. A stray
     # interrupt landing between the prints (not inside the watch loop) used to raise

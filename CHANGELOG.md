@@ -2,6 +2,10 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.187
+
+- **Connect is now as few keystrokes as `gh auth login`.** When you have no AWS credentials, nable no longer just tells you to open a second terminal and run `aws configure sso`. It offers to run it for you, right there, sharing the terminal so the interactive prompts and the SSO browser sign-in work exactly as if you had run it by hand, then the credential watcher connects the instant the login lands. One flow, one place: run `nable`, answer the browser prompt, you're connected. Consent-gated (a clear `[Y/n]`), TTY-only, and declining falls straight through to watching so nothing is forced.
+
 ## 0.8.186
 
 - **The no-credentials setup path no longer dead-ends or stalls.** Telemetry showed the real cliff: of machines that opened AWS connect, most never finished the credential probe, and the ones without credentials sat through 36 to 72 seconds of silence before anything appeared. Two fixes: (1) the probe's deadline is now actually enforced (it was bounded only for result collection, then blocked on stragglers anyway, boto3 sitting on the EC2 metadata endpoint through its retries); it returns in ~0.4s with no credentials and still finds real ones in under a second. (2) When nothing is found, nable now recommends the single command that fits your machine (`aws configure sso`, `aws configure`, or installing the CLI) and then **watches for the credentials to appear and connects automatically**, instead of blocking on an access-key prompt you cannot satisfy without leaving for the console. Set credentials up in another terminal and nable notices, no re-running.

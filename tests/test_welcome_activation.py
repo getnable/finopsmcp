@@ -312,6 +312,7 @@ def test_guide_screen_actually_renders(monkeypatch, capsys):
 
     monkeypatch.setattr(sw, "_detect_sso_profiles_needing_login", lambda: [])
     monkeypatch.setattr(sw, "_watch_for_aws_creds", lambda have_ids, **kw: [])
+    monkeypatch.setattr(sw, "_offer_run_aws_login", lambda *a, **k: None)  # not under test here
     monkeypatch.setattr(sw, "_emit_step", lambda *a, **k: None)
     monkeypatch.setattr(_sys, "stdin", _Tty(_sys.stdin))
     monkeypatch.setattr(_sys, "stdout", _Tty(_sys.stdout))
@@ -320,3 +321,56 @@ def test_guide_screen_actually_renders(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "No AWS credentials found" in out
     assert "Leave this running" in out          # the line that used to raise
+
+
+def test_guided_path_offers_to_run_aws_login_inline(monkeypatch, capsys):
+    """gh-style: with the AWS CLI present and no creds, the guide offers to RUN
+    `aws configure sso` right here (shared stdio, so the browser flow works) instead
+    of only telling the user to open a second terminal. Accepting runs it, then the
+    watcher connects. This is the '5-minute, gh-login-grade' onboarding leap."""
+    import sys as _sys
+    from finops import setup_wizard as sw
+
+    class _Tty:
+        def __init__(self, r): self._r = r
+        def isatty(self): return True
+        def __getattr__(self, n): return getattr(self._r, n)
+
+    monkeypatch.setattr(sw, "_detect_sso_profiles_needing_login", lambda: [])
+    monkeypatch.setattr("shutil.which", lambda n: "/usr/bin/aws" if n == "aws" else None)
+    monkeypatch.setattr(sw, "_watch_for_aws_creds", lambda have_ids, **kw: [])
+    monkeypatch.setattr(sw, "_emit_step", lambda *a, **k: None)
+    monkeypatch.setattr(_sys, "stdin", _Tty(_sys.stdin))
+    monkeypatch.setattr(_sys, "stdout", _Tty(_sys.stdout))
+    monkeypatch.setattr(sw, "_prompt", lambda *a, **k: "y")   # accept the offer
+
+    ran = {}
+    monkeypatch.setattr("subprocess.run", lambda cmd, *a, **k: ran.setdefault("cmd", cmd))
+
+    sw._guide_and_watch_for_creds(set())
+    assert ran.get("cmd") == ["aws", "configure", "sso"]      # it ran the login for us
+    assert "aws configure sso" in capsys.readouterr().out
+
+
+def test_guided_path_declines_run_cleanly(monkeypatch):
+    """Declining the offer must NOT run anything and must fall through to watching."""
+    import sys as _sys
+    from finops import setup_wizard as sw
+
+    class _Tty:
+        def __init__(self, r): self._r = r
+        def isatty(self): return True
+        def __getattr__(self, n): return getattr(self._r, n)
+
+    monkeypatch.setattr(sw, "_detect_sso_profiles_needing_login", lambda: [])
+    monkeypatch.setattr("shutil.which", lambda n: "/usr/bin/aws" if n == "aws" else None)
+    monkeypatch.setattr(sw, "_watch_for_aws_creds", lambda have_ids, **kw: [])
+    monkeypatch.setattr(sw, "_emit_step", lambda *a, **k: None)
+    monkeypatch.setattr(_sys, "stdin", _Tty(_sys.stdin))
+    monkeypatch.setattr(_sys, "stdout", _Tty(_sys.stdout))
+    monkeypatch.setattr(sw, "_prompt", lambda *a, **k: "n")   # decline
+
+    ran = {}
+    monkeypatch.setattr("subprocess.run", lambda cmd, *a, **k: ran.setdefault("cmd", cmd))
+    assert sw._guide_and_watch_for_creds(set()) is None
+    assert "cmd" not in ran                                   # nothing was run
