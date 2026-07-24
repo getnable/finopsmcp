@@ -295,3 +295,28 @@ def test_watcher_returns_empty_on_timeout_without_hanging(monkeypatch):
     monkeypatch.setattr(sw, "_detect_aws_candidates", lambda: [])
     monkeypatch.setattr("time.sleep", lambda s: None)
     assert sw._watch_for_aws_creds(have_ids=set(), timeout_s=0.01) == []
+
+
+def test_guide_screen_actually_renders(monkeypatch, capsys):
+    """Regression: the guide printed through a name that only existed inside other
+    functions, so the whole no-creds path died with NameError before it ever watched.
+    Tests that stub the watcher never execute these prints, and the bug shipped. This
+    one runs the real screen with only the watch loop stubbed."""
+    import sys as _sys
+    from finops import setup_wizard as sw
+
+    class _Tty:
+        def __init__(self, real): self._r = real
+        def isatty(self): return True
+        def __getattr__(self, n): return getattr(self._r, n)
+
+    monkeypatch.setattr(sw, "_detect_sso_profiles_needing_login", lambda: [])
+    monkeypatch.setattr(sw, "_watch_for_aws_creds", lambda have_ids, **kw: [])
+    monkeypatch.setattr(sw, "_emit_step", lambda *a, **k: None)
+    monkeypatch.setattr(_sys, "stdin", _Tty(_sys.stdin))
+    monkeypatch.setattr(_sys, "stdout", _Tty(_sys.stdout))
+
+    assert sw._guide_and_watch_for_creds(set()) is None
+    out = capsys.readouterr().out
+    assert "No AWS credentials found" in out
+    assert "Leave this running" in out          # the line that used to raise

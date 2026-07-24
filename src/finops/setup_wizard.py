@@ -807,6 +807,8 @@ def _guide_and_watch_for_creds(have_ids: set):
     that fits, and connect automatically when it lands. Returns a candidate or None."""
     import shutil
 
+    from .welcome import dim  # module-scope name does not exist here; import locally
+
     print("  No AWS credentials found on this machine.\n")
     try:
         sso_pending = [s for s in _detect_sso_profiles_needing_login()
