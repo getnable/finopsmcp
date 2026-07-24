@@ -2,6 +2,11 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.186
+
+- **The no-credentials setup path no longer dead-ends or stalls.** Telemetry showed the real cliff: of machines that opened AWS connect, most never finished the credential probe, and the ones without credentials sat through 36 to 72 seconds of silence before anything appeared. Two fixes: (1) the probe's deadline is now actually enforced (it was bounded only for result collection, then blocked on stragglers anyway, boto3 sitting on the EC2 metadata endpoint through its retries); it returns in ~0.4s with no credentials and still finds real ones in under a second. (2) When nothing is found, nable now recommends the single command that fits your machine (`aws configure sso`, `aws configure`, or installing the CLI) and then **watches for the credentials to appear and connects automatically**, instead of blocking on an access-key prompt you cannot satisfy without leaving for the console. Set credentials up in another terminal and nable notices, no re-running.
+- **No sample data at failure moments.** `nable scan` with no credentials, and the first-run close, used to advertise `--demo`; someone who just tried to see their own bill does not want a sample one. Both now point at the connect flow that waits. `serve --demo` (the dashboard preview) is unchanged.
+
 ## 0.8.185
 
 - **`finops ai-budget` now just asks you.** Run it once and it asks two questions, flat subscription or metered API, and what you pay per month, then remembers. No flags to memorize, and any plan cost works, not a hardcoded $200. Flags (`--plan-cost`, `--spend-cap`, `--tokens`) still work for scripts, and the agent can set the budget conversationally through `set_ai_budget`.
