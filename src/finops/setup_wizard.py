@@ -425,7 +425,9 @@ def _detect_aws_candidates() -> list:
     not inherit shell env vars when Claude Desktop spawns it.
     """
     import boto3
-    import concurrent.futures
+    import queue as _queue
+    import threading
+    import time as _time
 
     def _probe(profile):
         try:
@@ -453,24 +455,57 @@ def _detect_aws_candidates() -> list:
         profiles = []
 
     # Probe every named profile plus the ambient default chain (None) concurrently
-    # under a hard wall-clock deadline. Sequential probing stalled onboarding for
-    # seconds per profile when an SSO token needed refreshing or IMDS was
-    # firewalled; with several profiles that became a 30s+ freeze and a quit point.
-    # Anything unresolved past the deadline is abandoned (treated as "no creds").
+    # under a hard wall-clock deadline that is ACTUALLY honored.
+    #
+    # This used to run in a ThreadPoolExecutor `with` block. That bounded only how
+    # long we COLLECTED results: the context manager's exit calls shutdown(wait=True),
+    # which then blocked on every straggler anyway. Measured in the wild: probes took
+    # 36-72s on machines with no credentials (boto3 sitting on the EC2 metadata
+    # endpoint through its retries), all of it silent, and 19 of 24 machines that
+    # opened AWS connect quit during that wait without ever finishing the probe.
+    #
+    # Now: plain DAEMON threads that are simply abandoned at the deadline (they also
+    # cannot hold up interpreter exit, which an executor's atexit join can), plus a
+    # hard cap on the metadata service so a firewalled IMDS cannot stall at all.
     _DEADLINE = 4.0
     targets = list(profiles) + [None]
-    resolved: list = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
-        futs = {pool.submit(_probe, p): p for p in targets}
+    results: "_queue.Queue" = _queue.Queue()
+
+    def _worker(p):
         try:
-            for fut in concurrent.futures.as_completed(futs, timeout=_DEADLINE):
-                r = fut.result()
-                if r:
-                    p = futs[fut]
-                    r["label"] = f"profile '{p}'" if p else "default credentials"
-                    resolved.append(r)
-        except concurrent.futures.TimeoutError:
-            pass  # deadline hit, use whatever resolved in time
+            results.put((p, _probe(p)))
+        except Exception:
+            results.put((p, None))
+
+    # Only set what the user has not: never override a deliberate IMDS config.
+    _meta_keys = ("AWS_METADATA_SERVICE_TIMEOUT", "AWS_METADATA_SERVICE_NUM_ATTEMPTS")
+    _restore = {k: os.environ.get(k) for k in _meta_keys}
+    for k, v in (("AWS_METADATA_SERVICE_TIMEOUT", "1"),
+                 ("AWS_METADATA_SERVICE_NUM_ATTEMPTS", "1")):
+        os.environ.setdefault(k, v)
+
+    resolved: list = []
+    try:
+        for p in targets:
+            threading.Thread(target=_worker, args=(p,), daemon=True).start()
+        end = _time.time() + _DEADLINE
+        for _ in targets:
+            remaining = end - _time.time()
+            if remaining <= 0:
+                break
+            try:
+                p, r = results.get(timeout=remaining)
+            except _queue.Empty:
+                break  # deadline hit; abandon whatever is still running
+            if r:
+                r["label"] = f"profile '{p}'" if p else "default credentials"
+                resolved.append(r)
+    finally:
+        for k, v in _restore.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
     # Prefer named profiles; include the default chain only for accounts a named
     # profile didn't already cover. Dedupe by account_id.
