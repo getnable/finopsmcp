@@ -113,7 +113,7 @@ def test_skip_offers_real_connect_never_fake_numbers(monkeypatch, capsys):
     assert "Here's nable on a sample bill" not in out  # the old auto-demo is gone
     assert "No numbers yet, on purpose." in out  # honest empty state
     assert "finops setup aws" in out  # clear real next step offered
-    assert "welcome --demo" in out  # demo stays available as an explicit opt-in
+    assert "--demo" not in out  # never advertise sample data at a failure moment
 
 
 def test_menu_default_enter_connects_not_skips(monkeypatch):
@@ -227,9 +227,10 @@ def test_ambient_aws_declined_falls_through_to_menu_then_connect_nudge(monkeypat
     assert "No numbers yet, on purpose." in out  # honest empty state, real next step
 
 
-def test_no_creds_close_offers_inline_sample_tour(monkeypatch, capsys):
-    """Skipping everything offers the clearly-labeled sample tour inline; accepting
-    runs it (opt-in, so 'real data or nothing' holds: sample never sets shown)."""
+def test_no_creds_close_never_offers_a_sample_tour(monkeypatch, capsys):
+    """The close used to ask 'Want a 10-second tour on sample data?' and default it
+    to YES, spending the one moment we had on fake numbers. It must never offer
+    sample data here; it points at the connect flow that waits for credentials."""
     monkeypatch.setattr("finops.setup_wizard._configure_claude_desktop", lambda *a, **k: None)
 
     async def _no_ambient(self):
@@ -237,9 +238,7 @@ def test_no_creds_close_offers_inline_sample_tour(monkeypatch, capsys):
 
     monkeypatch.setattr("finops.connectors.aws.AWSConnector.is_configured", _no_ambient)
     monkeypatch.setattr(w, "_llm_ambient_provider", lambda: None)
-    # skip the menu, then accept the inline sample tour (Enter defaults to yes)
-    answers = iter(["5", ""])
-    monkeypatch.setattr("builtins.input", lambda *a, **k: next(answers))
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "5")  # skip the menu
 
     calls = []
     monkeypatch.setattr(w, "_show_value_moment", lambda demo=False: calls.append(demo) or False)
@@ -247,5 +246,52 @@ def test_no_creds_close_offers_inline_sample_tour(monkeypatch, capsys):
     w.run_welcome_flow(demo=False)
     out = capsys.readouterr().out
 
-    assert calls == [True]  # the sample tour ran: demo-labeled, opt-in
-    assert "No numbers yet, on purpose." in out  # the honest close still printed first
+    assert calls == []  # no sample tour ran, and nothing prompted for one
+    assert "sample data" not in out.lower()
+    assert "No numbers yet, on purpose." in out  # the honest close still printed
+    assert "connect" in out  # the real path forward is what we offer instead
+
+
+# ── no-ambient-creds: guide + watch instead of a dead-end paste prompt ─────────
+
+def test_cred_fingerprint_changes_when_aws_files_appear(tmp_path, monkeypatch):
+    """The watcher polls a cheap fingerprint and only pays for a real STS probe when
+    something actually changed. Writing ~/.aws/credentials must move it."""
+    from finops import setup_wizard as sw
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    for k in ("AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_SESSION_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+
+    before = sw._aws_cred_fingerprint()
+    (tmp_path / ".aws").mkdir()
+    (tmp_path / ".aws" / "credentials").write_text("[default]\naws_access_key_id=AKIAX\n")
+    assert sw._aws_cred_fingerprint() != before
+
+    # An env var alone also counts: that is how CI and CloudShell arrive.
+    after_file = sw._aws_cred_fingerprint()
+    monkeypatch.setenv("AWS_PROFILE", "acme")
+    assert sw._aws_cred_fingerprint() != after_file
+
+
+def test_watcher_connects_as_soon_as_credentials_appear(monkeypatch):
+    """The whole point: the user configures credentials in another terminal and nable
+    picks them up, instead of making them re-run the wizard (which took the one
+    observed success five attempts over four hours)."""
+    from finops import setup_wizard as sw
+    fingerprints = iter([(1,), (1,), (2,), (2,)])
+    monkeypatch.setattr(sw, "_aws_cred_fingerprint", lambda: next(fingerprints))
+    monkeypatch.setattr(sw, "_detect_aws_candidates",
+                        lambda: [{"account_id": "123", "label": "profile acme",
+                                  "profile": "acme", "region": "us-east-1", "alias": ""}])
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    found = sw._watch_for_aws_creds(have_ids=set(), timeout_s=30)
+    assert found and found[0]["account_id"] == "123"
+
+
+def test_watcher_returns_empty_on_timeout_without_hanging(monkeypatch):
+    from finops import setup_wizard as sw
+    monkeypatch.setattr(sw, "_aws_cred_fingerprint", lambda: (1,))
+    monkeypatch.setattr(sw, "_detect_aws_candidates", lambda: [])
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    assert sw._watch_for_aws_creds(have_ids=set(), timeout_s=0.01) == []

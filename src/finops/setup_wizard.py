@@ -700,28 +700,9 @@ def setup_aws_account() -> None:
                 return
     else:
         _emit_step("no_ambient_creds")
-        print("  No working AWS credentials found on this machine.\n")
-        print(
-            "  That is fine. The next step can mint a read-only key in your own\n"
-            "  AWS account with one click, no existing credentials needed.\n"
-        )
-
-    # Identity Center (SSO) profiles that exist but are not logged in. Surface
-    # them with the exact login command so an SSO-only user does not conclude
-    # nable ignores ~/.aws/config.
-    if not chosen:
-        try:
-            sso_pending = [s for s in _detect_sso_profiles_needing_login()
-                           if s["account_id"] not in have_ids]
-        except Exception:
-            sso_pending = []
-        if sso_pending:
-            print("  Found AWS Identity Center (SSO) profiles that just need a login:")
-            for s in sso_pending:
-                acct = f" -> account {s['account_id']}" if s["account_id"] else ""
-                print(f"    {s['profile']}{acct}")
-            print("\n  Log in to the one you want, then re-run 'finops setup aws':")
-            print(f"    {sso_pending[0]['login_command']}\n")
+        # Guide to the one command that fits this machine, then watch for the
+        # credentials to land instead of making them re-run the whole wizard.
+        chosen = _guide_and_watch_for_creds(have_ids)
 
     if chosen:
         _emit_step("ambient_confirmed", auth_method="profile" if chosen["profile"] else "default_chain")
@@ -745,6 +726,146 @@ def setup_aws_account() -> None:
         return
 
     _setup_aws_manual(taken)
+
+
+def _aws_cred_fingerprint() -> tuple:
+    """Cheap snapshot of anything that could become AWS credentials.
+
+    Polled by the watcher so a real STS probe only happens when something actually
+    changed on disk or in the environment. Covers env vars, the two ~/.aws files, and
+    the SSO/CLI caches that `aws sso login` writes."""
+    env = tuple(bool(os.getenv(k)) for k in (
+        "AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_SESSION_TOKEN",
+        "AWS_ROLE_ARN", "AWS_WEB_IDENTITY_TOKEN_FILE"))
+    stamps: list = []
+    home = Path.home() / ".aws"
+    for name in ("credentials", "config"):
+        try:
+            st = (home / name).stat()
+            stamps.append((round(st.st_mtime, 2), st.st_size))
+        except OSError:
+            stamps.append(None)
+    for sub in ("sso/cache", "cli/cache"):
+        try:
+            stamps.append(len(list((home / sub).iterdir())))
+        except OSError:
+            stamps.append(None)
+    return (env, tuple(stamps))
+
+
+def _watch_for_aws_creds(have_ids: set, timeout_s: float = 900.0) -> list:
+    """Wait for AWS credentials to appear, then return the detected candidates.
+
+    The only user who ever completed this path did it by leaving, running `aws
+    configure` themselves, and re-running the wizard, five times over four hours.
+    Watching removes the re-running: setting credentials up in another terminal is
+    now enough, nable notices and connects. Ctrl-C drops to the other options."""
+    import time as _t
+
+    start = _t.time()
+    last = _aws_cred_fingerprint()
+    spin, i = "|/-\\", 0
+    tty = sys.stdout.isatty()
+    try:
+        while _t.time() - start < timeout_s:
+            cur = _aws_cred_fingerprint()
+            if cur != last:
+                last = cur
+                if tty:
+                    sys.stdout.write("\r  checking new credentials..." + " " * 30 + "\r")
+                    sys.stdout.flush()
+                found = [c for c in _detect_aws_candidates()
+                         if c["account_id"] not in have_ids]
+                if found:
+                    if tty:
+                        sys.stdout.write("\r" + " " * 72 + "\r")
+                        sys.stdout.flush()
+                    return found
+            if tty:
+                mins = int((_t.time() - start) // 60)
+                sys.stdout.write(
+                    f"\r  {spin[i % 4]} waiting for credentials... "
+                    f"({mins}m, Ctrl-C for other options)   ")
+                sys.stdout.flush()
+            i += 1
+            _t.sleep(1.5)
+    except KeyboardInterrupt:
+        pass
+    if tty:
+        sys.stdout.write("\r" + " " * 72 + "\r")
+        sys.stdout.flush()
+    return []
+
+
+def _guide_and_watch_for_creds(have_ids: set):
+    """No credentials on this machine: give ONE tailored next step, then watch.
+
+    The old path printed three competing options (CloudShell, mint a key, one-click
+    CloudFormation) and then blocked on an access-key prompt the user could not
+    satisfy without leaving for the AWS console. Every observed session abandoned
+    right here. Now: detect what they actually have, recommend the single command
+    that fits, and connect automatically when it lands. Returns a candidate or None."""
+    import shutil
+
+    print("  No AWS credentials found on this machine.\n")
+    try:
+        sso_pending = [s for s in _detect_sso_profiles_needing_login()
+                       if s["account_id"] not in have_ids]
+    except Exception:
+        sso_pending = []
+
+    if sso_pending:
+        _emit_step("guided_sso_login")
+        print("  You already have an AWS Identity Center (SSO) profile. It just needs a login.")
+        print("  Run this in another terminal:\n")
+        print(f"      {sso_pending[0]['login_command']}\n")
+    elif shutil.which("aws"):
+        _emit_step("guided_aws_configure")
+        print("  Set credentials up in another terminal, whichever fits:\n")
+        print("      aws configure sso     (company SSO / Identity Center)")
+        print("      aws configure         (an IAM access key)\n")
+    else:
+        _emit_step("guided_install_cli")
+        print("  The AWS CLI is not installed. Fastest path:\n")
+        print("      brew install awscli && aws configure\n")
+        print("  (no CLI? Ctrl-C and pick 'paste an access key' instead)\n")
+
+    # Never watch without a human at the keyboard: a piped or CI invocation would
+    # otherwise block for the full timeout with nobody able to Ctrl-C it.
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("  Then re-run this command.\n")
+        return None
+
+    # Ctrl-C is the expected way out of this screen, so it must exit clean. A stray
+    # interrupt landing between the prints (not inside the watch loop) used to raise
+    # and dump a traceback at the exact moment the user was already bailing.
+    try:
+        print(dim("  Leave this running. nable connects the moment credentials appear.\n"))
+        found = _watch_for_aws_creds(have_ids)
+    except KeyboardInterrupt:
+        print()
+        found = []
+    if not found:
+        _emit_step("watch_abandoned")
+        print()
+        return None
+
+    if len(found) == 1:
+        c = found[0]
+        extra = f" ({c['alias']})" if c.get("alias") else ""
+        _ok(f"Found credentials: {c['label']} -> account {c['account_id']}{extra}")
+        _emit_step("watch_connected")
+        return c
+
+    print("\n  Found credentials for several accounts:")
+    for i, c in enumerate(found, 1):
+        extra = f" ({c['alias']})" if c.get("alias") else ""
+        print(f"   {i}) {c['label']} -> account {c['account_id']}{extra}")
+    pick = _prompt("  Which one?", default="1")
+    if pick.isdigit() and 1 <= int(pick) <= len(found):
+        _emit_step("watch_connected")
+        return found[int(pick) - 1]
+    return None
 
 
 def _print_one_click_key_offer(region: str = "us-east-1") -> None:

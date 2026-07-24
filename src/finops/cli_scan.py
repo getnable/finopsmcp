@@ -565,8 +565,8 @@ def run(args) -> int:
             return _fail(out, EXIT_NO_CREDS, [
                 "no AWS credentials found on this machine",
                 "  looked in: env vars, ~/.aws/credentials, ~/.aws/config (SSO), instance metadata",
-                "  fix: `aws configure` or `aws sso login`, then rerun",
-                "  or try it on sample data right now: `nable scan --demo`",
+                "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
+                "  then: `nable connect` waits and connects the moment they appear",
             ], "no-creds", t0)
         sts = session.client("sts")
         ident = sts.get_caller_identity()
@@ -581,8 +581,8 @@ def run(args) -> int:
         if klass == "no-creds":
             return _fail(out, EXIT_NO_CREDS, [
                 "no usable AWS credentials found",
-                "  fix: `aws configure` or `aws sso login`, then rerun",
-                "  or try sample data: `nable scan --demo`",
+                "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
+                "  then: `nable connect` waits and connects the moment they appear",
             ], "no-creds", t0)
         if klass == "denied":
             return _fail(out, EXIT_DENIED, [

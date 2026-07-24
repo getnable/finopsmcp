@@ -900,20 +900,11 @@ def run_welcome_flow(demo: bool = False) -> None:
             _line(dim("  Connect an account to see it:  ") + cyan(_cli("setup aws")) + dim("  (read-only, ~1 min)"))
             _line(dim("  Or paste a model key:  ") + cyan(_cli("setup openai")) + dim("  for your AI / token bill."))
         _blank()
-        # Do not end the run empty-handed: offer the clearly-labeled sample tour
-        # inline, one keystroke, instead of pointing at a command to re-run. The
-        # "real data or nothing" stance holds: sample never sets `shown`, and it
-        # is opt-in and labeled on every line it prints.
-        _demo_ans = "n"
-        try:
-            _demo_ans = input("  Want a 10-second tour on sample data instead? [Y/n]: ").strip().lower() or "y"
-        except (KeyboardInterrupt, EOFError):
-            _demo_ans = "n"
-        _blank()
-        if _demo_ans in ("y", "yes"):
-            _show_value_moment(demo=True)
-        else:
-            _line(dim("  Later: ") + cyan(_cli("welcome --demo")) + dim("  walks the same clearly-labeled sample bill."))
+        # No sample-data consolation prize. Someone who just tried to see their own
+        # bill does not want a tour of StreamCo's; offering it (and defaulting it to
+        # yes) spent the one moment we had on fake numbers instead of on getting
+        # their credentials working. Point at the connect flow that waits for them.
+        _line(dim("  ") + cyan(_cli("connect")) + dim("  sets credentials up and waits, it connects the moment they land."))
         _blank()
 
     # Cross-sell the rest of the machine: one scan, one prompt, and the OpenAI
