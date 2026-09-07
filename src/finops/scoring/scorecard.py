@@ -375,15 +375,16 @@ def _normalize_commitment_data(commitment_data: dict) -> tuple[float, float, flo
     coverage ("Only 0% of compute is under commitments"), regardless of real
     coverage.
 
-    coverage_pct wins outright when present (checked by key membership, not
-    truthiness, so a caller that legitimately passes 0% is trusted rather
-    than treated as absent, the same "absent vs. genuinely zero" distinction
-    _require_published makes below). Only when it is missing do we derive the
+    coverage_pct wins outright when present and non-null (checked with a
+    not-None test, not truthiness, so a caller that legitimately passes 0% is
+    trusted rather than treated as absent, while a present-but-null value falls
+    back to the components rather than reaching _clamp as None). Only when it is
+    absent or null do we derive the
     same "average of the instruments that answered" figure
     combined_coverage_pct already computes elsewhere in this codebase, from
     whichever of the hosted keys showed up.
     """
-    if "coverage_pct" in commitment_data:
+    if commitment_data.get("coverage_pct") is not None:
         coverage_pct = commitment_data["coverage_pct"]
     else:
         parts = [v for v in (
@@ -392,10 +393,10 @@ def _normalize_commitment_data(commitment_data: dict) -> tuple[float, float, flo
         ) if v is not None]
         coverage_pct = sum(parts) / len(parts) if parts else 0
 
-    if "on_demand_usd" in commitment_data:
+    if commitment_data.get("on_demand_usd") is not None:
         on_demand_spend = commitment_data["on_demand_usd"]
     else:
-        on_demand_spend = commitment_data.get("uncovered_on_demand_usd", 0)
+        on_demand_spend = commitment_data.get("uncovered_on_demand_usd") or 0
 
     potential_savings = commitment_data.get("potential_savings_usd", 0)
 
