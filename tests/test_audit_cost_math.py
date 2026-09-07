@@ -771,6 +771,58 @@ def test_scorecard_recoverable_total_includes_the_commitment_opportunity():
         f"{card.summary!r}")
 
 
+def test_commitment_coverage_scores_the_hosted_dashboards_shape_not_an_f():
+    """Fixed. The hosted dashboard's producer (nable-enterprise's
+    server_web._get_commitment_data) never emitted coverage_pct / on_demand_usd
+    / potential_savings_usd: it emits savings_plan_coverage_pct +
+    ri_coverage_pct + uncovered_on_demand_usd instead. _score_commitment_coverage
+    only ever read the legacy three, so coverage_pct read the dict .get()
+    default of 0 on every hosted tenant, and the dimension graded a confident F
+    ("Only 0% of compute is under commitments"), no matter how well covered
+    the account actually was."""
+    from finops.scoring.scorecard import _score_commitment_coverage
+
+    hosted_shaped = {
+        "savings_plan_coverage_pct": 55.0,
+        "savings_plan_utilization_pct": 98.0,
+        "ri_coverage_pct": 25.0,
+        "ri_utilization_pct": 100.0,
+        "uncovered_on_demand_usd": 4000.0,
+        "_source": "live",
+    }
+
+    dim = _score_commitment_coverage(hosted_shaped)
+
+    assert dim.grade != "F", f"graded {dim.grade} on 40% real coverage: {dim.findings}"
+    assert dim.metadata["coverage_pct"] == pytest.approx(40.0), (
+        "coverage should be the average of the two instruments that answered "
+        "(55% SP + 25% RI) / 2, not the dict-default 0")
+    assert dim.metadata["on_demand_spend_usd"] == pytest.approx(4000.0)
+    assert not any("Only 0%" in f for f in dim.findings), dim.findings
+
+
+def test_commitment_coverage_legacy_keys_still_win_when_present():
+    """Invariant. A caller that already builds the legacy coverage_pct shape
+    (finops/tools/attribution.py does, today, from
+    CommitmentAnalysis.combined_coverage_pct) must see byte-identical
+    behaviour after the hosted-shape fallback is added: legacy keys always
+    take priority over the hosted ones, even if both happen to be present."""
+    from finops.scoring.scorecard import _score_commitment_coverage
+
+    mixed = {
+        "coverage_pct": 72.0,
+        "on_demand_usd": 500.0,
+        # Present but must be ignored: the legacy keys above take priority.
+        "savings_plan_coverage_pct": 1.0,
+        "ri_coverage_pct": 2.0,
+    }
+
+    dim = _score_commitment_coverage(mixed)
+
+    assert dim.metadata["coverage_pct"] == 72.0
+    assert dim.metadata["on_demand_spend_usd"] == 500.0
+
+
 # ── 8. One savings basis across the rightsizing family ───────────────────────
 
 def test_rds_rightsizing_prices_on_the_same_basis_as_its_ec2_sibling(monkeypatch):

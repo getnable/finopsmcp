@@ -359,6 +359,49 @@ def _score_waste_reduction(
     )
 
 
+def _normalize_commitment_data(commitment_data: dict) -> tuple[float, float, float]:
+    """Read (coverage_pct, on_demand_spend, potential_savings) from either
+    shape a caller hands in.
+
+    The scorer's contract is coverage_pct / on_demand_usd /
+    potential_savings_usd: finops/tools/attribution.py builds exactly that,
+    sourced from CommitmentAnalysis.combined_coverage_pct and
+    uncovered_on_demand_usd. The hosted dashboard's producer
+    (nable-enterprise's server_web._get_commitment_data) never emitted those
+    three keys; it emits savings_plan_coverage_pct + ri_coverage_pct +
+    uncovered_on_demand_usd instead. The legacy keys were therefore always
+    absent on a hosted tenant, coverage_pct always read the dict .get()
+    default of 0, and every hosted tenant was graded an F on commitment
+    coverage ("Only 0% of compute is under commitments"), regardless of real
+    coverage.
+
+    coverage_pct wins outright when present (checked by key membership, not
+    truthiness, so a caller that legitimately passes 0% is trusted rather
+    than treated as absent, the same "absent vs. genuinely zero" distinction
+    _require_published makes below). Only when it is missing do we derive the
+    same "average of the instruments that answered" figure
+    combined_coverage_pct already computes elsewhere in this codebase, from
+    whichever of the hosted keys showed up.
+    """
+    if "coverage_pct" in commitment_data:
+        coverage_pct = commitment_data["coverage_pct"]
+    else:
+        parts = [v for v in (
+            commitment_data.get("savings_plan_coverage_pct"),
+            commitment_data.get("ri_coverage_pct"),
+        ) if v is not None]
+        coverage_pct = sum(parts) / len(parts) if parts else 0
+
+    if "on_demand_usd" in commitment_data:
+        on_demand_spend = commitment_data["on_demand_usd"]
+    else:
+        on_demand_spend = commitment_data.get("uncovered_on_demand_usd", 0)
+
+    potential_savings = commitment_data.get("potential_savings_usd", 0)
+
+    return coverage_pct, on_demand_spend, potential_savings
+
+
 def _score_commitment_coverage(
     commitment_data: dict | None = None,
     provider: str = "aws",
@@ -392,9 +435,7 @@ def _score_commitment_coverage(
             data_available=False, metadata=meta,
         )
 
-    coverage_pct = commitment_data.get("coverage_pct", 0)
-    on_demand_spend = commitment_data.get("on_demand_usd", 0)
-    potential_savings = commitment_data.get("potential_savings_usd", 0)
+    coverage_pct, on_demand_spend, potential_savings = _normalize_commitment_data(commitment_data)
     meta["coverage_pct"] = coverage_pct
     meta["on_demand_spend_usd"] = on_demand_spend
     # build_scorecard reads this key back out to compute the headline

@@ -34,6 +34,139 @@ log = logging.getLogger(__name__)
 
 SEASON_LEN = 7   # weekly seasonality in cloud spend is the dominant cycle
 
+# A trailing day read at below this fraction of its OWN prior same-weekday
+# history is treated as a partial/lag artifact rather than a real
+# observation (see _clean_trailing_partial_day). 0.35 means "under 35% of
+# the same-weekday median", comfortably outside normal weekly wobble, so a
+# genuinely slow-but-real day is not misclassified.
+_PARTIAL_DAY_RATIO = 0.35
+
+# Need at least this many prior same-weekday observations before trusting a
+# comparison at all. With fewer, we cannot tell a real low day from an
+# artifact, so we leave the data alone rather than guess.
+_MIN_SAME_WEEKDAY_SAMPLES = 2
+
+# A trailing day is only excused by a decline (see _trend_explains_the_drop)
+# when it is not too far even below what that decline predicts. Below this
+# fraction of the trend's own prediction, a real decline no longer explains
+# it and the day is still treated as a possible artifact.
+_TREND_CONSISTENT_RATIO = 0.5
+
+
+def _same_weekday_history(series: list[float]) -> list[float]:
+    """Values from the same day-of-week as series[-1]: series[-1-SEASON_LEN],
+    series[-1-2*SEASON_LEN], and so on for as far back as the series goes."""
+    n = len(series)
+    history = []
+    k = 1
+    while True:
+        idx = n - 1 - k * SEASON_LEN
+        if idx < 0:
+            break
+        history.append(series[idx])
+        k += 1
+    return history
+
+
+def _trend_explains_the_drop(series: list[float]) -> bool:
+    """
+    True when the SEASON_LEN days right before the trailing day are already
+    on a consistent downward slope that predicts a value close to (or lower
+    than) the real series[-1]: a genuinely declining/winding-down account,
+    not a posting artifact.
+
+    A fast, real decline can put series[-1] far below its own same-weekday
+    history for entirely legitimate reasons (weekly seasonality is a much
+    slower signal than a fast day-over-day wind-down). Overriding a point
+    like that with the same-weekday median would flatten the real decline
+    and feed a fabricated value into Holt-Winters' recursive level/trend
+    update, which then overshoots the forecast. So before accepting the
+    same-weekday check's verdict, we check whether the recent trend alone
+    already explains the low value.
+    """
+    window = series[-(SEASON_LEN + 1):-1]
+    xs = list(range(len(window)))
+    x_mean = statistics.mean(xs)
+    y_mean = statistics.mean(window)
+    num = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, window))
+    den = sum((x - x_mean) ** 2 for x in xs)
+    if den == 0:
+        return False
+
+    slope = num / den
+    if slope >= 0:
+        return False  # flat or rising trend: doesn't excuse a low trailing day
+
+    intercept = y_mean - slope * x_mean
+    predicted = intercept + slope * len(window)  # one step past the window == series[-1]
+    if predicted <= 0:
+        # The trend already extrapolates to zero/negative, so any real,
+        # non-negative value is consistent with (or milder than) the decline.
+        return True
+
+    return series[-1] >= predicted * _TREND_CONSISTENT_RATIO
+
+
+def _clean_trailing_partial_day(series: list[float]) -> list[float]:
+    """
+    Guard the fit against a not-yet-fully-posted trailing day.
+
+    Cost data for the most recent day is frequently incomplete: usage and
+    billing records land with a lag, so "today" (or "yesterday", depending on
+    the data source) can read as near-zero even though the account is
+    spending normally. Holt-Winters has no way to know that and bakes the
+    near-zero straight into the seasonal component for that weekday. Because
+    the seasonal array repeats every SEASON_LEN entries, that one corrupted
+    value resurfaces on every SEASON_LEN-th day across the whole forecast
+    horizon: an account steadily spending $600-700/day forecasts an exact
+    $0.00, with a zero-width interval, on every 7th day out.
+
+    Detection compares series[-1] only to its OWN prior same-weekday
+    observations (series[-1-7], series[-1-14], ...), never to a flat
+    trailing-N-day median. A flat median mixes different weekdays together,
+    so on a real weekday-high/weekend-low cadence it mistakes a genuine low
+    day for an artifact and inflates it, and it can just as easily reinflate
+    a genuine permanent drop to zero. Comparing a day only to its own
+    weekday's history avoids both: a day that matches its own weekday is
+    never touched, no matter how different it looks from the rest of the
+    week. A decline check further guards against fast, genuinely declining
+    accounts, where series[-1] can legitimately sit far below its own
+    same-weekday history because the account is winding down.
+
+    This only ever inspects/replaces series[-1] in a copy of the input; the
+    caller's list is never mutated. Every other point, including a genuine
+    zero anywhere else in the series, is returned exactly as given, so a
+    real drop to zero is never masked. Only this specific partial-tail-day
+    artifact is handled, and only when there is enough same-weekday history
+    to be confident about it: a false negative (missing a partial day) is
+    far cheaper than overwriting a customer's real number.
+    """
+    n = len(series)
+    if n <= SEASON_LEN:
+        return series  # not enough history to judge a trailing baseline
+
+    history = _same_weekday_history(series)
+    if len(history) < _MIN_SAME_WEEKDAY_SAMPLES:
+        return series  # too little same-weekday history to trust a comparison
+
+    weekday_baseline = statistics.median(history)
+    last = series[-1]
+
+    if weekday_baseline <= 1.0 or last >= weekday_baseline * _PARTIAL_DAY_RATIO:
+        return series  # matches its own weekday, or genuinely idle: not an artifact
+
+    if _trend_explains_the_drop(series):
+        return series  # a real, ongoing decline predicts a value this low
+
+    cleaned = list(series)
+    cleaned[-1] = round(weekday_baseline, 2)
+    log.info(
+        "forecast: trailing day $%.2f looks partial next to a $%.2f "
+        "same-weekday median; using the same-weekday median for fitting instead",
+        last, weekday_baseline,
+    )
+    return cleaned
+
 
 def _holt_winters_fit(
     series: list[float],
@@ -390,8 +523,12 @@ class Forecaster:
           <7 pts  → naive (mean)
           7–13    → linear regression
           ≥14     → Holt-Winters (auto-tunes alpha/beta/gamma)
+
+        Guards against a not-yet-fully-posted trailing day (see
+        _clean_trailing_partial_day) before any of the above ever sees it.
         """
-        self._series = [max(0.0, x) for x in series]
+        clamped = [max(0.0, x) for x in series]
+        self._series = _clean_trailing_partial_day(clamped)
         n = len(self._series)
 
         if n < 7:
