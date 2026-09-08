@@ -37,7 +37,6 @@ KNOWN_UNGUARDED = {
     "connectors/kubernetes_costs.py",
     "connectors/universal.py",
     "doctor.py",
-    "ml/forecasting.py",
     "recommendations/bedrock_routing.py",
     "recommendations/commitments.py",
     "recommendations/database_savings_plans.py",

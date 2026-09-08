@@ -9,9 +9,21 @@ Requires an Admin API key (sk-admin-...) or an org-level key with
   "Read billing" and "Read usage" scopes.
 
 Env vars:
-  OPENAI_API_KEY      — standard key (limited usage data)
-  OPENAI_ADMIN_KEY    — admin/org key (full cost + usage breakdown)
-  OPENAI_ORG_ID       — optional, scopes to a specific org
+  OPENAI_API_KEY:   standard key (limited usage data)
+  OPENAI_ADMIN_KEY: admin/org key (full cost + usage breakdown)
+  OPENAI_ORG_ID:    optional, scopes to a specific org
+
+A rejected key (401/403) is not a zero, but /v1/organization/costs is
+admin-only, so a standard OPENAI_API_KEY 401s there even when it is
+perfectly valid: OPENAI_ADMIN_KEY is optional by design. So a costs-endpoint
+auth failure is not proof of a bad key. get_costs() always falls through to
+the usage-based estimate on any costs failure, same as before this module
+tried to distinguish bad keys at all. The auth check that actually
+distinguishes a bad key from a real zero (_is_auth_error) lives at that
+fallback endpoint instead, the one any valid key, standard or admin, is
+entitled to reach. A 401/403 there returns a typed _credential_error_result
+(source="error"), so a caller can tell "nothing was spent" from "nable
+cannot see what was spent" apart.
 """
 from __future__ import annotations
 
@@ -21,7 +33,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# Current OpenAI pricing per 1M tokens (USD) — updated May 2026
+# Current OpenAI pricing per 1M tokens (USD), updated May 2026
 # Source: https://openai.com/pricing
 _MODEL_PRICING: dict[str, dict[str, float]] = {
     # GPT-4o family
@@ -124,7 +136,7 @@ def get_costs(
     try:
         import httpx
     except ImportError:
-        log.warning("httpx not installed — pip install httpx")
+        log.warning("httpx not installed: pip install httpx")
         return _empty_result("httpx_missing")
 
     from ...security.env import get_env
@@ -163,7 +175,17 @@ def get_costs(
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        log.warning("OpenAI costs API failed: %s — falling back to usage estimate", e)
+        # /v1/organization/costs is admin-only. A standard OPENAI_API_KEY
+        # (no OPENAI_ADMIN_KEY set, an intended and documented setup) always
+        # 401s here, not because the key is bad, but because a standard key
+        # was never entitled to call this endpoint in the first place. So an
+        # auth failure here is not evidence of a bad key and must not
+        # short-circuit into a credential error. Every failure of this
+        # endpoint, auth or otherwise, falls through to the usage-based
+        # estimate instead. If the key really is bad, _estimate_from_usage
+        # will find out for certain: that endpoint is the one any valid key,
+        # standard or admin, is entitled to reach.
+        log.warning("OpenAI costs API failed: %s, falling back to usage estimate", e)
         return _estimate_from_usage(start_date, end_date, api_key, org_id)
 
     # Resolve project IDs to names when using an admin key
@@ -352,6 +374,12 @@ def _estimate_from_usage(
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
+        if _is_auth_error(e):
+            # Unlike the costs endpoint, this one is reachable by a standard
+            # key too, so a 401/403 here is the real signal: OpenAI itself
+            # rejected this credential, standard or admin.
+            log.warning("OpenAI rejected the key on the usage API: %s", e)
+            return _credential_error_result(str(e)[:300])
         log.warning("OpenAI usage API also failed: %s", e)
         return _empty_result("api_error")
 
@@ -399,6 +427,39 @@ def _estimate_from_usage(
 def _empty_result(reason: str) -> dict[str, Any]:
     return {"total_usd": 0.0, "by_model": {}, "by_project": {}, "by_model_tokens": {},
             "daily": [], "source": "none", "reason": reason}
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    """True when OpenAI itself rejected the credential (401/403), not when
+    the request merely failed to complete (network blip, OpenAI down, httpx
+    missing). Same distinction the OpenRouter connector already draws with
+    its own status-code check: a rejected key is not the same failure as a
+    call that never got an answer, and must not be handled the same way.
+    """
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return status in (401, 403)
+
+
+def _credential_error_result(detail: str) -> dict[str, Any]:
+    """A typed result for a credential OpenAI itself rejected.
+
+    Every other failure in this module falls through to _empty_result or the
+    token-estimate fallback, which is right for "we could not tell" but wrong
+    for "the key is bad": both would otherwise report total_usd=0.0 with
+    source="none", indistinguishable from a genuine zero-spend account.
+    source="error" is the one carve-out, so a caller can surface "this
+    credential needs attention" instead of a silent $0. No sibling saas
+    connector has a shared error type to reuse (checked anthropic_usage,
+    openrouter, datadog, snowflake): openrouter.py comes closest, with an
+    inline 401/403/404 status check, but returns None to fall back rather
+    than a typed result. This is deliberately still a plain dict, matching
+    every other result this module returns, not a new exception type nothing
+    downstream would know to catch.
+    """
+    out = _empty_result("credential_invalid")
+    out["source"] = "error"
+    out["error"] = detail
+    return out
 
 
 async def is_configured() -> bool:
