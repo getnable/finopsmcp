@@ -69,6 +69,7 @@
                 "s3:GetBucketIntelligentTieringConfiguration",
                 "s3:ListBucketMultipartUploads",
                 "s3:ListMultipartUploadParts",
+                "cur:DescribeReportDefinitions",
                 "organizations:ListAccounts",
                 "organizations:ListRoots",
                 "organizations:ListOrganizationalUnitsForParent",

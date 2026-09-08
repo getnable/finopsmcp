@@ -98,6 +98,14 @@ _REQUIRED_ACTIONS: list[str] = [
     "s3:GetBucketIntelligentTieringConfiguration",
     "s3:ListBucketMultipartUploads",
     "s3:ListMultipartUploadParts",
+    # Cost & Usage Report discovery. Account-level describe (Resource:"*"), so it
+    # is safe in the shared list; it returns WHERE the CUR is delivered (bucket,
+    # prefix, report name) so the box can read the export directly from S3 instead
+    # of paying for Cost Explorer. Reading the CUR OBJECTS needs s3:GetObject, which
+    # is NOT here: it is granted separately, scoped to just the CUR bucket, so the
+    # role never gains "read every object in the account". See the CUR-read grant
+    # in nable-enterprise aws_oidc.cloudformation_template (CurBucket parameter).
+    "cur:DescribeReportDefinitions",
     # Organizations (org rollup — optional but harmless to include)
     "organizations:ListAccounts",
     "organizations:ListRoots",
