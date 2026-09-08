@@ -58,6 +58,12 @@ _GRADE_MAP = [
     (90, "A"), (75, "B"), (60, "C"), (40, "D"), (0, "F"),
 ]
 
+# Grade only when at least this much of the weighted picture was actually
+# measured. Below it a letter is noise dressed as a verdict, so the scorecard
+# reports N/A and leans on the dimension list instead. Half the total weight:
+# e.g. compute+waste, or waste+commitment+anomaly.
+_MIN_GRADED_WEIGHT = 50
+
 
 def _grade(score: float) -> str:
     for threshold, letter in _GRADE_MAP:
@@ -351,11 +357,17 @@ def _score_waste_reduction(
     if not actions:
         actions.append("Continue monitoring for idle and over-provisioned resources")
 
+    # Waste is measured only when a waste-detection input actually ran. With no
+    # idle-resource / k8s / helm inputs, total_waste is 0 and the score would be a
+    # fabricated 100 ("no waste!") over data nobody collected — abstain instead so
+    # it does not inflate the headline grade on a box that never ran the scans.
+    waste_available = bool(idle_resources or k8s_reports or orphaned_helm_releases)
     return DimensionScore(
         name="waste_reduction", display_name="Waste Reduction",
         raw_score=raw, weight=WEIGHTS["waste_reduction"],
         weighted_score=raw * WEIGHTS["waste_reduction"] / 100,
         grade=_grade(raw), findings=findings, actions=actions, metadata=meta,
+        data_available=waste_available,
     )
 
 
@@ -565,6 +577,12 @@ def _score_anomaly_response(
     findings: list[str] = []
     actions:  list[str] = []
     meta:     dict[str, Any] = {}
+    # Availability, not a fabricated middle. The DB-error fallback below reports a
+    # 50 with "data unavailable"; without this flag that 50 flowed into the grade
+    # like a measured score. An abstaining dimension must not count toward it. (A
+    # successful query that finds no anomalies is a real measurement and stays
+    # available.)
+    anomaly_available = True
 
     try:
         from ..storage.db import anomalies, get_engine
@@ -658,6 +676,7 @@ def _score_anomaly_response(
     except Exception as e:
         log.debug("Could not query anomaly response data: %s", e)
         raw = 50.0
+        anomaly_available = False
         findings.append("Anomaly response data unavailable")
         actions.append("Ensure nable has run at least one snapshot to track anomalies")
         meta["error"] = str(e)
@@ -670,6 +689,7 @@ def _score_anomaly_response(
         raw_score=raw, weight=WEIGHTS["anomaly_response"],
         weighted_score=raw * WEIGHTS["anomaly_response"] / 100,
         grade=_grade(raw), findings=findings, actions=actions, metadata=meta,
+        data_available=anomaly_available,
     )
 
 
@@ -800,11 +820,25 @@ def build_scorecard(
     anomaly  = _score_anomaly_response(anomaly_lookback_days)
 
     dimensions = [compute, waste, commits, tags, anomaly]
-    total = sum(d.weighted_score for d in dimensions)
-    grade = _grade(total)
+    # Grade only the dimensions actually measured. An unavailable dimension (no
+    # k8s/EC2 rightsizing data, Cost Explorer gated on a hosted box, no tag data,
+    # no waste scan) used to inject a placeholder raw score straight into the
+    # customer's headline letter — a "C" built partly from numbers nobody
+    # measured. Renormalize the weighted sum over the available weight so an
+    # unavailable dimension abstains, and refuse to grade at all below the floor.
+    available = [d for d in dimensions if d.data_available]
+    avail_weight = sum(d.weight for d in available)
+    graded = avail_weight >= _MIN_GRADED_WEIGHT
+    total = (sum(d.weighted_score for d in available) * 100.0 / avail_weight
+             if avail_weight > 0 else 0.0)
+    grade = _grade(total) if graded else "N/A"
 
-    # Trend
-    trend, delta = _get_score_trend(scope, total)
+    # Trend: only record and compare a real grade. An N/A, or a total scaled from
+    # a lone dimension, would pollute the history the trend reads back.
+    if graded:
+        trend, delta = _get_score_trend(scope, total)
+    else:
+        trend, delta = "no_history", 0.0
 
     # Potential savings. Both keys are read across a dimension boundary, so both
     # go through _require_published: a .get() default here quietly turns a
@@ -833,12 +867,21 @@ def build_scorecard(
         "no_history": "first score recorded",
     }[trend]
 
-    lowest_dim = sorted_dims[0]
-    summary = (
-        f"{label}: {grade} ({total:.0f}/100)  {trend_str}. "
-        f"Biggest gap: {lowest_dim.display_name} ({lowest_dim.raw_score:.0f}/100). "
-        f"Estimated ${potential:,.0f}/month recoverable."
-    )
+    if graded:
+        gap = min(available, key=lambda d: d.raw_score)
+        summary = (
+            f"{label}: {grade} ({total:.0f}/100)  {trend_str}. "
+            f"Biggest gap: {gap.display_name} ({gap.raw_score:.0f}/100). "
+            f"Estimated ${potential:,.0f}/month recoverable."
+        )
+    else:
+        measured = ", ".join(d.display_name for d in available) or "nothing yet"
+        summary = (
+            f"{label}: not enough measured to grade yet "
+            f"({avail_weight} of 100 weight: {measured}). "
+            f"Connect Cost Explorer or run the scans to complete the scorecard. "
+            f"Estimated ${potential:,.0f}/month recoverable so far."
+        )
 
     scorecard = Scorecard(
         scope=scope,
@@ -855,9 +898,12 @@ def build_scorecard(
         top_wins=top_wins,
     )
 
-    # Persist for future trend tracking
-    _persist_score(scope, total, grade, {
-        d.name: round(d.raw_score, 1) for d in dimensions
-    })
+    # Persist for future trend tracking — but only a real grade. Recording an N/A
+    # (or a total scaled from too little data) would seed the trend line with a
+    # number the next run compares against and reports as a swing.
+    if graded:
+        _persist_score(scope, total, grade, {
+            d.name: round(d.raw_score, 1) for d in dimensions
+        })
 
     return scorecard

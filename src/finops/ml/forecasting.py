@@ -439,14 +439,20 @@ class Forecaster:
         Returns up to `days` days of history. Works on day one — Cost Explorer
         has 13 months of history available without any local setup.
         """
-        import asyncio
         try:
-            import boto3
+            from ..billing_access import ce_client
             end = date.today()
             start = end - timedelta(days=days)
 
-            loop = asyncio.get_event_loop()
-            ce = boto3.client("ce", region_name="us-east-1")
+            # The sanctioned Cost Explorer chokepoint, not a raw boto3 client: it
+            # refuses in demo mode, when CE is disabled (NABLE_NO_COST_EXPLORER),
+            # and on unattended/scheduled paths where a per-request charge would
+            # repeat with nobody watching. A refusal raises BillingAccessError,
+            # caught below and degraded to no CE series — the forecast falls back
+            # to whatever local snapshot history exists — rather than an unmetered
+            # charge on the customer's own AWS account.
+            ce = ce_client(reason="forecasting day-one history (no local snapshots)",
+                           region="us-east-1")
 
             kwargs: dict = dict(
                 TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
@@ -458,12 +464,7 @@ class Forecaster:
                     "Dimensions": {"Key": "SERVICE", "Values": [self.service]}
                 }
 
-            def _fetch():
-                return ce.get_cost_and_usage(**kwargs)
-
-            # Always run synchronously via a thread — this method is called
-            # from within an async context via run_in_executor by the caller.
-            resp = _fetch()
+            resp = ce.get_cost_and_usage(**kwargs)
 
             series = []
             for period in resp.get("ResultsByTime", []):

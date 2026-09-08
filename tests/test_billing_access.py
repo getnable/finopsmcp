@@ -253,7 +253,7 @@ LEGACY_CE_SITES: frozenset[str] = frozenset({
     "connectors/aws_services/bedrock.py", "connectors/aws_services/documentdb.py",
     "connectors/aws_services/marketplace.py", "connectors/aws_services/textract.py",
     "connectors/kubernetes_costs.py", "connectors/llm_costs.py",
-    "connectors/universal.py", "doctor.py", "ml/forecasting.py",
+    "connectors/universal.py", "doctor.py",
     "recommendations/bedrock_routing.py", "recommendations/commitments.py",
     "recommendations/database_savings_plans.py", "recommendations/genuine_savings.py",
     "recommendations/rate_detector.py", "recommendations/textract_env.py",

@@ -823,6 +823,72 @@ def test_commitment_coverage_legacy_keys_still_win_when_present():
     assert dim.metadata["on_demand_spend_usd"] == 500.0
 
 
+# ── 7b. The headline grade never fabricates ──────────────────────────────────
+
+def test_waste_abstains_without_a_scan_and_counts_with_one():
+    """Waste used to score a fabricated 100 ("no waste detected") on a box with
+    spend but no waste-detection inputs, and mark it available, so that 100 flowed
+    into the headline grade. With no idle/k8s/helm inputs it must abstain; a real
+    scan is measured. (An empty result is treated as no-scan on purpose: abstaining
+    is honest, a fabricated 100 is not.)"""
+    from finops.scoring.scorecard import _score_waste_reduction
+
+    none_ran = _score_waste_reduction(total_spend=50000.0)
+    assert none_ran.data_available is False, (
+        "waste with no scan inputs must abstain, not score a fabricated 100")
+
+    scanned = _score_waste_reduction(
+        idle_resources=[{"monthly_cost_usd": 500.0}], total_spend=50000.0)
+    assert scanned.data_available is True
+
+
+def test_grade_is_na_when_too_little_is_measured_not_a_fabricated_letter():
+    """The headline fix. Unavailable dimensions used to inject placeholder scores
+    (compute 50, commitment 0/50, waste 100) straight into the letter grade. With
+    Cost Explorer gated (commitment {}), no rightsizing data (compute), and no
+    waste scan, too little is real to grade — the card must say N/A, not a
+    confident letter built from numbers nobody measured."""
+    from finops.scoring.scorecard import build_scorecard
+
+    card = build_scorecard(
+        scope="overall", label="Overall",
+        commitment_data={},            # Cost Explorer gated -> unavailable
+        total_monthly_spend=50000.0,   # real spend, but nothing else measured
+    )
+
+    assert card.grade == "N/A", (
+        f"graded {card.grade} on almost no measured data: {card.summary!r}")
+    assert "not enough measured" in card.summary.lower()
+    by_name = {d.name: d for d in card.dimensions}
+    assert by_name["commitment_coverage"].data_available is False
+    assert by_name["waste_reduction"].data_available is False
+    assert by_name["compute_efficiency"].data_available is False
+
+
+def test_grade_renormalizes_over_available_dimensions_when_enough_is_measured():
+    """When enough is measured, the grade reflects only the measured dimensions,
+    scaled to 0-100, not a total diluted by the ones that abstained. A strong real
+    commitment score plus a real waste scan clear the floor and grade on those."""
+    from finops.scoring.scorecard import build_scorecard
+
+    card = build_scorecard(
+        scope="overall", label="Overall",
+        commitment_data={
+            "savings_plan_coverage_pct": 90.0, "savings_plan_utilization_pct": 99.0,
+            "ri_coverage_pct": 90.0, "ri_utilization_pct": 99.0,
+            "uncovered_on_demand_usd": 100.0, "_source": "live",
+        },
+        idle_resources=[{"monthly_cost_usd": 100.0}],  # a real scan with a finding
+        tag_coverage={"team": 85.0}, required_tags=["team"],  # tags measured too
+        total_monthly_spend=50000.0,
+    )
+    # commitment(20) + waste(25) + tag_hygiene(15) = 60 clears the 50 floor on
+    # their own, with no dependence on whether the anomaly table is queryable in
+    # the test env, so this grades on the measured dimensions and is a real letter.
+    assert card.grade != "N/A", card.summary
+    assert card.total_score > 0
+
+
 # ── 8. One savings basis across the rightsizing family ───────────────────────
 
 def test_rds_rightsizing_prices_on_the_same_basis_as_its_ec2_sibling(monkeypatch):
