@@ -8,6 +8,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-4db8d4)](LICENSE)
 [![MCP Toplist](https://mcptoplist.com/badge/io.github.getnable%2Ffinops-mcp.svg)](https://mcptoplist.com/server/io.github.getnable%2Ffinops-mcp)
 
+**nable is an open-source, local-first FinOps MCP server for cloud and AI cost.** It covers AWS, Azure, GCP, Kubernetes, and 15+ AI and SaaS providers, and runs from your terminal or inside Claude, Cursor, and VS Code.
+
 You do not need to be a cloud-cost expert. nable does three things:
 
 - **Shows what you spend** across AWS, Azure, GCP, Kubernetes, and 15+ AI and SaaS providers, in one place.
@@ -48,6 +50,21 @@ Reads only free cloud APIs, so scanning never adds to your bill. `uvx nable scan
 - "How much are we spending on OpenAI and Anthropic?"
 - "Which instances should we downsize?"
 - "Open a Jira ticket for any waste over $200/mo"
+
+## How nable compares
+
+|  | nable | AWS Cost Explorer | Vantage / CloudHealth | Infracost |
+|---|---|---|---|---|
+| Open source | Yes (Apache-2.0) | No | No | Yes |
+| Where your data lives | Your machine | AWS | Vendor SaaS | Your machine / CI |
+| Clouds covered | AWS, Azure, GCP, Kubernetes | AWS only | Multi-cloud | IaC, any cloud |
+| AI and GPU spend | Yes (OpenAI, Anthropic, Bedrock, GPUs) | No | Limited | No |
+| Runs in Claude / Cursor / VS Code | Yes (MCP) | No | No | No |
+| Fixes waste | Opens a pull request, you approve | No | Dashboards only | No, estimates only |
+| Answers | What you spend and waste now | AWS spend | Multi-cloud spend | Cost of an IaC change before deploy |
+| Price | Free (local) | Free tier, then per request | Paid SaaS | Free (OSS) |
+
+Infracost prices an infrastructure change before you deploy it; nable finds and fixes waste in what you are already running. Fuller breakdowns: [nable vs Vantage](https://getnable.com/nable-vs-vantage), [vs CloudHealth](https://getnable.com/nable-vs-cloudhealth), [vs Kubecost](https://getnable.com/nable-vs-kubecost).
 
 ## Setup
 
@@ -173,6 +190,8 @@ az role assignment create --assignee <client-id> --role 'Monitoring Reader' --sc
 
 <details>
 <summary><b>FAQ</b> — free vs paid, providers, how it compares to Cost Explorer / Vantage</summary>
+
+**What is a FinOps MCP server?** An MCP (Model Context Protocol) server that answers cloud-cost questions from inside an AI editor. nable runs locally as one, so you can ask Claude, Cursor, or VS Code about your AWS, Azure, GCP, and AI spend and it reads your real cost data on your machine to answer.
 
 **Is nable free?** Yes. The terminal scan, every cost query, anomaly detection, all waste and rightsizing findings, and every connector are free forever. The agent team, ticket auto-creation, scheduled digests, and commitment recommendations are Pro.
 
