@@ -10,13 +10,38 @@ Required env vars:
     DATABRICKS_TOKEN   -- personal access token or service-principal OAuth token
 
 Optional env vars:
-    DATABRICKS_ACCOUNT_ID  -- account-level billing API (for multi-workspace orgs)
+    DATABRICKS_WAREHOUSE_ID -- a SQL warehouse id. With it, get_costs() reads
+                               system.billing.usage (metered DBUs, priced from
+                               system.billing.list_prices) over the SQL
+                               Statement Execution API. Three grants: USE
+                               CATALOG system, USE SCHEMA system.billing,
+                               SELECT on the two tables, plus CAN USE on the
+                               warehouse.
+    DATABRICKS_ACCOUNT_ID  -- account-level billing download (account admin only)
     DATABRICKS_ACCOUNT_TOKEN -- service-principal token for account console
-    DATABRICKS_DBU_PRICE   -- override $/DBU for cost estimates (default 0.40)
+    DATABRICKS_DBU_PRICE   -- your contract $/DBU. Used by the two fallback
+                               paths; without it they price at a default 0.40.
+
+WHAT IS MEASURED AND WHAT IS GUESSED.
+
+Three paths, tried in this order, and every CostEntry says which one made it
+(metadata.cost_source) and whether it is an estimate (metadata.is_estimate):
+
+  system.billing.usage   metered usage at the list price the table itself
+                         publishes. is_estimate False. Before any contract
+                         discount, and the metadata says so.
+  usage/download         metered usage from the account console, priced at
+                         DATABRICKS_DBU_PRICE. is_estimate True unless that
+                         price was set by hand.
+  cluster uptime         node type x workers x hours at a default DBU rate.
+                         is_estimate True, always. This is the only path a
+                         bare workspace token can take, and it used to ship
+                         with no label at all.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -118,6 +143,15 @@ def _ms_to_hours(ms: int) -> float:
     return ms / 3_600_000
 
 
+def _api_message(r: httpx.Response) -> str:
+    """The message field of a Databricks error body, or the raw text, capped."""
+    try:
+        body = r.json()
+        return str(body.get("message") or body.get("error") or body)[:300]
+    except Exception:  # noqa: BLE001
+        return (r.text or "")[:300]
+
+
 class DatabricksConnector(BaseConnector):
     """
     Connects to one Databricks workspace via REST API.
@@ -137,7 +171,12 @@ class DatabricksConnector(BaseConnector):
         self._token = os.getenv("DATABRICKS_TOKEN", "")
         self._account_id = os.getenv("DATABRICKS_ACCOUNT_ID", "")
         self._account_token = os.getenv("DATABRICKS_ACCOUNT_TOKEN", self._token)
-        self._dbu_price = float(os.getenv("DATABRICKS_DBU_PRICE", str(_DEFAULT_DBU_PRICE)))
+        self._warehouse_id = os.getenv("DATABRICKS_WAREHOUSE_ID", "").strip()
+        raw_price = os.getenv("DATABRICKS_DBU_PRICE", "")
+        # A price the customer typed is their contract rate; the default is a
+        # guess, and every number priced with it is labeled as one.
+        self._dbu_price_is_contract = bool(raw_price.strip())
+        self._dbu_price = float(raw_price or _DEFAULT_DBU_PRICE)
 
     # ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -195,6 +234,15 @@ class DatabricksConnector(BaseConnector):
                 entries=[],
             )
 
+        fallback_reason = ""
+        if self._warehouse_id:
+            try:
+                return await self._system_billing_usage(start_date, end_date)
+            except Exception as exc:  # noqa: BLE001
+                fallback_reason = f"system.billing.usage read failed ({exc})"
+        else:
+            fallback_reason = "no DATABRICKS_WAREHOUSE_ID, so system.billing.usage was not read"
+
         try:
             summary = await self._try_billable_usage_api(start_date, end_date)
             if summary:
@@ -202,8 +250,8 @@ class DatabricksConnector(BaseConnector):
         except Exception:
             pass
 
-        # Fall back to estimating from cluster/job data
-        return await self._estimated_costs_from_clusters(start_date, end_date)
+        # Fall back to estimating from cluster/job data, and say so on every row.
+        return await self._estimated_costs_from_clusters(start_date, end_date, fallback_reason)
 
     async def get_costs_as_focus(
         self,
@@ -222,6 +270,153 @@ class DatabricksConnector(BaseConnector):
             category="Compute",
             start_date=start_date,
             end_date=end_date,
+        )
+
+    # ── system.billing.usage over SQL (three grants, no account admin) ────────
+
+    # Metered DBUs by workspace and SKU, priced from the list_prices table the
+    # same schema publishes. The join picks the price row in force when the
+    # usage happened. A SKU with no price row still returns its quantity, with
+    # unpriced=1 so the caller can label that row instead of silently zeroing it.
+    _USAGE_SQL = """
+        SELECT u.workspace_id, u.sku_name, u.cloud,
+               u.billing_origin_product, u.usage_unit,
+               SUM(u.usage_quantity) AS quantity,
+               SUM(u.usage_quantity * COALESCE(CAST(p.pricing.`default` AS DOUBLE), 0)) AS list_cost,
+               MAX(CASE WHEN p.pricing.`default` IS NULL THEN 1 ELSE 0 END) AS unpriced
+        FROM system.billing.usage u
+        LEFT JOIN system.billing.list_prices p
+          ON u.sku_name = p.sku_name AND u.cloud = p.cloud
+         AND u.usage_start_time >= p.price_start_time
+         AND (p.price_end_time IS NULL OR u.usage_start_time < p.price_end_time)
+        WHERE u.usage_date >= :start_date AND u.usage_date <= :end_date
+        GROUP BY 1, 2, 3, 4, 5
+    """
+
+    async def _sql(self, statement: str, parameters: list[dict] | None = None,
+                   wait_seconds: int = 60) -> tuple[list[str], list[list]]:
+        """Run one statement on the configured warehouse and return
+        (column names, rows) as the Statement Execution API hands them back.
+
+        POST /api/2.0/sql/statements with wait_timeout keeps the first call
+        open up to 30s; a warehouse that is still starting answers PENDING and
+        is polled until wait_seconds runs out. Anything but SUCCEEDED raises
+        with the API's own message, which for a missing grant names the grant.
+        """
+        if not self._warehouse_id:
+            raise RuntimeError("DATABRICKS_WAREHOUSE_ID is not set")
+        body: dict[str, Any] = {
+            "warehouse_id": self._warehouse_id,
+            "statement": statement,
+            "wait_timeout": "30s",
+            "on_wait_timeout": "CONTINUE",
+            "disposition": "INLINE",
+            "format": "JSON_ARRAY",
+        }
+        if parameters:
+            body["parameters"] = parameters
+        deadline = datetime.now(timezone.utc).timestamp() + wait_seconds
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(self._url("2.0/sql/statements"), headers=self._headers(), json=body)
+            if r.status_code in (401, 403):
+                raise RuntimeError(f"Databricks rejected the token (HTTP {r.status_code})")
+            if r.status_code >= 400:
+                raise RuntimeError(f"HTTP {r.status_code}: {_api_message(r)}")
+            data = r.json()
+            while data.get("status", {}).get("state") in ("PENDING", "RUNNING"):
+                if datetime.now(timezone.utc).timestamp() > deadline:
+                    raise RuntimeError("the SQL warehouse did not answer in time (still starting?)")
+                await asyncio.sleep(2)
+                r = await client.get(self._url(f"2.0/sql/statements/{data['statement_id']}"),
+                                     headers=self._headers())
+                if r.status_code >= 400:
+                    raise RuntimeError(f"HTTP {r.status_code}: {_api_message(r)}")
+                data = r.json()
+            state = data.get("status", {}).get("state")
+            if state != "SUCCEEDED":
+                msg = (data.get("status", {}).get("error") or {}).get("message", state or "no state")
+                raise RuntimeError(msg)
+            manifest = data.get("manifest", {}) or {}
+            if manifest.get("truncated"):
+                # The warehouse cut the result at its byte limit. A partial
+                # bill summed as if whole is a wrong number with a real label.
+                raise RuntimeError("the result was truncated by the warehouse; narrow the date range")
+            cols = [c.get("name", "") for c in manifest.get("schema", {}).get("columns", [])]
+            result = data.get("result", {}) or {}
+            rows = list(result.get("data_array", []) or [])
+            # INLINE results arrive in chunks; every chunk is part of the bill.
+            nxt = result.get("next_chunk_internal_link")
+            hops = 0
+            while nxt and hops < 500:
+                r = await client.get(f"{self._host}{nxt}", headers=self._headers())
+                if r.status_code >= 400:
+                    raise RuntimeError(f"HTTP {r.status_code}: {_api_message(r)}")
+                chunk = r.json() or {}
+                rows.extend(chunk.get("data_array", []) or [])
+                nxt = chunk.get("next_chunk_internal_link")
+                hops += 1
+            if nxt:
+                raise RuntimeError("the result had more chunks than nable will read; narrow the date range")
+        return cols, rows
+
+    async def _system_billing_usage(self, start_date: date, end_date: date) -> CostSummary:
+        """Metered usage from system.billing.usage, priced from list_prices.
+
+        Not an estimate: the quantities are what Databricks metered. The
+        price is the published list price, before any contract discount, and
+        each entry says so in metadata.pricing.
+        """
+        cols, rows = await self._sql(self._USAGE_SQL, parameters=[
+            {"name": "start_date", "value": start_date.isoformat(), "type": "DATE"},
+            {"name": "end_date", "value": end_date.isoformat(), "type": "DATE"},
+        ])
+        idx = {c: i for i, c in enumerate(cols)}
+
+        def cell(row: list, name: str, default: Any = "") -> Any:
+            i = idx.get(name)
+            return row[i] if i is not None and i < len(row) and row[i] is not None else default
+
+        entries: list[CostEntry] = []
+        by_service: dict[str, float] = {}
+        by_account: dict[str, float] = {}
+        by_region: dict[str, float] = {}
+        total = 0.0
+        for row in rows:
+            sku = str(cell(row, "sku_name") or "DATABRICKS_UNKNOWN")
+            workspace = str(cell(row, "workspace_id") or "workspace")
+            cloud = str(cell(row, "cloud") or "")
+            quantity = float(cell(row, "quantity", 0) or 0)
+            unpriced = str(cell(row, "unpriced", "0")) in ("1", "true", "True")
+            meta: dict[str, Any] = {
+                "dbu": quantity, "sku": sku,
+                "unit": str(cell(row, "usage_unit") or ""),
+                "product": str(cell(row, "billing_origin_product") or ""),
+                "cost_source": "system.billing.usage",
+                "is_estimate": False,
+                "pricing": "system.billing.list_prices (list, before discounts)",
+            }
+            if unpriced:
+                # A SKU the price table does not cover: keep the metered
+                # quantity, price it at the DBU rate, and say so.
+                cost = quantity * self._dbu_price
+                meta.update(is_estimate=True, pricing="",
+                            estimate_reason=(f"no list price for {sku}; priced at "
+                                             f"${self._dbu_price}/DBU"))
+            else:
+                cost = float(cell(row, "list_cost", 0) or 0)
+            total += cost
+            by_service[sku] = by_service.get(sku, 0.0) + cost
+            by_account[workspace] = by_account.get(workspace, 0.0) + cost
+            if cloud:
+                by_region[cloud] = by_region.get(cloud, 0.0) + cost
+            entries.append(CostEntry(
+                provider="databricks", account_id=workspace, account_name=workspace,
+                service=sku, region=cloud, amount=cost, metadata=meta,
+            ))
+        return CostSummary(
+            provider="databricks", start_date=start_date, end_date=end_date,
+            total_usd=total, by_service=by_service, by_account=by_account,
+            by_region=by_region, entries=entries,
         )
 
     # ── Billable Usage API (account-level, requires account admin) ────────────
@@ -289,7 +484,13 @@ class DatabricksConnector(BaseConnector):
                 service=sku,
                 region=col(row, "cloud") or "",
                 amount=cost,
-                metadata={"dbu": quantity, "sku": sku},
+                metadata={"dbu": quantity, "sku": sku,
+                          "cost_source": "usage/download",
+                          "is_estimate": not self._dbu_price_is_contract,
+                          **({} if self._dbu_price_is_contract else {
+                              "estimate_reason": (
+                                  f"metered DBUs priced at a default ${self._dbu_price}/DBU; "
+                                  "set DATABRICKS_DBU_PRICE to your contract rate")})},
             ))
 
         return CostSummary(
@@ -306,12 +507,26 @@ class DatabricksConnector(BaseConnector):
     # ── Cluster-based cost estimation ─────────────────────────────────────────
 
     async def _estimated_costs_from_clusters(
-        self, start_date: date, end_date: date
+        self, start_date: date, end_date: date, why: str = ""
     ) -> CostSummary:
-        """Estimate costs from cluster list and recent runs (no account API needed)."""
+        """Estimate costs from cluster list and recent runs (no account API needed).
+
+        Every entry carries is_estimate=True and the reason: this is node type
+        times workers times uptime at a DBU rate, not a bill.
+        """
         async with httpx.AsyncClient(timeout=30) as client:
             clusters = await self._list_clusters(client)
             runs = await self._list_recent_runs(client, start_date, end_date)
+
+        label = {
+            "cost_source": "cluster-uptime",
+            "is_estimate": True,
+            "estimate_reason": (
+                "estimated from cluster uptime and node type at "
+                f"${self._dbu_price}/DBU"
+                + ("" if self._dbu_price_is_contract else " (default rate)")
+                + (f"; {why}" if why else "")),
+        }
 
         entries: list[CostEntry] = []
         by_service: dict[str, float] = {}
@@ -351,7 +566,8 @@ class DatabricksConnector(BaseConnector):
                 region="",
                 amount=cost,
                 tags=run.get("run_tags", {}),
-                metadata={"job_id": run.get("job_id"), "run_id": run.get("run_id"), "dbu": dbu},
+                metadata={"job_id": run.get("job_id"), "run_id": run.get("run_id"), "dbu": dbu,
+                          **label},
             ))
 
         # Cost from all-purpose / interactive clusters (estimate from uptime)
@@ -392,6 +608,7 @@ class DatabricksConnector(BaseConnector):
                     "cluster_id": cluster["cluster_id"],
                     "cluster_name": cluster.get("cluster_name", ""),
                     "dbu": dbu,
+                    **label,
                 },
             ))
 

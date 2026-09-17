@@ -187,16 +187,25 @@ CONNECTOR_SCOPES: dict[str, Scope] = {
     "databricks": Scope(
         provider="Databricks",
         credential="Account-level token or service principal",
-        permission="Account admin",
+        permission="USE CATALOG system, USE SCHEMA system.billing, SELECT on "
+                   "system.billing.usage and system.billing.list_prices, CAN USE on "
+                   "one SQL warehouse (with DATABRICKS_WAREHOUSE_ID); otherwise Account admin",
         grade=ACCOUNT,
-        calls=("GET /api/2.0/accounts/{id}/usage/download",),
+        calls=("POST /api/2.0/sql/statements (system.billing.usage, list_prices)",
+               "GET /api/2.0/sql/statements/{id}",
+               "GET /api/2.0/accounts/{id}/usage/download (fallback, account admin)",
+               "GET /api/2.0/clusters/list (fallback, uptime estimate)"),
         mint_url="https://docs.databricks.com/en/dev-tools/auth/pat.html",
-        note="The billable-usage download API is account-admin only. There is no "
-             "narrower role that can call it.",
-        gap="system.billing.usage can be read with three grants (USE CATALOG "
-            "system, USE SCHEMA system.billing, SELECT on the table) instead of "
-            "account admin. nable does not query it over SQL yet.",
-        env=("DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_ACCOUNT_ID"),
+        note="With DATABRICKS_WAREHOUSE_ID nable reads metered usage from "
+             "system.billing.usage over the Statement Execution API: four grants "
+             "on the system catalog and CAN USE on that warehouse, no admin. Without "
+             "it, the billable-usage download needs an account-admin token "
+             "(DATABRICKS_ACCOUNT_TOKEN), and without that the uptime estimate is "
+             "labeled as one.",
+        gap="The SQL path should become the default once a warehouse can be "
+            "discovered rather than typed.",
+        env=("DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_WAREHOUSE_ID",
+             "DATABRICKS_ACCOUNT_ID", "DATABRICKS_ACCOUNT_TOKEN"),
     ),
     "vercel": Scope(
         provider="Vercel",
