@@ -2348,7 +2348,8 @@ def _run_guard(parsed) -> None:
         print()
         print(f"  {bold('What it does:')} before your agent runs an infra-mutating command")
         print("  (terraform destroy, kubectl delete, aws ec2 terminate-instances, a")
-        print("  commitment purchase), nable checks it against your policy:")
+        print("  commitment purchase), or makes the same change through a Terraform,")
+        print("  AWS or Kubernetes MCP tool, nable checks it against your policy:")
         print(f"    one-way door      → {cyan('ask')}   you confirm, with the reason shown")
         print(f"    not in allowlist  → {cyan('deny')}  the agent is told why")
         print("    reversible + safe → silent, zero friction")
@@ -2432,6 +2433,7 @@ def _run_guard(parsed) -> None:
     print()
     stale: list[bool] = []
     unpinned: list[bool] = []
+    narrow: list[bool] = []
     for scope, is_global in (("project", False), ("global", True)):
         p = guard._settings_path(is_global)
         if guard.is_installed(p):
@@ -2446,6 +2448,9 @@ def _run_guard(parsed) -> None:
             elif guard.unpinned_hook_command(p):
                 unpinned.append(is_global)
                 state = amber("installed, unpinned")
+            elif not guard.hook_surfaces(p)["mcp"]:
+                narrow.append(is_global)
+                state = amber("installed, Bash only")
             else:
                 state = green("installed")
         else:
@@ -2468,11 +2473,16 @@ def _run_guard(parsed) -> None:
         print(f"  {amber('The hook fetches the newest finops-mcp from PyPI on every agent command.')}")
         print(dim("  A security hook should run the release you chose. Pin it in place:"))
         _fix(unpinned)
+    if narrow:
+        print(f"  {amber('MCP tool calls (Terraform, AWS, Kubernetes servers) are not checked.')}")
+        print(dim("  The hook only sees Bash. Widen it in place:"))
+        _fix(narrow)
     print(dim("  Try:      nable guard try                 (see it judge four commands)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
-    print(dim("  The hook is Claude Code. Other MCP agents (Cursor, etc.) get the same"))
-    print(dim("  gate as a tool: the agent calls check_action_policy before acting."))
+    print(dim("  The hook is Claude Code (Bash and MCP tool calls). Other MCP agents"))
+    print(dim("  (Cursor, etc.) get the same gate as a tool: the agent calls"))
+    print(dim("  check_action_policy before acting."))
     print()
 
 

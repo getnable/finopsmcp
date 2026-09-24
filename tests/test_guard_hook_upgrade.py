@@ -63,8 +63,9 @@ def test_a_healthy_hook_is_left_byte_for_byte(settings, monkeypatch, tmp_path):
     exe.parent.mkdir(parents=True)
     exe.touch(mode=0o755)
     body = json.dumps({"hooks": {"PreToolUse": [
-        {"matcher": "Bash", "hooks": [{"type": "command",
-                                       "command": f"{exe} guard hook", "timeout": 10}]},
+        {"matcher": g._HOOK_MATCHER, "hooks": [{"type": "command",
+                                                "command": f"{exe} guard hook",
+                                                "timeout": 10}]},
     ]}}, indent=4)
     settings.write_text(body)
     monkeypatch.setattr("shutil.which", lambda n: None)
@@ -114,11 +115,11 @@ def test_hook_pin_reads_every_form(cmd, pin):
     assert g.hook_pin(cmd) == pin
 
 
-def _legacy_settings(path, command=LEGACY):
+def _legacy_settings(path, command=LEGACY, matcher="Bash"):
     path.write_text(json.dumps({"hooks": {"PreToolUse": [
         {"matcher": "Bash", "hooks": [{"type": "command", "command": "other-tool check"}]},
-        {"matcher": "Bash", "hooks": [{"type": "command", "command": command,
-                                       "timeout": 30}]},
+        {"matcher": matcher, "hooks": [{"type": "command", "command": command,
+                                        "timeout": 30}]},
     ]}}))
 
 
@@ -145,7 +146,7 @@ def test_install_moves_an_older_pin_forward(settings, monkeypatch):
 
 
 def test_a_current_pin_is_left_alone(settings, monkeypatch):
-    _legacy_settings(settings, PINNED)
+    _legacy_settings(settings, PINNED, matcher=g._HOOK_MATCHER)
     before = settings.read_text()
     _uv_only(monkeypatch)
     g.install()

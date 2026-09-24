@@ -153,7 +153,8 @@ def test_install_uninstall_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_settings_path", lambda global_scope: tmp_path / "settings.json")
     p = g.install()
     s = json.loads(p.read_text())
-    assert s["hooks"]["PreToolUse"][0]["matcher"] == "Bash"
+    # Bash plus every MCP tool (test_guard_mcp.py covers the matcher itself).
+    assert s["hooks"]["PreToolUse"][0]["matcher"] == g._HOOK_MATCHER
     assert g.is_installed(p)
     # idempotent
     g.install()

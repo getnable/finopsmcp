@@ -3,8 +3,17 @@
 `finops guard install` wires nable's advisory policy gate (policy.py) into
 Claude Code so it runs automatically whenever an agent is about to execute an
 infrastructure-mutating shell command (terraform destroy, kubectl delete,
-aws ec2 terminate-instances, a commitment purchase, ...). The agent no longer
-has to remember to call check_action_policy; the harness enforces the check.
+aws ec2 terminate-instances, a commitment purchase, ...) or make the same
+change through an MCP tool (HashiCorp Terraform, AWS API, Kubernetes servers;
+the table is guard_mcp.py). The agent no longer has to remember to call
+check_action_policy; the harness enforces the check.
+
+Public entry points, for any harness adapter (guard_adapters.py for Cursor and
+Codex, run_hook below for Claude Code):
+  gate_command(command, *, harness)                 a shell command
+  gate_mcp_call(tool_name, arguments, *, harness)   an MCP tool call
+Both return None (no opinion: stay silent) or a verdict dict whose
+"decision" is "ask" or "deny"; see gate_command for the full shape.
 
 Verdict mapping (advisory, propose-only stays intact):
   escalate -> "ask"   the human sees the command plus the policy reason
@@ -288,22 +297,28 @@ def check_budget_gate() -> dict[str, Any] | None:
         return None  # unreadable budget is not a reason to block anyone
 
 
-def gate_command(command: str) -> dict[str, Any] | None:
-    """Evaluate a shell command against the policy gate.
+def _verdict_for(command: str, hit: tuple[str, str], *,
+                 context: str | None = None, via: str = "") -> dict[str, Any] | None:
+    """The policy verdict for one already-classified action, or None (allow).
 
-    Returns None when the guard has no opinion (not infra, or an in-policy
-    reversible action), else {decision: "ask"|"deny", reason, action_type}.
+    Shared by the shell and MCP entry points so a destroy is judged the same
+    whichever door the agent used. `command` is the shell form, which is what
+    gets priced; `context` is the text searched for a production context
+    (defaults to the command); `via` prefixes the reason with what an MCP call
+    amounts to, since the human never saw a command.
     """
-    # The AI budget stop comes first and is not conditioned on the command: an
-    # agent burning through its budget should be stopped whatever it is doing.
-    budget_hit = check_budget_gate()
-    if budget_hit is not None:
-        return budget_hit
-
-    hit = classify_command(command)
-    if hit is None:
-        return None
     door, action_type = hit
+    lead = f"{via}. " if via else ""
+
+    def verdict(decision: str, body: str, *, strict: bool = False,
+                est: dict[str, Any] | None = None) -> dict[str, Any]:
+        head = "nable guard (strict)" if strict else "nable guard"
+        v: dict[str, Any] = {"decision": decision, "action_type": action_type,
+                             "door": door, "reason": f"{head}: {lead}{body}"}
+        if est is not None:
+            v["monthly_delta_usd"] = est["monthly_usd"]
+            v["estimate"] = est
+        return v
 
     if action_type == "infra_apply":
         # Reversible mutation. Zero friction by default; strict mode confirms,
@@ -317,51 +332,101 @@ def gate_command(command: str) -> dict[str, Any] | None:
         # the user's FINOPS_POLICY_MAX_AUTO_USD and learned adjustments apply.
         est = estimate_command_monthly_cost(command)
         if est is not None:
-            verdict = evaluate_action_gate(action_type,
-                                           monthly_delta_usd=est["monthly_usd"])
-            if verdict.get("gate") != GATE_ALLOW:
-                return {
-                    "decision": "ask" if verdict.get("gate") == GATE_ESCALATE else "deny",
-                    "action_type": action_type,
-                    "monthly_delta_usd": est["monthly_usd"],
-                    "reason": (f"nable guard: {_cost_line(est)}. "
-                               f"{verdict.get('reason', 'a human must review this action.')}"),
-                }
+            gate = evaluate_action_gate(action_type, monthly_delta_usd=est["monthly_usd"])
+            if gate.get("gate") != GATE_ALLOW:
+                return verdict(
+                    "ask" if gate.get("gate") == GATE_ESCALATE else "deny",
+                    f"{_cost_line(est)}. "
+                    f"{gate.get('reason', 'a human must review this action.')}",
+                    est=est)
+        cost = f" {_cost_line(est)}." if est else ""
         if _strict():
-            cost = f" {_cost_line(est)}." if est else ""
-            return {
-                "decision": "ask",
-                "action_type": action_type,
-                "reason": ("nable guard (strict): this changes infrastructure and "
-                           f"therefore the bill.{cost} Cost it first (ask nable to "
-                           "estimate_change_cost) or confirm to proceed."),
-            }
-        if _prod_context(command):
-            cost = f" {_cost_line(est)}." if est else ""
-            return {
-                "decision": "ask",
-                "action_type": action_type,
-                "reason": ("nable guard: this mutates infrastructure in what looks "
-                           f"like a PRODUCTION context.{cost} Confirm to proceed, or "
-                           "cost it first (ask nable to estimate_change_cost)."),
-            }
+            return verdict("ask", "this changes infrastructure and therefore the "
+                           f"bill.{cost} Cost it first (ask nable to "
+                           "estimate_change_cost) or confirm to proceed.",
+                           strict=True, est=est)
+        if _prod_context(context if context is not None else command):
+            return verdict("ask", "this mutates infrastructure in what looks like a "
+                           f"PRODUCTION context.{cost} Confirm to proceed, or cost it "
+                           "first (ask nable to estimate_change_cost).", est=est)
         return None
 
-    verdict = evaluate_action_gate(action_type)
-    gate = verdict.get("gate")
-    if gate == GATE_ESCALATE:
-        return {
-            "decision": "ask",
-            "action_type": action_type,
-            "reason": f"nable guard: {verdict.get('reason', 'a human must review this action.')}",
-        }
-    if gate == GATE_BLOCK:
-        return {
-            "decision": "deny",
-            "action_type": action_type,
-            "reason": f"nable guard: {verdict.get('reason', 'this action is not in your policy allowlist.')}",
-        }
+    gate = evaluate_action_gate(action_type)
+    if gate.get("gate") == GATE_ESCALATE:
+        return verdict("ask", gate.get("reason", "a human must review this action."))
+    if gate.get("gate") == GATE_BLOCK:
+        return verdict("deny", gate.get("reason", "this action is not in your policy allowlist."))
     return None  # allow -> stay silent
+
+
+def gate_command(command: str, *, harness: str = "claude-code") -> dict[str, Any] | None:
+    """Evaluate a shell command against the policy gate. PUBLIC ENTRY POINT.
+
+    This and gate_mcp_call are what every harness adapter calls (the Claude
+    Code hook below; Cursor and Codex adapters in guard_adapters.py). `harness`
+    names the calling agent harness and is echoed back in the verdict.
+
+    Returns None when the guard has no opinion (not infra, or an in-policy
+    reversible action), else a verdict dict:
+
+        decision            "ask" (a human confirms) or "deny" (do not run)
+        reason              one line for the human, starting "nable guard"
+        action_type, door   the policy.py vocabulary (e.g. delete_resource, one_way)
+        monthly_delta_usd   present only when the action was priced
+        estimate            the pricing basis behind that figure, when priced
+        harness             as passed in
+    """
+    # The AI budget stop comes first and is not conditioned on the command: an
+    # agent burning through its budget should be stopped whatever it is doing.
+    budget_hit = check_budget_gate()
+    if budget_hit is not None:
+        return {**budget_hit, "harness": harness}
+
+    hit = classify_command(command)
+    if hit is None:
+        return None
+    v = _verdict_for(command, hit)
+    return {**v, "harness": harness} if v else None
+
+
+_SEVERITY = {"deny": 2, "ask": 1}
+
+
+def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
+                  harness: str = "claude-code") -> dict[str, Any] | None:
+    """Evaluate an MCP tool call against the policy gate. PUBLIC ENTRY POINT.
+
+    `tool_name` is the harness's full name (`mcp__<server>__<tool>` in Claude
+    Code). Known infra-mutating tools (guard_mcp.MCP_RULES: Terraform, AWS,
+    Kubernetes) are translated to the shell command they amount to and judged
+    exactly like it, prices included. Returns the same verdict shape as
+    gate_command, with `mcp_tool` added; a batch call returns its most severe
+    verdict.
+
+    Unknown MCP tools return None before anything else runs, the AI budget
+    stop included: the guard never asks about a tool it does not understand.
+    """
+    from .guard_mcp import argument_text, translate
+
+    actions = translate(tool_name, arguments)
+    if not actions:
+        return None
+
+    budget_hit = check_budget_gate()
+    if budget_hit is not None:
+        return {**budget_hit, "harness": harness, "mcp_tool": tool_name}
+
+    context = argument_text(arguments)
+    worst: dict[str, Any] | None = None
+    for act in actions:
+        hit = act.hit or classify_command(act.command)
+        if hit is None:
+            continue
+        v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
+                         via=f"{tool_name} would {act.summary or act.command}")
+        if v and _SEVERITY.get(v["decision"], 0) > _SEVERITY.get((worst or {}).get("decision"), 0):
+            worst = v
+    return {**worst, "harness": harness, "mcp_tool": tool_name} if worst else None
 
 
 # ── Claude Code hook protocol ──────────────────────────────────────────────────
@@ -369,19 +434,25 @@ def gate_command(command: str) -> dict[str, Any] | None:
 def run_hook(stdin: Any = None, stdout: Any = None) -> int:
     """PreToolUse hook body: JSON in on stdin, optional JSON verdict on stdout.
 
-    Fails open by design: any error, unknown payload, or non-Bash tool exits 0
+    Handles the Bash tool and MCP tools (`mcp__*`); everything else exits 0
+    with no output. Fails open by design: any error or unknown payload exits 0
     with no output so the guard can never break the user's agent.
     """
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     try:
         payload = json.load(stdin)
-        if payload.get("tool_name") != "Bash":
+        tool = payload.get("tool_name")
+        tool_input = payload.get("tool_input") or {}
+        if tool == "Bash":
+            command = tool_input.get("command") or ""
+            if not command:
+                return 0
+            verdict = gate_command(command, harness="claude-code")
+        elif isinstance(tool, str) and tool.startswith("mcp__"):
+            verdict = gate_mcp_call(tool, tool_input, harness="claude-code")
+        else:
             return 0
-        command = (payload.get("tool_input") or {}).get("command") or ""
-        if not command:
-            return 0
-        verdict = gate_command(command)
         if not verdict:
             return 0
         json.dump({
@@ -402,6 +473,45 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
 # prefixed (bare, absolute path, or uvx wrapper).
 _HOOK_MARKER = "guard hook"
 _HOOK_CMD = "finops guard hook"
+
+# Which tool calls Claude Code sends the hook. Its documented matcher rules: a
+# value of only letters, digits, `_`, `-`, spaces, `,` and `|` is a list of
+# exact names; anything else is an UNANCHORED JavaScript regex. So the obvious
+# "Bash|mcp__.*" would also match BashOutput, KillBash and any tool with "Bash"
+# anywhere in its name, spawning the hook for nothing. Anchored, it is exactly
+# the Bash tool plus every MCP tool (`mcp__<server>__<tool>`); run_hook then
+# returns at once for any MCP tool guard_mcp does not recognise.
+_HOOK_MATCHER = "^(Bash|mcp__.*)$"
+_LEGACY_MATCHER = "Bash"          # what every release before MCP coverage wrote
+
+
+def matcher_covers(matcher: Any, tool_name: str) -> bool:
+    """Would Claude Code run a hook with this matcher for `tool_name`?
+
+    Mirrors the documented rules closely enough to report coverage: empty or
+    "*" matches everything, a plain-word value is an exact list split on `|`
+    or `,`, anything else is an unanchored regex. Python's `re` stands in for
+    JavaScript's, which agree on every pattern this module writes."""
+    if matcher in (None, "", "*"):
+        return True
+    if not isinstance(matcher, str):
+        return False
+    if re.fullmatch(r"[A-Za-z0-9_\-\s,|]*", matcher):
+        return tool_name in {m.strip() for m in re.split(r"[|,]", matcher)}
+    try:
+        return re.search(matcher, tool_name) is not None
+    except re.error:
+        return False
+
+
+def hook_surfaces(path: Path) -> dict[str, bool]:
+    """Which tool surfaces our installed hook actually sees in this file."""
+    covered = {"bash": False, "mcp": False}
+    for entry, _h in _read_our_hooks(path):
+        m = entry.get("matcher")
+        covered["bash"] |= matcher_covers(m, "Bash")
+        covered["mcp"] |= matcher_covers(m, "mcp__server__call_aws")
+    return covered
 
 # The uvx form is pinned to the release that wrote it. Unpinned, `uvx --from
 # finops-mcp` resolves the newest PyPI release on every agent tool call, so
@@ -618,6 +728,24 @@ def _stale(cmd: str) -> bool:
     return not _command_runs(cmd) or hook_pin(cmd) in ("unpinned", "other")
 
 
+def _widen_matcher(pre: list, entry: dict, hook: dict) -> bool:
+    """Move our hook from the Bash-only matcher earlier releases wrote to one
+    that also covers MCP tools. Returns True when something changed.
+
+    Only the exact "Bash" we wrote is upgraded: any other matcher is a choice
+    someone made by hand, and it stays theirs. When our hook shares that entry
+    with someone else's, widening the entry would start running THEIR hook on
+    every MCP call, so ours moves to an entry of its own instead."""
+    if entry.get("matcher") != _LEGACY_MATCHER:
+        return False
+    if all(isinstance(h, dict) and _is_our_command(h.get("command")) for h in entry["hooks"]):
+        entry["matcher"] = _HOOK_MATCHER
+        return True
+    entry["hooks"].remove(hook)
+    pre.append({"matcher": _HOOK_MATCHER, "hooks": [hook]})
+    return True
+
+
 def install(global_scope: bool = False) -> Path:
     """Idempotently add the guard hook to Claude Code settings. Returns the path.
 
@@ -626,15 +754,17 @@ def install(global_scope: bool = False) -> Path:
     the 0.8.195 changelog told every uvx user the same. Both were promises this
     function did not keep: it returned early on any existing entry, so the dead
     hook stayed dead and the telemetry counted it as "repaired". Our own entry
-    is now rewritten in place when it is stale, keeping its position and every
-    other hook in the file exactly as found."""
+    is now rewritten in place when it is stale, or when its matcher predates
+    MCP coverage, keeping its position and every other hook in the file
+    exactly as found."""
     path = _settings_path(global_scope)
     settings = _load_settings(path)
     pre = _hook_list(settings, path, create=True)
     ours = list(_our_hooks(pre))
     if ours:
         changed = False
-        for _entry, h in ours:
+        for entry, h in ours:
+            changed = _widen_matcher(pre, entry, h) or changed
             if not _stale(h["command"]):
                 continue
             cmd = _hook_command()
@@ -647,7 +777,7 @@ def install(global_scope: bool = False) -> Path:
     else:
         cmd = _hook_command()
         pre.append({
-            "matcher": "Bash",
+            "matcher": _HOOK_MATCHER,
             "hooks": [{"type": "command", "command": cmd, "timeout": _timeout_for(cmd)}],
         })
     path.parent.mkdir(parents=True, exist_ok=True)
