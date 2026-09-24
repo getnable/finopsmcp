@@ -33,7 +33,7 @@ async def send_digest_now() -> dict:
 
 
 @_srv.mcp.tool()
-async def check_notification_config() -> dict:
+def check_notification_config() -> dict:
     """
     Check which notification channels (Slack, Teams) are configured and active,
     returning each channel's status and what is missing when one is not set up.
@@ -191,7 +191,7 @@ async def export_cost_report(
 
 
 @_srv.mcp.tool()
-async def fetch_invoice_emails() -> dict:
+def fetch_invoice_emails() -> dict:
     """
     Fetch unread invoice emails from the configured IMAP mailbox, extract
     amounts, and store them as cost entries. Solves the billing API gap for
@@ -387,7 +387,7 @@ async def push_weekly_insight() -> dict:
 
 
 @_srv.mcp.tool()
-async def send_weekly_digest_now() -> dict:
+def send_weekly_digest_now() -> dict:
     """
     Immediately send the weekly email digest to the configured recipient.
     Includes spend summary, anomalies, and top rightsizing recommendations.
@@ -416,7 +416,7 @@ async def send_weekly_digest_now() -> dict:
 
 
 @_srv.mcp.tool()
-async def subscribe_to_report(
+def subscribe_to_report(
     name: str,
     sections: list[str],
     frequency: str = "weekly",
@@ -501,7 +501,7 @@ async def subscribe_to_report(
 
 
 @_srv.mcp.tool()
-async def list_report_subscriptions() -> dict:
+def list_report_subscriptions() -> dict:
     """
     List all active report subscriptions, their names, schedules, sections, and delivery channels.
 
@@ -560,7 +560,7 @@ async def send_report_now(subscription_id: int) -> dict:
 
 
 @_srv.mcp.tool()
-async def cancel_report_subscription(subscription_id: int) -> dict:
+def cancel_report_subscription(subscription_id: int) -> dict:
     """
     Cancel (deactivate) a scheduled report subscription.
 

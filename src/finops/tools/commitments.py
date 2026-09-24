@@ -10,7 +10,7 @@ from .. import server as _srv
 
 
 @_srv.mcp.tool()
-async def get_commitment_analysis() -> dict:
+def get_commitment_analysis() -> dict:
     """
     Analyze Reserved Instance and Savings Plan coverage, utilization, and waste.
     Coverage %, utilization, and waste figures are free.
@@ -92,7 +92,7 @@ async def get_commitment_analysis() -> dict:
 
 
 @_srv.mcp.tool()
-async def get_commitment_coverage_by_tag(
+def get_commitment_coverage_by_tag(
     tag_key: str,
     tag_value: str,
     tag_coverage_pct: float = 100.0,
@@ -191,7 +191,7 @@ async def get_commitment_coverage_by_tag(
 
 
 @_srv.mcp.tool()
-async def get_ri_waste_detail(
+def get_ri_waste_detail(
     start_date: str | None = None,
     end_date: str | None = None,
     min_waste_usd: float = 10.0,
@@ -244,7 +244,7 @@ async def get_ri_waste_detail(
 
 
 @_srv.mcp.tool()
-async def get_savings_plan_showback(
+def get_savings_plan_showback(
     tag_key: str = "team",
     start_date: str | None = None,
     end_date: str | None = None,
@@ -455,7 +455,7 @@ async def scan_graviton_migration_opportunities(
 
 
 @_srv.mcp.tool()
-async def recommend_spot_adoption(
+def recommend_spot_adoption(
     regions: list[str] | None = None,
 ) -> str:
     """

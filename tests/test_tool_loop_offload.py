@@ -18,8 +18,10 @@ ready task while the tool was in flight.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import gc
+import pathlib
 import time
 
 import pytest
@@ -163,3 +165,177 @@ async def test_a_sync_tool_can_still_refresh_the_client_tool_list(bare_wrapper, 
 
     assert await bare_wrapper()(connect_tool)() == {"connected": True}
     await asyncio.wait_for(sent.wait(), timeout=2)
+
+
+# ── 2. real tools, blocked at the cloud boundary ─────────────────────────────
+
+def _sleepy(ret):
+    """A stand-in for one SDK round trip: holds its thread, then answers."""
+    def fake(*_a, **_k):
+        time.sleep(BLOCK_S)
+        return ret
+    return fake
+
+
+class _SlowBoto3Client:
+    """What boto3.client() returns here. Every API call takes BLOCK_S."""
+
+    def __getattr__(self, name):
+        return _sleepy({})
+
+
+def _block_scan_cloudwatch_waste(monkeypatch):
+    import finops.analyzers.optimizer as opt
+    monkeypatch.setattr(opt, "scan_cloudwatch_log_waste", _sleepy({"findings": []}))
+    from finops.tools import aws_waste
+    return aws_waste.scan_cloudwatch_waste()
+
+
+def _block_get_textract_costs(monkeypatch):
+    from finops.connectors.aws_services import textract
+    monkeypatch.setattr(textract.TextractAnalyzer, "get_costs", _sleepy("no spend"))
+    from finops.tools import aws_waste
+    return aws_waste.get_textract_costs(days=7)
+
+
+def _block_get_data_transfer_costs(monkeypatch):
+    import boto3
+    import finops.analyzers.waste as waste
+    monkeypatch.setattr(boto3, "client", _sleepy(_SlowBoto3Client()))
+    monkeypatch.setattr(waste, "check_data_transfer_costs", lambda ce, **k: [])
+    from finops.tools import aws
+    return aws.get_data_transfer_costs()
+
+
+def _block_get_s3_incomplete_multipart_uploads(monkeypatch):
+    import boto3
+    import finops.analyzers.waste as waste
+    monkeypatch.setattr(boto3, "client", _sleepy(_SlowBoto3Client()))
+    monkeypatch.setattr(waste, "check_s3_incomplete_multipart", lambda s3, **k: [])
+    from finops.tools import aws_waste
+    return aws_waste.get_s3_incomplete_multipart_uploads()
+
+
+def _block_list_org_accounts(monkeypatch):
+    from finops.connectors import aws_org
+    monkeypatch.setattr(aws_org, "list_org_accounts", _sleepy([]))
+    from finops.tools import attribution
+    return attribution.list_org_accounts()
+
+
+def _block_get_org_cost_summary(monkeypatch):
+    from finops.connectors import aws_org
+    monkeypatch.setattr(_srv, "require_pro", lambda feature: None)
+    monkeypatch.setattr(aws_org, "org_cost_summary", _sleepy({"accounts": []}))
+    from finops.tools import attribution
+    return attribution.get_org_cost_summary()
+
+
+# Keyed by tool name. Each entry installs a fake that blocks for BLOCK_S where
+# the tool would leave the machine, and returns the tool's awaitable.
+_BLOCKED_TOOLS = {
+    "scan_cloudwatch_waste": _block_scan_cloudwatch_waste,
+    "get_textract_costs": _block_get_textract_costs,
+    "get_data_transfer_costs": _block_get_data_transfer_costs,
+    "get_s3_incomplete_multipart_uploads": _block_get_s3_incomplete_multipart_uploads,
+    "list_org_accounts": _block_list_org_accounts,
+    "get_org_cost_summary": _block_get_org_cost_summary,
+}
+
+
+@pytest.fixture
+def real_tools(monkeypatch):
+    """The live registered tools, with demo interception off so the call reaches
+    the fake at the cloud boundary instead of being answered from the sample."""
+    from finops import demo_data
+    monkeypatch.setattr(demo_data, "DEMO_MODE", False)
+    monkeypatch.delenv("FINOPS_DEMO_FORCE", raising=False)
+    _srv._get_audit_logger()     # one-time sqlalchemy import, see bare_wrapper
+
+
+async def _assert_loop_kept_ticking(name: str, make_call) -> object:
+    async with _Heartbeat() as hb:
+        t0 = time.monotonic()
+        out = await make_call()
+        took = time.monotonic() - t0
+
+    # The fake really was reached: otherwise a stall of zero proves nothing.
+    assert took >= BLOCK_S * 0.9, f"{name} returned in {took:.2f}s without reaching the fake"
+    assert hb.max_stall < MAX_STALL_S, (
+        f"{name} held the event loop for {hb.max_stall:.2f}s of a {took:.2f}s call. "
+        f"Its blocking work must run off the loop: make it a plain def (the "
+        f"registration shim threads it) or await asyncio.to_thread around the call"
+    )
+    return out
+
+
+@pytest.mark.parametrize("name", sorted(_BLOCKED_TOOLS))
+async def test_a_tool_blocked_on_the_cloud_does_not_freeze_the_loop(name, monkeypatch, real_tools):
+    out = await _assert_loop_kept_ticking(name, lambda: _BLOCKED_TOOLS[name](monkeypatch))
+    assert out is not None
+
+
+# ── 3. the guard: keep future tools honest ───────────────────────────────────
+
+_SRC = pathlib.Path(_srv.__file__).parent
+_TOOL_FILES = [_SRC / "server.py", *sorted((_SRC / "tools").glob("*.py"))]
+
+
+def _is_tool(fn: ast.AST) -> bool:
+    return any(
+        isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "tool"
+        for d in getattr(fn, "decorator_list", ())
+    )
+
+
+def _tool_defs() -> list[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef]]:
+    out = []
+    for path in _TOOL_FILES:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_tool(node):
+                out.append((path.name, node))
+    return out
+
+
+def _body_nodes(fn):
+    """Every node in the tool's own body, not in functions it defines. A nested
+    def is either handed to to_thread (fine) or is its own concern."""
+    stack = list(fn.body)
+    while stack:
+        node = stack.pop()
+        yield node
+        for child in ast.iter_child_nodes(node):
+            if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                stack.append(child)
+
+
+def test_the_guard_sees_every_registered_tool():
+    """If the AST scan below stopped finding tools (a new registration style, a
+    moved module) the guard would pass vacuously. Tie it to the live registry."""
+    from finops.plugins import loaded_plugins
+    if loaded_plugins():
+        pytest.skip("installed plugins register tools from outside this repo")
+    scanned = {fn.name for _, fn in _tool_defs()}
+    registered = {t.name for t in _srv.mcp._tool_manager.list_tools()}
+    assert registered and registered <= scanned, (
+        f"the loop guard cannot see these tools: {sorted(registered - scanned)}"
+    )
+
+
+def test_no_async_tool_body_runs_without_awaiting():
+    """An `async def` tool that never awaits runs start to finish on the event
+    loop. Whatever it calls (boto3, httpx, a connector, the database) holds the
+    whole server while it runs. The same body as a plain `def` is threaded by
+    _instrumented_tool for free. 96 tools were in this state."""
+    offenders = [
+        f"{mod}:{fn.name} (line {fn.lineno})"
+        for mod, fn in _tool_defs()
+        if isinstance(fn, ast.AsyncFunctionDef)
+        and not any(isinstance(n, (ast.Await, ast.AsyncFor, ast.AsyncWith))
+                    for n in _body_nodes(fn))
+    ]
+    assert not offenders, (
+        "these async tools never await, so they run entirely on the event loop. "
+        "Make them plain `def` (the registration shim runs them in a thread):\n  "
+        + "\n  ".join(offenders)
+    )

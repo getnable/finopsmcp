@@ -10,7 +10,7 @@ from .. import server as _srv
 
 
 @_srv.mcp.tool()
-async def set_budget(
+def set_budget(
     name: str,
     limit_usd: float,
     scope_type: str = "total",
@@ -58,7 +58,7 @@ async def set_budget(
 
 
 @_srv.mcp.tool()
-async def check_budget_status(budget_name: str = "") -> dict:
+def check_budget_status(budget_name: str = "") -> dict:
     """
     Check current spend against budgets. Shows how much has been spent,
     what's remaining, and whether any budgets are in warning or exceeded status.
@@ -103,7 +103,7 @@ async def check_budget_status(budget_name: str = "") -> dict:
 
 
 @_srv.mcp.tool()
-async def list_budgets() -> dict:
+def list_budgets() -> dict:
     """
     List all configured budgets with their limits and scopes.
 
@@ -121,7 +121,7 @@ async def list_budgets() -> dict:
 
 
 @_srv.mcp.tool()
-async def delete_budget(budget_id: int) -> dict:
+def delete_budget(budget_id: int) -> dict:
     """
     Delete (deactivate) a budget by ID so it stops alerting and gating agent actions.
 
@@ -143,7 +143,7 @@ async def delete_budget(budget_id: int) -> dict:
 
 
 @_srv.mcp.tool()
-async def sync_budgets_from_yaml(yaml_path: str) -> dict:
+def sync_budgets_from_yaml(yaml_path: str) -> dict:
     """
     Import budgets from a budget.yml file. Idempotent, running twice
     is safe. Use this to version-control your spending limits alongside

@@ -413,7 +413,7 @@ async def list_accounts(provider: str | None = None) -> dict:
 
 
 @_srv.mcp.tool()
-async def set_alert_policy(
+def set_alert_policy(
     provider: str = "*",
     service_pattern: str = "*",
     muted: bool = False,
@@ -487,7 +487,7 @@ async def set_alert_policy(
 
 
 @_srv.mcp.tool()
-async def list_alert_policies() -> dict:
+def list_alert_policies() -> dict:
     """
     List all custom alert policies for anomaly detection.
 
@@ -529,7 +529,7 @@ async def list_alert_policies() -> dict:
 
 
 @_srv.mcp.tool()
-async def delete_alert_policy(policy_id: int) -> dict:
+def delete_alert_policy(policy_id: int) -> dict:
     """
     Remove a custom alert policy. The service will revert to the default threshold.
 
@@ -557,7 +557,7 @@ async def delete_alert_policy(policy_id: int) -> dict:
 
 
 @_srv.mcp.tool()
-async def list_vault_credentials() -> dict:
+def list_vault_credentials() -> dict:
     """
     List the names of credentials stored in the encrypted vault (never the values).
 
@@ -579,7 +579,7 @@ async def list_vault_credentials() -> dict:
 
 
 @_srv.mcp.tool()
-async def list_savings_recommendations(
+def list_savings_recommendations(
     status: str | None = None,
     source: str | None = None,
     limit: int = 30,
@@ -667,7 +667,7 @@ async def list_savings_recommendations(
 
 
 @_srv.mcp.tool()
-async def list_profiles() -> str:
+def list_profiles() -> str:
     """
     List all configured nable profiles (for multi-account or multi-client setups).
 
@@ -916,7 +916,7 @@ def whoami() -> dict:
 
 
 @_srv.mcp.tool()
-async def get_ai_budget_status() -> dict:
+def get_ai_budget_status() -> dict:
     """Where your AI coding agent stands against its budget, right now.
 
     Reads your agent's real token usage locally (Claude Code session logs) and reports
@@ -930,7 +930,7 @@ async def get_ai_budget_status() -> dict:
 
 
 @_srv.mcp.tool()
-async def check_ai_budget(estimated_next_tokens: int = 0) -> dict:
+def check_ai_budget(estimated_next_tokens: int = 0) -> dict:
     """Advisory gate: before a big task, is the agent about to blow its AI budget?
 
     Call this before an expensive run. Returns a verdict (ok / warn / over), the
@@ -942,7 +942,7 @@ async def check_ai_budget(estimated_next_tokens: int = 0) -> dict:
 
 
 @_srv.mcp.tool()
-async def set_ai_budget(mode: str | None = None,
+def set_ai_budget(mode: str | None = None,
                         plan_cost: float | None = None,
                         spend_cap: float | None = None,
                         monthly_tokens: int | None = None,
@@ -1066,7 +1066,7 @@ async def check_action_policy(
 
 
 @_srv.mcp.tool()
-async def list_views() -> dict:
+def list_views() -> dict:
     """
     List all pre-built cost views available to your team.
 
@@ -1396,7 +1396,7 @@ async def get_view(
 
 
 @_srv.mcp.tool()
-async def pin_view(
+def pin_view(
     title: str,
     dimensions: list[str] | None = None,
     filters: list[dict] | None = None,
@@ -1455,7 +1455,7 @@ async def pin_view(
 
 
 @_srv.mcp.tool()
-async def list_pinned_views() -> dict:
+def list_pinned_views() -> dict:
     """
     List the cost cards pinned to the dashboard: every saved view with its id,
     title, template, metric and dimensions, so you can re-run one with
@@ -1502,7 +1502,7 @@ async def get_pinned_view(view_id: int) -> dict:
 
 
 @_srv.mcp.tool()
-async def unpin_view(view_id: int) -> dict:
+def unpin_view(view_id: int) -> dict:
     """
     Remove a pinned cost card from the dashboard by id, so the dashboard stops
     tracking that saved view. The underlying saved view is not deleted, only
@@ -1598,7 +1598,7 @@ async def what_can_nable_do(detailed: bool = False) -> str:
 
 
 @_srv.mcp.tool()
-async def get_tableau_connection_info(port: int = 8080) -> str:
+def get_tableau_connection_info(port: int = 8080) -> str:
     """
     Returns the Tableau Web Data Connector URL for connecting Tableau Desktop to nable.
 

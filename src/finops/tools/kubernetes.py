@@ -10,7 +10,7 @@ from .. import server as _srv
 
 
 @_srv.mcp.tool()
-async def create_kubernetes_waste_tickets(
+def create_kubernetes_waste_tickets(
     min_monthly_waste: float = 50.0,
 ) -> dict:
     """
@@ -106,7 +106,7 @@ async def create_kubernetes_waste_tickets(
 
 
 @_srv.mcp.tool()
-async def list_kubernetes_contexts() -> dict:
+def list_kubernetes_contexts() -> dict:
     """
     List all Kubernetes contexts available in the local kubeconfig, and show
     which one is currently active. Use this to discover what to pass as the
@@ -529,7 +529,7 @@ async def get_helm_release_costs(
 
 
 @_srv.mcp.tool()
-async def estimate_helm_diff_cost(
+def estimate_helm_diff_cost(
     diff_text: str,
     release_name: str = "unknown",
     current_replicas: int = 1,
@@ -654,7 +654,7 @@ async def get_cluster_efficiency(context: str | None = None) -> dict:
 
 
 @_srv.mcp.tool()
-async def get_kubernetes_cost_trends(
+def get_kubernetes_cost_trends(
     days: int = 30,
     cluster: str | None = None,
     namespace: str | None = None,
@@ -862,7 +862,7 @@ async def get_kubernetes_cost_trends(
 
 
 @_srv.mcp.tool()
-async def compare_kubernetes_clusters() -> dict:
+def compare_kubernetes_clusters() -> dict:
     """
     Compare costs and efficiency across all configured Kubernetes clusters.
     Useful for multi-cluster setups (prod vs staging, region vs region).

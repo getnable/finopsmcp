@@ -365,7 +365,7 @@ async def audit_public_ipv4_addresses(
 
 
 @_srv.mcp.tool()
-async def get_instance_deep_analysis(
+def get_instance_deep_analysis(
     instance_id: str,
     region: str = "us-east-1",
     lookback_days: int = 14,
@@ -397,7 +397,7 @@ async def get_instance_deep_analysis(
 
 
 @_srv.mcp.tool()
-async def scan_cloudwatch_waste(
+def scan_cloudwatch_waste(
     regions: list[str] | None = None,
 ) -> dict:
     """
@@ -732,7 +732,7 @@ async def get_idle_load_balancers(
 
 
 @_srv.mcp.tool()
-async def get_s3_incomplete_multipart_uploads(
+def get_s3_incomplete_multipart_uploads(
     older_than_days: int = 7,
 ) -> dict:
     """
@@ -776,7 +776,7 @@ async def get_s3_incomplete_multipart_uploads(
 
 
 @_srv.mcp.tool()
-async def get_ecr_cleanup_recommendations(
+def get_ecr_cleanup_recommendations(
     older_than_days: int = 90,
     regions: list[str] | None = None,
 ) -> dict:
@@ -983,7 +983,7 @@ async def list_idle_resources(
 
 
 @_srv.mcp.tool()
-async def cleanup_idle_resources(
+def cleanup_idle_resources(
     resource_ids: list[str] | None = None,
     resource_types: list[str] | None = None,
     regions: list[str] | None = None,
@@ -1023,7 +1023,7 @@ async def cleanup_idle_resources(
 
 
 @_srv.mcp.tool()
-async def open_rightsizing_pr(
+def open_rightsizing_pr(
     tf_dir: str,
     github_repo: str | None = None,
     recommendation_ids: list[int] | None = None,
@@ -1181,7 +1181,7 @@ async def scan_waste_patterns(
 
 
 @_srv.mcp.tool()
-async def get_documentdb_costs(days: int = 30, account: str = "") -> str:
+def get_documentdb_costs(days: int = 30, account: str = "") -> str:
     """
     Analyze Amazon DocumentDB costs by cluster, with rightsizing recommendations.
 
@@ -1205,7 +1205,7 @@ async def get_documentdb_costs(days: int = 30, account: str = "") -> str:
 
 
 @_srv.mcp.tool()
-async def get_kendra_costs(account: str = "") -> str:
+def get_kendra_costs(account: str = "") -> str:
     """
     Analyze Amazon Kendra costs by index, with edition and usage flags.
 
@@ -1229,7 +1229,7 @@ async def get_kendra_costs(account: str = "") -> str:
 
 
 @_srv.mcp.tool()
-async def get_textract_costs(days: int = 30, account: str = "") -> str:
+def get_textract_costs(days: int = 30, account: str = "") -> str:
     """
     Analyze AWS Textract costs by API type (sync vs async).
 
@@ -1253,7 +1253,7 @@ async def get_textract_costs(days: int = 30, account: str = "") -> str:
 
 
 @_srv.mcp.tool()
-async def audit_textract_environment_waste(days: int = 30) -> dict:
+def audit_textract_environment_waste(days: int = 30) -> dict:
     """
     Analyzes Textract spend by environment to find non-production API calls.
     Textract charges per page, QA and staging environments often call it
@@ -1811,7 +1811,7 @@ async def audit_s3_intelligent_tiering(
 
 
 @_srv.mcp.tool()
-async def audit_spot_diversification(
+def audit_spot_diversification(
     regions: list[str] | None = None,
 ) -> str:
     """

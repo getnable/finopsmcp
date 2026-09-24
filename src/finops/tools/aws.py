@@ -10,7 +10,7 @@ from .. import server as _srv
 
 
 @_srv.mcp.tool()
-async def list_aws_accounts() -> dict:
+def list_aws_accounts() -> dict:
     """
     List all AWS accounts configured in ~/.finops-mcp/accounts.yaml.
 
@@ -103,7 +103,7 @@ async def get_traffic_cost_breakdown(
 
 
 @_srv.mcp.tool()
-async def get_data_transfer_costs(
+def get_data_transfer_costs(
     start_date: str | None = None,
     end_date: str | None = None,
     threshold_usd: float = 50.0,
@@ -313,7 +313,7 @@ async def connect_aws(account_id: str = "") -> dict:
 
 
 @_srv.mcp.tool()
-async def get_resource_cost_breakdown_aws(
+def get_resource_cost_breakdown_aws(
     start_date: str | None = None,
     end_date: str | None = None,
     service: str | None = None,
@@ -381,7 +381,7 @@ async def get_resource_cost_breakdown_aws(
 
 
 @_srv.mcp.tool()
-async def get_bedrock_costs(days: int = 30, account: str = "") -> str:
+def get_bedrock_costs(days: int = 30, account: str = "") -> str:
     """
     Break down Amazon Bedrock costs by model and token type.
 
@@ -405,7 +405,7 @@ async def get_bedrock_costs(days: int = 30, account: str = "") -> str:
 
 
 @_srv.mcp.tool()
-async def get_marketplace_costs(days: int = 30, account: str = "") -> str:
+def get_marketplace_costs(days: int = 30, account: str = "") -> str:
     """
     Break down AWS Marketplace costs by product and vendor.
 

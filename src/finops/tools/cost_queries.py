@@ -552,7 +552,7 @@ async def get_total_spend_all_sources(
 
 
 @_srv.mcp.tool()
-async def get_cost_history(
+def get_cost_history(
     provider: str,
     service: str,
     account_id: str,
@@ -599,7 +599,7 @@ async def get_cost_history(
 
 
 @_srv.mcp.tool()
-async def get_effective_rate_profile() -> dict:
+def get_effective_rate_profile() -> dict:
     """
     Auto-detect the account's effective private rates by comparing actual
     billed amounts against public on-demand prices.
@@ -708,7 +708,7 @@ async def get_workload_costs(
 
 
 @_srv.mcp.tool()
-async def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dict:
+def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dict:
     """
     Show the highest-spending AWS accounts in the organization.
     Requires a Pro plan (org_reports).
@@ -732,7 +732,7 @@ async def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dic
 
 
 @_srv.mcp.tool()
-async def get_storage_info() -> dict:
+def get_storage_info() -> dict:
     """
     Show the current storage backend (SQLite local or Postgres shared).
     Helps teams understand whether they're in single-engineer or shared mode.
@@ -824,7 +824,7 @@ async def benchmark_costs(
 
 
 @_srv.mcp.tool()
-async def estimate_terraform_cost(
+def estimate_terraform_cost(
     plan_json: str | None = None,
     plan_file: str | None = None,
     tf_dir: str | None = None,
@@ -883,7 +883,7 @@ async def estimate_terraform_cost(
 
 
 @_srv.mcp.tool()
-async def estimate_change_cost(
+def estimate_change_cost(
     terraform_plan_json: str | None = None,
     terraform_plan_file: str | None = None,
     tf_dir: str | None = None,
@@ -1001,7 +1001,7 @@ async def estimate_change_cost(
 
 
 @_srv.mcp.tool()
-async def set_business_metrics(
+def set_business_metrics(
     arr_usd: float | None = None,
     mrr_usd: float | None = None,
     mau: int | None = None,
@@ -1619,7 +1619,7 @@ async def slice_costs(
 
 
 @_srv.mcp.tool()
-async def list_active_services(
+def list_active_services(
     provider: str = "",
     start_date: str = "",
     end_date: str = "",
@@ -1683,7 +1683,7 @@ async def list_active_services(
 
 
 @_srv.mcp.tool()
-async def get_service_cost(
+def get_service_cost(
     service_name: str,
     provider: str = "",
     start_date: str = "",
@@ -2047,7 +2047,7 @@ async def explain_recent_cost_drivers(
 
 
 @_srv.mcp.tool()
-async def get_nable_roi(
+def get_nable_roi(
     period_days: int = 90,
 ) -> dict:
     """
