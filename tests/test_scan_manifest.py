@@ -103,6 +103,26 @@ def test_dry_run_json_is_a_pasteable_policy(capsys):
     assert payload["iam_policy"]["Statement"][0]["Sid"] == "NableReadOnlyScan"
 
 
+@pytest.mark.parametrize("check", [
+    "nat", "ec2", "rds_rightsizing", "rds_idle", "s3", "lambda", "load_balancer", "ecs",
+])
+def test_every_metric_reading_check_names_the_batched_read(check):
+    """These checks read CloudWatch through GetMetricData now. A policy that
+    grants only GetMetricStatistics lets the scan start and then fail every
+    metric read, which the detectors treat as unread and skip, so the scan
+    reports clean on an account it never measured."""
+    _, calls = SCAN_CHECKS[check]
+    assert ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData") in calls
+    assert "cloudwatch:GetMetricStatistics" not in iam_actions()
+
+
+def test_the_s3_check_can_find_each_buckets_region():
+    """Storage metrics live in the bucket's region, which the check reads with
+    GetBucketLocation. Without it every bucket falls back to us-east-1."""
+    _, calls = SCAN_CHECKS["s3"]
+    assert ("s3.get_bucket_location", "s3:GetBucketLocation") in calls
+
+
 @pytest.mark.parametrize("check", sorted(SCAN_CHECKS))
 def test_every_check_says_what_it_finds_in_plain_terms(check):
     """A permission list nobody can read is not disclosure."""

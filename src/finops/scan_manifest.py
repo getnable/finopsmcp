@@ -27,18 +27,18 @@ SCAN_CHECKS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         ("ec2.describe_addresses", "ec2:DescribeAddresses")]),
     "nat": ("NAT gateways with no meaningful traffic", [
         ("ec2.describe_nat_gateways", "ec2:DescribeNatGateways"),
-        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
+        ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData")]),
     "ec2": ("Idle and stopped instances still costing money", [
         ("ec2.describe_instances", "ec2:DescribeInstances"),
-        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
+        ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData")]),
     "rds": ("Backup retention beyond what the workload needs", [
         ("rds.describe_db_instances", "rds:DescribeDBInstances")]),
     "rds_rightsizing": ("Oversized database instances, by observed CPU", [
         ("rds.describe_db_instances", "rds:DescribeDBInstances"),
-        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
+        ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData")]),
     "rds_idle": ("Databases with no connections", [
         ("rds.describe_db_instances", "rds:DescribeDBInstances"),
-        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
+        ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData")]),
     "cloudtrail": ("Duplicate trails and expensive data events", [
         ("cloudtrail.describe_trails", "cloudtrail:DescribeTrails"),
         ("cloudtrail.get_event_selectors", "cloudtrail:GetEventSelectors")]),
@@ -46,22 +46,25 @@ SCAN_CHECKS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         ("logs.describe_log_groups", "logs:DescribeLogGroups")]),
     "s3": ("Buckets on a storage class their access pattern doesn't justify", [
         ("s3.list_buckets", "s3:ListAllMyBuckets"),
-        ("s3.get_bucket_lifecycle_configuration", "s3:GetLifecycleConfiguration")]),
+        ("s3.get_bucket_location", "s3:GetBucketLocation"),
+        ("s3.get_bucket_lifecycle_configuration", "s3:GetLifecycleConfiguration"),
+        ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData")]),
     "s3_multipart": ("Incomplete multipart uploads billing silently", [
         ("s3.list_multipart_uploads", "s3:ListBucketMultipartUploads")]),
     "lambda": ("Functions provisioned well above their observed memory", [
         ("lambda.list_functions", "lambda:ListFunctions"),
-        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
+        ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData")]),
     "load_balancer": ("Load balancers with no healthy targets", [
         ("elbv2.describe_load_balancers", "elasticloadbalancing:DescribeLoadBalancers"),
-        ("elbv2.describe_target_health", "elasticloadbalancing:DescribeTargetHealth")]),
+        ("elbv2.describe_target_health", "elasticloadbalancing:DescribeTargetHealth"),
+        ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData")]),
     "ecr": ("Untagged images nothing has pulled in months", [
         ("ecr.describe_repositories", "ecr:DescribeRepositories"),
         ("ecr.describe_images", "ecr:DescribeImages")]),
     "ecs": ("Fargate tasks reserving far more CPU than they use", [
         ("ecs.list_clusters", "ecs:ListClusters"),
         ("ecs.describe_services", "ecs:DescribeServices"),
-        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
+        ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData")]),
 }
 
 # Always needed, whatever checks run: identity, and which regions to sweep.
