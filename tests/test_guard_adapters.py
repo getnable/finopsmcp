@@ -12,6 +12,7 @@ wire format and the config file. Invariants under test:
     harness's JSON and nothing else
   - installing is idempotent, never touches another tool's hooks, refuses a
     file it does not understand (keeping a copy) and never half-writes one
+  - `--all` installs into exactly the agents present on this machine
 
 Payload fixtures are copied from the sources guard_adapters.py cites.
 """
@@ -640,3 +641,116 @@ def test_state_never_raises_on_a_file_it_cannot_understand(harness):
                  '{"hooks": {"beforeShellExecution": [null, 3]}}'):
         path.write_text(body)
         assert ga.state(harness, True) == "absent", f"raised or true-d on {body!r}"
+
+
+# ── --all ────────────────────────────────────────────────────────────────────
+
+def _cli_in_process(action, capsys, **kw):
+    kw = {"harness": None, "everything": True, "global_scope": True, **kw}
+    code = ga.cli(action, **kw)
+    return code, capsys.readouterr().out
+
+
+def test_only_agents_present_on_this_machine_are_detected(tmp_path, monkeypatch):
+    assert ga.detected() == []
+    (Path.home() / ".cursor").mkdir()
+    assert ga.detected() == ["cursor"]
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "ch"))
+    (tmp_path / "ch").mkdir()
+    (Path.home() / ".claude").mkdir()
+    assert ga.detected() == ["claude", "cursor", "codex"]
+
+
+def test_install_all_wires_each_agent_found_and_skips_the_rest(capsys, monkeypatch):
+    _uvx(monkeypatch)
+    (Path.home() / ".claude").mkdir()
+    (Path.home() / ".codex").mkdir()
+    code, out = _cli_in_process("install", capsys)
+    assert code == 0
+    assert g.is_installed(Path.home() / ".claude" / "settings.json")
+    assert ga.state("codex", True) == "installed"
+    assert not (Path.home() / ".cursor").exists(), "installed into an agent that is not here"
+    assert "Claude Code" in out and "Codex CLI" in out
+    assert "Cursor" in out and "not found" in out
+    assert "Hooks need review" in out, "Codex users must be told to trust the hook"
+
+
+def test_install_all_with_no_agent_found_says_so_and_fails(capsys):
+    code, out = _cli_in_process("install", capsys)
+    assert code == 1 and "No supported agent found" in out
+
+
+def test_one_refused_file_does_not_stop_the_others(capsys, monkeypatch):
+    _uvx(monkeypatch)
+    (Path.home() / ".codex").mkdir()
+    cursor = Path.home() / ".cursor" / "hooks.json"
+    cursor.parent.mkdir()
+    cursor.write_text("{ nope")
+    code, out = _cli_in_process("install", capsys)
+    assert code == 1
+    assert cursor.read_text() == "{ nope"
+    assert ga.state("codex", True) == "installed"
+    assert "not valid JSON" in out
+
+
+def test_uninstall_all_removes_ours_everywhere_and_nothing_else(capsys, monkeypatch):
+    _uvx(monkeypatch)
+    for d in (".claude", ".cursor", ".codex"):
+        (Path.home() / d).mkdir()
+    settings = Path.home() / ".claude" / "settings.json"
+    settings.write_text(json.dumps({"hooks": {"PreToolUse": [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "other-tool check"}]}]}}))
+    assert _cli_in_process("install", capsys)[0] == 0
+
+    code, out = _cli_in_process("uninstall", capsys)
+    assert code == 0 and out.count("removed") == 3
+    assert all(ga.state(h, True) == "absent" for h in ga.HARNESSES)
+    assert "other-tool" in settings.read_text()
+
+
+def test_single_harness_cli(capsys, monkeypatch):
+    _uvx(monkeypatch)
+    code, out = _cli_in_process("install", capsys, harness="cursor", everything=False,
+                                global_scope=False)
+    assert code == 0 and (Path.cwd() / ".cursor" / "hooks.json").exists()
+    assert "nable guard uninstall --harness cursor" in out
+    code, out = _cli_in_process("uninstall", capsys, harness="cursor", everything=False,
+                                global_scope=False)
+    assert code == 0 and "removed" in out
+
+
+def test_install_telemetry_names_the_harness_and_nothing_identifying(capsys, monkeypatch):
+    _uvx(monkeypatch)
+    events = []
+    monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: events.append((e, p)))
+    ga.cli("install", harness="codex", everything=False, global_scope=True)
+    [(name, payload)] = events
+    assert name == "guard_installed" and payload["harness"] == "codex"
+    assert set(payload) <= {"scope", "outcome", "hook_form", "harness"}
+    assert str(Path.home()) not in repr(payload) and "guard hook" not in repr(payload)
+
+
+def test_status_lists_the_other_agents(monkeypatch):
+    _uvx(monkeypatch)
+    assert ga.status_lines() == []               # nothing here, nothing to say
+    (Path.home() / ".cursor").mkdir()
+    ga.install("cursor", True)
+    lines = "\n".join(ga.status_lines())
+    assert "Cursor" in lines and "installed" in lines and "Codex" not in lines
+
+
+def test_the_real_cli_installs_everywhere_it_should(tmp_path):
+    home = tmp_path / "home"
+    (home / ".cursor").mkdir(parents=True, exist_ok=True)
+    (home / ".codex").mkdir()
+    r = _cli(["guard", "install", "--all", "--global"], home)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (home / ".cursor" / "hooks.json").exists()
+    assert (home / ".codex" / "hooks.json").exists()
+    assert not (home / ".claude").exists()
+
+    r = _cli(["guard", "status"], home)
+    assert r.returncode == 0 and "Cursor" in r.stdout and "Codex CLI" in r.stdout
+
+    r = _cli(["guard", "uninstall", "--harness", "codex", "--global"], home)
+    assert r.returncode == 0 and "removed" in r.stdout

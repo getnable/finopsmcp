@@ -2301,6 +2301,16 @@ def _run_guard(parsed) -> None:
         from .guard_adapters import run_hook
         raise SystemExit(run_hook(getattr(parsed, "guard_harness", None)))
 
+    # Cursor, Codex, or every agent found here: guard_adapters owns those files.
+    harness = getattr(parsed, "guard_harness", None)
+    everything = getattr(parsed, "guard_all", False)
+    if action in ("install", "uninstall") and (everything or harness in ("cursor", "codex")):
+        from .guard_adapters import cli
+        code = cli(action, harness=harness, everything=everything, global_scope=global_scope)
+        if code:
+            raise SystemExit(code)
+        return
+
     if action == "install":
         # No license check here on purpose. The guard is free forever (see the
         # note on "agent_gate" in license.py): it is the one surface that works
@@ -2438,6 +2448,12 @@ def _run_guard(parsed) -> None:
         else:
             state = dim("not installed")
         print(f"  {scope:<8} {state}   {dim(str(p))}")
+    from .guard_adapters import status_lines
+    other_agents = status_lines()
+    if other_agents:
+        print()
+        for line in other_agents:
+            print(line)
     print()
     if stale:
         print(f"  {amber('The hooked command no longer exists, so the guard is not running.')}")
@@ -2447,8 +2463,9 @@ def _run_guard(parsed) -> None:
     print(dim("  Try:      nable guard try                 (see it judge four commands)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
-    print(dim("  The hook is Claude Code. Other MCP agents (Cursor, etc.) get the same"))
-    print(dim("  gate as a tool: the agent calls check_action_policy before acting."))
+    print(dim("            nable guard install --all       (Claude Code, Cursor, Codex: each one found)"))
+    print(dim("  Other MCP agents get the same gate as a tool: the agent calls"))
+    print(dim("  check_action_policy before acting."))
     print()
 
 
@@ -2871,7 +2888,10 @@ def main(args: list[str] | None = None) -> None:
                          help="With 'check': a shell command to classify against your policy")
     guard_p.add_argument("--harness", dest="guard_harness", choices=["claude", "cursor", "codex"],
                          default=None,
-                         help="With 'hook': the payload format (detected when omitted)")
+                         help="With 'install'/'uninstall': the agent to wire (default claude). "
+                              "With 'hook': the payload format (detected when omitted)")
+    guard_p.add_argument("--all", dest="guard_all", action="store_true",
+                         help="With 'install'/'uninstall': every supported agent found on this machine")
 
     iam_p = sub.add_parser("iam-template", help="Print the least-privilege IAM policy / CloudFormation nable needs")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")

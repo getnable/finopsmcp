@@ -530,3 +530,92 @@ def state(harness: str, global_scope: bool) -> str:
     if not ours:
         return "absent"
     return "installed" if any(_runnable(c) for c in ours) else "broken"
+
+
+# ── CLI ────────────────────────────────────────────────────────────────────────
+
+_AFTER_INSTALL = {
+    "claude": "Restart Claude Code to pick up the hook.",
+    "cursor": "If Cursor is open, restart it so the hook is loaded.",
+    "codex": ("Codex asks you to review new hooks when it starts (\"Hooks need review\"). "
+              "Trust this one or it will not run. Codex hooks cannot ask for a "
+              "confirmation, so a command the guard would ask about is denied there, "
+              "with the reason."),
+}
+
+
+def cli(action: str, *, harness: str | None, everything: bool, global_scope: bool) -> int:
+    """`nable guard install|uninstall --harness X` and `--all`. Returns the exit code."""
+    from .welcome import _fire_telemetry, amber, cyan, dim, green
+
+    scope = "global" if global_scope else "project"
+    flag = " --global" if global_scope else ""
+    if everything:
+        targets = HARNESSES if action == "uninstall" else detected()
+        if not targets:
+            looked = ", ".join(str(config_dir(h)) for h in HARNESSES)
+            print(f"\n  No supported agent found (looked for {looked}).\n")
+            return 1
+    else:
+        targets = (harness or "claude",)
+
+    failed = 0
+    print()
+    for name in targets:
+        label = f"{LABELS[name]:<12}" if everything else LABELS[name]
+        try:
+            if action == "install":
+                outcome, path = install(name, global_scope)
+                _fire_telemetry("guard_installed", {
+                    "scope": scope, "outcome": outcome, "harness": name,
+                    "hook_form": "uvx" if guard._hook_command() == guard._UVX_HOOK_CMD else "binary",
+                })
+                verb = {"new": "installed", "already": "already installed",
+                        "repaired": "repaired"}[outcome]
+                print(f"  {green('✓')} {label} guard {verb} → {path}")
+                if state(name, global_scope) == "broken":
+                    print(f"      {amber('The hooked command does not exist, so the guard is not running.')}")
+                elif outcome != "already":
+                    print(dim(f"      {_AFTER_INSTALL[name]}"))
+            else:
+                removed, path = uninstall(name, global_scope)
+                if removed:
+                    print(f"  {green('✓')} {label} guard removed from {path}")
+                elif everything:
+                    print(dim(f"  - {label} not installed in {path}"))
+                else:
+                    print(f"  {label} guard was not installed in {path}")
+        except SystemExit as e:           # a refusal: the file was left as found
+            failed += 1
+            print(f"  {amber('!')} {label} {str(e.code).strip()}")
+        except OSError as e:
+            failed += 1
+            print(f"  {amber('!')} {label} could not write {hooks_path(name, global_scope)}: "
+                  f"{e.strerror or e}. Check the file's permissions and run it again.")
+    if everything and action == "install":
+        for name in HARNESSES:
+            if name not in targets:
+                print(dim(f"  - {LABELS[name]:<12} not found (no {config_dir(name)}), skipped"))
+    if action == "install" and not failed:
+        which = "--all" if everything else f"--harness {targets[0]}"
+        print(f"\n  {dim('Remove any time:')} {cyan(f'nable guard uninstall {which}{flag}')}")
+    print()
+    return 1 if failed else 0
+
+
+def status_lines() -> list[str]:
+    """One line per Cursor/Codex scope that is installed or whose agent is here."""
+    from .welcome import amber, dim, green
+
+    here = set(detected())
+    lines = []
+    for name in ("cursor", "codex"):
+        for scope, is_global in (("project", False), ("global", True)):
+            st = state(name, is_global)
+            if st == "absent" and name not in here:
+                continue
+            shown = {"installed": green("installed"), "broken": amber("installed, but broken"),
+                     "absent": dim("not installed")}[st]
+            lines.append(f"  {LABELS[name]:<10} {scope:<8} {shown}   "
+                         f"{dim(str(hooks_path(name, is_global)))}")
+    return lines
