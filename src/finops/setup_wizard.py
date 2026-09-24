@@ -2102,17 +2102,21 @@ def _check_path_warning() -> None:
     Warn the user if the directory containing the `finops` executable is not in PATH.
     This is the #1 silent failure after `pip install finops-mcp` in a user install.
     """
+    import contextlib
     import shutil
     if shutil.which("finops") is None:
         # The command is running (we got here), so find our own location
         finops_bin_dir = Path(sys.executable).parent
-        _warn(
-            f"The 'finops' command may not be in your PATH after install.\n"
-            f"  Your scripts directory: {finops_bin_dir}\n"
-            f"  Add it to PATH with:\n"
-            f"    export PATH=\"{finops_bin_dir}:$PATH\"\n"
-            f"  Or add that line to your ~/.zshrc / ~/.bashrc"
-        )
+        # stderr, not stdout: this runs before every subcommand, and on stdout
+        # it corrupts `--json` output for anyone whose scripts dir is off PATH.
+        with contextlib.redirect_stdout(sys.stderr):
+            _warn(
+                f"The 'finops' command may not be in your PATH after install.\n"
+                f"  Your scripts directory: {finops_bin_dir}\n"
+                f"  Add it to PATH with:\n"
+                f"    export PATH=\"{finops_bin_dir}:$PATH\"\n"
+                f"  Or add that line to your ~/.zshrc / ~/.bashrc"
+            )
 
 
 def _wizard_select_persona() -> None:

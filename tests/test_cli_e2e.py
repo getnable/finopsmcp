@@ -25,7 +25,7 @@ FIRST_PRINT_BUDGET_S = 5.0 if os.getenv("CI") else 2.0
 _ENV = {**os.environ, "NABLE_NO_TELEMETRY": "1", "NO_COLOR": "1"}
 
 
-def _run_entry(*argv: str, timeout: float = 60.0):
+def _run_entry(*argv: str, timeout: float = 60.0, env: dict | None = None):
     """Run finops.entry:main in a child process exactly as the console script would."""
     code = (
         "import sys; sys.argv = ['nable', *sys.argv[1:]]; "
@@ -36,7 +36,7 @@ def _run_entry(*argv: str, timeout: float = 60.0):
         capture_output=True,
         text=True,
         timeout=timeout,
-        env=_ENV,
+        env=_ENV if env is None else env,
         cwd=str(REPO),
     )
 
@@ -62,6 +62,20 @@ def test_scan_demo_json_stdout_is_pure():
     doc = json.loads(proc.stdout)  # any chrome on stdout breaks this parse
     assert doc["command"] == "scan" and doc["demo"] is True
     assert doc["recoverable"]["monthly_usd"] > 0
+
+
+def test_json_stdout_stays_pure_when_scripts_dir_is_off_path():
+    # A --user install leaves the scripts dir off PATH, which triggers the
+    # "not in your PATH" hint. That hint must go to stderr, never into --json.
+    scripts = str(Path(sys.executable).parent)
+    path = os.pathsep.join(
+        p for p in _ENV.get("PATH", "").split(os.pathsep)
+        if p and os.path.realpath(p) != os.path.realpath(scripts)
+    )
+    proc = _run_entry("scan", "--demo", "--json", env={**_ENV, "PATH": path})
+    assert proc.returncode == 0, proc.stderr
+    doc = json.loads(proc.stdout)
+    assert doc["command"] == "scan"
 
 
 def test_help_leads_with_get_answers():
