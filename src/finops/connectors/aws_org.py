@@ -46,41 +46,76 @@ def _ce_client(account_id: str | None = None, role_name: str = _ROLE_NAME) -> An
     """
     Return a Cost Explorer client. If account_id is given and differs from
     the caller's account, assume the FinOpsReadOnly role in that account.
+
+    Raises when the account cannot be reached. This used to fall back to the
+    caller's own client, which reads a different account: filtered to the
+    target it returned nothing, and the account was reported as $0.
     """
     import boto3
     if not account_id:
         return boto3.client("ce", region_name="us-east-1")
 
     # Get caller account to decide if cross-account needed
-    try:
-        sts = boto3.client("sts")
-        caller_account = sts.get_caller_identity()["Account"]
-    except Exception:
-        return boto3.client("ce", region_name="us-east-1")
+    sts = boto3.client("sts")
+    caller_account = sts.get_caller_identity()["Account"]
 
     if caller_account == account_id:
         return boto3.client("ce", region_name="us-east-1")
 
     # Cross-account assume role
+    role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
     try:
-        role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
-        sts = boto3.client("sts")
         assumed = sts.assume_role(
             RoleArn=role_arn,
             RoleSessionName="nable-finops",
             DurationSeconds=900,
         )
-        creds = assumed["Credentials"]
-        return boto3.client(
-            "ce",
-            region_name="us-east-1",
-            aws_access_key_id=creds["AccessKeyId"],
-            aws_secret_access_key=creds["SecretAccessKey"],
-            aws_session_token=creds["SessionToken"],
-        )
     except Exception as e:
-        log.warning("Could not assume role in %s: %s — falling back to management account CE", account_id, e)
-        return boto3.client("ce", region_name="us-east-1")
+        raise RuntimeError(f"Could not assume {role_arn}: {e}") from e
+    creds = assumed["Credentials"]
+    return boto3.client(
+        "ce",
+        region_name="us-east-1",
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+    )
+
+
+def _all_results_by_time(ce: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    """ResultsByTime across every page of a GetCostAndUsage call.
+
+    Grouped results are paged with NextPageToken. Reading only the first page
+    silently dropped accounts from the rollup (100 accounts came back as 60).
+    """
+    results: list[dict[str, Any]] = []
+    while True:
+        resp = ce.get_cost_and_usage(**kwargs)
+        results.extend(resp.get("ResultsByTime", []))
+        token = resp.get("NextPageToken")
+        if not token:
+            return results
+        kwargs["NextPageToken"] = token
+
+
+def _credential_identity() -> str:
+    """Whose credentials the org rollup reads with, for the cache key.
+
+    The rollup runs on the ambient credential chain, so a profile or key switch
+    reads a different organization. Keyed on AWSConnector.cache_identity() plus
+    the profile, a digest of the access key id, and the member role name.
+    """
+    import hashlib
+
+    from .aws import AWSConnector
+
+    key_id = os.environ.get("AWS_ACCESS_KEY_ID", "")
+    return "|".join([
+        AWSConnector().cache_identity(),
+        f"profile:{os.environ.get('AWS_PROFILE', '')}",
+        f"key:{hashlib.sha256(key_id.encode()).hexdigest()[:12] if key_id else ''}",
+        f"role:{_ROLE_NAME}",
+    ])
 
 
 # ── Organization discovery ────────────────────────────────────────────────────
@@ -215,7 +250,8 @@ def _account_spend(
         ce = _ce_client(account_id)
 
         # Total spend with account filter (management CE supports this)
-        resp = ce.get_cost_and_usage(
+        results = _all_results_by_time(
+            ce,
             TimePeriod={"Start": start, "End": end},
             Granularity=granularity,
             Filter={"Dimensions": {"Key": "LINKED_ACCOUNT", "Values": [account_id]}},
@@ -225,7 +261,7 @@ def _account_spend(
 
         total = 0.0
         by_service: dict[str, float] = {}
-        for period in resp.get("ResultsByTime", []):
+        for period in results:
             for group in period.get("Groups", []):
                 svc = group["Keys"][0]
                 amt = float(group["Metrics"]["UnblendedCost"]["Amount"])
@@ -259,15 +295,17 @@ def org_cost_summary(
     data that refreshes only ~3x/day.
     """
     from .. import cache as _cache
-    _ck = _cache.make_key("aws_org.org_cost_summary", days_back, include_zero_spend)
+    _ck = _cache.make_key("aws_org.org_cost_summary", _credential_identity(),
+                          days_back, include_zero_spend)
     _hit = _cache.get(_ck)
     if _hit is not None:
         import copy as _copy
         return _copy.deepcopy(_hit)
 
     result = _org_cost_summary_uncached(days_back, include_zero_spend)
-    # Only cache a real rollup, never a transient error payload.
-    if isinstance(result, dict) and not result.get("error"):
+    # Only cache a complete rollup, never a transient error or a partial one:
+    # an assume-role blip would otherwise hide those accounts for 12 hours.
+    if isinstance(result, dict) and not result.get("error") and not result.get("partial"):
         import copy as _copy
         _cache.set(_ck, _copy.deepcopy(result), _cache.COST_TTL)
     return result
@@ -283,7 +321,8 @@ def _org_cost_summary_uncached(
     try:
         import boto3
         ce = boto3.client("ce", region_name="us-east-1")
-        resp = ce.get_cost_and_usage(
+        results = _all_results_by_time(
+            ce,
             TimePeriod={"Start": start, "End": end},
             Granularity="MONTHLY",
             GroupBy=[
@@ -296,7 +335,7 @@ def _org_cost_summary_uncached(
         # Aggregate by account
         account_totals: dict[str, float] = {}
         account_services: dict[str, dict[str, float]] = {}
-        for period in resp.get("ResultsByTime", []):
+        for period in results:
             for group in period.get("Groups", []):
                 acct_id = group["Keys"][0]
                 svc     = group["Keys"][1]
@@ -345,17 +384,32 @@ def _fallback_per_account_rollup(start: str, end: str, days_back: int) -> dict[s
         return {"error": "No accounts found in organization", "org_total_usd": 0}
 
     results = []
+    failed = []
     for acct in accounts:
         data = _account_spend(acct["account_id"], start, end)
         data["account_name"] = acct["account_name"]
-        results.append(data)
+        # An account whose spend could not be read is not a $0 account. Keep it
+        # out of the total and the ranking, and say which ones are missing.
+        if data.get("error"):
+            failed.append({"account_id": data["account_id"],
+                           "account_name": data["account_name"],
+                           "error": data["error"]})
+        else:
+            results.append(data)
+
+    if not results:
+        return {
+            "error": "Could not read spend for any account in the organization",
+            "failed_accounts": failed,
+            "method": "per_account_assume_role",
+        }
 
     results.sort(key=lambda x: x["total_usd"], reverse=True)
     org_total = sum(r["total_usd"] for r in results)
     for r in results:
         r["pct_of_org"] = round(r["total_usd"] / org_total * 100, 1) if org_total else 0
 
-    return {
+    out = {
         "period_start": start,
         "period_end": end,
         "org_total_usd": round(org_total, 2),
@@ -363,6 +417,12 @@ def _fallback_per_account_rollup(start: str, end: str, days_back: int) -> dict[s
         "accounts": results,
         "method": "per_account_assume_role",
     }
+    if failed:
+        out["partial"] = True
+        out["failed_accounts"] = failed
+        out["note"] = (f"{len(failed)} of {len(accounts)} accounts could not be read; "
+                       "org_total_usd excludes them and is not the whole bill.")
+    return out
 
 
 def _load_account_names() -> dict[str, str]:
@@ -404,18 +464,19 @@ def account_anomalies(days_back: int = 30) -> list[dict[str, Any]]:
             # Cache per date window. The previous-period window is stable history and
             # is reused across repeated anomaly checks; the current window refreshes
             # only ~3x/day, so a 12h TTL never costs accuracy.
-            _ck = _cache.make_key("aws_org.period_totals", s, e)
+            _ck = _cache.make_key("aws_org.period_totals", _credential_identity(), s, e)
             _hit = _cache.get(_ck)
             if _hit is not None:
                 return dict(_hit)
-            resp = ce.get_cost_and_usage(
+            results = _all_results_by_time(
+                ce,
                 TimePeriod={"Start": s, "End": e},
                 Granularity="MONTHLY",
                 GroupBy=[{"Type": "DIMENSION", "Key": "LINKED_ACCOUNT"}],
                 Metrics=["UnblendedCost"],
             )
             totals: dict[str, float] = {}
-            for period in resp.get("ResultsByTime", []):
+            for period in results:
                 for group in period.get("Groups", []):
                     acct = group["Keys"][0]
                     amt  = float(group["Metrics"]["UnblendedCost"]["Amount"])
