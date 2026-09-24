@@ -140,3 +140,26 @@ async def test_a_sync_tool_error_still_reaches_the_audit_log(bare_wrapper, monke
     with pytest.raises(RuntimeError, match="sts unreachable"):
         await bare_wrapper()(broken_tool)()
     assert seen.get("outcome") == "error" and seen.get("tool") == "broken_tool"
+
+
+async def test_a_sync_tool_can_still_refresh_the_client_tool_list(bare_wrapper, monkeypatch):
+    """connect_* tools call _tool_surface_changed(), which schedules
+    send_tool_list_changed on the loop. From a worker thread there is no running
+    loop, and the notification must not be silently dropped because of it."""
+    sent = asyncio.Event()
+
+    class _Session:
+        async def send_tool_list_changed(self):
+            sent.set()
+
+    class _Ctx:
+        session = _Session()
+
+    monkeypatch.setattr(_srv.mcp, "get_context", lambda: _Ctx())
+
+    def connect_tool() -> dict:
+        _srv._tool_surface_changed()
+        return {"connected": True}
+
+    assert await bare_wrapper()(connect_tool)() == {"connected": True}
+    await asyncio.wait_for(sent.wait(), timeout=2)

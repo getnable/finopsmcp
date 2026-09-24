@@ -141,6 +141,12 @@ class _SurfacedFastMCP(FastMCP):
         return await super().call_tool(name, arguments, **kwargs)
 
 
+# The event loop that dispatches tool calls, recorded by _instrumented_tool before
+# it hands a sync tool to a worker thread, so code on that thread can schedule
+# work back onto the loop (see _tool_surface_changed).
+_TOOL_LOOP: "asyncio.AbstractEventLoop | None" = None
+
+
 def _tool_surface_changed() -> None:
     """After a successful in-chat connect: re-detect families and nudge the client
     to refresh its tool list. Best-effort on both counts; hidden tools are callable
@@ -153,7 +159,16 @@ def _tool_surface_changed() -> None:
     try:
         import asyncio as _aio
         session = mcp.get_context().session
-        _aio.get_running_loop().create_task(session.send_tool_list_changed())
+        try:
+            _aio.get_running_loop().create_task(session.send_tool_list_changed())
+        except RuntimeError:
+            # No loop in this thread: the caller is a sync tool, which
+            # _instrumented_tool runs on a worker thread. Hand the send back to
+            # the loop that dispatched it; get_running_loop() here used to raise
+            # into the bare except below and the refresh was silently dropped.
+            loop = _TOOL_LOOP
+            if loop is not None and loop.is_running():
+                _aio.run_coroutine_threadsafe(session.send_tool_list_changed(), loop)
     except Exception:
         pass
 
@@ -401,6 +416,8 @@ def _instrumented_tool(*dargs, **dkwargs):
                 if _is_coroutine_tool:
                     result = await fn(*args, **kwargs)
                 else:
+                    global _TOOL_LOOP
+                    _TOOL_LOOP = asyncio.get_running_loop()
                     _ret = await asyncio.to_thread(fn, *args, **kwargs)
                     result = await _ret if _inspect.isawaitable(_ret) else _ret
             except Exception as exc:
