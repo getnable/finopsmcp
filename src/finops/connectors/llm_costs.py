@@ -20,41 +20,6 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# Bedrock model pricing per 1M tokens (on-demand, us-east-1, May 2026)
-_BEDROCK_PRICING: dict[str, dict[str, float]] = {
-    # Anthropic on Bedrock
-    "anthropic.claude-3-5-sonnet-20241022-v2:0": {"input": 3.00,  "output": 15.00},
-    "anthropic.claude-3-5-haiku-20241022-v1:0":  {"input": 0.80,  "output": 4.00},
-    "anthropic.claude-3-opus-20240229-v1:0":     {"input": 15.00, "output": 75.00},
-    "anthropic.claude-3-sonnet-20240229-v1:0":   {"input": 3.00,  "output": 15.00},
-    "anthropic.claude-3-haiku-20240307-v1:0":    {"input": 0.25,  "output": 1.25},
-    # Meta Llama
-    "meta.llama3-70b-instruct-v1:0":             {"input": 0.99,  "output": 0.99},
-    "meta.llama3-8b-instruct-v1:0":              {"input": 0.22,  "output": 0.22},
-    "meta.llama3-1-405b-instruct-v1:0":          {"input": 5.32,  "output": 16.00},
-    # Amazon Nova
-    "amazon.nova-pro-v1:0":                      {"input": 0.80,  "output": 3.20},
-    "amazon.nova-lite-v1:0":                     {"input": 0.06,  "output": 0.24},
-    "amazon.nova-micro-v1:0":                    {"input": 0.035, "output": 0.14},
-    # Mistral
-    "mistral.mistral-large-2402-v1:0":           {"input": 4.00,  "output": 12.00},
-    "mistral.mistral-7b-instruct-v0:2":          {"input": 0.15,  "output": 0.20},
-    # Amazon Titan
-    "amazon.titan-text-premier-v1:0":            {"input": 0.50,  "output": 1.50},
-    "amazon.titan-text-lite-v1":                 {"input": 0.15,  "output": 0.20},
-    "amazon.titan-embed-text-v2:0":              {"input": 0.02,  "output": 0.00},
-    # Canonical ids for Bedrock Claude SKU display names. Cost Explorer reports
-    # Bedrock spend as per-model SKUs ("Claude Sonnet 4.5") with no model-id
-    # string, so _normalize_model_id maps them to these keys. Prices mirror
-    # recommendations.bedrock_routing.MODEL_PRICING.
-    "claude-sonnet-4-5":                         {"input": 3.00,  "output": 15.00},
-    "claude-sonnet-4-6":                         {"input": 3.00,  "output": 15.00},
-    "claude-haiku-3-5":                          {"input": 0.80,  "output": 4.00},
-    "claude-haiku-3":                            {"input": 0.25,  "output": 1.25},
-    "claude-opus-4":                             {"input": 15.00, "output": 75.00},
-}
-
-
 def get_bedrock_costs(start_date: date, end_date: date) -> dict[str, Any]:
     """Fetch Bedrock costs from Cost Explorer, broken down by model."""
     # Cost Explorer bills PER REQUEST against the customer's own account, and
@@ -562,16 +527,13 @@ def _generate_recommendations(
     """Surface cost-saving opportunities across model choices."""
     recs: list[dict[str, Any]] = []
 
-    from .saas.openai_usage import _MODEL_PRICING as OAI_PRICING
-    from .saas.anthropic_usage import _MODEL_PRICING as ANT_PRICING
+    from ..llm_prices import price_for
     from ..recommendations.bedrock_routing import _normalize_model_id
 
-    all_pricing = {**OAI_PRICING, **ANT_PRICING, **_BEDROCK_PRICING}
-
     # Expensive model -> cheaper sibling for lower-complexity tasks. The savings
-    # percentage is NOT hardcoded; it's computed from the real pricing tables
-    # (blended input+output), so it tracks price changes and never asserts a
-    # made-up number. It's an estimate that assumes a balanced input/output token
+    # percentage is NOT hardcoded; it's computed from llm_prices (blended
+    # input+output), so it tracks price changes and never asserts a made-up
+    # number. A pair either side of which has no confirmed price is skipped. It's an estimate that assumes a balanced input/output token
     # mix; the true figure depends on the workload's ratio.
     downgrades = {
         "gpt-4o":                   "gpt-4o-mini",
@@ -586,8 +548,8 @@ def _generate_recommendations(
         "o1":                       "o3-mini",
     }
 
-    def _blended(price: dict) -> float:
-        return float(price.get("input", 0.0)) + float(price.get("output", 0.0))
+    def _blended(price) -> float:
+        return price.input + price.output
 
     for model, spend in by_model.items():
         if spend < 5.0:  # ignore noise
@@ -603,8 +565,8 @@ def _generate_recommendations(
         for expensive, cheaper in downgrades.items():
             if expensive not in clean and expensive not in canonical:
                 continue
-            cur_price, new_price = all_pricing.get(expensive), all_pricing.get(cheaper)
-            if not cur_price or not new_price:
+            cur_price, new_price = price_for(expensive), price_for(cheaper)
+            if cur_price is None or new_price is None:
                 continue
             cur_blended, new_blended = _blended(cur_price), _blended(new_price)
             if cur_blended <= 0:
