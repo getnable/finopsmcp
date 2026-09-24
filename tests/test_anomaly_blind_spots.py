@@ -46,3 +46,25 @@ def test_flat_baseline_then_huge_spike_is_flagged_by_same_weekday(monkeypatch):
 def test_flat_baseline_small_wobble_is_still_quiet():
     """The floor must not turn a flat series into a hair trigger."""
     assert detect_for_series("aws", "EC2", "123", TODAY, 110.0, [100.0] * 28) is None
+
+
+# ── spend falling to (nearly) nothing ────────────────────────────────────────
+
+
+def test_drop_from_4000_a_day_to_zero_is_flagged(monkeypatch):
+    """The small-spend noise floor belongs on the baseline side. Applied to
+    today's amount it hid the drop that matters most: a pipeline or a backup
+    job that stopped running."""
+    history = _rows({n: 4_000.0 for n in range(1, 57)})
+    monkeypatch.setattr(seasonality, "get_history", lambda *a, **kw: history)
+    out = detect_with_seasonality("aws", "EC2", "123", TODAY, 0.0)
+    assert out is not None
+    assert out.direction == "drop"
+    assert out.severity == "high"
+
+
+def test_tiny_baseline_is_still_ignored(monkeypatch):
+    """A service that never cost more than a few dollars stays below the noise floor."""
+    history = _rows({n: 2.0 for n in range(1, 57)})
+    monkeypatch.setattr(seasonality, "get_history", lambda *a, **kw: history)
+    assert detect_with_seasonality("aws", "S3", "123", TODAY, 0.0) is None

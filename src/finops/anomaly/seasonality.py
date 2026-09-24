@@ -62,9 +62,10 @@ def detect_with_seasonality(
     Seasonality-aware detection. Lookback extended to 56 days (8 weeks) to
     collect enough same-weekday readings; falls back to rolling mean if sparse.
     """
-    if current_amount < _MIN_SPEND_THRESHOLD:
-        return None
-
+    # No noise floor on today's amount. A drop from $4,000/day to $0 is the
+    # signal that a pipeline or a backup stopped, and a floor here hid it. The
+    # small-spend floor lives on the baseline side, where a series that never
+    # cost more than a few dollars is ignored.
     history = get_history(provider, service, account_id, days=lookback_days)
     today_iso = snapshot_date.isoformat()
     weekday = snapshot_date.weekday()
