@@ -506,22 +506,27 @@ def _ec2_run(latency: float = 0.0, n: int = 200):
 
 
 def test_idle_ec2_stays_on_the_free_api_by_default():
+    """The reads the per-instance loop made, no more: CPU for all 200, and
+    NetworkOut for the 199 whose CPU came back low."""
     cw = _ec2_run()
-    assert cw.data_calls == 0
+    assert (cw.data_calls, cw.statistics_calls) == (0, 200 + 199)
 
 
 def test_idle_ec2_batches_when_opted_in(opted_in):
     cw = _ec2_run()
     assert cw.statistics_calls == 0
-    assert cw.data_calls == math.ceil(200 * 2 / 500)
+    assert cw.data_calls == math.ceil(200 / 500) + math.ceil(199 / 500)
 
 
 def test_idle_ec2_reads_concurrently():
-    """40 instances, two reads each, 50ms a read: 4s in sequence."""
+    """40 instances, 79 reads at 50ms each: ~4s in sequence, ~0.5s eight at a
+    time (ceil(40 / 8) CPU rounds, then ceil(39 / 8) NetworkOut rounds)."""
     t0 = time.monotonic()
-    _ec2_run(latency=0.05, n=40)
+    cw = _ec2_run(latency=0.05, n=40)
     elapsed = time.monotonic() - t0
-    assert elapsed < 80 * 0.05 / 3, f"{elapsed:.2f}s is not concurrent"
+    assert cw.statistics_calls == 79
+    assert elapsed >= (math.ceil(40 / 8) + math.ceil(39 / 8)) * 0.05 * 0.9
+    assert elapsed < 79 * 0.05 / 3, f"{elapsed:.2f}s is not concurrent"
 
 
 def _lambda_pages(n: int) -> list[dict]:
@@ -551,13 +556,15 @@ def _lambda_run():
 
 
 def test_lambda_stays_on_the_free_api_by_default():
-    assert _lambda_run().data_calls == 0
+    """Invocations for all 300, memory for the 299 not read as zero."""
+    cw = _lambda_run()
+    assert (cw.data_calls, cw.statistics_calls) == (0, 300 + 299)
 
 
 def test_lambda_batches_when_opted_in(opted_in):
     cw = _lambda_run()
     assert cw.statistics_calls == 0
-    assert cw.data_calls == math.ceil(300 * 2 / 500)
+    assert cw.data_calls == math.ceil(300 / 500) + math.ceil(299 / 500)
 
 
 def _rds_pages(n: int, db_class: str = "db.m5.xlarge") -> list[dict]:
@@ -811,13 +818,16 @@ def _s3_run():
 
 
 def test_s3_storage_class_stays_on_the_free_api_by_default():
-    assert _s3_run().data_calls == 0
+    """Size for all 200, GETs for the 199 with a readable size, object count
+    for the 197 confirmed low access."""
+    cw = _s3_run()
+    assert (cw.data_calls, cw.statistics_calls) == (0, 200 + 199 + 197)
 
 
 def test_s3_storage_class_batches_when_opted_in(opted_in):
     cw = _s3_run()
     assert cw.statistics_calls == 0
-    assert cw.data_calls == math.ceil(200 * 3 / 500)
+    assert cw.data_calls == 3 * math.ceil(200 / 500)
 
 
 def _regional_cloudwatch() -> dict[str, _Metrics]:

@@ -681,29 +681,30 @@ def check_s3_storage_class(
         for bucket in buckets
     }
 
-    # StandardStorage size, GET requests and object count for every bucket in
-    # one batched read per region, all daily over the lookback window.
-    queries_by_region: dict[str, list[MetricQuery]] = {}
-    for bucket in buckets:
-        for metric, dim, stat in (
-            ("BucketSizeBytes", ("StorageType", "StandardStorage"), "Average"),
-            ("GetRequests", ("FilterId", "AllRequests"), "Sum"),
-            ("NumberOfObjects", ("StorageType", "AllStorageTypes"), "Average"),
-        ):
-            queries_by_region.setdefault(bucket_regions[bucket["Name"]], []).append(
-                MetricQuery((bucket["Name"], metric), "AWS/S3", metric,
-                            (("BucketName", bucket["Name"]), dim), stat, 86400))
-    series = fetch_metric_values_by_region(
-        lambda r: cw_client if r == region or cw_client_for_region is None
-        else cw_client_for_region(r),
-        queries_by_region, start, now)
+    clients: dict[str, Any] = {region: cw_client}
 
-    for bucket in buckets:
-        bucket_name = bucket["Name"]
-        bucket_region = bucket_regions[bucket_name]
+    def _cw_for(r: str) -> Any:
+        if r not in clients:
+            clients[r] = cw_client_for_region(r) if cw_client_for_region else cw_client
+        return clients[r]
 
-        # Bucket size via CloudWatch
-        size_datapoints = series.get((bucket_name, "BucketSizeBytes"))
+    def _read(names: list[str], metric: str, dim: tuple[str, str], stat: str) -> dict:
+        """One daily series per bucket, read in each bucket's own region."""
+        by_region: dict[str, list[MetricQuery]] = {}
+        for name in names:
+            by_region.setdefault(bucket_regions[name], []).append(
+                MetricQuery(name, "AWS/S3", metric, (("BucketName", name), dim), stat, 86400))
+        return fetch_metric_values_by_region(_cw_for, by_region, start, now)
+
+    # Three rounds, each only for the buckets the last one kept: the same reads
+    # the per-bucket loop made, so the free path spends no more requests.
+
+    # Bucket size via CloudWatch
+    size_gb_by_bucket: dict[str, float] = {}
+    sizes = _read([b["Name"] for b in buckets],
+                  "BucketSizeBytes", ("StorageType", "StandardStorage"), "Average")
+    for bucket in buckets:
+        size_datapoints = sizes.get(bucket["Name"])
         if not size_datapoints:
             continue
         avg_bytes = max(size_datapoints)
@@ -711,9 +712,13 @@ def check_s3_storage_class(
 
         if size_gb < min_size_gb:
             continue
+        size_gb_by_bucket[bucket["Name"]] = size_gb
 
-        # Check request frequency (GetRequests)
-        req_datapoints = series.get((bucket_name, "GetRequests"))
+    # Check request frequency (GetRequests)
+    daily_gets_by_bucket: dict[str, float] = {}
+    gets = _read(list(size_gb_by_bucket), "GetRequests", ("FilterId", "AllRequests"), "Sum")
+    for bucket_name in size_gb_by_bucket:
+        req_datapoints = gets.get(bucket_name)
         if req_datapoints is None:
             # S3 request metrics require request metrics to be enabled on the bucket
             avg_daily_gets = None
@@ -725,12 +730,22 @@ def check_s3_storage_class(
         is_low_access = avg_daily_gets is not None and avg_daily_gets < 100
         if not is_low_access:
             continue
+        daily_gets_by_bucket[bucket_name] = avg_daily_gets
+
+    # Object count to compute Intelligent-Tiering monitoring cost
+    objects = _read(list(daily_gets_by_bucket),
+                    "NumberOfObjects", ("StorageType", "AllStorageTypes"), "Average")
+
+    for bucket in buckets:
+        bucket_name = bucket["Name"]
+        bucket_region = bucket_regions[bucket_name]
+        if bucket_name not in daily_gets_by_bucket:
+            continue
+        size_gb = size_gb_by_bucket[bucket_name]
+        avg_daily_gets = daily_gets_by_bucket[bucket_name]
+        object_count = max(objects.get(bucket_name) or [], default=0)
 
         monthly_standard_cost = size_gb * _S3_STANDARD_PER_GB_MONTH
-
-        # Object count to compute Intelligent-Tiering monitoring cost
-        obj_datapoints = series.get((bucket_name, "NumberOfObjects"))
-        object_count = max(obj_datapoints or [], default=0)
 
         # Intelligent-Tiering: monitoring fee = $0.0025 per 1,000 objects/mo
         it_monitoring_cost = (object_count / 1000) * 0.0025
@@ -823,18 +838,26 @@ def check_lambda_memory(
 
     fns = [fn for page in pages for fn in page.get("Functions", [])]
 
-    # Invocations (Sum) and Lambda Insights memory (Maximum) for every function,
-    # one batched read, each as a single period spanning the whole window.
+    # Each read is a single period spanning the whole window. Invocations (Sum)
+    # for every function, then Lambda Insights memory (Maximum) only for the
+    # ones that were not read as zero invocations: the same reads the
+    # per-function loop made.
     now = datetime.now(timezone.utc)
-    series = fetch_metric_values(cw_client, [
-        MetricQuery((fn["FunctionName"], metric), namespace, metric,
-                    (("FunctionName", fn["FunctionName"]),), stat, 86400 * lookback_days)
-        for fn in fns
-        for namespace, metric, stat in (
-            ("AWS/Lambda", "Invocations", "Sum"),
-            ("LambdaInsights", "memory_utilization", "Maximum"),
-        )
-    ], now - timedelta(days=lookback_days), now)
+    start = now - timedelta(days=lookback_days)
+
+    def _query(fn: dict, namespace: str, metric: str, stat: str) -> MetricQuery:
+        return MetricQuery(fn["FunctionName"], namespace, metric,
+                           (("FunctionName", fn["FunctionName"]),), stat, 86400 * lookback_days)
+
+    invocations = fetch_metric_values(
+        cw_client, [_query(fn, "AWS/Lambda", "Invocations", "Sum") for fn in fns], start, now)
+    total_by_fn = {
+        name: None if values is None else sum(values) for name, values in invocations.items()
+    }
+    memory = fetch_metric_values(cw_client, [
+        _query(fn, "LambdaInsights", "memory_utilization", "Maximum")
+        for fn in fns if total_by_fn.get(fn["FunctionName"]) != 0
+    ], start, now)
 
     for fn in fns:
         fn_name = fn["FunctionName"]
@@ -843,8 +866,7 @@ def check_lambda_memory(
         code_size_mb = fn.get("CodeSize", 0) / (1024 * 1024)
 
         # Check invocations — zero invocations = potentially dead function
-        inv_datapoints = series.get((fn_name, "Invocations"))
-        total_invocations = None if inv_datapoints is None else sum(inv_datapoints)
+        total_invocations = total_by_fn.get(fn_name)
 
         if total_invocations == 0:
             findings.append({
@@ -870,7 +892,7 @@ def check_lambda_memory(
 
         # Try Lambda Insights for actual memory usage
         max_memory_used_mb = None
-        mem_datapoints = series.get((fn_name, "memory_utilization"))
+        mem_datapoints = memory.get(fn_name)
         if mem_datapoints:
             max_utilization_pct = max(mem_datapoints)
             max_memory_used_mb = configured_memory_mb * (max_utilization_pct / 100.0)
@@ -996,26 +1018,19 @@ def check_idle_ec2(
                         continue
                 candidates.append(inst)
 
-    # CPU and NetworkOut for every candidate in one batched read.
-    # Sum over a 1-hour Period gives total bytes per hour. Averaging the
-    # per-collection-interval samples (Statistics=Average) would return mean
-    # bytes-per-sample, ~12x too low against a per-hour threshold, so the guard
-    # would never fire. Use Sum.
-    series = fetch_metric_values(cw_client, [
-        MetricQuery((inst["InstanceId"], metric), "AWS/EC2", metric,
-                    (("InstanceId", inst["InstanceId"]),), stat, 3600)  # hourly
+    # CPU for every candidate, then NetworkOut only where CPU came back low:
+    # the same reads the per-resource loop made, so the free path spends no
+    # more requests and the opt-in path bills no more metrics than it must.
+    cpu_series = fetch_metric_values(cw_client, [
+        MetricQuery(inst["InstanceId"], "AWS/EC2", "CPUUtilization",
+                    (("InstanceId", inst["InstanceId"]),), "Average", 3600)  # hourly
         for inst in candidates
-        for metric, stat in (("CPUUtilization", "Average"), ("NetworkOut", "Sum"))
     ], start, now)
 
+    low_cpu: list[tuple[dict, float, float]] = []
     for inst in candidates:
         inst_id = inst["InstanceId"]
-        inst_type = inst.get("InstanceType", "unknown")
-        name_tag = next(
-            (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
-        )
-
-        datapoints = series.get((inst_id, "CPUUtilization"))
+        datapoints = cpu_series.get(inst_id)
         if datapoints is None:
             log.debug("CW CPU metrics failed for %s", inst_id)
             continue
@@ -1028,12 +1043,30 @@ def check_idle_ec2(
 
         if avg_cpu >= cpu_threshold_pct:
             continue
+        low_cpu.append((inst, avg_cpu, max_cpu))
+
+    # Sum over a 1-hour Period gives total bytes per hour. Averaging the
+    # per-collection-interval samples (Statistics=Average) would return mean
+    # bytes-per-sample, ~12x too low against a per-hour threshold, so the guard
+    # would never fire. Use Sum.
+    net_series = fetch_metric_values(cw_client, [
+        MetricQuery(inst["InstanceId"], "AWS/EC2", "NetworkOut",
+                    (("InstanceId", inst["InstanceId"]),), "Sum", 3600)
+        for inst, _, _ in low_cpu
+    ], start, now)
+
+    for inst, avg_cpu, max_cpu in low_cpu:
+        inst_id = inst["InstanceId"]
+        inst_type = inst.get("InstanceType", "unknown")
+        name_tag = next(
+            (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
+        )
 
         # Low CPU alone does not mean idle. Batch, network- or disk-bound
         # workloads and warm-standby DR boxes run with low CPU but real
         # I/O. Skip flagging when network shows sustained activity, so a
         # working instance is not falsely called idle.
-        net_dps = series.get((inst_id, "NetworkOut"))
+        net_dps = net_series.get(inst_id)
         if net_dps is None:
             # 0.0 here does not mean "no traffic", it means "we could not
             # look", and the very next line is the guard that protects a
