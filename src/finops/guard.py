@@ -645,8 +645,10 @@ _WARN_AT = 0.80
 
 
 def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = None,
-                 via: str = "", cwd: str | None = None) -> dict[str, Any] | None:
-    """The policy verdict for one already-classified action, or None (allow).
+                 via: str = "", cwd: str | None = None) -> dict[str, Any]:
+    """The policy verdict for one already-classified action. Always a dict:
+    "allow" is a verdict too (the ledger records it, with its figure), and the
+    public entry points turn it into None for their callers.
 
     Shared by the shell and MCP entry points so a destroy is judged the same
     whichever door the agent used. `command` is the shell form, which is what
@@ -665,6 +667,11 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
         if est is not None:
             v["monthly_delta_usd"] = est["monthly_usd"]
             v["estimate"] = est
+        return v
+
+    def allowed(est: dict[str, Any] | None) -> dict[str, Any]:
+        v = verdict("allow", "allowed by policy", est=est)
+        del v["reason"]                # silent: there is nothing to tell anyone
         return v
 
     destroys: list[str] = []
@@ -715,7 +722,7 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
                 return verdict("warn", f"{_cost_line(est)}, {monthly / cap:.0%} of your "
                                f"${cap:,.0f}/mo auto threshold. Proceeding without a prompt.",
                                est=est)
-        return None
+        return allowed(est)
 
     # One-way doors escalate whatever they cost, but the human deciding on a
     # Savings Plan should see the commitment in the same breath as the question.
@@ -734,18 +741,25 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
         return verdict("deny", cost + gate.get("reason",
                                                "this action is not in your policy allowlist."),
                        est=est)
-    return None  # allow -> stay silent
+    return allowed(est)
 
 
-def gate_command(command: str, *, harness: str = "claude-code",
-                 cwd: str | None = None) -> dict[str, Any] | None:
+def gate_command(command: str, *, harness: str = "claude-code", cwd: str | None = None,
+                 tool: str = "shell", record: bool = True) -> dict[str, Any] | None:
     """Evaluate a shell command against the policy gate. PUBLIC ENTRY POINT.
 
     This and gate_mcp_call are what every harness adapter calls (the Claude
     Code hook below; Cursor and Codex adapters in guard_adapters.py). `harness`
     names the calling agent harness and is echoed back in the verdict. `cwd`
     is the directory the agent will run the command in, when the harness
-    says (a saved Terraform plan is found relative to it).
+    says (a saved Terraform plan is found relative to it). `tool` is the
+    harness's name for its shell tool ("Bash" in Claude Code), for the ledger.
+
+    Every verdict on an infrastructure action, allows included, is appended
+    to the decision ledger (guard_ledger.py) unless `record` is False, which
+    is for a human asking what the guard would do (`nable guard check`), not
+    an agent doing it. Never raises: an internal error is recorded as a
+    fail-open and returns None, so an adapter cannot be broken by the guard.
 
     Returns None when the guard has no opinion (not infra, or an in-policy
     reversible action), else a verdict dict:
@@ -759,24 +773,32 @@ def gate_command(command: str, *, harness: str = "claude-code",
         estimate            the pricing basis behind that figure, when priced
         harness             as passed in
     """
-    # The AI budget stop comes first and is not conditioned on the command: an
-    # agent burning through its budget should be stopped whatever it is doing.
-    budget_hit = check_budget_gate()
-    if budget_hit is not None:
-        return {**budget_hit, "harness": harness}
-
-    hit = classify_command(command)
-    if hit is None:
+    try:
+        # The AI budget stop comes first and is not conditioned on the command:
+        # an agent burning through its budget should be stopped whatever it is
+        # doing.
+        budget_hit = check_budget_gate()
+        if budget_hit is not None:
+            v = {**budget_hit, "harness": harness}
+        else:
+            hit = classify_command(command)
+            if hit is None:
+                return None
+            v = {**_verdict_for(command, hit, cwd=cwd), "harness": harness}
+        if record:
+            _record(v, tool=tool, command=command)
+        return None if v["decision"] == "allow" else v
+    except Exception as exc:
+        if record:
+            _record_fail_open(exc, harness=harness, tool=tool, command=command)
         return None
-    v = _verdict_for(command, hit, cwd=cwd)
-    return {**v, "harness": harness} if v else None
 
 
-_SEVERITY = {"deny": 3, "ask": 2, "warn": 1}
+_SEVERITY = {"deny": 3, "ask": 2, "warn": 1, "allow": 0}
 
 
 def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
-                  harness: str = "claude-code") -> dict[str, Any] | None:
+                  harness: str = "claude-code", record: bool = True) -> dict[str, Any] | None:
     """Evaluate an MCP tool call against the policy gate. PUBLIC ENTRY POINT.
 
     `tool_name` is the harness's full name (`mcp__<server>__<tool>` in Claude
@@ -787,30 +809,101 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     verdict.
 
     Unknown MCP tools return None before anything else runs, the AI budget
-    stop included: the guard never asks about a tool it does not understand.
+    stop included: the guard never asks about a tool it does not understand,
+    and does not record it either. Recording and fail-open as gate_command.
     """
-    from .guard_mcp import argument_text, translate
+    summary = tool_name
+    try:
+        from .guard_mcp import argument_text, translate
 
-    actions = translate(tool_name, arguments)
-    if not actions:
+        actions = translate(tool_name, arguments)
+        if not actions:
+            return None
+        summary = actions[0].command
+
+        budget_hit = check_budget_gate()
+        if budget_hit is not None:
+            worst: dict[str, Any] | None = {**budget_hit}
+        else:
+            context = argument_text(arguments)
+            worst = None
+            for act in actions:
+                hit = act.hit or classify_command(act.command)
+                if hit is None:
+                    continue
+                v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
+                                 via=(f"{tool_name} would {act.summary}" if act.summary
+                                      else f"{tool_name} amounts to `{act.command}`"))
+                if worst is None or _SEVERITY[v["decision"]] > _SEVERITY[worst["decision"]]:
+                    worst, summary = v, act.command
+            if worst is None:
+                return None
+        worst = {**worst, "harness": harness, "mcp_tool": tool_name}
+        if record:
+            _record(worst, tool=tool_name, command=summary)
+        return None if worst["decision"] == "allow" else worst
+    except Exception as exc:
+        if record:
+            _record_fail_open(exc, harness=harness, tool=tool_name, command=summary)
         return None
 
-    budget_hit = check_budget_gate()
-    if budget_hit is not None:
-        return {**budget_hit, "harness": harness, "mcp_tool": tool_name}
 
-    context = argument_text(arguments)
-    worst: dict[str, Any] | None = None
-    for act in actions:
-        hit = act.hit or classify_command(act.command)
-        if hit is None:
-            continue
-        v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
-                         via=(f"{tool_name} would {act.summary}" if act.summary
-                              else f"{tool_name} amounts to `{act.command}`"))
-        if v and _SEVERITY.get(v["decision"], 0) > _SEVERITY.get((worst or {}).get("decision"), 0):
-            worst = v
-    return {**worst, "harness": harness, "mcp_tool": tool_name} if worst else None
+# ── Decision ledger ───────────────────────────────────────────────────────────
+
+def _policy_version() -> str:
+    """A short fingerprint of the effective policy, so a reviewer can tell
+    which verdicts were made under which knobs (threshold, allowlist)."""
+    import hashlib
+    try:
+        blob = json.dumps(load_policy(), sort_keys=True, default=str)
+    except Exception:
+        return "unknown"
+    return hashlib.sha256(blob.encode()).hexdigest()[:12]
+
+
+def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
+    """Append one verdict to the ledger. Cheap, and never raises."""
+    try:
+        from . import guard_ledger
+        est = v.get("estimate") or {}
+        guard_ledger.append({
+            "harness": v.get("harness"),
+            "tool": tool,
+            "command": guard_ledger.redact(command),
+            "door": v.get("door"),
+            "action_type": v.get("action_type"),
+            "decision": v["decision"],
+            "monthly_usd": est.get("monthly_usd"),
+            "total_usd": est.get("total_usd"),
+            "basis": est.get("basis"),
+            "reason": guard_ledger.redact(v.get("reason"), limit=600) if v.get("reason") else None,
+            "policy_version": _policy_version(),
+            "nable_version": __version__,
+            # Known only for a deny: the call never ran. An ask is the human's
+            # to answer after the hook has exited, and an allow may still meet
+            # the harness's own permission prompt.
+            "outcome": "not_run" if v["decision"] == "deny" else None,
+        })
+    except Exception:
+        pass
+
+
+def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: Any) -> None:
+    """A guard error let a call through unexamined; that is a verdict too."""
+    try:
+        from . import guard_ledger
+        guard_ledger.append({
+            "harness": harness,
+            "tool": tool if isinstance(tool, str) else None,
+            "command": guard_ledger.redact(command) if command else None,
+            "decision": "fail_open",
+            "error": type(exc).__name__,
+            "policy_version": _policy_version(),
+            "nable_version": __version__,
+            "outcome": None,
+        })
+    except Exception:
+        pass
 
 
 # ── Claude Code hook protocol ──────────────────────────────────────────────────
@@ -824,6 +917,7 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
     """
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
+    tool: Any = None
     try:
         payload = json.load(stdin)
         tool = payload.get("tool_name")
@@ -832,7 +926,8 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
             command = tool_input.get("command") or ""
             if not command:
                 return 0
-            verdict = gate_command(command, harness="claude-code", cwd=payload.get("cwd"))
+            verdict = gate_command(command, harness="claude-code", cwd=payload.get("cwd"),
+                                   tool="Bash")
         elif isinstance(tool, str) and tool.startswith("mcp__"):
             verdict = gate_mcp_call(tool, tool_input, harness="claude-code")
         else:
@@ -852,7 +947,10 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
             }
         }, stdout)
         return 0
-    except Exception:
+    except Exception as exc:
+        # Still exit 0 with nothing on stdout: availability beats judgement.
+        # But a fail-open is exactly what an audit should be able to count.
+        _record_fail_open(exc, harness="claude-code", tool=tool, command=None)
         return 0
 
 

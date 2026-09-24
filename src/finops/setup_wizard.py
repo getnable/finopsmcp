@@ -2288,6 +2288,8 @@ def _run_guard(parsed) -> None:
     against the human-authored policy in policy.py before the agent runs them.
     Advisory and propose-only: it asks or denies, it never executes.
     """
+    import json
+
     from . import guard
     from .welcome import _fire_telemetry, amber, bold, cyan, dim, green
 
@@ -2393,7 +2395,7 @@ def _run_guard(parsed) -> None:
         print()
         for cmd in samples:
             print(f"  $ {cmd}")
-            verdict = guard.gate_command(cmd)
+            verdict = guard.gate_command(cmd, harness="cli", record=False)
             if verdict is not None:
                 print(f"    {cyan(verdict['decision'])}   {verdict['reason']}")
             else:
@@ -2411,12 +2413,38 @@ def _run_guard(parsed) -> None:
         print()
         return
 
+    if action == "report":
+        _guard_report(parsed)
+        return
+
+    if action == "verify-log":
+        from . import guard_ledger
+        result = guard_ledger.verify()
+        if getattr(parsed, "guard_json", False):
+            print(json.dumps(result, indent=2))
+        else:
+            print()
+            if result["ok"]:
+                print(f"  {green('✓')} Decision ledger intact: {result['records']} record(s), "
+                      "every one chained to the last.")
+                print(dim(f"  Head: {result['head']}"))
+                print(dim("  A chain cannot show its tail being cut off. Keep the head somewhere"))
+                print(dim("  else (a ticket, a commit) and compare it next time."))
+            else:
+                print(f"  {amber('✗')} Decision ledger broken at line {result['broken_at']}: "
+                      f"{result['problem']}.")
+            print(dim(f"  {result['path']}"))
+            print()
+        if not result["ok"]:
+            raise SystemExit(1)
+        return
+
     if action == "check":
         cmd = getattr(parsed, "guard_command", "")
         if not cmd:
             print("\n  Usage: nable guard check --command \"terraform destroy ...\"\n")
             return
-        verdict = guard.gate_command(cmd)
+        verdict = guard.gate_command(cmd, harness="cli", record=False)
         print()
         if verdict is None:
             hit = guard.classify_command(cmd)
@@ -2483,6 +2511,55 @@ def _run_guard(parsed) -> None:
     print(dim("  The hook is Claude Code (Bash and MCP tool calls). Other MCP agents"))
     print(dim("  (Cursor, etc.) get the same gate as a tool: the agent calls"))
     print(dim("  check_action_policy before acting."))
+    print()
+
+
+def _guard_report(parsed) -> None:
+    """`nable guard report`: what the guard saw, stopped and let through."""
+    import json
+
+    from . import guard_ledger
+    from .welcome import bold, cyan, dim
+
+    days = getattr(parsed, "guard_days", 30) or 30
+    summary = guard_ledger.summarize(days)
+    if getattr(parsed, "guard_json", False):
+        print(json.dumps(summary, indent=2))
+        return
+    d = summary["by_decision"]
+    print()
+    print(f"  {bold('nable guard')}: the last {days:g} days, {summary['records']} decision(s)")
+    print()
+    if not summary["records"]:
+        print(dim("  Nothing recorded yet. Verdicts land here as your agent runs infra commands."))
+        print(dim(f"  {summary['path']}"))
+        print()
+        return
+    print(f"    asked a human   {d.get('ask', 0):>6}")
+    print(f"    blocked         {d.get('deny', 0):>6}")
+    print(f"    warned          {d.get('warn', 0):>6}")
+    print(f"    allowed         {d.get('allow', 0):>6}")
+    if d.get("fail_open"):
+        errs = ", ".join(f"{k} x{v}" for k, v in summary["fail_open_errors"].items())
+        print(f"    failed open     {d['fail_open']:>6}   ({errs})")
+    print()
+    print(f"  Escalated or blocked: ~${summary['usd_per_month_escalated_or_blocked']:,.0f}/mo "
+          "at stake (list-price estimates)")
+    if summary["usd_order_ceilings_escalated_or_blocked"]:
+        print(f"  Commitment orders escalated or blocked: up to "
+              f"${summary['usd_order_ceilings_escalated_or_blocked']:,.0f}")
+    print(f"  Let through with a figure (allowed or warned): "
+          f"~${summary['usd_per_month_allowed_with_a_figure']:,.0f}/mo")
+    if summary["largest"]:
+        print()
+        print(f"  {bold('Largest escalations')}")
+        for r in summary["largest"]:
+            print(f"    {cyan(r['decision']):<5} ~${r['monthly_usd']:,.0f}/mo  {r['command']}")
+            print(dim(f"          {r['ts']}  {r['harness']}  {r['tool']}"))
+    print()
+    print(dim("  By harness: " + ", ".join(f"{k} {v}" for k, v in summary["by_harness"].items())))
+    print(dim("  Check the log was not edited: nable guard verify-log"))
+    print(dim(f"  {summary['path']}"))
     print()
 
 
@@ -2897,12 +2974,17 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
-    guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check", "try"],
+    guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
+                                                  "try", "report", "verify-log"],
                          nargs="?", default="status")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
     guard_p.add_argument("--command", dest="guard_command", default="",
                          help="With 'check': a shell command to classify against your policy")
+    guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
+                         help="With 'report': how many days of the decision ledger to summarise")
+    guard_p.add_argument("--json", dest="guard_json", action="store_true",
+                         help="With 'report' or 'verify-log': print JSON")
 
     iam_p = sub.add_parser("iam-template", help="Print the least-privilege IAM policy / CloudFormation nable needs")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")

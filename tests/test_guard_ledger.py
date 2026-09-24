@@ -1,0 +1,364 @@
+"""The decision ledger: every guard verdict, kept, chained and redacted.
+
+Invariants under test:
+  - every verdict on an infrastructure action is recorded, allows included,
+    and nothing else is (an `ls` is not an audit event)
+  - a fail-open is recorded too: an audit has to be able to count the calls
+    the guard let through without looking
+  - the file is append-only in practice: 0600, O_APPEND, each record chained
+    to the one before, so an edit, a deletion or a reordering is detectable
+  - secrets in a command never reach the file
+  - writing the ledger can never break the gate
+  - `nable guard report` and `nable guard verify-log` read it back
+"""
+from __future__ import annotations
+
+import argparse
+import contextlib
+import hashlib
+import io
+import json
+import os
+import stat
+import sys
+import threading
+
+import pytest
+
+import finops.ai_budget as ai_budget
+import finops.guard as g
+import finops.guard_ledger as gl
+
+
+@pytest.fixture(autouse=True)
+def _clean(monkeypatch):
+    for var in ("FINOPS_GUARD_STRICT", "FINOPS_POLICY_MAX_AUTO_USD",
+                "FINOPS_POLICY_ALLOWED_ACTIONS", "FINOPS_GUARD_PROD_PATTERNS",
+                "FINOPS_GUARD_STOP_ON_BUDGET"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(ai_budget, "status", lambda: {"verdict": ai_budget.BUDGET_OK})
+
+
+def _records():
+    p = gl.ledger_path()
+    return [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []
+
+
+# ── what gets recorded ────────────────────────────────────────────────────────
+
+def test_an_ask_is_recorded_with_its_classification():
+    g.gate_command("terraform destroy -auto-approve", harness="claude-code", tool="Bash")
+    [r] = _records()
+    assert r["decision"] == "ask"
+    assert (r["door"], r["action_type"]) == ("one_way", "delete_resource")
+    assert (r["harness"], r["tool"]) == ("claude-code", "Bash")
+    assert r["command"] == "terraform destroy -auto-approve"
+    assert "one-way door" in r["reason"]
+    assert r["policy_version"] and r["nable_version"]
+    assert r["ts"].endswith("+00:00")
+
+
+def test_an_allow_with_a_figure_is_recorded_though_the_agent_hears_nothing():
+    assert g.gate_command("aws ec2 run-instances --instance-type t3.micro") is None
+    [r] = _records()
+    assert r["decision"] == "allow"
+    assert r["monthly_usd"] == 7.59                           # 0.0104 x 730, in cents
+    assert "list price" in r["basis"]
+
+
+def test_warn_and_deny_are_recorded(monkeypatch):
+    g.gate_command("aws ec2 run-instances --instance-type c5.4xlarge")
+    monkeypatch.setenv("FINOPS_POLICY_ALLOWED_ACTIONS", "ticket")
+    g.gate_command("aws ec2 stop-instances --instance-ids i-1")
+    warn, deny = _records()
+    assert warn["decision"] == "warn" and warn["monthly_usd"] == pytest.approx(0.68 * 730)
+    assert deny["decision"] == "deny" and deny["outcome"] == "not_run"
+
+
+def test_a_budget_stop_is_recorded(monkeypatch):
+    monkeypatch.setattr(ai_budget, "status", lambda: {
+        "verdict": ai_budget.BUDGET_OVER, "verdict_basis": "tokens", "pct_of_budget": 1.2,
+        "billable_tokens_mtd": 12, "budget": {"monthly_tokens": 10}})
+    g.gate_command("ls -la")
+    [r] = _records()
+    assert (r["decision"], r["action_type"]) == ("ask", "ai_budget")
+
+
+def test_commands_the_guard_has_no_opinion_on_are_not_recorded():
+    for cmd in ("ls -la", "git status", "aws s3 ls", "terraform plan"):
+        assert g.gate_command(cmd) is None
+    assert _records() == []
+
+
+def test_mcp_verdicts_are_recorded_under_the_tool_name():
+    g.gate_mcp_call("mcp__terraform__create_run",
+                    {"workspace_name": "net", "run_type": "is_destroy"})
+    g.gate_mcp_call("mcp__github__delete_file", {"path": "x"})      # unknown: not an event
+    [r] = _records()
+    assert r["tool"] == "mcp__terraform__create_run"
+    assert r["command"] == "terraform destroy"
+    assert r["decision"] == "ask"
+
+
+def test_a_human_asking_is_not_an_agent_doing(capsys):
+    from finops import setup_wizard
+    setup_wizard._run_guard(argparse.Namespace(guard_action="check", guard_global=False,
+                                               guard_command="terraform destroy"))
+    setup_wizard._run_guard(argparse.Namespace(guard_action="try", guard_global=False))
+    assert _records() == [], "`guard check` / `guard try` wrote to the audit log"
+
+
+def test_a_guard_crash_fails_open_and_is_recorded(monkeypatch):
+    def boom(cmd):
+        raise RuntimeError("classifier bug")
+    monkeypatch.setattr(g, "classify_command", boom)
+    assert g.gate_command("terraform destroy", harness="cursor") is None
+    [r] = _records()
+    assert (r["decision"], r["error"], r["harness"]) == ("fail_open", "RuntimeError", "cursor")
+
+
+def test_an_unreadable_hook_payload_fails_open_and_is_recorded():
+    out = io.StringIO()
+    assert g.run_hook(stdin=io.StringIO("not json"), stdout=out) == 0
+    assert out.getvalue() == ""
+    [r] = _records()
+    assert r["decision"] == "fail_open" and r["error"] == "JSONDecodeError"
+
+
+def test_a_ledger_that_cannot_be_written_never_costs_the_verdict(monkeypatch, tmp_path):
+    monkeypatch.setattr(gl, "_path_override", tmp_path)          # a directory, not a file
+    v = g.gate_command("terraform destroy")
+    assert v and v["decision"] == "ask"
+    assert gl.append({"decision": "ask"}) is False
+
+
+# ── redaction ─────────────────────────────────────────────────────────────────
+
+SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+
+@pytest.mark.parametrize("raw,gone,kept", [
+    (f"AWS_SECRET_ACCESS_KEY={SECRET} terraform destroy", SECRET,
+     "AWS_SECRET_ACCESS_KEY=[REDACTED] terraform destroy"),
+    ("GITHUB_TOKEN='ghp_x' db_password=hunter2 terraform apply", "hunter2",
+     "db_password=[REDACTED]"),
+    ("aws rds create-db-instance --master-user-password hunter2 --engine mysql", "hunter2",
+     "--master-user-password [REDACTED] --engine mysql"),
+    ("aws configure set aws_access_key_id AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE",
+     "[REDACTED-AWS-KEY-ID]"),
+    ("curl -H 'Authorization: Bearer abc.def.ghi' https://api", "abc.def.ghi", "Bearer [REDACTED]"),
+    ("git clone https://me:s3cretPass@github.com/org/repo", "s3cretPass", "https://me:[REDACTED]@"),
+    ("helm install x --set token=Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFCQ0RFRkdI", "Zm9vYmFyYmF6",
+     "helm install x"),
+])
+def test_secrets_never_reach_the_ledger(raw, gone, kept):
+    out = gl.redact(raw)
+    assert gone not in out
+    assert kept in out
+
+
+def test_redaction_keeps_what_an_auditor_needs():
+    cmd = ("terraform -chdir=/home/me/Infra2025/prod apply "
+           "-var-file=prod.tfvars plan.out && sha256sum 0f1e2d3c4b5a69788796a5b4c3d2e1f0aabbccdd")
+    assert gl.redact(cmd) == cmd
+
+
+def test_a_secret_in_a_recorded_command_is_redacted_on_disk():
+    g.gate_command(f"AWS_SECRET_ACCESS_KEY={SECRET} terraform destroy")
+    blob = gl.ledger_path().read_text()
+    assert SECRET not in blob and "[REDACTED]" in blob
+
+
+def test_long_commands_are_bounded():
+    assert len(gl.redact("kubectl delete pod " + "x " * 1000)) <= 400
+
+
+# ── the file and its chain ────────────────────────────────────────────────────
+
+def test_the_file_is_owner_only():
+    g.gate_command("terraform destroy")
+    assert stat.S_IMODE(gl.ledger_path().stat().st_mode) == 0o600
+
+
+def test_a_pre_existing_loose_file_is_tightened():
+    p = gl.ledger_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.touch(mode=0o644)
+    p.chmod(0o644)
+    gl.append({"decision": "ask"})
+    assert stat.S_IMODE(p.stat().st_mode) == 0o600
+
+
+def _three():
+    for d in ("ask", "deny", "allow"):
+        gl.append({"decision": d, "command": f"cmd-{d}"})
+
+
+def test_each_record_carries_the_hash_of_the_line_before_it():
+    _three()
+    lines = gl.ledger_path().read_bytes().splitlines()
+    assert json.loads(lines[0])["prev"] == gl.GENESIS
+    for before, after in zip(lines, lines[1:]):
+        assert json.loads(after)["prev"] == hashlib.sha256(before).hexdigest()
+    v = gl.verify()
+    assert v["ok"] and v["records"] == 3
+    assert v["head"] == hashlib.sha256(lines[-1]).hexdigest()
+
+
+@pytest.mark.parametrize("tamper", ["edit", "delete", "reorder"])
+def test_tampering_breaks_the_chain(tamper):
+    _three()
+    p = gl.ledger_path()
+    lines = p.read_bytes().splitlines()
+    if tamper == "edit":
+        lines[1] = lines[1].replace(b'"deny"', b'"allow"')
+    elif tamper == "delete":
+        del lines[1]
+    else:
+        lines[0], lines[1] = lines[1], lines[0]
+    p.write_bytes(b"\n".join(lines) + b"\n")
+    v = gl.verify()
+    assert not v["ok"]
+    assert v["broken_at"] in (1, 2, 3)
+
+
+def test_a_torn_last_write_is_never_glued_to_the_next_record():
+    gl.append({"decision": "ask"})
+    p = gl.ledger_path()
+    with p.open("ab") as fh:
+        fh.write(b'{"v":1,"decision":"de')                 # a crash mid-write
+    gl.append({"decision": "allow"})
+    lines = p.read_bytes().splitlines()
+    assert json.loads(lines[-1])["decision"] == "allow", "the new record was corrupted"
+    v = gl.verify()
+    assert not v["ok"] and v["broken_at"] == 2, "a torn record is an integrity event"
+
+
+def test_concurrent_agents_do_not_fork_the_chain():
+    """Two agent sessions can hit the hook at the same moment. Without the
+    lock both read the same last line and the chain forks."""
+    def worker():
+        for _ in range(25):
+            gl.append({"decision": "ask", "command": "terraform destroy"})
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    v = gl.verify()
+    assert v["ok"], v
+    assert v["records"] == 200
+
+
+# ── where it lives ────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("env", [
+    {"FINOPS_DATA_DIR": "{tmp}/data"},
+    {"FINOPS_PROFILE": "work"},
+    {},
+])
+def test_the_ledger_lives_in_the_same_data_dir_as_everything_else(env, monkeypatch, tmp_path):
+    """guard_ledger copies storage.db.data_dir()'s rule rather than import
+    SQLAlchemy into the hook. The copy must not drift."""
+    import finops.storage.db as db
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for k in ("FINOPS_DATA_DIR", "FINOPS_PROFILE"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v.format(tmp=tmp_path))
+    monkeypatch.setattr(db, "_DATA_DIR", None)
+    expected = db.data_dir()
+    monkeypatch.delitem(sys.modules, "finops.storage.db")
+    assert gl._data_dir() == expected
+    monkeypatch.setattr(gl, "_path_override", None)
+    assert gl.ledger_path() == expected / "guard-ledger.jsonl"
+
+
+def test_the_hook_path_does_not_import_sqlalchemy():
+    code = ("import sys, io, json; import finops.guard as g; "
+            "g.gate_command('terraform destroy'); "
+            "print('sqlalchemy' in sys.modules)")
+    import subprocess
+    env = {**os.environ, "HOME": str(gl.ledger_path().parent), "NABLE_NO_TELEMETRY": "1"}
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                       env=env, timeout=60)
+    assert r.stdout.strip() == "False", r.stderr
+
+
+# ── reading it back ───────────────────────────────────────────────────────────
+
+def _cli(action, **kw):
+    from finops import setup_wizard
+    kw.setdefault("guard_global", False)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        setup_wizard._run_guard(argparse.Namespace(guard_action=action, **kw))
+    return out.getvalue()
+
+
+def _activity(monkeypatch):
+    g.gate_command("aws ec2 run-instances --instance-type p4d.24xlarge --count 8")   # ask
+    g.gate_command("aws ec2 run-instances --instance-type t3.micro")                 # allow
+    g.gate_command("terraform destroy")                                               # ask
+    g.gate_command("aws savingsplans create-savings-plan --commitment 1")            # ask
+    monkeypatch.setenv("FINOPS_POLICY_ALLOWED_ACTIONS", "ticket")
+    g.gate_command("aws ec2 stop-instances --instance-ids i-1")                      # deny
+    monkeypatch.delenv("FINOPS_POLICY_ALLOWED_ACTIONS")
+
+
+def test_the_summary_counts_and_sums(monkeypatch):
+    _activity(monkeypatch)
+    s = gl.summarize(30)
+    assert s["records"] == 5
+    assert s["by_decision"]["ask"] == 3 and s["by_decision"]["deny"] == 1
+    assert s["by_decision"]["allow"] == 1
+    assert s["usd_per_month_escalated_or_blocked"] == pytest.approx(
+        8 * 32.77 * 730 + 730, rel=1e-3)
+    assert s["usd_per_month_allowed_with_a_figure"] == pytest.approx(0.0104 * 730, rel=1e-3)
+    assert s["largest"][0]["monthly_usd"] == pytest.approx(8 * 32.77 * 730, rel=1e-3)
+
+
+def test_old_records_fall_outside_the_window():
+    gl.append({"decision": "ask", "monthly_usd": 100.0})
+    p = gl.ledger_path()
+    rec = json.loads(p.read_text())
+    rec["ts"] = "2020-01-01T00:00:00+00:00"
+    p.write_text(json.dumps(rec) + "\n")
+    assert gl.summarize(30)["records"] == 0
+    assert gl.summarize(365 * 20)["records"] == 1
+
+
+def test_report_cli_prints_escalations_and_dollars(monkeypatch):
+    _activity(monkeypatch)
+    out = _cli("report", guard_days=30, guard_json=False)
+    assert "asked a human        3" in out
+    assert "blocked              1" in out
+    assert "$192,107/mo at stake" in out
+    assert "aws ec2 run-instances --instance-type p4d.24xlarge --count 8" in out, \
+        "the largest escalation is named"
+    assert "nable guard verify-log" in out
+
+
+def test_report_cli_json_is_parseable(monkeypatch):
+    _activity(monkeypatch)
+    data = json.loads(_cli("report", guard_days=7, guard_json=True))
+    assert data["records"] == 5 and data["days"] == 7
+
+
+def test_report_on_an_empty_ledger_says_so():
+    assert "Nothing recorded yet" in _cli("report", guard_days=30, guard_json=False)
+
+
+def test_verify_log_cli_passes_and_fails():
+    _three()
+    assert "Decision ledger intact: 3 record(s)" in _cli("verify-log", guard_json=False)
+    p = gl.ledger_path()
+    p.write_bytes(p.read_bytes().replace(b'"deny"', b'"allow"'))
+    with pytest.raises(SystemExit) as e:
+        _cli("verify-log", guard_json=False)
+    assert e.value.code == 1
+
+
+def test_verify_log_json():
+    _three()
+    assert json.loads(_cli("verify-log", guard_json=True))["ok"] is True
