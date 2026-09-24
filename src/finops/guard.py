@@ -89,6 +89,11 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bhelm\s+(?:install|upgrade)\b", "infra_apply"),
     (r"\bkubectl\s+(?:apply|scale)\b", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),
+    # Launches the pricers below can put a figure on. Unclassified, they could
+    # never reach the policy's dollar threshold however large they were.
+    (r"\baws\s+rds\s+create-db-instance\b", "infra_apply"),
+    (r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b", "infra_apply"),
+    (r"\baz\s+(?:\S+\s+)*vm\s+create\b", "infra_apply"),
 ]
 
 
@@ -171,54 +176,243 @@ def _strict() -> bool:
 # guard stayed silent, while policy.py's dollar threshold sat unreachable
 # because nothing on the shell path ever computed a dollar figure. Reversible
 # is not the same as cheap.
+#
+# Every pricer below reads prices the repo already holds and returns None for
+# anything it cannot price from them. An "ask" without a figure is the guard's
+# old behaviour; an ask with a made-up figure is worse than that, because the
+# human decides on the number. Deliberately NOT priced:
+#   - `kubectl scale --replicas N`: what a replica costs depends on its
+#     requests and the node it lands on, neither of which is in the command.
+#   - a Reserved Instance purchase without --limit-price: the offering id fixes
+#     type, term and price, and looking it up needs the network.
+#   - `terraform apply` without a saved plan: there is nothing to read yet.
+
+_ON_DEMAND_BASIS = "on-demand us-east-1 list price"
 
 _RUN_INSTANCES_RE = re.compile(r"\baws\s+ec2\s+run-instances\b")
 _INSTANCE_TYPE_RE = re.compile(r"--instance-type[=\s]+([a-z0-9]+\.[a-z0-9]+)")
 # `--count 8` or the min:max form `--count 2:8`; price the max, because the
 # guard's job is the ceiling a human is about to authorise, not the floor.
 _COUNT_RE = re.compile(r"--count[=\s]+(\d+)(?::(\d+))?")
+_RDS_CREATE_RE = re.compile(r"\baws\s+rds\s+create-db-instance\b")
+_SAVINGS_PLAN_RE = re.compile(r"\baws\s+savingsplans\s+create-savings-plan\b")
+_RESERVED_RE = re.compile(r"\baws\s+ec2\s+purchase-reserved-instances-offering\b")
+# JSON ({"Amount": 1200, ...}, quotes already stripped) and shorthand
+# (Amount=1200,CurrencyCode=USD) spell the same thing.
+_LIMIT_AMOUNT_RE = re.compile(r"--limit-price[=\s]+\S*?Amount\W{1,3}([\d.]+)")
+_GCE_CREATE_RE = re.compile(r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b(?!-)")
+_AZ_VM_CREATE_RE = re.compile(r"\baz\s+(?:\S+\s+)*vm\s+create\b")
+_SHELL_BREAKS = ("&&", "||", ";", "|")
+
+# The engines _RDS_HOURLY's rates are for. Aurora bills per cluster instance
+# at other rates and SQL Server, Oracle and Db2 carry licence-included rates
+# the table does not hold: those get no figure, not a MySQL price.
+_RDS_TABLE_ENGINES = ("mysql", "postgres", "mariadb")
 
 
-def estimate_command_monthly_cost(command: str) -> dict[str, Any] | None:
-    """A local, list-price monthly estimate for a shell command, or None.
+def _flag(cmd: str, name: str) -> str | None:
+    """The value of `--name value` or `--name=value`, or None."""
+    m = re.search(rf"(?<!\S)--{re.escape(name)}(?:=|\s+)(?!-)(\S+)", cmd)
+    return m.group(1) if m else None
 
-    Covers `aws ec2 run-instances` with an instance type in the local price
-    table (on-demand us-east-1 list, the same table the Terraform estimator
-    uses). Anything unpriceable returns None: an unknown type must degrade to
-    the guard's existing behaviour, never to an invented figure.
-    """
-    cmd = _normalize(command)
-    if not _RUN_INSTANCES_RE.search(cmd):
+
+def _has_flag(cmd: str, name: str) -> bool:
+    """A boolean flag is present (`--multi-az`, never `--no-multi-az`)."""
+    return re.search(rf"(?<!\S)--{re.escape(name)}(?![\w=-])", cmd) is not None
+
+
+def _num(raw: str | None) -> float | None:
+    try:
+        v = float(raw) if raw is not None else None
+    except ValueError:
         return None
+    return v if v is not None and v > 0 else None
+
+
+def _rate(hourly: float) -> str:
+    """$32.77, $0.171, $0.0104: enough digits that the rate is the table's."""
+    return f"${hourly:,.2f}" if round(hourly, 2) == hourly else f"${hourly:,.4f}".rstrip("0")
+
+
+def _hours_per_month() -> float:
+    from .aws_prices import HOURS_PER_MONTH
+    return HOURS_PER_MONTH
+
+
+def _price_run_instances(cmd: str) -> dict[str, Any] | None:
     m = _INSTANCE_TYPE_RE.search(cmd)
     if not m:
         return None
     itype = m.group(1)
-    try:
-        from .connectors.terraform_estimate import HOURS_PER_MONTH, _EC2_HOURLY
-        hourly = _EC2_HOURLY.get(itype)
-    except Exception:
-        return None
+    from .connectors.terraform_estimate import _EC2_HOURLY
+    hourly = _EC2_HOURLY.get(itype)
     if not hourly:
         return None
     count = 1
     cm = _COUNT_RE.search(cmd)
     if cm:
         count = max(int(cm.group(1)), int(cm.group(2) or 0)) or 1
-    monthly = hourly * count * HOURS_PER_MONTH
+    monthly = hourly * count * _hours_per_month()
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": itype,
         "count": count,
-        "basis": "on-demand us-east-1 list price",
+        "basis": _ON_DEMAND_BASIS,
+        "line": (f"{count}x {itype} at {_rate(hourly)}/hr ({_ON_DEMAND_BASIS}) "
+                 f"is ~${monthly:,.0f}/mo"),
     }
 
 
+def _price_rds(cmd: str) -> dict[str, Any] | None:
+    cls = _flag(cmd, "db-instance-class")
+    engine = (_flag(cmd, "engine") or "").lower()
+    if not cls or engine not in _RDS_TABLE_ENGINES:
+        return None
+    from .connectors.terraform_estimate import _RDS_HOURLY
+    hourly = _RDS_HOURLY.get(cls)
+    if not hourly:
+        return None
+    # Multi-AZ runs a standby of the same class: twice the instance hours,
+    # the same rule the Terraform estimator applies to aws_db_instance.
+    multi_az = _has_flag(cmd, "multi-az")
+    monthly = hourly * (2 if multi_az else 1) * _hours_per_month()
+    basis = f"{_ON_DEMAND_BASIS}, instance hours only; storage and I/O not included"
+    return {
+        "monthly_usd": round(monthly, 2),
+        "hourly_usd": hourly,
+        "instance_type": cls,
+        "count": 2 if multi_az else 1,
+        "basis": basis,
+        "line": (f"{cls} {engine}{' Multi-AZ' if multi_az else ''} at {_rate(hourly)}/hr"
+                 f"{' x2 for the standby' if multi_az else ''} ({basis}) "
+                 f"is ~${monthly:,.0f}/mo"),
+    }
+
+
+def _price_savings_plan(cmd: str) -> dict[str, Any] | None:
+    hourly = _num(_flag(cmd, "commitment"))
+    if hourly is None:
+        return None
+    monthly = hourly * _hours_per_month()
+    # The commitment is exact; the term is not in the command. It is fixed by
+    # the offering id, and resolving that is a network call, so both terms are
+    # stated rather than one guessed.
+    basis = ("--commitment is dollars per hour for the whole term; the offering "
+             "id fixes the term (1 or 3 years), which the guard cannot look up offline")
+    upfront = _num(_flag(cmd, "upfront-payment-amount"))
+    return {
+        "monthly_usd": round(monthly, 2),
+        "commitment_hourly_usd": hourly,
+        "term_totals_usd": {"1yr": round(monthly * 12, 2), "3yr": round(monthly * 36, 2)},
+        "basis": basis,
+        "line": (f"a {_rate(hourly)}/hr Savings Plan commitment is ${monthly:,.0f}/mo, "
+                 f"${monthly * 12:,.0f} over a 1-year term or ${monthly * 36:,.0f} over 3 years"
+                 + (f", ${upfront:,.0f} of it up front" if upfront else "")
+                 + f" ({basis})"),
+    }
+
+
+def _price_reserved_instances(cmd: str) -> dict[str, Any] | None:
+    m = _LIMIT_AMOUNT_RE.search(cmd)
+    ceiling = _num(m.group(1)) if m else None
+    if ceiling is None:
+        return None
+    count = int(_num(_flag(cmd, "instance-count")) or 1)
+    basis = ("the --limit-price ceiling on the whole order; the offering id fixes "
+             "type, term and price, which the guard cannot look up offline")
+    return {
+        "monthly_usd": None,           # a one-off order ceiling, not a monthly rate
+        "total_usd": round(ceiling, 2),
+        "count": count,
+        "basis": basis,
+        "line": (f"{count} Reserved Instance{'s' if count != 1 else ''}, the order capped "
+                 f"at ${ceiling:,.0f} ({basis})"),
+    }
+
+
+def _leading_names(cmd: str, verb_end: int) -> int:
+    """How many positional names follow the verb before the first flag.
+
+    `gcloud compute instances create vm-1 vm-2 --machine-type ...` makes two.
+    Names written after flags cannot be told from flag values without the
+    flag's schema, so they are not counted and the line says "each"."""
+    n = 0
+    for tok in cmd[verb_end:].split():
+        if tok.startswith("-") or tok in _SHELL_BREAKS:
+            break
+        n += 1
+    return n
+
+
+def _price_table_vm(cmd: str, *, flag: str, table: dict[str, float], count: int,
+                    basis: str) -> dict[str, Any] | None:
+    size = _flag(cmd, flag)
+    if not size:
+        return None
+    # Azure sizes are case-insensitive on the CLI (standard_d4s_v3 works).
+    each = table.get(size) or {k.lower(): v for k, v in table.items()}.get(size.lower())
+    if not each:
+        return None
+    monthly = each * count
+    return {
+        "monthly_usd": round(monthly, 2),
+        "instance_type": size,
+        "count": count,
+        "basis": basis,
+        "line": f"{count}x {size} at ${each:,.2f}/mo each ({basis}) is ~${monthly:,.0f}/mo",
+    }
+
+
+def _price_gce(cmd: str) -> dict[str, Any] | None:
+    from .connectors.kubernetes import _GKE_MONTHLY
+    m = _GCE_CREATE_RE.search(cmd)
+    return _price_table_vm(
+        cmd, flag="machine-type", table=_GKE_MONTHLY,
+        count=max(1, _leading_names(cmd, m.end())),
+        basis="on-demand monthly, nable's Compute Engine node price table")
+
+
+def _price_az_vm(cmd: str) -> dict[str, Any] | None:
+    from .connectors.kubernetes import _AKS_MONTHLY
+    return _price_table_vm(
+        cmd, flag="size", table=_AKS_MONTHLY,
+        count=int(_num(_flag(cmd, "count")) or 1),
+        basis="pay-as-you-go monthly, nable's Azure VM price table")
+
+
+_PRICERS: list[tuple[re.Pattern[str], Any]] = [
+    (_RUN_INSTANCES_RE, _price_run_instances),
+    (_RDS_CREATE_RE, _price_rds),
+    (_SAVINGS_PLAN_RE, _price_savings_plan),
+    (_RESERVED_RE, _price_reserved_instances),
+    (_GCE_CREATE_RE, _price_gce),
+    (_AZ_VM_CREATE_RE, _price_az_vm),
+]
+
+
+def estimate_command_monthly_cost(command: str) -> dict[str, Any] | None:
+    """A local, list-price estimate for a shell command, or None.
+
+    Returns {monthly_usd, basis, line, ...} where `line` is the sentence the
+    human reads and `basis` says where the number came from. `monthly_usd` is
+    None when the only honest figure is a one-off total (`total_usd`, e.g. a
+    Reserved Instance order ceiling). Anything unpriceable returns None: an
+    unknown type must degrade to the guard's existing behaviour, never to an
+    invented figure.
+    """
+    cmd = _normalize(command)
+    for pattern, pricer in _PRICERS:
+        if pattern.search(cmd):
+            try:
+                return pricer(cmd)
+            except Exception:
+                return None            # a pricing bug must not cost the verdict
+    return None
+
+
 def _cost_line(est: dict[str, Any]) -> str:
-    return (f"{est['count']}x {est['instance_type']} at "
-            f"${est['hourly_usd']:,.2f}/hr ({est['basis']}) is "
-            f"~${est['monthly_usd']:,.0f}/mo")
+    return est["line"]
 
 
 def _prod_context(command: str) -> bool:
@@ -342,7 +536,8 @@ def _verdict_for(command: str, hit: tuple[str, str], *,
         # the user's FINOPS_POLICY_MAX_AUTO_USD and learned adjustments apply.
         est = estimate_command_monthly_cost(command)
         if est is not None:
-            gate = evaluate_action_gate(action_type, monthly_delta_usd=est["monthly_usd"])
+            gate = evaluate_action_gate(action_type,
+                                        monthly_delta_usd=est.get("monthly_usd") or 0.0)
             if gate.get("gate") != GATE_ALLOW:
                 return verdict(
                     "ask" if gate.get("gate") == GATE_ESCALATE else "deny",
@@ -361,11 +556,19 @@ def _verdict_for(command: str, hit: tuple[str, str], *,
                            "first (ask nable to estimate_change_cost).", est=est)
         return None
 
-    gate = evaluate_action_gate(action_type)
+    # One-way doors escalate whatever they cost, but the human deciding on a
+    # Savings Plan should see the commitment in the same breath as the question.
+    est = estimate_command_monthly_cost(command)
+    cost = f"{_cost_line(est)}. " if est else ""
+    gate = evaluate_action_gate(action_type,
+                                monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0)
     if gate.get("gate") == GATE_ESCALATE:
-        return verdict("ask", gate.get("reason", "a human must review this action."))
+        return verdict("ask", cost + gate.get("reason", "a human must review this action."),
+                       est=est)
     if gate.get("gate") == GATE_BLOCK:
-        return verdict("deny", gate.get("reason", "this action is not in your policy allowlist."))
+        return verdict("deny", cost + gate.get("reason",
+                                               "this action is not in your policy allowlist."),
+                       est=est)
     return None  # allow -> stay silent
 
 
