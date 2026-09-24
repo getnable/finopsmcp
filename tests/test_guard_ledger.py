@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import hashlib
 import io
+import itertools
 import json
 import os
 import stat
@@ -25,14 +26,14 @@ import threading
 
 import pytest
 
-import finops.ai_budget as ai_budget
 import finops.guard as g
 import finops.guard_ledger as gl
+from finops import ai_budget
 
 # Figures come from the price table, never typed in: the p4d rate is revised
 # when AWS cuts GPU prices, and a test that pins yesterday's rate fails for a
 # reason that has nothing to do with the guard.
-from finops.connectors.terraform_estimate import _EC2_HOURLY  # noqa: E402
+from finops.connectors.terraform_estimate import _EC2_HOURLY
 
 P4D_HOURLY = _EC2_HOURLY["p4d.24xlarge"]
 P4D_X8_MONTHLY = 8 * P4D_HOURLY * 730
@@ -207,7 +208,7 @@ def test_each_record_carries_the_hash_of_the_line_before_it():
     _three()
     lines = gl.ledger_path().read_bytes().splitlines()
     assert json.loads(lines[0])["prev"] == gl.GENESIS
-    for before, after in zip(lines, lines[1:]):
+    for before, after in itertools.pairwise(lines):
         assert json.loads(after)["prev"] == hashlib.sha256(before).hexdigest()
     v = gl.verify()
     assert v["ok"] and v["records"] == 3
@@ -269,7 +270,7 @@ def test_concurrent_agents_do_not_fork_the_chain():
 def test_the_ledger_lives_in_the_same_data_dir_as_everything_else(env, monkeypatch, tmp_path):
     """guard_ledger copies storage.db.data_dir()'s rule rather than import
     SQLAlchemy into the hook. The copy must not drift."""
-    import finops.storage.db as db
+    from finops.storage import db
     monkeypatch.setenv("HOME", str(tmp_path))
     for k in ("FINOPS_DATA_DIR", "FINOPS_PROFILE"):
         monkeypatch.delenv(k, raising=False)
@@ -290,7 +291,7 @@ def test_the_hook_path_does_not_import_sqlalchemy():
     import subprocess
     env = {**os.environ, "HOME": str(gl.ledger_path().parent), "NABLE_NO_TELEMETRY": "1"}
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                       env=env, timeout=60)
+                       env=env, timeout=60, check=False)
     assert r.stdout.strip() == "False", r.stderr
 
 

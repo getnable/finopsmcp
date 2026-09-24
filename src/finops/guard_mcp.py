@@ -31,8 +31,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 ONE_WAY_DELETE = ("one_way", "delete_resource")
 TWO_WAY_APPLY = ("two_way", "infra_apply")

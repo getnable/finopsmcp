@@ -31,6 +31,7 @@ aws ec2 run-instances) with a nudge to cost the change first.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -453,7 +454,7 @@ def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any
             from .security.vault import child_env
             try:
                 r = subprocess.run([exe, "show", "-json", str(plan_path)], cwd=str(base),
-                                   capture_output=True, text=True,
+                                   capture_output=True, text=True, check=False,
                                    timeout=_PLAN_SHOW_TIMEOUT_S, env=child_env())
                 if r.returncode == 0:
                     doc = json.loads(r.stdout)
@@ -862,8 +863,9 @@ def _policy_version() -> str:
 
 
 def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
-    """Append one verdict to the ledger. Cheap, and never raises."""
-    try:
+    """Append one verdict to the ledger. Cheap, and never raises: a ledger
+    problem is a missing line, never a lost verdict."""
+    with contextlib.suppress(Exception):
         from . import guard_ledger
         est = v.get("estimate") or {}
         guard_ledger.append({
@@ -884,13 +886,11 @@ def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
             # the harness's own permission prompt.
             "outcome": "not_run" if v["decision"] == "deny" else None,
         })
-    except Exception:
-        pass
 
 
 def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: Any) -> None:
     """A guard error let a call through unexamined; that is a verdict too."""
-    try:
+    with contextlib.suppress(Exception):
         from . import guard_ledger
         guard_ledger.append({
             "harness": harness,
@@ -902,8 +902,6 @@ def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: A
             "nable_version": __version__,
             "outcome": None,
         })
-    except Exception:
-        pass
 
 
 # ── Claude Code hook protocol ──────────────────────────────────────────────────
@@ -1025,7 +1023,7 @@ def hook_pin(cmd: str) -> str | None:
     if not m:
         return None
     spec = m.group(1)
-    if not re.fullmatch(rf"{re.escape(_PYPI_NAME)}==[A-Za-z0-9.+!-]+", spec):
+    if not re.fullmatch(rf"{re.escape(_PYPI_NAME)}==[A-Za-z0-9.+-]+", spec):
         return "unpinned"
     return "pinned" if spec == f"{_PYPI_NAME}=={__version__}" else "other"
 
@@ -1330,7 +1328,7 @@ def _adapter_rows() -> list[dict[str, Any]]:
     """Cursor and Codex hook state from guard_adapters, [] when this build has
     no adapters or they cannot answer. Read-only."""
     try:
-        from . import guard_adapters as ga      # type: ignore[attr-defined]
+        from . import guard_adapters as ga  # type: ignore[attr-defined]
         found = set(ga.detected())
         rows = []
         for name in _ADAPTER_SURFACES:

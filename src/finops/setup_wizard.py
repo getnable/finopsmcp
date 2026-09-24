@@ -2554,7 +2554,7 @@ def _guard_doctor(parsed) -> None:
     print()
     print(f"  {bold('Covered on this machine')}")
     for c in d["covered"] or ["nothing yet"]:
-        print(f"    {green('✓') if d['covered'] else amber('!')} {c}")
+        print(f"    {green('✓') if d['covered'] else amber('✗')} {c}")
     print(f"  {bold('Not covered')}")
     for c in d["not_covered"]:
         print(f"    - {c}")

@@ -31,7 +31,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -82,17 +82,17 @@ _SECRET_WORD = r"(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|AUTH)
 _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     # PEM private keys, whole block (or to the end if the block is cut off).
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
-                re.S), "[REDACTED-PRIVATE-KEY]"),
+                re.DOTALL), "[REDACTED-PRIVATE-KEY]"),
     # NAME=value where NAME mentions a key, secret, token or password:
     # AWS_SECRET_ACCESS_KEY=..., GITHUB_TOKEN="...", db_password='...'.
     (re.compile(rf"\b([A-Za-z_][A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|\S+)",
-                re.I), r"\1=[REDACTED]"),
+                re.IGNORECASE), r"\1=[REDACTED]"),
     # --password x, --master-user-password=x, --api-key x, --auth-token x.
     (re.compile(r"(--[A-Za-z0-9-]*(?:password|passwd|secret|token|key)[A-Za-z0-9-]*)(=|\s+)"
-                r"(\"[^\"]*\"|'[^']*'|\S+)", re.I), r"\1\2[REDACTED]"),
+                r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1\2[REDACTED]"),
     (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"),
      "[REDACTED-AWS-KEY-ID]"),
-    (re.compile(r"\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+", re.I), r"\1 [REDACTED]"),
+    (re.compile(r"\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE), r"\1 [REDACTED]"),
     # https://user:password@host
     (re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:)[^@\s]+@"), r"\1[REDACTED]@"),
 ]
@@ -162,7 +162,7 @@ def append(entry: dict[str, Any]) -> bool:
                 pass                       # no flock (Windows): single-writer best effort
             last = _last_line(fd)
             rec = {"v": SCHEMA,
-                   "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                   "ts": datetime.now(UTC).isoformat(timespec="seconds"),
                    **entry,
                    "prev": _sha(last) if last is not None else GENESIS}
             line = json.dumps(rec, separators=(",", ":"), sort_keys=True,
@@ -223,7 +223,7 @@ def read(days: float | None = None, path: Path | None = None) -> list[dict[str, 
     path = path or ledger_path()
     if not path.exists():
         return []
-    since = datetime.now(timezone.utc) - timedelta(days=days) if days else None
+    since = datetime.now(UTC) - timedelta(days=days) if days else None
     out = []
     with path.open("rb") as fh:
         for raw in fh:

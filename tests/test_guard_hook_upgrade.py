@@ -90,7 +90,7 @@ def test_a_user_raised_timeout_survives_the_repair(settings, monkeypatch):
 # agent tool call: whoever could publish to that name could run code on every
 # guarded machine on the next Bash call, with no install step and no prompt.
 
-from finops import __version__  # noqa: E402
+from finops import __version__
 
 LEGACY = "uvx --from finops-mcp finops guard hook"
 PINNED = f"uvx --from finops-mcp=={__version__} finops guard hook"

@@ -11,13 +11,13 @@ import json
 
 import pytest
 
-import finops.ai_budget as ai_budget
 import finops.guard as g
+from finops import ai_budget
 
 # Figures come from the price table, never typed in: the p4d rate is revised
 # when AWS cuts GPU prices, and a test that pins yesterday's rate fails for a
 # reason that has nothing to do with the guard.
-from finops.connectors.terraform_estimate import _EC2_HOURLY  # noqa: E402
+from finops.connectors.terraform_estimate import _EC2_HOURLY
 
 P4D_HOURLY = _EC2_HOURLY["p4d.24xlarge"]
 P4D_X8_MONTHLY = 8 * P4D_HOURLY * 730
@@ -235,9 +235,9 @@ def test_kubectl_scale_never_gets_an_invented_figure(cmd):
 
 # ── a saved Terraform plan is priced before it is applied ─────────────────────
 
-import json as _json  # noqa: E402
-import os  # noqa: E402
-import stat  # noqa: E402
+import json as _json
+import os
+import stat
 
 P4D_PLAN = {"resource_changes": [
     {"address": "aws_instance.train", "type": "aws_instance",
@@ -376,7 +376,7 @@ def test_replacements_alone_stay_a_reversible_apply(fake_tf):
 def test_the_plan_read_does_not_get_the_vault(fake_tf, monkeypatch):
     """terraform loads whatever providers the directory declares."""
     seen = {}
-    import finops.security.vault as vault
+    from finops.security import vault
     real = vault.child_env
     monkeypatch.setattr(vault, "child_env",
                         lambda *a, **k: seen.setdefault("env", real(*a, **k)))

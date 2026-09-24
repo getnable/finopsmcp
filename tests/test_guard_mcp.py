@@ -22,15 +22,15 @@ import json
 
 import pytest
 
-import finops.ai_budget as ai_budget
 import finops.guard as g
 import finops.guard_mcp as gm
-from finops.policy import door_of
+from finops import ai_budget
 
 # Figures come from the price table, never typed in: the p4d rate is revised
 # when AWS cuts GPU prices, and a test that pins yesterday's rate fails for a
 # reason that has nothing to do with the guard.
-from finops.connectors.terraform_estimate import _EC2_HOURLY  # noqa: E402
+from finops.connectors.terraform_estimate import _EC2_HOURLY
+from finops.policy import door_of
 
 P4D_HOURLY = _EC2_HOURLY["p4d.24xlarge"]
 P4D_X8_MONTHLY = 8 * P4D_HOURLY * 730
