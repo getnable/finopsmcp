@@ -100,6 +100,28 @@ def test_a_check_that_worked_somewhere_still_counts_as_run():
     assert len(report["errors"]) == 1
 
 
+def test_an_identity_denied_every_read_runs_no_checks_at_all():
+    """The headline case, every check at once. Seven checks used to catch their
+    own inventory failure and return [], so even with the guard fixed they
+    still counted as run on an account nothing could read."""
+    report = _audit(regions=["us-east-1"])      # every check, us-east-1 runs S3 too
+    assert report["checks_run"] == [], report["checks_run"]
+    assert {f["check"] for f in report["checks_failed"]} == set(optimizer._ALL_CHECKS)
+
+
+def test_one_load_balancer_inventory_failing_is_not_the_whole_check():
+    """ALB/NLB and Classic are separate reads. One denied still leaves a real
+    answer from the other, so only both failing makes the check fail."""
+    from unittest.mock import MagicMock
+    from finops.analyzers import waste
+
+    ok = MagicMock()
+    ok.get_paginator.return_value.paginate.return_value = [{"LoadBalancerDescriptions": []}]
+    assert waste.check_idle_load_balancers(_DeniedClient(), ok, MagicMock(), "us-east-1") == []
+    with pytest.raises(ClientError):
+        waste.check_idle_load_balancers(_DeniedClient(), _DeniedClient(), MagicMock(), "us-east-1")
+
+
 def test_failure_lines_carry_the_error_code_never_the_message():
     report = _audit(regions=["us-east-1", "eu-west-1"], checks=["ebs"])
     blob = json.dumps({k: report[k] for k in ("errors", "checks_failed")})

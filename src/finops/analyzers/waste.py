@@ -240,7 +240,9 @@ def check_elastic_ips(ec2_client: Any, region: str = "unknown") -> list[dict]:
         resp = ec2_client.describe_addresses()
     except Exception as exc:
         log.warning("describe_addresses failed (region=%s): %s", region, exc)
-        return findings
+        # Raise, not return []: the inventory read failed, so this check saw
+        # nothing, and an empty list reads upstream as "checked, all clean".
+        raise
 
     for addr in resp.get("Addresses", []):
         allocation_id = addr.get("AllocationId", addr.get("PublicIp", "unknown"))
@@ -449,7 +451,9 @@ def check_cloudtrail_waste(
         trails = resp.get("trailList", [])
     except Exception as exc:
         log.warning("describe_trails failed (region=%s): %s", region, exc)
-        return findings
+        # Raise, not return []: the inventory read failed, so this check saw
+        # nothing, and an empty list reads upstream as "checked, all clean".
+        raise
 
     management_event_trails = []
     for trail in trails:
@@ -651,7 +655,9 @@ def check_s3_storage_class(
         buckets = resp.get("Buckets", [])
     except Exception as exc:
         log.warning("list_buckets failed: %s", exc)
-        return findings
+        # Raise, not return []: the inventory read failed, so this check saw
+        # nothing, and an empty list reads upstream as "checked, all clean".
+        raise
 
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
@@ -1389,6 +1395,7 @@ def check_idle_load_balancers(
     lookback_days are flagged as idle. They still incur the hourly LCU base cost.
     """
     findings: list[dict] = []
+    listing_errors: list[Exception] = []
 
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
@@ -1455,6 +1462,7 @@ def check_idle_load_balancers(
                 })
     except Exception as exc:
         log.warning("ELBv2 describe failed (region=%s): %s", region, exc)
+        listing_errors.append(exc)
 
     # Classic ELBs
     try:
@@ -1503,7 +1511,12 @@ def check_idle_load_balancers(
                 })
     except Exception as exc:
         log.warning("Classic ELB describe failed (region=%s): %s", region, exc)
+        listing_errors.append(exc)
 
+    # One inventory failing still leaves a real read of the other. Both failing
+    # means this check looked at nothing, which must not come back as [].
+    if len(listing_errors) == 2:
+        raise listing_errors[0]
     return findings
 
 
@@ -1529,7 +1542,9 @@ def check_s3_incomplete_multipart(
         buckets = buckets_resp.get("Buckets", [])
     except Exception as exc:
         log.warning("list_buckets failed: %s", exc)
-        return findings
+        # Raise, not return []: the inventory read failed, so this check saw
+        # nothing, and an empty list reads upstream as "checked, all clean".
+        raise
 
     for bucket in buckets:
         bucket_name = bucket["Name"]
@@ -1614,7 +1629,9 @@ def check_ecr_old_images(
             repos.extend(page.get("repositories", []))
     except Exception as exc:
         log.warning("ECR describe_repositories failed (region=%s): %s", region, exc)
-        return findings
+        # Raise, not return []: the inventory read failed, so this check saw
+        # nothing, and an empty list reads upstream as "checked, all clean".
+        raise
 
     for repo in repos:
         repo_name = repo["repositoryName"]
@@ -1785,7 +1802,9 @@ def check_ecs_task_rightsizing(
             clusters.extend(page.get("clusterArns", []))
     except Exception as exc:
         log.warning("ECS list_clusters failed (region=%s): %s", region, exc)
-        return findings
+        # Raise, not return []: the inventory read failed, so this check saw
+        # nothing, and an empty list reads upstream as "checked, all clean".
+        raise
 
     for cluster_arn in clusters:
         cluster_name = cluster_arn.split("/")[-1]
