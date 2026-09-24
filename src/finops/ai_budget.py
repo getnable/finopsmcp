@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import token_budget
+from . import llm_prices, token_budget
 
 # ── Verdicts (mirror policy.py's vocabulary) ─────────────────────────────────
 BUDGET_OK = "ok"        # comfortably under budget
@@ -43,13 +43,23 @@ _WARN_AT = float(os.getenv("FINOPS_AI_BUDGET_WARN_PCT", "0.80"))
 # window, so 5h is a sensible default to show burn against. Configurable.
 _WINDOW_HOURS = float(os.getenv("FINOPS_AI_WINDOW_HOURS", "5"))
 
-# Blended API-equivalent price so a subscription user sees a dollar figure they can
-# reason about ("this session would be ~$18 on the API"). Not what the plan charges
-# (that is flat); it is the metered-equivalent. Configurable per the model you run.
-_USD_PER_MTOK_IN = float(os.getenv("FINOPS_AI_USD_PER_MTOK_IN", "3.0"))
-_USD_PER_MTOK_OUT = float(os.getenv("FINOPS_AI_USD_PER_MTOK_OUT", "15.0"))
-_USD_PER_MTOK_CACHE_WRITE = float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE", "3.75"))
-_USD_PER_MTOK_CACHE_READ = float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_READ", "0.30"))
+# API-equivalent dollars so a subscription user sees a figure they can reason about
+# ("this session would be ~$18 on the API"). Not what the plan charges (that is
+# flat); it is the metered-equivalent, priced per response at the list rate of the
+# model that produced it (llm_prices). A model that table does not know falls back
+# to this blended rate, Sonnet 4.6's by default, and is reported as unpriced rather
+# than silently folded in. Configurable for the model you run.
+_BLEND = llm_prices.MODEL_PRICES["claude-sonnet-4-6"]
+_FALLBACK = llm_prices.ModelPrice(
+    model="fallback", provider="fallback",
+    input=float(os.getenv("FINOPS_AI_USD_PER_MTOK_IN", str(_BLEND.input))),
+    output=float(os.getenv("FINOPS_AI_USD_PER_MTOK_OUT", str(_BLEND.output))),
+    cache_write_5m=float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE",
+                                   str(_BLEND.cache_write_5m))),
+    cache_write_1h=float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE_1H",
+                                   str(_BLEND.cache_write_1h))),
+    cache_read=float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_READ", str(_BLEND.cache_read))),
+)
 
 def _data_dir() -> Path:
     d = Path(os.getenv("FINOPS_DATA_DIR") or (Path.home() / ".nable"))
@@ -133,42 +143,18 @@ def _claude_projects_dir() -> Path:
     return (Path(base) if base else Path.home() / ".claude") / "projects"
 
 
-def _usd_equivalent(tin: int, tout: int, cwrite: int, cread: int) -> float:
-    return round(
-        tin / 1e6 * _USD_PER_MTOK_IN
-        + tout / 1e6 * _USD_PER_MTOK_OUT
-        + cwrite / 1e6 * _USD_PER_MTOK_CACHE_WRITE
-        + cread / 1e6 * _USD_PER_MTOK_CACHE_READ,
-        2,
-    )
-
-
 def read_agent_usage(since_epoch: float) -> dict[str, Any]:
     """Tally Claude Code token usage across all local sessions since `since_epoch`.
 
     Exact counts, read locally. Skips log files whose mtime predates the window so a
-    long history stays cheap. Returns totals + a per-model split + first/last activity.
+    long history stays cheap. Returns totals, a per-model split of tokens and of
+    list-price dollars, the models priced at the fallback rate, and first/last
+    activity.
     """
     proj = _claude_projects_dir()
-    tin = tout = cwrite = cread = msgs = 0
-    by_model: dict[str, int] = {}
-    first_ts: float | None = None
-    last_ts: float | None = None
-
     if not proj.is_dir():
-        return _usage_payload(tin, tout, cwrite, cread, msgs, by_model, first_ts, last_ts,
-                              source_present=False)
-
-    for r in _responses(proj, since_epoch):
-        ti, to, cw, cr = r["input"], r["output"], r["cache_write"], r["cache_read"]
-        tin += ti; tout += to; cwrite += cw; cread += cr; msgs += 1
-        by_model[r["model"]] = by_model.get(r["model"], 0) + ti + to + cw + cr
-        ts = r["ts"]
-        first_ts = ts if first_ts is None else min(first_ts, ts)
-        last_ts = ts if last_ts is None else max(last_ts, ts)
-
-    return _usage_payload(tin, tout, cwrite, cread, msgs, by_model, first_ts, last_ts,
-                          source_present=True)
+        return _tally([], source_present=False)
+    return _tally(_responses(proj, since_epoch), source_present=True)
 
 
 def _responses(proj: Path, since_epoch: float) -> list[dict[str, Any]]:
@@ -211,34 +197,89 @@ def _responses(proj: Path, since_epoch: float) -> list[dict[str, Any]]:
                     cr = int(usage.get("cache_read_input_tokens", 0) or 0)
                     if ti == to == cw == cr == 0:
                         continue
+                    # Claude Code writes its main-thread cache with the 1-hour TTL,
+                    # billed at 2x input against 1.25x for the 5-minute one. The
+                    # split is in usage.cache_creation; anything it does not
+                    # account for is priced as a 5-minute write.
+                    split = usage.get("cache_creation")
+                    cw_1h = 0
+                    if isinstance(split, dict):
+                        cw_1h = min(cw, int(split.get("ephemeral_1h_input_tokens", 0) or 0))
                     key = ((msg.get("id"), rec.get("requestId")) if msg.get("id")
                            else (str(path), lineno))
                     seen[key] = {
                         "ts": ts, "model": str(msg.get("model", "") or "unknown"),
                         "input": ti, "output": to, "cache_write": cw, "cache_read": cr,
+                        "cache_write_1h": cw_1h,
+                        "fast": usage.get("speed") == "fast",
+                        "us_only": usage.get("inference_geo") == "us",
                     }
         except OSError:
             continue
     return list(seen.values())
 
 
-def _usage_payload(tin, tout, cwrite, cread, msgs, by_model, first_ts, last_ts,
-                   source_present):
+def _response_usd(r: dict[str, Any]) -> tuple[float, bool]:
+    """(list-price USD, priced) for one response. Unpriced means the fallback rate."""
+    price = llm_prices.price_for(r["model"])
+    usd = (price or _FALLBACK).cost(
+        input_tokens=r["input"], output_tokens=r["output"],
+        cache_write_5m_tokens=r["cache_write"] - r["cache_write_1h"],
+        cache_write_1h_tokens=r["cache_write_1h"], cache_read_tokens=r["cache_read"],
+        fast=r["fast"], us_only=r["us_only"])
+    return usd, price is not None
+
+
+def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, Any]:
+    tin = tout = cwrite = cread = 0
+    usd_total = 0.0
+    by_model: dict[str, int] = {}
+    usd_by_model: dict[str, float] = {}
+    unpriced: dict[str, int] = {}
+    first_ts: float | None = None
+    last_ts: float | None = None
+    for r in responses:
+        ti, to, cw, cr = r["input"], r["output"], r["cache_write"], r["cache_read"]
+        tin += ti; tout += to; cwrite += cw; cread += cr
+        model = r["model"]
+        by_model[model] = by_model.get(model, 0) + ti + to + cw + cr
+        usd, priced = _response_usd(r)
+        usd_total += usd
+        usd_by_model[model] = usd_by_model.get(model, 0.0) + usd
+        if not priced:
+            unpriced[model] = unpriced.get(model, 0) + ti + to + cw
+        ts = r["ts"]
+        first_ts = ts if first_ts is None else min(first_ts, ts)
+        last_ts = ts if last_ts is None else max(last_ts, ts)
+
     # "Billable" = the tokens that represent real new work and cost: input, output,
     # and cache creation. cache_read is Claude Code re-reading its own cached context
     # every turn; it is cheap and would otherwise dwarf every other number, so it is
     # reported separately and NOT the headline the budget measures against.
     billable = tin + tout + cwrite
-    return {
+    out = {
         "input_tokens": tin, "output_tokens": tout,
         "cache_creation_tokens": cwrite, "cache_read_tokens": cread,
         "billable_tokens": billable, "total_tokens": billable + cread,
-        "messages": msgs,
-        "usd_equivalent": _usd_equivalent(tin, tout, cwrite, cread),
+        "messages": len(responses),
+        "usd_equivalent": round(usd_total, 2),
         "by_model": dict(sorted(by_model.items(), key=lambda kv: -kv[1])),
+        "cost_by_model": {m: round(v, 2) for m, v in
+                          sorted(usd_by_model.items(), key=lambda kv: -kv[1])},
+        # Billable tokens from models llm_prices has no confirmed rate for. Their
+        # dollars are in usd_equivalent at the fallback rate, and named here so a
+        # figure built on a guessed rate is never presented as a list price.
+        "unpriced_models": dict(sorted(unpriced.items(), key=lambda kv: -kv[1])),
+        "prices_as_of": llm_prices.AS_OF,
         "first_activity": first_ts, "last_activity": last_ts,
         "source_present": source_present,
     }
+    if unpriced:
+        out["unpriced_note"] = (
+            f"{', '.join(unpriced)} priced at the fallback ${_FALLBACK.input:g}/"
+            f"${_FALLBACK.output:g} per 1M in/out; set FINOPS_AI_USD_PER_MTOK_IN/OUT "
+            f"to the rate you pay.")
+    return out
 
 
 def _rec_epoch(ts: Any) -> float | None:
