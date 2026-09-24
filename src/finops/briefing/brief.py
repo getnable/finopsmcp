@@ -157,6 +157,11 @@ class Brief:
             if self.investigations:
                 return (f"Nothing confirmed to act on. "
                         f"{len(self.investigations)} thing(s) worth a look.")
+            if self.gaps:
+                # "Nothing new found" is a verdict on the whole account; with
+                # gaps it is only true of the part nable could read.
+                return (f"Nothing new found in what nable could read. "
+                        f"{len(self.gaps)} thing(s) it could not check.")
             return "Nothing new found."
         safe = [i for i in self.actionable if i.resource_map.isolated is True]
         head = f"${self.total_monthly_usd:,.0f}/mo across {n} item(s)"

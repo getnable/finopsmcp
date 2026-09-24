@@ -86,6 +86,14 @@ def _gather_aws(gaps: list[str], scanned: dict) -> list[dict]:
         gaps.append(f"The AWS audit could not run: {report.get('error') if isinstance(report, dict) else 'no report'}")
         return []
 
+    checks_failed = report.get("checks_failed") or []
+    if checks_failed and not report.get("checks_run"):
+        # Every check raised, usually AccessDenied on every read. Say so first
+        # and plainly: an empty brief on top of an unreadable account reads as
+        # "all clear" to anyone who does not open the gap list.
+        codes = sorted({str(f.get("error_code", "")) for f in checks_failed})
+        gaps.append("The AWS audit could not read anything: every check failed "
+                    f"({', '.join(codes)}). Zero findings here is not a clean account.")
     for err in report.get("errors") or []:
         gaps.append(str(err))
     timed_out = report.get("regions_timed_out") or []
