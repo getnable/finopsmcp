@@ -89,9 +89,6 @@ def test_a_nat_gateway_we_could_not_measure_is_not_reported_idle(monkeypatch):
         def get_metric_statistics(self, **kw):
             raise RuntimeError("AccessDenied: cloudwatch:GetMetricStatistics")
 
-        def get_metric_data(self, **kw):
-            raise RuntimeError("AccessDenied: cloudwatch:GetMetricData")
-
     class _Paginator:
         """The detector paginates. An earlier version of this fake had only
         describe_nat_gateways, so get_paginator raised AttributeError, the
@@ -137,14 +134,6 @@ def test_the_fake_actually_drives_the_detector():
         def get_metric_statistics(self, **kw):
             # a real read that genuinely observed near-zero traffic
             return {"Datapoints": [{"Sum": 1.0}]}
-
-        def get_metric_data(self, **kw):
-            # the same reading, through the batched API
-            return {"MetricDataResults": [
-                {"Id": q["Id"], "Timestamps": [kw["StartTime"]], "Values": [1.0],
-                 "StatusCode": "Complete"}
-                for q in kw["MetricDataQueries"]
-            ]}
 
     class _Paginator:
         def paginate(self, **kw):

@@ -93,10 +93,13 @@ def _batch_get_hourly_cpu_max(
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=_LOOKBACK_DAYS)
 
+    # This scan has always read through GetMetricData, which AWS bills per
+    # metric with no free tier. It stays that way here; the shared default is
+    # the free GetMetricStatistics path.
     series = fetch_metric_values(cw_client, [
         MetricQuery(iid, "AWS/EC2", "CPUUtilization", (("InstanceId", iid),), "Maximum", 3600)
         for iid in instance_ids
-    ], start, end)
+    ], start, end, use_get_metric_data=True)
     return {iid: series.get(iid) or [] for iid in instance_ids}
 
 

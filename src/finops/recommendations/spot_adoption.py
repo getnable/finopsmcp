@@ -122,10 +122,13 @@ def _batch_get_cpu_variance(
     end   = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
 
+    # This scan has always read through GetMetricData, which AWS bills per
+    # metric with no free tier. It stays that way here; the shared default is
+    # the free GetMetricStatistics path.
     series = fetch_metric_values(cw_client, [
         MetricQuery(iid, "AWS/EC2", "CPUUtilization", (("InstanceId", iid),), "Average", 3600)
         for iid in instance_ids
-    ], start, end)
+    ], start, end, use_get_metric_data=True)
 
     out: dict[str, float] = {}
     for iid in instance_ids:

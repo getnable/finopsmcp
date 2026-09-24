@@ -1,24 +1,33 @@
-"""CloudWatch reads are batched, and a batch never turns a failed read into zero.
+"""CloudWatch reads run concurrently, stay free by default, and never turn a
+failed read into zero.
 
 The waste detectors used to call get_metric_statistics once per resource per
 metric, inside the describe loop. 200 instances with two metrics each was 400
-sequential round trips for one check in one region. GetMetricData carries 500
-series per call, so the same read is one call.
+sequential round trips for one check in one region.
 
-Batching changes what a failure looks like. One throttled call now covers every
-resource in the chunk, and CloudWatch can also answer a single series with
-Forbidden, InternalError or PartialData while the rest come back Complete. Each
-of those has to reach the detector as "unread", the same thing an exception from
-get_metric_statistics was, and never as an empty series that reads as idle.
+Two ways out, with different bills (AWS Price List, AmazonCloudWatch offer file,
+us-east-1, checked 2026-09-24): GetMetricStatistics sits in CW:Requests, which
+has 1,000,000 free requests a month; GetMetricData is CW:GMD-Metrics, $0.01 per
+1,000 metrics with no free tier. `nable scan` promises no paid API calls, so the
+default keeps one GetMetricStatistics call per series and runs them
+concurrently. GetMetricData batching (500 series a call) is opt-in through
+FINOPS_CLOUDWATCH_GETMETRICDATA=1.
 
-The fakes answer with the real GetMetricData response shape (MetricDataResults
-with Id, Timestamps, Values, StatusCode, and a top-level NextToken), and the
-botocore Stubber tests validate the request against the real service model.
+Either way a failure has to reach the detector as "unread", the same thing an
+exception from get_metric_statistics was, and never as an empty series that
+reads as idle. On the batched path that includes a throttled call covering a
+whole chunk and a single series answered Forbidden, InternalError or
+PartialData.
+
+The fakes answer with the real response shapes, and the botocore Stubber tests
+validate each request against the real service model.
 """
 from __future__ import annotations
 
 import math
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -26,11 +35,27 @@ import pytest
 from botocore.exceptions import ClientError
 from botocore.stub import ANY, Stubber
 
-from finops.analyzers.cloudwatch import MetricQuery, fetch_metric_values
+from finops.analyzers.cloudwatch import (
+    GET_METRIC_DATA_ENV,
+    MetricQuery,
+    fetch_metric_values,
+)
 
 
 _T0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
 _ID_PATTERN = re.compile(r"^[a-z][a-zA-Z0-9_]*$")
+
+
+@pytest.fixture(autouse=True)
+def _free_path_unless_asked(monkeypatch):
+    """A developer shell with the opt-in set must not flip every test here onto
+    the billed path."""
+    monkeypatch.delenv(GET_METRIC_DATA_ENV, raising=False)
+
+
+@pytest.fixture
+def opted_in(monkeypatch):
+    monkeypatch.setenv(GET_METRIC_DATA_ENV, "1")
 
 
 def _ts(hours: int) -> datetime:
@@ -49,11 +74,35 @@ def _stubbed_cloudwatch():
 
 
 class _CountingCloudWatch:
-    """Answers every series Complete with one datapoint, and counts calls."""
+    """Answers every series with one datapoint through either API, counting
+    calls. `fail_call` throttles that GetMetricData call; `hang` names series
+    whose GetMetricStatistics call takes `hang_s` seconds."""
 
-    def __init__(self, fail_call: int | None = None):
+    def __init__(self, fail_call: int | None = None, latency: float = 0.0,
+                 hang: tuple = (), hang_s: float = 0.0):
         self.calls: list[list[dict]] = []
+        self.statistics_calls = 0
+        self.max_in_flight = 0
+        self._in_flight = 0
+        self._lock = threading.Lock()
         self._fail_call = fail_call
+        self._latency = latency
+        self._hang, self._hang_s = hang, hang_s
+
+    def get_metric_statistics(self, **kw):
+        with self._lock:
+            self.statistics_calls += 1
+            self._in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        try:
+            value = kw["Dimensions"][0]["Value"]
+            time.sleep(self._hang_s if value in self._hang else self._latency)
+            stat = kw["Statistics"][0]
+            return {"Datapoints": [{"Timestamp": _T0, stat: 1.0, "Unit": "Percent"}],
+                    "Label": kw["MetricName"]}
+        finally:
+            with self._lock:
+                self._in_flight -= 1
 
     def get_metric_data(self, **kw):
         self.calls.append(kw["MetricDataQueries"])
@@ -68,9 +117,105 @@ class _CountingCloudWatch:
         ], "Messages": []}
 
 
-# ── the helper ───────────────────────────────────────────────────────────────
+# ── the helper, default path: GetMetricStatistics, concurrent ───────────────
 
-def test_the_request_matches_the_service_model():
+def test_the_default_request_matches_the_service_model():
+    client, stub = _stubbed_cloudwatch()
+    stub.add_response(
+        "get_metric_statistics",
+        {"Label": "CPUUtilization", "Datapoints": [
+            {"Timestamp": _ts(1), "Average": 3.0, "Unit": "Percent"},
+            {"Timestamp": _ts(0), "Average": 2.0, "Unit": "Percent"},
+        ]},
+        {
+            "Namespace": "AWS/EC2",
+            "MetricName": "CPUUtilization",
+            "Dimensions": [{"Name": "InstanceId", "Value": "i-1"}],
+            "StartTime": _T0,
+            "EndTime": _ts(24),
+            "Period": 3600,
+            "Statistics": ["Average"],
+        },
+    )
+    with stub:
+        got = fetch_metric_values(client, [_q("i-1")], _T0, _ts(24))
+    stub.assert_no_pending_responses()
+    # Oldest first, whatever order CloudWatch returned them in.
+    assert got == {"i-1": [2.0, 3.0]}
+
+
+def test_the_default_path_never_calls_the_billed_api():
+    cw = _CountingCloudWatch()
+    got = fetch_metric_values(cw, [_q(n, value=f"i-{n}") for n in range(30)], _T0, _ts(24))
+    assert cw.calls == []
+    assert cw.statistics_calls == 30
+    assert all(v == [1.0] for v in got.values())
+
+
+def test_the_env_flag_opts_in_to_get_metric_data(opted_in):
+    cw = _CountingCloudWatch()
+    fetch_metric_values(cw, [_q(n, value=f"i-{n}") for n in range(30)], _T0, _ts(24))
+    assert len(cw.calls) == 1
+    assert cw.statistics_calls == 0
+
+
+def test_an_explicit_argument_beats_the_env_flag(opted_in):
+    cw = _CountingCloudWatch()
+    fetch_metric_values(cw, [_q("a")], _T0, _ts(24), use_get_metric_data=False)
+    assert cw.calls == [] and cw.statistics_calls == 1
+
+
+def test_n_slow_reads_take_about_n_over_workers_round_trips():
+    """64 reads at 50ms each: 3.2s one after another, ~0.4s eight at a time."""
+    latency, n, workers = 0.05, 64, 8
+    cw = _CountingCloudWatch(latency=latency)
+
+    t0 = time.monotonic()
+    got = fetch_metric_values(cw, [_q(i, value=f"i-{i}") for i in range(n)], _T0, _ts(24),
+                              max_workers=workers)
+    elapsed = time.monotonic() - t0
+
+    assert len(got) == n and cw.statistics_calls == n
+    assert cw.max_in_flight == workers
+    assert elapsed >= math.ceil(n / workers) * latency * 0.9
+    assert elapsed < n * latency / 3, f"{elapsed:.2f}s is not concurrent"
+
+
+def test_a_hung_read_is_abandoned_as_unread_without_holding_up_the_rest():
+    cw = _CountingCloudWatch(hang=("i-hung",), hang_s=2.0)
+    queries = [_q("hung", value="i-hung")] + [_q(i, value=f"i-{i}") for i in range(20)]
+
+    t0 = time.monotonic()
+    got = fetch_metric_values(cw, queries, _T0, _ts(24), idle_timeout_s=0.3)
+    elapsed = time.monotonic() - t0
+
+    assert got["hung"] is None
+    assert all(got[i] == [1.0] for i in range(20))
+    assert elapsed < 1.5, f"waited {elapsed:.2f}s on a hung call"
+
+
+def test_a_failed_read_is_unread_and_an_empty_one_is_not():
+    class _CW:
+        def get_metric_statistics(self, **kw):
+            if kw["Dimensions"][0]["Value"] == "i-denied":
+                raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}},
+                                  "GetMetricStatistics")
+            return {"Datapoints": [], "Label": kw["MetricName"]}
+
+    got = fetch_metric_values(
+        _CW(), [_q("a", value="i-denied"), _q("b", value="i-quiet")], _T0, _ts(24))
+    assert got == {"a": None, "b": []}
+
+
+def test_no_queries_means_no_calls():
+    cw = _CountingCloudWatch()
+    assert fetch_metric_values(cw, [], _T0, _ts(24)) == {}
+    assert cw.calls == [] and cw.statistics_calls == 0
+
+
+# ── the helper, opt-in path: GetMetricData, batched ──────────────────────────
+
+def test_the_batched_request_matches_the_service_model():
     client, stub = _stubbed_cloudwatch()
     stub.add_response(
         "get_metric_data",
@@ -98,9 +243,8 @@ def test_the_request_matches_the_service_model():
         },
     )
     with stub:
-        got = fetch_metric_values(client, [_q("i-1")], _T0, _ts(24))
+        got = fetch_metric_values(client, [_q("i-1")], _T0, _ts(24), use_get_metric_data=True)
     stub.assert_no_pending_responses()
-    # Oldest first, whatever order CloudWatch returned them in.
     assert got == {"i-1": [2.0, 3.0]}
 
 
@@ -108,7 +252,7 @@ def test_one_call_carries_up_to_500_series():
     cw = _CountingCloudWatch()
     queries = [_q(("i", n), value=f"i-{n}") for n in range(1001)]
 
-    got = fetch_metric_values(cw, queries, _T0, _ts(24))
+    got = fetch_metric_values(cw, queries, _T0, _ts(24), use_get_metric_data=True)
 
     assert len(cw.calls) == math.ceil(1001 / 500) == 3
     assert [len(c) for c in cw.calls] == [500, 500, 1]
@@ -142,7 +286,8 @@ def test_next_token_pages_are_followed_and_joined():
     )
     with stub:
         got = fetch_metric_values(
-            client, [_q("a", value="i-a"), _q("b", value="i-b")], _T0, _ts(24))
+            client, [_q("a", value="i-a"), _q("b", value="i-b")], _T0, _ts(24),
+            use_get_metric_data=True)
     stub.assert_no_pending_responses()
     assert got == {"a": [3.0, 4.0, 5.0], "b": [9.0]}
 
@@ -160,7 +305,7 @@ def test_a_series_left_partial_is_unread_not_short():
         {"MetricDataQueries": ANY, "StartTime": ANY, "EndTime": ANY},
     )
     with stub:
-        got = fetch_metric_values(client, [_q("a")], _T0, _ts(24))
+        got = fetch_metric_values(client, [_q("a")], _T0, _ts(24), use_get_metric_data=True)
     assert got == {"a": None}
 
 
@@ -178,7 +323,8 @@ def test_a_failed_series_is_unread_and_its_neighbours_are_not(status):
     )
     with stub:
         got = fetch_metric_values(
-            client, [_q("a", value="i-a"), _q("b", value="i-b")], _T0, _ts(24))
+            client, [_q("a", value="i-a"), _q("b", value="i-b")], _T0, _ts(24),
+            use_get_metric_data=True)
     # a failed; b was read and genuinely had nothing, which is a real answer.
     assert got == {"a": None, "b": []}
 
@@ -190,14 +336,15 @@ def test_a_series_missing_from_the_response_is_unread():
         {"MetricDataQueries": ANY, "StartTime": ANY, "EndTime": ANY},
     )
     with stub:
-        assert fetch_metric_values(client, [_q("a")], _T0, _ts(24)) == {"a": None}
+        assert fetch_metric_values(
+            client, [_q("a")], _T0, _ts(24), use_get_metric_data=True) == {"a": None}
 
 
 def test_a_throttled_call_marks_only_its_own_chunk_unread():
     cw = _CountingCloudWatch(fail_call=2)
     queries = [_q(n, value=f"i-{n}") for n in range(600)]
 
-    got = fetch_metric_values(cw, queries, _T0, _ts(24))
+    got = fetch_metric_values(cw, queries, _T0, _ts(24), use_get_metric_data=True)
 
     assert all(got[n] == [1.0] for n in range(500))
     assert all(got[n] is None for n in range(500, 600))
@@ -217,57 +364,60 @@ def test_a_repeated_next_token_ends_the_read_as_unread():
                  "StatusCode": "PartialData"}], "NextToken": "same"}
 
     cw = _Loops()
-    assert fetch_metric_values(cw, [_q("a")], _T0, _ts(24)) == {"a": None}
+    assert fetch_metric_values(
+        cw, [_q("a")], _T0, _ts(24), use_get_metric_data=True) == {"a": None}
     assert cw.calls == 2
 
 
-def test_a_client_that_is_not_boto_shaped_does_not_hang():
-    """A MagicMock client answers .get() with a truthy mock for NextToken. The
-    read must stop and report the series unread, not page forever."""
+@pytest.mark.parametrize("batched", [False, True])
+def test_a_client_that_is_not_boto_shaped_does_not_hang(batched):
+    """A MagicMock client answers .get() with a truthy mock. The read must stop
+    and report the series unread, not page forever or read a mock as data."""
     from unittest.mock import MagicMock
-    assert fetch_metric_values(MagicMock(), [_q("a")], _T0, _ts(24)) == {"a": None}
-
-
-def test_no_queries_means_no_calls():
-    cw = _CountingCloudWatch()
-    assert fetch_metric_values(cw, [], _T0, _ts(24)) == {}
-    assert cw.calls == []
+    assert fetch_metric_values(
+        MagicMock(), [_q("a")], _T0, _ts(24), use_get_metric_data=batched) == {"a": None}
 
 
 # ── the detectors ────────────────────────────────────────────────────────────
 
 class _Metrics:
     """A CloudWatch account with some series in it, served through both read
-    APIs so the same test can run against the per-resource code and the batched
-    code and count what each one costs.
+    APIs, counting calls to each.
 
     `series` maps (MetricName, *dimension values) to the values CloudWatch
-    holds, or to a StatusCode string for a series it refuses. Anything absent is
-    a Complete series with no datapoints, which is what CloudWatch answers for a
-    metric nobody published.
+    holds, or to a StatusCode string for a series it refuses (an AccessDenied
+    exception from GetMetricStatistics). Anything absent is a series with no
+    datapoints, which is what CloudWatch answers for a metric nobody published.
+    `latency` delays every GetMetricStatistics call.
     """
 
-    def __init__(self, series: dict | None = None):
+    def __init__(self, series: dict | None = None, latency: float = 0.0):
         self.series = series or {}
-        self.calls = 0
+        self.latency = latency
+        self.statistics_calls = 0
+        self.data_calls = 0
+        self._lock = threading.Lock()
 
     @staticmethod
     def _key(metric: str, dims: list[dict]) -> tuple:
         return (metric, *(d["Value"] for d in dims))
 
     def get_metric_statistics(self, **kw):
-        self.calls += 1
+        with self._lock:
+            self.statistics_calls += 1
+        time.sleep(self.latency)
         got = self.series.get(self._key(kw["MetricName"], kw["Dimensions"]), [])
         if isinstance(got, str):
             raise ClientError({"Error": {"Code": "AccessDenied", "Message": got}},
                               "GetMetricStatistics")
         stat = kw["Statistics"][0]
-        return {"Datapoints": [
+        return {"Label": kw["MetricName"], "Datapoints": [
             {"Timestamp": _ts(i), stat: v, "Unit": "None"} for i, v in enumerate(got)
         ]}
 
     def get_metric_data(self, **kw):
-        self.calls += 1
+        with self._lock:
+            self.data_calls += 1
         results = []
         for q in kw["MetricDataQueries"]:
             metric = q["MetricStat"]["Metric"]
@@ -303,26 +453,30 @@ def _nat_pages(n: int) -> list[dict]:
     ]}]
 
 
-def test_nat_gateways_are_read_in_one_call_per_500():
+def _nat_run():
     from finops.analyzers import waste
 
     busy = 40 * 1024 ** 3
-    cw = _Metrics({("BytesOutToDestination", "nat-0001"): [busy] * 7})
-
+    cw = _Metrics({
+        ("BytesOutToDestination", "nat-0001"): [busy] * 7,
+        ("BytesOutToDestination", "nat-0002"): "Forbidden",
+    })
     findings = waste.check_nat_gateways(_Pages(_nat_pages(600)), cw, region="us-east-1")
+    # nat-0001 carries 40 GB/day, nat-0002 could not be read, the other 598
+    # read fine and empty.
+    assert len(findings) == 598
+    assert not {"nat-0001", "nat-0002"} & {f["resource_id"] for f in findings}
+    return cw
 
-    assert cw.calls == math.ceil(600 * 1 / 500) == 2
-    # nat-0001 carries 40 GB/day; the other 599 read Complete and empty.
-    assert len(findings) == 599
-    assert "nat-0001" not in {f["resource_id"] for f in findings}
+
+def test_nat_gateways_stay_on_the_free_api_by_default():
+    cw = _nat_run()
+    assert (cw.data_calls, cw.statistics_calls) == (0, 600)
 
 
-def test_a_nat_gateway_whose_series_is_refused_is_not_idle():
-    from finops.analyzers import waste
-
-    cw = _Metrics({("BytesOutToDestination", "nat-0000"): "Forbidden"})
-    findings = waste.check_nat_gateways(_Pages(_nat_pages(2)), cw, region="us-east-1")
-    assert [f["resource_id"] for f in findings] == ["nat-0001"]
+def test_nat_gateways_batch_when_opted_in(opted_in):
+    cw = _nat_run()
+    assert (cw.data_calls, cw.statistics_calls) == (math.ceil(600 / 500), 0)
 
 
 def _ec2_pages(n: int) -> list[dict]:
@@ -334,35 +488,40 @@ def _ec2_pages(n: int) -> list[dict]:
     ]}]}]
 
 
-def test_idle_ec2_reads_cpu_and_network_in_one_call_per_500_series():
-    """200 instances, two series each: 400 round trips before, 1 now."""
+def _ec2_run(latency: float = 0.0, n: int = 200):
     from finops.analyzers import waste
 
-    series = {("CPUUtilization", f"i-{i:04d}"): [1.0] * 336 for i in range(200)}
+    series = {("CPUUtilization", f"i-{i:04d}"): [1.0] * 336 for i in range(n)}
     series[("NetworkOut", "i-0007")] = [500 * 1024 ** 2] * 336  # busy on the wire
     series[("CPUUtilization", "i-0008")] = [60.0] * 336         # busy on CPU
-    cw = _Metrics(series)
+    series[("NetworkOut", "i-0009")] = "Forbidden"              # guard unreadable
+    cw = _Metrics(series, latency=latency)
 
-    findings = waste.check_idle_ec2(_Pages(_ec2_pages(200)), cw, region="us-east-1")
+    findings = waste.check_idle_ec2(_Pages(_ec2_pages(n)), cw, region="us-east-1")
 
-    assert cw.calls == math.ceil(200 * 2 / 500) == 1
     flagged = {f["resource_id"] for f in findings}
-    assert len(flagged) == 198
-    assert not {"i-0007", "i-0008"} & flagged
+    assert len(flagged) == n - 3
+    assert not {"i-0007", "i-0008", "i-0009"} & flagged
+    return cw
 
 
-def test_a_refused_network_series_still_protects_a_low_cpu_instance():
-    """The CPU series reads fine and low, the NetworkOut series in the same call
-    comes back Forbidden. The guard must fail towards in-use."""
-    from finops.analyzers import waste
+def test_idle_ec2_stays_on_the_free_api_by_default():
+    cw = _ec2_run()
+    assert cw.data_calls == 0
 
-    cw = _Metrics({
-        ("CPUUtilization", "i-0000"): [1.0] * 336,
-        ("NetworkOut", "i-0000"): "Forbidden",
-        ("CPUUtilization", "i-0001"): [1.0] * 336,
-    })
-    findings = waste.check_idle_ec2(_Pages(_ec2_pages(2)), cw, region="us-east-1")
-    assert [f["resource_id"] for f in findings] == ["i-0001"]
+
+def test_idle_ec2_batches_when_opted_in(opted_in):
+    cw = _ec2_run()
+    assert cw.statistics_calls == 0
+    assert cw.data_calls == math.ceil(200 * 2 / 500)
+
+
+def test_idle_ec2_reads_concurrently():
+    """40 instances, two reads each, 50ms a read: 4s in sequence."""
+    t0 = time.monotonic()
+    _ec2_run(latency=0.05, n=40)
+    elapsed = time.monotonic() - t0
+    assert elapsed < 80 * 0.05 / 3, f"{elapsed:.2f}s is not concurrent"
 
 
 def _lambda_pages(n: int) -> list[dict]:
@@ -373,29 +532,32 @@ def _lambda_pages(n: int) -> list[dict]:
     ]}]
 
 
-def test_lambda_reads_invocations_and_memory_in_one_call_per_500_series():
+def _lambda_run():
     from finops.analyzers import waste
 
     series = {("Invocations", f"fn-{i:04d}"): [10.0] for i in range(300)}
     series[("Invocations", "fn-0003")] = []                   # read, never invoked
     series[("memory_utilization", "fn-0004")] = [20.0]        # 205 MB of 1024
+    series[("Invocations", "fn-0005")] = "InternalError"      # unread, not zero
     cw = _Metrics(series)
 
     findings = waste.check_lambda_memory(_Pages(_lambda_pages(300)), cw, region="us-east-1")
 
-    assert cw.calls == math.ceil(300 * 2 / 500) == 2
     assert {(f["resource_id"], f["waste_type"]) for f in findings} == {
         ("fn-0003", "lambda_zero_invocations"),
         ("fn-0004", "lambda_memory_overprovisioned"),
     }
+    return cw
 
 
-def test_a_refused_invocations_series_is_not_zero_invocations():
-    from finops.analyzers import waste
+def test_lambda_stays_on_the_free_api_by_default():
+    assert _lambda_run().data_calls == 0
 
-    cw = _Metrics({("Invocations", "fn-0000"): "InternalError"})
-    findings = waste.check_lambda_memory(_Pages(_lambda_pages(2)), cw, region="us-east-1")
-    assert [f["resource_id"] for f in findings] == ["fn-0001"]
+
+def test_lambda_batches_when_opted_in(opted_in):
+    cw = _lambda_run()
+    assert cw.statistics_calls == 0
+    assert cw.data_calls == math.ceil(300 * 2 / 500)
 
 
 def _rds_pages(n: int, db_class: str = "db.m5.xlarge") -> list[dict]:
@@ -406,7 +568,7 @@ def _rds_pages(n: int, db_class: str = "db.m5.xlarge") -> list[dict]:
     ]}]
 
 
-def test_rds_rightsizing_reads_cpu_in_one_call_per_500():
+def _rds_rightsizing_run():
     from finops.analyzers import waste
 
     series = {("CPUUtilization", f"db-{i:04d}"): [4.0] * 48 for i in range(250)}
@@ -417,15 +579,25 @@ def test_rds_rightsizing_reads_cpu_in_one_call_per_500():
 
     findings = waste.check_rds_rightsizing(_Pages(_rds_pages(250)), cw, region="us-east-1")
 
-    assert cw.calls == math.ceil(250 / 500) == 1
     flagged = {f["resource_id"] for f in findings}
     assert len(flagged) == 247
     assert not {"db-0002", "db-0003", "db-0004"} & flagged
     # Same money as the per-resource path: (0.342 - 0.171) * 730.
     assert {f["estimated_monthly_savings"] for f in findings} == {124.83}
+    return cw
 
 
-def test_rds_idle_reads_connections_in_one_call_per_500():
+def test_rds_rightsizing_stays_on_the_free_api_by_default():
+    cw = _rds_rightsizing_run()
+    assert (cw.data_calls, cw.statistics_calls) == (0, 250)
+
+
+def test_rds_rightsizing_batches_when_opted_in(opted_in):
+    cw = _rds_rightsizing_run()
+    assert (cw.data_calls, cw.statistics_calls) == (math.ceil(250 / 500), 0)
+
+
+def _rds_idle_run():
     from finops.analyzers import waste
 
     series = {("DatabaseConnections", f"db-{i:04d}"): [0.0] * 14 for i in range(250)}
@@ -436,10 +608,20 @@ def test_rds_idle_reads_connections_in_one_call_per_500():
 
     findings = waste.check_rds_idle(_Pages(_rds_pages(250)), cw, region="us-east-1")
 
-    assert cw.calls == math.ceil(250 / 500) == 1
     flagged = {f["resource_id"] for f in findings}
     assert len(flagged) == 247
     assert not {"db-0002", "db-0003", "db-0004"} & flagged
+    return cw
+
+
+def test_rds_idle_stays_on_the_free_api_by_default():
+    cw = _rds_idle_run()
+    assert (cw.data_calls, cw.statistics_calls) == (0, 250)
+
+
+def test_rds_idle_batches_when_opted_in(opted_in):
+    cw = _rds_idle_run()
+    assert (cw.data_calls, cw.statistics_calls) == (math.ceil(250 / 500), 0)
 
 
 class _Inventory:
@@ -467,7 +649,7 @@ def _alb(i: int, lb_type: str = "application") -> dict:
             "State": {"Code": "active"}}
 
 
-def test_load_balancers_are_read_in_one_call_per_500():
+def _lb_run():
     from finops.analyzers import waste
 
     v2 = [_alb(i) for i in range(300)] + [_alb(i, "network") for i in range(300, 400)]
@@ -484,10 +666,20 @@ def test_load_balancers_are_read_in_one_call_per_500():
         _Inventory([{"LoadBalancers": v2}]),
         _Inventory([{"LoadBalancerDescriptions": classic}]), cw, region="us-east-1")
 
-    assert cw.calls == math.ceil(600 / 500) == 2
     flagged = {f["lb_name"] for f in findings}
     assert len(flagged) == 600 - 5
     assert not {"lb-0001", "lb-0301", "clb-0001", "lb-0002", "clb-0002"} & flagged
+    return cw
+
+
+def test_load_balancers_stay_on_the_free_api_by_default():
+    cw = _lb_run()
+    assert (cw.data_calls, cw.statistics_calls) == (0, 600)
+
+
+def test_load_balancers_batch_when_opted_in(opted_in):
+    cw = _lb_run()
+    assert (cw.data_calls, cw.statistics_calls) == (math.ceil(600 / 500), 0)
 
 
 def test_one_failed_lb_inventory_still_reports_the_other():
@@ -533,7 +725,7 @@ class _ECS:
         return {"taskDefinition": {"cpu": "1024", "memory": "2048"}}
 
 
-def test_ecs_services_are_read_in_one_call_per_500():
+def _ecs_run():
     from finops.analyzers import waste
 
     series = {("CpuUtilized", "prod", f"svc-{i:04d}"): [50.0] * 48 for i in range(120)}
@@ -544,12 +736,22 @@ def test_ecs_services_are_read_in_one_call_per_500():
 
     findings = waste.check_ecs_task_rightsizing(_ECS(120), cw, region="us-east-1")
 
-    assert cw.calls == math.ceil(120 / 500) == 1
     flagged = {f["service"] for f in findings}
     assert len(flagged) == 117
     assert not {"svc-0001", "svc-0002", "svc-0003"} & flagged
     # 512 units saved on 2 tasks: 0.5 vCPU * 0.04048 * 730 * 2.
     assert {f["estimated_monthly_savings"] for f in findings} == {29.55}
+    return cw
+
+
+def test_ecs_stays_on_the_free_api_by_default():
+    cw = _ecs_run()
+    assert (cw.data_calls, cw.statistics_calls) == (0, 120)
+
+
+def test_ecs_batches_when_opted_in(opted_in):
+    cw = _ecs_run()
+    assert (cw.data_calls, cw.statistics_calls) == (math.ceil(120 / 500), 0)
 
 
 _TB = 1000 * 1024 ** 3
@@ -571,6 +773,12 @@ class _S3:
         return {"LocationConstraint": self.locations[Bucket]}
 
 
+class _S3Denied(_S3):
+    def get_bucket_location(self, Bucket):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}},
+                          "GetBucketLocation")
+
+
 def _s3_series(names, size=_TB, gets=1.0, objects=1000.0) -> dict:
     out = {}
     for n in names:
@@ -580,7 +788,7 @@ def _s3_series(names, size=_TB, gets=1.0, objects=1000.0) -> dict:
     return out
 
 
-def test_s3_storage_class_reads_three_series_per_bucket_in_one_call_per_500():
+def _s3_run():
     from finops.analyzers import waste
 
     names = [f"bucket-{i:04d}" for i in range(200)]
@@ -593,19 +801,23 @@ def test_s3_storage_class_reads_three_series_per_bucket_in_one_call_per_500():
     findings = waste.check_s3_storage_class(
         _S3({n: None for n in names}), cw, region="us-east-1")
 
-    assert cw.calls == math.ceil(200 * 3 / 500) == 2
     flagged = {f["resource_id"] for f in findings}
     assert len(flagged) == 197
     assert not {"bucket-0001", "bucket-0002", "bucket-0003"} & flagged
     # 1000 GB: $23.00 STANDARD - $12.50 IT storage - $0.0025 monitoring.
     assert {f["estimated_monthly_savings"] for f in findings} == {10.5}
     assert {f["recommendation"] for f in findings} == {"INTELLIGENT_TIERING"}
+    return cw
 
 
-class _S3Denied(_S3):
-    def get_bucket_location(self, Bucket):
-        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}},
-                          "GetBucketLocation")
+def test_s3_storage_class_stays_on_the_free_api_by_default():
+    assert _s3_run().data_calls == 0
+
+
+def test_s3_storage_class_batches_when_opted_in(opted_in):
+    cw = _s3_run()
+    assert cw.statistics_calls == 0
+    assert cw.data_calls == math.ceil(200 * 3 / 500)
 
 
 def _regional_cloudwatch() -> dict[str, _Metrics]:
@@ -645,10 +857,11 @@ def test_s3_storage_class_reads_each_bucket_in_its_own_region():
         ("logs-listed-region", "us-west-2"),
     }
     assert s3.location_calls == 3
-    # One client per region, the scan's own region reuses the client it has,
-    # and one batched call in each.
-    assert sorted(built) == ["eu-west-1", "us-west-2"]
-    assert [cws[r].calls for r in ("us-east-1", "eu-west-1", "us-west-2")] == [1, 1, 1]
+    # A client per region, the scan's own region reuses the client it has, and
+    # every read went to the free API in the bucket's own region.
+    assert set(built) == {"eu-west-1", "us-west-2"}
+    assert [cws[r].statistics_calls for r in ("us-east-1", "eu-west-1", "us-west-2")] == [3, 3, 6]
+    assert sum(cw.data_calls for cw in cws.values()) == 0
 
 
 def test_an_unreadable_bucket_location_falls_back_to_the_scan_region():
@@ -692,10 +905,11 @@ def _it_series(names, objects=1_000_000.0, size=10 * 1024 ** 3) -> dict:
     return out
 
 
-def test_intelligent_tiering_audit_reads_each_bucket_in_its_own_region():
-    """Before, all seven series per bucket were read one call at a time from
-    us-east-1, so a bucket in any other region came back 'enable bucket metrics'
-    although its metrics were there all along."""
+def _it_run():
+    """60 Intelligent-Tiering buckets in us-east-1 and 80 in eu-west-1. Before,
+    all seven series per bucket were read from us-east-1, so every bucket in any
+    other region came back 'enable bucket metrics' although its metrics were
+    there all along."""
     import asyncio
     from finops.recommendations.s3_intelligent_tiering import audit_s3_intelligent_tiering
 
@@ -718,8 +932,19 @@ def test_intelligent_tiering_audit_reads_each_bucket_in_its_own_region():
     # 1M objects of 10 KB each: monitoring outweighs tiering, in both regions.
     assert {r["recommendation"] for r in results} == {
         "LIKELY_WASTE_monitoring_exceeds_savings"}
-    assert cws["us-east-1"].calls == math.ceil(60 * 7 / 500) == 1
-    assert cws["eu-west-1"].calls == math.ceil(80 * 7 / 500) == 2
+    return cws
+
+
+def test_intelligent_tiering_audit_reads_each_bucket_in_its_region_for_free():
+    cws = _it_run()
+    assert [(cws[r].data_calls, cws[r].statistics_calls) for r in ("us-east-1", "eu-west-1")] \
+        == [(0, 60 * 7), (0, 80 * 7)]
+
+
+def test_intelligent_tiering_audit_batches_per_region_when_opted_in(opted_in):
+    cws = _it_run()
+    assert [(cws[r].data_calls, cws[r].statistics_calls) for r in ("us-east-1", "eu-west-1")] \
+        == [(math.ceil(60 * 7 / 500), 0), (math.ceil(80 * 7 / 500), 0)]
 
 
 @pytest.mark.parametrize("location, expected", [

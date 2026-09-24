@@ -8,7 +8,7 @@ class: idle-RDS waste (analyzers/waste.py) and k8s node cost
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 from finops.analyzers.waste import check_rds_idle
@@ -54,12 +54,9 @@ def _rds_cw_for(db_class: str):
     cw = MagicMock()
     now = datetime.now(timezone.utc)
     # >= 7 datapoints, all near-zero connections -> idle
-    cw.get_metric_data.return_value = {"MetricDataResults": [{
-        "Id": "q0",
-        "Timestamps": [now - timedelta(days=i) for i in range(10)],
-        "Values": [0.0] * 10,
-        "StatusCode": "Complete",
-    }]}
+    cw.get_metric_statistics.return_value = {
+        "Datapoints": [{"Maximum": 0.0, "Timestamp": now} for _ in range(10)]
+    }
     return rds, cw
 
 

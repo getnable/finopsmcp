@@ -7,7 +7,10 @@ and pre-built helpers for EC2, RDS, and Lambda utilization profiles.
 from __future__ import annotations
 
 import logging
+import os
+import time
 from collections.abc import Callable, Hashable, Sequence
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -15,16 +18,43 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
-# ── Batched reads ─────────────────────────────────────────────────────────────
+# ── Many-series reads ─────────────────────────────────────────────────────────
+#
+# What a read costs, from the AWS Price List (AmazonCloudWatch offer file,
+# us-east-1, checked 2026-09-24):
+#   CW:Requests      GetMetricStatistics and the other standard API calls.
+#                    1,000,000 requests a month free (global), then $0.01 per 1,000.
+#   CW:GMD-Metrics   GetMetricData. $0.01 per 1,000 metrics requested, NO free tier.
+# `nable scan` promises no paid API calls, so the default path is one
+# GetMetricStatistics call per series, run concurrently. GetMetricData batching
+# is opt-in (FINOPS_CLOUDWATCH_GETMETRICDATA=1, or use_get_metric_data=True) for
+# a host that has decided the round trips cost more than the metrics do.
 
 # GetMetricData takes at most 500 MetricDataQueries per call.
 MAX_QUERIES_PER_CALL = 500
 
+# Concurrent GetMetricStatistics calls per fetch. The account quota is 400
+# transactions per second per region; 8 workers at a 30ms round trip is ~270.
+DEFAULT_WORKERS = 8
+
+# Give up on whatever is still outstanding once no call has finished for this
+# long. A hung call then costs at most this much past the last one to return,
+# and every series still outstanding comes back unread.
+DEFAULT_IDLE_TIMEOUT_S = 30.0
+
+GET_METRIC_DATA_ENV = "FINOPS_CLOUDWATCH_GETMETRICDATA"
+
+
+def get_metric_data_opted_in() -> bool:
+    """True when this host has opted in to billed GetMetricData batching."""
+    return (os.getenv(GET_METRIC_DATA_ENV) or "").strip().lower() in ("1", "true", "yes")
+
 
 @dataclass(frozen=True)
 class MetricQuery:
-    """One metric series to read in a batch. `key` is the caller's handle for
-    the result and never reaches CloudWatch, so it can be any hashable value."""
+    """One metric series to read. `key` is the caller's handle for the result
+    and never reaches CloudWatch, so it can be any hashable value. `stat` is a
+    standard statistic (Average, Sum, Maximum, Minimum, SampleCount)."""
     key: Hashable
     namespace: str
     metric_name: str
@@ -38,12 +68,23 @@ def fetch_metric_values(
     queries: Sequence[MetricQuery],
     start: datetime,
     end: datetime,
+    *,
+    use_get_metric_data: bool | None = None,
+    max_workers: int = DEFAULT_WORKERS,
+    idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
 ) -> dict[Hashable, list[float] | None]:
     """
-    Read many metric series with GetMetricData instead of one
-    get_metric_statistics call per resource per metric. 200 instances with two
-    metrics each was 400 sequential round trips; this is one call per 500
-    series, plus a page for each NextToken CloudWatch hands back.
+    Read many metric series without one sequential round trip per series. The
+    detectors used to call get_metric_statistics inside the describe loop, so
+    200 instances with two metrics each was 400 calls back to back.
+
+    By default each series is still one GetMetricStatistics call, which stays
+    inside CloudWatch's free request tier, but `max_workers` of them run at
+    once, so the wall clock is about ceil(N / max_workers) round trips instead
+    of N. With use_get_metric_data=True (None follows
+    FINOPS_CLOUDWATCH_GETMETRICDATA) the series go out as GetMetricData, 500 per
+    call plus a page for each NextToken, which is billed per metric requested
+    with no free tier. See the price notes above.
 
     Returns {key: values}, values oldest first. The two empty answers mean
     different things and callers must keep them apart:
@@ -51,12 +92,92 @@ def fetch_metric_values(
     - [] is a read that succeeded and found no datapoints, the same thing an
       empty Datapoints list from get_metric_statistics meant.
     - None is a read that failed: the call raised (throttling, AccessDenied),
-      CloudWatch marked the series Forbidden or InternalError, or it stayed
-      PartialData with no page left to fetch. A partial series summed or
-      averaged is a smaller number than the real one, which is how a busy
-      resource gets called idle, so it is reported as unread rather than
-      returned short. Treat None exactly as a get_metric_statistics exception.
+      it was still outstanding when the fetch gave up (idle_timeout_s), or on
+      the GetMetricData path CloudWatch marked the series Forbidden or
+      InternalError, or left it PartialData with no page left to fetch. A
+      partial series summed or averaged is a smaller number than the real one,
+      which is how a busy resource gets called idle, so it is reported as
+      unread rather than returned short. Treat None exactly as a
+      get_metric_statistics exception.
     """
+    if not queries:
+        return {}
+    if use_get_metric_data is None:
+        use_get_metric_data = get_metric_data_opted_in()
+    if use_get_metric_data:
+        return _fetch_with_get_metric_data(cw_client, queries, start, end)
+    return _fetch_with_get_metric_statistics(
+        cw_client, queries, start, end, max_workers, idle_timeout_s)
+
+
+def _read_statistics(
+    cw_client: Any, q: MetricQuery, start: datetime, end: datetime,
+) -> list[float] | None:
+    """One GetMetricStatistics call for one series, never raising."""
+    try:
+        resp = cw_client.get_metric_statistics(
+            Namespace=q.namespace,
+            MetricName=q.metric_name,
+            Dimensions=[{"Name": n, "Value": v} for n, v in q.dimensions],
+            StartTime=start,
+            EndTime=end,
+            Period=q.period,
+            Statistics=[q.stat],
+        )
+        datapoints = resp.get("Datapoints", [])
+    except Exception as exc:
+        log.debug("CloudWatch %s read failed for %s: %s", q.metric_name, q.dimensions, exc)
+        return None
+    if not isinstance(datapoints, list):
+        return None
+    # The API returns datapoints in no particular order. A missing Timestamp
+    # sorts last rather than raising on None < None.
+    ordered = sorted(datapoints, key=lambda dp: (dp.get("Timestamp") is None, dp.get("Timestamp")))
+    return [dp.get(q.stat, 0) for dp in ordered]
+
+
+def _fetch_with_get_metric_statistics(
+    cw_client: Any,
+    queries: Sequence[MetricQuery],
+    start: datetime,
+    end: datetime,
+    max_workers: int,
+    idle_timeout_s: float,
+) -> dict[Hashable, list[float] | None]:
+    out: dict[Hashable, list[float] | None] = {}
+    pool = ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(queries))),
+                              thread_name_prefix="cw-read")
+    try:
+        futures = {pool.submit(_read_statistics, cw_client, q, start, end): q for q in queries}
+        pending = set(futures)
+        last_progress = time.monotonic()
+        while pending:
+            remaining = last_progress + idle_timeout_s - time.monotonic()
+            if remaining <= 0:
+                break
+            done, pending = wait(pending, timeout=remaining, return_when=FIRST_COMPLETED)
+            if done:
+                last_progress = time.monotonic()
+            for f in done:
+                out[futures[f].key] = f.result()
+        if pending:
+            log.warning("CloudWatch reads stalled; %d series left unread", len(pending))
+            for f in pending:
+                out[futures[f].key] = None
+    finally:
+        # Never wait on a hung call: queued reads are cancelled, and a running
+        # one finishes (or times out in botocore) on its own thread.
+        pool.shutdown(wait=False, cancel_futures=True)
+    return out
+
+
+def _fetch_with_get_metric_data(
+    cw_client: Any,
+    queries: Sequence[MetricQuery],
+    start: datetime,
+    end: datetime,
+) -> dict[Hashable, list[float] | None]:
+    """The opt-in path: one billed GetMetricData call per 500 series."""
     out: dict[Hashable, list[float] | None] = {}
     for chunk_start in range(0, len(queries), MAX_QUERIES_PER_CALL):
         chunk = queries[chunk_start:chunk_start + MAX_QUERIES_PER_CALL]
@@ -126,6 +247,8 @@ def fetch_metric_values_by_region(
     queries_by_region: dict[str, list[MetricQuery]],
     start: datetime,
     end: datetime,
+    *,
+    use_get_metric_data: bool | None = None,
 ) -> dict[Hashable, list[float] | None]:
     """fetch_metric_values for series that live in different regions, one
     CloudWatch client per region. A region whose client cannot be built reads
@@ -138,7 +261,8 @@ def fetch_metric_values_by_region(
             log.warning("CloudWatch client for %s unavailable: %s", region, exc)
             out.update({q.key: None for q in queries})
             continue
-        out.update(fetch_metric_values(cw, queries, start, end))
+        out.update(fetch_metric_values(cw, queries, start, end,
+                                       use_get_metric_data=use_get_metric_data))
     return out
 
 

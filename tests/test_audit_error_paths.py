@@ -88,29 +88,6 @@ class _CloudWatch:
             raise rule
         return {"Datapoints": rule}
 
-    def get_metric_data(self, **kw):
-        """The batched read, driven by the same rules. An exception rule fails
-        the whole call, which is what a throttled GetMetricData does to every
-        series in it. A datapoint list comes back as one Complete series."""
-        queries = kw["MetricDataQueries"]
-        names = [q["MetricStat"]["Metric"]["MetricName"] for q in queries]
-        self.asked.extend(names)
-        for name in names:
-            if isinstance(self._rules[name], Exception):
-                raise self._rules[name]
-        start = kw["StartTime"]
-        return {"MetricDataResults": [
-            {
-                "Id": q["Id"],
-                "Label": name,
-                "Timestamps": [start + timedelta(hours=i)
-                               for i in range(len(self._rules[name]))],
-                "Values": [dp[q["MetricStat"]["Stat"]] for dp in self._rules[name]],
-                "StatusCode": "Complete",
-            }
-            for q, name in zip(queries, names)
-        ]}
-
 
 _NAT_PAGES = [{
     "NatGateways": [{

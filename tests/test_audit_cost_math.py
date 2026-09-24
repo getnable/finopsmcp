@@ -145,13 +145,10 @@ def _rds_session(instances):
             return _Paginator([{"DBInstances": list(instances)}])
 
     class _CW:
-        def get_metric_data(self, **kwargs):
-            return {"MetricDataResults": [
-                {"Id": q["Id"],
-                 "Timestamps": [NOW - timedelta(days=i) for i in range(14)],
-                 "Values": [0.0] * 14,
-                 "StatusCode": "Complete"}
-                for q in kwargs["MetricDataQueries"]
+        def get_metric_statistics(self, **kwargs):
+            return {"Datapoints": [
+                {"Timestamp": NOW - timedelta(days=i), "Maximum": 0.0}
+                for i in range(14)
             ]}
 
     class _STS:
@@ -799,13 +796,10 @@ def test_rds_rightsizing_prices_on_the_same_basis_as_its_ec2_sibling(monkeypatch
             }]}])
 
     class _CW:
-        def get_metric_data(self, **kwargs):
-            return {"MetricDataResults": [
-                {"Id": q["Id"],
-                 "Timestamps": [NOW - timedelta(hours=i) for i in range(48)],
-                 "Values": [4.0] * 48,
-                 "StatusCode": "Complete"}
-                for q in kwargs["MetricDataQueries"]
+        def get_metric_statistics(self, **kwargs):
+            return {"Datapoints": [
+                {"Timestamp": NOW - timedelta(hours=i), "Average": 4.0}
+                for i in range(48)
             ]}
 
     _fake_boto3_clients(monkeypatch, rds=_RDS(), cloudwatch=_CW(), ce=_FakeCostExplorer())
@@ -862,12 +856,8 @@ def test_idle_load_balancer_has_a_single_price(monkeypatch):
             return _Paginator([{"LoadBalancerDescriptions": []}])
 
     class _CW:
-        def get_metric_data(self, **kwargs):
-            return {"MetricDataResults": [
-                {"Id": q["Id"], "Timestamps": [NOW], "Values": [0.0],
-                 "StatusCode": "Complete"}
-                for q in kwargs["MetricDataQueries"]
-            ]}
+        def get_metric_statistics(self, **kwargs):
+            return {"Datapoints": [{"Timestamp": NOW, "Sum": 0.0}]}
 
     findings = check_idle_load_balancers(_ELBv2(), _ELB(), _CW(), "us-east-1")
 
