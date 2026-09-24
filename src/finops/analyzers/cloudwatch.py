@@ -7,10 +7,111 @@ and pre-built helpers for EC2, RDS, and Lambda utilization profiles.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Hashable, Sequence
 
 log = logging.getLogger(__name__)
+
+
+# ── Batched reads ─────────────────────────────────────────────────────────────
+
+# GetMetricData takes at most 500 MetricDataQueries per call.
+MAX_QUERIES_PER_CALL = 500
+
+
+@dataclass(frozen=True)
+class MetricQuery:
+    """One metric series to read in a batch. `key` is the caller's handle for
+    the result and never reaches CloudWatch, so it can be any hashable value."""
+    key: Hashable
+    namespace: str
+    metric_name: str
+    dimensions: tuple[tuple[str, str], ...]
+    stat: str
+    period: int
+
+
+def fetch_metric_values(
+    cw_client: Any,
+    queries: Sequence[MetricQuery],
+    start: datetime,
+    end: datetime,
+) -> dict[Hashable, list[float] | None]:
+    """
+    Read many metric series with GetMetricData instead of one
+    get_metric_statistics call per resource per metric. 200 instances with two
+    metrics each was 400 sequential round trips; this is one call per 500
+    series, plus a page for each NextToken CloudWatch hands back.
+
+    Returns {key: values}, values oldest first. The two empty answers mean
+    different things and callers must keep them apart:
+
+    - [] is a read that succeeded and found no datapoints, the same thing an
+      empty Datapoints list from get_metric_statistics meant.
+    - None is a read that failed: the call raised (throttling, AccessDenied),
+      CloudWatch marked the series Forbidden or InternalError, or it stayed
+      PartialData with no page left to fetch. A partial series summed or
+      averaged is a smaller number than the real one, which is how a busy
+      resource gets called idle, so it is reported as unread rather than
+      returned short. Treat None exactly as a get_metric_statistics exception.
+    """
+    out: dict[Hashable, list[float] | None] = {}
+    for chunk_start in range(0, len(queries), MAX_QUERIES_PER_CALL):
+        chunk = queries[chunk_start:chunk_start + MAX_QUERIES_PER_CALL]
+        # Ids must match ^[a-z][a-zA-Z0-9_]*$ and be unique within the call.
+        by_id = {f"q{i}": q for i, q in enumerate(chunk)}
+        request = [
+            {
+                "Id": qid,
+                "MetricStat": {
+                    "Metric": {
+                        "Namespace": q.namespace,
+                        "MetricName": q.metric_name,
+                        "Dimensions": [{"Name": n, "Value": v} for n, v in q.dimensions],
+                    },
+                    "Period": q.period,
+                    "Stat": q.stat,
+                },
+                "ReturnData": True,
+            }
+            for qid, q in by_id.items()
+        ]
+        points: dict[str, list[tuple[Any, float]]] = {qid: [] for qid in by_id}
+        status: dict[str, str] = {}
+        try:
+            token = None
+            while True:
+                kwargs: dict[str, Any] = {
+                    "MetricDataQueries": request, "StartTime": start, "EndTime": end,
+                }
+                if token:
+                    kwargs["NextToken"] = token
+                resp = cw_client.get_metric_data(**kwargs)
+                for r in resp.get("MetricDataResults", []):
+                    qid = r.get("Id")
+                    if qid not in points:
+                        continue
+                    points[qid].extend(zip(r.get("Timestamps", []), r.get("Values", [])))
+                    # A series can come back PartialData on one page and
+                    # Complete on a later one, so the last word wins. One that
+                    # finished early is simply absent from later pages.
+                    status[qid] = r.get("StatusCode", "Complete")
+                token = resp.get("NextToken")
+                if not token:
+                    break
+        except Exception as exc:
+            log.warning("CloudWatch get_metric_data failed for %d series: %s", len(chunk), exc)
+            for q in chunk:
+                out[q.key] = None
+            continue
+
+        for qid, q in by_id.items():
+            if status.get(qid) != "Complete":
+                out[q.key] = None
+            else:
+                out[q.key] = [v for _, v in sorted(points[qid], key=lambda p: p[0])]
+    return out
 
 
 # ── Low-level metric helper ───────────────────────────────────────────────────
