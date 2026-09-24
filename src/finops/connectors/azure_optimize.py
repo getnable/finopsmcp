@@ -568,11 +568,15 @@ def get_cost_by_dimension(
     subs = [subscription_id] if subscription_id else _subscription_ids()
     by_value: dict[str, float] = {}
     total = 0.0
+    failed: list[dict[str, str]] = []
     for sub in subs:
         try:
             rows = _query_cost_management(token, sub, body)
         except Exception as exc:
+            # Recorded, not just logged: a skipped subscription used to fall out
+            # of the total silently, which reads as that subscription costing $0.
             log.warning("Azure cost-by-%s failed for sub %s: %s", dimension, sub, exc)
+            failed.append({"subscription_id": sub, "error": type(exc).__name__})
             continue
         for row in rows:
             key = _str(row.get(az_dim)) or "__unknown__"
@@ -580,8 +584,13 @@ def get_cost_by_dimension(
             by_value[key] = by_value.get(key, 0.0) + cost
             total += cost
 
+    if subs and len(failed) == len(subs):
+        return _error(f"Could not read Azure cost by {dimension} for any subscription.")
+
     ranked = sorted(by_value.items(), key=lambda kv: kv[1], reverse=True)
+    extra = {"partial": True, "failed_subscriptions": failed} if failed else {}
     return {
+        **extra,
         "dimension": dimension,
         "azure_dimension": az_dim,
         "breakdown": [{"name": k, "cost_usd": round(v, 4)} for k, v in ranked[:limit]],
