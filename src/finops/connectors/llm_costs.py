@@ -298,20 +298,6 @@ def get_all_llm_costs(
     from .saas.openrouter import get_costs as openrouter_costs, is_configured as openrouter_configured
     from .saas.litellm import get_costs as litellm_costs, is_configured as litellm_configured
 
-    # Read-through cache: these four fetches are the slowest path in the
-    # product and agentic sessions re-ask constantly.
-    import copy as _copy
-    from .. import cache as _cache
-    _ck = _cache.make_key("llm.get_all", start_date.isoformat(), end_date.isoformat(), f"xcn={exclude_cloud_native}")
-    _hit = _cache.get(_ck)
-    if _hit is not None:
-        out = _copy.deepcopy(_hit)
-        if not include_provider_results:
-            out.pop("provider_results", None)
-        return out
-
-    results: dict[str, dict] = {}
-
     # Use asyncio.run() safely — avoid deprecated get_event_loop on Python 3.10+
     import asyncio
 
@@ -327,16 +313,49 @@ def get_all_llm_costs(
         except RuntimeError:
             return asyncio.run(coro)
 
+    # Which usage-API providers are set up. Env checks only, so cheap, and part
+    # of the cache key: connecting a new provider must not keep serving a total
+    # cached before it existed.
+    configured = {
+        "openai": _run(openai_configured()),
+        "anthropic": _run(anthropic_configured()),
+        "vertex": _run(vertex_configured()),
+        "openrouter": _run(openrouter_configured()),
+        "litellm": _run(litellm_configured()),
+    }
+
+    # Read-through cache: these four fetches are the slowest path in the
+    # product and agentic sessions re-ask constantly.
+    import copy as _copy
+    from .. import cache as _cache
+    _ck = _cache.make_key(
+        "llm.get_all", start_date.isoformat(), end_date.isoformat(),
+        f"xcn={exclude_cloud_native}",
+        "providers=" + ",".join(sorted(k for k, v in configured.items() if v)),
+    )
+    _hit = _cache.get(_ck)
+    if _hit is not None:
+        out = _copy.deepcopy(_hit)
+        if not include_provider_results:
+            out.pop("provider_results", None)
+        return out
+
+    results: dict[str, dict] = {}
+    failed: dict[str, str] = {}
+
     # The four provider fetches are independent network calls that used to run
     # serially (the single biggest chunk of query latency). Run them in a
     # thread pool so the slowest provider sets the wall clock, not the sum.
+    # A fetcher returns None when its provider is not set up. A configured
+    # provider that could not be read returns its source="none" result (or
+    # raises), and the loop below lists it under failed_providers.
     def _fetch_openai():
-        if _run(openai_configured()):
+        if configured["openai"]:
             return openai_costs(start_date, end_date)
         return None
 
     def _fetch_anthropic():
-        if _run(anthropic_configured()):
+        if configured["anthropic"]:
             return anthropic_costs(start_date, end_date)
         return None
 
@@ -344,31 +363,29 @@ def get_all_llm_costs(
         import boto3
         from botocore.config import Config
         # Bound the STS auth probe. Without a timeout a hung IMDS/STS endpoint
-        # blocks a pool thread for botocore's default (~60s x retries); on any
-        # failure the outer loop skips Bedrock cleanly.
+        # blocks a pool thread for botocore's default (~60s x retries). No AWS
+        # credential means Bedrock is not set up, which is not a failure.
         _cfg = Config(connect_timeout=5, read_timeout=10, retries={"max_attempts": 1})
-        boto3.client("sts", config=_cfg).get_caller_identity()  # quick auth check
+        try:
+            boto3.client("sts", config=_cfg).get_caller_identity()  # quick auth check
+        except Exception as e:
+            log.debug("bedrock skipped, no usable AWS credential: %s", e)
+            return None
         return get_bedrock_costs(start_date, end_date)
 
     def _fetch_vertex():
-        if _run(vertex_configured()):
-            v = get_vertex_costs(start_date, end_date)
-            if v.get("source") != "none":
-                return v
+        if configured["vertex"]:
+            return get_vertex_costs(start_date, end_date)
         return None
 
     def _fetch_openrouter():
-        if _run(openrouter_configured()):
-            v = openrouter_costs(start_date, end_date)
-            if v.get("source") != "none":
-                return v
+        if configured["openrouter"]:
+            return openrouter_costs(start_date, end_date)
         return None
 
     def _fetch_litellm():
-        if _run(litellm_configured()):
-            v = litellm_costs(start_date, end_date)
-            if v.get("source") != "none":
-                return v
+        if configured["litellm"]:
+            return litellm_costs(start_date, end_date)
         return None
 
     import concurrent.futures
@@ -391,10 +408,19 @@ def get_all_llm_costs(
         for name, fut in _futs.items():
             try:
                 data = fut.result()
-                if data is not None:
-                    results[name] = data
             except Exception as e:
-                log.debug("%s cost fetch skipped: %s", name, e)
+                # A configured provider that raised is missing from the total,
+                # not $0 and not silently absent.
+                log.warning("%s cost fetch failed: %s", name, e)
+                failed[name] = f"{type(e).__name__}: {e}"
+                continue
+            if data is None:
+                continue
+            reason = _unread_reason(data)
+            if reason is None:
+                results[name] = data
+            elif not reason.startswith("not_configured"):
+                failed[name] = reason
 
     # Aggregate
     total = 0.0
@@ -438,6 +464,8 @@ def get_all_llm_costs(
 
     recommendations = _generate_recommendations(by_model, results)
 
+    unpriced = {p: d["unpriced_models"] for p, d in results.items() if d.get("unpriced_models")}
+
     _out = {
         "period":       f"{start_date} → {end_date}",
         "total_usd":    round(total, 4),
@@ -456,7 +484,22 @@ def get_all_llm_costs(
         # so MCP tool responses do not carry the duplicated per-provider payloads.
         "provider_results": results,
     }
-    _cache.set(_ck, _copy.deepcopy(_out), _cache.COST_TTL)
+    if failed or unpriced:
+        _out["partial"] = True
+    if failed:
+        _out["failed_providers"] = failed
+        _out["note"] = (
+            f"Not read: {', '.join(sorted(failed))}. total_usd excludes them and "
+            f"is not the whole AI bill."
+        )
+        if not results:
+            _out["error"] = "No configured AI provider could be read."
+    if unpriced:
+        _out["unpriced_models"] = unpriced
+    # A failed read is often transient; caching it would hide that provider's
+    # spend for the whole TTL.
+    if not failed:
+        _cache.set(_ck, _copy.deepcopy(_out), _cache.COST_TTL)
     if not include_provider_results:
         _out = dict(_out)
         _out.pop("provider_results", None)
@@ -583,3 +626,21 @@ def _generate_recommendations(
 def _empty(reason: str) -> dict[str, Any]:
     return {"total_usd": 0.0, "by_model": {}, "daily": [],
             "source": "none", "reason": reason}
+
+
+# source="none" reasons that are a real, measured answer rather than a failed
+# read. Cost Explorer answered and there is no Bedrock service in the bill.
+_MEASURED_EMPTY = {"no_bedrock_services"}
+
+
+def _unread_reason(data: dict[str, Any]) -> str | None:
+    """Why a provider result carries no data, or None when it is a real read.
+
+    Every provider module returns total_usd 0.0 with source "none" when it
+    could not read the bill (api_error, ce_error, httpx_missing, ...). Merged
+    as-is that is a $0 provider; this is what keeps it out of the total.
+    """
+    if data.get("source") != "none":
+        return None
+    reason = str(data.get("reason") or "unknown")
+    return None if reason in _MEASURED_EMPTY else reason
