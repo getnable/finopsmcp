@@ -51,7 +51,9 @@ async def get_cost_summary(
         acct_cfg, acct_err = resolve_named_account(account)
         if acct_err:
             return acct_err
-        session = get_boto3_session(acct_cfg)
+        # A role_arn account means a synchronous sts:AssumeRole here, on
+        # botocore's 60s default timeouts; keep it off the event loop.
+        session = await _srv.asyncio.to_thread(get_boto3_session, acct_cfg)
         acct_connector = _AWSConnector(session=session)
         pool = {"aws": acct_connector}
         targets = {"aws": acct_connector} if await acct_connector.is_configured() else {}
@@ -208,7 +210,8 @@ async def get_costs_by_service(
         acct_cfg, acct_err = resolve_named_account(account)
         if acct_err:
             return acct_err
-        session = get_boto3_session(acct_cfg)
+        # sts:AssumeRole for role_arn accounts; off the loop (see get_cost_summary).
+        session = await _srv.asyncio.to_thread(get_boto3_session, acct_cfg)
         acct_connector = _AWSConnector(session=session)
         targets = {"aws": acct_connector} if await acct_connector.is_configured() else {}
     elif provider:
@@ -427,7 +430,8 @@ async def get_cost_summary_all_accounts(
 
     for acct in accounts:
         try:
-            session = get_boto3_session(acct)
+            # sts:AssumeRole per role_arn account; off the loop (see get_cost_summary).
+            session = await _srv.asyncio.to_thread(get_boto3_session, acct)
             # Identity is what keeps this loop from serving account #1's spend
             # for every account: one connector per account, one cache entry each.
             connector = AWSConnector(
@@ -684,7 +688,8 @@ async def get_workload_costs(
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        report = connector.analyze_cluster(context)
+        # analyze_cluster lists nodes, pods and metrics from the Kubernetes API.
+        report = await _srv.asyncio.to_thread(connector.analyze_cluster, context)
         result = connector.get_workload_breakdown(
             report,
             namespace=namespace,

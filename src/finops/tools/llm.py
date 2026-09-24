@@ -622,7 +622,8 @@ async def optimize_ai_spend(days: int = 30) -> dict:
 
         # Bedrock input/output/cache cost split from Cost Explorer (best effort).
         try:
-            bedrock_split = bedrock_token_cost_split(sd, ed)
+            # A synchronous ce:GetCostAndUsage, so to_thread like the fetches above.
+            bedrock_split = await _srv.asyncio.to_thread(bedrock_token_cost_split, sd, ed)
         except Exception as e:
             _srv.log.debug("Bedrock token split for optimizer: %s", e)
             bedrock_split = None

@@ -869,25 +869,33 @@ async def get_ecs_rightsizing_recommendations(
         import boto3
         from ..analyzers.waste import check_ecs_task_rightsizing
 
-        if regions is None:
-            try:
-                ec2g = boto3.client("ec2", region_name="us-east-1")
-                resp = ec2g.describe_regions(
-                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
-                )
-                regions = [r["RegionName"] for r in resp.get("Regions", [])]
-            except Exception:
-                regions = ["us-east-1", "us-west-2", "eu-west-1"]
+        # The region discovery and the per-region ECS + CloudWatch sweep are all
+        # synchronous boto3 calls. This tool is async (it awaits the pricing
+        # step below), so run inline they held the event loop for the whole
+        # multi-region scan. One worker thread keeps the sequential sweep as it
+        # was, just off the loop.
+        def _scan(regions):
+            if regions is None:
+                try:
+                    ec2g = boto3.client("ec2", region_name="us-east-1")
+                    resp = ec2g.describe_regions(
+                        Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                    )
+                    regions = [r["RegionName"] for r in resp.get("Regions", [])]
+                except Exception:
+                    regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
-        all_findings: list[dict] = []
-        for region in regions:
-            try:
-                ecs = boto3.client("ecs", region_name=region)
-                cw = boto3.client("cloudwatch", region_name=region)
-                findings = check_ecs_task_rightsizing(ecs, cw, region, cpu_threshold_pct=cpu_threshold)
-                all_findings.extend(findings)
-            except Exception as exc:
-                _srv.log.warning("ECS rightsizing scan failed for region %s: %s", region, exc)
+            found: list[dict] = []
+            for region in regions:
+                try:
+                    ecs = boto3.client("ecs", region_name=region)
+                    cw = boto3.client("cloudwatch", region_name=region)
+                    found.extend(check_ecs_task_rightsizing(ecs, cw, region, cpu_threshold_pct=cpu_threshold))
+                except Exception as exc:
+                    _srv.log.warning("ECS rightsizing scan failed for region %s: %s", region, exc)
+            return regions, found
+
+        regions, all_findings = await _srv.asyncio.to_thread(_scan, regions)
 
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)

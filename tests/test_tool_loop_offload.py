@@ -173,8 +173,9 @@ async def test_a_sync_tool_can_still_refresh_the_client_tool_list(bare_wrapper, 
 def slow_posthog(monkeypatch):
     """Telemetry switched on, with PostHog answering after BLOCK_S. Returns the
     list of event names that reached it."""
+    import sys
+
     import httpx
-    from finops import telemetry
 
     posted: list[str] = []
 
@@ -182,7 +183,15 @@ def slow_posthog(monkeypatch):
         time.sleep(BLOCK_S)
         posted.append((json or {}).get("event"))
 
-    monkeypatch.setattr(telemetry, "_is_opted_out", lambda: False)
+    # test_airgap re-imports finops.telemetry, after which server._telemetry,
+    # the finops package attribute and sys.modules can each hold a different
+    # module object. The wrapper sends through the first, _team_nudge's
+    # `from . import telemetry` reads the second; switch every copy on.
+    import finops
+    copies = (_srv._telemetry, getattr(finops, "telemetry", None),
+              sys.modules.get("finops.telemetry"))
+    for telemetry in {id(m): m for m in copies if m is not None}.values():
+        monkeypatch.setattr(telemetry, "_is_opted_out", lambda: False)
     monkeypatch.setattr(httpx, "post", post)
     return posted
 
@@ -347,6 +356,74 @@ def _block_get_org_cost_summary(monkeypatch):
     return attribution.get_org_cost_summary()
 
 
+# Async tools: these await other work too, so they stay async and reach their
+# blocking calls through asyncio.to_thread.
+
+def _block_get_ecs_rightsizing_recommendations(monkeypatch):
+    import boto3
+    import finops.analyzers.waste as waste
+    from finops.tools import aws_waste
+    monkeypatch.setattr(boto3, "client", _sleepy(_SlowBoto3Client()))
+    monkeypatch.setattr(waste, "check_ecs_task_rightsizing", lambda *a, **k: [])
+
+    async def list_price(findings, resource_type):
+        return {}
+    monkeypatch.setattr(aws_waste, "_price_on_customer_rates", list_price)
+    return aws_waste.get_ecs_rightsizing_recommendations(regions=["us-east-1"])
+
+
+def _block_push_to_n8n(monkeypatch):
+    import finops.analyzers.optimizer as opt
+    from finops.connectors.saas import n8n
+    from finops.tools import notifications
+
+    async def yes(self):
+        return True
+
+    async def sent(self, **_k):
+        return True
+
+    monkeypatch.setattr(_srv, "require_pro", lambda feature: None)
+    monkeypatch.setattr(n8n.N8nConnector, "is_configured", yes)
+    monkeypatch.setattr(n8n.N8nConnector, "send_audit_summary", sent)
+    monkeypatch.setattr(opt, "run_deep_audit", _sleepy({"findings": []}))
+    monkeypatch.setitem(_srv.CLOUD_CONNECTORS, "aws", None)
+    return notifications.push_to_n8n()
+
+
+def _block_get_label_costs(monkeypatch):
+    from finops.connectors import kubernetes as k8s
+    from finops.tools import attribution
+
+    async def yes(self):
+        return True
+
+    report = type("R", (), {"cluster": "c1"})()
+    monkeypatch.setattr(k8s.KubernetesConnector, "is_configured", yes)
+    monkeypatch.setattr(k8s.KubernetesConnector, "analyze_cluster", _sleepy(report))
+    monkeypatch.setattr(k8s.KubernetesConnector, "get_label_costs",
+                        lambda self, r, label_key: {"by_label": []})
+    return attribution.get_label_costs(label_key="team")
+
+
+def _block_get_cost_summary_for_a_role_account(monkeypatch):
+    """account= on a role_arn account: sts:AssumeRole before anything is fetched."""
+    from finops import accounts
+    from finops.connectors.aws import AWSConnector
+    from finops.tools import cost_queries
+
+    async def no(self):
+        return False
+
+    monkeypatch.setattr(accounts, "resolve_named_account", lambda name: (
+        accounts.AccountConfig(name=name, account_id="111122223333",
+                               region="us-east-1", role_arn="arn:aws:iam::111122223333:role/r"),
+        None))
+    monkeypatch.setattr(accounts, "get_boto3_session", _sleepy(object()))
+    monkeypatch.setattr(AWSConnector, "is_configured", no)
+    return cost_queries.get_cost_summary(account="prod")
+
+
 # Keyed by tool name. Each entry installs a fake that blocks for BLOCK_S where
 # the tool would leave the machine, and returns the tool's awaitable.
 _BLOCKED_TOOLS = {
@@ -356,6 +433,10 @@ _BLOCKED_TOOLS = {
     "get_s3_incomplete_multipart_uploads": _block_get_s3_incomplete_multipart_uploads,
     "list_org_accounts": _block_list_org_accounts,
     "get_org_cost_summary": _block_get_org_cost_summary,
+    "get_ecs_rightsizing_recommendations": _block_get_ecs_rightsizing_recommendations,
+    "push_to_n8n": _block_push_to_n8n,
+    "get_label_costs": _block_get_label_costs,
+    "get_cost_summary[account]": _block_get_cost_summary_for_a_role_account,
 }
 
 
@@ -455,3 +536,126 @@ def test_no_async_tool_body_runs_without_awaiting():
         "Make them plain `def` (the registration shim runs them in a thread):\n  "
         + "\n  ".join(offenders)
     )
+
+
+# Calls that leave the machine (or sleep) and return only when the far end
+# answers. Matched on the callee's dotted tail, so `boto3.client`, `_srv.boto3.client`
+# and `self.boto3.client` all count. Not exhaustive and not meant to be: it is
+# the set this codebase actually reaches for, each of which has been found
+# running on the loop at least once.
+_BLOCKING_DOTTED = {
+    "boto3.client", "boto3.resource", "boto3.Session",
+    "httpx.get", "httpx.post", "httpx.put", "httpx.patch", "httpx.delete",
+    "httpx.request", "httpx.stream", "httpx.Client",
+    "requests.get", "requests.post", "requests.put", "requests.patch",
+    "requests.delete", "requests.request", "requests.Session",
+    "urllib.request.urlopen", "time.sleep",
+    "subprocess.run", "subprocess.check_output", "subprocess.check_call",
+    "subprocess.call", "subprocess.Popen",
+}
+# Synchronous nable helpers and SDK methods that do network I/O inside. Matched
+# on the final name, called as a function or a method.
+_BLOCKING_NAMES = {
+    # telemetry: a blocking POST with a 5s timeout
+    "_send_event", "_emit_provider_connected", "_gcp_emit_connected",
+    # AWS: STS, Cost Explorer and multi-region sweeps
+    "get_boto3_session", "assume_role", "get_caller_identity", "describe_regions",
+    "_make_client", "_account_id", "run_deep_audit", "analyze_commitments",
+    "analyze_rightsizing", "scan_idle_resources", "detect_savings_context",
+    "bedrock_token_cost_split", "scan_cloudwatch_log_waste",
+    "list_org_accounts", "org_cost_summary", "ou_cost_breakdown",
+    # Kubernetes API
+    "analyze_cluster", "analyze_all_clusters", "discover_helm_releases",
+    # LLM provider usage APIs and ticketing HTTP
+    "get_all_llm_costs", "create_rightsizing_ticket", "create_ticket",
+}
+# (module, function, callee) triples that are knowingly left on the loop, each
+# with the reason. Keep this empty if at all possible.
+_BLOCKING_ALLOWED: dict[tuple[str, str, str], str] = {}
+
+
+def _callee(call: ast.Call) -> tuple[str, str]:
+    """(dotted callee as written, its last component)."""
+    try:
+        dotted = ast.unparse(call.func)
+    except Exception:
+        dotted = ""
+    f = call.func
+    last = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+    return dotted, last
+
+
+def _is_blocking(call: ast.Call) -> bool:
+    dotted, last = _callee(call)
+    if last in _BLOCKING_NAMES:
+        return True
+    return any(dotted == d or dotted.endswith("." + d) for d in _BLOCKING_DOTTED)
+
+
+def _loop_side_blocking_calls(fn: ast.AsyncFunctionDef) -> list[tuple[int, str]]:
+    """Blocking calls an async function makes on the event loop itself.
+
+    Descends into nested async defs (they run on the loop too) but not into
+    sync defs or lambdas: those are what gets handed to asyncio.to_thread.
+    A call that is the direct operand of `await` is a coroutine and is fine;
+    anything else, including a call in the argument list of an awaited one,
+    runs synchronously right here.
+    """
+    awaited = {id(n.value) for n in ast.walk(fn) if isinstance(n, ast.Await)}
+    found = []
+    stack = list(fn.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.Call) and id(node) not in awaited and _is_blocking(node):
+            found.append((node.lineno, _callee(node)[0]))
+        stack.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def _async_defs_in_tool_modules():
+    for path in _TOOL_FILES:
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef):
+                yield path.name, node
+
+
+def test_no_async_function_in_the_tool_layer_blocks_the_loop():
+    """Every async function in server.py and finops/tools/*, tools and their
+    helpers alike, reaches boto3, httpx, STS, the Kubernetes API and the other
+    known-blocking calls only through asyncio.to_thread (or a plain def the
+    registration shim threads). _BLOCKING_ALLOWED lists the deliberate
+    exceptions, with a reason each."""
+    offenders = []
+    for mod, fn in _async_defs_in_tool_modules():
+        for lineno, callee in _loop_side_blocking_calls(fn):
+            last = callee.rsplit(".", 1)[-1].split("(")[0]
+            if (mod, fn.name, last) in _BLOCKING_ALLOWED:
+                continue
+            offenders.append(f"{mod}:{lineno} {fn.name} calls {callee}(...) on the loop")
+    assert not offenders, (
+        "blocking I/O on the event loop. Wrap it in `await asyncio.to_thread(...)`, "
+        "or make the tool a plain def:\n  " + "\n  ".join(sorted(offenders))
+    )
+
+
+def test_the_blocking_scanner_catches_what_it_claims():
+    """Mutation check on the guard: a scanner that matched nothing would pass."""
+    def scan(src: str) -> list[str]:
+        fn = ast.parse(src).body[0]
+        return [c for _, c in _loop_side_blocking_calls(fn)]
+
+    assert scan("async def t():\n    boto3.client('s3').list_buckets()\n") == ["boto3.client"]
+    assert scan("async def t():\n    r = connector.analyze_cluster(ctx)\n") == ["connector.analyze_cluster"]
+    assert scan("async def t():\n    await asyncio.wait_for(x(get_boto3_session(a)), 5)\n") \
+        == ["get_boto3_session"]
+    # Nested async helpers run on the loop too.
+    assert scan("async def t():\n    async def one():\n        _srv.time.sleep(1)\n"
+                "    await one()\n") == ["_srv.time.sleep"]
+    # The sanctioned forms are not reported.
+    assert scan("async def t():\n    await asyncio.to_thread(boto3.client, 's3')\n") == []
+    assert scan("async def t():\n    def work():\n        return boto3.client('s3')\n"
+                "    await asyncio.to_thread(work)\n") == []
+    assert scan("async def t():\n    await asyncio.to_thread(lambda: run_deep_audit())\n") == []

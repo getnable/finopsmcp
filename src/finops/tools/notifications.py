@@ -787,7 +787,10 @@ async def push_to_n8n(
     try:
         from ..analyzers.optimizer import run_deep_audit
         t0 = time.monotonic()
-        report = run_deep_audit(regions=regions)
+        # The full multi-region AWS sweep, all synchronous boto3. It ran on the
+        # event loop, which for its whole duration (often minutes) left the
+        # server unable to answer anything else.
+        report = await _srv.asyncio.to_thread(run_deep_audit, regions=regions)
         duration = time.monotonic() - t0
 
         findings = report.get("findings", [])

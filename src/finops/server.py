@@ -793,7 +793,8 @@ async def _resolve_account_id(account_id: str | None) -> str:
     aws = CLOUD_CONNECTORS.get("aws")
     try:
         if aws and await aws.is_configured():
-            return aws._account_id() or ""
+            # sts:GetCallerIdentity, synchronous; off the loop.
+            return await asyncio.to_thread(aws._account_id) or ""
     except Exception:
         pass
     return ""
@@ -1026,9 +1027,13 @@ async def _credit_context(aws_connector, cache_key: str) -> dict | None:
     ctx = None
     try:
         from .connectors.credit_tracking import get_credit_status, credit_headsup
-        ce = aws_connector._make_client()
+        # Client construction inside the thread too: building a botocore client
+        # loads the service model and resolves credentials (an IMDS probe or an
+        # SSO refresh), and the 12s deadline cannot interrupt that on the loop.
         status = await asyncio.wait_for(
-            asyncio.to_thread(get_credit_status, 6, None, ce), timeout=12.0
+            asyncio.to_thread(
+                lambda: get_credit_status(6, None, aws_connector._make_client())),
+            timeout=12.0,
         )
         ctx = credit_headsup(status)
     except Exception:

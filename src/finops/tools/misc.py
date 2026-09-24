@@ -63,7 +63,9 @@ async def nable_setup_status() -> dict:
         (connected if ok else not_connected).append(name)
 
     try:
-        found = scan_ambient_credentials()
+        # Reads the vault (the OS keychain, which can sit behind a password
+        # dialog) and probes credential files per provider; off the loop.
+        found = await _srv.asyncio.to_thread(scan_ambient_credentials)
     except Exception:
         found = []
     detected = [

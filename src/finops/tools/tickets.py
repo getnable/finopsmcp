@@ -224,7 +224,8 @@ async def create_rightsizing_tickets(
                 "recommended_type": r.recommended_type,
                 "monthly_savings_usd": savings,
             }
-            url = create_rightsizing_ticket(rec)
+            # A synchronous httpx POST to Jira, Linear or GitHub; off the loop.
+            url = await _srv.asyncio.to_thread(create_rightsizing_ticket, rec)
             if url:
                 urls.append({"resource": r.instance_id, "savings": savings, "url": url})
 
@@ -378,7 +379,10 @@ async def export_board_summary(period_days: int = 30) -> dict:
     ai_monthly = None
     try:
         from ..connectors.llm_costs import get_all_llm_costs
-        _ai = get_all_llm_costs(
+        # One HTTP call per configured LLM provider, synchronous; every other
+        # caller already runs it with to_thread.
+        _ai = await _srv.asyncio.to_thread(
+            get_all_llm_costs,
             start_date=_srv.date.today() - _srv.timedelta(days=period_days),
             end_date=_srv.date.today(),
         )

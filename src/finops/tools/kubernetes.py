@@ -192,7 +192,8 @@ async def get_kubernetes_costs(
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        report = connector.analyze_cluster(context)
+        # analyze_cluster lists nodes, pods and metrics from the Kubernetes API.
+        report = await _srv.asyncio.to_thread(connector.analyze_cluster, context)
 
         # Persist to DB for trend analysis
         try:
@@ -424,20 +425,26 @@ async def get_helm_release_costs(
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        k8s_client = connector._load_client(context)
+        # Everything from loading the kubeconfig to attributing costs talks to
+        # the Kubernetes API (nodes, pods, metrics, then every Helm release
+        # secret), so it runs as one unit on a worker thread, not on the loop.
+        def _collect():
+            k8s_client = connector._load_client(context)
 
-        # Get workload costs first
-        report = connector.analyze_cluster(context)
-        workloads = report.workloads
-        if namespace:
-            workloads = [w for w in workloads if w.namespace == namespace]
+            # Get workload costs first
+            report = connector.analyze_cluster(context)
+            workloads = report.workloads
+            if namespace:
+                workloads = [w for w in workloads if w.namespace == namespace]
 
-        # Discover Helm releases and attribute costs
-        releases = discover_helm_releases(k8s_client)
-        if namespace:
-            releases = [r for r in releases if r.namespace == namespace]
+            # Discover Helm releases and attribute costs
+            releases = discover_helm_releases(k8s_client)
+            if namespace:
+                releases = [r for r in releases if r.namespace == namespace]
 
-        releases, unmanaged_cost = attribute_costs_to_releases(releases, workloads, k8s_client)
+            return attribute_costs_to_releases(releases, workloads, k8s_client)
+
+        releases, unmanaged_cost = await _srv.asyncio.to_thread(_collect)
 
         # Cost by chart (across all releases of same chart)
         by_chart: dict[str, float] = {}
@@ -627,7 +634,8 @@ async def get_cluster_efficiency(context: str | None = None) -> dict:
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        report = connector.analyze_cluster(context)
+        # analyze_cluster lists nodes, pods and metrics from the Kubernetes API.
+        report = await _srv.asyncio.to_thread(connector.analyze_cluster, context)
         result = connector.compute_efficiency_score(report)
 
         # Human-readable headline

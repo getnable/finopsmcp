@@ -560,7 +560,8 @@ async def recommend_database_savings_plans() -> dict:
         if aws is None or not await aws.is_configured():
             return {"error": "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."}
 
-        result = _recommend()
+        # Synchronous Cost Explorer reads; off the event loop.
+        result = await _srv.asyncio.to_thread(_recommend)
         if result is None:
             return {"error": "Could not retrieve RDS spend data. Check AWS credentials."}
         return result

@@ -226,7 +226,9 @@ async def get_efficiency_scorecard(
             from ..connectors.kubernetes import KubernetesConnector
             conn = KubernetesConnector()
             if await conn.is_configured():
-                k8s_reports = conn.analyze_all_clusters()
+                # to_thread: one Kubernetes API sweep per context. Inline, it
+                # held the event loop for the whole walk of every cluster.
+                k8s_reports = await _srv.asyncio.to_thread(conn.analyze_all_clusters)
         except Exception:
             pass
 
@@ -254,7 +256,10 @@ async def get_efficiency_scorecard(
 
         try:
             from ..recommendations.commitments import analyze_commitments
-            raw_commits = analyze_commitments(tag_filter=tag_filter)
+            # Cost Explorer coverage and utilization reads; off the loop.
+            raw_commits = await _srv.asyncio.to_thread(
+                analyze_commitments, tag_filter=tag_filter,
+            )
             if raw_commits:
                 commitment = {
                     # None when neither instrument could be read. This used to
@@ -443,7 +448,8 @@ async def get_label_costs(
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        report = connector.analyze_cluster(context)
+        # analyze_cluster lists nodes, pods and metrics from the Kubernetes API.
+        report = await _srv.asyncio.to_thread(connector.analyze_cluster, context)
         result = connector.get_label_costs(report, label_key=label_key)
 
         # Human-readable summary

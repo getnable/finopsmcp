@@ -294,7 +294,8 @@ async def connect_aws(account_id: str = "") -> dict:
     )
     await _srv.asyncio.to_thread(add_account, cfg)
     auth = "profile" if match.get("profile") else "default_chain"
-    _emit_provider_connected(auth)
+    # A telemetry POST (5s timeout) when telemetry is on; off the loop.
+    await _srv.asyncio.to_thread(_emit_provider_connected, auth)
     # Drop the cached "no provider" answer so the next cost tool returns real data
     # this session, not the demo stub.
     from .. import demo_data as _dd
