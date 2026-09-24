@@ -6,7 +6,7 @@ nable is worth keeping. Cost Explorer already holds months of daily per-service
 history, so we backfill the baseline from CE in one call and anomalies work on
 day one.
 
-Idempotent (store_snapshot upserts per provider/service/account/date) and
+Idempotent (store_snapshots upserts per provider/service/account/date) and
 self-limiting: it runs only when the existing history is thinner than the
 detector's minimum, so an instance with a real snapshot habit never re-pulls.
 One CE call per run (about $0.01 of AWS API cost, roughly the same as the daily
@@ -94,7 +94,7 @@ def backfill_from_cost_explorer(days: int = _TARGET_DAYS, *,
     try:
         import boto3
 
-        from ..storage.snapshots import store_snapshot
+        from ..storage.snapshots import store_snapshots
 
         # Through the gate, not around it. This runs from _snapshot_all on every
         # scheduled snapshot and paginates, so it is not one Cost Explorer
@@ -107,7 +107,10 @@ def backfill_from_cost_explorer(days: int = _TARGET_DAYS, *,
         end = date.today()
         start = end - timedelta(days=days)
 
-        rows = 0
+        # Collected across pages and written in one transaction at the end: a
+        # per-row upsert is a commit per row, and ninety days of per-service
+        # history is thousands of them.
+        batch: list[dict] = []
         seen_days: set[str] = set()
         token: str | None = None
         while True:
@@ -128,19 +131,20 @@ def backfill_from_cost_explorer(days: int = _TARGET_DAYS, *,
                     amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
                     if amount < _MIN_AMOUNT:
                         continue
-                    store_snapshot(
-                        provider="aws",
-                        service=group["Keys"][0],
-                        account_id=sts_account,
-                        region="",
-                        snapshot_date=date.fromisoformat(day),
-                        amount_usd=round(amount, 4),
-                    )
-                    rows += 1
+                    batch.append({
+                        "provider": "aws",
+                        "service": group["Keys"][0],
+                        "account_id": sts_account,
+                        "region": "",
+                        "snapshot_date": date.fromisoformat(day),
+                        "amount_usd": round(amount, 4),
+                    })
                     seen_days.add(day)
             token = resp.get("NextPageToken")
             if not token:
                 break
+        store_snapshots(batch)
+        rows = len(batch)
 
         log.info("anomaly baseline backfilled: %d rows across %d days", rows, len(seen_days))
         return {"backfilled_days": len(seen_days), "rows": rows}

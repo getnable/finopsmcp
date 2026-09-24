@@ -76,7 +76,7 @@ async def _snapshot_all() -> dict:
     from ..connectors.saas.datadog import DatadogConnector
     from ..connectors.saas.mongodb_atlas import MongoDBAtlasConnector
     from ..connectors.saas.twilio import TwilioConnector
-    from ..storage.snapshots import store_snapshot, store_zero_for_stopped_series
+    from ..storage.snapshots import store_snapshots, store_zero_for_stopped_series
 
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -155,19 +155,22 @@ async def _snapshot_all() -> dict:
             # covered the same day for free.
             summary = await connector.get_costs(yesterday, today, granularity="DAILY")
             seen: dict[str, set[tuple[str, str, str]]] = {}
+            batch: list[dict] = []
             for entry in summary.entries:
                 if entry.amount > 0:
-                    store_snapshot(
-                        provider=entry.provider,
-                        service=entry.service,
-                        account_id=entry.account_id,
-                        region=entry.region,
-                        snapshot_date=yesterday,
-                        amount_usd=entry.amount,
-                        granularity="DAILY",
-                    )
+                    batch.append({
+                        "provider": entry.provider,
+                        "service": entry.service,
+                        "account_id": entry.account_id,
+                        "region": entry.region,
+                        "snapshot_date": yesterday,
+                        "amount_usd": entry.amount,
+                        "granularity": "DAILY",
+                    })
                     seen.setdefault(entry.provider, set()).add(
                         (entry.service, entry.account_id, entry.region))
+            # One transaction for the whole fetch, not one per entry.
+            store_snapshots(batch)
             # A service that stopped billing gets a $0 row so the detector can
             # see the drop. Only when the fetch returned spend for the day: an
             # empty answer is far more likely late data than every service
