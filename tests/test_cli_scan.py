@@ -644,3 +644,78 @@ def test_a_broken_import_names_the_versions_to_the_user(monkeypatch, capsys):
     text = capsys.readouterr().out
     assert "found: boto3 " in text
     assert "uvx --python 3.12 nable scan" in text
+
+
+# ── what a first real scan prints ─────────────────────────────────────────────
+#
+# Real findings carry `detail`, not `description`, so the list printed the
+# internal key once per resource (`unattached_ebs_volume, us-east-1` four times)
+# and the lines shown never summed to the headline.
+
+def _real_findings():
+    vol = {"waste_type": "unattached_ebs_volume", "resource_type": "EBS Volume",
+           "detail": "500 GB gp3 volume is unattached"}
+    return [
+        {**vol, "region": "us-east-1", "estimated_monthly_savings": 40.0},
+        {**vol, "region": "us-west-2", "estimated_monthly_savings": 71.25},
+        {"waste_type": "idle_nat_gateway", "region": "us-east-1",
+         "estimated_monthly_savings": 32.85},
+        {"waste_type": "unassociated_elastic_ip", "region": "us-east-1",
+         "estimated_monthly_savings": 3.65},
+        {"waste_type": "gp2_should_migrate_to_gp3", "region": "us-east-1",
+         "estimated_monthly_savings": 0.16},
+    ]
+
+
+def test_real_findings_group_by_kind_and_reconcile(capsys):
+    code, _, _ = _run(_args(), _session(), report=_report(findings=_real_findings()))
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK
+    assert "unattached_ebs_volume" not in out and "idle_nat_gateway" not in out
+    assert "$111/mo  2 unattached EBS volumes, 2 regions" in out
+    assert "$32.85/mo  1 idle NAT gateway, us-east-1" in out
+    # The two sub-floor findings are not dropped from the arithmetic.
+    assert "$3.81/mo  2 more findings" in out
+    assert "nable scan --json" in out
+
+
+def test_group_keeps_a_single_findings_own_description():
+    rows = cli_scan._group_findings([
+        {"waste_type": "idle_nat_gateway", "description": "4 NAT gateways with no traffic",
+         "region": "us-east-1", "estimated_monthly_savings": 131.4},
+    ])
+    assert rows == [{"description": "4 NAT gateways with no traffic", "region": "us-east-1",
+                     "monthly": 131.4, "n": 1}]
+
+
+def test_unknown_waste_type_reads_as_words():
+    rows = cli_scan._group_findings([
+        {"waste_type": "brand_new_check", "estimated_monthly_savings": 30.0},
+        {"waste_type": "brand_new_check", "estimated_monthly_savings": 30.0},
+    ])
+    assert rows[0]["description"] == "2 brand new check" and rows[0]["region"] == ""
+
+
+@pytest.mark.parametrize("given,want", [
+    (["us-east-1,us-west-2"], ["us-east-1", "us-west-2"]),
+    (["US-EAST-1", "eu-west-1, us-east-1"], ["us-east-1", "eu-west-1"]),
+    (["us-east-1", "us-west-2"], ["us-east-1", "us-west-2"]),
+    (None, []),
+])
+def test_regions_flag_accepts_how_people_type_a_list(given, want):
+    assert cli_scan._split_regions(given) == want
+
+
+def test_comma_separated_regions_scan_instead_of_failing(capsys):
+    _, _, engine = _run(_args(regions=["us-east-1,eu-west-1"]), _session())
+    out = capsys.readouterr().out
+    assert "not valid region" not in out
+    assert engine.call_args.kwargs["regions"] == ["us-east-1", "eu-west-1"]
+
+
+def test_a_region_name_gets_a_fix_line(capsys):
+    code, _, _ = _run(_args(regions=["virginia"]), _session())
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "not valid region name(s): virginia" in out
+    assert "fix: region codes" in out

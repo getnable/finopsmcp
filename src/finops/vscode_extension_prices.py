@@ -9,11 +9,13 @@ from __future__ import annotations
 from typing import Any
 
 from .aws_prices import EC2_HOURLY as _EC2_HOURLY
-from .aws_prices import CLB_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY, lb_hourly
+from .aws_prices import (
+    CLB_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY, ebs_volume_monthly, lb_hourly,
+)
 from .aws_prices import RDS_HOURLY as _RDS_HOURLY
 from .connectors.terraform_estimate import (
     _ELASTICACHE_HOURLY,
-    _EBS_PER_GB_MONTH, _OPENSEARCH_HOURLY, _REDSHIFT_HOURLY, _MSK_BROKER_HOURLY,
+    _OPENSEARCH_HOURLY, _REDSHIFT_HOURLY, _MSK_BROKER_HOURLY,
 )
 
 
@@ -64,14 +66,11 @@ def price_resource_py(
         return {"monthly": round(h * count * HOURS_PER_MONTH, 2), "detail": f"{count}× {node}"}
 
     if t == "aws_ebs_volume":
-        vtype = attrs.get("type", "gp2")
+        vtype = attrs.get("type") or "gp2"
         size  = _f(attrs.get("size"))
-        price = _EBS_PER_GB_MONTH.get(vtype, 0.10)
-        iops  = _f(attrs.get("iops"))
-        m     = size * price
-        if vtype in ("io1", "io2") and iops:
-            m += iops * 0.065
-        note = "Switch to gp3 to save 20% with same/better IOPS" if vtype == "gp2" else None
+        m     = ebs_volume_monthly(vtype, size, _f(attrs.get("iops")), _f(attrs.get("throughput")))
+        note = ("gp3 is 20% less per GB; over 170 GB, provision gp3 IOPS/throughput to match"
+                if vtype == "gp2" else None)
         return {"monthly": round(m, 2), "detail": f"{size:.0f} GB {vtype}", "note": note}
 
     if t == "aws_nat_gateway":

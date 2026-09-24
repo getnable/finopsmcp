@@ -193,7 +193,7 @@ CATALOG: list[dict[str, Any]] = [
         "count": 16,
         "blurb": "Sixteen targeted scanners for the line items everyone forgets.",
         "asks": [
-            ("Audit our idle public IPv4 addresses", "$3.60/mo each since Feb 2024"),
+            ("Audit our idle public IPv4 addresses", "$3.65/mo each since Feb 2024"),
             ("Check our NLB cross-zone data charges", "and EFS cross-AZ mounts"),
             ("Find orphaned CloudWatch alarms and EBS snapshots", "and S3 tiering opportunities"),
         ],

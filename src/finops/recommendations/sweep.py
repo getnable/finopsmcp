@@ -127,7 +127,7 @@ def normalise(name, data) -> list[dict]:
             waste = data.get("total_monthly_waste", 0) or 0
             if waste > 0:
                 n_unattached = len(data.get("unattached_eips", []))
-                out.append({"title": f"Release {n_unattached} unattached Elastic IP(s)", "monthly_savings": waste, "category": "Network", "detail": f"${waste:.2f}/mo, $3.60 per IP"})
+                out.append({"title": f"Release {n_unattached} unattached Elastic IP(s)", "monthly_savings": waste, "category": "Network", "detail": f"${waste:.2f}/mo, $3.65 per IP"})
         elif name == "lambda_pc" and isinstance(data, list):
             for r in data:
                 s = r.get("wasted_monthly_cost", 0) or 0

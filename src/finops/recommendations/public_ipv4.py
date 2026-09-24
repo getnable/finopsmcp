@@ -2,7 +2,7 @@
 Public IPv4 audit.
 
 Since Feb 1 2024, AWS charges $0.005/hr per public IPv4 address.
-That is $3.60/month or $43.20/year for every address, including ones
+That is $3.65/month or $43.80/year for every address, including ones
 on stopped instances and unassociated Elastic IPs.
 
 Categories:

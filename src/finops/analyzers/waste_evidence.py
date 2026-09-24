@@ -59,7 +59,7 @@ WASTE_EVIDENCE: dict[str, EvidenceSpec] = {
     ),
     "gp2_should_migrate_to_gp3": EvidenceSpec(
         MEASURED, "high",
-        assumptions=("Same-size gp3 with the free 3,000 IOPS / 125 MB/s baseline.",),
+        assumptions=("Same-size gp3 provisioned to the gp2 volume's IOPS and throughput.",),
     ),
     "unassociated_elastic_ip": EvidenceSpec(MEASURED, "high"),
     "s3_incomplete_multipart_uploads": EvidenceSpec(

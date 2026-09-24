@@ -21,15 +21,22 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..aws_prices import (
+    EBS_PER_GB_MONTH,
+    EBS_SNAPSHOT_PER_GB_MONTH,
+    PUBLIC_IPV4_PER_MONTH,
+    ebs_volume_monthly,
+)
+
 log = logging.getLogger(__name__)
 
 # ── Pricing constants (on-demand approximations) ──────────────────────────────
 
-_EIP_MONTHLY = 3.60                   # unassociated EIP / month
+_EIP_MONTHLY = PUBLIC_IPV4_PER_MONTH  # $0.005/hr for every public IPv4 address
 _NAT_GW_BASE_MONTHLY = 32.85          # NAT GW fixed cost / month ($0.045/hr * 730hr)
 _NAT_GW_DATA_PER_GB = 0.045           # per GB processed
-_EBS_GP2_PER_GB_MONTH = 0.10          # gp2 price / GB / month (us-east-1)
-_EBS_GP3_PER_GB_MONTH = 0.08          # gp3 price / GB / month (us-east-1)
+_EBS_GP2_PER_GB_MONTH = EBS_PER_GB_MONTH["gp2"]
+_EBS_GP3_PER_GB_MONTH = EBS_PER_GB_MONTH["gp3"]
 _EBS_GP2_TO_GP3_SAVINGS_PCT = 0.20    # 20% cheaper
 _CW_LOGS_STORAGE_PER_GB_MONTH = 0.03  # archived log storage
 _S3_STANDARD_PER_GB_MONTH = 0.023
@@ -67,6 +74,21 @@ def _now_utc() -> datetime:
 
 # ── EBS volumes ───────────────────────────────────────────────────────────────
 
+def _gp2_to_gp3_savings(size_gb: float) -> float:
+    """What moving a gp2 volume to a gp3 with the same performance saves.
+
+    gp2 gets 3 IOPS per GB (up to 16,000) and 250 MiB/s above 170 GB. gp3
+    includes 3,000 IOPS and 125 MiB/s and bills the rest, so a large gp2
+    volume saves less than the 20% storage difference once its IOPS and
+    throughput are matched. Pricing the migration at the free gp3 baseline
+    would quote savings on a volume that then runs slower.
+    """
+    gp2_iops = min(16000.0, max(100.0, 3.0 * size_gb))
+    gp2_mibps = 250.0 if size_gb > 170 else 125.0
+    gp3 = ebs_volume_monthly("gp3", size_gb, max(3000.0, gp2_iops), gp2_mibps)
+    return max(0.0, ebs_volume_monthly("gp2", size_gb) - gp3)
+
+
 def check_ebs_volumes(ec2_client: Any, region: str = "unknown") -> list[dict]:
     """
     Detect:
@@ -93,9 +115,14 @@ def check_ebs_volumes(ec2_client: Any, region: str = "unknown") -> list[dict]:
                 (t["Value"] for t in vol.get("Tags", []) if t["Key"] == "Name"), ""
             )
 
-            # Unattached volumes
-            if state == "available" and not attachments:
-                monthly_cost = size_gb * _EBS_GP2_PER_GB_MONTH
+            unattached = state == "available" and not attachments
+
+            # Unattached volumes, priced at their own type plus any provisioned
+            # IOPS and throughput. A flat gp2 rate read a 1,000-IOPS io1 volume
+            # at 7% of what it costs.
+            if unattached:
+                monthly_cost = ebs_volume_monthly(
+                    vol_type, size_gb, vol.get("Iops"), vol.get("Throughput"))
                 findings.append({
                     "resource_id": vol_id,
                     "resource_type": "EBS Volume",
@@ -113,18 +140,20 @@ def check_ebs_volumes(ec2_client: Any, region: str = "unknown") -> list[dict]:
                     "volume_type": vol_type,
                 })
 
-            # gp2 → gp3 migration candidates (all gp2 volumes qualify)
-            if vol_type == "gp2" and size_gb > 0:
-                monthly_savings = size_gb * (_EBS_GP2_PER_GB_MONTH - _EBS_GP3_PER_GB_MONTH)
+            # gp2 → gp3 migration candidates. Not for an unattached volume:
+            # the finding above already counts all of its cost, and deleting it
+            # and migrating it are not savings you can have together.
+            if vol_type == "gp2" and size_gb > 0 and not unattached:
+                monthly_savings = _gp2_to_gp3_savings(size_gb)
                 findings.append({
                     "resource_id": vol_id,
                     "resource_type": "EBS Volume",
                     "waste_type": "gp2_should_migrate_to_gp3",
                     "estimated_monthly_savings": round(monthly_savings, 2),
                     "detail": (
-                        f"{size_gb} GB gp2 volume. Migrating to gp3 saves ~20% "
-                        f"(${monthly_savings:.2f}/mo) and gives 3,000 IOPS + 125 MB/s free "
-                        f"(vs gp2's variable burst). Zero downtime — API call only. "
+                        f"{size_gb} GB gp2 volume. Migrating to gp3 at the same IOPS and "
+                        f"throughput saves ${monthly_savings:.2f}/mo, and gp3 has no burst "
+                        f"credits to run out of. Zero downtime, API call only. "
                         f"Name: {name_tag or 'untagged'}."
                     ),
                     "severity": _severity_from_savings(monthly_savings),
@@ -146,7 +175,7 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
     that have no associated AMI (orphaned) or no lifecycle policy.
     EBS snapshot storage is $0.05/GB-month.
     """
-    _SNAPSHOT_STORAGE_PER_GB_MONTH = 0.05
+    _SNAPSHOT_STORAGE_PER_GB_MONTH = EBS_SNAPSHOT_PER_GB_MONTH
     findings: list[dict] = []
     cutoff = _now_utc() - timedelta(days=older_than_days)
 
@@ -233,7 +262,7 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
 
 def check_elastic_ips(ec2_client: Any, region: str = "unknown") -> list[dict]:
     """
-    Detect unassociated Elastic IPs. AWS charges $3.60/month per idle EIP.
+    Detect unassociated Elastic IPs. AWS charges $0.005/hr ($3.65/month) per address.
     """
     findings: list[dict] = []
 

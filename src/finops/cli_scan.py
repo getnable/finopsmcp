@@ -209,6 +209,18 @@ def _finish(code: int, lingering: bool) -> int:
     return code
 
 
+def _split_regions(values: list[str] | None) -> list[str]:
+    """--regions as people type it. The flag took space-separated values only,
+    so `--regions us-east-1,us-west-2` (how the AWS CLI and most tools spell a
+    list) failed as one invalid region, and `US-EAST-1` failed on case."""
+    out: list[str] = []
+    for v in values or []:
+        for r in re.split(r"[,\s]+", v.strip().lower()):
+            if r and r not in out:
+                out.append(r)
+    return out
+
+
 def _classify_boto_error(exc: Exception) -> str:
     """Map a botocore exception to one of our typed failure classes.
 
@@ -448,6 +460,78 @@ def _render_extra(out, b) -> None:
         print(f"      {_dim(b.note)}", file=out)
 
 
+# One line per kind of waste, the way `--demo` reads, instead of one line per
+# resource. A real finding carries `detail` (a sentence about one resource) and
+# no `description`, so a first real scan printed the internal key,
+# `unattached_ebs_volume, us-east-1`, once per volume, and the five lines it had
+# room for did not add up to the headline above them.
+_WASTE_LABELS: dict[str, tuple[str, str]] = {
+    "unattached_ebs_volume": ("unattached EBS volume", "unattached EBS volumes"),
+    "unattached_ebs": ("unattached EBS volume", "unattached EBS volumes"),
+    "gp2_should_migrate_to_gp3": ("gp2 volume cheaper as gp3", "gp2 volumes cheaper as gp3"),
+    "old_snapshots": ("old EBS snapshot", "old EBS snapshots"),
+    "old_unmanaged_snapshot": ("old EBS snapshot", "old EBS snapshots"),
+    "idle_nat_gateway": ("idle NAT gateway", "idle NAT gateways"),
+    "idle_load_balancer": ("idle load balancer", "idle load balancers"),
+    "unassociated_elastic_ip": ("unused Elastic IP", "unused Elastic IPs"),
+    "idle_ec2_low_cpu": ("idle EC2 instance", "idle EC2 instances"),
+    "oversized_ec2": ("oversized EC2 instance", "oversized EC2 instances"),
+    "compute_optimizer_overprovisioned_ec2": ("oversized EC2 instance", "oversized EC2 instances"),
+    "idle_rds": ("idle RDS instance", "idle RDS instances"),
+    "rds_idle_no_connections": ("idle RDS instance", "idle RDS instances"),
+    "rds_overprovisioned": ("oversized RDS instance", "oversized RDS instances"),
+    "compute_optimizer_overprovisioned_rds": ("oversized RDS instance", "oversized RDS instances"),
+    "excessive_rds_backup_retention": ("RDS instance keeping extra backups",
+                                       "RDS instances keeping extra backups"),
+    "lambda_zero_invocations": ("Lambda function never invoked", "Lambda functions never invoked"),
+    "lambda_memory_overprovisioned": ("Lambda function with unused memory",
+                                      "Lambda functions with unused memory"),
+    "compute_optimizer_overprovisioned_lambda": ("Lambda function with unused memory",
+                                                 "Lambda functions with unused memory"),
+    "ecs_overprovisioned_cpu": ("ECS service with unused CPU", "ECS services with unused CPU"),
+    "ecr_old_untagged_images": ("ECR repo with old untagged images",
+                                "ECR repos with old untagged images"),
+    "s3_suboptimal_storage_class": ("S3 bucket in a costlier storage class",
+                                    "S3 buckets in a costlier storage class"),
+    "s3_incomplete_multipart_uploads": ("S3 bucket holding abandoned uploads",
+                                        "S3 buckets holding abandoned uploads"),
+    "log_group_infinite_retention": ("log group kept forever", "log groups kept forever"),
+    "cloudtrail_data_events_enabled": ("CloudTrail trail logging data events",
+                                       "CloudTrail trails logging data events"),
+    "duplicate_cloudtrail_management_events": ("duplicate CloudTrail trail",
+                                               "duplicate CloudTrail trails"),
+    "cloudtrail_stopped_but_s3_bucket_costs_persist": ("stopped trail still storing logs",
+                                                       "stopped trails still storing logs"),
+    "data_transfer_cost": ("data transfer line", "data transfer lines"),
+}
+
+
+def _group_findings(findings: list[dict]) -> list[dict]:
+    """Findings summed by waste_type, largest first. A group of one keeps the
+    finding's own description when it has one (the demo's do)."""
+    groups: dict[str, dict] = {}
+    for f in findings:
+        wt = f.get("waste_type") or "finding"
+        g = groups.setdefault(wt, {"n": 0, "monthly": 0.0, "regions": set(),
+                                   "description": f.get("description")})
+        g["n"] += 1
+        g["monthly"] += float(f.get("estimated_monthly_savings") or 0)
+        if f.get("region"):
+            g["regions"].add(f["region"])
+    rows = []
+    for wt, g in groups.items():
+        if g["n"] == 1 and g["description"]:
+            desc = g["description"]
+        else:
+            one, many = _WASTE_LABELS.get(wt, (wt.replace("_", " "), wt.replace("_", " ")))
+            desc = f"{g['n']} {one if g['n'] == 1 else many}"
+        regions = sorted(g["regions"])
+        where = regions[0] if len(regions) == 1 else (f"{len(regions)} regions" if regions else "")
+        rows.append({"description": desc, "region": where, "monthly": g["monthly"], "n": g["n"]})
+    rows.sort(key=lambda r: -r["monthly"])
+    return rows
+
+
 def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=None):
     extra_blocks = extra_blocks or []
     demo_tag = _dim(" (demo data)") if demo else ""
@@ -488,21 +572,24 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
             if recoverable >= _FINDING_FLOOR_USD:
                 print(_green(_bold(f"{_usd(recoverable)}/mo recoverable")) + demo_tag, file=out)
 
-        findings = [
-            f
-            for f in report.get("findings", [])
-            if float(f.get("estimated_monthly_savings") or 0) >= _FINDING_FLOOR_USD
-        ][:_MAX_FINDINGS_SHOWN]
+        groups = _group_findings(report.get("findings") or [])
+        shown = [g for g in groups if g["monthly"] >= _FINDING_FLOOR_USD][:_MAX_FINDINGS_SHOWN]
 
         if recoverable < _FINDING_FLOOR_USD:
             # The proud state: a clean account is a result, not an apology.
             print(_green("no material waste found, nice") + demo_tag, file=out)
         else:
-            for f in findings:
-                monthly = float(f.get("estimated_monthly_savings") or 0)
-                desc = f.get("description") or f.get("waste_type", "finding")
-                region = f.get("region", "")
-                print(f"  {_usd(monthly) + '/mo':>12}  {desc}" + (f", {region}" if region else ""), file=out)
+            for g in shown:
+                region = g["region"]
+                print(f"  {_usd(g['monthly']) + '/mo':>12}  {g['description']}"
+                      + (f", {region}" if region else ""), file=out)
+            rest_n = sum(g["n"] for g in groups) - sum(g["n"] for g in shown)
+            rest_usd = sum(g["monthly"] for g in groups) - sum(g["monthly"] for g in shown)
+            if rest_n > 0:
+                # Without this the lines above never sum to the headline.
+                print(_dim(f"  {_usd(rest_usd) + '/mo':>12}  {rest_n} more finding"
+                           f"{'s' if rest_n != 1 else ''} · `nable scan --json` lists every one"),
+                      file=out)
 
         timed_out = report.get("regions_timed_out") or []
         if timed_out:
@@ -959,12 +1046,14 @@ def run(args) -> int:
                 ], "expired", t0, exc=exc)
             # any other CE hiccup: proceed without the spend headline
 
-    override = getattr(args, "regions", None)
+    override = _split_regions(getattr(args, "regions", None))
     if override:
         bad = [r for r in override if not _REGION_RE.match(r)]
         if bad:
-            return _fail(out, 1, [f"not valid region name(s): {', '.join(bad)}"],
-                         "bad-region-arg", t0, props={"n_bad": len(bad)})
+            return _fail(out, 1, [
+                f"not valid region name(s): {', '.join(bad)}",
+                "  fix: region codes, not names, e.g. `nable scan --regions us-east-1 eu-west-1`",
+            ], "bad-region-arg", t0, props={"n_bad": len(bad)})
         regions = override
     else:
         regions = _pick_regions(spend, session)

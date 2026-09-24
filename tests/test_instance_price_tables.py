@@ -554,3 +554,73 @@ def test_vscode_mirrors_price_lb_at_the_base_rate():
         ts = _ts_table("LB_HOURLY")
         assert ts == {k: v for k, v in aws_prices.LB_HOURLY_BY_TYPE.items()}
         assert "0.008 * HOURS_PER_MONTH" not in _PRICES_TS.read_text(encoding="utf-8")
+
+
+# ── EBS ──────────────────────────────────────────────────────────────────────
+#
+# AWS Price List, AmazonEC2 offer, us-east-1. sc1 was $0.025 in five tables
+# against a $0.015 list rate, and the unattached-volume finding priced every
+# volume at gp2 without IOPS.
+
+@pytest.mark.parametrize("args,monthly", [
+    (("gp2", 100), 10.0),
+    (("gp3", 500), 40.0),
+    (("gp3", 100, 6000, 250), 28.0),         # 8 + 3,000 extra IOPS x 0.005 + 125 MiB/s x 0.04
+    (("io1", 50, 1000), 71.25),              # 6.25 + 1,000 x 0.065
+    (("io2", 100, 70000), 3739.6),           # tiers at 32k and 64k
+    (("sc1", 1000), 15.0),
+    (("st1", 1000), 45.0),
+    ((None, 10), 1.0),
+])
+def test_ebs_volume_monthly(args, monthly):
+    assert aws_prices.ebs_volume_monthly(*args) == pytest.approx(monthly)
+
+
+def test_every_ebs_table_is_the_shared_one():
+    from finops.connectors import terraform_estimate
+    from finops.pr_comments import estimator
+
+    assert terraform_estimate._EBS_PER_GB_MONTH is aws_prices.EBS_PER_GB_MONTH
+    assert estimator._EBS_MONTHLY_PER_GB is aws_prices.EBS_PER_GB_MONTH
+    if _PRICES_TS.exists():
+        assert _ts_table("EBS_PER_GB") == aws_prices.EBS_PER_GB_MONTH
+
+
+def test_unattached_volume_priced_by_type_and_not_double_counted():
+    from finops.analyzers.waste import check_ebs_volumes
+
+    vols = [
+        {"VolumeId": "vol-gp3", "Size": 500, "VolumeType": "gp3", "State": "available",
+         "Iops": 3000, "Throughput": 125, "Attachments": []},
+        {"VolumeId": "vol-io1", "Size": 50, "VolumeType": "io1", "State": "available",
+         "Iops": 1000, "Attachments": []},
+        {"VolumeId": "vol-gp2", "Size": 100, "VolumeType": "gp2", "State": "available",
+         "Attachments": []},
+        {"VolumeId": "vol-live", "Size": 2000, "VolumeType": "gp2", "State": "in-use",
+         "Attachments": [{"InstanceId": "i-1"}]},
+    ]
+
+    class _EC2:
+        def get_paginator(self, name):
+            class _P:
+                def paginate(self_inner):
+                    return [{"Volumes": vols}]
+            return _P()
+
+    got = {(f["resource_id"], f["waste_type"]): f["estimated_monthly_savings"]
+           for f in check_ebs_volumes(_EC2(), "us-east-1")}
+    assert got == {
+        ("vol-gp3", "unattached_ebs_volume"): 40.0,
+        ("vol-io1", "unattached_ebs_volume"): 71.25,
+        ("vol-gp2", "unattached_ebs_volume"): 10.0,
+        # 2 TB gp2 has 6,000 IOPS and 250 MiB/s; a gp3 that matches both is
+        # $160 + $15 + $5, so the move saves $20, not the 20% storage delta ($40).
+        ("vol-live", "gp2_should_migrate_to_gp3"): 20.0,
+    }
+
+
+def test_eip_uses_the_730_hour_month():
+    from finops.analyzers import waste
+    from finops.cleanup import idle
+
+    assert waste._EIP_MONTHLY == idle._EIP_PER_MONTH == aws_prices.PUBLIC_IPV4_PER_MONTH == 3.65

@@ -77,15 +77,31 @@ const ELASTICACHE_HOURLY: Record<string, number> = {
   "cache.r6g.large": 0.186, "cache.r6g.xlarge": 0.372,
 };
 
-// ── EBS ─────────────────────────────────────────────────────────────────────
+// ── Load balancers (hourly base, before LCUs) ───────────────────────────────
 const LB_HOURLY: Record<string, number> = {
   "application": 0.0225, "network": 0.0225, "gateway": 0.0125,
 };
 
+// ── EBS ─────────────────────────────────────────────────────────────────────
+// Mirrors aws_prices.ebs_volume_monthly; a test pins EBS_PER_GB to the Python table.
 const EBS_PER_GB: Record<string, number> = {
   "gp2": 0.10, "gp3": 0.08, "io1": 0.125, "io2": 0.125,
-  "st1": 0.045, "sc1": 0.025, "standard": 0.05,
+  "st1": 0.045, "sc1": 0.015, "standard": 0.05,
 };
+
+function ebsMonthly(volType: string, sizeGb: number, iops: number, throughput: number): number {
+  let m = sizeGb * (EBS_PER_GB[volType] ?? EBS_PER_GB["gp2"]);
+  if (volType === "gp3") {
+    m += Math.max(0, iops - 3000) * 0.005 + Math.max(0, throughput - 125) * 0.04;
+  } else if (volType === "io1") {
+    m += iops * 0.065;
+  } else if (volType === "io2") {
+    m += Math.min(iops, 32000) * 0.065
+      + Math.max(0, Math.min(iops, 64000) - 32000) * 0.0455
+      + Math.max(0, iops - 64000) * 0.03185;
+  }
+  return m;
+}
 
 // ── OpenSearch ───────────────────────────────────────────────────────────────
 const OPENSEARCH_HOURLY: Record<string, number> = {
@@ -151,11 +167,10 @@ export function priceResource(
     case "aws_ebs_volume": {
       const volType = attrs["type"] || "gp2";
       const sizeGb = parseFloat(attrs["size"] || "0");
-      const priceGb = EBS_PER_GB[volType] ?? 0.10;
-      const iops = parseFloat(attrs["iops"] || "0");
-      let monthly = sizeGb * priceGb;
-      if ((volType === "io1" || volType === "io2") && iops) monthly += iops * 0.065;
-      const note = volType === "gp2" ? "💡 Switch to gp3 to save 20% with same/better IOPS" : undefined;
+      const iops = parseFloat(attrs["iops"] || "0") || 0;
+      const throughput = parseFloat(attrs["throughput"] || "0") || 0;
+      const monthly = ebsMonthly(volType, sizeGb, iops, throughput);
+      const note = volType === "gp2" ? "💡 gp3 is 20% less per GB; over 170 GB, provision gp3 IOPS/throughput to match" : undefined;
       return { monthly: Math.round(monthly * 100) / 100, detail: `${sizeGb} GB ${volType}`, note };
     }
 

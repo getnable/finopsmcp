@@ -16,8 +16,8 @@ from typing import Any
 
 from .parser import ResourceChange
 from ..aws_prices import (
-    ALB_PER_MONTH, EC2_MONTHLY, HOURS_PER_MONTH, NAT_GATEWAY_PER_MONTH, NLB_PER_MONTH,
-    RDS_MONTHLY, lb_hourly,
+    ALB_PER_MONTH, EBS_PER_GB_MONTH, EC2_MONTHLY, HOURS_PER_MONTH, NAT_GATEWAY_PER_MONTH,
+    NLB_PER_MONTH, RDS_MONTHLY, ebs_volume_monthly, lb_hourly,
 )
 from ..recommendations.rate_detector import detect_effective_rates
 
@@ -44,9 +44,7 @@ _FIXED_MONTHLY: dict[str, float] = {
     "aws_lambda_function": 0.0,          # pay-per-use, negligible base
 }
 
-_EBS_MONTHLY_PER_GB: dict[str, float] = {
-    "gp3": 0.08, "gp2": 0.10, "io1": 0.125, "io2": 0.125, "st1": 0.045, "sc1": 0.025,
-}
+_EBS_MONTHLY_PER_GB: dict[str, float] = EBS_PER_GB_MONTH
 
 
 @dataclass
@@ -162,10 +160,10 @@ def estimate_changes(
 
         # EBS
         elif rtype == "aws_ebs_volume":
-            vol_type = props.get("type", "gp3")
-            size_gb = float(props.get("size", props.get("volume_size", 20)))
-            price_per_gb = _EBS_MONTHLY_PER_GB.get(vol_type, 0.08)
-            monthly = round(size_gb * price_per_gb * multiplier, 2)
+            vol_type = props.get("type") or "gp3"
+            size_gb = float(props.get("size") or props.get("volume_size") or 20)
+            monthly = round(ebs_volume_monthly(
+                vol_type, size_gb, props.get("iops"), props.get("throughput")) * multiplier, 2)
             breakdown["storage"] = monthly
             confidence = "high"
 

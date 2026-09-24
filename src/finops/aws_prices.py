@@ -107,6 +107,55 @@ NLB_PER_MONTH = round(NLB_HOURLY * HOURS_PER_MONTH, 2)   # 16.43
 CLB_PER_MONTH = round(CLB_HOURLY * HOURS_PER_MONTH, 2)   # 18.25
 NAT_GATEWAY_PER_MONTH = round(NAT_GATEWAY_HOURLY * HOURS_PER_MONTH, 2)   # 32.85
 
+# Every public IPv4 address, attached or not, since February 2024.
+PUBLIC_IPV4_HOURLY = 0.005
+PUBLIC_IPV4_PER_MONTH = round(PUBLIC_IPV4_HOURLY * HOURS_PER_MONTH, 2)   # 3.65
+
+# ── EBS ──────────────────────────────────────────────────────────────────────
+#
+# AWS Price List, AmazonEC2 offer, us-east-1, version 20260924165117. Five
+# tables used to carry these, all with sc1 at $0.025 (the list rate is $0.015),
+# and the unattached-volume finding priced every volume at the gp2 rate: a
+# 500 GB gp3 volume read $50/mo against $40, and a 50 GB io1 volume with 1,000
+# provisioned IOPS read $5/mo against $71.25, because IOPS were never counted.
+EBS_PER_GB_MONTH: dict[str, float] = {
+    "gp2": 0.10, "gp3": 0.08, "io1": 0.125, "io2": 0.125,
+    "st1": 0.045, "sc1": 0.015, "standard": 0.05,
+}
+EBS_SNAPSHOT_PER_GB_MONTH = 0.05
+# gp3 includes 3,000 IOPS and 125 MiB/s; provisioning above that is billed.
+EBS_GP3_FREE_IOPS = 3000
+EBS_GP3_PER_IOPS_MONTH = 0.005
+EBS_GP3_FREE_MIBPS = 125
+EBS_GP3_PER_MIBPS_MONTH = 0.04
+# io1 is flat per provisioned IOPS; io2 is tiered at 32,000 and 64,000.
+EBS_IO1_PER_IOPS_MONTH = 0.065
+EBS_IO2_IOPS_TIERS: tuple[tuple[float, float], ...] = (
+    (32000, 0.065), (64000, 0.0455), (float("inf"), 0.03185),
+)
+
+
+def ebs_volume_monthly(vol_type: str | None, size_gb: float,
+                       iops: float | None = None, throughput: float | None = None) -> float:
+    """List-price monthly cost of one EBS volume: storage plus any billed IOPS
+    and throughput. Unknown types price as gp2, the most common legacy default."""
+    vt = (vol_type or "gp2").lower()
+    total = (size_gb or 0) * EBS_PER_GB_MONTH.get(vt, EBS_PER_GB_MONTH["gp2"])
+    iops = float(iops or 0)
+    if vt == "gp3":
+        total += max(0.0, iops - EBS_GP3_FREE_IOPS) * EBS_GP3_PER_IOPS_MONTH
+        total += max(0.0, float(throughput or 0) - EBS_GP3_FREE_MIBPS) * EBS_GP3_PER_MIBPS_MONTH
+    elif vt == "io1":
+        total += iops * EBS_IO1_PER_IOPS_MONTH
+    elif vt == "io2":
+        floor = 0.0
+        for ceiling, rate in EBS_IO2_IOPS_TIERS:
+            if iops <= floor:
+                break
+            total += (min(iops, ceiling) - floor) * rate
+            floor = ceiling
+    return total
+
 # ── EC2 and RDS instances ────────────────────────────────────────────────────
 #
 # The same failure at fleet scale. These rates used to live in about fourteen

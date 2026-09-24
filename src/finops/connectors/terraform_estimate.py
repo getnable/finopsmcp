@@ -31,8 +31,8 @@ from pathlib import Path
 from typing import Any
 
 from ..aws_prices import (
-    CLB_HOURLY, EC2_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY, NAT_GATEWAY_PER_GB,
-    RDS_HOURLY, lb_hourly,
+    CLB_HOURLY, EBS_PER_GB_MONTH, EC2_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY,
+    NAT_GATEWAY_PER_GB, RDS_HOURLY, ebs_volume_monthly, lb_hourly,
 )
 
 log = logging.getLogger(__name__)
@@ -55,10 +55,7 @@ _ELASTICACHE_HOURLY: dict[str, float] = {
 }
 
 # EBS: $/GB/month
-_EBS_PER_GB_MONTH: dict[str, float] = {
-    "gp2": 0.10, "gp3": 0.08, "io1": 0.125, "io2": 0.125,
-    "st1": 0.045, "sc1": 0.025, "standard": 0.05,
-}
+_EBS_PER_GB_MONTH: dict[str, float] = EBS_PER_GB_MONTH
 
 # Flat rates ($/hour)
 _FLAT_RATES: dict[str, float] = {
@@ -245,20 +242,19 @@ def _estimate_elasticache(rc: ResourceChange) -> CostLine | None:
 
 def _estimate_ebs(rc: ResourceChange) -> CostLine | None:
     cfg = rc.net_config
-    vol_type = cfg.get("type", "gp2")
-    size_gb  = float(cfg.get("size", 0))
-    iops     = float(cfg.get("iops", 0))
-    price_gb = _EBS_PER_GB_MONTH.get(vol_type, 0.10)
-    monthly  = size_gb * price_gb
-    # io1/io2: additional IOPS charge
-    iops_charge = 0.0
-    if vol_type in ("io1", "io2") and iops:
-        iops_charge = iops * 0.065  # $/IOPS-month
-        monthly += iops_charge
-    monthly *= _sign(rc)
+    # A plan writes null for anything computed at apply time (iops on gp2,
+    # size on a volume restored from a snapshot), so .get(k, 0) is not enough.
+    vol_type = cfg.get("type") or "gp2"
+    size_gb  = float(cfg.get("size") or 0)
+    iops     = float(cfg.get("iops") or 0)
+    tput     = float(cfg.get("throughput") or 0)
+    price_gb = _EBS_PER_GB_MONTH.get(vol_type, _EBS_PER_GB_MONTH["gp2"])
+    storage  = size_gb * price_gb
+    total    = ebs_volume_monthly(vol_type, size_gb, iops, tput)
+    monthly  = total * _sign(rc)
     detail = f"{size_gb:.0f} GB {vol_type} @ ${price_gb}/GB-mo"
-    if iops_charge:
-        detail += f" + {iops:.0f} IOPS"
+    if total - storage > 0.005:
+        detail += f" + ${total - storage:,.2f}/mo provisioned IOPS/throughput"
     return CostLine(rc.address, rc.type, _action_label(rc), monthly, detail, "high")
 
 

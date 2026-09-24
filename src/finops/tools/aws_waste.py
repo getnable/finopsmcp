@@ -269,7 +269,7 @@ async def audit_public_ipv4_addresses(
 ) -> str:
     """
     Audits public IPv4 addresses across AWS. Since Feb 2024, AWS charges
-    $3.60/month per IP including stopped instances. Finds unattached Elastic IPs
+    $3.65/month per IP including stopped instances. Finds unattached Elastic IPs
     and IPs on stopped instances with release recommendations.
 
     Args:

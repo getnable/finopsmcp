@@ -20,24 +20,13 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# Monthly cost estimates (us-east-1 on-demand)
-_EBS_GP3_PER_GB_MONTH = 0.08
-_EBS_GP2_PER_GB_MONTH = 0.10
-_EBS_IO1_PER_GB_MONTH = 0.125
-_EIP_PER_MONTH = 3.60
-_SNAPSHOT_PER_GB_MONTH = 0.05
-# Re-exported from aws_prices so analyzers/waste.py and this module cannot
+# Monthly cost estimates (us-east-1 on-demand), single-sourced in aws_prices.
+# _ALB_PER_MONTH is re-exported so analyzers/waste.py and this module cannot
 # hold two different prices for one load balancer, which they did.
 from ..aws_prices import ALB_PER_MONTH as _ALB_PER_MONTH
-
-_EBS_PRICE = {
-    "gp3": _EBS_GP3_PER_GB_MONTH,
-    "gp2": _EBS_GP2_PER_GB_MONTH,
-    "io1": _EBS_IO1_PER_GB_MONTH,
-    "io2": _EBS_IO1_PER_GB_MONTH,
-    "st1": 0.045,
-    "sc1": 0.025,
-}
+from ..aws_prices import EBS_SNAPSHOT_PER_GB_MONTH as _SNAPSHOT_PER_GB_MONTH
+from ..aws_prices import PUBLIC_IPV4_PER_MONTH as _EIP_PER_MONTH
+from ..aws_prices import ebs_volume_monthly
 
 
 @dataclass
@@ -127,8 +116,8 @@ def _scan_ebs_volumes(
 
             vol_type = vol.get("VolumeType", "gp2")
             size_gb = vol.get("Size", 0)
-            price_per_gb = _EBS_PRICE.get(vol_type, _EBS_GP2_PER_GB_MONTH)
-            monthly = round(size_gb * price_per_gb, 2)
+            monthly = round(ebs_volume_monthly(
+                vol_type, size_gb, vol.get("Iops"), vol.get("Throughput")), 2)
 
             results.append(IdleResource(
                 resource_type="ebs_volume",
@@ -262,7 +251,8 @@ def _scan_stopped_ec2(
             for vol in vol_resp.get("Volumes", []):
                 vt = vol.get("VolumeType", "gp2")
                 sg = vol.get("Size", 0)
-                vol_monthly[vol["VolumeId"]] = sg * _EBS_PRICE.get(vt, _EBS_GP2_PER_GB_MONTH)
+                vol_monthly[vol["VolumeId"]] = ebs_volume_monthly(
+                    vt, sg, vol.get("Iops"), vol.get("Throughput"))
         except Exception:
             pass
 
