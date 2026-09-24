@@ -150,19 +150,20 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
     findings: list[dict] = []
     cutoff = _now_utc() - timedelta(days=older_than_days)
 
+    # The audit stamps the account id on every finding it returns; this check
+    # does not need to know it.
+    account_id = None
     try:
-        # Get the current account ID to filter to owned snapshots.
-        account_id = None
-        try:
-            import boto3
-            sts_client = boto3.client("sts", region_name=region if region != "unknown" else "us-east-1")
-            account_id = sts_client.get_caller_identity()["Account"]
-        except Exception:
-            pass
-
-        kwargs: dict[str, Any] = {"Filters": [{"Name": "status", "Values": ["completed"]}]}
-        if account_id:
-            kwargs["OwnerIds"] = [account_id]
+        # OwnerIds=["self"], always. This used to ask STS for the account id and
+        # filter on it only when that call worked. When it failed, the query ran
+        # unfiltered, paged through every PUBLIC snapshot in the region, and
+        # flagged other accounts' snapshots as this account's waste. The STS
+        # call also used the default boto3 chain, not the audit's session, so a
+        # cross-account (role_arn) audit filtered on the wrong account.
+        kwargs: dict[str, Any] = {
+            "OwnerIds": ["self"],
+            "Filters": [{"Name": "status", "Values": ["completed"]}],
+        }
 
         paginator = ec2_client.get_paginator("describe_snapshots")
         pages = paginator.paginate(**kwargs)
