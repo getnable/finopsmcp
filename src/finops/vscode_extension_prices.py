@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from .aws_prices import EC2_HOURLY as _EC2_HOURLY
-from .aws_prices import HOURS_PER_MONTH
+from .aws_prices import CLB_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY, lb_hourly
 from .aws_prices import RDS_HOURLY as _RDS_HOURLY
 from .connectors.terraform_estimate import (
     _ELASTICACHE_HOURLY,
@@ -75,14 +75,17 @@ def price_resource_py(
         return {"monthly": round(m, 2), "detail": f"{size:.0f} GB {vtype}", "note": note}
 
     if t == "aws_nat_gateway":
-        return {"monthly": round(0.045 * HOURS_PER_MONTH, 2), "detail": "$0.045/hr base",
+        return {"monthly": round(NAT_GATEWAY_HOURLY * HOURS_PER_MONTH, 2),
+                "detail": f"${NAT_GATEWAY_HOURLY}/hr base",
                 "note": "Add VPC endpoints for S3/DynamoDB to cut data transfer charges"}
 
     if t in ("aws_lb", "aws_alb"):
-        return {"monthly": round(0.008 * HOURS_PER_MONTH, 2), "detail": "$0.008/hr + LCU"}
+        h = lb_hourly(attrs.get("load_balancer_type"))
+        return {"monthly": round(h * HOURS_PER_MONTH, 2), "detail": f"${h}/hr base + LCU"}
 
     if t == "aws_elb":
-        return {"monthly": round(0.025 * HOURS_PER_MONTH, 2), "detail": "$0.025/hr classic ELB"}
+        return {"monthly": round(CLB_HOURLY * HOURS_PER_MONTH, 2),
+                "detail": f"${CLB_HOURLY}/hr classic ELB"}
 
     if t == "aws_eks_cluster":
         return {"monthly": round(0.10 * HOURS_PER_MONTH, 2), "detail": "$0.10/hr control plane",

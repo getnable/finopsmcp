@@ -41,6 +41,23 @@ HOURS_PER_MONTH = 730.0
 ALB_HOURLY = 0.0225
 NLB_HOURLY = 0.0225
 CLB_HOURLY = 0.025
+GWLB_HOURLY = 0.0125
+
+# Terraform's aws_lb covers all three v2 types through load_balancer_type, and
+# defaults to "application" when the attribute is absent.
+LB_HOURLY_BY_TYPE = {"application": ALB_HOURLY, "network": NLB_HOURLY, "gateway": GWLB_HOURLY}
+
+
+def lb_hourly(load_balancer_type: str | None) -> float:
+    """Hourly base charge for an aws_lb of this type. Unknown types price as ALB."""
+    return LB_HOURLY_BY_TYPE.get((load_balancer_type or "application").lower(), ALB_HOURLY)
+
+
+# NAT gateway: an hourly charge while it exists plus a per-GB charge on every
+# byte it processes. The hourly part is the floor; the per-GB part is usually
+# larger for a gateway carrying real egress.
+NAT_GATEWAY_HOURLY = 0.045
+NAT_GATEWAY_PER_GB = 0.045
 
 # ── what reading the bill costs the customer ─────────────────────────────────
 #
@@ -88,6 +105,7 @@ S3_EGRESS_PER_GB = 0.09
 ALB_PER_MONTH = round(ALB_HOURLY * HOURS_PER_MONTH, 2)   # 16.43
 NLB_PER_MONTH = round(NLB_HOURLY * HOURS_PER_MONTH, 2)   # 16.43
 CLB_PER_MONTH = round(CLB_HOURLY * HOURS_PER_MONTH, 2)   # 18.25
+NAT_GATEWAY_PER_MONTH = round(NAT_GATEWAY_HOURLY * HOURS_PER_MONTH, 2)   # 32.85
 
 # ── EC2 and RDS instances ────────────────────────────────────────────────────
 #

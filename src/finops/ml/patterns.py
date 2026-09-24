@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Callable
 
+from ..aws_prices import ALB_PER_MONTH
+
 log = logging.getLogger(__name__)
 
 
@@ -366,7 +368,7 @@ def _check_unused_load_balancers(ctx: PatternContext) -> PatternMatch | None:
     ]
     if not empty:
         return None
-    monthly = len(empty) * 0.008 * 730   # ALB base rate
+    monthly = len(empty) * ALB_PER_MONTH
     if monthly < 10:
         return None
     names = [lb.get("name", "") for lb in empty]

@@ -15,7 +15,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .parser import ResourceChange
-from ..aws_prices import EC2_MONTHLY, HOURS_PER_MONTH, RDS_MONTHLY
+from ..aws_prices import (
+    ALB_PER_MONTH, EC2_MONTHLY, HOURS_PER_MONTH, NAT_GATEWAY_PER_MONTH, NLB_PER_MONTH,
+    RDS_MONTHLY, lb_hourly,
+)
 from ..recommendations.rate_detector import detect_effective_rates
 
 log = logging.getLogger(__name__)
@@ -29,11 +32,11 @@ _EC2_MONTHLY = EC2_MONTHLY
 _RDS_MONTHLY = RDS_MONTHLY
 
 _FIXED_MONTHLY: dict[str, float] = {
-    "aws_nat_gateway": 45.00,   # $0.045/hr + data transfer
-    "aws_lb": 16.20,            # ALB base ~$0.0225/hr
-    "aws_alb": 16.20,
-    "aws_nlb": 16.20,
-    "aws_eks_cluster": 73.00,   # $0.10/hr control plane
+    "aws_nat_gateway": NAT_GATEWAY_PER_MONTH,   # hourly base only; data processed is per GB
+    "aws_lb": ALB_PER_MONTH,    # load_balancer_type overrides this below
+    "aws_alb": ALB_PER_MONTH,
+    "aws_nlb": NLB_PER_MONTH,
+    "aws_eks_cluster": round(0.10 * HOURS_PER_MONTH, 2),   # $0.10/hr control plane
     "aws_redshift_cluster": 180.00,
     "aws_msk_cluster": 200.00,
     "aws_elasticache_cluster": 52.00,
@@ -168,7 +171,10 @@ def estimate_changes(
 
         # Fixed-cost resources
         elif rtype in _FIXED_MONTHLY:
-            monthly = round(_FIXED_MONTHLY[rtype] * multiplier, 2)
+            base = _FIXED_MONTHLY[rtype]
+            if rtype == "aws_lb" and props.get("load_balancer_type"):
+                base = round(lb_hourly(props["load_balancer_type"]) * HOURS_PER_MONTH, 2)
+            monthly = round(base * multiplier, 2)
             breakdown["base"] = monthly
             confidence = "high" if monthly > 0 else "low"
 

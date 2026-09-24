@@ -482,3 +482,75 @@ def test_vscode_extension_prices_match_aws_prices(ts_name, table):
     ts = _ts_table(ts_name)
     assert ts
     assert {k: v for k, v in ts.items() if table.get(k) != v} == {}
+
+
+# ── load balancers and NAT gateways ──────────────────────────────────────────
+#
+# The Terraform estimator, the PR-comment estimator, the VS Code extension and
+# its Python mirror each carried their own load balancer rate. Three used $0.008,
+# which is the ALB LCU-hour price, not the $0.0225 hourly base (a $16.43/mo ALB
+# quoted as $5.84). The PR estimator had $16.20 for every LB and $45.00 for a NAT
+# gateway whose hourly base is $32.85. Rates checked against the AWS Price List
+# (AWSELB offer, us-east-1): ALB and NLB $0.0225/hr, GWLB $0.0125/hr, Classic
+# $0.025/hr, ALB LCU $0.008.
+
+def test_shared_lb_and_nat_rates():
+    assert aws_prices.ALB_HOURLY == aws_prices.NLB_HOURLY == 0.0225
+    assert aws_prices.GWLB_HOURLY == 0.0125
+    assert aws_prices.CLB_HOURLY == 0.025
+    assert aws_prices.lb_hourly(None) == 0.0225
+    assert aws_prices.lb_hourly("gateway") == 0.0125
+    assert aws_prices.lb_hourly("NETWORK") == 0.0225
+    assert aws_prices.NAT_GATEWAY_PER_MONTH == 32.85
+
+
+@pytest.mark.parametrize("lb_type,monthly", [(None, 16.43), ("network", 16.43), ("gateway", 9.12)])
+def test_terraform_estimate_prices_lb_by_type(lb_type, monthly):
+    from finops.connectors.terraform_estimate import ResourceChange, _estimate_load_balancer
+
+    after = {"load_balancer_type": lb_type} if lb_type else {}
+    line = _estimate_load_balancer(ResourceChange("aws_lb.web", "aws_lb", ["create"], None, after))
+    assert round(line.monthly_delta, 2) == monthly
+    classic = _estimate_load_balancer(ResourceChange("aws_elb.old", "aws_elb", ["delete"], {}, None))
+    assert round(classic.monthly_delta, 2) == -aws_prices.CLB_PER_MONTH
+
+
+def test_terraform_estimate_nat_gateway_uses_shared_rate():
+    from finops.connectors.terraform_estimate import ResourceChange, _estimate_nat_gateway
+
+    line = _estimate_nat_gateway(ResourceChange("aws_nat_gateway.a", "aws_nat_gateway", ["create"], None, {}))
+    assert round(line.monthly_delta, 2) == aws_prices.NAT_GATEWAY_PER_MONTH
+
+
+def test_pr_comment_estimator_lb_and_nat(monkeypatch):
+    from finops.pr_comments import estimator
+    from finops.pr_comments.parser import ResourceChange
+
+    class _Rates:
+        has_private_pricing = False
+        confidence = "low"
+
+        def effective_multiplier(self):
+            return 1.0
+
+    monkeypatch.setattr(estimator, "detect_effective_rates", lambda: _Rates())
+    changes = [
+        ResourceChange("add", "aws_nat_gateway", "nat", "aws"),
+        ResourceChange("add", "aws_lb", "alb", "aws"),
+        ResourceChange("add", "aws_lb", "gwlb", "aws", {"load_balancer_type": "gateway"}),
+    ]
+    got = {e.resource_name: e.monthly_usd for e in estimator.estimate_changes(changes)}
+    assert got == {"nat": 32.85, "alb": 16.43, "gwlb": 9.12}
+
+
+def test_vscode_mirrors_price_lb_at_the_base_rate():
+    from finops import vscode_extension_prices
+
+    assert vscode_extension_prices.price_resource_py("aws_lb", {})["monthly"] == 16.43
+    assert vscode_extension_prices.price_resource_py(
+        "aws_lb", {"load_balancer_type": "gateway"})["monthly"] == 9.12
+    assert vscode_extension_prices.price_resource_py("aws_nat_gateway", {})["monthly"] == 32.85
+    if _PRICES_TS.exists():
+        ts = _ts_table("LB_HOURLY")
+        assert ts == {k: v for k, v in aws_prices.LB_HOURLY_BY_TYPE.items()}
+        assert "0.008 * HOURS_PER_MONTH" not in _PRICES_TS.read_text(encoding="utf-8")

@@ -78,6 +78,10 @@ const ELASTICACHE_HOURLY: Record<string, number> = {
 };
 
 // ── EBS ─────────────────────────────────────────────────────────────────────
+const LB_HOURLY: Record<string, number> = {
+  "application": 0.0225, "network": 0.0225, "gateway": 0.0125,
+};
+
 const EBS_PER_GB: Record<string, number> = {
   "gp2": 0.10, "gp3": 0.08, "io1": 0.125, "io2": 0.125,
   "st1": 0.045, "sc1": 0.025, "standard": 0.05,
@@ -163,8 +167,12 @@ export function priceResource(
       };
 
     case "aws_lb":
-    case "aws_alb":
-      return { monthly: Math.round(0.008 * HOURS_PER_MONTH * 100) / 100, detail: "$0.008/hr base + LCU" };
+    case "aws_alb": {
+      // $0.008 is the LCU-hour price; the hourly base is $0.0225 (ALB, NLB) or $0.0125 (GWLB).
+      const lbType = (attrs["load_balancer_type"] || "application").toLowerCase();
+      const h = LB_HOURLY[lbType] ?? LB_HOURLY["application"];
+      return { monthly: Math.round(h * HOURS_PER_MONTH * 100) / 100, detail: `$${h}/hr base + LCU` };
+    }
 
     case "aws_elb":
       return { monthly: Math.round(0.025 * HOURS_PER_MONTH * 100) / 100, detail: "$0.025/hr (classic ELB)" };

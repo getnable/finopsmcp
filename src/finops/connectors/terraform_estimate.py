@@ -30,7 +30,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..aws_prices import EC2_HOURLY, HOURS_PER_MONTH, RDS_HOURLY
+from ..aws_prices import (
+    CLB_HOURLY, EC2_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY, NAT_GATEWAY_PER_GB,
+    RDS_HOURLY, lb_hourly,
+)
 
 log = logging.getLogger(__name__)
 
@@ -59,10 +62,10 @@ _EBS_PER_GB_MONTH: dict[str, float] = {
 
 # Flat rates ($/hour)
 _FLAT_RATES: dict[str, float] = {
-    "aws_nat_gateway": 0.045,                    # + data processing
-    "aws_lb": 0.008,                             # ALB/NLB base (+ LCU)
-    "aws_alb": 0.008,
-    "aws_elb": 0.025,                            # classic ELB
+    "aws_nat_gateway": NAT_GATEWAY_HOURLY,       # + data processing
+    "aws_lb": lb_hourly("application"),          # ALB/NLB base (+ LCU); GWLB priced by type
+    "aws_alb": lb_hourly("application"),
+    "aws_elb": CLB_HOURLY,                       # classic ELB
     "aws_eks_cluster": 0.10,                     # control plane only
     "aws_elasticsearchdomain": 0.0,              # priced by node below
     "aws_opensearch_domain": 0.0,                # priced by node below
@@ -263,12 +266,15 @@ def _estimate_nat_gateway(rc: ResourceChange) -> CostLine | None:
     hourly  = _FLAT_RATES["aws_nat_gateway"]
     monthly = hourly * HOURS_PER_MONTH * _sign(rc)
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"${hourly}/hr base (+ $0.045/GB data processed)", "high")
+                    f"${hourly}/hr base (+ ${NAT_GATEWAY_PER_GB}/GB data processed)", "high")
 
 
 def _estimate_load_balancer(rc: ResourceChange) -> CostLine | None:
     rtype   = rc.type
-    hourly  = _FLAT_RATES.get(rtype, 0.008)
+    if rtype == "aws_elb":
+        hourly = CLB_HOURLY
+    else:
+        hourly = lb_hourly((rc.net_config or {}).get("load_balancer_type"))
     monthly = hourly * HOURS_PER_MONTH * _sign(rc)
     return CostLine(rc.address, rtype, _action_label(rc), monthly,
                     f"${hourly}/hr base (+ LCU/data charges)", "medium")
