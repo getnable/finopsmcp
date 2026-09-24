@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""What the bill looks like right now, from the one AWS source that is free.
+"""What the bill looks like right now, from the cheapest AWS source there is.
 
 THE GAP THIS FILLS
 
@@ -10,11 +10,14 @@ files up to 24 hours behind, and the current day is always partial. So a
 dashboard built only on the CUR is correct and slightly behind, and the first
 question anyone asks is "what about today".
 
-Cost Explorer answers that for $0.01 a question. CloudWatch answers it for
-nothing. AWS publishes AWS/Billing EstimatedCharges into CloudWatch metrics,
-and the first million CloudWatch API requests each month are free, which no
-other billing source offers. That is the entire reason this module exists: it
-closes the freshness gap without putting a meter on asking.
+Cost Explorer answers that for $0.01 a question. CloudWatch answers it for a
+small fraction of a cent. AWS publishes AWS/Billing EstimatedCharges into
+CloudWatch metrics, and the read here is one GetMetricData call for the total
+plus one metric per service. GetMetricData is billed at $0.01 per 1,000
+metrics with no free tier (AWS Price List, CW:GMD-Metrics); only the
+list_metrics discovery call falls in CloudWatch's free request tier. That is
+the reason this module exists: it closes the freshness gap for about a
+hundredth of what Cost Explorer charges per question.
 
 WHAT THIS IS NOT
 
@@ -83,7 +86,7 @@ class EstimatedCharges:
 
     @property
     def cost_usd(self) -> float:
-        """What asking cost, before the free tier. Almost always zero in practice."""
+        """What asking cost. GetMetricData has no free tier, so this is billed."""
         return (self.metrics_requested / 1000.0) * CLOUDWATCH_PER_1000_METRICS
 
     @property
@@ -168,8 +171,9 @@ def latest_estimated_charges(session: Any = None, *,
     """Month-to-date estimated charges, total and per service.
 
     One get_metric_data call carries up to 500 queries, so the whole read is two
-    API calls regardless of how many services an account uses. Both fall inside
-    CloudWatch's free tier at any plausible frequency.
+    API calls regardless of how many services an account uses. list_metrics is
+    a standard request inside CloudWatch's free tier; get_metric_data is not,
+    and bills $0.01 per 1,000 metrics requested (see cost_usd).
     """
     if (os.getenv("NABLE_NO_CLOUDWATCH_BILLING") or "").strip().lower() in ("1", "true", "yes"):
         return unavailable("CloudWatch billing metrics are disabled here "
@@ -262,7 +266,7 @@ def latest_estimated_charges(session: Any = None, *,
 def is_available(session: Any = None) -> bool:
     """Whether this account publishes billing metrics at all.
 
-    Used to decide whether the free path can cover the freshness gap, so it has
+    Used to decide whether the CloudWatch path can cover the freshness gap, so it has
     to be a real read rather than a guess at configuration.
     """
     return latest_estimated_charges(session, include_services=False).get(

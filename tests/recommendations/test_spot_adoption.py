@@ -152,6 +152,45 @@ def test_get_cpu_variance_returns_zero_on_exception() -> None:
     assert variance == 0.0
 
 
+def test_batched_cpu_variance_reads_every_next_token_page() -> None:
+    """14 days of hourly points for 500 instances is more than one
+    GetMetricData answer holds. The spread must be of the whole series, not of
+    whichever page came back first."""
+    import statistics
+    from datetime import datetime, timedelta, timezone
+
+    from finops.recommendations.spot_adoption import _batch_get_cpu_variance
+
+    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    cw = MagicMock()
+    cw.get_metric_data.side_effect = [
+        {"MetricDataResults": [{
+            "Id": "q0", "StatusCode": "PartialData",
+            "Timestamps": [t0, t0 + timedelta(hours=1)], "Values": [10.0, 10.0],
+        }], "NextToken": "page-2"},
+        {"MetricDataResults": [{
+            "Id": "q0", "StatusCode": "Complete",
+            "Timestamps": [t0 + timedelta(hours=2), t0 + timedelta(hours=3)],
+            "Values": [90.0, 90.0],
+        }]},
+    ]
+
+    got = _batch_get_cpu_variance(cw, ["i-abc123"], days=14)
+
+    assert cw.get_metric_data.call_count == 2
+    assert got == {"i-abc123": pytest.approx(statistics.stdev([10.0, 10.0, 90.0, 90.0]))}
+
+
+def test_batched_cpu_variance_is_zero_for_a_series_it_could_not_read() -> None:
+    from finops.recommendations.spot_adoption import _batch_get_cpu_variance
+
+    cw = MagicMock()
+    cw.get_metric_data.return_value = {"MetricDataResults": [
+        {"Id": "q0", "StatusCode": "Forbidden", "Timestamps": [], "Values": []},
+    ]}
+    assert _batch_get_cpu_variance(cw, ["i-abc123"], days=14) == {"i-abc123": 0.0}
+
+
 # ── _get_asg_members ──────────────────────────────────────────────────────────
 
 def test_get_asg_members_returns_instance_ids() -> None:
@@ -211,7 +250,7 @@ def _make_metric_data_response_empty(instance_ids: list[str]) -> dict:
     """Return a get_metric_data response with no data points per instance."""
     return {
         "MetricDataResults": [
-            {"Id": f"m{i}", "Timestamps": [], "Values": []}
+            {"Id": f"q{i}", "Timestamps": [], "Values": []}
             for i, _ in enumerate(instance_ids)
         ]
     }

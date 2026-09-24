@@ -46,7 +46,9 @@ SCAN_CHECKS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         ("logs.describe_log_groups", "logs:DescribeLogGroups")]),
     "s3": ("Buckets on a storage class their access pattern doesn't justify", [
         ("s3.list_buckets", "s3:ListAllMyBuckets"),
-        ("s3.get_bucket_lifecycle_configuration", "s3:GetLifecycleConfiguration")]),
+        ("s3.get_bucket_location", "s3:GetBucketLocation"),
+        ("s3.get_bucket_lifecycle_configuration", "s3:GetLifecycleConfiguration"),
+        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
     "s3_multipart": ("Incomplete multipart uploads billing silently", [
         ("s3.list_multipart_uploads", "s3:ListBucketMultipartUploads")]),
     "lambda": ("Functions provisioned well above their observed memory", [
@@ -54,7 +56,8 @@ SCAN_CHECKS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
     "load_balancer": ("Load balancers with no healthy targets", [
         ("elbv2.describe_load_balancers", "elasticloadbalancing:DescribeLoadBalancers"),
-        ("elbv2.describe_target_health", "elasticloadbalancing:DescribeTargetHealth")]),
+        ("elbv2.describe_target_health", "elasticloadbalancing:DescribeTargetHealth"),
+        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
     "ecr": ("Untagged images nothing has pulled in months", [
         ("ecr.describe_repositories", "ecr:DescribeRepositories"),
         ("ecr.describe_images", "ecr:DescribeImages")]),
@@ -63,6 +66,15 @@ SCAN_CHECKS: dict[str, tuple[str, list[tuple[str, str]]]] = {
         ("ecs.describe_services", "ecs:DescribeServices"),
         ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
 }
+
+# Only when a host opts in to batched CloudWatch reads
+# (FINOPS_CLOUDWATCH_GETMETRICDATA=1). AWS bills GetMetricData at $0.01 per
+# 1,000 metrics with no free tier, while GetMetricStatistics has 1,000,000 free
+# requests a month, so the default scan reads through GetMetricStatistics and
+# this is not in the default policy.
+GET_METRIC_DATA_ACTIONS: list[tuple[str, str]] = [
+    ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData"),
+]
 
 # Always needed, whatever checks run: identity, and which regions to sweep.
 BASE_ACTIONS: list[tuple[str, str]] = [
@@ -86,24 +98,36 @@ _MUTATING = ("create", "delete", "put", "update", "modify", "terminate",
              "purchase", "tag", "untag", "set")
 
 
-def iam_actions(include_spend: bool = False) -> list[str]:
-    """Every IAM action a scan needs, sorted and deduplicated."""
+def _get_metric_data_in_use(include_get_metric_data: bool | None) -> bool:
+    if include_get_metric_data is None:
+        from .analyzers.cloudwatch import get_metric_data_opted_in
+        return get_metric_data_opted_in()
+    return include_get_metric_data
+
+
+def iam_actions(include_spend: bool = False,
+                include_get_metric_data: bool | None = None) -> list[str]:
+    """Every IAM action a scan needs, sorted and deduplicated. GetMetricData is
+    in only when this host has opted in to it (None follows the env flag)."""
     actions = {a for _, a in BASE_ACTIONS}
     for _, calls in SCAN_CHECKS.values():
         actions.update(a for _, a in calls)
     if include_spend:
         actions.update(a for _, a in SPEND_ACTIONS)
+    if _get_metric_data_in_use(include_get_metric_data):
+        actions.update(a for _, a in GET_METRIC_DATA_ACTIONS)
     return sorted(actions)
 
 
-def iam_policy(include_spend: bool = False) -> dict:
+def iam_policy(include_spend: bool = False,
+               include_get_metric_data: bool | None = None) -> dict:
     """The least-privilege policy for exactly what the scanner calls."""
     return {
         "Version": "2012-10-17",
         "Statement": [{
             "Sid": "NableReadOnlyScan",
             "Effect": "Allow",
-            "Action": iam_actions(include_spend),
+            "Action": iam_actions(include_spend, include_get_metric_data),
             "Resource": "*",
         }],
     }
@@ -132,6 +156,14 @@ def render_dry_run(include_spend: bool = False) -> str:
     else:
         out += ["", "Cost Explorer is NOT called. `--spend` adds it, and each",
                 "request is billed to your account at $0.01."]
+    if _get_metric_data_in_use(None):
+        out += ["", "WITH FINOPS_CLOUDWATCH_GETMETRICDATA=1 (billed $0.01 per 1,000 metrics):"]
+        for call, action in GET_METRIC_DATA_ACTIONS:
+            out.append(f"  {call:<42} {action}")
+    else:
+        out += ["", "CloudWatch is read with GetMetricStatistics, inside its free",
+                "request tier. FINOPS_CLOUDWATCH_GETMETRICDATA=1 batches the reads",
+                "through GetMetricData instead, billed at $0.01 per 1,000 metrics."]
     out += [
         "",
         f"{len(iam_actions(include_spend))} IAM actions, every one a "

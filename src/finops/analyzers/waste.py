@@ -18,6 +18,7 @@ Monetary estimates use on-demand approximations — not exact billing figures.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -26,6 +27,12 @@ from ..aws_prices import (
     EBS_SNAPSHOT_PER_GB_MONTH,
     PUBLIC_IPV4_PER_MONTH,
     ebs_volume_monthly,
+)
+from .cloudwatch import (
+    MetricQuery,
+    fetch_metric_values,
+    fetch_metric_values_by_region,
+    s3_bucket_region,
 )
 
 log = logging.getLogger(__name__)
@@ -330,71 +337,68 @@ def check_nat_gateways(
     start = now - timedelta(days=lookback_days)
     period_seconds = 86400  # daily
 
-    for page in pages:
-        for nat in page.get("NatGateways", []):
-            nat_id = nat["NatGatewayId"]
-            vpc_id = nat.get("VpcId", "")
-            subnet_id = nat.get("SubnetId", "")
-            name_tag = next(
-                (t["Value"] for t in nat.get("Tags", []) if t["Key"] == "Name"), ""
-            )
+    nats = [nat for page in pages for nat in page.get("NatGateways", [])]
 
-            # Fetch BytesOutToDestination (egress through NAT GW)
-            try:
-                resp = cw_client.get_metric_statistics(
-                    Namespace="AWS/NATGateway",
-                    MetricName="BytesOutToDestination",
-                    Dimensions=[{"Name": "NatGatewayId", "Value": nat_id}],
-                    StartTime=start,
-                    EndTime=now,
-                    Period=period_seconds,
-                    Statistics=["Sum"],
-                )
-                datapoints = resp.get("Datapoints", [])
-            except Exception as exc:
-                # A failed read is not zero traffic. Collapsing it to 0.0 flagged
-                # every NAT gateway in the region as idle the moment CloudWatch
-                # was unreachable or the IAM permission was missing, and the
-                # trust envelope then stamped each one MEASURED/high. The sibling
-                # detectors (EBS at :673, EC2 CPU at :1018) already skip on this
-                # exact failure. BytesOutToDestination is the only evidence this
-                # detector has, so without it there is no finding to make.
-                log.debug("CW metrics failed for NAT GW %s: %s", nat_id, exc)
-                continue
+    # BytesOutToDestination (egress through NAT GW), one batched read for all
+    sums = fetch_metric_values(cw_client, [
+        MetricQuery(nat["NatGatewayId"], "AWS/NATGateway", "BytesOutToDestination",
+                    (("NatGatewayId", nat["NatGatewayId"]),), "Sum", period_seconds)
+        for nat in nats
+    ], start, now)
 
-            if not datapoints:
-                # The read SUCCEEDED and returned nothing, which is different from
-                # the read failing: the gateway is new, or genuinely carrying no
-                # traffic. That is a real observation.
-                avg_bytes_per_day = 0.0
-            else:
-                total_bytes = sum(dp.get("Sum", 0) for dp in datapoints)
-                avg_bytes_per_day = total_bytes / len(datapoints)
+    for nat in nats:
+        nat_id = nat["NatGatewayId"]
+        vpc_id = nat.get("VpcId", "")
+        subnet_id = nat.get("SubnetId", "")
+        name_tag = next(
+            (t["Value"] for t in nat.get("Tags", []) if t["Key"] == "Name"), ""
+        )
 
-            avg_gb_per_day = avg_bytes_per_day / (1024 ** 3)
+        datapoints = sums.get(nat_id)
+        if datapoints is None:
+            # A failed read is not zero traffic. Collapsing it to 0.0 flagged
+            # every NAT gateway in the region as idle the moment CloudWatch
+            # was unreachable or the IAM permission was missing, and the
+            # trust envelope then stamped each one MEASURED/high. The sibling
+            # detectors (EBS at :673, EC2 CPU at :1018) already skip on this
+            # exact failure. BytesOutToDestination is the only evidence this
+            # detector has, so without it there is no finding to make.
+            log.debug("CW metrics failed for NAT GW %s", nat_id)
+            continue
 
-            if avg_gb_per_day < low_throughput_gb_per_day:
-                # Savings: fixed hourly cost only (data processing cost is minimal at low volume)
-                monthly_savings = _NAT_GW_BASE_MONTHLY
-                findings.append({
-                    "resource_id": nat_id,
-                    "resource_type": "NAT Gateway",
-                    "waste_type": "idle_nat_gateway",
-                    "estimated_monthly_savings": round(monthly_savings, 2),
-                    "detail": (
-                        f"NAT Gateway {nat_id} in {subnet_id} (VPC: {vpc_id}) averaged "
-                        f"{avg_gb_per_day:.3f} GB/day over {lookback_days} days "
-                        f"(threshold: {low_throughput_gb_per_day} GB/day). "
-                        f"Fixed cost ~${_NAT_GW_BASE_MONTHLY:.2f}/mo regardless of usage. "
-                        f"Name: {name_tag or 'untagged'}. "
-                        f"Consider consolidating to fewer AZs or using VPC endpoints."
-                    ),
-                    "severity": _severity_from_savings(monthly_savings),
-                    "region": region,
-                    "account_id": None,
-                    "avg_gb_per_day": round(avg_gb_per_day, 4),
-                    "vpc_id": vpc_id,
-                })
+        if not datapoints:
+            # The read SUCCEEDED and returned nothing, which is different from
+            # the read failing: the gateway is new, or genuinely carrying no
+            # traffic. That is a real observation.
+            avg_bytes_per_day = 0.0
+        else:
+            total_bytes = sum(datapoints)
+            avg_bytes_per_day = total_bytes / len(datapoints)
+
+        avg_gb_per_day = avg_bytes_per_day / (1024 ** 3)
+
+        if avg_gb_per_day < low_throughput_gb_per_day:
+            # Savings: fixed hourly cost only (data processing cost is minimal at low volume)
+            monthly_savings = _NAT_GW_BASE_MONTHLY
+            findings.append({
+                "resource_id": nat_id,
+                "resource_type": "NAT Gateway",
+                "waste_type": "idle_nat_gateway",
+                "estimated_monthly_savings": round(monthly_savings, 2),
+                "detail": (
+                    f"NAT Gateway {nat_id} in {subnet_id} (VPC: {vpc_id}) averaged "
+                    f"{avg_gb_per_day:.3f} GB/day over {lookback_days} days "
+                    f"(threshold: {low_throughput_gb_per_day} GB/day). "
+                    f"Fixed cost ~${_NAT_GW_BASE_MONTHLY:.2f}/mo regardless of usage. "
+                    f"Name: {name_tag or 'untagged'}. "
+                    f"Consider consolidating to fewer AZs or using VPC endpoints."
+                ),
+                "severity": _severity_from_savings(monthly_savings),
+                "region": region,
+                "account_id": None,
+                "avg_gb_per_day": round(avg_gb_per_day, 4),
+                "vpc_id": vpc_id,
+            })
 
     return findings
 
@@ -658,10 +662,15 @@ def check_s3_storage_class(
     region: str = "unknown",
     min_size_gb: float = 10.0,
     lookback_days: int = 30,
+    cw_client_for_region: Callable[[str], Any] | None = None,
 ) -> list[dict]:
     """
     Detect S3 buckets storing data in STANDARD storage class with low access
     frequency where a cheaper storage class would actually save money.
+
+    S3 publishes a bucket's storage metrics in the bucket's own region, so with
+    cw_client_for_region each bucket is read from CloudWatch in its region and
+    reported there. Without it every bucket is read through cw_client.
 
     We do NOT blindly recommend Intelligent-Tiering — its $0.0025/1k objects/month
     monitoring fee can exceed the storage savings for buckets with many small objects
@@ -692,80 +701,79 @@ def check_s3_storage_class(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
-    for bucket in buckets:
-        bucket_name = bucket["Name"]
+    # Asking us-east-1 CloudWatch about a bucket in eu-west-1 is a successful
+    # read of nothing, which silently skipped every bucket outside it.
+    bucket_regions = {
+        bucket["Name"]: (s3_bucket_region(s3_client, bucket, region)
+                         if cw_client_for_region else region)
+        for bucket in buckets
+    }
 
-        # Get bucket size via CloudWatch
-        try:
-            size_resp = cw_client.get_metric_statistics(
-                Namespace="AWS/S3",
-                MetricName="BucketSizeBytes",
-                Dimensions=[
-                    {"Name": "BucketName", "Value": bucket_name},
-                    {"Name": "StorageType", "Value": "StandardStorage"},
-                ],
-                StartTime=start,
-                EndTime=now,
-                Period=86400,
-                Statistics=["Average"],
-            )
-            size_datapoints = size_resp.get("Datapoints", [])
-            if not size_datapoints:
-                continue
-            avg_bytes = max(dp.get("Average", 0) for dp in size_datapoints)
-            size_gb = avg_bytes / (1024 ** 3)
-        except Exception:
+    clients: dict[str, Any] = {region: cw_client}
+
+    def _cw_for(r: str) -> Any:
+        if r not in clients:
+            clients[r] = cw_client_for_region(r) if cw_client_for_region else cw_client
+        return clients[r]
+
+    def _read(names: list[str], metric: str, dim: tuple[str, str], stat: str) -> dict:
+        """One daily series per bucket, read in each bucket's own region."""
+        by_region: dict[str, list[MetricQuery]] = {}
+        for name in names:
+            by_region.setdefault(bucket_regions[name], []).append(
+                MetricQuery(name, "AWS/S3", metric, (("BucketName", name), dim), stat, 86400))
+        return fetch_metric_values_by_region(_cw_for, by_region, start, now)
+
+    # Three rounds, each only for the buckets the last one kept: the same reads
+    # the per-bucket loop made, so the free path spends no more requests.
+
+    # Bucket size via CloudWatch
+    size_gb_by_bucket: dict[str, float] = {}
+    sizes = _read([b["Name"] for b in buckets],
+                  "BucketSizeBytes", ("StorageType", "StandardStorage"), "Average")
+    for bucket in buckets:
+        size_datapoints = sizes.get(bucket["Name"])
+        if not size_datapoints:
             continue
+        avg_bytes = max(size_datapoints)
+        size_gb = avg_bytes / (1024 ** 3)
 
         if size_gb < min_size_gb:
             continue
+        size_gb_by_bucket[bucket["Name"]] = size_gb
 
-        # Check request frequency (GetRequests)
-        try:
-            req_resp = cw_client.get_metric_statistics(
-                Namespace="AWS/S3",
-                MetricName="GetRequests",
-                Dimensions=[
-                    {"Name": "BucketName", "Value": bucket_name},
-                    {"Name": "FilterId", "Value": "AllRequests"},
-                ],
-                StartTime=start,
-                EndTime=now,
-                Period=86400,
-                Statistics=["Sum"],
-            )
-            req_datapoints = req_resp.get("Datapoints", [])
-            total_gets = sum(dp.get("Sum", 0) for dp in req_datapoints)
-            avg_daily_gets = total_gets / lookback_days if lookback_days else 0
-        except Exception:
+    # Check request frequency (GetRequests)
+    daily_gets_by_bucket: dict[str, float] = {}
+    gets = _read(list(size_gb_by_bucket), "GetRequests", ("FilterId", "AllRequests"), "Sum")
+    for bucket_name in size_gb_by_bucket:
+        req_datapoints = gets.get(bucket_name)
+        if req_datapoints is None:
             # S3 request metrics require request metrics to be enabled on the bucket
             avg_daily_gets = None
+        else:
+            total_gets = sum(req_datapoints)
+            avg_daily_gets = total_gets / lookback_days if lookback_days else 0
 
         # Only flag confirmed low-access buckets — skip if we can't verify
         is_low_access = avg_daily_gets is not None and avg_daily_gets < 100
         if not is_low_access:
             continue
+        daily_gets_by_bucket[bucket_name] = avg_daily_gets
+
+    # Object count to compute Intelligent-Tiering monitoring cost
+    objects = _read(list(daily_gets_by_bucket),
+                    "NumberOfObjects", ("StorageType", "AllStorageTypes"), "Average")
+
+    for bucket in buckets:
+        bucket_name = bucket["Name"]
+        bucket_region = bucket_regions[bucket_name]
+        if bucket_name not in daily_gets_by_bucket:
+            continue
+        size_gb = size_gb_by_bucket[bucket_name]
+        avg_daily_gets = daily_gets_by_bucket[bucket_name]
+        object_count = max(objects.get(bucket_name) or [], default=0)
 
         monthly_standard_cost = size_gb * _S3_STANDARD_PER_GB_MONTH
-
-        # Get object count to compute Intelligent-Tiering monitoring cost
-        try:
-            obj_resp = cw_client.get_metric_statistics(
-                Namespace="AWS/S3",
-                MetricName="NumberOfObjects",
-                Dimensions=[
-                    {"Name": "BucketName", "Value": bucket_name},
-                    {"Name": "StorageType", "Value": "AllStorageTypes"},
-                ],
-                StartTime=start,
-                EndTime=now,
-                Period=86400,
-                Statistics=["Average"],
-            )
-            obj_datapoints = obj_resp.get("Datapoints", [])
-            object_count = max((dp.get("Average", 0) for dp in obj_datapoints), default=0)
-        except Exception:
-            object_count = 0
 
         # Intelligent-Tiering: monitoring fee = $0.0025 per 1,000 objects/mo
         it_monitoring_cost = (object_count / 1000) * 0.0025
@@ -817,7 +825,7 @@ def check_s3_storage_class(
             "recommendation": recommendation,
             "detail": detail,
             "severity": _severity_from_savings(net_savings),
-            "region": region,
+            "region": bucket_region,
             "account_id": None,
             "size_gb": round(size_gb, 2),
             "object_count": int(object_count) if object_count else None,
@@ -856,106 +864,101 @@ def check_lambda_memory(
         log.warning("list_functions failed (region=%s): %s", region, exc)
         return findings
 
-    for page in pages:
-        for fn in page.get("Functions", []):
-            fn_name = fn["FunctionName"]
-            configured_memory_mb = fn.get("MemorySize", 128)
-            runtime = fn.get("Runtime", "unknown")
-            code_size_mb = fn.get("CodeSize", 0) / (1024 * 1024)
+    fns = [fn for page in pages for fn in page.get("Functions", [])]
 
-            dims = [{"Name": "FunctionName", "Value": fn_name}]
+    # Each read is a single period spanning the whole window. Invocations (Sum)
+    # for every function, then Lambda Insights memory (Maximum) only for the
+    # ones that were not read as zero invocations: the same reads the
+    # per-function loop made.
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=lookback_days)
 
-            # Check invocations — zero invocations = potentially dead function
-            try:
-                inv_resp = cw_client.get_metric_statistics(
-                    Namespace="AWS/Lambda",
-                    MetricName="Invocations",
-                    Dimensions=dims,
-                    StartTime=datetime.now(timezone.utc) - timedelta(days=lookback_days),
-                    EndTime=datetime.now(timezone.utc),
-                    Period=86400 * lookback_days,
-                    Statistics=["Sum"],
-                )
-                inv_datapoints = inv_resp.get("Datapoints", [])
-                total_invocations = sum(dp.get("Sum", 0) for dp in inv_datapoints)
-            except Exception:
-                total_invocations = None
+    def _query(fn: dict, namespace: str, metric: str, stat: str) -> MetricQuery:
+        return MetricQuery(fn["FunctionName"], namespace, metric,
+                           (("FunctionName", fn["FunctionName"]),), stat, 86400 * lookback_days)
 
-            if total_invocations == 0:
+    invocations = fetch_metric_values(
+        cw_client, [_query(fn, "AWS/Lambda", "Invocations", "Sum") for fn in fns], start, now)
+    total_by_fn = {
+        name: None if values is None else sum(values) for name, values in invocations.items()
+    }
+    memory = fetch_metric_values(cw_client, [
+        _query(fn, "LambdaInsights", "memory_utilization", "Maximum")
+        for fn in fns if total_by_fn.get(fn["FunctionName"]) != 0
+    ], start, now)
+
+    for fn in fns:
+        fn_name = fn["FunctionName"]
+        configured_memory_mb = fn.get("MemorySize", 128)
+        runtime = fn.get("Runtime", "unknown")
+        code_size_mb = fn.get("CodeSize", 0) / (1024 * 1024)
+
+        # Check invocations — zero invocations = potentially dead function
+        total_invocations = total_by_fn.get(fn_name)
+
+        if total_invocations == 0:
+            findings.append({
+                "resource_id": fn_name,
+                "resource_type": "Lambda Function",
+                "waste_type": "lambda_zero_invocations",
+                "estimated_monthly_savings": _UNKNOWN_SAVINGS,
+                "detail": (
+                    f"Lambda function '{fn_name}' ({runtime}) had 0 invocations "
+                    f"over the past {lookback_days} days. "
+                    f"Code size: {code_size_mb:.1f} MB. "
+                    f"Consider deleting if no longer needed — stored code doesn't cost "
+                    f"much but orphaned functions indicate technical debt."
+                ),
+                "severity": "low",
+                "region": region,
+                "account_id": None,
+                "runtime": runtime,
+                "configured_memory_mb": configured_memory_mb,
+                "total_invocations": 0,
+            })
+            continue
+
+        # Try Lambda Insights for actual memory usage
+        max_memory_used_mb = None
+        mem_datapoints = memory.get(fn_name)
+        if mem_datapoints:
+            max_utilization_pct = max(mem_datapoints)
+            max_memory_used_mb = configured_memory_mb * (max_utilization_pct / 100.0)
+
+        if max_memory_used_mb is not None and max_memory_used_mb > 0:
+            # We have real data from Lambda Insights
+            ratio = configured_memory_mb / max_memory_used_mb
+            if ratio >= 2.0:
+                # Recommend sizing down to 1.5x actual usage (headroom)
+                recommended_mb = _next_lambda_memory_size(int(max_memory_used_mb * 1.5))
+                memory_savings_pct = (configured_memory_mb - recommended_mb) / configured_memory_mb
+
+                # Lambda pricing: $0.0000166667/GB-second
+                # Savings depend on invocation volume — use relative savings
+                estimated_savings = 10.0 * memory_savings_pct  # rough $10 base * savings %
+
                 findings.append({
                     "resource_id": fn_name,
                     "resource_type": "Lambda Function",
-                    "waste_type": "lambda_zero_invocations",
-                    "estimated_monthly_savings": _UNKNOWN_SAVINGS,
+                    "waste_type": "lambda_memory_overprovisioned",
+                    "estimated_monthly_savings": round(estimated_savings, 2),
                     "detail": (
-                        f"Lambda function '{fn_name}' ({runtime}) had 0 invocations "
-                        f"over the past {lookback_days} days. "
-                        f"Code size: {code_size_mb:.1f} MB. "
-                        f"Consider deleting if no longer needed — stored code doesn't cost "
-                        f"much but orphaned functions indicate technical debt."
+                        f"Lambda function '{fn_name}' is configured for {configured_memory_mb} MB "
+                        f"but p99 actual usage (via Lambda Insights) is {max_memory_used_mb:.0f} MB "
+                        f"({ratio:.1f}x over-provisioned). "
+                        f"Recommended: {recommended_mb} MB (1.5x headroom). "
+                        f"This reduces cost by ~{memory_savings_pct*100:.0f}%. "
+                        f"Test with AWS Lambda Power Tuning tool for optimal size."
                     ),
-                    "severity": "low",
+                    "severity": _severity_from_savings(estimated_savings),
                     "region": region,
                     "account_id": None,
                     "runtime": runtime,
                     "configured_memory_mb": configured_memory_mb,
-                    "total_invocations": 0,
+                    "max_used_memory_mb": round(max_memory_used_mb, 1),
+                    "recommended_memory_mb": recommended_mb,
+                    "total_invocations": total_invocations,
                 })
-                continue
-
-            # Try Lambda Insights for actual memory usage
-            max_memory_used_mb = None
-            try:
-                mem_resp = cw_client.get_metric_statistics(
-                    Namespace="LambdaInsights",
-                    MetricName="memory_utilization",
-                    Dimensions=dims,
-                    StartTime=datetime.now(timezone.utc) - timedelta(days=lookback_days),
-                    EndTime=datetime.now(timezone.utc),
-                    Period=86400 * lookback_days,
-                    Statistics=["Maximum"],
-                )
-                mem_datapoints = mem_resp.get("Datapoints", [])
-                if mem_datapoints:
-                    max_utilization_pct = max(dp.get("Maximum", 0) for dp in mem_datapoints)
-                    max_memory_used_mb = configured_memory_mb * (max_utilization_pct / 100.0)
-            except Exception:
-                pass
-
-            if max_memory_used_mb is not None and max_memory_used_mb > 0:
-                # We have real data from Lambda Insights
-                ratio = configured_memory_mb / max_memory_used_mb
-                if ratio >= 2.0:
-                    # Recommend sizing down to 1.5x actual usage (headroom)
-                    recommended_mb = _next_lambda_memory_size(int(max_memory_used_mb * 1.5))
-                    memory_savings_pct = (configured_memory_mb - recommended_mb) / configured_memory_mb
-
-                    # Lambda pricing: $0.0000166667/GB-second
-                    # Savings depend on invocation volume — use relative savings
-                    estimated_savings = 10.0 * memory_savings_pct  # rough $10 base * savings %
-
-                    findings.append({
-                        "resource_id": fn_name,
-                        "resource_type": "Lambda Function",
-                        "waste_type": "lambda_memory_overprovisioned",
-                        "estimated_monthly_savings": round(estimated_savings, 2),
-                        "detail": (
-                            f"Lambda function '{fn_name}' is configured for {configured_memory_mb} MB "
-                            f"but p99 actual usage (via Lambda Insights) is {max_memory_used_mb:.0f} MB "
-                            f"({ratio:.1f}x over-provisioned). "
-                            f"Recommended: {recommended_mb} MB (1.5x headroom). "
-                            f"This reduces cost by ~{memory_savings_pct*100:.0f}%. "
-                            f"Test with AWS Lambda Power Tuning tool for optimal size."
-                        ),
-                        "severity": _severity_from_savings(estimated_savings),
-                        "region": region,
-                        "account_id": None,
-                        "runtime": runtime,
-                        "configured_memory_mb": configured_memory_mb,
-                        "max_used_memory_mb": round(max_memory_used_mb, 1),
-                        "recommended_memory_mb": recommended_mb,
-                        "total_invocations": total_invocations,
-                    })
 
     return findings
 
@@ -1029,14 +1032,10 @@ def check_idle_ec2(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
+    candidates: list[dict] = []
     for page in pages:
         for reservation in page.get("Reservations", []):
             for inst in reservation.get("Instances", []):
-                inst_id = inst["InstanceId"]
-                inst_type = inst.get("InstanceType", "unknown")
-                name_tag = next(
-                    (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
-                )
                 launch_time = inst.get("LaunchTime")
 
                 # Skip instances launched less than lookback_days ago — not enough data
@@ -1045,106 +1044,108 @@ def check_idle_ec2(
                         launch_time = launch_time.replace(tzinfo=timezone.utc)
                     if (now - launch_time).days < lookback_days:
                         continue
+                candidates.append(inst)
 
-                # Fetch CPU utilization
-                try:
-                    resp = cw_client.get_metric_statistics(
-                        Namespace="AWS/EC2",
-                        MetricName="CPUUtilization",
-                        Dimensions=[{"Name": "InstanceId", "Value": inst_id}],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=3600,  # hourly
-                        Statistics=["Average"],
-                    )
-                    datapoints = resp.get("Datapoints", [])
-                except Exception as exc:
-                    log.debug("CW CPU metrics failed for %s: %s", inst_id, exc)
-                    continue
+    # CPU for every candidate, then NetworkOut only where CPU came back low:
+    # the same reads the per-resource loop made, so the free path spends no
+    # more requests and the opt-in path bills no more metrics than it must.
+    cpu_series = fetch_metric_values(cw_client, [
+        MetricQuery(inst["InstanceId"], "AWS/EC2", "CPUUtilization",
+                    (("InstanceId", inst["InstanceId"]),), "Average", 3600)  # hourly
+        for inst in candidates
+    ], start, now)
 
-                if not datapoints:
-                    continue
+    low_cpu: list[tuple[dict, float, float]] = []
+    for inst in candidates:
+        inst_id = inst["InstanceId"]
+        datapoints = cpu_series.get(inst_id)
+        if datapoints is None:
+            log.debug("CW CPU metrics failed for %s", inst_id)
+            continue
 
-                avg_cpu = sum(dp.get("Average", 0) for dp in datapoints) / len(datapoints)
-                max_cpu = max(dp.get("Average", 0) for dp in datapoints)
+        if not datapoints:
+            continue
 
-                if avg_cpu >= cpu_threshold_pct:
-                    continue
+        avg_cpu = sum(datapoints) / len(datapoints)
+        max_cpu = max(datapoints)
 
-                # Low CPU alone does not mean idle. Batch, network- or disk-bound
-                # workloads and warm-standby DR boxes run with low CPU but real
-                # I/O. Skip flagging when network shows sustained activity, so a
-                # working instance is not falsely called idle.
-                try:
-                    # Sum over a 1-hour Period gives total bytes per hour. Averaging
-                    # the per-collection-interval samples (Statistics=Average) would
-                    # return mean bytes-per-sample, ~12x too low against a per-hour
-                    # threshold, so the guard would never fire. Use Sum.
-                    net_resp = cw_client.get_metric_statistics(
-                        Namespace="AWS/EC2",
-                        MetricName="NetworkOut",
-                        Dimensions=[{"Name": "InstanceId", "Value": inst_id}],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=3600,
-                        Statistics=["Sum"],
-                    )
-                    net_dps = net_resp.get("Datapoints", [])
-                    avg_net_per_hr = (
-                        sum(dp.get("Sum", 0) for dp in net_dps) / len(net_dps)
-                        if net_dps else 0.0
-                    )
-                    net_unavailable = False
-                except Exception as exc:
-                    # 0.0 here does not mean "no traffic", it means "we could not
-                    # look", and the very next line is the guard that protects a
-                    # busy instance from being called idle. A failed read used to
-                    # DISABLE the check that would have saved it.
-                    #
-                    # An earlier pass kept the finding and merely downgraded its
-                    # provenance, reasoning that low CPU was measured and real.
-                    # That is true and it is not enough: this guard exists for
-                    # one specific false positive, the network-bound host that
-                    # sits at 2% CPU, and a Kafka broker is the textbook case.
-                    # Attaching a caveat still puts "stop, downsize, or
-                    # terminate" in front of someone for a machine that is
-                    # serving traffic. Unknown has to fail towards in-use.
-                    #
-                    # So: skip, the same way check_nat_gateways does on the same
-                    # failure. The cost is missing a genuinely idle instance
-                    # while CloudWatch is unreachable, which the next run catches.
-                    log.debug("CW NetworkOut failed for %s: %s", inst_id, exc)
-                    continue
+        if avg_cpu >= cpu_threshold_pct:
+            continue
+        low_cpu.append((inst, avg_cpu, max_cpu))
 
-                if avg_net_per_hr > _IDLE_NET_BYTES_PER_HR:
-                    continue  # network-active: treat as in-use, not idle
+    # Sum over a 1-hour Period gives total bytes per hour. Averaging the
+    # per-collection-interval samples (Statistics=Average) would return mean
+    # bytes-per-sample, ~12x too low against a per-hour threshold, so the guard
+    # would never fire. Use Sum.
+    net_series = fetch_metric_values(cw_client, [
+        MetricQuery(inst["InstanceId"], "AWS/EC2", "NetworkOut",
+                    (("InstanceId", inst["InstanceId"]),), "Sum", 3600)
+        for inst, _, _ in low_cpu
+    ], start, now)
 
-                vcpus = _vcpus_from_type(inst_type)
-                monthly_savings = vcpus * _APPROX_MONTHLY_PER_VCPU
+    for inst, avg_cpu, max_cpu in low_cpu:
+        inst_id = inst["InstanceId"]
+        inst_type = inst.get("InstanceType", "unknown")
+        name_tag = next(
+            (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
+        )
 
-                findings.append({
-                    "resource_id": inst_id,
-                    "resource_type": "EC2 Instance",
-                    "waste_type": "idle_ec2_low_cpu",
-                    "estimated_monthly_savings": round(monthly_savings, 2),
-                    "detail": (
-                        f"EC2 instance {inst_id} ({inst_type}) averaged {avg_cpu:.1f}% CPU "
-                        f"(peak: {max_cpu:.1f}%) over {lookback_days} days "
-                        f"— well below the {cpu_threshold_pct}% idle threshold. "
-                        f"Name: {name_tag or 'untagged'}. "
-                        f"Consider stopping, downsizing, or terminating. "
-                        f"Check Network/Disk metrics before terminating — "
-                        f"some instances are disk/network bound with low CPU."
-                    ),
-                    "severity": _severity_from_savings(monthly_savings),
-                    "region": region,
-                    "account_id": None,
-                    "instance_type": inst_type,
-                    "avg_cpu_pct": round(avg_cpu, 2),
-                    "max_cpu_pct": round(max_cpu, 2),
-                    "name": name_tag,
-                    "lookback_days": lookback_days,
-                })
+        # Low CPU alone does not mean idle. Batch, network- or disk-bound
+        # workloads and warm-standby DR boxes run with low CPU but real
+        # I/O. Skip flagging when network shows sustained activity, so a
+        # working instance is not falsely called idle.
+        net_dps = net_series.get(inst_id)
+        if net_dps is None:
+            # 0.0 here does not mean "no traffic", it means "we could not
+            # look", and the very next line is the guard that protects a
+            # busy instance from being called idle. A failed read used to
+            # DISABLE the check that would have saved it.
+            #
+            # An earlier pass kept the finding and merely downgraded its
+            # provenance, reasoning that low CPU was measured and real.
+            # That is true and it is not enough: this guard exists for
+            # one specific false positive, the network-bound host that
+            # sits at 2% CPU, and a Kafka broker is the textbook case.
+            # Attaching a caveat still puts "stop, downsize, or
+            # terminate" in front of someone for a machine that is
+            # serving traffic. Unknown has to fail towards in-use.
+            #
+            # So: skip, the same way check_nat_gateways does on the same
+            # failure. The cost is missing a genuinely idle instance
+            # while CloudWatch is unreachable, which the next run catches.
+            log.debug("CW NetworkOut failed for %s", inst_id)
+            continue
+        avg_net_per_hr = sum(net_dps) / len(net_dps) if net_dps else 0.0
+
+        if avg_net_per_hr > _IDLE_NET_BYTES_PER_HR:
+            continue  # network-active: treat as in-use, not idle
+
+        vcpus = _vcpus_from_type(inst_type)
+        monthly_savings = vcpus * _APPROX_MONTHLY_PER_VCPU
+
+        findings.append({
+            "resource_id": inst_id,
+            "resource_type": "EC2 Instance",
+            "waste_type": "idle_ec2_low_cpu",
+            "estimated_monthly_savings": round(monthly_savings, 2),
+            "detail": (
+                f"EC2 instance {inst_id} ({inst_type}) averaged {avg_cpu:.1f}% CPU "
+                f"(peak: {max_cpu:.1f}%) over {lookback_days} days "
+                f"— well below the {cpu_threshold_pct}% idle threshold. "
+                f"Name: {name_tag or 'untagged'}. "
+                f"Consider stopping, downsizing, or terminating. "
+                f"Check Network/Disk metrics before terminating — "
+                f"some instances are disk/network bound with low CPU."
+            ),
+            "severity": _severity_from_savings(monthly_savings),
+            "region": region,
+            "account_id": None,
+            "instance_type": inst_type,
+            "avg_cpu_pct": round(avg_cpu, 2),
+            "max_cpu_pct": round(max_cpu, 2),
+            "name": name_tag,
+            "lookback_days": lookback_days,
+        })
 
     return findings
 
@@ -1196,13 +1197,11 @@ def check_rds_rightsizing(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
+    candidates: list[dict] = []
     for page in pages:
         for db in page.get("DBInstances", []):
-            db_id = db["DBInstanceIdentifier"]
-            db_class = db.get("DBInstanceClass", "")
             engine = db.get("Engine", "")
             status = db.get("DBInstanceStatus", "")
-            multi_az = db.get("MultiAZ", False)
 
             if status != "available":
                 continue
@@ -1210,65 +1209,68 @@ def check_rds_rightsizing(
                 continue
             if db.get("ReadReplicaSourceDBInstanceIdentifier"):
                 continue
+            candidates.append(db)
 
-            try:
-                resp = cw_client.get_metric_statistics(
-                    Namespace="AWS/RDS",
-                    MetricName="CPUUtilization",
-                    Dimensions=[{"Name": "DBInstanceIdentifier", "Value": db_id}],
-                    StartTime=start,
-                    EndTime=now,
-                    Period=3600,
-                    Statistics=["Average"],
-                )
-                datapoints = resp.get("Datapoints", [])
-            except Exception as exc:
-                log.debug("CW CPU metrics failed for RDS %s: %s", db_id, exc)
-                continue
+    series = fetch_metric_values(cw_client, [
+        MetricQuery(db["DBInstanceIdentifier"], "AWS/RDS", "CPUUtilization",
+                    (("DBInstanceIdentifier", db["DBInstanceIdentifier"]),), "Average", 3600)
+        for db in candidates
+    ], start, now)
 
-            if not datapoints or len(datapoints) < 24:
-                continue
+    for db in candidates:
+        db_id = db["DBInstanceIdentifier"]
+        db_class = db.get("DBInstanceClass", "")
+        engine = db.get("Engine", "")
+        multi_az = db.get("MultiAZ", False)
 
-            avg_cpu = sum(dp.get("Average", 0) for dp in datapoints) / len(datapoints)
-            max_cpu = max(dp.get("Average", 0) for dp in datapoints)
+        datapoints = series.get(db_id)
+        if datapoints is None:
+            log.debug("CW CPU metrics failed for RDS %s", db_id)
+            continue
 
-            if avg_cpu >= cpu_threshold_pct:
-                continue
+        if not datapoints or len(datapoints) < 24:
+            continue
 
-            recommended_class = _RDS_DOWNSIZE.get(db_class)
-            if not recommended_class:
-                continue
+        avg_cpu = sum(datapoints) / len(datapoints)
+        max_cpu = max(datapoints)
 
-            current_hourly = _RDS_HOURLY.get(db_class, 0.0)
-            recommended_hourly = _RDS_HOURLY.get(recommended_class, 0.0)
-            factor = 2.0 if multi_az else 1.0
-            monthly_savings = (current_hourly - recommended_hourly) * 730 * factor
+        if avg_cpu >= cpu_threshold_pct:
+            continue
 
-            if monthly_savings <= 0:
-                continue
+        recommended_class = _RDS_DOWNSIZE.get(db_class)
+        if not recommended_class:
+            continue
 
-            findings.append({
-                "resource_id": db_id,
-                "resource_type": "RDS Instance",
-                "waste_type": "rds_overprovisioned",
-                "estimated_monthly_savings": round(monthly_savings, 2),
-                "detail": (
-                    f"RDS instance '{db_id}' ({db_class}, {engine}) averaged "
-                    f"{avg_cpu:.1f}% CPU (peak: {max_cpu:.1f}%) over {lookback_days} days. "
-                    f"Recommend downsizing to {recommended_class}. "
-                    f"{'Multi-AZ: savings doubled. ' if multi_az else ''}"
-                    f"Verify FreeStorageSpace and DatabaseConnections before resizing."
-                ),
-                "severity": _severity_from_savings(monthly_savings),
-                "region": region,
-                "account_id": None,
-                "current_class": db_class,
-                "recommended_class": recommended_class,
-                "engine": engine,
-                "multi_az": multi_az,
-                "avg_cpu_pct": round(avg_cpu, 2),
-                "max_cpu_pct": round(max_cpu, 2),
-            })
+        current_hourly = _RDS_HOURLY.get(db_class, 0.0)
+        recommended_hourly = _RDS_HOURLY.get(recommended_class, 0.0)
+        factor = 2.0 if multi_az else 1.0
+        monthly_savings = (current_hourly - recommended_hourly) * 730 * factor
+
+        if monthly_savings <= 0:
+            continue
+
+        findings.append({
+            "resource_id": db_id,
+            "resource_type": "RDS Instance",
+            "waste_type": "rds_overprovisioned",
+            "estimated_monthly_savings": round(monthly_savings, 2),
+            "detail": (
+                f"RDS instance '{db_id}' ({db_class}, {engine}) averaged "
+                f"{avg_cpu:.1f}% CPU (peak: {max_cpu:.1f}%) over {lookback_days} days. "
+                f"Recommend downsizing to {recommended_class}. "
+                f"{'Multi-AZ: savings doubled. ' if multi_az else ''}"
+                f"Verify FreeStorageSpace and DatabaseConnections before resizing."
+            ),
+            "severity": _severity_from_savings(monthly_savings),
+            "region": region,
+            "account_id": None,
+            "current_class": db_class,
+            "recommended_class": recommended_class,
+            "engine": engine,
+            "multi_az": multi_az,
+            "avg_cpu_pct": round(avg_cpu, 2),
+            "max_cpu_pct": round(max_cpu, 2),
+        })
 
     return findings
 
@@ -1296,78 +1298,74 @@ def check_rds_idle(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
-    for page in pages:
-        for db in page.get("DBInstances", []):
-            db_id = db["DBInstanceIdentifier"]
-            db_class = db.get("DBInstanceClass", "")
-            engine = db.get("Engine", "")
-            status = db.get("DBInstanceStatus", "")
+    candidates = [
+        db for page in pages for db in page.get("DBInstances", [])
+        if db.get("DBInstanceStatus", "") == "available"
+    ]
 
-            if status != "available":
-                continue
+    series = fetch_metric_values(cw_client, [
+        MetricQuery(db["DBInstanceIdentifier"], "AWS/RDS", "DatabaseConnections",
+                    (("DBInstanceIdentifier", db["DBInstanceIdentifier"]),), "Maximum", 86400)
+        for db in candidates
+    ], start, now)
 
-            try:
-                resp = cw_client.get_metric_statistics(
-                    Namespace="AWS/RDS",
-                    MetricName="DatabaseConnections",
-                    Dimensions=[{"Name": "DBInstanceIdentifier", "Value": db_id}],
-                    StartTime=start,
-                    EndTime=now,
-                    Period=86400,
-                    Statistics=["Maximum"],
-                )
-                datapoints = resp.get("Datapoints", [])
-            except Exception as exc:
-                log.debug("CW connections failed for RDS %s: %s", db_id, exc)
-                continue
+    for db in candidates:
+        db_id = db["DBInstanceIdentifier"]
+        db_class = db.get("DBInstanceClass", "")
+        engine = db.get("Engine", "")
 
-            if not datapoints or len(datapoints) < 7:
-                continue
+        datapoints = series.get(db_id)
+        if datapoints is None:
+            log.debug("CW connections failed for RDS %s", db_id)
+            continue
 
-            max_connections = max(dp.get("Maximum", 0) for dp in datapoints)
+        if not datapoints or len(datapoints) < 7:
+            continue
 
-            if max_connections >= connection_threshold:
-                continue
+        max_connections = max(datapoints)
 
-            multi_az = db.get("MultiAZ", False)
-            # Do NOT fabricate a price for an unknown class. The idle signal (no
-            # connections) is measured and real; the dollar is not, so an unknown
-            # class stays unpriced rather than emitting a made-up $0.10/hr, which
-            # on a large instance is off by 100x. A wrong number that looks real
-            # is worse than an honest "cost unknown".
-            current_hourly = _RDS_HOURLY.get(db_class)
-            if current_hourly is None:
-                monthly_cost = None
-                savings_val = None
-                cost_txt = (f"cost unknown ({db_class} is not in nable's price table; "
-                            f"check the real rate in Cost Explorer)")
-                severity = "unknown"
-            else:
-                monthly_cost = current_hourly * 730 * (2 if multi_az else 1)
-                savings_val = round(monthly_cost, 2)
-                cost_txt = f"~${monthly_cost:.0f}/mo"
-                severity = _severity_from_savings(monthly_cost)
+        if max_connections >= connection_threshold:
+            continue
 
-            findings.append({
-                "resource_id": db_id,
-                "resource_type": "RDS Instance",
-                "waste_type": "rds_idle_no_connections",
-                "estimated_monthly_savings": savings_val,
-                "unpriced": savings_val is None,
-                "detail": (
-                    f"RDS instance '{db_id}' ({db_class}, {engine}) had "
-                    f"max {max_connections:.0f} connections over the past {lookback_days} days. "
-                    f"Running cost: {cost_txt}. "
-                    f"Consider stopping (preserves data) or deleting with a final snapshot."
-                ),
-                "severity": severity,
-                "region": region,
-                "account_id": None,
-                "current_class": db_class,
-                "engine": engine,
-                "max_connections_14d": max_connections,
-                "estimated_monthly_cost": savings_val,
-            })
+        multi_az = db.get("MultiAZ", False)
+        # Do NOT fabricate a price for an unknown class. The idle signal (no
+        # connections) is measured and real; the dollar is not, so an unknown
+        # class stays unpriced rather than emitting a made-up $0.10/hr, which
+        # on a large instance is off by 100x. A wrong number that looks real
+        # is worse than an honest "cost unknown".
+        current_hourly = _RDS_HOURLY.get(db_class)
+        if current_hourly is None:
+            monthly_cost = None
+            savings_val = None
+            cost_txt = (f"cost unknown ({db_class} is not in nable's price table; "
+                        f"check the real rate in Cost Explorer)")
+            severity = "unknown"
+        else:
+            monthly_cost = current_hourly * 730 * (2 if multi_az else 1)
+            savings_val = round(monthly_cost, 2)
+            cost_txt = f"~${monthly_cost:.0f}/mo"
+            severity = _severity_from_savings(monthly_cost)
+
+        findings.append({
+            "resource_id": db_id,
+            "resource_type": "RDS Instance",
+            "waste_type": "rds_idle_no_connections",
+            "estimated_monthly_savings": savings_val,
+            "unpriced": savings_val is None,
+            "detail": (
+                f"RDS instance '{db_id}' ({db_class}, {engine}) had "
+                f"max {max_connections:.0f} connections over the past {lookback_days} days. "
+                f"Running cost: {cost_txt}. "
+                f"Consider stopping (preserves data) or deleting with a final snapshot."
+            ),
+            "severity": severity,
+            "region": region,
+            "account_id": None,
+            "current_class": db_class,
+            "engine": engine,
+            "max_connections_14d": max_connections,
+            "estimated_monthly_cost": savings_val,
+        })
 
     return findings
 
@@ -1425,114 +1423,24 @@ def check_idle_load_balancers(
     start = now - timedelta(days=lookback_days)
 
     # ALB and NLB via ELBv2
+    v2_lbs: list[dict] = []
     try:
         paginator = elbv2_client.get_paginator("describe_load_balancers")
         for page in paginator.paginate():
             for lb in page.get("LoadBalancers", []):
-                lb_name = lb.get("LoadBalancerName", "")
-                lb_arn = lb.get("LoadBalancerArn", "")
-                lb_type = lb.get("Type", "application")
-                state = lb.get("State", {}).get("Code", "")
-
-                if state != "active":
+                if lb.get("State", {}).get("Code", "") != "active":
                     continue
-
-                metric = "RequestCount" if lb_type == "application" else "ActiveFlowCount"
-                namespace = "AWS/ApplicationELB" if lb_type == "application" else "AWS/NetworkELB"
-                lb_dim_value = lb_arn.split("loadbalancer/")[-1] if "loadbalancer/" in lb_arn else lb_arn
-
-                try:
-                    resp = cw_client.get_metric_statistics(
-                        Namespace=namespace,
-                        MetricName=metric,
-                        Dimensions=[{"Name": "LoadBalancer", "Value": lb_dim_value}],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=86400,
-                        Statistics=["Sum"] if lb_type == "application" else ["Average"],
-                    )
-                    datapoints = resp.get("Datapoints", [])
-                except Exception as exc:
-                    log.debug("CW metrics failed for LB %s: %s", lb_name, exc)
-                    continue
-
-                if not datapoints:
-                    total_requests = 0.0
-                else:
-                    total_requests = sum(dp.get("Sum", dp.get("Average", 0)) for dp in datapoints)
-
-                if total_requests >= request_threshold:
-                    continue
-
-                monthly_cost = ALB_PER_MONTH if lb_type == "application" else NLB_PER_MONTH
-
-                findings.append({
-                    "resource_id": lb_arn,
-                    "resource_type": "ALB" if lb_type == "application" else "NLB",
-                    "waste_type": "idle_load_balancer",
-                    "estimated_monthly_savings": round(monthly_cost, 2),
-                    "detail": (
-                        f"Load balancer '{lb_name}' ({lb_type}) had {total_requests:.0f} "
-                        f"total requests over {lookback_days} days. "
-                        f"Running cost: ~${monthly_cost:.0f}/mo. "
-                        f"Check target groups before deleting."
-                    ),
-                    "severity": _severity_from_savings(monthly_cost),
-                    "region": region,
-                    "account_id": None,
-                    "lb_name": lb_name,
-                    "lb_type": lb_type,
-                    "total_requests_14d": total_requests,
-                })
+                v2_lbs.append(lb)
     except Exception as exc:
         log.warning("ELBv2 describe failed (region=%s): %s", region, exc)
         listing_errors.append(exc)
 
     # Classic ELBs
+    classic_lbs: list[dict] = []
     try:
         paginator = elb_client.get_paginator("describe_load_balancers")
         for page in paginator.paginate():
-            for lb in page.get("LoadBalancerDescriptions", []):
-                lb_name = lb.get("LoadBalancerName", "")
-
-                try:
-                    resp = cw_client.get_metric_statistics(
-                        Namespace="AWS/ELB",
-                        MetricName="RequestCount",
-                        Dimensions=[{"Name": "LoadBalancerName", "Value": lb_name}],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=86400,
-                        Statistics=["Sum"],
-                    )
-                    datapoints = resp.get("Datapoints", [])
-                except Exception:
-                    continue
-
-                total_requests = sum(dp.get("Sum", 0) for dp in datapoints)
-
-                if total_requests >= request_threshold:
-                    continue
-
-                monthly_cost = CLB_PER_MONTH
-
-                findings.append({
-                    "resource_id": lb_name,
-                    "resource_type": "Classic Load Balancer",
-                    "waste_type": "idle_load_balancer",
-                    "estimated_monthly_savings": round(monthly_cost, 2),
-                    "detail": (
-                        f"Classic ELB '{lb_name}' had {total_requests:.0f} requests over "
-                        f"{lookback_days} days. Running cost: ~${monthly_cost:.0f}/mo. "
-                        f"Migrate to ALB/NLB or delete if unused."
-                    ),
-                    "severity": _severity_from_savings(monthly_cost),
-                    "region": region,
-                    "account_id": None,
-                    "lb_name": lb_name,
-                    "lb_type": "classic",
-                    "total_requests_14d": total_requests,
-                })
+            classic_lbs.extend(page.get("LoadBalancerDescriptions", []))
     except Exception as exc:
         log.warning("Classic ELB describe failed (region=%s): %s", region, exc)
         listing_errors.append(exc)
@@ -1541,6 +1449,100 @@ def check_idle_load_balancers(
     # means this check looked at nothing, which must not come back as [].
     if len(listing_errors) == 2:
         raise listing_errors[0]
+
+    def _v2_dim(lb: dict) -> str:
+        lb_arn = lb.get("LoadBalancerArn", "")
+        return lb_arn.split("loadbalancer/")[-1] if "loadbalancer/" in lb_arn else lb_arn
+
+    queries = []
+    for i, lb in enumerate(v2_lbs):
+        application = lb.get("Type", "application") == "application"
+        queries.append(MetricQuery(
+            ("v2", i),
+            "AWS/ApplicationELB" if application else "AWS/NetworkELB",
+            "RequestCount" if application else "ActiveFlowCount",
+            (("LoadBalancer", _v2_dim(lb)),),
+            "Sum" if application else "Average",
+            86400,
+        ))
+    for i, lb in enumerate(classic_lbs):
+        queries.append(MetricQuery(
+            ("classic", i), "AWS/ELB", "RequestCount",
+            (("LoadBalancerName", lb.get("LoadBalancerName", "")),), "Sum", 86400,
+        ))
+    series = fetch_metric_values(cw_client, queries, start, now)
+
+    for i, lb in enumerate(v2_lbs):
+        lb_name = lb.get("LoadBalancerName", "")
+        lb_arn = lb.get("LoadBalancerArn", "")
+        lb_type = lb.get("Type", "application")
+
+        datapoints = series.get(("v2", i))
+        if datapoints is None:
+            log.debug("CW metrics failed for LB %s", lb_name)
+            continue
+
+        if not datapoints:
+            total_requests = 0.0
+        else:
+            total_requests = sum(datapoints)
+
+        if total_requests >= request_threshold:
+            continue
+
+        monthly_cost = ALB_PER_MONTH if lb_type == "application" else NLB_PER_MONTH
+
+        findings.append({
+            "resource_id": lb_arn,
+            "resource_type": "ALB" if lb_type == "application" else "NLB",
+            "waste_type": "idle_load_balancer",
+            "estimated_monthly_savings": round(monthly_cost, 2),
+            "detail": (
+                f"Load balancer '{lb_name}' ({lb_type}) had {total_requests:.0f} "
+                f"total requests over {lookback_days} days. "
+                f"Running cost: ~${monthly_cost:.0f}/mo. "
+                f"Check target groups before deleting."
+            ),
+            "severity": _severity_from_savings(monthly_cost),
+            "region": region,
+            "account_id": None,
+            "lb_name": lb_name,
+            "lb_type": lb_type,
+            "total_requests_14d": total_requests,
+        })
+
+    for i, lb in enumerate(classic_lbs):
+        lb_name = lb.get("LoadBalancerName", "")
+
+        datapoints = series.get(("classic", i))
+        if datapoints is None:
+            continue
+
+        total_requests = sum(datapoints)
+
+        if total_requests >= request_threshold:
+            continue
+
+        monthly_cost = CLB_PER_MONTH
+
+        findings.append({
+            "resource_id": lb_name,
+            "resource_type": "Classic Load Balancer",
+            "waste_type": "idle_load_balancer",
+            "estimated_monthly_savings": round(monthly_cost, 2),
+            "detail": (
+                f"Classic ELB '{lb_name}' had {total_requests:.0f} requests over "
+                f"{lookback_days} days. Running cost: ~${monthly_cost:.0f}/mo. "
+                f"Migrate to ALB/NLB or delete if unused."
+            ),
+            "severity": _severity_from_savings(monthly_cost),
+            "region": region,
+            "account_id": None,
+            "lb_name": lb_name,
+            "lb_type": "classic",
+            "total_requests_14d": total_requests,
+        })
+
     return findings
 
 
@@ -1835,6 +1837,7 @@ def check_ecs_task_rightsizing(
         # nothing, and an empty list reads upstream as "checked, all clean".
         raise
 
+    services: list[tuple[str, dict, int, int]] = []
     for cluster_arn in clusters:
         cluster_name = cluster_arn.split("/")[-1]
 
@@ -1854,7 +1857,6 @@ def check_ecs_task_rightsizing(
                 continue
 
             for svc in resp.get("services", []):
-                svc_name = svc.get("serviceName", "")
                 task_def_arn = svc.get("taskDefinition", "")
                 launch_type = svc.get("launchType", "")
 
@@ -1868,63 +1870,58 @@ def check_ecs_task_rightsizing(
                     allocated_memory_mb = int(td.get("memory", 512))
                 except Exception:
                     continue
+                services.append((cluster_name, svc, allocated_cpu, allocated_memory_mb))
 
-                try:
-                    cpu_resp = cw_client.get_metric_statistics(
-                        Namespace="ECS/ContainerInsights",
-                        MetricName="CpuUtilized",
-                        Dimensions=[
-                            {"Name": "ClusterName", "Value": cluster_name},
-                            {"Name": "ServiceName", "Value": svc_name},
-                        ],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=3600,
-                        Statistics=["Average"],
-                    )
-                    cpu_datapoints = cpu_resp.get("Datapoints", [])
-                except Exception:
-                    continue
+    series = fetch_metric_values(cw_client, [
+        MetricQuery(i, "ECS/ContainerInsights", "CpuUtilized",
+                    (("ClusterName", cluster_name), ("ServiceName", svc.get("serviceName", ""))),
+                    "Average", 3600)
+        for i, (cluster_name, svc, _, _) in enumerate(services)
+    ], start, now)
 
-                if not cpu_datapoints or len(cpu_datapoints) < 24:
-                    continue
+    for i, (cluster_name, svc, allocated_cpu, allocated_memory_mb) in enumerate(services):
+        svc_name = svc.get("serviceName", "")
 
-                avg_cpu_units = sum(dp.get("Average", 0) for dp in cpu_datapoints) / len(cpu_datapoints)
-                avg_cpu_pct = (avg_cpu_units / allocated_cpu) * 100 if allocated_cpu > 0 else 0
+        cpu_datapoints = series.get(i)
+        if not cpu_datapoints or len(cpu_datapoints) < 24:
+            continue
 
-                if avg_cpu_pct >= cpu_threshold_pct:
-                    continue
+        avg_cpu_units = sum(cpu_datapoints) / len(cpu_datapoints)
+        avg_cpu_pct = (avg_cpu_units / allocated_cpu) * 100 if allocated_cpu > 0 else 0
 
-                recommended_cpu = max(256, allocated_cpu // 2)
-                cpu_vcpu_saved = (allocated_cpu - recommended_cpu) / 1024
-                desired_count = svc.get("desiredCount", 1)
-                monthly_cpu_savings = cpu_vcpu_saved * _FARGATE_VCPU_HOURLY * 730 * desired_count
+        if avg_cpu_pct >= cpu_threshold_pct:
+            continue
 
-                if monthly_cpu_savings < 5:
-                    continue
+        recommended_cpu = max(256, allocated_cpu // 2)
+        cpu_vcpu_saved = (allocated_cpu - recommended_cpu) / 1024
+        desired_count = svc.get("desiredCount", 1)
+        monthly_cpu_savings = cpu_vcpu_saved * _FARGATE_VCPU_HOURLY * 730 * desired_count
 
-                findings.append({
-                    "resource_id": svc.get("serviceArn", svc_name),
-                    "resource_type": "ECS Fargate Service",
-                    "waste_type": "ecs_overprovisioned_cpu",
-                    "estimated_monthly_savings": round(monthly_cpu_savings, 2),
-                    "detail": (
-                        f"ECS Fargate service '{svc_name}' (cluster: {cluster_name}) "
-                        f"uses {avg_cpu_pct:.1f}% of its {allocated_cpu} CPU units on average. "
-                        f"Desired count: {desired_count}. "
-                        f"Recommend reducing CPU to {recommended_cpu} units. "
-                        f"Requires Container Insights enabled."
-                    ),
-                    "severity": _severity_from_savings(monthly_cpu_savings),
-                    "region": region,
-                    "account_id": None,
-                    "cluster": cluster_name,
-                    "service": svc_name,
-                    "allocated_cpu_units": allocated_cpu,
-                    "recommended_cpu_units": recommended_cpu,
-                    "allocated_memory_mb": allocated_memory_mb,
-                    "avg_cpu_pct": round(avg_cpu_pct, 2),
-                    "desired_count": desired_count,
-                })
+        if monthly_cpu_savings < 5:
+            continue
+
+        findings.append({
+            "resource_id": svc.get("serviceArn", svc_name),
+            "resource_type": "ECS Fargate Service",
+            "waste_type": "ecs_overprovisioned_cpu",
+            "estimated_monthly_savings": round(monthly_cpu_savings, 2),
+            "detail": (
+                f"ECS Fargate service '{svc_name}' (cluster: {cluster_name}) "
+                f"uses {avg_cpu_pct:.1f}% of its {allocated_cpu} CPU units on average. "
+                f"Desired count: {desired_count}. "
+                f"Recommend reducing CPU to {recommended_cpu} units. "
+                f"Requires Container Insights enabled."
+            ),
+            "severity": _severity_from_savings(monthly_cpu_savings),
+            "region": region,
+            "account_id": None,
+            "cluster": cluster_name,
+            "service": svc_name,
+            "allocated_cpu_units": allocated_cpu,
+            "recommended_cpu_units": recommended_cpu,
+            "allocated_memory_mb": allocated_memory_mb,
+            "avg_cpu_pct": round(avg_cpu_pct, 2),
+            "desired_count": desired_count,
+        })
 
     return findings
