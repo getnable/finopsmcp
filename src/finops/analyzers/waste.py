@@ -662,54 +662,40 @@ def check_s3_storage_class(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
+    # StandardStorage size, GET requests and object count for every bucket in
+    # one batched read, all daily over the lookback window.
+    series = fetch_metric_values(cw_client, [
+        MetricQuery((bucket["Name"], metric), "AWS/S3", metric,
+                    (("BucketName", bucket["Name"]), dim), stat, 86400)
+        for bucket in buckets
+        for metric, dim, stat in (
+            ("BucketSizeBytes", ("StorageType", "StandardStorage"), "Average"),
+            ("GetRequests", ("FilterId", "AllRequests"), "Sum"),
+            ("NumberOfObjects", ("StorageType", "AllStorageTypes"), "Average"),
+        )
+    ], start, now)
+
     for bucket in buckets:
         bucket_name = bucket["Name"]
 
-        # Get bucket size via CloudWatch
-        try:
-            size_resp = cw_client.get_metric_statistics(
-                Namespace="AWS/S3",
-                MetricName="BucketSizeBytes",
-                Dimensions=[
-                    {"Name": "BucketName", "Value": bucket_name},
-                    {"Name": "StorageType", "Value": "StandardStorage"},
-                ],
-                StartTime=start,
-                EndTime=now,
-                Period=86400,
-                Statistics=["Average"],
-            )
-            size_datapoints = size_resp.get("Datapoints", [])
-            if not size_datapoints:
-                continue
-            avg_bytes = max(dp.get("Average", 0) for dp in size_datapoints)
-            size_gb = avg_bytes / (1024 ** 3)
-        except Exception:
+        # Bucket size via CloudWatch
+        size_datapoints = series.get((bucket_name, "BucketSizeBytes"))
+        if not size_datapoints:
             continue
+        avg_bytes = max(size_datapoints)
+        size_gb = avg_bytes / (1024 ** 3)
 
         if size_gb < min_size_gb:
             continue
 
         # Check request frequency (GetRequests)
-        try:
-            req_resp = cw_client.get_metric_statistics(
-                Namespace="AWS/S3",
-                MetricName="GetRequests",
-                Dimensions=[
-                    {"Name": "BucketName", "Value": bucket_name},
-                    {"Name": "FilterId", "Value": "AllRequests"},
-                ],
-                StartTime=start,
-                EndTime=now,
-                Period=86400,
-                Statistics=["Sum"],
-            )
-            req_datapoints = req_resp.get("Datapoints", [])
-            total_gets = sum(dp.get("Sum", 0) for dp in req_datapoints)
-            avg_daily_gets = total_gets / lookback_days if lookback_days else 0
-        except Exception:
+        req_datapoints = series.get((bucket_name, "GetRequests"))
+        if req_datapoints is None:
             # S3 request metrics require request metrics to be enabled on the bucket
             avg_daily_gets = None
+        else:
+            total_gets = sum(req_datapoints)
+            avg_daily_gets = total_gets / lookback_days if lookback_days else 0
 
         # Only flag confirmed low-access buckets — skip if we can't verify
         is_low_access = avg_daily_gets is not None and avg_daily_gets < 100
@@ -718,24 +704,9 @@ def check_s3_storage_class(
 
         monthly_standard_cost = size_gb * _S3_STANDARD_PER_GB_MONTH
 
-        # Get object count to compute Intelligent-Tiering monitoring cost
-        try:
-            obj_resp = cw_client.get_metric_statistics(
-                Namespace="AWS/S3",
-                MetricName="NumberOfObjects",
-                Dimensions=[
-                    {"Name": "BucketName", "Value": bucket_name},
-                    {"Name": "StorageType", "Value": "AllStorageTypes"},
-                ],
-                StartTime=start,
-                EndTime=now,
-                Period=86400,
-                Statistics=["Average"],
-            )
-            obj_datapoints = obj_resp.get("Datapoints", [])
-            object_count = max((dp.get("Average", 0) for dp in obj_datapoints), default=0)
-        except Exception:
-            object_count = 0
+        # Object count to compute Intelligent-Tiering monitoring cost
+        obj_datapoints = series.get((bucket_name, "NumberOfObjects"))
+        object_count = max(obj_datapoints or [], default=0)
 
         # Intelligent-Tiering: monitoring fee = $0.0025 per 1,000 objects/mo
         it_monitoring_cost = (object_count / 1000) * 0.0025

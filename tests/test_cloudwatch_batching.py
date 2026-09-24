@@ -550,3 +550,53 @@ def test_ecs_services_are_read_in_one_call_per_500():
     assert not {"svc-0001", "svc-0002", "svc-0003"} & flagged
     # 512 units saved on 2 tasks: 0.5 vCPU * 0.04048 * 730 * 2.
     assert {f["estimated_monthly_savings"] for f in findings} == {29.55}
+
+
+_TB = 1000 * 1024 ** 3
+
+
+class _S3:
+    """list_buckets plus get_bucket_location, as the real client answers them:
+    LocationConstraint is None for us-east-1 and 'EU' for old eu-west-1 buckets."""
+
+    def __init__(self, locations: dict[str, str | None]):
+        self.locations = locations
+        self.location_calls = 0
+
+    def list_buckets(self):
+        return {"Buckets": [{"Name": n, "CreationDate": _T0} for n in self.locations]}
+
+    def get_bucket_location(self, Bucket):
+        self.location_calls += 1
+        return {"LocationConstraint": self.locations[Bucket]}
+
+
+def _s3_series(names, size=_TB, gets=1.0, objects=1000.0) -> dict:
+    out = {}
+    for n in names:
+        out[("BucketSizeBytes", n, "StandardStorage")] = [size] * 30
+        out[("GetRequests", n, "AllRequests")] = [gets] * 30
+        out[("NumberOfObjects", n, "AllStorageTypes")] = [objects] * 30
+    return out
+
+
+def test_s3_storage_class_reads_three_series_per_bucket_in_one_call_per_500():
+    from finops.analyzers import waste
+
+    names = [f"bucket-{i:04d}" for i in range(200)]
+    series = _s3_series(names)
+    series[("GetRequests", "bucket-0001", "AllRequests")] = [5000.0] * 30   # hot
+    series[("GetRequests", "bucket-0002", "AllRequests")] = "Forbidden"     # unread
+    series[("BucketSizeBytes", "bucket-0003", "StandardStorage")] = "InternalError"
+    cw = _Metrics(series)
+
+    findings = waste.check_s3_storage_class(
+        _S3({n: None for n in names}), cw, region="us-east-1")
+
+    assert cw.calls == math.ceil(200 * 3 / 500) == 2
+    flagged = {f["resource_id"] for f in findings}
+    assert len(flagged) == 197
+    assert not {"bucket-0001", "bucket-0002", "bucket-0003"} & flagged
+    # 1000 GB: $23.00 STANDARD - $12.50 IT storage - $0.0025 monitoring.
+    assert {f["estimated_monthly_savings"] for f in findings} == {10.5}
+    assert {f["recommendation"] for f in findings} == {"INTELLIGENT_TIERING"}
