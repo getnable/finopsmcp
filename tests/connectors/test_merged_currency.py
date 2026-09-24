@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
-from types import SimpleNamespace
 
 import pytest
 
@@ -92,13 +91,10 @@ def test_gcp_rollup_keeps_account_currency(monkeypatch):
 
 
 def _azure_result(currency: str):
-    """QueryResult shape: columns with names, rows in column order."""
+    """Query API rows as azure_detail returns them: dicts keyed by column name."""
     cols = ["Cost", "BillingMonth", "ServiceName", "ResourceLocation", "Currency"]
-    return SimpleNamespace(
-        columns=[SimpleNamespace(name=n) for n in cols],
-        rows=[[120.5, "2026-09-01T00:00:00", "Virtual Machines", "westeurope", currency]],
-        next_link=None,
-    )
+    return [dict(zip(cols, [120.5, "2026-09-01T00:00:00", "Virtual Machines",
+                            "westeurope", currency]))]
 
 
 def test_azure_reads_the_currency_column(monkeypatch):

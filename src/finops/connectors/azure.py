@@ -5,6 +5,7 @@ import os
 from datetime import date, datetime, timezone
 from typing import Any
 
+from . import azure_detail as _detail
 from .base import BaseConnector, CostEntry, CostSummary, combined_currency
 
 
@@ -56,65 +57,73 @@ class AzureConnector(BaseConnector):
     # ── internal helpers ────────────────────────────────────────────────────
 
     def _credential(self):
-        from azure.identity import ClientSecretCredential
+        """The service principal when it is fully configured, else the default chain.
 
-        return ClientSecretCredential(
-            tenant_id=os.environ["AZURE_TENANT_ID"],
-            client_id=os.environ["AZURE_CLIENT_ID"],
-            client_secret=os.environ["AZURE_CLIENT_SECRET"],
-        )
+        is_configured() accepts `az login`, managed identity and the rest of
+        DefaultAzureCredential, which set none of the service principal vars.
+        Building ClientSecretCredential unconditionally made every one of those
+        users fail on KeyError 'AZURE_TENANT_ID'.
+        """
+        sp = ("AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET")
+        if all(os.getenv(v) for v in sp):
+            from azure.identity import ClientSecretCredential
 
-    def _query_costs(self, subscription_id: str, start_date: date, end_date: date, granularity: str) -> dict:
-        from azure.mgmt.costmanagement import CostManagementClient
-        from azure.mgmt.costmanagement.models import (
-            QueryDataset,
-            QueryDefinition,
-            QueryGrouping,
-            QueryTimePeriod,
-        )
+            return ClientSecretCredential(
+                tenant_id=os.environ["AZURE_TENANT_ID"],
+                client_id=os.environ["AZURE_CLIENT_ID"],
+                client_secret=os.environ["AZURE_CLIENT_SECRET"],
+            )
+        from azure.identity import DefaultAzureCredential
 
-        client = CostManagementClient(self._credential())
-        scope = f"/subscriptions/{subscription_id}"
+        return DefaultAzureCredential(exclude_interactive_browser_credential=True)
 
-        query = QueryDefinition(
-            type="ActualCost",
-            timeframe="Custom",
-            time_period=QueryTimePeriod(
-                from_property=f"{start_date.isoformat()}T00:00:00Z",
-                to=f"{end_date.isoformat()}T00:00:00Z",
-            ),
-            dataset=QueryDataset(
-                granularity=granularity.capitalize(),
-                grouping=[
-                    QueryGrouping(type="Dimension", name="ServiceName"),
-                    QueryGrouping(type="Dimension", name="ResourceLocation"),
+    def _query_costs(self, subscription_id: str, start_date: date, end_date: date, granularity: str) -> list[dict]:
+        """Rows (dicts keyed by column name) from the Cost Management Query API.
+
+        REST through azure_detail rather than the SDK's query.usage, which
+        returns one page and has no way to follow nextLink: a subscription with
+        more rows than a page reported only the first. azure-identity mints the
+        token, as in ambient.py. The aggregation is explicit so the cost column
+        is named "Cost" rather than whatever the API defaults to.
+        """
+        token = self._credential().get_token("https://management.azure.com/.default").token
+        body = {
+            "type": "ActualCost",
+            "timeframe": "Custom",
+            "timePeriod": {
+                "from": f"{start_date.isoformat()}T00:00:00Z",
+                "to": f"{end_date.isoformat()}T00:00:00Z",
+            },
+            "dataset": {
+                "granularity": granularity.capitalize(),
+                "aggregation": {"totalCost": {"name": "Cost", "function": "Sum"}},
+                "grouping": [
+                    {"type": "Dimension", "name": "ServiceName"},
+                    {"type": "Dimension", "name": "ResourceLocation"},
                 ],
-            ),
-        )
+            },
+        }
+        return _detail._query_cost_management(token, subscription_id, body)
 
-        result = client.query.usage(scope=scope, parameters=query)
-        return result
-
-    def _parse_result(self, result, subscription_id: str, start_date: date, end_date: date) -> CostSummary:
+    def _parse_result(self, rows: list[dict], subscription_id: str, start_date: date, end_date: date) -> CostSummary:
         entries: list[CostEntry] = []
         by_service: dict[str, float] = {}
         by_region: dict[str, float] = {}
         total = 0.0
         currencies: set[str] = set()
 
-        columns = {col.name: i for i, col in enumerate(result.columns)}
-        cost_idx = columns.get("Cost", 0)
-        service_idx = columns.get("ServiceName", 2)
-        region_idx = columns.get("ResourceLocation", 3)
-        # The query returns the billing currency as its own column. A EUR or
-        # JPY subscription used to come out labelled USD.
-        currency_idx = columns.get("Currency")
-
-        for row in result.rows or []:
-            amount = float(row[cost_idx])
-            service = str(row[service_idx])
-            region = str(row[region_idx])
-            cur = str(row[currency_idx]) if currency_idx is not None and row[currency_idx] else ""
+        for row in rows:
+            # By name only. The positional fallback read column 0 as cost when
+            # the name did not match, which is a date or a service on some shapes.
+            if "Cost" not in row:
+                raise RuntimeError(
+                    f"Azure cost query returned no Cost column (columns: {sorted(row)})")
+            amount = float(row["Cost"] or 0)
+            service = str(row.get("ServiceName") or "")
+            region = str(row.get("ResourceLocation") or "")
+            # The query returns the billing currency as its own column. A EUR or
+            # JPY subscription used to come out labelled USD.
+            cur = str(row.get("Currency") or "")
             if cur:
                 currencies.add(cur)
             total += amount
