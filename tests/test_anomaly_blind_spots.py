@@ -135,3 +135,105 @@ def test_a_spike_in_one_region_is_not_hidden_by_the_other(fresh_db, monkeypatch)
     asyncio.run(jobs._detect_and_alert())
 
     assert [(a.direction, a.baseline_mean) for a in persisted] == [("spike", 1_000.0)]
+
+
+# ── a service that stops billing leaves no row to evaluate ───────────────────
+
+
+class _FakeConnector:
+    """Stands in for every connector _snapshot_all builds. Only the provider named
+    in `entries` is configured; the rest report not configured."""
+
+    entries: dict[str, list] = {}
+    _name = ""
+
+    def __init__(self, *a, **kw):
+        pass
+
+    async def is_configured(self):
+        return self._name in self.entries
+
+    async def get_costs(self, start, end, granularity="DAILY"):
+        from finops.connectors.base import CostSummary
+
+        rows = self.entries[self._name]
+        return CostSummary(provider=self._name, start_date=start, end_date=end,
+                           total_usd=sum(e.amount for e in rows), by_service={},
+                           by_account={}, by_region={}, entries=list(rows))
+
+
+def _patch_connectors(monkeypatch, entries: dict[str, list]) -> None:
+    import finops.connectors.aws as aws
+    import finops.connectors.azure as azure
+    import finops.connectors.gcp as gcp
+    import finops.connectors.saas.datadog as datadog
+    import finops.connectors.saas.mongodb_atlas as atlas
+    import finops.connectors.saas.twilio as twilio
+
+    _FakeConnector.entries = entries
+    for mod, cls, name in ((aws, "AWSConnector", "aws"), (azure, "AzureConnector", "azure"),
+                           (gcp, "GCPConnector", "gcp"),
+                           (datadog, "DatadogConnector", "datadog"),
+                           (atlas, "MongoDBAtlasConnector", "mongodb_atlas"),
+                           (twilio, "TwilioConnector", "twilio")):
+        monkeypatch.setattr(mod, cls, type(cls, (_FakeConnector,), {"_name": name}))
+
+
+def _entry(service: str, amount: float):
+    from finops.connectors.base import CostEntry
+
+    return CostEntry(provider="azure", account_id="sub-1", account_name="sub-1",
+                     service=service, region="eastus", amount=amount)
+
+
+def _yesterday_rows(service: str) -> list[float]:
+    from finops.storage.snapshots import get_history
+
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    return [r["amount_usd"] for r in get_history("azure", service, "sub-1", days=2)
+            if r["snapshot_date"] == yesterday]
+
+
+def test_a_service_that_stops_billing_is_flagged_as_a_drop(fresh_db, monkeypatch):
+    """Snapshots stored only amount > 0, so a service going from $4,000 a day to
+    nothing simply had no row for yesterday, and the detector, which walks
+    yesterday's rows, never looked at it."""
+    from finops.scheduler import jobs
+    from finops.storage.snapshots import store_snapshot
+
+    for n in range(2, 30):
+        d = date.today() - timedelta(days=n)
+        store_snapshot("azure", "SQL Database", "sub-1", "eastus", d, 4_000.0)
+        store_snapshot("azure", "Storage", "sub-1", "eastus", d, 50.0)
+    # Last billed three weeks ago: outside the recent window, so no zero row.
+    store_snapshot("azure", "Retired Service", "sub-1", "eastus",
+                   date.today() - timedelta(days=21), 900.0)
+    _patch_connectors(monkeypatch, {"azure": [_entry("Storage", 50.0)]})
+
+    asyncio.run(jobs._snapshot_all())
+
+    assert _yesterday_rows("SQL Database") == [0.0]
+    assert _yesterday_rows("Retired Service") == []
+
+    persisted: list = []
+    monkeypatch.setattr("finops.anomaly.detector.persist_anomaly",
+                        lambda a: persisted.append(a) or (len(persisted), False))
+    asyncio.run(jobs._detect_and_alert())
+    assert [(a.service, a.direction) for a in persisted] == [("SQL Database", "drop")]
+
+
+def test_an_empty_fetch_writes_no_zero_rows(fresh_db, monkeypatch):
+    """A provider that returned nothing at all for the day is far more likely to
+    be late than to have stopped every service at once. Zero-filling it would
+    page a drop for every service on the account."""
+    from finops.scheduler import jobs
+    from finops.storage.snapshots import store_snapshot
+
+    for n in range(2, 30):
+        store_snapshot("azure", "SQL Database", "sub-1", "eastus",
+                       date.today() - timedelta(days=n), 4_000.0)
+    _patch_connectors(monkeypatch, {"azure": []})
+
+    asyncio.run(jobs._snapshot_all())
+
+    assert _yesterday_rows("SQL Database") == []

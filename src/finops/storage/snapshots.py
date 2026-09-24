@@ -92,6 +92,44 @@ def replace_provider_day(provider: str, day: date, rows: list[dict]) -> int:
     return len(rows)
 
 
+def store_zero_for_stopped_series(
+    provider: str,
+    day: date,
+    seen: set[tuple[str, str, str]],
+    recent_days: int = 7,
+) -> int:
+    """Write a $0 row for each recently billed series missing from `day`'s fetch.
+
+    Snapshots store only what the provider billed, so a service that stopped
+    billing had no row for the day at all, and anomaly detection, which walks the
+    day's rows, never looked at it. A $4,000/day pipeline going to $0 is exactly
+    the drop worth catching. `seen` holds the (service, account_id, region) keys
+    the fetch did return. Bounded to series with spend in the last `recent_days`,
+    so a service retired months ago is not zero-filled forever. Returns rows written.
+    """
+    from datetime import timedelta
+    start = (day - timedelta(days=recent_days)).isoformat()
+    engine = get_engine()
+    with engine.connect() as conn:
+        recent = conn.execute(
+            select(cost_snapshots.c.service, cost_snapshots.c.account_id,
+                   cost_snapshots.c.region)
+            .where(
+                and_(
+                    cost_snapshots.c.provider == provider,
+                    cost_snapshots.c.snapshot_date >= start,
+                    cost_snapshots.c.snapshot_date < day.isoformat(),
+                    cost_snapshots.c.amount_usd > 0,
+                )
+            )
+            .distinct()
+        ).fetchall()
+    missing = {tuple(r) for r in recent} - seen
+    for service, account_id, region in sorted(missing):
+        store_snapshot(provider, service, account_id, region, day, 0.0)
+    return len(missing)
+
+
 def latest_captured_at() -> str | None:
     """ISO timestamp of the most recent cost snapshot, or None if there are none.
 
