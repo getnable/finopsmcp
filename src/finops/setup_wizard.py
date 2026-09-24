@@ -2288,6 +2288,8 @@ def _run_guard(parsed) -> None:
     against the human-authored policy in policy.py before the agent runs them.
     Advisory and propose-only: it asks or denies, it never executes.
     """
+    import json
+
     from . import guard
     from .welcome import _fire_telemetry, amber, bold, cyan, dim, green
 
@@ -2323,6 +2325,10 @@ def _run_guard(parsed) -> None:
         # install() overwrites, so we can count how many people the uv-cache-path
         # bug actually reached. There was no guard telemetry at all before this.
         was_broken = bool(guard.broken_hook_command(guard._settings_path(global_scope)))
+        # And was it the unpinned uvx form earlier releases wrote, the one that
+        # pulls the newest PyPI release on every agent tool call?
+        # install() pins it in place; this counts how many it reached.
+        was_unpinned = bool(guard.unpinned_hook_command(guard._settings_path(global_scope)))
         try:
             path = guard.install(global_scope)
         except OSError as e:
@@ -2338,18 +2344,25 @@ def _run_guard(parsed) -> None:
         # commands, no cost data. Honors NABLE_NO_TELEMETRY like everything else.
         _fire_telemetry("guard_installed", {
             "scope": scope,
-            "outcome": "repaired" if was_broken else ("already" if already else "new"),
+            "outcome": ("repaired" if was_broken else "repinned" if was_unpinned
+                        else ("already" if already else "new")),
             "hook_form": "uvx" if guard._hook_command() == guard._UVX_HOOK_CMD else "binary",
         })
         print()
-        if already:
+        if was_broken:
+            print(f"  {green('✓')} Guard repaired: the hooked command no longer existed → {path}")
+        elif was_unpinned:
+            print(f"  {green('✓')} Guard pinned to finops-mcp=={guard.__version__} → {path}")
+            print(dim("    It used to fetch the newest PyPI release on every agent command."))
+        elif already:
             print(f"  {green('✓')} Guard already installed in {path}")
         else:
             print(f"  {green('✓')} Agent cost guardrail installed → {path}")
         print()
         print(f"  {bold('What it does:')} before your agent runs an infra-mutating command")
         print("  (terraform destroy, kubectl delete, aws ec2 terminate-instances, a")
-        print("  commitment purchase), nable checks it against your policy:")
+        print("  commitment purchase), or makes the same change through a Terraform,")
+        print("  AWS or Kubernetes MCP tool, nable checks it against your policy:")
         print(f"    one-way door      → {cyan('ask')}   you confirm, with the reason shown")
         print(f"    not in allowlist  → {cyan('deny')}  the agent is told why")
         print("    reversible + safe → silent, zero friction")
@@ -2393,7 +2406,7 @@ def _run_guard(parsed) -> None:
         print()
         for cmd in samples:
             print(f"  $ {cmd}")
-            verdict = guard.gate_command(cmd)
+            verdict = guard.gate_command(cmd, harness="cli", record=False)
             if verdict is not None:
                 print(f"    {cyan(verdict['decision'])}   {verdict['reason']}")
             else:
@@ -2411,12 +2424,42 @@ def _run_guard(parsed) -> None:
         print()
         return
 
+    if action == "report":
+        _guard_report(parsed)
+        return
+
+    if action == "doctor":
+        _guard_doctor(parsed)
+        return
+
+    if action == "verify-log":
+        from . import guard_ledger
+        result = guard_ledger.verify()
+        if getattr(parsed, "guard_json", False):
+            print(json.dumps(result, indent=2))
+        else:
+            print()
+            if result["ok"]:
+                print(f"  {green('✓')} Decision ledger intact: {result['records']} record(s), "
+                      "every one chained to the last.")
+                print(dim(f"  Head: {result['head']}"))
+                print(dim("  A chain cannot show its tail being cut off. Keep the head somewhere"))
+                print(dim("  else (a ticket, a commit) and compare it next time."))
+            else:
+                print(f"  {amber('✗')} Decision ledger broken at line {result['broken_at']}: "
+                      f"{result['problem']}.")
+            print(dim(f"  {result['path']}"))
+            print()
+        if not result["ok"]:
+            raise SystemExit(1)
+        return
+
     if action == "check":
         cmd = getattr(parsed, "guard_command", "")
         if not cmd:
             print("\n  Usage: nable guard check --command \"terraform destroy ...\"\n")
             return
-        verdict = guard.gate_command(cmd)
+        verdict = guard.gate_command(cmd, harness="cli", record=False)
         print()
         if verdict is None:
             hit = guard.classify_command(cmd)
@@ -2431,7 +2474,9 @@ def _run_guard(parsed) -> None:
 
     # status (default)
     print()
-    stale = False
+    stale: list[bool] = []
+    unpinned: list[bool] = []
+    narrow: list[bool] = []
     for scope, is_global in (("project", False), ("global", True)):
         p = guard._settings_path(is_global)
         if guard.is_installed(p):
@@ -2441,8 +2486,14 @@ def _run_guard(parsed) -> None:
             # someone they are guarded at the moment they stopped being.
             broken = guard.broken_hook_command(p)
             if broken:
-                stale = True
+                stale.append(is_global)
                 state = amber("installed, but broken")
+            elif guard.unpinned_hook_command(p):
+                unpinned.append(is_global)
+                state = amber("installed, unpinned")
+            elif not guard.hook_surfaces(p)["mcp"]:
+                narrow.append(is_global)
+                state = amber("installed, Bash only")
             else:
                 state = green("installed")
         else:
@@ -2455,17 +2506,139 @@ def _run_guard(parsed) -> None:
         for line in other_agents:
             print(line)
     print()
+
+    def _fix(scopes: list[bool]) -> None:
+        # The repair has to name the scope that needs it: a bare
+        # `nable guard install` only ever touches this project's settings.
+        for is_global in scopes:
+            print(f"  {cyan('nable guard install' + (' --global' if is_global else ''))}")
+        print()
+
     if stale:
         print(f"  {amber('The hooked command no longer exists, so the guard is not running.')}")
         print(dim("  Claude Code skips a hook it cannot execute, silently. Re-run:"))
-        print(f"  {cyan('nable guard install')}")
-        print()
+        _fix(stale)
+    if unpinned:
+        print(f"  {amber('The hook fetches the newest finops-mcp from PyPI on every agent command.')}")
+        print(dim("  A security hook should run the release you chose. Pin it in place:"))
+        _fix(unpinned)
+    if narrow:
+        print(f"  {amber('MCP tool calls (Terraform, AWS, Kubernetes servers) are not checked.')}")
+        print(dim("  The hook only sees Bash. Widen it in place:"))
+        _fix(narrow)
     print(dim("  Try:      nable guard try                 (see it judge four commands)"))
+    print(dim("  Coverage: nable guard doctor              (what is and is not guarded here)"))
+    print(dim("  History:  nable guard report              (what it asked, blocked, let through)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
     print(dim("            nable guard install --all       (Claude Code, Cursor, Codex: each one found)"))
-    print(dim("  Other MCP agents get the same gate as a tool: the agent calls"))
+    print(dim("  In Claude Code the hook sees Bash and MCP tool calls; in Cursor and Codex, shell"))
+    print(dim("  commands. Other MCP agents get the same gate as a tool: the agent calls"))
     print(dim("  check_action_policy before acting."))
+    print()
+
+
+def _guard_doctor(parsed) -> None:
+    """`nable guard doctor`: what is covered on this machine, plainly."""
+    import json
+    import textwrap
+
+    from . import guard
+    from .welcome import amber, bold, cyan, dim, green
+
+    d = guard.doctor()
+    if getattr(parsed, "guard_json", False):
+        print(json.dumps(d, indent=2))
+        return
+    labels = {"claude-code": "Claude Code", "cursor": "Cursor", "codex": "Codex CLI"}
+    print()
+    print(f"  {bold('nable guard doctor')}   finops-mcp {d['version']}")
+    print()
+    for r in d["surfaces"]:
+        name = f"{labels.get(r['harness'], r['harness']):<12} {r['scope']:<8}"
+        if not r["installed"]:
+            state = dim("not installed")
+        elif not r.get("runs"):
+            state = amber("installed, but the hooked command no longer exists")
+        elif r["harness"] == "claude-code":
+            sees = " + ".join(s for s, on in (("Bash", r.get("bash")), ("MCP", r.get("mcp"))) if on)
+            pin = {"pinned": "pinned to this release", "other": "pinned to another release",
+                   "unpinned": amber("unpinned"), "binary": "installed binary"}[r["pin"]]
+            state = f"{green('installed')}, sees {sees or 'nothing'}, {pin}"
+        else:
+            state = green("installed")
+        print(f"  {name} {state}")
+        print(dim(f"  {'':<21} {r['path']}"))
+    print()
+    print(f"  {bold('Covered on this machine')}")
+    for c in d["covered"] or ["nothing yet"]:
+        print(f"    {green('✓') if d['covered'] else amber('✗')} {c}")
+    print(f"  {bold('Not covered')}")
+    for c in d["not_covered"]:
+        print(f"    - {c}")
+    led = d["ledger"]
+    print()
+    if led["ok"]:
+        print(f"  Decision ledger: {led['records']} record(s), chain intact")
+    else:
+        print(f"  Decision ledger: {amber('chain broken at line ' + str(led['broken_at']))}")
+    print(dim(f"  {led['path']}"))
+    print()
+    for line in textwrap.wrap(d["seatbelt"], 76):
+        print(f"  {line}")
+    print()
+    print(f"  {bold('Next')}")
+    for fix in d["recommendations"]:
+        print(f"    {cyan('->')} {fix}")
+    print()
+
+
+def _guard_report(parsed) -> None:
+    """`nable guard report`: what the guard saw, stopped and let through."""
+    import json
+
+    from . import guard_ledger
+    from .welcome import bold, cyan, dim
+
+    days = getattr(parsed, "guard_days", 30) or 30
+    summary = guard_ledger.summarize(days)
+    if getattr(parsed, "guard_json", False):
+        print(json.dumps(summary, indent=2))
+        return
+    d = summary["by_decision"]
+    print()
+    print(f"  {bold('nable guard')}: the last {days:g} days, {summary['records']} decision(s)")
+    print()
+    if not summary["records"]:
+        print(dim("  Nothing recorded yet. Verdicts land here as your agent runs infra commands."))
+        print(dim(f"  {summary['path']}"))
+        print()
+        return
+    print(f"    asked a human   {d.get('ask', 0):>6}")
+    print(f"    blocked         {d.get('deny', 0):>6}")
+    print(f"    warned          {d.get('warn', 0):>6}")
+    print(f"    allowed         {d.get('allow', 0):>6}")
+    if d.get("fail_open"):
+        errs = ", ".join(f"{k} x{v}" for k, v in summary["fail_open_errors"].items())
+        print(f"    failed open     {d['fail_open']:>6}   ({errs})")
+    print()
+    print(f"  Escalated or blocked: ~${summary['usd_per_month_escalated_or_blocked']:,.0f}/mo "
+          "at stake (list-price estimates)")
+    if summary["usd_order_ceilings_escalated_or_blocked"]:
+        print(f"  Commitment orders escalated or blocked: up to "
+              f"${summary['usd_order_ceilings_escalated_or_blocked']:,.0f}")
+    print(f"  Let through with a figure (allowed or warned): "
+          f"~${summary['usd_per_month_allowed_with_a_figure']:,.0f}/mo")
+    if summary["largest"]:
+        print()
+        print(f"  {bold('Largest escalations')}")
+        for r in summary["largest"]:
+            print(f"    {cyan(r['decision']):<5} ~${r['monthly_usd']:,.0f}/mo  {r['command']}")
+            print(dim(f"          {r['ts']}  {r['harness']}  {r['tool']}"))
+    print()
+    print(dim("  By harness: " + ", ".join(f"{k} {v}" for k, v in summary["by_harness"].items())))
+    print(dim("  Check the log was not edited: nable guard verify-log"))
+    print(dim(f"  {summary['path']}"))
     print()
 
 
@@ -2880,7 +3053,8 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
-    guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check", "try"],
+    guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
+                                                  "try", "report", "verify-log", "doctor"],
                          nargs="?", default="status")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
@@ -2892,6 +3066,10 @@ def main(args: list[str] | None = None) -> None:
                               "With 'hook': the payload format (detected when omitted)")
     guard_p.add_argument("--all", dest="guard_all", action="store_true",
                          help="With 'install'/'uninstall': every supported agent found on this machine")
+    guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
+                         help="With 'report': how many days of the decision ledger to summarise")
+    guard_p.add_argument("--json", dest="guard_json", action="store_true",
+                         help="With 'report', 'verify-log' or 'doctor': print JSON")
 
     iam_p = sub.add_parser("iam-template", help="Print the least-privilege IAM policy / CloudFormation nable needs")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")

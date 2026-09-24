@@ -182,7 +182,7 @@ def test_cursor_response_uses_only_documented_keys(monkeypatch):
 
 
 def test_cursor_mcp_calls_are_allowed_without_consulting_the_gate(monkeypatch):
-    monkeypatch.setattr(g, "gate_command", lambda c: pytest.fail("gate consulted for MCP"))
+    monkeypatch.setattr(g, "gate_command", lambda c, *a, **k: pytest.fail("gate consulted for MCP"))
     code, body, _ = _run(CURSOR_MCP)
     assert code == 0 and body == {"permission": "allow"}
 
@@ -258,7 +258,7 @@ def test_codex_never_gets_a_value_its_parser_rejects(verdict):
 
 @pytest.mark.parametrize("tool", ["apply_patch", "mcp__aws__delete_bucket", "spawn_agent"])
 def test_codex_other_tools_are_left_alone(tool, monkeypatch):
-    monkeypatch.setattr(g, "gate_command", lambda c: pytest.fail("gate consulted"))
+    monkeypatch.setattr(g, "gate_command", lambda c, *a, **k: pytest.fail("gate consulted"))
     code, body, _ = _run({**CODEX_BASH, "tool_name": tool, "tool_input": {"command": ASK_CMD}})
     assert code == 0 and body is None
 
@@ -298,7 +298,7 @@ def test_unreadable_input_allows_and_says_why(raw):
     (_with(CODEX_BASH, ASK_CMD), None),
 ])
 def test_a_gate_crash_allows_and_says_why(payload, expected, monkeypatch):
-    def boom(command):
+    def boom(command, *a, **k):
         raise RuntimeError("policy file exploded")
     monkeypatch.setattr(g, "gate_command", boom)
     code, body, err = _run(payload)
@@ -364,7 +364,9 @@ def test_cursor_install_writes_the_documented_shape(monkeypatch):
     assert entry["failClosed"] is False
     assert entry["timeout"] >= 30                 # cold uvx resolve
     # A desktop app may not see a terminal's PATH, so uvx is spelled out.
-    assert entry["command"] == f"{uvx} --from finops-mcp finops guard hook"
+    # Pinned to this release, like the Claude Code hook: an unpinned uvx
+    # fetches the newest PyPI release on every shell command.
+    assert entry["command"] == f"{uvx} --from finops-mcp=={g.__version__} finops guard hook"
 
 
 def test_codex_install_writes_the_documented_shape(monkeypatch):
@@ -754,3 +756,24 @@ def test_the_real_cli_installs_everywhere_it_should(tmp_path):
 
     r = _cli(["guard", "uninstall", "--harness", "codex", "--global"], home)
     assert r.returncode == 0 and "removed" in r.stdout
+
+
+# ── the ledger names the harness that asked ───────────────────────────────────
+
+@pytest.mark.parametrize("payload,harness", [(_with(CURSOR_SHELL, ASK_CMD), "cursor"),
+                                             (_with(CODEX_BASH, ASK_CMD), "codex")])
+def test_verdicts_are_attributed_to_their_harness(payload, harness, monkeypatch):
+    seen = {}
+    real = g.gate_command
+
+    def spy(command, *a, **k):
+        seen.update(k)
+        return real(command, *a, **k)
+    monkeypatch.setattr(g, "gate_command", spy)
+    _run(payload)
+    assert seen.get("harness") == harness
+
+
+def test_codex_shows_a_warn_without_stopping():
+    out = ga.codex_response({"decision": "warn", "reason": "nable guard: 99% of threshold"})
+    assert out == {"systemMessage": "nable guard: 99% of threshold"}

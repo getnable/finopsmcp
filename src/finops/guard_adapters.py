@@ -114,6 +114,10 @@ def codex_response(verdict: dict[str, Any] | None) -> dict[str, Any] | None:
     """
     decision, reason = _decision(verdict)
     if decision == "allow":
+        # "warn" (a priced change near the policy threshold) proceeds; Codex
+        # can show it without stopping, so it does.
+        if (verdict or {}).get("decision") == "warn" and verdict.get("reason"):
+            return {"systemMessage": str(verdict["reason"])}
         return None
     if decision == "ask" and (verdict or {}).get("action_type") == "ai_budget":
         return {"systemMessage": reason}
@@ -132,7 +136,8 @@ def _respond_cursor(payload: dict) -> dict[str, Any]:
     command = payload.get("command")
     if not isinstance(command, str) or not command.strip():
         return dict(_CURSOR_ALLOW)
-    return cursor_response(guard.gate_command(command))
+    return cursor_response(guard.gate_command(command, harness="cursor",
+                                              cwd=payload.get("cwd"), tool="shell"))
 
 
 def _respond_codex(payload: dict) -> dict[str, Any] | None:
@@ -144,7 +149,8 @@ def _respond_codex(payload: dict) -> dict[str, Any] | None:
         command = " ".join(str(c) for c in command)
     if not isinstance(command, str) or not command.strip():
         return None
-    return codex_response(guard.gate_command(command))
+    return codex_response(guard.gate_command(command, harness="codex",
+                                             cwd=payload.get("cwd"), tool="Bash"))
 
 
 _RESPONDERS = {"cursor": _respond_cursor, "codex": _respond_codex}
@@ -489,11 +495,12 @@ def install(harness: str, global_scope: bool = False) -> tuple[str, Path]:
     "new", "already", "repaired". Raises SystemExit when it refuses a file."""
     path = hooks_path(harness, global_scope)
     if harness == "claude":
-        # guard.install leaves an existing entry alone, dead or not, so this
-        # never reports "repaired" for Claude Code; the CLI flags a dead one.
+        # guard.install repairs a dead entry and re-pins an unpinned uvx one in
+        # place, so read both before it writes to report what it did.
         already = guard.is_installed(path)
+        fixed = bool(guard.broken_hook_command(path) or guard.unpinned_hook_command(path))
         guard.install(global_scope)
-        return ("already" if already else "new"), path
+        return ("repaired" if fixed else "already" if already else "new"), path
     doc = _load(path)
     outcome = _ADAPTERS[harness][0](doc, path, hook_command(harness))
     if outcome != "already":

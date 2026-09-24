@@ -37,6 +37,17 @@ def _no_real_keychain(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _guard_ledger_sandbox(monkeypatch, tmp_path_factory):
+    """Every guard verdict is appended to a decision ledger under the user's
+    data dir. A suite full of `terraform destroy` fixtures must not land in the
+    developer's real audit log, so each test writes to a throwaway one (tests
+    that read it back take its path from guard_ledger.ledger_path())."""
+    import finops.guard_ledger as ledger
+    monkeypatch.setattr(ledger, "_path_override",
+                        tmp_path_factory.mktemp("guard-ledger") / ledger.LEDGER_NAME)
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_service_creds(monkeypatch):
     """Unit tests must not inherit the developer's live service credentials.
 
