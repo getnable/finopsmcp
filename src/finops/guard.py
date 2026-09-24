@@ -236,7 +236,7 @@ def _stop_on_budget() -> bool:
         return False
 
 
-def check_budget_gate() -> dict[str, Any] | None:
+def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
     """Stop the agent when its own token spend is over the budget the user set.
 
     This runs BEFORE command classification and applies to every tool call, not
@@ -246,17 +246,22 @@ def check_budget_gate() -> dict[str, Any] | None:
     Reads the local Claude Code session logs (ai_budget), so it needs no cloud
     account, no API key and no network. Returns None when no budget is set, when
     usage is under it, or on ANY error: a guard that cannot read its own budget
-    must not take a position.
+    must not take a position. session_id is the hook payload's, so a per-session
+    cap is measured against the session making the call.
     """
     try:
         from .ai_budget import BUDGET_OVER, status
-        st = status()
+        st = status(session_id=session_id) if session_id else status()
         if st.get("verdict") != BUDGET_OVER:
             return None
         budget = st.get("budget") or {}
         pct = st.get("pct_of_budget")
         over = f"{pct * 100:.0f}% of" if isinstance(pct, (int, float)) else "over"
-        if st.get("verdict_basis") == "spend":
+        if st.get("verdict_basis") == "session":
+            sess = st.get("session") or {}
+            detail = (f"~${sess.get('usd_equivalent', 0):,.2f} estimated this session, "
+                      f"{over} its ${sess.get('cap_usd') or 0:,.2f} session cap")
+        elif st.get("verdict_basis") == "spend":
             detail = (f"~${st.get('est_usd_mtd_list_price', 0):,.0f} estimated this month, "
                       f"{over} your ${budget.get('spend_cap', 0):,.0f} cap")
         else:
@@ -280,7 +285,7 @@ def check_budget_gate() -> dict[str, Any] | None:
         return None  # unreadable budget is not a reason to block anyone
 
 
-def gate_command(command: str) -> dict[str, Any] | None:
+def gate_command(command: str, session_id: str | None = None) -> dict[str, Any] | None:
     """Evaluate a shell command against the policy gate.
 
     Returns None when the guard has no opinion (not infra, or an in-policy
@@ -288,7 +293,7 @@ def gate_command(command: str) -> dict[str, Any] | None:
     """
     # The AI budget stop comes first and is not conditioned on the command: an
     # agent burning through its budget should be stopped whatever it is doing.
-    budget_hit = check_budget_gate()
+    budget_hit = check_budget_gate(session_id)
     if budget_hit is not None:
         return budget_hit
 
@@ -373,7 +378,7 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
         command = (payload.get("tool_input") or {}).get("command") or ""
         if not command:
             return 0
-        verdict = gate_command(command)
+        verdict = gate_command(command, session_id=payload.get("session_id") or None)
         if not verdict:
             return 0
         json.dump({
