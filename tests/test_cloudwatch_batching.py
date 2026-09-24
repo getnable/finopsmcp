@@ -567,6 +567,40 @@ def test_lambda_batches_when_opted_in(opted_in):
     assert cw.data_calls == math.ceil(300 / 500) + math.ceil(299 / 500)
 
 
+def test_lambda_reads_ask_each_namespace_by_its_own_dimension_name():
+    """AWS/Lambda publishes Invocations under FunctionName. Lambda Insights
+    publishes memory_utilization in LambdaInsights under function_name. Asked by
+    the wrong name, CloudWatch answers a successful read of nothing, so the
+    memory finding never fired from real data. _Metrics matches on dimension
+    values only, which is how that went unseen; this fake answers a series only
+    when it is asked for by the name its publisher uses."""
+    from finops.analyzers import waste
+
+    published = {
+        ("AWS/Lambda", "Invocations", (("FunctionName", "fn-0000"),)): 10.0,
+        ("LambdaInsights", "memory_utilization", (("function_name", "fn-0000"),)): 20.0,
+    }
+
+    class _ByDimensionName:
+        def __init__(self):
+            self.asked: list[tuple] = []
+
+        def get_metric_statistics(self, **kw):
+            series = (kw["Namespace"], kw["MetricName"],
+                      tuple((d["Name"], d["Value"]) for d in kw["Dimensions"]))
+            self.asked.append(series)
+            value = published.get(series)
+            stat = kw["Statistics"][0]
+            return {"Datapoints": [] if value is None else [{"Timestamp": _T0, stat: value}]}
+
+    cw = _ByDimensionName()
+    findings = waste.check_lambda_memory(_Pages(_lambda_pages(1)), cw, region="us-east-1")
+
+    assert sorted(cw.asked) == sorted(published)
+    assert [(f["resource_id"], f["waste_type"]) for f in findings] == [
+        ("fn-0000", "lambda_memory_overprovisioned")]
+
+
 def _rds_pages(n: int, db_class: str = "db.m5.xlarge") -> list[dict]:
     return [{"DBInstances": [
         {"DBInstanceIdentifier": f"db-{i:04d}", "DBInstanceClass": db_class,
