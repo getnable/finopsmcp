@@ -461,7 +461,7 @@ _PRICES_TS = Path(__file__).resolve().parents[1] / "vscode-extension" / "src" / 
 
 def _ts_table(name: str) -> dict[str, float]:
     text = _PRICES_TS.read_text(encoding="utf-8")
-    body = re.search(rf"const {name}: Record<string, number> = \{{(.*?)\n\}};", text, re.S)
+    body = re.search(rf"const {name}: Record<string, number> = \{{(.*?)\n\}};", text, re.DOTALL)
     assert body, f"{name} not found in {_PRICES_TS}"
     return {k: float(v) for k, v in re.findall(r'"([^"]+)":\s*([0-9.]+)', body.group(1))}
 

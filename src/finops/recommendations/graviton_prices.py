@@ -13,8 +13,8 @@ from ..aws_prices import EC2_HOURLY, HOURS_PER_MONTH
 # Hourly on-demand price in USD (us-east-1, Linux, no RI/SP)
 HOURLY_PRICE: dict[str, float] = EC2_HOURLY
 
-__all__ = ["HOURLY_PRICE", "HOURS_PER_MONTH", "GRAVITON_SAVINGS_PCT"]
-
 # Fallback savings ratio when both types are in the price table but
 # the Graviton type is missing. Graviton is consistently ~20% cheaper.
 GRAVITON_SAVINGS_PCT: float = 0.20
+
+__all__ = ["GRAVITON_SAVINGS_PCT", "HOURLY_PRICE", "HOURS_PER_MONTH"]
