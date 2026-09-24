@@ -62,6 +62,11 @@ class EffectiveRateProfile:
         return public_price * self.effective_multiplier(service)
 
 
+# How long to wait on the Athena rate query before stopping it. The same budget
+# the CUR connector gives its own queries.
+_ATHENA_TIMEOUT_SECS = 30
+
+
 def _date_range(months_back: int = 3) -> tuple[str, str]:
     end = date.today().replace(day=1)
     start = (end - timedelta(days=months_back * 30)).replace(day=1)
@@ -165,7 +170,11 @@ def _detect_from_cur_athena(
     try:
         import boto3
         athena = boto3.client("athena")
-        s3_output = os.getenv("CUR_ATHENA_S3_OUTPUT", f"s3://aws-athena-query-results-{boto3.client('sts').get_caller_identity()['Account']}/finops-rates/")
+        # Only look the account up when it is needed: as a getenv default the
+        # STS call ran every time, set or not.
+        s3_output = os.getenv("CUR_ATHENA_S3_OUTPUT") or (
+            "s3://aws-athena-query-results-"
+            f"{boto3.client('sts').get_caller_identity()['Account']}/finops-rates/")
 
         query = f"""
         SELECT
@@ -191,34 +200,25 @@ def _detect_from_cur_athena(
         )
         execution_id = resp["QueryExecutionId"]
 
-        import time
-        for _ in range(30):
-            status_resp = athena.get_query_execution(QueryExecutionId=execution_id)
-            state = status_resp["QueryExecution"]["Status"]["State"]
-            if state == "SUCCEEDED":
-                break
-            if state in ("FAILED", "CANCELLED"):
-                log.warning("Athena CUR query failed: %s", state)
-                return None
-            time.sleep(2)
-        else:
-            return None
-
-        results_resp = athena.get_query_results(QueryExecutionId=execution_id)
-        rows = results_resp.get("ResultSet", {}).get("Rows", [])
-        if len(rows) <= 1:
+        # The CUR connector's wait: a wall-clock deadline, a stop on timeout
+        # and every results page. This loop used to count only its own sleeps
+        # (a slow status call stretched the wait well past a minute), left a
+        # timed-out query running and billing per byte, and read the first
+        # page of results only, so services past row 1,000 had no rate.
+        from ..connectors.cur import wait_for_query_rows
+        rows = wait_for_query_rows(athena, execution_id, timeout_secs=_ATHENA_TIMEOUT_SECS)
+        if not rows:
             return None
 
         per_service: dict[str, float] = {}
         total_public = 0.0
         total_actual = 0.0
 
-        for row in rows[1:]:  # skip header
-            cells = [c.get("VarCharValue", "0") for c in row["Data"]]
-            service = cells[0]
+        for row in rows:
+            service = row.get("service", "")
             try:
-                pub = float(cells[1])
-                actual = float(cells[2])
+                pub = float(row.get("avg_public_rate") or 0)
+                actual = float(row.get("avg_actual_rate") or 0)
                 if pub > 0 and actual >= 0:
                     discount = 1.0 - (actual / pub)
                     per_service[service] = round(discount, 4)

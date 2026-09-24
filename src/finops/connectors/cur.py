@@ -179,7 +179,16 @@ def _athena_query(sql: str, timeout_secs: int = 30) -> list[dict]:
 
     execution_id = start_resp["QueryExecutionId"]
     log.debug("Athena query submitted: %s", execution_id)
+    return wait_for_query_rows(athena, execution_id, timeout_secs)
 
+
+def wait_for_query_rows(athena: Any, execution_id: str, timeout_secs: int = 30) -> list[dict]:
+    """Wait for a started Athena query and return every result row as a dict.
+
+    Shared with anything else that runs its own Athena query (the rate
+    detector does), so the deadline, the stop on timeout and the pagination
+    are written once. Raises CURQueryError on failure or timeout.
+    """
     # Poll with exponential backoff. The deadline is wall-clock: counting only
     # the sleeps ignored the time each status call took, so a slow API let the
     # loop run several times longer than timeout_secs.
