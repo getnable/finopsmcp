@@ -28,6 +28,7 @@ Output contract (the design doc is the source of truth):
 
 Exit codes (pinned contract; argparse owns 2 for usage errors):
     0  success, including partial WITH results (banner shown)
+    1  an unexpected error (prints how to report it) or a bad --regions value
     3  credentials expired (prints the exact refresh command)
     4  permission denied everywhere (prints the IAM actions needed)
     5  partial with no usable results
@@ -721,8 +722,43 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
 
 # ── the command ────────────────────────────────────────────────────────────────
 
-def run(args) -> int:
+def _crash_site(exc: BaseException) -> str:
+    """Where inside nable an unexpected exception was raised, as
+    `analyzers/optimizer.py:612`. Relative to the package, so it carries no
+    home directory or username, and with the version it pins the statement."""
+    tb = exc.__traceback__
+    site = ""
+    while tb is not None:
+        fname = tb.tb_frame.f_code.co_filename.replace("\\", "/")
+        if "/finops/" in fname:
+            site = f"{fname.rsplit('/finops/', 1)[1]}:{tb.tb_lineno}"
+        tb = tb.tb_next
+    return site
+
+
+def main(args) -> int:
+    """`nable scan` as the CLI runs it. run() gives every failure it anticipates
+    its own exit code and fix line; this is for the ones it does not. Without it
+    an unexpected exception reached the user as a Python traceback, which the
+    module promises never happens, and the run sent cli_scan_started with no
+    terminal event, so it could not be counted as a failure at all."""
     t0 = time.time()
+    try:
+        return run(args, t0)
+    except Exception as exc:
+        if getattr(args, "debug", False):
+            raise
+        out = sys.stderr if getattr(args, "json", False) else sys.stdout
+        return _fail(out, 1, [
+            f"nable scan stopped on an unexpected error ({type(exc).__name__})",
+            "  this is most likely a bug in nable rather than your AWS setup",
+            "  `nable scan --debug` prints the full trace; please include it in a report:",
+            "  https://github.com/getnable/finopsmcp/issues/new",
+        ], "crash", t0, exc=exc, props={"crash_site": _crash_site(exc)})
+
+
+def run(args, t0: float | None = None) -> int:
+    t0 = time.time() if t0 is None else t0
     as_json = bool(getattr(args, "json", False))
 
     # --dry-run answers "what will this touch?" before anything is touched, and

@@ -719,3 +719,48 @@ def test_a_region_name_gets_a_fix_line(capsys):
     assert code == 1
     assert "not valid region name(s): virginia" in out
     assert "fix: region codes" in out
+
+
+# ── an error nobody anticipated ───────────────────────────────────────────────
+
+def _run_with_engine_error(args, exc):
+    events: list[tuple[str, dict]] = []
+    with (
+        patch.object(cli_scan, "_emit", side_effect=lambda e, p, wait: events.append((e, p))),
+        patch("boto3.Session", return_value=_session()),
+        patch("finops.analyzers.optimizer._discover_regions", return_value=["us-east-1"]),
+        patch("finops.analyzers.optimizer.run_deep_audit", side_effect=exc),
+    ):
+        code = cli_scan.main(args)
+    return code, events
+
+
+def test_unexpected_error_is_reported_not_stack_traced(capsys):
+    """An exception no branch anticipated used to escape as a traceback and
+    leave cli_scan_started with no terminal event, uncountable as a failure."""
+    code, events = _run_with_engine_error(_args(), KeyError("/Users/someone/secret"))
+    out = capsys.readouterr()
+    assert code == 1
+    assert "Traceback" not in out.out + out.err
+    assert "unexpected error (KeyError)" in out.out
+    assert "nable scan --debug" in out.out and "issues/new" in out.out
+    assert [e for e, _ in events] == ["cli_scan_started", "cli_scan_failed"]
+    props = events[-1][1]
+    assert props["error_class"] == "crash" and props["exc_type"] == "KeyError"
+    # Where it failed, relative to the package: no home directory, no message.
+    assert props["crash_site"].startswith("cli_scan.py:") or "/" in props["crash_site"]
+    assert "secret" not in json.dumps(props) and "/Users" not in json.dumps(props)
+
+
+def test_debug_still_shows_the_trace():
+    with pytest.raises(KeyError):
+        _run_with_engine_error(_args(debug=True), KeyError("boom"))
+
+
+def test_the_cli_runs_the_scan_through_the_guard():
+    import inspect
+
+    from finops import setup_wizard
+    src = inspect.getsource(setup_wizard)
+    assert "from .cli_scan import main as _scan_main" in src
+    assert "from .cli_scan import run as _scan_run" not in src

@@ -3138,8 +3138,8 @@ def main(args: list[str] | None = None) -> None:
         )
         return
     elif parsed.cmd == "scan":
-        from .cli_scan import run as _scan_run
-        raise SystemExit(_scan_run(parsed))
+        from .cli_scan import main as _scan_main
+        raise SystemExit(_scan_main(parsed))
     elif parsed.cmd == "brief":
         from .cli_brief import run as _brief_run
         raise SystemExit(_brief_run(parsed))
