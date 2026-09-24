@@ -214,6 +214,8 @@ def store_attributed_cost(
 ) -> None:
     engine = get_engine()
     with engine.begin() as conn:
+        # Environment is part of the key: teamA/prod and teamA/dev on the same
+        # day are two rows, and leaving it out let the second replace the first.
         conn.execute(
             attributed_costs.delete().where(
                 and_(
@@ -221,6 +223,7 @@ def store_attributed_cost(
                     attributed_costs.c.service == service,
                     attributed_costs.c.account_id == account_id,
                     attributed_costs.c.team == team,
+                    attributed_costs.c.environment == environment,
                     attributed_costs.c.snapshot_date == snapshot_date.isoformat(),
                 )
             )
