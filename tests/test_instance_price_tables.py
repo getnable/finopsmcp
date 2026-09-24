@@ -180,3 +180,69 @@ def test_a_type_one_copy_lacked_is_priced_rather_than_zero():
     from finops.recommendations import spot_adoption
 
     assert spot_adoption._monthly_ondemand_cost("m5.8xlarge") == round(1.536 * 730, 2)
+
+
+# ── analyzers/waste.py RDS ───────────────────────────────────────────────────
+
+def _idle_rds(db_class: str):
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock
+
+    rds = MagicMock()
+    rds.get_paginator.return_value.paginate.return_value = [{"DBInstances": [{
+        "DBInstanceIdentifier": "db-1", "DBInstanceClass": db_class,
+        "Engine": "postgres", "DBInstanceStatus": "available", "MultiAZ": False,
+    }]}]
+    cw = MagicMock()
+    now = datetime.now(timezone.utc)
+    cw.get_metric_statistics.return_value = {"Datapoints": [
+        {"Average": 2.0, "Maximum": 0.0, "Timestamp": now} for _ in range(48)
+    ]}
+    return rds, cw
+
+
+@pytest.mark.parametrize("db_class,hourly", [
+    ("db.t3.medium", 0.068), ("db.t3.2xlarge", 0.544), ("db.m5.xlarge", 0.342),
+    ("db.r5.large", 0.24),
+])
+def test_idle_rds_quotes_what_it_used_to(db_class, hourly):
+    from finops.analyzers import waste
+
+    assert waste._RDS_HOURLY is RDS_HOURLY
+    [f] = waste.check_rds_idle(*_idle_rds(db_class), region="us-east-1")
+    assert f["estimated_monthly_savings"] == round(hourly * 730, 2)
+
+
+@pytest.mark.parametrize("db_class,was,now", [
+    # waste.py's copy against terraform_estimate and the VS Code extension,
+    # which agreed with each other. See test_rds_graviton_rates_match_terraform.
+    ("db.m6g.large", 0.162, 0.152),
+    ("db.m6g.xlarge", 0.325, 0.304),
+    ("db.m6g.2xlarge", 0.650, 0.608),
+    ("db.r6g.large", 0.228, 0.192),
+    ("db.r6g.xlarge", 0.456, 0.384),
+])
+def test_idle_rds_graviton_uses_the_corrected_rate(db_class, was, now):
+    from finops.analyzers import waste
+
+    [f] = waste.check_rds_idle(*_idle_rds(db_class), region="us-east-1")
+    assert f["estimated_monthly_savings"] == round(now * 730, 2)
+    assert f["estimated_monthly_savings"] != round(was * 730, 2)
+
+
+def test_rds_rightsizing_saving_for_a_graviton_downsize_uses_the_corrected_rate():
+    # db.r6g.xlarge to db.r6g.large: (0.384 - 0.192) * 730 = 140.16, where the
+    # old local copy said (0.456 - 0.228) * 730 = 166.44.
+    from finops.analyzers import waste
+
+    [f] = waste.check_rds_rightsizing(*_idle_rds("db.r6g.xlarge"), region="us-east-1")
+    assert f["estimated_monthly_savings"] == 140.16
+
+
+def test_rds_graviton_rates_match_terraform():
+    # The whole Graviton column, as terraform_estimate had it before the merge.
+    graviton = {k: v for k, v in RDS_HOURLY.items() if k.startswith(("db.m6g.", "db.r6g."))}
+    assert graviton == {
+        "db.m6g.large": 0.152, "db.m6g.xlarge": 0.304, "db.m6g.2xlarge": 0.608,
+        "db.r6g.large": 0.192, "db.r6g.xlarge": 0.384, "db.r6g.2xlarge": 0.768,
+    }

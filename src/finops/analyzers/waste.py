@@ -1122,17 +1122,11 @@ def check_idle_ec2(
 
 # ── RDS rightsizing ───────────────────────────────────────────────────────────
 
-# Approximate on-demand hourly prices per instance class (us-east-1, single-AZ).
-# Used only when Cost Explorer data is unavailable.
-_RDS_HOURLY: dict[str, float] = {
-    "db.t3.micro": 0.017, "db.t3.small": 0.034, "db.t3.medium": 0.068,
-    "db.t3.large": 0.136, "db.t3.xlarge": 0.272, "db.t3.2xlarge": 0.544,
-    "db.m5.large": 0.171, "db.m5.xlarge": 0.342, "db.m5.2xlarge": 0.684,
-    "db.m5.4xlarge": 1.368,
-    "db.m6g.large": 0.162, "db.m6g.xlarge": 0.325, "db.m6g.2xlarge": 0.650,
-    "db.r5.large": 0.240, "db.r5.xlarge": 0.480, "db.r5.2xlarge": 0.960,
-    "db.r6g.large": 0.228, "db.r6g.xlarge": 0.456,
-}
+# On-demand hourly prices per instance class (us-east-1, single-AZ). Used only
+# when Cost Explorer data is unavailable. Single-sourced in aws_prices: this was
+# a local copy that read 0.162 and 0.228 for db.m6g.large and db.r6g.large while
+# the Terraform estimator quoted 0.152 and 0.192 for the same instances.
+from ..aws_prices import RDS_HOURLY as _RDS_HOURLY
 
 _RDS_DOWNSIZE: dict[str, str] = {
     "db.t3.medium": "db.t3.small",    "db.t3.large": "db.t3.medium",
