@@ -2312,6 +2312,10 @@ def _run_guard(parsed) -> None:
         # install() overwrites, so we can count how many people the uv-cache-path
         # bug actually reached. There was no guard telemetry at all before this.
         was_broken = bool(guard.broken_hook_command(guard._settings_path(global_scope)))
+        # And was it the unpinned uvx form earlier releases wrote, the one that
+        # pulls the newest PyPI release on every agent tool call?
+        # install() pins it in place; this counts how many it reached.
+        was_unpinned = bool(guard.unpinned_hook_command(guard._settings_path(global_scope)))
         try:
             path = guard.install(global_scope)
         except OSError as e:
@@ -2327,11 +2331,17 @@ def _run_guard(parsed) -> None:
         # commands, no cost data. Honors NABLE_NO_TELEMETRY like everything else.
         _fire_telemetry("guard_installed", {
             "scope": scope,
-            "outcome": "repaired" if was_broken else ("already" if already else "new"),
+            "outcome": ("repaired" if was_broken else "repinned" if was_unpinned
+                        else ("already" if already else "new")),
             "hook_form": "uvx" if guard._hook_command() == guard._UVX_HOOK_CMD else "binary",
         })
         print()
-        if already:
+        if was_broken:
+            print(f"  {green('✓')} Guard repaired: the hooked command no longer existed → {path}")
+        elif was_unpinned:
+            print(f"  {green('✓')} Guard pinned to finops-mcp=={guard.__version__} → {path}")
+            print(dim("    It used to fetch the newest PyPI release on every agent command."))
+        elif already:
             print(f"  {green('✓')} Guard already installed in {path}")
         else:
             print(f"  {green('✓')} Agent cost guardrail installed → {path}")
@@ -2420,7 +2430,8 @@ def _run_guard(parsed) -> None:
 
     # status (default)
     print()
-    stale = False
+    stale: list[bool] = []
+    unpinned: list[bool] = []
     for scope, is_global in (("project", False), ("global", True)):
         p = guard._settings_path(is_global)
         if guard.is_installed(p):
@@ -2430,19 +2441,33 @@ def _run_guard(parsed) -> None:
             # someone they are guarded at the moment they stopped being.
             broken = guard.broken_hook_command(p)
             if broken:
-                stale = True
+                stale.append(is_global)
                 state = amber("installed, but broken")
+            elif guard.unpinned_hook_command(p):
+                unpinned.append(is_global)
+                state = amber("installed, unpinned")
             else:
                 state = green("installed")
         else:
             state = dim("not installed")
         print(f"  {scope:<8} {state}   {dim(str(p))}")
     print()
+
+    def _fix(scopes: list[bool]) -> None:
+        # The repair has to name the scope that needs it: a bare
+        # `nable guard install` only ever touches this project's settings.
+        for is_global in scopes:
+            print(f"  {cyan('nable guard install' + (' --global' if is_global else ''))}")
+        print()
+
     if stale:
         print(f"  {amber('The hooked command no longer exists, so the guard is not running.')}")
         print(dim("  Claude Code skips a hook it cannot execute, silently. Re-run:"))
-        print(f"  {cyan('nable guard install')}")
-        print()
+        _fix(stale)
+    if unpinned:
+        print(f"  {amber('The hook fetches the newest finops-mcp from PyPI on every agent command.')}")
+        print(dim("  A security hook should run the release you chose. Pin it in place:"))
+        _fix(unpinned)
     print(dim("  Try:      nable guard try                 (see it judge four commands)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))

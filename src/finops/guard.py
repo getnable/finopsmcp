@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .policy import GATE_ALLOW, GATE_BLOCK, GATE_ESCALATE, evaluate_action_gate
 
 # ── Command classification ─────────────────────────────────────────────────────
@@ -395,8 +396,34 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
 _HOOK_MARKER = "guard hook"
 _HOOK_CMD = "finops guard hook"
 
+# The uvx form is pinned to the release that wrote it. Unpinned, `uvx --from
+# finops-mcp` resolves the newest PyPI release on every agent tool call, so
+# whoever can publish to that project name can run code on every machine with
+# the guard installed, on the next Bash call, with no install step and no
+# prompt. A security hook is the last thing that should auto-update from the
+# network. Pinned, the code that runs is the code the user chose to install;
+# `nable guard install` from a newer release moves the pin forward in place.
+_PYPI_NAME = "finops-mcp"
+_UVX_HOOK_CMD = f"uvx --from {_PYPI_NAME}=={__version__} finops guard hook"
+_UVX_FROM_RE = re.compile(r"^uvx\s+--from[=\s]+['\"]?([^\s'\"]+)")
 
-_UVX_HOOK_CMD = "uvx --from finops-mcp finops guard hook"
+
+def hook_pin(cmd: str) -> str | None:
+    """How a hook command is pinned.
+
+    "pinned"   the uvx form at exactly this release
+    "other"    the uvx form pinned to some other release
+    "unpinned" the uvx form with no version (resolves latest on every call)
+    None       not the uvx form: a binary path is fixed by whatever was
+               installed there, so it has no pin to speak of
+    """
+    m = _UVX_FROM_RE.match(cmd.strip())
+    if not m:
+        return None
+    spec = m.group(1)
+    if not re.fullmatch(rf"{re.escape(_PYPI_NAME)}==[A-Za-z0-9.+!-]+", spec):
+        return "unpinned"
+    return "pinned" if spec == f"{_PYPI_NAME}=={__version__}" else "other"
 
 
 def _is_ephemeral(path: str) -> bool:
@@ -436,7 +463,8 @@ def _hook_command() -> str:
     A uvx user has no `finops` on PATH afterwards, so a bare command would fail
     with command-not-found on every Bash call. A persistent binary is best. An
     ephemeral one is worse than none, because it fails open and lies about it, so
-    those fall through to the uvx form, which re-resolves at run time."""
+    those fall through to the uvx form, which re-resolves at run time (to this
+    release, see _UVX_HOOK_CMD, not to whatever PyPI has that day)."""
     import shutil
     found = shutil.which("finops")
     if found and not _is_ephemeral(found):
@@ -528,7 +556,8 @@ def _command_runs(cmd: str) -> bool:
     """Does the program a hook command names still exist?"""
     import shutil
     exe = cmd[1:cmd.index('"', 1)] if cmd.startswith('"') else cmd.split()[0]
-    # The uvx form re-resolves at run time; it is healthy if uv exists.
+    # The uvx form resolves its (pinned) release at run time; it is healthy if
+    # uv exists.
     probe = "uvx" if exe == "uvx" else exe
     return bool(shutil.which(probe) or Path(probe).exists())
 
@@ -561,9 +590,25 @@ def broken_hook_command(path: Path) -> str | None:
     return None
 
 
+def unpinned_hook_command(path: Path) -> str | None:
+    """Our installed hook command, when it is the uvx form with no version.
+
+    That form resolves the newest release from PyPI on every agent tool call
+    (see _UVX_HOOK_CMD). Returns None when the hook is absent, pinned, or a
+    binary path."""
+    for _entry, h in _read_our_hooks(path):
+        if hook_pin(h["command"]) == "unpinned":
+            return h["command"]
+    return None
+
+
 def _stale(cmd: str) -> bool:
-    """Should install() rewrite this existing hook command in place?"""
-    return not _command_runs(cmd)
+    """Should install() rewrite this existing hook command in place?
+
+    Dead, unpinned, or pinned to a release other than the one running the
+    install. Re-running install is an explicit choice of release, so the pin
+    follows it; a healthy binary-path hook is never touched."""
+    return not _command_runs(cmd) or hook_pin(cmd) in ("unpinned", "other")
 
 
 def install(global_scope: bool = False) -> Path:
