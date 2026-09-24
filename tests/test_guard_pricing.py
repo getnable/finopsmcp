@@ -181,3 +181,119 @@ def test_kubectl_scale_never_gets_an_invented_figure(cmd):
     is in the command. No figure, and the reversible default stays silent."""
     assert g.estimate_command_monthly_cost(cmd) is None
     assert g.gate_command(cmd) is None
+
+
+# ── a saved Terraform plan is priced before it is applied ─────────────────────
+
+import json as _json  # noqa: E402
+import os  # noqa: E402
+import stat  # noqa: E402
+
+P4D_PLAN = {"resource_changes": [
+    {"address": "aws_instance.train", "type": "aws_instance",
+     "change": {"actions": ["create"], "before": None,
+                "after": {"instance_type": "p4d.24xlarge"}}},
+    {"address": "aws_iam_role.r", "type": "aws_iam_role",
+     "change": {"actions": ["create"], "before": None, "after": {}}},
+]}
+
+
+@pytest.fixture
+def fake_tf(tmp_path, monkeypatch):
+    """A `terraform` on PATH that prints a canned plan for `show -json` and
+    records how it was called. Never the real binary: no provider runs here."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    calls = tmp_path / "calls.log"
+    plan_json = tmp_path / "plan.json"
+    plan_json.write_text(_json.dumps(P4D_PLAN))
+    for name in ("terraform", "tofu"):
+        exe = bindir / name
+        exe.write_text("#!/bin/sh\n"
+                       f'echo "$(pwd) $*" >> "{calls}"\n'
+                       '[ -n "$FAKE_TF_SLEEP" ] && sleep "$FAKE_TF_SLEEP"\n'
+                       f'cat "{plan_json}"\n')
+        exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.delenv("TERRAFORM_BIN", raising=False)
+    monkeypatch.delenv("FAKE_TF_SLEEP", raising=False)
+    work = tmp_path / "infra"
+    work.mkdir()
+    return {"work": work, "calls": calls}
+
+
+def test_a_saved_plan_is_priced_through_terraform_show(fake_tf):
+    (fake_tf["work"] / "plan.out").write_bytes(b"binary plan")
+    v = g.gate_command("terraform apply plan.out", cwd=str(fake_tf["work"]))
+    assert v and v["decision"] == "ask", "a ~$24k/mo plan must not apply silently"
+    assert v["monthly_delta_usd"] == pytest.approx(32.77 * 730)
+    assert "plan.out changes the bill by +$23,922/mo" in v["reason"]
+    assert "terraform show -json plan.out" in v["reason"], "the basis names its source"
+    assert "1 resource in the plan not priced" in v["reason"]
+    call = fake_tf["calls"].read_text().split()
+    assert call[0] == str(fake_tf["work"]) and call[1:3] == ["show", "-json"]
+
+
+def test_chdir_and_a_cd_prefix_are_followed(fake_tf):
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    root = fake_tf["work"].parent
+    assert g.estimate_command_monthly_cost("terraform -chdir=infra apply plan.out", cwd=str(root))
+    assert g.estimate_command_monthly_cost("cd infra && tofu apply -auto-approve plan.out",
+                                           cwd=str(root))
+
+
+def test_the_plan_is_found_past_flags_that_take_a_value(fake_tf):
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    est = g.estimate_command_monthly_cost("terraform apply -lock-timeout 30s -input=false plan.out",
+                                          cwd=str(fake_tf["work"]))
+    assert est and est["plan"] == "plan.out"
+
+
+@pytest.mark.parametrize("cmd", [
+    "terraform apply",                    # no saved plan: nothing to read yet
+    "terraform apply -auto-approve",
+    "terraform apply missing.out",        # a plan file that does not exist
+])
+def test_no_plan_file_means_no_figure_and_no_subprocess(fake_tf, cmd):
+    assert g.estimate_command_monthly_cost(cmd, cwd=str(fake_tf["work"])) is None
+    assert not fake_tf["calls"].exists(), "terraform ran with no plan to read"
+
+
+def test_no_binary_means_no_figure(fake_tf, monkeypatch):
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    monkeypatch.setenv("PATH", str(fake_tf["work"]))       # nothing runnable
+    assert g.estimate_command_monthly_cost("terraform apply plan.out",
+                                           cwd=str(fake_tf["work"])) is None
+
+
+def test_a_slow_show_times_out_to_no_figure(fake_tf, monkeypatch):
+    """The hook itself times out at 10s and a timed-out hook gives no verdict
+    at all. A slow plan read must cost the figure, not the guard."""
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    monkeypatch.setenv("FAKE_TF_SLEEP", "3")
+    monkeypatch.setattr(g, "_PLAN_SHOW_TIMEOUT_S", 0.3)
+    assert g.estimate_command_monthly_cost("terraform apply plan.out",
+                                           cwd=str(fake_tf["work"])) is None
+
+
+def test_the_hook_passes_the_session_cwd(fake_tf):
+    import io
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    out = io.StringIO()
+    g.run_hook(stdin=io.StringIO(_json.dumps({
+        "tool_name": "Bash", "cwd": str(fake_tf["work"]),
+        "tool_input": {"command": "terraform apply plan.out"}})), stdout=out)
+    body = _json.loads(out.getvalue())["hookSpecificOutput"]
+    assert "$23,922/mo" in body["permissionDecisionReason"]
+
+
+def test_the_plan_read_does_not_get_the_vault(fake_tf, monkeypatch):
+    """terraform loads whatever providers the directory declares."""
+    seen = {}
+    import finops.security.vault as vault
+    real = vault.child_env
+    monkeypatch.setattr(vault, "child_env",
+                        lambda *a, **k: seen.setdefault("env", real(*a, **k)))
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    g.estimate_command_monthly_cost("terraform apply plan.out", cwd=str(fake_tf["work"]))
+    assert "env" in seen, "terraform show ran without child_env()"

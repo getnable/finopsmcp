@@ -239,7 +239,7 @@ def _hours_per_month() -> float:
     return HOURS_PER_MONTH
 
 
-def _price_run_instances(cmd: str) -> dict[str, Any] | None:
+def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     m = _INSTANCE_TYPE_RE.search(cmd)
     if not m:
         return None
@@ -264,7 +264,7 @@ def _price_run_instances(cmd: str) -> dict[str, Any] | None:
     }
 
 
-def _price_rds(cmd: str) -> dict[str, Any] | None:
+def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     cls = _flag(cmd, "db-instance-class")
     engine = (_flag(cmd, "engine") or "").lower()
     if not cls or engine not in _RDS_TABLE_ENGINES:
@@ -290,7 +290,7 @@ def _price_rds(cmd: str) -> dict[str, Any] | None:
     }
 
 
-def _price_savings_plan(cmd: str) -> dict[str, Any] | None:
+def _price_savings_plan(cmd: str, **_: Any) -> dict[str, Any] | None:
     hourly = _num(_flag(cmd, "commitment"))
     if hourly is None:
         return None
@@ -313,7 +313,7 @@ def _price_savings_plan(cmd: str) -> dict[str, Any] | None:
     }
 
 
-def _price_reserved_instances(cmd: str) -> dict[str, Any] | None:
+def _price_reserved_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
     m = _LIMIT_AMOUNT_RE.search(cmd)
     ceiling = _num(m.group(1)) if m else None
     if ceiling is None:
@@ -364,7 +364,7 @@ def _price_table_vm(cmd: str, *, flag: str, table: dict[str, float], count: int,
     }
 
 
-def _price_gce(cmd: str) -> dict[str, Any] | None:
+def _price_gce(cmd: str, **_: Any) -> dict[str, Any] | None:
     from .connectors.kubernetes import _GKE_MONTHLY
     m = _GCE_CREATE_RE.search(cmd)
     return _price_table_vm(
@@ -373,12 +373,94 @@ def _price_gce(cmd: str) -> dict[str, Any] | None:
         basis="on-demand monthly, nable's Compute Engine node price table")
 
 
-def _price_az_vm(cmd: str) -> dict[str, Any] | None:
+def _price_az_vm(cmd: str, **_: Any) -> dict[str, Any] | None:
     from .connectors.kubernetes import _AKS_MONTHLY
     return _price_table_vm(
         cmd, flag="size", table=_AKS_MONTHLY,
         count=int(_num(_flag(cmd, "count")) or 1),
         basis="pay-as-you-go monthly, nable's Azure VM price table")
+
+
+_TF_APPLY_RE = re.compile(r"\b(terraform|tofu)\s+((?:-chdir=\S+\s+)?)apply\b")
+_CD_PREFIX_RE = re.compile(r"^cd\s+(\S+)\s*(?:&&|;)")
+# `terraform apply` flags that take their value as the NEXT token, so that
+# token is not mistaken for the plan file.
+_TF_VALUE_FLAGS = ("-var", "-var-file", "-target", "-replace", "-state",
+                   "-state-out", "-backup", "-parallelism", "-lock-timeout")
+# The hook's own timeout is 10s (30s for uvx) and a timed-out hook fails open
+# with no verdict at all. Reading a plan loads provider schemas, which is
+# usually one to three seconds; past five, no figure beats no guard.
+_PLAN_SHOW_TIMEOUT_S = 5.0
+
+
+def _planfile_arg(cmd: str, verb_end: int) -> str | None:
+    skip = False
+    for tok in cmd[verb_end:].split():
+        if tok in _SHELL_BREAKS:
+            break
+        if skip:
+            skip = False
+        elif tok.startswith("-"):
+            skip = tok in _TF_VALUE_FLAGS
+        else:
+            return tok
+    return None
+
+
+def _price_planfile(cmd: str, *, cwd: str | None = None, **_: Any) -> dict[str, Any] | None:
+    """`terraform apply plan.out` applies exactly the saved plan, so the plan
+    can be priced before it runs, through the same estimator as `nable
+    estimate`. Only when the plan file exists and the binary is on PATH;
+    anything else (a plain apply, a missing file, a slow or failing `show`)
+    is no figure, never a guess."""
+    import shutil
+    import subprocess
+
+    m = _TF_APPLY_RE.search(cmd)
+    tool = m.group(1)
+    plan = _planfile_arg(cmd, m.end())
+    if not plan:
+        return None
+    base = Path(cwd or os.getcwd())
+    cd = _CD_PREFIX_RE.match(cmd)
+    if cd:
+        base = base / Path(cd.group(1)).expanduser()
+    chdir = re.search(r"-chdir=(\S+)", m.group(2))
+    if chdir:
+        base = base / Path(chdir.group(1)).expanduser()
+    plan_path = base / Path(plan).expanduser()
+    if not plan_path.is_file():
+        return None
+    exe = shutil.which((os.environ.get("TERRAFORM_BIN") or "terraform") if tool == "terraform"
+                       else "tofu")
+    if not exe:
+        return None
+    # env=child_env(): terraform loads the providers the directory declares,
+    # and none of them get nable's decrypted vault (see estimate_from_dir).
+    from .security.vault import child_env
+    r = subprocess.run([exe, "show", "-json", str(plan_path)], cwd=str(base),
+                       capture_output=True, text=True, timeout=_PLAN_SHOW_TIMEOUT_S,
+                       env=child_env())
+    if r.returncode != 0:
+        return None
+    from .connectors.terraform_estimate import estimate_plan
+    result = estimate_plan(json.loads(r.stdout))
+    if not result["lines"]:
+        return None                    # nothing in the plan is priceable
+    monthly = float(result["monthly_delta_usd"])
+    unpriced = len(result["unpriced"])
+    basis = (f"`{tool} show -json {plan}`, {_ON_DEMAND_BASIS}"
+             + (f"; {unpriced} resource{'s' if unpriced != 1 else ''} in the plan not priced"
+                if unpriced else ""))
+    return {
+        "monthly_usd": round(monthly, 2),
+        "plan": plan,
+        "priced_resources": len(result["lines"]),
+        "unpriced_resources": unpriced,
+        "basis": basis,
+        "line": (f"{plan} changes the bill by {'+' if monthly >= 0 else '-'}"
+                 f"${abs(monthly):,.0f}/mo ({basis})"),
+    }
 
 
 _PRICERS: list[tuple[re.Pattern[str], Any]] = [
@@ -388,11 +470,15 @@ _PRICERS: list[tuple[re.Pattern[str], Any]] = [
     (_RESERVED_RE, _price_reserved_instances),
     (_GCE_CREATE_RE, _price_gce),
     (_AZ_VM_CREATE_RE, _price_az_vm),
+    (_TF_APPLY_RE, _price_planfile),
 ]
 
 
-def estimate_command_monthly_cost(command: str) -> dict[str, Any] | None:
+def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> dict[str, Any] | None:
     """A local, list-price estimate for a shell command, or None.
+
+    `cwd` is the directory the command will run in (the agent session's), used
+    to find a saved Terraform plan; it defaults to this process's.
 
     Returns {monthly_usd, basis, line, ...} where `line` is the sentence the
     human reads and `basis` says where the number came from. `monthly_usd` is
@@ -405,7 +491,7 @@ def estimate_command_monthly_cost(command: str) -> dict[str, Any] | None:
     for pattern, pricer in _PRICERS:
         if pattern.search(cmd):
             try:
-                return pricer(cmd)
+                return pricer(cmd, cwd=cwd)
             except Exception:
                 return None            # a pricing bug must not cost the verdict
     return None
@@ -501,8 +587,8 @@ def check_budget_gate() -> dict[str, Any] | None:
         return None  # unreadable budget is not a reason to block anyone
 
 
-def _verdict_for(command: str, hit: tuple[str, str], *,
-                 context: str | None = None, via: str = "") -> dict[str, Any] | None:
+def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = None,
+                 via: str = "", cwd: str | None = None) -> dict[str, Any] | None:
     """The policy verdict for one already-classified action, or None (allow).
 
     Shared by the shell and MCP entry points so a destroy is judged the same
@@ -534,7 +620,7 @@ def _verdict_for(command: str, hit: tuple[str, str], *,
         # p4d.24xlarge is a ~$191k/mo decision whichever door it is. The
         # estimate rides the same evaluate_action_gate as everything else, so
         # the user's FINOPS_POLICY_MAX_AUTO_USD and learned adjustments apply.
-        est = estimate_command_monthly_cost(command)
+        est = estimate_command_monthly_cost(command, cwd=cwd)
         if est is not None:
             gate = evaluate_action_gate(action_type,
                                         monthly_delta_usd=est.get("monthly_usd") or 0.0)
@@ -558,7 +644,7 @@ def _verdict_for(command: str, hit: tuple[str, str], *,
 
     # One-way doors escalate whatever they cost, but the human deciding on a
     # Savings Plan should see the commitment in the same breath as the question.
-    est = estimate_command_monthly_cost(command)
+    est = estimate_command_monthly_cost(command, cwd=cwd)
     cost = f"{_cost_line(est)}. " if est else ""
     gate = evaluate_action_gate(action_type,
                                 monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0)
@@ -572,12 +658,15 @@ def _verdict_for(command: str, hit: tuple[str, str], *,
     return None  # allow -> stay silent
 
 
-def gate_command(command: str, *, harness: str = "claude-code") -> dict[str, Any] | None:
+def gate_command(command: str, *, harness: str = "claude-code",
+                 cwd: str | None = None) -> dict[str, Any] | None:
     """Evaluate a shell command against the policy gate. PUBLIC ENTRY POINT.
 
     This and gate_mcp_call are what every harness adapter calls (the Claude
     Code hook below; Cursor and Codex adapters in guard_adapters.py). `harness`
-    names the calling agent harness and is echoed back in the verdict.
+    names the calling agent harness and is echoed back in the verdict. `cwd`
+    is the directory the agent will run the command in, when the harness
+    says (a saved Terraform plan is found relative to it).
 
     Returns None when the guard has no opinion (not infra, or an in-policy
     reversible action), else a verdict dict:
@@ -598,7 +687,7 @@ def gate_command(command: str, *, harness: str = "claude-code") -> dict[str, Any
     hit = classify_command(command)
     if hit is None:
         return None
-    v = _verdict_for(command, hit)
+    v = _verdict_for(command, hit, cwd=cwd)
     return {**v, "harness": harness} if v else None
 
 
@@ -662,7 +751,7 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
             command = tool_input.get("command") or ""
             if not command:
                 return 0
-            verdict = gate_command(command, harness="claude-code")
+            verdict = gate_command(command, harness="claude-code", cwd=payload.get("cwd"))
         elif isinstance(tool, str) and tool.startswith("mcp__"):
             verdict = gate_mcp_call(tool, tool_input, harness="claude-code")
         else:
