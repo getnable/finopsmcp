@@ -916,7 +916,7 @@ def whoami() -> dict:
 
 
 @_srv.mcp.tool()
-async def get_ai_budget_status() -> dict:
+async def get_ai_budget_status(session_id: str | None = None) -> dict:
     """Where your AI coding agent stands against its budget, right now.
 
     Reads your agent's real token usage locally (Claude Code session logs) and reports
@@ -924,21 +924,31 @@ async def get_ai_budget_status() -> dict:
     a verdict (ok / warn / over). Nothing leaves your machine. It does NOT claim a
     percentage of a Claude/Cursor plan's hidden rate limit (no API exposes that); it
     reports your real usage against the budget you set with set_ai_budget. Token counts
-    are exact; any dollar figure is a list-price estimate, never presented as your bill."""
+    are exact; any dollar figure is a list-price estimate at each model's own rate,
+    never presented as your bill. cost_by_model and by_session split the month;
+    unpriced_models names any model priced at a fallback rate.
+
+    `session` is this Claude Code session's spend so far and its per-session cap, and
+    `headroom` is what is left under each cap. session_id defaults to the calling
+    session (session.id_source says how it was found)."""
     from ..ai_budget import status
-    return status()
+    return status(session_id=session_id or None)
 
 
 @_srv.mcp.tool()
-async def check_ai_budget(estimated_next_tokens: int = 0) -> dict:
+async def check_ai_budget(estimated_next_tokens: int = 0,
+                          session_id: str | None = None) -> dict:
     """Advisory gate: before a big task, is the agent about to blow its AI budget?
 
     Call this before an expensive run. Returns a verdict (ok / warn / over), the
-    reason, and a recommendation. Advice only, it never blocks; relay the verdict and
-    let the human decide. Pass estimated_next_tokens to test whether the next task
-    would tip a token budget over."""
+    reason, a recommendation, and `headroom`: dollars left under this session's cap,
+    and dollars or tokens left under the monthly budget. Advice only, it never blocks;
+    relay the verdict and let the human decide. Pass estimated_next_tokens to test
+    whether the next task would tip a token budget over. session_id defaults to the
+    calling session."""
     from ..ai_budget import check
-    return check(estimated_next_tokens=int(estimated_next_tokens or 0))
+    return check(estimated_next_tokens=int(estimated_next_tokens or 0),
+                 session_id=session_id or None)
 
 
 @_srv.mcp.tool()
@@ -946,7 +956,10 @@ async def set_ai_budget(mode: str | None = None,
                         plan_cost: float | None = None,
                         spend_cap: float | None = None,
                         monthly_tokens: int | None = None,
-                        plan_label: str | None = None) -> dict:
+                        plan_label: str | None = None,
+                        session_cap: float | None = None,
+                        every_session: bool = False,
+                        session_id: str | None = None) -> dict:
     """Set the coding agent's monthly AI budget. Two lenses:
 
     - Flat subscription (Claude Pro/Max, Cursor): pass plan_cost = what you pay per
@@ -958,11 +971,23 @@ async def set_ai_budget(mode: str | None = None,
 
     monthly_tokens is an optional usage cap for either lens. Ask the human which
     lens fits and what they pay rather than assuming. Stored locally in ~/.nable,
-    nothing uploaded."""
-    from ..ai_budget import set_budget
-    return {"budget": set_budget(mode=mode, plan_cost=plan_cost, spend_cap=spend_cap,
-                                 monthly_tokens=monthly_tokens, plan_label=plan_label),
-            "note": "Saved. Call get_ai_budget_status to see where you stand."}
+    nothing uploaded.
+
+    session_cap is a per-task cap in dollars at list price, for "this task may spend
+    at most $40". It caps the current session (subagents included) unless
+    every_session is true, which makes it the cap for every session. 0 clears it."""
+    from ..ai_budget import resolve_session, set_budget
+    sid, source = (None, None)
+    if session_cap is not None and not every_session:
+        sid, source = resolve_session(session_id or None)
+    budget = set_budget(mode=mode, plan_cost=plan_cost, spend_cap=spend_cap,
+                        monthly_tokens=monthly_tokens, plan_label=plan_label,
+                        session_cap=session_cap, session_id=sid)
+    out = {"budget": budget, "note": "Saved. Call get_ai_budget_status to see where you stand."}
+    if session_cap is not None:
+        out["session_cap_applies_to"] = (
+            {"session_id": sid, "id_source": source} if sid else "every_session")
+    return out
 
 
 @_srv.mcp.tool()
