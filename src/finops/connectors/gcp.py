@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .base import BaseConnector, CostEntry, CostSummary
+from .base import BaseConnector, CostEntry, CostSummary, combined_currency
 
 
 def _export_not_configured() -> Exception:
@@ -189,6 +189,7 @@ class GCPConnector(BaseConnector):
                     service=service,
                     region=region,
                     amount=amount,
+                    currency=cur or "USD",
                 )
             )
 
@@ -260,7 +261,8 @@ class GCPConnector(BaseConnector):
                 raise
             return self._rows_to_summary(rows, billing_account_id, start_date, end_date)
 
-        for summary in await asyncio.gather(*[_one(b) for b in self._billing_account_ids]):
+        _parts = await asyncio.gather(*[_one(b) for b in self._billing_account_ids])
+        for summary in _parts:
             merged.total_usd += summary.total_usd
             for k, v in summary.by_service.items():
                 merged.by_service[k] = merged.by_service.get(k, 0.0) + v
@@ -269,6 +271,8 @@ class GCPConnector(BaseConnector):
             for k, v in summary.by_region.items():
                 merged.by_region[k] = merged.by_region.get(k, 0.0) + v
             merged.entries.extend(summary.entries)
+        # Each billing account reports in its own currency; carry it through.
+        merged.currency = combined_currency(list(_parts))
 
         _cache.set(_ck, _copy.deepcopy(merged), _cache.COST_TTL)
         return merged

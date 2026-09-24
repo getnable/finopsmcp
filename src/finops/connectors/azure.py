@@ -5,7 +5,7 @@ import os
 from datetime import date, datetime, timezone
 from typing import Any
 
-from .base import BaseConnector, CostEntry, CostSummary
+from .base import BaseConnector, CostEntry, CostSummary, combined_currency
 
 
 class AzureConnector(BaseConnector):
@@ -100,16 +100,23 @@ class AzureConnector(BaseConnector):
         by_service: dict[str, float] = {}
         by_region: dict[str, float] = {}
         total = 0.0
+        currencies: set[str] = set()
 
         columns = {col.name: i for i, col in enumerate(result.columns)}
         cost_idx = columns.get("Cost", 0)
         service_idx = columns.get("ServiceName", 2)
         region_idx = columns.get("ResourceLocation", 3)
+        # The query returns the billing currency as its own column. A EUR or
+        # JPY subscription used to come out labelled USD.
+        currency_idx = columns.get("Currency")
 
         for row in result.rows or []:
             amount = float(row[cost_idx])
             service = str(row[service_idx])
             region = str(row[region_idx])
+            cur = str(row[currency_idx]) if currency_idx is not None and row[currency_idx] else ""
+            if cur:
+                currencies.add(cur)
             total += amount
             by_service[service] = by_service.get(service, 0.0) + amount
             by_region[region] = by_region.get(region, 0.0) + amount
@@ -121,6 +128,7 @@ class AzureConnector(BaseConnector):
                     service=service,
                     region=region,
                     amount=amount,
+                    currency=cur or "USD",
                 )
             )
 
@@ -133,6 +141,7 @@ class AzureConnector(BaseConnector):
             by_account={subscription_id: total},
             by_region=by_region,
             entries=entries,
+            currency=(currencies.pop() if len(currencies) == 1 else ("MIXED" if currencies else "USD")),
         )
 
     # ── public API ──────────────────────────────────────────────────────────
@@ -179,7 +188,8 @@ class AzureConnector(BaseConnector):
                 raise
             return self._parse_result(raw, sub_id, start_date, end_date)
 
-        for summary in await asyncio.gather(*[_one(s) for s in self._subscription_ids]):
+        _parts = await asyncio.gather(*[_one(s) for s in self._subscription_ids])
+        for summary in _parts:
             merged.total_usd += summary.total_usd
             for k, v in summary.by_service.items():
                 merged.by_service[k] = merged.by_service.get(k, 0.0) + v
@@ -188,6 +198,8 @@ class AzureConnector(BaseConnector):
             for k, v in summary.by_region.items():
                 merged.by_region[k] = merged.by_region.get(k, 0.0) + v
             merged.entries.extend(summary.entries)
+        # Each subscription reports in its own billing currency; carry it through.
+        merged.currency = combined_currency(list(_parts))
 
         _cache.set(_ck, _copy.deepcopy(merged), _cache.COST_TTL)
         return merged
