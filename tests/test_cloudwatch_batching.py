@@ -298,3 +298,43 @@ def test_a_nat_gateway_whose_series_is_refused_is_not_idle():
     cw = _Metrics({("BytesOutToDestination", "nat-0000"): "Forbidden"})
     findings = waste.check_nat_gateways(_Pages(_nat_pages(2)), cw, region="us-east-1")
     assert [f["resource_id"] for f in findings] == ["nat-0001"]
+
+
+def _ec2_pages(n: int) -> list[dict]:
+    old = datetime.now(timezone.utc) - timedelta(days=120)
+    return [{"Reservations": [{"Instances": [
+        {"InstanceId": f"i-{i:04d}", "InstanceType": "m5.large", "LaunchTime": old,
+         "State": {"Name": "running"}, "Tags": []}
+        for i in range(n)
+    ]}]}]
+
+
+def test_idle_ec2_reads_cpu_and_network_in_one_call_per_500_series():
+    """200 instances, two series each: 400 round trips before, 1 now."""
+    from finops.analyzers import waste
+
+    series = {("CPUUtilization", f"i-{i:04d}"): [1.0] * 336 for i in range(200)}
+    series[("NetworkOut", "i-0007")] = [500 * 1024 ** 2] * 336  # busy on the wire
+    series[("CPUUtilization", "i-0008")] = [60.0] * 336         # busy on CPU
+    cw = _Metrics(series)
+
+    findings = waste.check_idle_ec2(_Pages(_ec2_pages(200)), cw, region="us-east-1")
+
+    assert cw.calls == math.ceil(200 * 2 / 500) == 1
+    flagged = {f["resource_id"] for f in findings}
+    assert len(flagged) == 198
+    assert not {"i-0007", "i-0008"} & flagged
+
+
+def test_a_refused_network_series_still_protects_a_low_cpu_instance():
+    """The CPU series reads fine and low, the NetworkOut series in the same call
+    comes back Forbidden. The guard must fail towards in-use."""
+    from finops.analyzers import waste
+
+    cw = _Metrics({
+        ("CPUUtilization", "i-0000"): [1.0] * 336,
+        ("NetworkOut", "i-0000"): "Forbidden",
+        ("CPUUtilization", "i-0001"): [1.0] * 336,
+    })
+    findings = waste.check_idle_ec2(_Pages(_ec2_pages(2)), cw, region="us-east-1")
+    assert [f["resource_id"] for f in findings] == ["i-0001"]

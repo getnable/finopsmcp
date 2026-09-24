@@ -999,14 +999,10 @@ def check_idle_ec2(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
+    candidates: list[dict] = []
     for page in pages:
         for reservation in page.get("Reservations", []):
             for inst in reservation.get("Instances", []):
-                inst_id = inst["InstanceId"]
-                inst_type = inst.get("InstanceType", "unknown")
-                name_tag = next(
-                    (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
-                )
                 launch_time = inst.get("LaunchTime")
 
                 # Skip instances launched less than lookback_days ago — not enough data
@@ -1015,106 +1011,97 @@ def check_idle_ec2(
                         launch_time = launch_time.replace(tzinfo=timezone.utc)
                     if (now - launch_time).days < lookback_days:
                         continue
+                candidates.append(inst)
 
-                # Fetch CPU utilization
-                try:
-                    resp = cw_client.get_metric_statistics(
-                        Namespace="AWS/EC2",
-                        MetricName="CPUUtilization",
-                        Dimensions=[{"Name": "InstanceId", "Value": inst_id}],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=3600,  # hourly
-                        Statistics=["Average"],
-                    )
-                    datapoints = resp.get("Datapoints", [])
-                except Exception as exc:
-                    log.debug("CW CPU metrics failed for %s: %s", inst_id, exc)
-                    continue
+    # CPU and NetworkOut for every candidate in one batched read.
+    # Sum over a 1-hour Period gives total bytes per hour. Averaging the
+    # per-collection-interval samples (Statistics=Average) would return mean
+    # bytes-per-sample, ~12x too low against a per-hour threshold, so the guard
+    # would never fire. Use Sum.
+    series = fetch_metric_values(cw_client, [
+        MetricQuery((inst["InstanceId"], metric), "AWS/EC2", metric,
+                    (("InstanceId", inst["InstanceId"]),), stat, 3600)  # hourly
+        for inst in candidates
+        for metric, stat in (("CPUUtilization", "Average"), ("NetworkOut", "Sum"))
+    ], start, now)
 
-                if not datapoints:
-                    continue
+    for inst in candidates:
+        inst_id = inst["InstanceId"]
+        inst_type = inst.get("InstanceType", "unknown")
+        name_tag = next(
+            (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
+        )
 
-                avg_cpu = sum(dp.get("Average", 0) for dp in datapoints) / len(datapoints)
-                max_cpu = max(dp.get("Average", 0) for dp in datapoints)
+        datapoints = series.get((inst_id, "CPUUtilization"))
+        if datapoints is None:
+            log.debug("CW CPU metrics failed for %s", inst_id)
+            continue
 
-                if avg_cpu >= cpu_threshold_pct:
-                    continue
+        if not datapoints:
+            continue
 
-                # Low CPU alone does not mean idle. Batch, network- or disk-bound
-                # workloads and warm-standby DR boxes run with low CPU but real
-                # I/O. Skip flagging when network shows sustained activity, so a
-                # working instance is not falsely called idle.
-                try:
-                    # Sum over a 1-hour Period gives total bytes per hour. Averaging
-                    # the per-collection-interval samples (Statistics=Average) would
-                    # return mean bytes-per-sample, ~12x too low against a per-hour
-                    # threshold, so the guard would never fire. Use Sum.
-                    net_resp = cw_client.get_metric_statistics(
-                        Namespace="AWS/EC2",
-                        MetricName="NetworkOut",
-                        Dimensions=[{"Name": "InstanceId", "Value": inst_id}],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=3600,
-                        Statistics=["Sum"],
-                    )
-                    net_dps = net_resp.get("Datapoints", [])
-                    avg_net_per_hr = (
-                        sum(dp.get("Sum", 0) for dp in net_dps) / len(net_dps)
-                        if net_dps else 0.0
-                    )
-                    net_unavailable = False
-                except Exception as exc:
-                    # 0.0 here does not mean "no traffic", it means "we could not
-                    # look", and the very next line is the guard that protects a
-                    # busy instance from being called idle. A failed read used to
-                    # DISABLE the check that would have saved it.
-                    #
-                    # An earlier pass kept the finding and merely downgraded its
-                    # provenance, reasoning that low CPU was measured and real.
-                    # That is true and it is not enough: this guard exists for
-                    # one specific false positive, the network-bound host that
-                    # sits at 2% CPU, and a Kafka broker is the textbook case.
-                    # Attaching a caveat still puts "stop, downsize, or
-                    # terminate" in front of someone for a machine that is
-                    # serving traffic. Unknown has to fail towards in-use.
-                    #
-                    # So: skip, the same way check_nat_gateways does on the same
-                    # failure. The cost is missing a genuinely idle instance
-                    # while CloudWatch is unreachable, which the next run catches.
-                    log.debug("CW NetworkOut failed for %s: %s", inst_id, exc)
-                    continue
+        avg_cpu = sum(datapoints) / len(datapoints)
+        max_cpu = max(datapoints)
 
-                if avg_net_per_hr > _IDLE_NET_BYTES_PER_HR:
-                    continue  # network-active: treat as in-use, not idle
+        if avg_cpu >= cpu_threshold_pct:
+            continue
 
-                vcpus = _vcpus_from_type(inst_type)
-                monthly_savings = vcpus * _APPROX_MONTHLY_PER_VCPU
+        # Low CPU alone does not mean idle. Batch, network- or disk-bound
+        # workloads and warm-standby DR boxes run with low CPU but real
+        # I/O. Skip flagging when network shows sustained activity, so a
+        # working instance is not falsely called idle.
+        net_dps = series.get((inst_id, "NetworkOut"))
+        if net_dps is None:
+            # 0.0 here does not mean "no traffic", it means "we could not
+            # look", and the very next line is the guard that protects a
+            # busy instance from being called idle. A failed read used to
+            # DISABLE the check that would have saved it.
+            #
+            # An earlier pass kept the finding and merely downgraded its
+            # provenance, reasoning that low CPU was measured and real.
+            # That is true and it is not enough: this guard exists for
+            # one specific false positive, the network-bound host that
+            # sits at 2% CPU, and a Kafka broker is the textbook case.
+            # Attaching a caveat still puts "stop, downsize, or
+            # terminate" in front of someone for a machine that is
+            # serving traffic. Unknown has to fail towards in-use.
+            #
+            # So: skip, the same way check_nat_gateways does on the same
+            # failure. The cost is missing a genuinely idle instance
+            # while CloudWatch is unreachable, which the next run catches.
+            log.debug("CW NetworkOut failed for %s", inst_id)
+            continue
+        avg_net_per_hr = sum(net_dps) / len(net_dps) if net_dps else 0.0
 
-                findings.append({
-                    "resource_id": inst_id,
-                    "resource_type": "EC2 Instance",
-                    "waste_type": "idle_ec2_low_cpu",
-                    "estimated_monthly_savings": round(monthly_savings, 2),
-                    "detail": (
-                        f"EC2 instance {inst_id} ({inst_type}) averaged {avg_cpu:.1f}% CPU "
-                        f"(peak: {max_cpu:.1f}%) over {lookback_days} days "
-                        f"— well below the {cpu_threshold_pct}% idle threshold. "
-                        f"Name: {name_tag or 'untagged'}. "
-                        f"Consider stopping, downsizing, or terminating. "
-                        f"Check Network/Disk metrics before terminating — "
-                        f"some instances are disk/network bound with low CPU."
-                    ),
-                    "severity": _severity_from_savings(monthly_savings),
-                    "region": region,
-                    "account_id": None,
-                    "instance_type": inst_type,
-                    "avg_cpu_pct": round(avg_cpu, 2),
-                    "max_cpu_pct": round(max_cpu, 2),
-                    "name": name_tag,
-                    "lookback_days": lookback_days,
-                })
+        if avg_net_per_hr > _IDLE_NET_BYTES_PER_HR:
+            continue  # network-active: treat as in-use, not idle
+
+        vcpus = _vcpus_from_type(inst_type)
+        monthly_savings = vcpus * _APPROX_MONTHLY_PER_VCPU
+
+        findings.append({
+            "resource_id": inst_id,
+            "resource_type": "EC2 Instance",
+            "waste_type": "idle_ec2_low_cpu",
+            "estimated_monthly_savings": round(monthly_savings, 2),
+            "detail": (
+                f"EC2 instance {inst_id} ({inst_type}) averaged {avg_cpu:.1f}% CPU "
+                f"(peak: {max_cpu:.1f}%) over {lookback_days} days "
+                f"— well below the {cpu_threshold_pct}% idle threshold. "
+                f"Name: {name_tag or 'untagged'}. "
+                f"Consider stopping, downsizing, or terminating. "
+                f"Check Network/Disk metrics before terminating — "
+                f"some instances are disk/network bound with low CPU."
+            ),
+            "severity": _severity_from_savings(monthly_savings),
+            "region": region,
+            "account_id": None,
+            "instance_type": inst_type,
+            "avg_cpu_pct": round(avg_cpu, 2),
+            "max_cpu_pct": round(max_cpu, 2),
+            "name": name_tag,
+            "lookback_days": lookback_days,
+        })
 
     return findings
 
