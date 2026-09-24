@@ -136,10 +136,11 @@ and uses no model at all.
 | Open source | Yes (Apache-2.0) | No | Partly | No |
 | Runs locally, no data egress | Yes | N/A (in-console) | Yes | No (SaaS) |
 | Cross-cloud (AWS + Azure + GCP) | Yes | AWS only | Pre-deploy IaC | Yes |
-| AI / LLM / GPU cost | Yes | No | No | Limited |
+| AI / LLM / GPU cost | Yes | Bedrock only | No | Vantage: yes; CloudHealth: token dashboard |
 | Terminal + CI | Yes | Console only | CI (PR comments) | Dashboard |
-| Works inside Claude / Cursor (MCP) | Yes | No | No | No |
-| Proposes fixes as PRs | Yes | No | No | No |
+| Works inside Claude / Cursor (MCP) | Yes, local | Billing MCP server (read-only) | Yes | Vantage: hosted MCP; CloudHealth: no |
+| Checks an agent's command before it runs | Yes (cost + policy) | No | No | No |
+| Proposes fixes as PRs | Yes, on running waste | No | AutoFix PRs on IaC before deploy | No |
 | Price | Free to start | Free (AWS-native) | Free tier | Paid |
 
 nable is the open-source, cross-cloud option that also covers AI and GPU spend

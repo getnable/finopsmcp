@@ -628,7 +628,7 @@ def require_team(feature: str) -> dict | None:
 
     friendly = feature.replace("_", " ")
     return {
-        "error": f"{friendly} requires the Pro plan.",
+        "error": f"{friendly} requires the Team plan.",
         "plan": s.mode,
         "upgrade": (
             f"The conversational Slack bot and chat remediation are part of nable Team "
@@ -717,7 +717,10 @@ def require_pro(feature: str) -> dict | None:
         "error": "pro_required",
         "feature": feature,
         "message": "\n".join(lines),
-        "upgrade_url": _CHECKOUT_URL,
+        # The Pro checkout, matching the text above. This returned the Team
+        # ($1,000/mo) link, so an agent relaying upgrade_url sent a user who hit
+        # a $25 Pro gate to a $1,000 checkout.
+        "upgrade_url": _PRO_CHECKOUT_URL,
         "activate_command": _ACTIVATE_CMD,
         "free_tier_available": True,
     }

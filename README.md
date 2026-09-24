@@ -58,11 +58,12 @@ Reads only free cloud APIs, so scanning never adds to your bill. `uvx nable scan
 | Open source | Yes (Apache-2.0) | No | No | Yes |
 | Where your data lives | Your machine | AWS | Vendor SaaS | Your machine / CI |
 | Clouds covered | AWS, Azure, GCP, Kubernetes | AWS only | Multi-cloud | IaC, any cloud |
-| AI and GPU spend | Yes (OpenAI, Anthropic, Bedrock, GPUs) | No | Limited | No |
-| Runs in Claude / Cursor / VS Code | Yes (MCP) | No | No | No |
-| Fixes waste | Opens a pull request, you approve | No | Dashboards only | No, estimates only |
+| AI and GPU spend | Yes (OpenAI, Anthropic, Bedrock, GPUs) | Bedrock only | Vantage: yes; CloudHealth: token dashboard | No |
+| Runs in Claude / Cursor / VS Code | Yes (local MCP) | Billing MCP server (read-only) | Vantage: hosted MCP; CloudHealth: no | Yes (MCP, editor extensions) |
+| Checks an agent's command for cost and policy before it runs | Yes (guard hook) | No | No | No |
+| Fixes waste | Opens a pull request, you approve | No | Vantage: in-product agent; no PR to your IaC | AutoFix PRs before deploy, not on running waste |
 | Answers | What you spend and waste now | AWS spend | Multi-cloud spend | Cost of an IaC change before deploy |
-| Price | Free (local) | Free tier, then per request | Paid SaaS | Free (OSS) |
+| Price | Free (local) | Free tier, then per request | Paid SaaS | Free (OSS), paid cloud |
 
 Infracost prices an infrastructure change before you deploy it; nable finds and fixes waste in what you are already running. Fuller breakdowns: [nable vs Vantage](https://getnable.com/nable-vs-vantage), [vs CloudHealth](https://getnable.com/nable-vs-cloudhealth), [vs Kubecost](https://getnable.com/nable-vs-kubecost).
 
