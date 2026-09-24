@@ -440,3 +440,67 @@ def test_rds_idle_reads_connections_in_one_call_per_500():
     flagged = {f["resource_id"] for f in findings}
     assert len(flagged) == 247
     assert not {"db-0002", "db-0003", "db-0004"} & flagged
+
+
+class _Inventory:
+    """elbv2 and elb describe clients, either of which can fail to list."""
+
+    def __init__(self, pages=None, error: Exception | None = None):
+        self._pages, self._error = pages or [], error
+
+    def get_paginator(self, _name):
+        pages, error = self._pages, self._error
+
+        class _P:
+            def paginate(self, **_kw):
+                if error:
+                    raise error
+                return list(pages)
+        return _P()
+
+
+def _alb(i: int, lb_type: str = "application") -> dict:
+    kind = "app" if lb_type == "application" else "net"
+    return {"LoadBalancerName": f"lb-{i:04d}", "Type": lb_type,
+            "LoadBalancerArn": f"arn:aws:elasticloadbalancing:us-east-1:1:"
+                               f"loadbalancer/{kind}/lb-{i:04d}/abc",
+            "State": {"Code": "active"}}
+
+
+def test_load_balancers_are_read_in_one_call_per_500():
+    from finops.analyzers import waste
+
+    v2 = [_alb(i) for i in range(300)] + [_alb(i, "network") for i in range(300, 400)]
+    classic = [{"LoadBalancerName": f"clb-{i:04d}"} for i in range(200)]
+    cw = _Metrics({
+        ("RequestCount", "app/lb-0001/abc"): [1e6] * 14,       # busy ALB
+        ("ActiveFlowCount", "net/lb-0301/abc"): [50.0] * 14,   # busy NLB
+        ("RequestCount", "clb-0001"): [1e6] * 14,              # busy classic
+        ("RequestCount", "app/lb-0002/abc"): "Forbidden",      # unread
+        ("RequestCount", "clb-0002"): "InternalError",         # unread
+    })
+
+    findings = waste.check_idle_load_balancers(
+        _Inventory([{"LoadBalancers": v2}]),
+        _Inventory([{"LoadBalancerDescriptions": classic}]), cw, region="us-east-1")
+
+    assert cw.calls == math.ceil(600 / 500) == 2
+    flagged = {f["lb_name"] for f in findings}
+    assert len(flagged) == 600 - 5
+    assert not {"lb-0001", "lb-0301", "clb-0001", "lb-0002", "clb-0002"} & flagged
+
+
+def test_one_failed_lb_inventory_still_reports_the_other():
+    from finops.analyzers import waste
+
+    cw = _Metrics()
+    findings = waste.check_idle_load_balancers(
+        _Inventory(error=RuntimeError("AccessDenied")),
+        _Inventory([{"LoadBalancerDescriptions": [{"LoadBalancerName": "clb-0"}]}]),
+        cw, region="us-east-1")
+    assert [f["lb_name"] for f in findings] == ["clb-0"]
+
+    with pytest.raises(RuntimeError):
+        waste.check_idle_load_balancers(
+            _Inventory(error=RuntimeError("AccessDenied")),
+            _Inventory(error=RuntimeError("AccessDenied")), cw, region="us-east-1")

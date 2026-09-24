@@ -862,8 +862,12 @@ def test_idle_load_balancer_has_a_single_price(monkeypatch):
             return _Paginator([{"LoadBalancerDescriptions": []}])
 
     class _CW:
-        def get_metric_statistics(self, **kwargs):
-            return {"Datapoints": [{"Timestamp": NOW, "Sum": 0.0}]}
+        def get_metric_data(self, **kwargs):
+            return {"MetricDataResults": [
+                {"Id": q["Id"], "Timestamps": [NOW], "Values": [0.0],
+                 "StatusCode": "Complete"}
+                for q in kwargs["MetricDataQueries"]
+            ]}
 
     findings = check_idle_load_balancers(_ELBv2(), _ELB(), _CW(), "us-east-1")
 

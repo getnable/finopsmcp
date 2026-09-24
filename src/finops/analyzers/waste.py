@@ -1373,114 +1373,24 @@ def check_idle_load_balancers(
     start = now - timedelta(days=lookback_days)
 
     # ALB and NLB via ELBv2
+    v2_lbs: list[dict] = []
     try:
         paginator = elbv2_client.get_paginator("describe_load_balancers")
         for page in paginator.paginate():
             for lb in page.get("LoadBalancers", []):
-                lb_name = lb.get("LoadBalancerName", "")
-                lb_arn = lb.get("LoadBalancerArn", "")
-                lb_type = lb.get("Type", "application")
-                state = lb.get("State", {}).get("Code", "")
-
-                if state != "active":
+                if lb.get("State", {}).get("Code", "") != "active":
                     continue
-
-                metric = "RequestCount" if lb_type == "application" else "ActiveFlowCount"
-                namespace = "AWS/ApplicationELB" if lb_type == "application" else "AWS/NetworkELB"
-                lb_dim_value = lb_arn.split("loadbalancer/")[-1] if "loadbalancer/" in lb_arn else lb_arn
-
-                try:
-                    resp = cw_client.get_metric_statistics(
-                        Namespace=namespace,
-                        MetricName=metric,
-                        Dimensions=[{"Name": "LoadBalancer", "Value": lb_dim_value}],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=86400,
-                        Statistics=["Sum"] if lb_type == "application" else ["Average"],
-                    )
-                    datapoints = resp.get("Datapoints", [])
-                except Exception as exc:
-                    log.debug("CW metrics failed for LB %s: %s", lb_name, exc)
-                    continue
-
-                if not datapoints:
-                    total_requests = 0.0
-                else:
-                    total_requests = sum(dp.get("Sum", dp.get("Average", 0)) for dp in datapoints)
-
-                if total_requests >= request_threshold:
-                    continue
-
-                monthly_cost = ALB_PER_MONTH if lb_type == "application" else NLB_PER_MONTH
-
-                findings.append({
-                    "resource_id": lb_arn,
-                    "resource_type": "ALB" if lb_type == "application" else "NLB",
-                    "waste_type": "idle_load_balancer",
-                    "estimated_monthly_savings": round(monthly_cost, 2),
-                    "detail": (
-                        f"Load balancer '{lb_name}' ({lb_type}) had {total_requests:.0f} "
-                        f"total requests over {lookback_days} days. "
-                        f"Running cost: ~${monthly_cost:.0f}/mo. "
-                        f"Check target groups before deleting."
-                    ),
-                    "severity": _severity_from_savings(monthly_cost),
-                    "region": region,
-                    "account_id": None,
-                    "lb_name": lb_name,
-                    "lb_type": lb_type,
-                    "total_requests_14d": total_requests,
-                })
+                v2_lbs.append(lb)
     except Exception as exc:
         log.warning("ELBv2 describe failed (region=%s): %s", region, exc)
         listing_errors.append(exc)
 
     # Classic ELBs
+    classic_lbs: list[dict] = []
     try:
         paginator = elb_client.get_paginator("describe_load_balancers")
         for page in paginator.paginate():
-            for lb in page.get("LoadBalancerDescriptions", []):
-                lb_name = lb.get("LoadBalancerName", "")
-
-                try:
-                    resp = cw_client.get_metric_statistics(
-                        Namespace="AWS/ELB",
-                        MetricName="RequestCount",
-                        Dimensions=[{"Name": "LoadBalancerName", "Value": lb_name}],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=86400,
-                        Statistics=["Sum"],
-                    )
-                    datapoints = resp.get("Datapoints", [])
-                except Exception:
-                    continue
-
-                total_requests = sum(dp.get("Sum", 0) for dp in datapoints)
-
-                if total_requests >= request_threshold:
-                    continue
-
-                monthly_cost = CLB_PER_MONTH
-
-                findings.append({
-                    "resource_id": lb_name,
-                    "resource_type": "Classic Load Balancer",
-                    "waste_type": "idle_load_balancer",
-                    "estimated_monthly_savings": round(monthly_cost, 2),
-                    "detail": (
-                        f"Classic ELB '{lb_name}' had {total_requests:.0f} requests over "
-                        f"{lookback_days} days. Running cost: ~${monthly_cost:.0f}/mo. "
-                        f"Migrate to ALB/NLB or delete if unused."
-                    ),
-                    "severity": _severity_from_savings(monthly_cost),
-                    "region": region,
-                    "account_id": None,
-                    "lb_name": lb_name,
-                    "lb_type": "classic",
-                    "total_requests_14d": total_requests,
-                })
+            classic_lbs.extend(page.get("LoadBalancerDescriptions", []))
     except Exception as exc:
         log.warning("Classic ELB describe failed (region=%s): %s", region, exc)
         listing_errors.append(exc)
@@ -1489,6 +1399,100 @@ def check_idle_load_balancers(
     # means this check looked at nothing, which must not come back as [].
     if len(listing_errors) == 2:
         raise listing_errors[0]
+
+    def _v2_dim(lb: dict) -> str:
+        lb_arn = lb.get("LoadBalancerArn", "")
+        return lb_arn.split("loadbalancer/")[-1] if "loadbalancer/" in lb_arn else lb_arn
+
+    queries = []
+    for i, lb in enumerate(v2_lbs):
+        application = lb.get("Type", "application") == "application"
+        queries.append(MetricQuery(
+            ("v2", i),
+            "AWS/ApplicationELB" if application else "AWS/NetworkELB",
+            "RequestCount" if application else "ActiveFlowCount",
+            (("LoadBalancer", _v2_dim(lb)),),
+            "Sum" if application else "Average",
+            86400,
+        ))
+    for i, lb in enumerate(classic_lbs):
+        queries.append(MetricQuery(
+            ("classic", i), "AWS/ELB", "RequestCount",
+            (("LoadBalancerName", lb.get("LoadBalancerName", "")),), "Sum", 86400,
+        ))
+    series = fetch_metric_values(cw_client, queries, start, now)
+
+    for i, lb in enumerate(v2_lbs):
+        lb_name = lb.get("LoadBalancerName", "")
+        lb_arn = lb.get("LoadBalancerArn", "")
+        lb_type = lb.get("Type", "application")
+
+        datapoints = series.get(("v2", i))
+        if datapoints is None:
+            log.debug("CW metrics failed for LB %s", lb_name)
+            continue
+
+        if not datapoints:
+            total_requests = 0.0
+        else:
+            total_requests = sum(datapoints)
+
+        if total_requests >= request_threshold:
+            continue
+
+        monthly_cost = ALB_PER_MONTH if lb_type == "application" else NLB_PER_MONTH
+
+        findings.append({
+            "resource_id": lb_arn,
+            "resource_type": "ALB" if lb_type == "application" else "NLB",
+            "waste_type": "idle_load_balancer",
+            "estimated_monthly_savings": round(monthly_cost, 2),
+            "detail": (
+                f"Load balancer '{lb_name}' ({lb_type}) had {total_requests:.0f} "
+                f"total requests over {lookback_days} days. "
+                f"Running cost: ~${monthly_cost:.0f}/mo. "
+                f"Check target groups before deleting."
+            ),
+            "severity": _severity_from_savings(monthly_cost),
+            "region": region,
+            "account_id": None,
+            "lb_name": lb_name,
+            "lb_type": lb_type,
+            "total_requests_14d": total_requests,
+        })
+
+    for i, lb in enumerate(classic_lbs):
+        lb_name = lb.get("LoadBalancerName", "")
+
+        datapoints = series.get(("classic", i))
+        if datapoints is None:
+            continue
+
+        total_requests = sum(datapoints)
+
+        if total_requests >= request_threshold:
+            continue
+
+        monthly_cost = CLB_PER_MONTH
+
+        findings.append({
+            "resource_id": lb_name,
+            "resource_type": "Classic Load Balancer",
+            "waste_type": "idle_load_balancer",
+            "estimated_monthly_savings": round(monthly_cost, 2),
+            "detail": (
+                f"Classic ELB '{lb_name}' had {total_requests:.0f} requests over "
+                f"{lookback_days} days. Running cost: ~${monthly_cost:.0f}/mo. "
+                f"Migrate to ALB/NLB or delete if unused."
+            ),
+            "severity": _severity_from_savings(monthly_cost),
+            "region": region,
+            "account_id": None,
+            "lb_name": lb_name,
+            "lb_type": "classic",
+            "total_requests_14d": total_requests,
+        })
+
     return findings
 
 
