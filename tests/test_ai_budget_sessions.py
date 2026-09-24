@@ -86,6 +86,16 @@ def test_a_session_counts_its_subagents_and_nothing_else(claude):
     assert u["usd_equivalent"] == 24.0            # $4 input + $20 output, no sess-b
 
 
+def test_a_session_is_named_for_the_project_it_started_in(claude):
+    # A subagent working in a worktree later on is still the same task.
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 10)])
+    _write(claude, "sess-a", [_rec(now - 30, "sess-a", "m2", 10,
+                                   cwd="/Users/x/proj/.claude/worktrees/agent-1")],
+           subagent="agent-1")
+    assert ab.read_agent_usage(now - 3600)["by_session"]["sess-a"]["project"] == "proj"
+
+
 def test_a_session_is_counted_from_its_start_not_from_the_window(claude):
     # A long task that began before the 5h window, or last month, is one task.
     now = time.time()
@@ -202,6 +212,62 @@ def test_the_saved_list_of_session_caps_stays_bounded(claude):
     caps = ab.get_budget()["session_caps"]
     assert len(caps) == ab._SESSION_CAPS_KEPT
     assert "sess-0" not in caps and f"sess-{ab._SESSION_CAPS_KEPT + 4}" in caps
+
+
+# ── `nable ai-budget` ────────────────────────────────────────────────────────
+
+def _cli(capsys, **flags):
+    import argparse
+
+    from finops import cli_ai_budget as cli
+
+    ns = dict(plan_cost=None, spend_cap=None, tokens=None, session_cap=None,
+              month=False, reset=False, json=False)
+    ns.update(flags)
+    assert cli.run(argparse.Namespace(**ns)) == 0
+    return capsys.readouterr().out
+
+
+def test_the_cli_shows_cost_by_model_and_by_session(claude, capsys):
+    now = time.time()
+    _write(claude, "sess-aaaa1111", [
+        _rec(now - 90, "sess-aaaa1111", "m1", 1_000_000, 1_000_000),                  # $24
+        _rec(now - 80, "sess-aaaa1111", "m2", 1_000_000, 1_000_000, model="claude-nova-9"),
+    ])
+    _write(claude, "sess-bbbb2222", [_rec(now - 60, "sess-bbbb2222", "m3", 1_000_000, 1_000_000,
+                                          model="claude-haiku-4-5", cwd="/Users/x/other")])
+    out = _cli(capsys)
+    model_part = out.split("by model, last 5h")[1].split("by session")[0]
+    lines = [ln.split() for ln in model_part.strip().splitlines()]
+    assert lines[0][:3] == ["claude-opus-5-5", "~$24.00", "50%"]
+    assert lines[1][:2] == ["claude-nova-9", "~$18.00"]
+    assert "unpriced, at the fallback rate" in model_part.splitlines()[2]
+    assert lines[2][:2] == ["claude-haiku-4-5", "~$6.00"]
+
+    session_part = out.split("by session, last 5h")[1]
+    rows = [ln.split() for ln in session_part.strip().splitlines()[:2]]
+    assert rows[0][:3] == ["~$42.00", "proj", "sess-aaa"]
+    assert rows[1][:3] == ["~$6.00", "other", "sess-bbb"]
+
+
+def test_the_cli_session_cap_flag_and_this_sessions_row(claude, capsys, monkeypatch):
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 1_000_000, 1_000_000)])  # $24
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-a")
+    out = _cli(capsys, session_cap=40)
+    assert ab.get_budget()["session_cap"] == 40.0
+    line = next(ln for ln in out.splitlines() if "this session" in ln and "cap" in ln)
+    assert "~$24.00 of $40.00 cap" in line and "OK (60%)" in line and "~$16.00 left" in line
+    assert "(this session)" in out.split("by session")[1]
+
+
+def test_the_cli_month_flag_splits_the_month(claude, capsys, monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(ab, "_month_start_epoch", lambda: now - 30 * 86400)
+    _write(claude, "sess-a", [_rec(now - 3 * 86400, "sess-a", "m1", 1_000_000)])   # outside 5h
+    assert "by model" not in _cli(capsys)
+    out = _cli(capsys, month=True)
+    assert "by model, month to date" in out and "~$4.00" in out
 
 
 # ── the MCP tools the agent calls ────────────────────────────────────────────

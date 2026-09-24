@@ -327,10 +327,12 @@ def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, A
         sess["usd_equivalent"] += usd
         sess["billable_tokens"] += ti + to + cw
         sess["messages"] += 1
+        sess["last_activity"] = max(sess["last_activity"], ts)
+        # Named for where the session started: a subagent's worktree later on
+        # is still the same task.
+        if r.get("cwd") and (sess["project"] is None or ts < sess["first_activity"]):
+            sess["project"] = Path(r["cwd"]).name
         sess["first_activity"] = min(sess["first_activity"], ts)
-        if ts >= sess["last_activity"]:
-            sess["last_activity"] = ts
-            sess["project"] = Path(r["cwd"]).name if r.get("cwd") else sess["project"]
 
     # "Billable" = the tokens that represent real new work and cost: input, output,
     # and cache creation. cache_read is Claude Code re-reading its own cached context

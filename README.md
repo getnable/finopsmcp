@@ -129,7 +129,11 @@ you are on a flat plan or a metered API and what you pay, then remembers. On a f
 plan it tracks how much subsidized compute you pull for your fixed fee and warns
 before you run low; on metered it gates on a dollar spend cap. `check_ai_budget` does
 the same for the agent mid-task. It reads your Claude Code usage locally, nothing
-uploaded. Add to your system prompt:
+uploaded. Every response is priced at its own model's list rate, cache writes and
+reads included, and the report splits cost by model and by session. A per-task cap
+(`nable ai-budget --session-cap 40`, or "this task may spend at most $40" to the
+agent) is measured against one Claude Code session, subagents included, and
+`check_ai_budget` returns the headroom left under it. Add to your system prompt:
 
 > Before starting a large task, call `check_ai_budget`. If it returns `warn` or
 > `over`, tell me where I stand before continuing.
