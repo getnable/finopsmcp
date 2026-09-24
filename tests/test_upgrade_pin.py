@@ -248,6 +248,9 @@ def test_every_version_carrier_agrees_with_the_package():
             _json("plugins/nable/.claude-plugin/plugin.json")["version"],
         "docs/sbom.json": _json("docs/sbom.json")["metadata"]["component"]["version"],
         "packaging/mcpb/manifest.json": _json("packaging/mcpb/manifest.json")["version"],
+        # The sixth, found by audit five releases stale at 0.8.211.
+        ".claude-plugin/marketplace.json":
+            _json(".claude-plugin/marketplace.json")["plugins"][0]["version"],
     }
 
     wrong = {k: v for k, v in carriers.items() if v != pkg}

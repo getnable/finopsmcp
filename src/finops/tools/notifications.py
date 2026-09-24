@@ -170,11 +170,8 @@ async def export_cost_report(
 
     # Open HTML in browser if requested
     if open_file and "html" in output:
-        try:
-            import subprocess
-            subprocess.Popen(["open", output["html"]])
-        except Exception:
-            pass
+        from ..open_file import open_local_file
+        open_local_file(output["html"])
 
     result = {
         "title": title,

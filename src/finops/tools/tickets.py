@@ -89,9 +89,6 @@ async def generate_account_dashboard(
         - "Generate an account cost dashboard and open it"
 
     """
-    import subprocess
-    import sys
-
     aws = _srv.CLOUD_CONNECTORS.get("aws")
     aws_configured = aws and await aws.is_configured()
 
@@ -107,15 +104,8 @@ async def generate_account_dashboard(
     path = result["path"]
 
     if open_browser:
-        try:
-            if sys.platform == "darwin":
-                subprocess.Popen(["open", path])
-            elif sys.platform.startswith("linux"):
-                subprocess.Popen(["xdg-open", path])
-            elif sys.platform == "win32":
-                _srv.os.startfile(path)  # noqa: S606, startfile is safe; no shell
-        except Exception:
-            pass  # opening the browser is best-effort
+        from ..open_file import open_local_file
+        open_local_file(path)
 
     if push_to_notion:
         try:
