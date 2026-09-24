@@ -18,6 +18,7 @@ _MIN_HISTORY_DAYS    = 7     # need at least 7 data points
 _MIN_SPEND_THRESHOLD = 5.0   # ignore noise below $5
 _Z_SCORE_THRESHOLD   = 2.0   # flag if |z| > 2.0
 _PCT_THRESHOLD       = 20.0  # AND |pct_change| > 20%
+_MAX_STALE_DAYS      = 2     # newest snapshot older than this: history is stale
 # Floor on the baseline stdev, as a fraction of the mean and in dollars. A
 # perfectly flat baseline has stdev 0, and dividing by it (or treating z as 0)
 # made the most obvious anomaly there is, $100 a day for a month then $10,000,
@@ -341,7 +342,15 @@ def persist_anomaly(result: AnomalyResult) -> tuple[int, bool]:
     )
 
 
-def snapshot_history_days(provider: str | None = None) -> int:
+def _snapshot_filter(query, provider: str | None, account_id: str | None):
+    if provider:
+        query = query.where(cost_snapshots.c.provider == provider)
+    if account_id:
+        query = query.where(cost_snapshots.c.account_id == account_id)
+    return query
+
+
+def snapshot_history_days(provider: str | None = None, account_id: str | None = None) -> int:
     """Count how many distinct days of cost snapshots we have on hand.
 
     This is the honest measure of whether we can detect anomalies at all. The
@@ -349,22 +358,42 @@ def snapshot_history_days(provider: str | None = None) -> int:
     cannot produce a real all-clear, only "not enough history yet".
     """
     engine = get_engine()
-    query = select(func.count(distinct(cost_snapshots.c.snapshot_date)))
-    if provider:
-        query = query.where(cost_snapshots.c.provider == provider)
+    query = _snapshot_filter(
+        select(func.count(distinct(cost_snapshots.c.snapshot_date))), provider, account_id)
     with engine.connect() as conn:
         return int(conn.execute(query).scalar() or 0)
 
 
-def has_enough_history(provider: str | None = None) -> bool:
-    """True once there are enough days of snapshots to trust a detection result."""
-    return snapshot_history_days(provider) >= _MIN_HISTORY_DAYS
+def latest_snapshot_date(provider: str | None = None, account_id: str | None = None) -> date | None:
+    """The newest snapshot day on hand, or None when there are none."""
+    engine = get_engine()
+    query = _snapshot_filter(
+        select(func.max(cost_snapshots.c.snapshot_date)), provider, account_id)
+    with engine.connect() as conn:
+        val = conn.execute(query).scalar()
+    return date.fromisoformat(val) if val else None
+
+
+def history_is_stale(provider: str | None = None, account_id: str | None = None) -> bool:
+    """True when the newest snapshot is too old for detection to have looked at
+    recent spend. A month of history that stopped two weeks ago still counts as
+    enough days, but nothing has been checked since it stopped."""
+    latest = latest_snapshot_date(provider, account_id)
+    return latest is None or latest < date.today() - timedelta(days=_MAX_STALE_DAYS)
+
+
+def has_enough_history(provider: str | None = None, account_id: str | None = None) -> bool:
+    """True once there are enough days of snapshots, recent enough, to trust a
+    detection result."""
+    return (snapshot_history_days(provider, account_id) >= _MIN_HISTORY_DAYS
+            and not history_is_stale(provider, account_id))
 
 
 def get_active_anomalies(
     provider: str | None = None,
     severity: str | None = None,
     limit: int = 50,
+    account_id: str | None = None,
 ) -> list[dict[str, Any]]:
     engine = get_engine()
     query = (
@@ -373,10 +402,15 @@ def get_active_anomalies(
         .order_by(anomalies.c.detected_at.desc())
         .limit(limit)
     )
+    # Every filter is part of the one SELECT, so it applies before the LIMIT.
+    # Filtering the returned rows afterwards made an account whose anomalies
+    # were older than the newest `limit` of everybody's read as clear.
     if provider:
         query = query.where(anomalies.c.provider == provider)
     if severity:
         query = query.where(anomalies.c.severity == severity)
+    if account_id:
+        query = query.where(anomalies.c.account_id == account_id)
     with engine.connect() as conn:
         return [dict(r._mapping) for r in conn.execute(query).fetchall()]
 
