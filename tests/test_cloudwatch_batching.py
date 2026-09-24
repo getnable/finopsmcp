@@ -396,3 +396,47 @@ def test_a_refused_invocations_series_is_not_zero_invocations():
     cw = _Metrics({("Invocations", "fn-0000"): "InternalError"})
     findings = waste.check_lambda_memory(_Pages(_lambda_pages(2)), cw, region="us-east-1")
     assert [f["resource_id"] for f in findings] == ["fn-0001"]
+
+
+def _rds_pages(n: int, db_class: str = "db.m5.xlarge") -> list[dict]:
+    return [{"DBInstances": [
+        {"DBInstanceIdentifier": f"db-{i:04d}", "DBInstanceClass": db_class,
+         "Engine": "postgres", "DBInstanceStatus": "available", "MultiAZ": False}
+        for i in range(n)
+    ]}]
+
+
+def test_rds_rightsizing_reads_cpu_in_one_call_per_500():
+    from finops.analyzers import waste
+
+    series = {("CPUUtilization", f"db-{i:04d}"): [4.0] * 48 for i in range(250)}
+    series[("CPUUtilization", "db-0002")] = [80.0] * 48   # busy
+    series[("CPUUtilization", "db-0003")] = [4.0] * 23    # too little data
+    series[("CPUUtilization", "db-0004")] = "Forbidden"   # unread
+    cw = _Metrics(series)
+
+    findings = waste.check_rds_rightsizing(_Pages(_rds_pages(250)), cw, region="us-east-1")
+
+    assert cw.calls == math.ceil(250 / 500) == 1
+    flagged = {f["resource_id"] for f in findings}
+    assert len(flagged) == 247
+    assert not {"db-0002", "db-0003", "db-0004"} & flagged
+    # Same money as the per-resource path: (0.342 - 0.171) * 730.
+    assert {f["estimated_monthly_savings"] for f in findings} == {124.83}
+
+
+def test_rds_idle_reads_connections_in_one_call_per_500():
+    from finops.analyzers import waste
+
+    series = {("DatabaseConnections", f"db-{i:04d}"): [0.0] * 14 for i in range(250)}
+    series[("DatabaseConnections", "db-0002")] = [3.0] * 14   # in use
+    series[("DatabaseConnections", "db-0003")] = [0.0] * 6    # too little data
+    series[("DatabaseConnections", "db-0004")] = "InternalError"
+    cw = _Metrics(series)
+
+    findings = waste.check_rds_idle(_Pages(_rds_pages(250)), cw, region="us-east-1")
+
+    assert cw.calls == math.ceil(250 / 500) == 1
+    flagged = {f["resource_id"] for f in findings}
+    assert len(flagged) == 247
+    assert not {"db-0002", "db-0003", "db-0004"} & flagged

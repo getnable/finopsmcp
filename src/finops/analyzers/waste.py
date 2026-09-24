@@ -1147,13 +1147,11 @@ def check_rds_rightsizing(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
+    candidates: list[dict] = []
     for page in pages:
         for db in page.get("DBInstances", []):
-            db_id = db["DBInstanceIdentifier"]
-            db_class = db.get("DBInstanceClass", "")
             engine = db.get("Engine", "")
             status = db.get("DBInstanceStatus", "")
-            multi_az = db.get("MultiAZ", False)
 
             if status != "available":
                 continue
@@ -1161,65 +1159,68 @@ def check_rds_rightsizing(
                 continue
             if db.get("ReadReplicaSourceDBInstanceIdentifier"):
                 continue
+            candidates.append(db)
 
-            try:
-                resp = cw_client.get_metric_statistics(
-                    Namespace="AWS/RDS",
-                    MetricName="CPUUtilization",
-                    Dimensions=[{"Name": "DBInstanceIdentifier", "Value": db_id}],
-                    StartTime=start,
-                    EndTime=now,
-                    Period=3600,
-                    Statistics=["Average"],
-                )
-                datapoints = resp.get("Datapoints", [])
-            except Exception as exc:
-                log.debug("CW CPU metrics failed for RDS %s: %s", db_id, exc)
-                continue
+    series = fetch_metric_values(cw_client, [
+        MetricQuery(db["DBInstanceIdentifier"], "AWS/RDS", "CPUUtilization",
+                    (("DBInstanceIdentifier", db["DBInstanceIdentifier"]),), "Average", 3600)
+        for db in candidates
+    ], start, now)
 
-            if not datapoints or len(datapoints) < 24:
-                continue
+    for db in candidates:
+        db_id = db["DBInstanceIdentifier"]
+        db_class = db.get("DBInstanceClass", "")
+        engine = db.get("Engine", "")
+        multi_az = db.get("MultiAZ", False)
 
-            avg_cpu = sum(dp.get("Average", 0) for dp in datapoints) / len(datapoints)
-            max_cpu = max(dp.get("Average", 0) for dp in datapoints)
+        datapoints = series.get(db_id)
+        if datapoints is None:
+            log.debug("CW CPU metrics failed for RDS %s", db_id)
+            continue
 
-            if avg_cpu >= cpu_threshold_pct:
-                continue
+        if not datapoints or len(datapoints) < 24:
+            continue
 
-            recommended_class = _RDS_DOWNSIZE.get(db_class)
-            if not recommended_class:
-                continue
+        avg_cpu = sum(datapoints) / len(datapoints)
+        max_cpu = max(datapoints)
 
-            current_hourly = _RDS_HOURLY.get(db_class, 0.0)
-            recommended_hourly = _RDS_HOURLY.get(recommended_class, 0.0)
-            factor = 2.0 if multi_az else 1.0
-            monthly_savings = (current_hourly - recommended_hourly) * 730 * factor
+        if avg_cpu >= cpu_threshold_pct:
+            continue
 
-            if monthly_savings <= 0:
-                continue
+        recommended_class = _RDS_DOWNSIZE.get(db_class)
+        if not recommended_class:
+            continue
 
-            findings.append({
-                "resource_id": db_id,
-                "resource_type": "RDS Instance",
-                "waste_type": "rds_overprovisioned",
-                "estimated_monthly_savings": round(monthly_savings, 2),
-                "detail": (
-                    f"RDS instance '{db_id}' ({db_class}, {engine}) averaged "
-                    f"{avg_cpu:.1f}% CPU (peak: {max_cpu:.1f}%) over {lookback_days} days. "
-                    f"Recommend downsizing to {recommended_class}. "
-                    f"{'Multi-AZ: savings doubled. ' if multi_az else ''}"
-                    f"Verify FreeStorageSpace and DatabaseConnections before resizing."
-                ),
-                "severity": _severity_from_savings(monthly_savings),
-                "region": region,
-                "account_id": None,
-                "current_class": db_class,
-                "recommended_class": recommended_class,
-                "engine": engine,
-                "multi_az": multi_az,
-                "avg_cpu_pct": round(avg_cpu, 2),
-                "max_cpu_pct": round(max_cpu, 2),
-            })
+        current_hourly = _RDS_HOURLY.get(db_class, 0.0)
+        recommended_hourly = _RDS_HOURLY.get(recommended_class, 0.0)
+        factor = 2.0 if multi_az else 1.0
+        monthly_savings = (current_hourly - recommended_hourly) * 730 * factor
+
+        if monthly_savings <= 0:
+            continue
+
+        findings.append({
+            "resource_id": db_id,
+            "resource_type": "RDS Instance",
+            "waste_type": "rds_overprovisioned",
+            "estimated_monthly_savings": round(monthly_savings, 2),
+            "detail": (
+                f"RDS instance '{db_id}' ({db_class}, {engine}) averaged "
+                f"{avg_cpu:.1f}% CPU (peak: {max_cpu:.1f}%) over {lookback_days} days. "
+                f"Recommend downsizing to {recommended_class}. "
+                f"{'Multi-AZ: savings doubled. ' if multi_az else ''}"
+                f"Verify FreeStorageSpace and DatabaseConnections before resizing."
+            ),
+            "severity": _severity_from_savings(monthly_savings),
+            "region": region,
+            "account_id": None,
+            "current_class": db_class,
+            "recommended_class": recommended_class,
+            "engine": engine,
+            "multi_az": multi_az,
+            "avg_cpu_pct": round(avg_cpu, 2),
+            "max_cpu_pct": round(max_cpu, 2),
+        })
 
     return findings
 
@@ -1247,78 +1248,74 @@ def check_rds_idle(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
-    for page in pages:
-        for db in page.get("DBInstances", []):
-            db_id = db["DBInstanceIdentifier"]
-            db_class = db.get("DBInstanceClass", "")
-            engine = db.get("Engine", "")
-            status = db.get("DBInstanceStatus", "")
+    candidates = [
+        db for page in pages for db in page.get("DBInstances", [])
+        if db.get("DBInstanceStatus", "") == "available"
+    ]
 
-            if status != "available":
-                continue
+    series = fetch_metric_values(cw_client, [
+        MetricQuery(db["DBInstanceIdentifier"], "AWS/RDS", "DatabaseConnections",
+                    (("DBInstanceIdentifier", db["DBInstanceIdentifier"]),), "Maximum", 86400)
+        for db in candidates
+    ], start, now)
 
-            try:
-                resp = cw_client.get_metric_statistics(
-                    Namespace="AWS/RDS",
-                    MetricName="DatabaseConnections",
-                    Dimensions=[{"Name": "DBInstanceIdentifier", "Value": db_id}],
-                    StartTime=start,
-                    EndTime=now,
-                    Period=86400,
-                    Statistics=["Maximum"],
-                )
-                datapoints = resp.get("Datapoints", [])
-            except Exception as exc:
-                log.debug("CW connections failed for RDS %s: %s", db_id, exc)
-                continue
+    for db in candidates:
+        db_id = db["DBInstanceIdentifier"]
+        db_class = db.get("DBInstanceClass", "")
+        engine = db.get("Engine", "")
 
-            if not datapoints or len(datapoints) < 7:
-                continue
+        datapoints = series.get(db_id)
+        if datapoints is None:
+            log.debug("CW connections failed for RDS %s", db_id)
+            continue
 
-            max_connections = max(dp.get("Maximum", 0) for dp in datapoints)
+        if not datapoints or len(datapoints) < 7:
+            continue
 
-            if max_connections >= connection_threshold:
-                continue
+        max_connections = max(datapoints)
 
-            multi_az = db.get("MultiAZ", False)
-            # Do NOT fabricate a price for an unknown class. The idle signal (no
-            # connections) is measured and real; the dollar is not, so an unknown
-            # class stays unpriced rather than emitting a made-up $0.10/hr, which
-            # on a large instance is off by 100x. A wrong number that looks real
-            # is worse than an honest "cost unknown".
-            current_hourly = _RDS_HOURLY.get(db_class)
-            if current_hourly is None:
-                monthly_cost = None
-                savings_val = None
-                cost_txt = (f"cost unknown ({db_class} is not in nable's price table; "
-                            f"check the real rate in Cost Explorer)")
-                severity = "unknown"
-            else:
-                monthly_cost = current_hourly * 730 * (2 if multi_az else 1)
-                savings_val = round(monthly_cost, 2)
-                cost_txt = f"~${monthly_cost:.0f}/mo"
-                severity = _severity_from_savings(monthly_cost)
+        if max_connections >= connection_threshold:
+            continue
 
-            findings.append({
-                "resource_id": db_id,
-                "resource_type": "RDS Instance",
-                "waste_type": "rds_idle_no_connections",
-                "estimated_monthly_savings": savings_val,
-                "unpriced": savings_val is None,
-                "detail": (
-                    f"RDS instance '{db_id}' ({db_class}, {engine}) had "
-                    f"max {max_connections:.0f} connections over the past {lookback_days} days. "
-                    f"Running cost: {cost_txt}. "
-                    f"Consider stopping (preserves data) or deleting with a final snapshot."
-                ),
-                "severity": severity,
-                "region": region,
-                "account_id": None,
-                "current_class": db_class,
-                "engine": engine,
-                "max_connections_14d": max_connections,
-                "estimated_monthly_cost": savings_val,
-            })
+        multi_az = db.get("MultiAZ", False)
+        # Do NOT fabricate a price for an unknown class. The idle signal (no
+        # connections) is measured and real; the dollar is not, so an unknown
+        # class stays unpriced rather than emitting a made-up $0.10/hr, which
+        # on a large instance is off by 100x. A wrong number that looks real
+        # is worse than an honest "cost unknown".
+        current_hourly = _RDS_HOURLY.get(db_class)
+        if current_hourly is None:
+            monthly_cost = None
+            savings_val = None
+            cost_txt = (f"cost unknown ({db_class} is not in nable's price table; "
+                        f"check the real rate in Cost Explorer)")
+            severity = "unknown"
+        else:
+            monthly_cost = current_hourly * 730 * (2 if multi_az else 1)
+            savings_val = round(monthly_cost, 2)
+            cost_txt = f"~${monthly_cost:.0f}/mo"
+            severity = _severity_from_savings(monthly_cost)
+
+        findings.append({
+            "resource_id": db_id,
+            "resource_type": "RDS Instance",
+            "waste_type": "rds_idle_no_connections",
+            "estimated_monthly_savings": savings_val,
+            "unpriced": savings_val is None,
+            "detail": (
+                f"RDS instance '{db_id}' ({db_class}, {engine}) had "
+                f"max {max_connections:.0f} connections over the past {lookback_days} days. "
+                f"Running cost: {cost_txt}. "
+                f"Consider stopping (preserves data) or deleting with a final snapshot."
+            ),
+            "severity": severity,
+            "region": region,
+            "account_id": None,
+            "current_class": db_class,
+            "engine": engine,
+            "max_connections_14d": max_connections,
+            "estimated_monthly_cost": savings_val,
+        })
 
     return findings
 

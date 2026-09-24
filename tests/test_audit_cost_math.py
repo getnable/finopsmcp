@@ -145,10 +145,13 @@ def _rds_session(instances):
             return _Paginator([{"DBInstances": list(instances)}])
 
     class _CW:
-        def get_metric_statistics(self, **kwargs):
-            return {"Datapoints": [
-                {"Timestamp": NOW - timedelta(days=i), "Maximum": 0.0}
-                for i in range(14)
+        def get_metric_data(self, **kwargs):
+            return {"MetricDataResults": [
+                {"Id": q["Id"],
+                 "Timestamps": [NOW - timedelta(days=i) for i in range(14)],
+                 "Values": [0.0] * 14,
+                 "StatusCode": "Complete"}
+                for q in kwargs["MetricDataQueries"]
             ]}
 
     class _STS:
@@ -796,10 +799,13 @@ def test_rds_rightsizing_prices_on_the_same_basis_as_its_ec2_sibling(monkeypatch
             }]}])
 
     class _CW:
-        def get_metric_statistics(self, **kwargs):
-            return {"Datapoints": [
-                {"Timestamp": NOW - timedelta(hours=i), "Average": 4.0}
-                for i in range(48)
+        def get_metric_data(self, **kwargs):
+            return {"MetricDataResults": [
+                {"Id": q["Id"],
+                 "Timestamps": [NOW - timedelta(hours=i) for i in range(48)],
+                 "Values": [4.0] * 48,
+                 "StatusCode": "Complete"}
+                for q in kwargs["MetricDataQueries"]
             ]}
 
     _fake_boto3_clients(monkeypatch, rds=_RDS(), cloudwatch=_CW(), ce=_FakeCostExplorer())
