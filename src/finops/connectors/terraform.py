@@ -40,9 +40,13 @@ def _load_state(tf_dir: str, state_path: str | None = None) -> dict:
     if state_path:
         with open(state_path) as f:
             return json.load(f)
+    from ..security.vault import child_env
+    # child_env: `terraform show` loads the provider plugins tf_dir declares,
+    # and they must not inherit the credentials the vault decrypted.
     result = subprocess.run(
         [os.environ.get("TERRAFORM_BIN", "terraform"), "show", "-json"],
         cwd=tf_dir,
+        env=child_env(),
         capture_output=True,
         text=True,
         timeout=60,

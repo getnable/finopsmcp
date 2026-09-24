@@ -585,6 +585,15 @@ async def cancel_report_subscription(subscription_id: int) -> dict:
         return {"error": str(e)}
 
 
+def _is_nable_csv(path) -> bool:
+    """True when path is a report this tool wrote earlier (safe to overwrite)."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.readline().strip().strip('"') == "nable Cost Report"
+    except OSError:
+        return False
+
+
 @_srv.mcp.tool()
 async def export_cost_report_csv(
     output_path: str | None = None,
@@ -629,6 +638,12 @@ async def export_cost_report_csv(
         if isinstance(resolved, dict):
             return resolved["error"]
         dest = pathlib.Path(resolved)
+        # The path arrives from the model, so it is only ever a CSV and never
+        # clobbers a file nable did not write (a document, a startup script).
+        if dest.suffix.lower() != ".csv":
+            return "output_path must end in .csv."
+        if dest.exists() and not _is_nable_csv(dest):
+            return f"{dest} already exists and is not a nable report. Choose a new file name."
     else:
         dest = pathlib.Path.home() / "Downloads" / f"nable-report-{today}.csv"
 

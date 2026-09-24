@@ -205,3 +205,27 @@ def test_a_leading_formula_in_a_cell_is_neutralised(monkeypatch, tmp_path):
     row = _data_rows(_rows(dest))[0]
     for cell in (row[1], row[2], row[5]):
         assert cell.startswith("'"), f"formula reached the sheet unescaped: {cell!r}"
+
+
+# ── output_path comes from the model: only CSVs, never someone else's file ────
+
+def test_a_non_csv_output_path_is_refused(three_findings, tmp_path):
+    dest = tmp_path / "startup.bat"
+    out = asyncio.run(EXPORT(output_path=str(dest)))
+    assert "must end in .csv" in out
+    assert not dest.exists()
+
+
+def test_an_existing_foreign_file_is_not_overwritten(three_findings, tmp_path):
+    dest = tmp_path / "budget.csv"
+    dest.write_text("my,own,spreadsheet\n")
+    out = asyncio.run(EXPORT(output_path=str(dest)))
+    assert "already exists" in out
+    assert dest.read_text() == "my,own,spreadsheet\n"
+
+
+def test_an_earlier_nable_report_can_be_refreshed(three_findings, tmp_path):
+    dest = tmp_path / "r.csv"
+    asyncio.run(EXPORT(output_path=str(dest)))
+    asyncio.run(EXPORT(output_path=str(dest)))
+    assert _rows(dest)[0][0] == "nable Cost Report"

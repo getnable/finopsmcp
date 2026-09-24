@@ -57,10 +57,13 @@ def _read_state_json(tf_dir: str) -> dict[str, Any]:
             log.warning("Could not parse terraform.tfstate: %s", exc)
 
     # Fall back to CLI
+    from ..security.vault import child_env
     tf_bin = os.environ.get("TERRAFORM_BIN", "terraform")
+    # child_env: the provider plugins tf_dir declares run inside this call.
     result = subprocess.run(
         [tf_bin, "show", "-json"],
         cwd=tf_dir,
+        env=child_env(),
         capture_output=True,
         text=True,
         timeout=60,

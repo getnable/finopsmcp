@@ -842,9 +842,12 @@ async def open_terraform_tag_pr(
         }
 
     # 2. Git: checkout branch, stage, commit, push
+    from ..security.vault import child_env
+
     def run_git(*args: str) -> str:
+        # child_env: git runs the repo's own hooks, which must not see the vault.
         result = _sp.run(
-            ["git", *args], cwd=tf_dir, capture_output=True, text=True
+            ["git", *args], cwd=tf_dir, env=child_env(), capture_output=True, text=True
         )
         if result.returncode != 0:
             raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")

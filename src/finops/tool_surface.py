@@ -496,6 +496,16 @@ WRITE_TOOLS: frozenset[str] = frozenset({
     # advertising these as read-only meant a caller-supplied directory could get
     # a process spawned without anyone being asked.
     "estimate_terraform_cost", "estimate_change_cost", "check_action_policy",
+    # Same reasoning: `terraform show -json` loads the directory's plugins.
+    "audit_terraform_tags",
+    # These write a file to a caller-chosen or exports path. Not destructive to
+    # the cloud, but a write to the machine is not what readOnlyHint promises.
+    "export_cost_report", "export_cost_report_csv", "export_board_summary",
+    "generate_account_dashboard",
+    # Moves messages out of the user's INBOX and stores parsed spend.
+    "fetch_invoice_emails",
+    # Changes the cap the guard enforces on the calling agent itself.
+    "set_ai_budget",
 })
 # The subset that removes/revokes something (destructiveHint = true). Additive
 # writes (create/set/send/pin/open-PR) are writes but NOT destructive.

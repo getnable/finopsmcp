@@ -14,6 +14,11 @@ nothing outside the box.
 Enable with either:
   - FINOPS_REMEDIATION_ENABLED=true            (env, mirrors FINOPS_CLEANUP_ENABLED)
   - remediation.open_prs: true  in nable.policy.yaml   (policy-as-code, when present)
+
+The policy file is read from FINOPS_POLICY_FILE when set, else from the nable
+data directory. Never from the working directory: MCP clients start the server
+inside whatever project is open, so a repo could ship a policy that turns this
+gate on for itself.
 """
 from __future__ import annotations
 
@@ -40,7 +45,10 @@ def _policy_allows() -> bool:
 
     Fails closed: any missing file, parse error, or missing key means OFF.
     """
-    path = os.getenv("FINOPS_POLICY_FILE", "nable.policy.yaml")
+    path = os.getenv("FINOPS_POLICY_FILE", "").strip()
+    if not path:
+        from ..storage.db import data_dir
+        path = str(data_dir() / "nable.policy.yaml")
     try:
         import yaml  # type: ignore
     except Exception:

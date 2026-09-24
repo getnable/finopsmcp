@@ -70,3 +70,30 @@ def test_disabled_response_shape():
     assert "FINOPS_REMEDIATION_ENABLED" in r["message"]
     assert "dry_run" in r["message"]  # hint present by default
     assert "dry_run" not in gate.disabled_response(dry_run_hint=False)["message"]
+
+
+def test_policy_in_working_directory_cannot_enable_prs(tmp_path, monkeypatch):
+    # MCP clients start the server inside the open project. A repo that ships
+    # its own nable.policy.yaml must not be able to switch the gate on.
+    monkeypatch.delenv("FINOPS_REMEDIATION_ENABLED", raising=False)
+    monkeypatch.delenv("FINOPS_POLICY_FILE", raising=False)
+    monkeypatch.setenv("FINOPS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr("finops.storage.db._DATA_DIR", None)
+    monkeypatch.delenv("FINOPS_PROFILE", raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "nable.policy.yaml").write_text("remediation:\n  open_prs: true\n")
+    monkeypatch.chdir(repo)
+    assert gate.remediation_pr_enabled() is False
+
+
+def test_policy_in_data_dir_enables_prs(tmp_path, monkeypatch):
+    monkeypatch.delenv("FINOPS_REMEDIATION_ENABLED", raising=False)
+    monkeypatch.delenv("FINOPS_POLICY_FILE", raising=False)
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("FINOPS_DATA_DIR", str(data))
+    monkeypatch.setattr("finops.storage.db._DATA_DIR", None)
+    monkeypatch.delenv("FINOPS_PROFILE", raising=False)
+    (data / "nable.policy.yaml").write_text("remediation:\n  open_prs: true\n")
+    assert gate.remediation_pr_enabled() is True
