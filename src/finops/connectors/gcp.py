@@ -10,6 +10,18 @@ from typing import Any
 from .base import BaseConnector, CostEntry, CostSummary
 
 
+def _export_not_configured() -> Exception:
+    """The refusal when no BigQuery billing export is configured.
+
+    The message is what the user reads in by_provider, so it carries the setup
+    steps from billing_access rather than a bare "not configured".
+    """
+    from ..billing_access import BillingAccessError, unavailable
+
+    info = unavailable("gcp")
+    return BillingAccessError(" ".join([info["message"], *info["setup"], info["note"]]))
+
+
 class GCPConnector(BaseConnector):
     provider = "gcp"
 
@@ -108,11 +120,12 @@ class GCPConnector(BaseConnector):
         """
         Query the BigQuery billing export table.
         Requires: GCP_BQ_BILLING_TABLE env var in the form `project.dataset.table`.
-        Falls back to Cloud Billing API summary if not configured.
+        Raises BillingAccessError when it is not configured: the Cloud Billing
+        API exposes no spend, so there is nothing honest to fall back to.
         """
         bq_table = os.getenv("GCP_BQ_BILLING_TABLE")
         if not bq_table:
-            return self._query_billing_api(billing_account_id, start_date, end_date)
+            raise _export_not_configured()
 
         from google.cloud import bigquery
 
@@ -143,14 +156,6 @@ class GCPConnector(BaseConnector):
         )
         rows = list(client.query(query, job_config=job_config).result())
         return [dict(row) for row in rows]
-
-    def _query_billing_api(self, billing_account_id: str, start_date: date, end_date: date) -> list[dict]:
-        """
-        Light fallback using the Cloud Billing SKU catalog.
-        Note: The Billing API doesn't expose actual spend — for real spend data
-        configure GCP_BQ_BILLING_TABLE (BigQuery billing export).
-        """
-        return []
 
     def _rows_to_summary(
         self,
@@ -220,12 +225,25 @@ class GCPConnector(BaseConnector):
             entries=[],
         )
 
+        # No export table, no spend data. Refuse before the cache: this used to
+        # return an empty summary that read as $0.00 and was then cached for 12h,
+        # so fixing the config kept serving the zero.
+        bq_table = os.getenv("GCP_BQ_BILLING_TABLE")
+        if not bq_table:
+            raise _export_not_configured()
+        if not self._billing_account_ids:
+            raise RuntimeError(
+                "No GCP billing account to read. Set GCP_BILLING_ACCOUNT_IDS to the "
+                "billing account(s) exported to GCP_BQ_BILLING_TABLE."
+            )
+
         # Read-through cache + parallel billing accounts; BigQuery used to run
         # synchronously on the event loop and block every other connector.
+        # The table is part of the key: a different export is different data.
         import copy as _copy
         from .. import cache as _cache
         _ck = _cache.make_key(
-            "gcp.get_costs", ",".join(sorted(self._billing_account_ids)),
+            "gcp.get_costs", bq_table, ",".join(sorted(self._billing_account_ids)),
             start_date.isoformat(), end_date.isoformat(), granularity,
         )
         _hit = _cache.get(_ck)
