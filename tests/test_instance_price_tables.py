@@ -331,3 +331,27 @@ def test_pr_estimator_rds_is_the_shared_rate(monkeypatch, db_class, was, now):
         "add", "aws_db_instance", "db", "aws", {"instance_class": db_class})])
     assert est.breakdown["compute"] == now == round(RDS_HOURLY[db_class] * 730, 2)
     assert now != was
+
+
+# ── the modules that borrowed terraform_estimate's table ─────────────────────
+
+def test_guard_prices_run_instances_from_the_shared_table():
+    from finops.guard import estimate_command_monthly_cost
+
+    est = estimate_command_monthly_cost(
+        "aws ec2 run-instances --instance-type p4d.24xlarge --count 8")
+    assert est["hourly_usd"] == 32.77
+    assert est["monthly_usd"] == round(32.77 * 8 * 730, 2)
+
+
+def test_kubernetes_costs_and_vscode_mirror_use_the_shared_table():
+    from finops import vscode_extension_prices
+    from finops.connectors import kubernetes_costs
+
+    assert kubernetes_costs._EC2_HOURLY is EC2_HOURLY
+    assert kubernetes_costs._node_daily_cost("m5.large") == pytest.approx(0.096 * 24)
+    assert vscode_extension_prices._EC2_HOURLY is EC2_HOURLY
+    assert vscode_extension_prices._RDS_HOURLY is RDS_HOURLY
+    rds = vscode_extension_prices.price_resource_py(
+        "aws_db_instance", {"instance_class": "db.r6g.large"})
+    assert rds["monthly"] == 140.16

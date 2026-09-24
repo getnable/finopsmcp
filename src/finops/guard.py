@@ -168,8 +168,8 @@ def estimate_command_monthly_cost(command: str) -> dict[str, Any] | None:
         return None
     itype = m.group(1)
     try:
-        from .connectors.terraform_estimate import HOURS_PER_MONTH, _EC2_HOURLY
-        hourly = _EC2_HOURLY.get(itype)
+        from .aws_prices import EC2_HOURLY, HOURS_PER_MONTH
+        hourly = EC2_HOURLY.get(itype)
     except Exception:
         return None
     if not hourly:

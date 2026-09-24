@@ -38,8 +38,7 @@ log = logging.getLogger(__name__)
 # All prices on-demand us-east-1, May 2026
 
 # EC2 and RDS are shared with half a dozen other modules and live in aws_prices.
-# The underscored names stay because guard, verifiers, kubernetes_costs and the
-# VS Code mirror import them from here.
+# The underscored names stay for anything that still imports them from here.
 _EC2_HOURLY = EC2_HOURLY
 _RDS_HOURLY = RDS_HOURLY
 
