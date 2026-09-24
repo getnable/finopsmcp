@@ -41,6 +41,10 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # Must sit in the one-way list (checked first) or the two-way apply pattern
     # would classify it as a reversible mutation.
     (r"\b(?:terraform|tofu)\s+(?:\S+\s+)*apply\b[^|;&]*\s-destroy\b", "delete_resource"),
+    # The same flag passed through terraform's own env hook:
+    # `TF_CLI_ARGS_apply=-destroy terraform apply` is a destroy the apply
+    # pattern below would otherwise wave through as a reversible mutation.
+    (r"\bTF_CLI_ARGS(?:_\w+)?=\S*-destroy\b", "delete_resource"),
     (r"\bpulumi\s+(?:\S+\s+)*destroy\b", "delete_resource"),
     (r"\beksctl\s+delete\b", "delete_resource"),
     # bucket/object wipes: `aws s3 rb` removes a bucket, `aws s3 rm --recursive`
@@ -116,7 +120,10 @@ def _strip_aws_global_options(cmd: str) -> str:
 def classify_command(command: str) -> tuple[str, str] | None:
     """Classify a shell command as ("one_way"|"two_way", action_type), or None
     when it is not an infrastructure mutation nable cares about."""
-    cmd = " ".join(command.split())  # normalize whitespace
+    # Quotes do not change which program runs: `"aws" ec2 terminate-instances`
+    # is a terminate. Dropping them can only over-match, which is the safe side.
+    cmd = command.replace('"', "").replace("'", "")
+    cmd = " ".join(cmd.split())  # normalize whitespace
     cmd = _strip_aws_global_options(cmd)
     for pattern, action in _ONE_WAY_CLASSIFIERS:
         if re.search(pattern, cmd):

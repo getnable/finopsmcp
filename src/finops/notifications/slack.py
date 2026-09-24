@@ -6,6 +6,17 @@ from typing import Any
 
 import httpx
 
+def esc(value: Any) -> str:
+    """Escape a data value for Slack mrkdwn.
+
+    Service, team, cluster and budget names come from cloud tags and resource
+    names that anyone with tag rights can set. Unescaped, a tag like
+    `<!channel> <https://evil|Re-authenticate>` pinged the channel and put a
+    phishing link inside a trusted bot message. Slack's rule: escape & < >.
+    """
+    return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 _SEVERITY_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
 _DIRECTION_EMOJI = {"spike": "📈", "drop": "📉"}
 
@@ -82,8 +93,8 @@ def anomaly_blocks(anomaly: dict[str, Any]) -> list[dict]:
     return [
         {"type": "header", "text": {"type": "plain_text", "text": f"{emoji} Cost Anomaly — {anomaly['severity'].upper()} severity"}},
         {"type": "section", "fields": [
-            {"type": "mrkdwn", "text": f"*Provider*\n{anomaly['provider'].upper()}"},
-            {"type": "mrkdwn", "text": f"*Service*\n{anomaly['service']}"},
+            {"type": "mrkdwn", "text": f"*Provider*\n{esc(anomaly['provider'].upper())}"},
+            {"type": "mrkdwn", "text": f"*Service*\n{esc(anomaly['service'])}"},
             {"type": "mrkdwn", "text": f"*Change*\n{d_emoji} {sign}{pct:.0f}% vs 28-day avg"},
             {"type": "mrkdwn", "text": f"*Today*\n${anomaly['current_amount']:,.2f}"},
             {"type": "mrkdwn", "text": f"*Baseline avg*\n${anomaly['baseline_mean']:,.2f}"},
@@ -91,7 +102,7 @@ def anomaly_blocks(anomaly: dict[str, Any]) -> list[dict]:
         ]},
         *impact_blocks,
         {"type": "context", "elements": [
-            {"type": "mrkdwn", "text": f"Detected {anomaly.get('detected_at', '')} · Account: {anomaly.get('account_id', '')}"}
+            {"type": "mrkdwn", "text": f"Detected {anomaly.get('detected_at', '')} · Account: {esc(anomaly.get('account_id', ''))}"}
         ]},
         {"type": "divider"},
     ]
@@ -120,7 +131,7 @@ def daily_digest_blocks(
         f"• *{p.upper()}*: ${v:,.2f}" for p, v in sorted(by_provider.items(), key=lambda x: -x[1])
     )
     service_text = "\n".join(
-        f"{i+1}. {s['service']}: *${s['amount_usd']:,.2f}* ({s.get('pct', 0):.1f}%)"
+        f"{i+1}. {esc(s['service'])}: *${s['amount_usd']:,.2f}* ({s.get('pct', 0):.1f}%)"
         for i, s in enumerate(top_services[:5])
     )
 
@@ -187,7 +198,7 @@ def weekly_insight_blocks(
             pct = m.get("pct_change", 0)
             arrow = "↑" if pct > 0 else "↓"
             mover_lines.append(
-                f"• *{m['service']}* ({m.get('provider','').upper()}): "
+                f"• *{esc(m['service'])}* ({esc(m.get('provider','').upper())}): "
                 f"{arrow}{abs(pct):.0f}% · ${m.get('this_week', 0):,.0f} this week"
             )
         blocks.append({
@@ -216,7 +227,7 @@ def weekly_insight_blocks(
         for b in budget_alerts[:3]:
             pct = b.get("pct_used", 0)
             emoji = "🔴" if pct >= 100 else "🟡"
-            alert_lines.append(f"{emoji} *{b['name']}*: {pct:.0f}% of budget used")
+            alert_lines.append(f"{emoji} *{esc(b['name'])}*: {pct:.0f}% of budget used")
         blocks.append({
             "type": "section",
             "text": {"type": "mrkdwn", "text": "*Budget alerts*\n" + "\n".join(alert_lines)},
@@ -264,7 +275,7 @@ async def send_anomaly_alert(anomaly: dict[str, Any]) -> bool:
     blocks = anomaly_blocks(anomaly)
     pct = abs(anomaly["pct_change"])
     sign = "+" if anomaly["direction"] == "spike" else "-"
-    text = f"Cost anomaly: {anomaly['provider']} / {anomaly['service']} {sign}{pct:.0f}% ({anomaly['severity']})"
+    text = f"Cost anomaly: {esc(anomaly['provider'])} / {esc(anomaly['service'])} {sign}{pct:.0f}% ({anomaly['severity']})"
     return await send(blocks, text)
 
 

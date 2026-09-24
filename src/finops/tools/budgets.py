@@ -169,8 +169,15 @@ async def sync_budgets_from_yaml(yaml_path: str) -> dict:
     """
     if err := _srv.require_role("analyst"):
         return err
+    # The path comes from the model. Resolve it and only open YAML: a parse
+    # error on any other file would quote that file's contents back.
+    resolved = _srv._resolve_safe_path(yaml_path, must_exist=True)
+    if isinstance(resolved, dict):
+        return resolved
+    if not resolved.lower().endswith((".yml", ".yaml")):
+        return {"error": "yaml_path must be a .yml or .yaml file"}
     try:
         from ..budget.enforcer import sync_from_yaml
-        return sync_from_yaml(yaml_path)
+        return sync_from_yaml(resolved)
     except Exception as e:
         return {"error": str(e)}

@@ -14,6 +14,7 @@ import html as _html
 import io
 import json
 import os
+import re
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Any
@@ -480,7 +481,9 @@ def write_report(
         formats = ["html", "csv"]
 
     ts = _ts()
-    safe_title = title.lower().replace(" ", "_").replace("/", "_")[:40]
+    # Allowlist, not a denylist: replacing only "/" let a "\\" or "..\\"
+    # in a model-supplied title escape the exports directory on Windows.
+    safe_title = re.sub(r"[^a-z0-9_-]+", "_", title.lower())[:40] or "report"
     base = _export_dir() / f"{safe_title}_{ts}"
     output: dict[str, str] = {}
 

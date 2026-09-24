@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import html
 import os
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -631,7 +632,8 @@ async def generate_account_dashboard(
     if output_path:
         out = Path(output_path).expanduser().resolve()
     else:
-        slug = resolved_account.replace("/", "-")
+        # account_id can come from the model: allowlist it before it names a file.
+        slug = re.sub(r"[^A-Za-z0-9_-]+", "-", str(resolved_account)) or "account"
         filename = f"dashboard-{slug}-{today.isoformat()}.html"
         out = _dashboard_dir() / filename
 

@@ -19,6 +19,8 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from .slack import esc
+
 log = logging.getLogger(__name__)
 
 # ── Preset cron expressions ───────────────────────────────────────────────────
@@ -86,7 +88,7 @@ async def _section_spend(filters: dict, lookback_days: int) -> tuple[list[dict],
             f"  • *{r.provider.upper()}*: ${float(r.t):,.0f}" for r in rows
         )
         svc_lines = "\n".join(
-            f"  {i+1}. {r.service}: *${float(r.t):,.0f}*" for i, r in enumerate(svc_rows)
+            f"  {i+1}. {esc(r.service)}: *${float(r.t):,.0f}*" for i, r in enumerate(svc_rows)
         )
 
         blocks: list[dict] = [
@@ -178,7 +180,7 @@ async def _section_k8s(**_) -> tuple[list[dict], str]:
             # r is a ClusterReport dataclass; rightsizing_opportunities is list[dict]
             waste = sum(opp.get("potential_savings_usd", 0) for opp in r.rightsizing_opportunities)
             total_waste += waste
-            lines.append(f"  • *{r.cluster}*: ${r.total_monthly_cost:,.0f}/mo, ${waste:,.0f} waste")
+            lines.append(f"  • *{esc(r.cluster)}*: ${r.total_monthly_cost:,.0f}/mo, ${waste:,.0f} waste")
 
         blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": (
             f"☸️ *Kubernetes* — {len(reports)} cluster(s), ${total_waste:,.0f}/mo waste\n" + "\n".join(lines)
@@ -262,7 +264,7 @@ async def _section_budgets(**_) -> tuple[list[dict], str]:
         lines = []
         for b in results[:6]:
             status_emoji = "🔴" if b.get("status") == "exceeded" else "🟡"
-            lines.append(f"  {status_emoji} *{b['name']}*: ${b['spent']:,.0f} / ${b['limit']:,.0f} ({b['pct_used']:.0f}%)")
+            lines.append(f"  {status_emoji} *{esc(b['name'])}*: ${b['spent']:,.0f} / ${b['limit']:,.0f} ({b['pct_used']:.0f}%)")
 
         blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": (
             f"💰 *Budgets* — {len(exceeded)} exceeded, {len(warning)} warnings\n" + "\n".join(lines)
@@ -299,11 +301,11 @@ async def _section_teams(filters: dict, lookback_days: int) -> tuple[list[dict],
 
         total = sum(float(r.t) for r in rows)
         lines = "\n".join(
-            f"  {i+1}. *{r.team}*: ${float(r.t):,.0f} ({float(r.t)/total*100:.1f}%)"
+            f"  {i+1}. *{esc(r.team)}*: ${float(r.t):,.0f} ({float(r.t)/total*100:.1f}%)"
             for i, r in enumerate(rows)
         )
         blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": f"👥 *By team* ({lookback_days}d)\n{lines}"}}]
-        return blocks, f"Top team: {rows[0].team} (${float(rows[0].t):,.0f})"
+        return blocks, f"Top team: {esc(rows[0].team)} (${float(rows[0].t):,.0f})"
     except Exception as e:
         log.warning("teams section failed: %s", e)
         return [], ""

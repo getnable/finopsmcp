@@ -322,3 +322,16 @@ def test_guard_status_points_at_the_tryout(capsys, monkeypatch):
     except SystemExit:
         pass
     assert "nable guard try" in capsys.readouterr().out
+
+
+def test_quoted_program_name_is_still_classified():
+    from finops.guard import classify_command
+    assert classify_command('"aws" ec2 terminate-instances --instance-ids i-1') == ("one_way", "terminate_instance")
+    assert classify_command("'terraform' destroy") == ("one_way", "delete_resource")
+
+
+def test_destroy_through_tf_cli_args_is_one_way():
+    from finops.guard import classify_command
+    assert classify_command("TF_CLI_ARGS_apply=-destroy terraform apply") == ("one_way", "delete_resource")
+    assert classify_command('TF_CLI_ARGS="-destroy -auto-approve" terraform apply') == ("one_way", "delete_resource")
+    assert classify_command("terraform apply") == ("two_way", "infra_apply")
