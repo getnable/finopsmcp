@@ -407,16 +407,23 @@ def _planfile_arg(cmd: str, verb_end: int) -> str | None:
     return None
 
 
-def _price_planfile(cmd: str, *, cwd: str | None = None, **_: Any) -> dict[str, Any] | None:
-    """`terraform apply plan.out` applies exactly the saved plan, so the plan
-    can be priced before it runs, through the same estimator as `nable
-    estimate`. Only when the plan file exists and the binary is on PATH;
-    anything else (a plain apply, a missing file, a slow or failing `show`)
-    is no figure, never a guess."""
+_PLAN_CACHE: dict[tuple[str, float], dict[str, Any] | None] = {}
+
+
+def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any]] | None:
+    """(tool, plan file as written, `show -json` document) for `terraform|tofu
+    apply <planfile>`, or None.
+
+    Only when the plan file exists and the binary is on PATH; anything else (a
+    plain apply, a missing file, a slow or failing `show`) is None. Read once
+    per plan file per process: both pricing and the destroy check need it,
+    and the hook must not pay for `show` twice."""
     import shutil
     import subprocess
 
     m = _TF_APPLY_RE.search(cmd)
+    if not m:
+        return None
     tool = m.group(1)
     plan = _planfile_arg(cmd, m.end())
     if not plan:
@@ -429,22 +436,64 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, **_: Any) -> dict[str, 
     if chdir:
         base = base / Path(chdir.group(1)).expanduser()
     plan_path = base / Path(plan).expanduser()
-    if not plan_path.is_file():
+    try:
+        key = (str(plan_path.resolve()), plan_path.stat().st_mtime)
+    except OSError:
         return None
-    exe = shutil.which((os.environ.get("TERRAFORM_BIN") or "terraform") if tool == "terraform"
-                       else "tofu")
-    if not exe:
+    if key not in _PLAN_CACHE:
+        _PLAN_CACHE[key] = None
+        exe = shutil.which((os.environ.get("TERRAFORM_BIN") or "terraform")
+                           if tool == "terraform" else "tofu")
+        if exe and plan_path.is_file():
+            # env=child_env(): terraform loads the providers the directory
+            # declares, and none of them get nable's decrypted vault (see
+            # estimate_from_dir).
+            from .security.vault import child_env
+            try:
+                r = subprocess.run([exe, "show", "-json", str(plan_path)], cwd=str(base),
+                                   capture_output=True, text=True,
+                                   timeout=_PLAN_SHOW_TIMEOUT_S, env=child_env())
+                if r.returncode == 0:
+                    doc = json.loads(r.stdout)
+                    _PLAN_CACHE[key] = doc if isinstance(doc, dict) else None
+            except (OSError, ValueError, subprocess.SubprocessError):
+                pass
+    doc = _PLAN_CACHE[key]
+    return (tool, plan, doc) if doc is not None else None
+
+
+def saved_plan_destroys(command: str, *, cwd: str | None = None) -> list[str]:
+    """Addresses a saved plan deletes outright, for `terraform apply <planfile>`.
+
+    `terraform plan -destroy -out plan.out` then `terraform apply plan.out` is
+    a destroy wearing the apply verb, and the classifier can only see the verb.
+    The plan cannot lie about it. Replacements (delete-then-create) are not
+    counted: they are routine in ordinary applies, and asking on each one is
+    the kind of noise that gets a guard uninstalled."""
+    try:
+        read = _read_saved_plan(_normalize(command), cwd)
+        if read is None:
+            return []
+        out = []
+        for rc in read[2].get("resource_changes") or []:
+            actions = (rc.get("change") or {}).get("actions") or []
+            if "delete" in actions and "create" not in actions:
+                out.append(str(rc.get("address") or rc.get("type") or "?"))
+        return out
+    except Exception:
+        return []
+
+
+def _price_planfile(cmd: str, *, cwd: str | None = None, **_: Any) -> dict[str, Any] | None:
+    """`terraform apply plan.out` applies exactly the saved plan, so the plan
+    can be priced before it runs, through the same estimator as `nable
+    estimate`."""
+    read = _read_saved_plan(cmd, cwd)
+    if read is None:
         return None
-    # env=child_env(): terraform loads the providers the directory declares,
-    # and none of them get nable's decrypted vault (see estimate_from_dir).
-    from .security.vault import child_env
-    r = subprocess.run([exe, "show", "-json", str(plan_path)], cwd=str(base),
-                       capture_output=True, text=True, timeout=_PLAN_SHOW_TIMEOUT_S,
-                       env=child_env())
-    if r.returncode != 0:
-        return None
+    tool, plan, doc = read
     from .connectors.terraform_estimate import estimate_plan
-    result = estimate_plan(json.loads(r.stdout))
+    result = estimate_plan(doc)
     if not result["lines"]:
         return None                    # nothing in the plan is priceable
     monthly = float(result["monthly_delta_usd"])
@@ -610,6 +659,14 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
             v["estimate"] = est
         return v
 
+    destroys: list[str] = []
+    if action_type == "infra_apply":
+        # A saved plan that deletes resources is a one-way door whatever verb
+        # applies it; saved_plan_destroys reads the plan rather than the verb.
+        destroys = saved_plan_destroys(command, cwd=cwd)
+        if destroys:
+            door, action_type = "one_way", "delete_resource"
+
     if action_type == "infra_apply":
         # Reversible mutation. Zero friction by default; strict mode confirms,
         # and a production context always confirms: practitioners run agents
@@ -646,6 +703,10 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
     # Savings Plan should see the commitment in the same breath as the question.
     est = estimate_command_monthly_cost(command, cwd=cwd)
     cost = f"{_cost_line(est)}. " if est else ""
+    if destroys:
+        shown = ", ".join(destroys[:3]) + (f" and {len(destroys) - 3} more" if len(destroys) > 3 else "")
+        cost = (f"the saved plan destroys {len(destroys)} "
+                f"resource{'s' if len(destroys) != 1 else ''} ({shown}). ") + cost
     gate = evaluate_action_gate(action_type,
                                 monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0)
     if gate.get("gate") == GATE_ESCALATE:

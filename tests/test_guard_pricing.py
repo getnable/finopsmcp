@@ -219,7 +219,7 @@ def fake_tf(tmp_path, monkeypatch):
     monkeypatch.delenv("FAKE_TF_SLEEP", raising=False)
     work = tmp_path / "infra"
     work.mkdir()
-    return {"work": work, "calls": calls}
+    return {"work": work, "calls": calls, "plan_json": plan_json}
 
 
 def test_a_saved_plan_is_priced_through_terraform_show(fake_tf):
@@ -285,6 +285,42 @@ def test_the_hook_passes_the_session_cwd(fake_tf):
         "tool_input": {"command": "terraform apply plan.out"}})), stdout=out)
     body = _json.loads(out.getvalue())["hookSpecificOutput"]
     assert "$23,922/mo" in body["permissionDecisionReason"]
+
+
+def _change(address, rtype, actions, before=None, after=None):
+    return {"address": address, "type": rtype,
+            "change": {"actions": actions, "before": before, "after": after}}
+
+
+def test_a_saved_destroy_plan_is_a_one_way_door(fake_tf):
+    """`terraform plan -destroy -out d.out` then `terraform apply d.out` is a
+    destroy wearing the apply verb. The classifier sees only the verb; the
+    plan cannot lie about it."""
+    fake_tf["plan_json"].write_text(_json.dumps({"resource_changes": [
+        _change("aws_db_instance.orders", "aws_db_instance", ["delete"],
+                before={"instance_class": "db.r5.large"}),
+        _change("aws_instance.web", "aws_instance", ["delete"],
+                before={"instance_type": "m5.large"}),
+    ]}))
+    (fake_tf["work"] / "d.out").write_bytes(b"x")
+    v = g.gate_command("terraform apply d.out", cwd=str(fake_tf["work"]))
+    assert v and v["decision"] == "ask"
+    assert (v["door"], v["action_type"]) == ("one_way", "delete_resource")
+    assert ("the saved plan destroys 2 resources "
+            "(aws_db_instance.orders, aws_instance.web)") in v["reason"]
+    assert "changes the bill by -$" in v["reason"], "the saving is still shown"
+    assert len(fake_tf["calls"].read_text().splitlines()) == 1, \
+        "the plan was read more than once for one verdict"
+
+
+def test_replacements_alone_stay_a_reversible_apply(fake_tf):
+    fake_tf["plan_json"].write_text(_json.dumps({"resource_changes": [
+        _change("aws_instance.web", "aws_instance", ["delete", "create"],
+                before={"instance_type": "t3.micro"}, after={"instance_type": "t3.micro"}),
+    ]}))
+    (fake_tf["work"] / "r.out").write_bytes(b"x")
+    assert g.saved_plan_destroys("terraform apply r.out", cwd=str(fake_tf["work"])) == []
+    assert g.gate_command("terraform apply r.out", cwd=str(fake_tf["work"])) is None
 
 
 def test_the_plan_read_does_not_get_the_vault(fake_tf, monkeypatch):
