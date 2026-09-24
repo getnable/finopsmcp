@@ -10,6 +10,8 @@ wire format and the config file. Invariants under test:
     and Codex never receives a value its parser rejects
   - every failure allows, says why on stderr, and keeps stdout to the
     harness's JSON and nothing else
+  - installing is idempotent, never touches another tool's hooks, refuses a
+    file it does not understand (keeping a copy) and never half-writes one
 
 Payload fixtures are copied from the sources guard_adapters.py cites.
 """
@@ -18,6 +20,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -333,3 +336,307 @@ def test_the_real_cli_prints_one_json_document_and_nothing_else(payload, harness
     r = _cli(["guard", "hook", *harness_flag], tmp_path / "home", json.dumps(payload))
     assert r.returncode == 0, r.stderr
     assert check(json.loads(r.stdout)), r.stdout
+
+
+# ── install: shape and command ───────────────────────────────────────────────
+
+def _uvx(monkeypatch) -> str:
+    """No finops on PATH (the uvx install case), uvx at a durable location.
+
+    pytest's tmp_path lives under $TMPDIR, which guard._is_ephemeral rightly
+    rejects, so the temp root is pointed elsewhere for the exe to count."""
+    uvx = Path.home() / "uv" / "bin" / "uvx"
+    uvx.parent.mkdir(parents=True, exist_ok=True)
+    uvx.touch(mode=0o755)
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(Path.home() / "not-a-tmp"))
+    monkeypatch.setattr("shutil.which", lambda n: str(uvx) if n == "uvx" else None)
+    return str(uvx)
+
+
+def test_cursor_install_writes_the_documented_shape(monkeypatch):
+    uvx = _uvx(monkeypatch)
+    outcome, path = ga.install("cursor", global_scope=True)
+    assert outcome == "new" and path == Path.home() / ".cursor" / "hooks.json"
+    doc = json.loads(path.read_text())
+    assert doc["version"] == 1
+    [entry] = doc["hooks"]["beforeShellExecution"]
+    assert entry["failClosed"] is False
+    assert entry["timeout"] >= 30                 # cold uvx resolve
+    # A desktop app may not see a terminal's PATH, so uvx is spelled out.
+    assert entry["command"] == f"{uvx} --from finops-mcp finops guard hook"
+
+
+def test_codex_install_writes_the_documented_shape(monkeypatch):
+    _uvx(monkeypatch)
+    outcome, path = ga.install("codex", global_scope=True)
+    assert outcome == "new" and path == Path.home() / ".codex" / "hooks.json"
+    doc = json.loads(path.read_text())
+    assert set(doc) <= {"hooks", "description"}, "Codex denies unknown top-level keys"
+    [group] = doc["hooks"]["PreToolUse"]
+    assert group["matcher"] == "^Bash$"
+    [handler] = group["hooks"]
+    assert handler["type"] == "command"
+    # Codex runs hooks through a login shell, so the bare uvx form resolves.
+    assert handler["command"] == g._UVX_HOOK_CMD
+
+
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_the_installed_command_carries_no_harness_flag(harness, monkeypatch):
+    """An older nable rejects an unknown flag with exit 2, which both Cursor and
+    Codex read as "block": a stale uvx cache would stop every command."""
+    _uvx(monkeypatch)
+    ga.install(harness, global_scope=True)
+    assert "--harness" not in ga.hooks_path(harness, True).read_text()
+
+
+def test_codex_home_is_honoured(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "custom-codex"))
+    assert ga.hooks_path("codex", True) == tmp_path / "custom-codex" / "hooks.json"
+    monkeypatch.setenv("CODEX_HOME", "")
+    assert ga.hooks_path("codex", True) == Path.home() / ".codex" / "hooks.json"
+
+
+def test_project_scope_writes_under_the_project():
+    assert ga.hooks_path("cursor", False) == Path.cwd() / ".cursor" / "hooks.json"
+    assert ga.hooks_path("codex", False) == Path.cwd() / ".codex" / "hooks.json"
+
+
+# ── install: safety ──────────────────────────────────────────────────────────
+
+FOREIGN = {
+    "cursor": {"version": 1, "hooks": {
+        "beforeShellExecution": [{"command": "./audit.sh", "timeout": 5}],
+        "afterFileEdit": [{"command": "./format.sh"}]}},
+    "codex": {"description": "team hooks", "hooks": {
+        "PreToolUse": [{"matcher": "^Bash$",
+                        "hooks": [{"type": "command", "command": "python3 policy.py"}]}],
+        "Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]}},
+}
+
+
+def _ours(harness, path):
+    doc = json.loads(path.read_text())
+    cmds = ga._ADAPTERS[harness][2](doc)
+    return [c for c in cmds if ga._is_ours(c)], [c for c in cmds if not ga._is_ours(c)], doc
+
+
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_install_is_idempotent_and_does_not_rewrite(harness, monkeypatch):
+    _uvx(monkeypatch)
+    _, path = ga.install(harness, True)
+    first = path.read_bytes()
+    for _ in range(3):
+        assert ga.install(harness, True)[0] == "already"
+    assert path.read_bytes() == first
+    assert len(_ours(harness, path)[0]) == 1
+
+
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_other_hooks_survive_install_and_uninstall(harness, monkeypatch):
+    _uvx(monkeypatch)
+    path = ga.hooks_path(harness, True)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(FOREIGN[harness]))
+
+    ga.install(harness, True)
+    ours, theirs, _ = _ours(harness, path)
+    assert len(ours) == 1 and theirs, "a foreign hook went missing on install"
+
+    assert ga.uninstall(harness, True)[0] is True
+    assert json.loads(path.read_text()) == FOREIGN[harness], "uninstall did not restore the file"
+
+
+def test_codex_uninstall_keeps_a_foreign_handler_sharing_our_group(monkeypatch):
+    _uvx(monkeypatch)
+    path = ga.hooks_path("codex", True)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"hooks": {"PreToolUse": [{"matcher": "^Bash$", "hooks": [
+        {"type": "command", "command": "python3 policy.py"},
+        {"type": "command", "command": g._UVX_HOOK_CMD}]}]}}))
+    assert ga.uninstall("codex", True)[0] is True
+    assert json.loads(path.read_text())["hooks"]["PreToolUse"] == [
+        {"matcher": "^Bash$", "hooks": [{"type": "command", "command": "python3 policy.py"}]}]
+
+
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_uninstall_twice_and_uninstall_nothing(harness, monkeypatch):
+    _uvx(monkeypatch)
+    path = ga.hooks_path(harness, True)
+    assert ga.uninstall(harness, True)[0] is False
+    assert not path.exists(), "uninstall created a file"
+    ga.install(harness, True)
+    assert ga.uninstall(harness, True)[0] is True
+    assert ga.uninstall(harness, True)[0] is False
+
+
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_malformed_json_is_refused_backed_up_and_left_alone(harness):
+    path = ga.hooks_path(harness, True)
+    path.parent.mkdir(parents=True)
+    body = b'{"version": 1, "hooks": { THIS IS NOT JSON'
+    path.write_bytes(body)
+    for action in (ga.install, ga.install, ga.uninstall):
+        with pytest.raises(SystemExit) as e:
+            action(harness, True)
+        assert "not valid JSON" in str(e.value.code) and "nothing was changed" in str(e.value.code)
+    assert path.read_bytes() == body, "refused but still wrote to the file"
+    backups = list(path.parent.glob("hooks.json.nable-backup-*"))
+    assert len(backups) == 1, f"expected one backup for one broken file, got {backups}"
+    assert backups[0].read_bytes() == body
+    assert backups[0].name in str(e.value.code)
+
+
+@pytest.mark.parametrize("harness,body,described_as", [
+    ("cursor", '["a", "list"]', "list"),
+    ("codex", '"a string"', "str"),
+    ("cursor", '{"version": 1, "hooks": "wat"}', "str"),
+    ("cursor", '{"version": 1, "hooks": {"beforeShellExecution": {"command": "x"}}}', "dict"),
+    ("cursor", '{"version": 2, "hooks": {}}', "version 2"),
+    ("codex", '{"hooks": {"PreToolUse": {"matcher": "Bash"}}}', "dict"),
+])
+def test_unexpected_shapes_are_refused_rather_than_guessed_at(harness, body, described_as):
+    path = ga.hooks_path(harness, True)
+    path.parent.mkdir(parents=True)
+    path.write_text(body)
+    with pytest.raises(SystemExit) as e:
+        ga.install(harness, True)
+    assert described_as in str(e.value.code)
+    assert path.read_text() == body
+
+
+@pytest.mark.parametrize("harness,body", [
+    ("cursor", '{"version": 1, "hooks": null}'),
+    ("cursor", '{"version": 1, "hooks": {"beforeShellExecution": null}}'),
+    ("cursor", "{}"),
+    ("codex", '{"hooks": null}'),
+    ("codex", '{"hooks": {"PreToolUse": null}}'),
+])
+def test_null_keys_are_treated_as_absent(harness, body, monkeypatch):
+    _uvx(monkeypatch)
+    path = ga.hooks_path(harness, True)
+    path.parent.mkdir(parents=True)
+    path.write_text(body)
+    assert ga.install(harness, True)[0] == "new"
+    assert len(_ours(harness, path)[0]) == 1
+
+
+def test_a_versionless_cursor_file_is_not_given_a_version(monkeypatch):
+    """Only what we need changes; a file that works without a version keeps working."""
+    _uvx(monkeypatch)
+    path = ga.hooks_path("cursor", True)
+    path.parent.mkdir(parents=True)
+    path.write_text('{"hooks": {"afterFileEdit": [{"command": "./f.sh"}]}}')
+    ga.install("cursor", True)
+    assert "version" not in json.loads(path.read_text())
+
+
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_a_failed_replace_leaves_the_old_file_and_no_debris(harness, monkeypatch):
+    _uvx(monkeypatch)
+    path = ga.hooks_path(harness, True)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(FOREIGN[harness]))
+    before = path.read_bytes()
+
+    def disk_full(src, dst):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(ga.os, "replace", disk_full)
+    with pytest.raises(OSError):
+        ga.install(harness, True)
+    assert path.read_bytes() == before
+    assert sorted(p.name for p in path.parent.iterdir()) == ["hooks.json"]
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                    reason="root writes through a read-only mode")
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_a_read_only_file_is_not_swapped_out_from_under_its_mode(harness, monkeypatch):
+    """os.replace only needs the directory writable; the file's mode still counts."""
+    _uvx(monkeypatch)
+    path = ga.hooks_path(harness, True)
+    path.parent.mkdir(parents=True)
+    path.write_text("{}")
+    path.chmod(stat.S_IRUSR)
+    try:
+        with pytest.raises(PermissionError):
+            ga.install(harness, True)
+    finally:
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    assert path.read_text() == "{}"
+
+
+def test_a_read_only_file_is_refused_even_when_access_is_mocked(monkeypatch):
+    """The same guarantee, checked where running as root would hide it."""
+    _uvx(monkeypatch)
+    path = ga.hooks_path("cursor", True)
+    path.parent.mkdir(parents=True)
+    path.write_text("{}")
+    monkeypatch.setattr(ga.os, "access", lambda p, mode: False)
+    with pytest.raises(PermissionError):
+        ga.install("cursor", True)
+    assert path.read_text() == "{}"
+
+
+def test_a_dotfiles_symlink_stays_a_symlink(tmp_path, monkeypatch):
+    _uvx(monkeypatch)
+    real = tmp_path / "dotfiles" / "cursor-hooks.json"
+    real.parent.mkdir()
+    real.write_text(json.dumps(FOREIGN["cursor"]))
+    link = ga.hooks_path("cursor", True)
+    link.parent.mkdir(parents=True)
+    link.symlink_to(real)
+    ga.install("cursor", True)
+    assert link.is_symlink(), "replaced the user's symlink with a plain file"
+    assert len(_ours("cursor", real)[0]) == 1
+
+
+def test_the_file_mode_is_kept(monkeypatch):
+    _uvx(monkeypatch)
+    path = ga.hooks_path("codex", True)
+    path.parent.mkdir(parents=True)
+    path.write_text("{}")
+    path.chmod(0o640)
+    ga.install("codex", True)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+
+
+# ── dead hooks ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_a_dead_hook_is_repaired_and_a_live_one_left_alone(harness, monkeypatch):
+    _uvx(monkeypatch)
+    ga.install(harness, True)
+    path = ga.hooks_path(harness, True)
+    doc = json.loads(path.read_text())
+    entry = (doc["hooks"]["beforeShellExecution"][0] if harness == "cursor"
+             else doc["hooks"]["PreToolUse"][0]["hooks"][0])
+    entry["command"] = "/gone/uv/archive-v0/x/bin/finops guard hook"
+    path.write_text(json.dumps(doc))
+    assert ga.state(harness, True) == "broken"
+
+    assert ga.install(harness, True)[0] == "repaired"
+    assert ga.state(harness, True) == "installed"
+    [cmd], _, _ = _ours(harness, path)
+    assert "/gone/" not in cmd
+
+    # A live command of ours that differs (a hand-edited wrapper) is kept.
+    exe = Path.cwd() / "wrapper-finops"
+    exe.touch()
+    doc = json.loads(path.read_text())
+    entry = (doc["hooks"]["beforeShellExecution"][0] if harness == "cursor"
+             else doc["hooks"]["PreToolUse"][0]["hooks"][0])
+    entry["command"] = f"{exe} guard hook"
+    path.write_text(json.dumps(doc))
+    assert ga.install(harness, True)[0] == "already"
+    assert _ours(harness, path)[0] == [f"{exe} guard hook"]
+
+
+@pytest.mark.parametrize("harness", ["cursor", "codex"])
+def test_state_never_raises_on_a_file_it_cannot_understand(harness):
+    path = ga.hooks_path(harness, True)
+    path.parent.mkdir(parents=True)
+    for body in ("[]", "null", '"x"', '{"hooks": null}', "not json",
+                 '{"hooks": {"PreToolUse": [null, {"hooks": [null]}]}}',
+                 '{"hooks": {"beforeShellExecution": [null, 3]}}'):
+        path.write_text(body)
+        assert ga.state(harness, True) == "absent", f"raised or true-d on {body!r}"
