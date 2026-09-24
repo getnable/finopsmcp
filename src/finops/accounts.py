@@ -79,6 +79,25 @@ def get_account(name: str) -> AccountConfig | None:
     return None
 
 
+def resolve_named_account(name: str) -> tuple[AccountConfig | None, dict | None]:
+    """Resolve an account the caller NAMED. Returns (account, None) or (None, error).
+
+    Never falls back to the default account. A caller who names an account is
+    asking about that account, so a typo answered with the default account's
+    spend is a plausible number that belongs to somebody else. The error lists
+    the valid names so the caller can correct it in one step.
+    """
+    acct = get_account(name)
+    if acct is not None:
+        return acct, None
+    valid = [a.name for a in list_accounts()]
+    return None, {
+        "error": (f"Account '{name}' not found. Valid accounts: "
+                  f"{', '.join(valid) if valid else '(none configured)'}."),
+        "valid_accounts": valid,
+    }
+
+
 def get_default_account() -> AccountConfig | None:
     """Return the default account, or the first account if no default is set."""
     data = _load_yaml()
