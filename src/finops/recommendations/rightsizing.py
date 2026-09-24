@@ -17,31 +17,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..aws_prices import EC2_HOURLY
+from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
+
 log = logging.getLogger(__name__)
 
 _LOOKBACK_DAYS     = 14
 _AVG_CPU_THRESHOLD = 20.0
 _MAX_CPU_THRESHOLD = 50.0
-_HOURS_PER_MONTH   = 730.0
 
 # Fallback on-demand hourly prices (us-east-1) used only when Compute
-# Optimizer savings estimates are unavailable.
-_HOURLY_PRICE: dict[str, float] = {
-    "t3.nano": 0.0052,    "t3.micro": 0.0104,   "t3.small": 0.0208,
-    "t3.medium": 0.0416,  "t3.large": 0.0832,   "t3.xlarge": 0.1664,
-    "t3.2xlarge": 0.3328,
-    "t3a.nano": 0.0047,   "t3a.micro": 0.0094,  "t3a.small": 0.0188,
-    "t3a.medium": 0.0376, "t3a.large": 0.0752,  "t3a.xlarge": 0.1504,
-    "t3a.2xlarge": 0.3008,
-    "m5.large": 0.096,    "m5.xlarge": 0.192,   "m5.2xlarge": 0.384,
-    "m5.4xlarge": 0.768,  "m5.8xlarge": 1.536,
-    "m6i.large": 0.096,   "m6i.xlarge": 0.192,  "m6i.2xlarge": 0.384,
-    "m6i.4xlarge": 0.768, "m6i.8xlarge": 1.536,
-    "c5.large": 0.085,    "c5.xlarge": 0.17,    "c5.2xlarge": 0.34,
-    "c5.4xlarge": 0.68,   "c5.9xlarge": 1.53,
-    "r5.large": 0.126,    "r5.xlarge": 0.252,   "r5.2xlarge": 0.504,
-    "r5.4xlarge": 1.008,  "r5.8xlarge": 2.016,
-}
+# Optimizer savings estimates are unavailable. Shared with every other module
+# that prices an EC2 instance; see aws_prices.
+_HOURLY_PRICE: dict[str, float] = EC2_HOURLY
 
 _DOWNSIZE_MAP: dict[str, str] = {
     "t3.medium": "t3.small",    "t3.large": "t3.medium",

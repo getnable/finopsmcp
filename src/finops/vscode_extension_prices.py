@@ -8,10 +8,12 @@ heavier terraform_estimate module.
 from __future__ import annotations
 from typing import Any
 
+from .aws_prices import EC2_HOURLY as _EC2_HOURLY
+from .aws_prices import HOURS_PER_MONTH
+from .aws_prices import RDS_HOURLY as _RDS_HOURLY
 from .connectors.terraform_estimate import (
-    _EC2_HOURLY, _RDS_HOURLY, _ELASTICACHE_HOURLY,
+    _ELASTICACHE_HOURLY,
     _EBS_PER_GB_MONTH, _OPENSEARCH_HOURLY, _REDSHIFT_HOURLY, _MSK_BROKER_HOURLY,
-    HOURS_PER_MONTH,
 )
 
 

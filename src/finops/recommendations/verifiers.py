@@ -81,7 +81,7 @@ def verify_ec2_change(resource_id: str, recommended_config: dict, row: Any = Non
 
         if current_type == target_type:
             # Change confirmed. Estimate saving from the type difference.
-            from ..connectors.terraform_estimate import _EC2_HOURLY, HOURS_PER_MONTH
+            from ..aws_prices import EC2_HOURLY as _EC2_HOURLY, HOURS_PER_MONTH
             old_type = recommended_config.get("from_instance_type", "")
             old_hourly = _EC2_HOURLY.get(old_type, 0.0)
             new_hourly = _EC2_HOURLY.get(target_type, 0.0)
@@ -171,7 +171,7 @@ def verify_graviton_change(resource_id: str, recommended_config: dict, row: Any 
             except (TypeError, ValueError):
                 pass
         try:
-            from ..connectors.terraform_estimate import _EC2_HOURLY, HOURS_PER_MONTH
+            from ..aws_prices import EC2_HOURLY as _EC2_HOURLY, HOURS_PER_MONTH
             old_hourly = _EC2_HOURLY.get(old_type, 0.0)
             new_hourly = _EC2_HOURLY.get(target_type, 0.0)
             return round((old_hourly - new_hourly) * HOURS_PER_MONTH, 2)

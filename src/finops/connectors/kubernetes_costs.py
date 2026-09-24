@@ -59,9 +59,9 @@ _NODE_CAPACITY: dict[str, tuple[float, float]] = {
     "i3.large": (2, 15.25), "i3.xlarge": (4, 30.5),
 }
 
-# EC2 hourly on-demand (us-east-1) — for cost estimation when CE tags are missing
-from .terraform_estimate import _EC2_HOURLY
-HOURS_PER_MONTH = 730.0
+# EC2 hourly on-demand (us-east-1), for cost estimation when CE tags are missing
+from ..aws_prices import EC2_HOURLY as _EC2_HOURLY
+from ..aws_prices import HOURS_PER_MONTH
 
 
 @dataclass
