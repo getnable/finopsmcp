@@ -18,10 +18,16 @@ Monetary estimates use on-demand approximations — not exact billing figures.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .cloudwatch import MetricQuery, fetch_metric_values
+from .cloudwatch import (
+    MetricQuery,
+    fetch_metric_values,
+    fetch_metric_values_by_region,
+    s3_bucket_region,
+)
 
 log = logging.getLogger(__name__)
 
@@ -628,10 +634,15 @@ def check_s3_storage_class(
     region: str = "unknown",
     min_size_gb: float = 10.0,
     lookback_days: int = 30,
+    cw_client_for_region: Callable[[str], Any] | None = None,
 ) -> list[dict]:
     """
     Detect S3 buckets storing data in STANDARD storage class with low access
     frequency where a cheaper storage class would actually save money.
+
+    S3 publishes a bucket's storage metrics in the bucket's own region, so with
+    cw_client_for_region each bucket is read from CloudWatch in its region and
+    reported there. Without it every bucket is read through cw_client.
 
     We do NOT blindly recommend Intelligent-Tiering — its $0.0025/1k objects/month
     monitoring fee can exceed the storage savings for buckets with many small objects
@@ -662,21 +673,34 @@ def check_s3_storage_class(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
-    # StandardStorage size, GET requests and object count for every bucket in
-    # one batched read, all daily over the lookback window.
-    series = fetch_metric_values(cw_client, [
-        MetricQuery((bucket["Name"], metric), "AWS/S3", metric,
-                    (("BucketName", bucket["Name"]), dim), stat, 86400)
+    # Asking us-east-1 CloudWatch about a bucket in eu-west-1 is a successful
+    # read of nothing, which silently skipped every bucket outside it.
+    bucket_regions = {
+        bucket["Name"]: (s3_bucket_region(s3_client, bucket, region)
+                         if cw_client_for_region else region)
         for bucket in buckets
+    }
+
+    # StandardStorage size, GET requests and object count for every bucket in
+    # one batched read per region, all daily over the lookback window.
+    queries_by_region: dict[str, list[MetricQuery]] = {}
+    for bucket in buckets:
         for metric, dim, stat in (
             ("BucketSizeBytes", ("StorageType", "StandardStorage"), "Average"),
             ("GetRequests", ("FilterId", "AllRequests"), "Sum"),
             ("NumberOfObjects", ("StorageType", "AllStorageTypes"), "Average"),
-        )
-    ], start, now)
+        ):
+            queries_by_region.setdefault(bucket_regions[bucket["Name"]], []).append(
+                MetricQuery((bucket["Name"], metric), "AWS/S3", metric,
+                            (("BucketName", bucket["Name"]), dim), stat, 86400))
+    series = fetch_metric_values_by_region(
+        lambda r: cw_client if r == region or cw_client_for_region is None
+        else cw_client_for_region(r),
+        queries_by_region, start, now)
 
     for bucket in buckets:
         bucket_name = bucket["Name"]
+        bucket_region = bucket_regions[bucket_name]
 
         # Bucket size via CloudWatch
         size_datapoints = series.get((bucket_name, "BucketSizeBytes"))
@@ -758,7 +782,7 @@ def check_s3_storage_class(
             "recommendation": recommendation,
             "detail": detail,
             "severity": _severity_from_savings(net_savings),
-            "region": region,
+            "region": bucket_region,
             "account_id": None,
             "size_gb": round(size_gb, 2),
             "object_count": int(object_count) if object_count else None,

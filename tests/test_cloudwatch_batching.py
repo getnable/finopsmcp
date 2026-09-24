@@ -600,3 +600,80 @@ def test_s3_storage_class_reads_three_series_per_bucket_in_one_call_per_500():
     # 1000 GB: $23.00 STANDARD - $12.50 IT storage - $0.0025 monitoring.
     assert {f["estimated_monthly_savings"] for f in findings} == {10.5}
     assert {f["recommendation"] for f in findings} == {"INTELLIGENT_TIERING"}
+
+
+class _S3Denied(_S3):
+    def get_bucket_location(self, Bucket):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}},
+                          "GetBucketLocation")
+
+
+def _regional_cloudwatch() -> dict[str, _Metrics]:
+    """Each bucket's storage metrics exist only in its own region, as in S3."""
+    return {
+        "us-east-1": _Metrics(_s3_series(["logs-virginia"])),
+        "eu-west-1": _Metrics(_s3_series(["logs-ireland"])),
+        "us-west-2": _Metrics(_s3_series(["logs-oregon", "logs-listed-region"])),
+    }
+
+
+def test_s3_storage_class_reads_each_bucket_in_its_own_region():
+    """Before, every bucket was read from us-east-1 CloudWatch, which answers a
+    bucket in another region with a successful read of nothing, so every bucket
+    outside us-east-1 was silently skipped."""
+    from finops.analyzers import waste
+
+    cws = _regional_cloudwatch()
+    s3 = _S3({"logs-virginia": None, "logs-ireland": "EU", "logs-oregon": "us-west-2"})
+    # ListBuckets can carry the region itself; then no location call is needed.
+    listed = s3.list_buckets()["Buckets"] + [
+        {"Name": "logs-listed-region", "BucketRegion": "us-west-2"}]
+    s3.list_buckets = lambda: {"Buckets": listed}
+    built: list[str] = []
+
+    def _cw_for(region):
+        built.append(region)
+        return cws[region]
+
+    findings = waste.check_s3_storage_class(
+        s3, cws["us-east-1"], region="us-east-1", cw_client_for_region=_cw_for)
+
+    assert {(f["resource_id"], f["region"]) for f in findings} == {
+        ("logs-virginia", "us-east-1"),
+        ("logs-ireland", "eu-west-1"),
+        ("logs-oregon", "us-west-2"),
+        ("logs-listed-region", "us-west-2"),
+    }
+    assert s3.location_calls == 3
+    # One client per region, the scan's own region reuses the client it has,
+    # and one batched call in each.
+    assert sorted(built) == ["eu-west-1", "us-west-2"]
+    assert [cws[r].calls for r in ("us-east-1", "eu-west-1", "us-west-2")] == [1, 1, 1]
+
+
+def test_an_unreadable_bucket_location_falls_back_to_the_scan_region():
+    from finops.analyzers import waste
+
+    cws = _regional_cloudwatch()
+    findings = waste.check_s3_storage_class(
+        _S3Denied({"logs-virginia": None}), cws["us-east-1"], region="us-east-1",
+        cw_client_for_region=lambda r: cws[r])
+    assert [(f["resource_id"], f["region"]) for f in findings] == [
+        ("logs-virginia", "us-east-1")]
+
+
+def test_the_deep_audit_hands_the_s3_check_a_client_per_region():
+    from finops.analyzers import optimizer
+
+    cws = _regional_cloudwatch()
+    s3 = _S3({"logs-virginia": None, "logs-ireland": "EU"})
+
+    class _Session:
+        def client(self, service, region_name=None, **_kw):
+            return {"s3": s3, "cloudwatch": cws.get(region_name)}[service]
+
+    findings = optimizer._audit_region(_Session(), "us-east-1", frozenset({"s3"}))
+
+    assert findings.checks_completed == {"s3"}
+    assert {(f["resource_id"], f["region"]) for f in findings} == {
+        ("logs-virginia", "us-east-1"), ("logs-ireland", "eu-west-1")}

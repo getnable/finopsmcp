@@ -7,9 +7,10 @@ and pre-built helpers for EC2, RDS, and Lambda utilization profiles.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Hashable, Sequence
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +119,52 @@ def fetch_metric_values(
             else:
                 out[q.key] = [v for _, v in sorted(points[qid], key=lambda p: p[0])]
     return out
+
+
+def fetch_metric_values_by_region(
+    cw_client_for_region: Callable[[str], Any],
+    queries_by_region: dict[str, list[MetricQuery]],
+    start: datetime,
+    end: datetime,
+) -> dict[Hashable, list[float] | None]:
+    """fetch_metric_values for series that live in different regions, one
+    CloudWatch client per region. A region whose client cannot be built reads
+    as unread for every series in it."""
+    out: dict[Hashable, list[float] | None] = {}
+    for region, queries in queries_by_region.items():
+        try:
+            cw = cw_client_for_region(region)
+        except Exception as exc:
+            log.warning("CloudWatch client for %s unavailable: %s", region, exc)
+            out.update({q.key: None for q in queries})
+            continue
+        out.update(fetch_metric_values(cw, queries, start, end))
+    return out
+
+
+def s3_bucket_region(s3_client: Any, bucket: dict, default: str) -> str:
+    """
+    The region a bucket lives in, which is where CloudWatch publishes its
+    storage metrics (BucketSizeBytes, NumberOfObjects). Asking us-east-1 about
+    a bucket in eu-west-1 is a successful read of nothing.
+
+    Uses ListBuckets' BucketRegion when present, else get_bucket_location, whose
+    LocationConstraint is None for us-east-1 and the legacy 'EU' for eu-west-1.
+    Falls back to `default` when the location cannot be read.
+    """
+    region = bucket.get("BucketRegion")
+    if region:
+        return region
+    try:
+        location = s3_client.get_bucket_location(Bucket=bucket["Name"]).get("LocationConstraint")
+    except Exception as exc:
+        log.debug("get_bucket_location failed for %s: %s", bucket.get("Name"), exc)
+        return default
+    if not location:
+        return "us-east-1"
+    if location == "EU":
+        return "eu-west-1"
+    return location
 
 
 # ── Low-level metric helper ───────────────────────────────────────────────────
