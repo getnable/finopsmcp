@@ -159,6 +159,30 @@ def read_agent_usage(since_epoch: float) -> dict[str, Any]:
         return _usage_payload(tin, tout, cwrite, cread, msgs, by_model, first_ts, last_ts,
                               source_present=False)
 
+    for r in _responses(proj, since_epoch):
+        ti, to, cw, cr = r["input"], r["output"], r["cache_write"], r["cache_read"]
+        tin += ti; tout += to; cwrite += cw; cread += cr; msgs += 1
+        by_model[r["model"]] = by_model.get(r["model"], 0) + ti + to + cw + cr
+        ts = r["ts"]
+        first_ts = ts if first_ts is None else min(first_ts, ts)
+        last_ts = ts if last_ts is None else max(last_ts, ts)
+
+    return _usage_payload(tin, tout, cwrite, cread, msgs, by_model, first_ts, last_ts,
+                          source_present=True)
+
+
+def _responses(proj: Path, since_epoch: float) -> list[dict[str, Any]]:
+    """One entry per API response in the window, however many lines logged it.
+
+    Claude Code writes a transcript line per content block of a response
+    (thinking, text, each tool_use), and every one of those lines carries the
+    whole response's usage. Summing lines counted each response's input and
+    cache tokens once per block: about 2x on real transcripts, with output 1.3x
+    because output_tokens grows as the blocks stream. Keyed on the response, the
+    last line wins, and it holds the final output count. A line with no message
+    id (older logs) is its own response.
+    """
+    seen: dict[Any, dict[str, Any]] = {}
     for path in proj.rglob("*.jsonl"):
         try:
             if path.stat().st_mtime < since_epoch - 1:
@@ -167,7 +191,7 @@ def read_agent_usage(since_epoch: float) -> dict[str, Any]:
             continue
         try:
             with path.open("r", encoding="utf-8", errors="ignore") as fh:
-                for line in fh:
+                for lineno, line in enumerate(fh):
                     if '"usage"' not in line:
                         continue
                     try:
@@ -187,16 +211,15 @@ def read_agent_usage(since_epoch: float) -> dict[str, Any]:
                     cr = int(usage.get("cache_read_input_tokens", 0) or 0)
                     if ti == to == cw == cr == 0:
                         continue
-                    tin += ti; tout += to; cwrite += cw; cread += cr; msgs += 1
-                    model = str(msg.get("model", "") or "unknown")
-                    by_model[model] = by_model.get(model, 0) + ti + to + cw + cr
-                    first_ts = ts if first_ts is None else min(first_ts, ts)
-                    last_ts = ts if last_ts is None else max(last_ts, ts)
+                    key = ((msg.get("id"), rec.get("requestId")) if msg.get("id")
+                           else (str(path), lineno))
+                    seen[key] = {
+                        "ts": ts, "model": str(msg.get("model", "") or "unknown"),
+                        "input": ti, "output": to, "cache_write": cw, "cache_read": cr,
+                    }
         except OSError:
             continue
-
-    return _usage_payload(tin, tout, cwrite, cread, msgs, by_model, first_ts, last_ts,
-                          source_present=True)
+    return list(seen.values())
 
 
 def _usage_payload(tin, tout, cwrite, cread, msgs, by_model, first_ts, last_ts,

@@ -47,6 +47,34 @@ def test_billable_excludes_cache_read(tmp_path):
     assert u["messages"] == 1
 
 
+def _block(ts_epoch, msg_id, request_id, tout, tin=2, cwrite=1000, cread=40_000,
+           model="claude-opus-5-5", session="sess-a"):
+    # One transcript line per content block, as Claude Code writes them: every
+    # block of a response repeats the response's usage, output growing as it streams.
+    rec = _assistant(ts_epoch, tin=tin, tout=tout, cwrite=cwrite, cread=cread, model=model)
+    rec["message"]["id"] = msg_id
+    rec["requestId"] = request_id
+    rec["sessionId"] = session
+    return rec
+
+
+def test_a_response_logged_as_several_blocks_counts_once(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _block(now - 60, "msg_1", "req_1", tout=8),     # thinking block
+        _block(now - 60, "msg_1", "req_1", tout=120),   # text block
+        _block(now - 60, "msg_1", "req_1", tout=351),   # tool_use, final count
+        _block(now - 30, "msg_2", "req_2", tout=40),    # a second response
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["messages"] == 2
+    assert u["input_tokens"] == 4                     # 2 per response, not per line
+    assert u["output_tokens"] == 351 + 40             # the last line of each response
+    assert u["cache_creation_tokens"] == 2000
+    assert u["cache_read_tokens"] == 80_000
+    assert u["billable_tokens"] == 4 + 391 + 2000
+
+
 def test_window_filters_old_records(tmp_path):
     now = time.time()
     _write_session(tmp_path / "claude", [
