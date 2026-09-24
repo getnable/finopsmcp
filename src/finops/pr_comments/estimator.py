@@ -15,9 +15,16 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .parser import ResourceChange
+from ..aws_prices import HOURS_PER_MONTH
+from ..connectors.terraform_estimate import _EC2_HOURLY
 from ..recommendations.rate_detector import detect_effective_rates
 
 log = logging.getLogger(__name__)
+
+# GPU types are derived from the hourly list rates. The monthly literals were
+# hourly x 1000 for g4dn (g4dn.xlarge $0.526/hr stored as $526/mo), so a PR
+# adding a GPU node group was quoted 37% high or worse.
+_GPU_TYPES = ("p3.2xlarge", "p3.8xlarge", "g4dn.xlarge", "g4dn.2xlarge")
 
 # Monthly on-demand prices (us-east-1) — snapshot, used as fallback
 _EC2_MONTHLY: dict[str, float] = {
@@ -29,8 +36,7 @@ _EC2_MONTHLY: dict[str, float] = {
     "c6i.large": 61.32,"c6i.xlarge": 122.64,"c6i.2xlarge": 245.28,"c6i.4xlarge": 490.56,
     "r5.large": 91.98, "r5.xlarge": 183.96,"r5.2xlarge": 367.92,"r5.4xlarge": 735.84,
     "r6i.large": 91.98,"r6i.xlarge": 183.96,"r6i.2xlarge": 367.92,
-    "p3.2xlarge": 2234.00,"p3.8xlarge": 8937.00,
-    "g4dn.xlarge": 526.00,"g4dn.2xlarge": 1052.00,
+    **{t: round(_EC2_HOURLY[t] * HOURS_PER_MONTH, 2) for t in _GPU_TYPES},
 }
 
 _RDS_MONTHLY: dict[str, float] = {
