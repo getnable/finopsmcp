@@ -181,3 +181,22 @@ def test_timeout_marks_abandoned_and_notes():
     gcp = [b for b in blocks if b.family == "gcp"][0]
     assert gcp.status == "timeout"
     assert abandoned is True   # a lingering worker thread -> caller hard-exits
+
+
+def test_a_hung_provider_does_not_hold_the_scan_past_its_timeout():
+    """The timeout used to fire on time and then wait anyway: leaving the
+    `with ThreadPoolExecutor` block joined the hung worker, so the scan sat for
+    as long as the provider hung. The call must return near the timeout."""
+    import threading
+    import time
+
+    release = threading.Event()
+    with patch.dict(sa._GATHERERS, {"llm": ("ai", lambda spend: release.wait(10))}):
+        t0 = time.monotonic()
+        blocks, abandoned = sa.gather_extra_providers(
+            frozenset({"llm"}), spend=False, per_provider_timeout=0.5, overall_budget=0.5)
+        took = time.monotonic() - t0
+    release.set()
+    assert took < 3.0, f"waited {took:.1f}s for a provider that timed out at 0.5s"
+    assert [b.status for b in blocks] == ["timeout"] and abandoned is True
+

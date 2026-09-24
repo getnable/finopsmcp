@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -128,15 +129,24 @@ class _quiet_sdk_loggers:
 def _run(fn, timeout: float = PROBE_TIMEOUT_S):
     """Call fn with a hard timeout, swallowing everything. A probe that hangs or
     explodes is just 'nothing found'; it must never take onboarding with it."""
-    def _quietly():
-        with _quiet_sdk_loggers():
-            return fn()
+    box: dict = {}
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            return ex.submit(_quietly).result(timeout=timeout)
-    except Exception:
-        return None
+    def _quietly():
+        try:
+            with _quiet_sdk_loggers():
+                box["v"] = fn()
+        except Exception:
+            box["v"] = None
+
+    # A daemon thread and a join, the welcome._run_capped pattern. This was
+    # `with ThreadPoolExecutor(...)` around .result(timeout=...): the timeout
+    # fired on time, then leaving the `with` block called shutdown(wait=True)
+    # and sat there until the hung SDK call returned, so the "hard" timeout was
+    # the SDK's own ~9s metadata probe. A daemon thread is simply abandoned.
+    t = threading.Thread(target=_quietly, daemon=True, name="nable-ambient-probe")
+    t.start()
+    t.join(timeout=timeout)
+    return box.get("v")
 
 
 # ── AWS ───────────────────────────────────────────────────────────────────────
@@ -326,7 +336,8 @@ def detect_all(providers: list[str] | None = None) -> dict[str, Ambient]:
     timeouts is 18 seconds of a first run spent finding nothing."""
     names = providers or list(PROBES)
     out: dict[str, Ambient] = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(names)) as ex:
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(names)))
+    try:
         futures = {ex.submit(PROBES[n]): n for n in names if n in PROBES}
         for fut in concurrent.futures.as_completed(futures, timeout=PROBE_TIMEOUT_S * 2):
             n = futures[fut]
@@ -334,6 +345,14 @@ def detect_all(providers: list[str] | None = None) -> dict[str, Ambient]:
                 out[n] = fut.result()
             except Exception:
                 out[n] = Ambient(n, detail="probe failed")
+    except (concurrent.futures.TimeoutError, TimeoutError):
+        # One slow provider must not cost the ones that already answered. This
+        # used to escape, and welcome's caller caught it by discarding every
+        # result, so an AWS chain found in 50ms vanished behind a hung GCP probe.
+        pass
+    finally:
+        # wait=False: leaving a `with` block here waited for the hung probe.
+        ex.shutdown(wait=False, cancel_futures=True)
     for n in names:
         out.setdefault(n, Ambient(n, detail="probe did not finish"))
     return out
