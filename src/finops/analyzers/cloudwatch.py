@@ -81,6 +81,7 @@ def fetch_metric_values(
         status: dict[str, str] = {}
         try:
             token = None
+            seen_tokens: set[str] = set()
             while True:
                 kwargs: dict[str, Any] = {
                     "MetricDataQueries": request, "StartTime": start, "EndTime": end,
@@ -98,8 +99,13 @@ def fetch_metric_values(
                     # finished early is simply absent from later pages.
                     status[qid] = r.get("StatusCode", "Complete")
                 token = resp.get("NextToken")
-                if not token:
+                if not isinstance(token, str) or not token:
                     break
+                # A token that comes back twice would page forever. Nothing
+                # read so far can be trusted as whole, so fail the chunk.
+                if token in seen_tokens:
+                    raise RuntimeError("GetMetricData repeated a NextToken")
+                seen_tokens.add(token)
         except Exception as exc:
             log.warning("CloudWatch get_metric_data failed for %d series: %s", len(chunk), exc)
             for q in chunk:

@@ -203,6 +203,31 @@ def test_a_throttled_call_marks_only_its_own_chunk_unread():
     assert all(got[n] is None for n in range(500, 600))
 
 
+def test_a_repeated_next_token_ends_the_read_as_unread():
+    """Paging must terminate. A token CloudWatch hands back twice means the
+    pages cannot be trusted as a whole series, so the chunk is unread."""
+    class _Loops:
+        calls = 0
+
+        def get_metric_data(self, **kw):
+            self.calls += 1
+            assert self.calls < 10, "paged forever"
+            return {"MetricDataResults": [
+                {"Id": "q0", "Timestamps": [_T0], "Values": [1.0],
+                 "StatusCode": "PartialData"}], "NextToken": "same"}
+
+    cw = _Loops()
+    assert fetch_metric_values(cw, [_q("a")], _T0, _ts(24)) == {"a": None}
+    assert cw.calls == 2
+
+
+def test_a_client_that_is_not_boto_shaped_does_not_hang():
+    """A MagicMock client answers .get() with a truthy mock for NextToken. The
+    read must stop and report the series unread, not page forever."""
+    from unittest.mock import MagicMock
+    assert fetch_metric_values(MagicMock(), [_q("a")], _T0, _ts(24)) == {"a": None}
+
+
 def test_no_queries_means_no_calls():
     cw = _CountingCloudWatch()
     assert fetch_metric_values(cw, [], _T0, _ts(24)) == {}
