@@ -148,14 +148,21 @@ async def _section_scorecard(filters: dict, **_) -> tuple[list[dict], str]:
             return [], ""
 
         d = sc.as_dict()
+        dims = d.get("dimensions", [])
+        # This read dim['dimension'] and d['overall_score'], neither of which
+        # as_dict emits, so the KeyError dropped the section from every digest.
+        # A scorecard with no measured dimension is not a grade worth sending.
+        if not any(dim.get("data_available") for dim in dims):
+            return [], ""
         grade = d.get("grade", "?")
-        score = d.get("overall_score", 0)
+        score = d.get("total_score", 0)
         trend = d.get("trend", "")
         trend_emoji = {"improving": "📈", "declining": "📉", "stable": "➡️"}.get(trend, "")
 
         dim_lines = "\n".join(
-            f"  • {dim['dimension'].replace('_',' ').title()}: *{dim['score']}* ({dim['grade']})"
-            for dim in d.get("dimensions", [])
+            f"  • {esc(dim['display_name'])}: *{dim['score']}* ({dim['grade']})"
+            if dim.get("data_available") else f"  • {esc(dim['display_name'])}: no data"
+            for dim in dims
         )
         scope_label = f" — {filters['team']}" if filters.get("team") else ""
         blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": (
