@@ -3,11 +3,15 @@
 The rows are pinned to the published figures so a typo is a failing test, not
 a quietly wrong estimate, and the resolver is pinned on the spellings nable
 actually meets: API ids with a date, Bedrock profiles, Vertex ids and Cost
-Explorer SKU names.
+Explorer SKU names. The last section fails if a new model-keyed price table
+appears outside llm_prices.
 """
 from __future__ import annotations
 
+import ast
+import re
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -156,3 +160,121 @@ def test_openai_cache_writes_bill_as_input_and_reads_at_the_cached_rate():
     assert p.cost(cache_read_tokens=1_000_000) == pytest.approx(1.25)
     # No cached rate published: cached tokens bill as input.
     assert MODEL_PRICES["gpt-3.5-turbo"].cost(cache_read_tokens=1_000_000) == pytest.approx(0.50)
+
+
+# ── no new copies ────────────────────────────────────────────────────────────
+#
+# A dict literal with an LLM model id for a key and a price for a value is a
+# token-price table, whatever it is called. Four of them were merged into
+# llm_prices, and every one had started as a reasonable local convenience, so
+# the only durable rule is that none may exist outside llm_prices unless it is
+# listed here with the reason it is not a copy of an LLM token price.
+
+_SRC = Path(__file__).resolve().parents[1] / "src" / "finops"
+_MODEL_KEY = re.compile(
+    r"(claude|anthropic\.|gpt-|chatgpt|^o[1-9](-|$)|gemini|llama|mistral|mixtral|nova-|"
+    r"titan|command-r|deepseek|qwen|embedding|dall-e|whisper|tts-|sonnet|haiku|opus|"
+    r"bison|gecko|imagen)", re.I)
+# Field names a per-model price row uses when it is a dict.
+_PRICE_FIELDS = {"input", "output", "prompt", "completion", "cache_read", "cache_write",
+                 "input_price", "output_price"}
+
+_ALLOWED = {
+    ("llm_prices.py", "_ANTHROPIC"): "the source of truth",
+    ("llm_prices.py", "_OPENAI"): "the source of truth",
+    ("llm_prices.py", "FAST_MODE"): "the source of truth",
+    ("connectors/saas/vertex_costs.py", "_VERTEX_PRICING"):
+        "Gemini and PaLM on Vertex: a provider llm_prices does not cover yet, "
+        "and the only copy of those rates",
+    ("analytics/ai_kpis.py", "_CONTEXT_WINDOWS"): "context window sizes in tokens, not prices",
+    ("demo_data.py", "by_model"): "the demo account's monthly spend in dollars, not a rate",
+}
+
+
+def _is_number(node: ast.AST) -> bool:
+    if isinstance(node, ast.UnaryOp):
+        node = node.operand
+    return (isinstance(node, ast.Constant) and isinstance(node.value, (int, float))
+            and not isinstance(node.value, bool))
+
+
+def _is_price(node: ast.AST) -> bool:
+    """A number, a row of numbers, an {"input": n, ...} dict, or a constructor
+    called with numbers (a ModelPrice built somewhere else)."""
+    if _is_number(node):
+        return True
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return len(node.elts) >= 2 and any(_is_number(e) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        return any(isinstance(k, ast.Constant) and k.value in _PRICE_FIELDS and _is_number(v)
+                   for k, v in zip(node.keys, node.values))
+    if isinstance(node, ast.Call):
+        return sum(_is_number(a) for a in [*node.args, *(k.value for k in node.keywords)]) >= 2
+    return False
+
+
+def _llm_price_dicts(source: str) -> list[tuple[str, int]]:
+    """(name, line) for each model-keyed price dict. The name is the variable it
+    is assigned to, else the key it sits under in an enclosing dict, else "<dict>"."""
+    tree = ast.parse(source)
+    names: dict[int, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    names[id(node.value)] = t.id
+        if isinstance(node, ast.Dict):
+            for k, v in zip(node.keys, node.values):
+                if (isinstance(v, ast.Dict) and isinstance(k, ast.Constant)
+                        and isinstance(k.value, str)):
+                    names.setdefault(id(v), k.value)
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        if any(isinstance(k, ast.Constant) and isinstance(k.value, str)
+               and _MODEL_KEY.search(k.value) and _is_price(v)
+               for k, v in zip(node.keys, node.values)):
+            found.append((names.get(id(node), "<dict>"), node.lineno))
+    return found
+
+
+def _scan() -> dict[tuple[str, str], int]:
+    hits = {}
+    for path in sorted(_SRC.rglob("*.py")):
+        rel = path.relative_to(_SRC).as_posix()
+        for name, line in _llm_price_dicts(path.read_text(encoding="utf-8")):
+            hits[(rel, name)] = line
+    return hits
+
+
+def test_no_llm_price_table_outside_llm_prices():
+    stray = {k: line for k, line in _scan().items() if k not in _ALLOWED}
+    assert not stray, (
+        "LLM token prices belong in finops/llm_prices.py; resolve a model with "
+        "price_for() instead of adding a table. If this dict is not a price, add it "
+        f"to _ALLOWED with the reason. Found: {stray}")
+
+
+def test_the_allowlist_has_no_stale_entries():
+    # An entry for a table that has moved or been renamed would silently allow
+    # a new one under the old name.
+    found = _scan()
+    assert not [k for k in _ALLOWED if k not in found]
+
+
+def test_the_scan_catches_a_copy_in_any_shape():
+    src = (
+        "PRICING = {'claude-opus-5': (5.0, 25.0)}\n"
+        "_RATES: dict = {'gpt-4o': {'input': 2.5, 'output': 10.0}}\n"
+        "BLEND = {'sonnet': 3.0}\n"
+        "ROWS = {'claude-haiku-4-5': ModelPrice('x', 'anthropic', 1.0, 5.0, None, None, 0.1)}\n"
+        "def f():\n"
+        "    return {'anthropic.claude-3-haiku': [0.25, 1.25]}.get('x')\n"
+        "NAMES = {'claude-opus-5': 'Claude Opus 5'}\n"      # a label, not a price
+        "ROUTE = {'gpt-4o': 'gpt-4o-mini'}\n"               # a mapping, not a price
+        "TIERS = {'gpt-4o': True}\n"                        # a flag, not a price
+    )
+    assert [n for n, _ in _llm_price_dicts(src)] == [
+        "PRICING", "_RATES", "BLEND", "ROWS", "<dict>"]
