@@ -444,6 +444,70 @@ def test_demo_needs_no_aws(capsys):
     assert code == cli_scan.EXIT_OK
 
 
+# ── no AWS credentials, other providers "connected" ─────────────────────────────
+
+def _only_accounts_yaml(tmp_path, monkeypatch):
+    """The real detection chain with one signal: a profile-based account in
+    accounts.yaml. No provider env keys, no vault, no kubeconfig."""
+    import finops.accounts as accounts
+    import finops.tool_surface as ts
+    from finops.security import vault
+
+    f = tmp_path / "accounts.yaml"
+    f.write_text("accounts:\n- name: prod\n  profile: prod\ndefault_account: prod\n")
+    monkeypatch.setattr(accounts, "_ACCOUNTS_FILE", f)
+    for keys in ts._ENV_KEYS.values():
+        for k in keys:
+            monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(vault.Vault, "default",
+                        classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("no vault"))))
+    monkeypatch.setattr(ts, "_kubeconfig_present", lambda: False)
+    # Undo the AWS-only autouse stub: detection runs for real, uncached.
+    monkeypatch.setattr(ts, "connected_families", ts._detect_families)
+    # The AI leg answers the way it does with nothing configured.
+    monkeypatch.setattr("finops.connectors.llm_costs.get_all_llm_costs",
+                        lambda **kw: {"total_usd": 0.0, "by_provider": {}})
+
+
+def test_accounts_yaml_without_credentials_is_not_a_clean_scan(tmp_path, monkeypatch, capsys):
+    """accounts.yaml puts aws (and so llm) in connected_families with no usable
+    credentials behind it. The AI block drops itself as a false positive, and
+    the scan used to exit 0 with no providers and no findings."""
+    import finops.tool_surface as ts
+    _only_accounts_yaml(tmp_path, monkeypatch)
+    assert ts.connected_families() == frozenset({"aws", "llm"})
+    code, events, _ = _run(_args(json=True), _session(creds=False))
+    cap = capsys.readouterr()
+    assert code == cli_scan.EXIT_NO_CREDS, cap.out
+    assert cap.out == "", "a failed scan printed a result document"
+    assert [p["error_class"] for e, p in events if e == "cli_scan_failed"] == ["no-creds"]
+
+
+def test_no_aws_and_every_other_provider_errored_is_not_a_clean_scan(monkeypatch, capsys):
+    from finops import scan_assembler as sa
+    monkeypatch.setattr("finops.tool_surface.connected_families",
+                        lambda: frozenset({"aws", "llm", "gcp"}))
+    dead = sa.ProviderBlock(family="gcp", label="GCP", status="errored", note="PermissionDenied")
+    monkeypatch.setattr("finops.scan_assembler.gather_extra_providers",
+                        lambda fams, *, spend, **kw: ([dead], False))
+    code, _, _ = _run(_args(), _session(creds=False))
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_NO_CREDS
+    assert "PermissionDenied" in out            # the reason is still shown
+
+
+def test_no_aws_with_another_provider_answering_still_exits_zero(monkeypatch, capsys):
+    from finops import scan_assembler as sa
+    monkeypatch.setattr("finops.tool_surface.connected_families",
+                        lambda: frozenset({"llm"}))
+    ai = sa.ProviderBlock(family="ai", label="AI & GPU", status="ok", spend_usd=900.0)
+    monkeypatch.setattr("finops.scan_assembler.gather_extra_providers",
+                        lambda fams, *, spend, **kw: ([ai], False))
+    code, _, _ = _run(_args(), _session(creds=False))
+    assert code == cli_scan.EXIT_OK
+    assert "AI & GPU" in capsys.readouterr().out
+
+
 # ── deadline hard-exit (regression: live scan hung 45s past its deadline) ──────
 
 def test_finish_returns_normally_without_lingering_threads():

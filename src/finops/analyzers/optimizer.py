@@ -88,12 +88,41 @@ def _discover_regions(session) -> list[str]:
 
 # ── Per-region audit runner ───────────────────────────────────────────────────
 
+class _RegionFindings(list):
+    """A region's findings, plus the checks that could not run there.
+
+    A list subclass rather than a tuple so every caller (and every test double)
+    that treats the result as a plain findings list keeps working. A check that
+    raised is NOT a check that found nothing: without this record, an identity
+    denied every read came back as "16 checks run, 0 findings", a clean bill of
+    health for an account nable never looked at.
+    """
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.checks_failed: list[dict] = []
+        self.checks_completed: set[str] = set()
+
+
+def _error_code(exc: Exception) -> str:
+    """The AWS error code (AccessDenied, Throttling...) or the exception type.
+    Never the message: it carries ARNs and account ids, and this reaches the
+    brief, Slack, and `nable scan --json`."""
+    resp = getattr(exc, "response", None)
+    if isinstance(resp, dict):
+        code = (resp.get("Error") or {}).get("Code")
+        if code:
+            return str(code)
+    return type(exc).__name__
+
+
 def _audit_region(
     session,
     region: str,
     checks: frozenset[str],
 ) -> list[dict]:
-    """Run all requested checks in a single region. Returns findings list."""
+    """Run all requested checks in a single region. Returns findings list, with
+    the checks that raised on `.checks_failed`."""
     from .waste import (
         check_ebs_volumes,
         check_ebs_snapshots,
@@ -113,7 +142,7 @@ def _audit_region(
         check_ecs_task_rightsizing,
     )
 
-    findings: list[dict] = []
+    findings = _RegionFindings()
 
     # Build clients lazily (some regions may not have all services)
     def _client(service: str):
@@ -140,8 +169,11 @@ def _audit_region(
             for finding in result:
                 finding.setdefault("region", region)
             findings.extend(result)
+            findings.checks_completed.add(name)
         except Exception as exc:
             log.warning("Check '%s' failed in %s: %s", name, region, exc)
+            findings.checks_failed.append(
+                {"check": name, "region": region, "error_code": _error_code(exc)})
 
     if "ebs" in checks and ec2_client:
         _run("ebs", check_ebs_volumes, ec2_client, region)
@@ -558,6 +590,7 @@ def run_deep_audit(
             "by_region": dict,        # region → {count, total_savings}
             "compute_optimizer_findings": int,
             "errors": list[str],
+            "checks_failed": list[dict],  # {check, region, error_code}
         }
     """
     # Resolve role ARN from env if not explicitly passed
@@ -606,6 +639,8 @@ def run_deep_audit(
 
     all_findings: list[dict] = []
     errors: list[str] = []
+    checks_failed: list[dict] = []
+    checks_completed: set[str] = set()
     regions_timed_out: list[str] = []
     threads_abandoned = False  # True when the deadline left live boto3 threads running
 
@@ -642,6 +677,10 @@ def run_deep_audit(
                     done_count += 1
                     try:
                         region_findings = future.result()
+                        checks_failed.extend(
+                            getattr(region_findings, "checks_failed", None) or [])
+                        checks_completed |= set(
+                            getattr(region_findings, "checks_completed", None) or ())
                         # Stamp account_id onto all findings from this region
                         for f in region_findings:
                             if f.get("account_id") is None:
@@ -685,6 +724,23 @@ def run_deep_audit(
         # cancel_futures drops queued work; threads mid-boto3-call finish in
         # the background (wait=False) and their results are discarded.
         pool.shutdown(wait=False, cancel_futures=True)
+
+    # ── Checks that could not run ────────────────────────────────────────────
+    # One error line per (check, error code), not per region: a denied identity
+    # fails every check in every region, and 16 x 17 identical lines bury the
+    # one fact that matters. A check stays in checks_run only if it completed
+    # somewhere; one that failed everywhere never looked at anything, and
+    # counting it as run is how "0 findings" read as "clean".
+    _grouped: dict[tuple[str, str], list[str]] = {}
+    for f in checks_failed:
+        _grouped.setdefault((f["check"], f["error_code"]), []).append(f["region"])
+    for (check, code), where in sorted(_grouped.items()):
+        errors.append(
+            f"Check '{check}' could not run ({code}) in {len(where)} region(s): "
+            f"{', '.join(sorted(where)[:5])}{' ...' if len(where) > 5 else ''}"
+        )
+    failed_everywhere = {f["check"] for f in checks_failed} - checks_completed
+    checks_run = sorted(active_checks - failed_everywhere)
 
     # ── Compute Optimizer (global, not per-region) ───────────────────────────
     # Skipped when the deadline already expired: CO is a bonus enrichment, and
@@ -761,7 +817,8 @@ def run_deep_audit(
         "account_id": account_id,
         "regions_scanned": sorted(set(regions) - set(regions_timed_out)),
         "regions_timed_out": regions_timed_out,
-        "checks_run": sorted(active_checks),
+        "checks_run": checks_run,
+        "checks_failed": checks_failed,
         "total_findings": len(all_findings),
         "total_estimated_monthly_savings": round(total_savings, 2),
         # How many findings are real but un-pricable, so the gap between

@@ -512,6 +512,15 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
                      f"(reached the {_SCAN_DEADLINE_S}s time limit; skipped: {', '.join(timed_out)})"),
                 file=out,
             )
+        failed = sorted({f.get("check", "?") for f in report.get("checks_failed") or []})
+        if failed:
+            # Without this line "no material waste found" reads as a verdict on
+            # checks that never ran.
+            print(
+                _dim(f"{len(failed)} check(s) could not run and were not counted: "
+                     f"{', '.join(failed)} (`nable scan --dry-run --json` prints the policy)"),
+                file=out,
+            )
 
     # ── extra providers (AI / GCP / Azure), the cross-provider frame ──
     for b in extra_blocks:
@@ -603,8 +612,11 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
             "regions_scanned": report.get("regions_scanned", []),
             "regions_timed_out": report.get("regions_timed_out", []),
             "errors": report.get("errors", []),
+            "checks_failed": report.get("checks_failed", []),
             "duration_s": round(duration_s, 1),
-            "partial": bool(report.get("regions_timed_out")),
+            # A check that could not read is as partial as a region that timed
+            # out: the findings list is missing whatever it would have found.
+            "partial": bool(report.get("regions_timed_out") or report.get("checks_failed")),
         },
         "providers": [
             {
@@ -806,6 +818,21 @@ def run(args) -> int:
         from .scan_assembler import gather_extra_providers
         print(_dim("no AWS credentials found · scanning your other connected providers"), file=out)
         blocks, abandoned = gather_extra_providers(_fams, spend=want_spend)
+        if not any(b.status in ("ok", "no_data") for b in blocks):
+            # Nothing answered. The common case: a profile-based account in
+            # accounts.yaml puts "aws" (and so "llm") in connected_families with
+            # no usable credentials behind it, the AI block drops itself as a
+            # false positive, and the scan used to exit 0 with no providers and
+            # no findings: a clean result for an account nothing was read from.
+            for b in blocks:
+                _render_extra(out, b)
+            code = _fail(out, EXIT_NO_CREDS, [
+                "no AWS credentials found, and no other connected provider answered",
+                "  looked in: env vars, ~/.aws/credentials, ~/.aws/config (SSO), instance metadata",
+                "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
+                "  then: `nable connect` waits and connects the moment they appear",
+            ], "no-creds", t0, props={"n_extra": len(blocks)})
+            return _finish(code, abandoned)
         _render(out, None, None, demo=False, ce_denied=False, extra_blocks=blocks)
         if as_json:
             print(json.dumps(_json_payload(
@@ -975,6 +1002,51 @@ def run(args) -> int:
     scanned = report.get("regions_scanned") or []
     has_results = bool(scanned)
     lingering = bool(report.get("_threads_abandoned"))
+
+    # Every check raised (typically AccessDenied on every read). Regions were
+    # "scanned" only in the sense that we asked; nothing was read, so zero
+    # findings here is not a clean account and must not exit 0 as one.
+    checks_failed = report.get("checks_failed") or []
+    if has_results and checks_failed and not report.get("checks_run"):
+        codes = sorted({f.get("error_code", "") for f in checks_failed})
+        denied = all(c in ("AccessDenied", "AccessDeniedException", "UnauthorizedOperation")
+                     for c in codes)
+        # Same rule as the time-limit branch below: AWS reading nothing is one
+        # row, not the whole scan, when another provider did answer.
+        extra_blocks, extra_abandoned = ([], False)
+        if _extra_fams:
+            from .scan_assembler import gather_extra_providers
+            extra_blocks, extra_abandoned = gather_extra_providers(_fams, spend=want_spend)
+        lingering = lingering or extra_abandoned
+        if any(b.status == "ok" for b in extra_blocks):
+            print(_dim(f"AWS: every check failed ({', '.join(codes)}); "
+                       "showing your other providers"), file=out)
+            _render(out, None, None, demo=False, ce_denied=False, extra_blocks=extra_blocks)
+            if as_json:
+                # The report rides along for scan.errors and scan.partial; its
+                # findings are empty because nothing was read.
+                print(json.dumps(_json_payload(
+                    None, report, demo=False, profile=profile, account_id=account_id,
+                    duration_s=time.time() - t0, extra_blocks=extra_blocks,
+                ), indent=2))
+            _emit("cli_scan_completed", {
+                "demo": False, "aws_all_checks_failed": True,
+                "providers": len([b for b in extra_blocks if b.status == "ok"]),
+                "duration_s": round(time.time() - t0, 1),
+            }, wait=True)
+            return _finish(EXIT_OK, lingering)
+        if as_json:
+            print(json.dumps(_json_payload(
+                spend, report, demo=False, profile=profile, account_id=account_id,
+                duration_s=time.time() - t0,
+            ), indent=2))
+        code = _fail(out, EXIT_DENIED if denied else EXIT_PARTIAL_EMPTY, [
+            f"every check failed ({', '.join(codes)}); nothing in this account was read",
+            "  fix: `nable scan --dry-run --json` prints the exact least-privilege",
+            "       policy for the calls this scan makes, ready to paste",
+        ], "permission" if denied else "all-checks-failed", t0,
+            props={"n_failed": len(checks_failed)})
+        return _finish(code, lingering)
 
     if not has_results:
         # AWS produced nothing (hit the time limit). Don't blank the whole cross-provider

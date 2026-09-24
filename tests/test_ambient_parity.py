@@ -305,3 +305,43 @@ def test_a_credential_that_cannot_list_subscriptions_says_why(monkeypatch):
     r = ambient.detect_azure()
     assert r.found is False
     assert "no subscriptions" in r.detail and "HTTP 403" in r.detail
+
+
+# ── the time box is a real time box ──────────────────────────────────────────
+
+def test_a_hung_probe_returns_at_its_timeout_not_when_the_sdk_gives_up():
+    """`with ThreadPoolExecutor` around .result(timeout=...) timed out on time,
+    then shutdown(wait=True) on the way out waited for the hung SDK call, so the
+    probe cost the SDK's own metadata timeout instead of ours."""
+    import threading
+    import time
+
+    release = threading.Event()
+    t0 = time.monotonic()
+    assert ambient._run(lambda: release.wait(10), timeout=0.2) is None
+    took = time.monotonic() - t0
+    release.set()
+    assert took < 2.0, f"a 0.2s time box took {took:.1f}s"
+
+
+def test_one_slow_cloud_does_not_erase_the_ones_that_answered(monkeypatch):
+    """detect_all's as_completed timeout escaped as TimeoutError, and welcome's
+    caller handled it by discarding every result: an AWS chain found in
+    milliseconds vanished because a GCP probe hung."""
+    import threading
+    import time
+
+    release = threading.Event()
+    monkeypatch.setattr(ambient, "PROBE_TIMEOUT_S", 0.2)
+    monkeypatch.setitem(ambient.PROBES, "aws",
+                        lambda: ambient.Ambient("aws", found=True, source="env"))
+    monkeypatch.setitem(ambient.PROBES, "gcp",
+                        lambda: release.wait(10) and ambient.Ambient("gcp"))
+    t0 = time.monotonic()
+    out = ambient.detect_all(["aws", "gcp"])
+    took = time.monotonic() - t0
+    release.set()
+    assert took < 2.0, f"detect_all waited {took:.1f}s on the hung probe"
+    assert out["aws"].found is True
+    assert out["gcp"].found is False and out["gcp"].detail == "probe did not finish"
+

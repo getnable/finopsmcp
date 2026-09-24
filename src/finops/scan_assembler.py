@@ -223,7 +223,12 @@ def gather_extra_providers(
     abandoned = False
     labels = {"ai": "AI & GPU", "gcp": "GCP", "azure": "Azure"}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+    # Not a `with` block: its exit is shutdown(wait=True), which waited for the
+    # very worker that just timed out, so a hung provider held the scan for as
+    # long as it hung and the per-provider timeout bounded nothing. The caller
+    # hard-exits on `abandoned`, so the orphaned thread cannot hold the process.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs))
+    try:
         futs = {pool.submit(fn, spend): fam for fam, fn in jobs}
         deadline = time.monotonic() + overall_budget
         for fut, fam in futs.items():
@@ -239,6 +244,8 @@ def gather_extra_providers(
                 blocks.append(ProviderBlock(
                     family=fam, label=labels.get(fam, fam.upper()), status="errored",
                     note=str(exc).split(chr(10))[0][:90]))
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     blocks = [b for b in blocks if b.status != "skip"]
     order = {"ai": 0, "gcp": 1, "azure": 2}

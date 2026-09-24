@@ -2899,8 +2899,12 @@ def main(args: list[str] | None = None) -> None:
     # output too: a policy verdict prefixed with a setup banner reads as a bug
     # on camera and in scripts (the `guard hook` machine path already bails
     # out above, before any output).
+    #
+    # stderr, not stdout: every other command's stdout may be a machine
+    # document too (`brief --json`, `ai-budget --json`), and a banner line
+    # ahead of it made that output unparseable. On a terminal it looks the same.
     if parsed.cmd not in ("scan", "guard"):
-        print("\n  nable setup: all credentials stay on your machine\n")
+        print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
         "aws": setup_aws_account,

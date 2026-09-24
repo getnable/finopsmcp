@@ -25,7 +25,7 @@ FIRST_PRINT_BUDGET_S = 5.0 if os.getenv("CI") else 2.0
 _ENV = {**os.environ, "NABLE_NO_TELEMETRY": "1", "NO_COLOR": "1"}
 
 
-def _run_entry(*argv: str, timeout: float = 60.0, env: dict | None = None):
+def _run_entry(*argv: str, timeout: float = 60.0):
     """Run finops.entry:main in a child process exactly as the console script would."""
     code = (
         "import sys; sys.argv = ['nable', *sys.argv[1:]]; "
@@ -36,7 +36,7 @@ def _run_entry(*argv: str, timeout: float = 60.0, env: dict | None = None):
         capture_output=True,
         text=True,
         timeout=timeout,
-        env=_ENV if env is None else env,
+        env=_ENV,
         cwd=str(REPO),
     )
 
@@ -64,18 +64,45 @@ def test_scan_demo_json_stdout_is_pure():
     assert doc["recoverable"]["monthly_usd"] > 0
 
 
-def test_json_stdout_stays_pure_when_scripts_dir_is_off_path():
-    # A --user install leaves the scripts dir off PATH, which triggers the
-    # "not in your PATH" hint. That hint must go to stderr, never into --json.
-    scripts = str(Path(sys.executable).parent)
-    path = os.pathsep.join(
-        p for p in _ENV.get("PATH", "").split(os.pathsep)
-        if p and os.path.realpath(p) != os.path.realpath(scripts)
+def _run_isolated(tmp_path, *argv: str):
+    """_run_entry with a throwaway HOME and data dir, and a PATH without the
+    `finops` script on it (the `uvx nable` case, which also triggers the PATH
+    warning). No AWS keys: nothing here may reach a cloud."""
+    env = {k: v for k, v in _ENV.items()
+           if not k.startswith(("AWS_", "FINOPS_", "NABLE_BRIEF"))}
+    env.update(HOME=str(tmp_path), FINOPS_DATA_DIR=str(tmp_path / "data"),
+               PATH="/usr/bin:/bin", AWS_EC2_METADATA_DISABLED="true")
+    code = (
+        "import sys; sys.argv = ['nable', *sys.argv[1:]]; "
+        "from finops.entry import main; main()"
     )
-    proc = _run_entry("scan", "--demo", "--json", env={**_ENV, "PATH": path})
+    return subprocess.run(
+        [sys.executable, "-c", code, *argv],
+        capture_output=True, text=True, timeout=60.0, env=env, cwd=str(REPO),
+    )
+
+
+def test_brief_json_stdout_is_pure(tmp_path):
+    """The setup banner used to print to stdout ahead of every command but
+    scan and guard, so `nable brief --json | jq` failed on line one."""
+    proc = _run_isolated(tmp_path, "brief", "--latest", "--json")
+    assert proc.returncode == 0, proc.stderr
+    doc = json.loads(proc.stdout)  # any chrome on stdout breaks this parse
+    assert doc == {"error": "no_brief"}
+
+
+def test_ai_budget_json_stdout_is_pure(tmp_path):
+    proc = _run_isolated(tmp_path, "ai-budget", "--json")
     assert proc.returncode == 0, proc.stderr
     doc = json.loads(proc.stdout)
-    assert doc["command"] == "scan"
+    assert "verdict" in doc
+
+
+def test_scan_json_stdout_is_pure_without_finops_on_path(tmp_path):
+    """The PATH warning ran ahead of scan too, on stdout."""
+    proc = _run_isolated(tmp_path, "scan", "--demo", "--json")
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["command"] == "scan"
 
 
 def test_help_leads_with_get_answers():
