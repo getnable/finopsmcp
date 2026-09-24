@@ -115,7 +115,7 @@ def _isolated(tmp_path, monkeypatch):
                 "FINOPS_GUARD_STOP_ON_BUDGET", "UV_CACHE_DIR"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: None)
-    monkeypatch.setattr(g, "check_budget_gate", lambda: None)
+    monkeypatch.setattr(g, "check_budget_gate", lambda *a, **k: None)
 
 
 def _deny_mode(monkeypatch):
@@ -222,14 +222,14 @@ def test_codex_ask_becomes_a_deny_that_says_why():
 def test_codex_over_budget_notice_warns_instead_of_stopping(monkeypatch):
     """Notify mode is the user's choice at install; turning it into a stop on
     every command would override that choice."""
-    monkeypatch.setattr(g, "check_budget_gate", lambda: {
+    monkeypatch.setattr(g, "check_budget_gate", lambda *a, **k: {
         "decision": "ask", "action_type": "ai_budget", "reason": "nable guard: over budget"})
     _, body, _ = _run(_with(CODEX_BASH, ALLOW_CMD))
     assert body == {"systemMessage": "nable guard: over budget"}
 
 
 def test_codex_budget_stop_is_a_deny(monkeypatch):
-    monkeypatch.setattr(g, "check_budget_gate", lambda: {
+    monkeypatch.setattr(g, "check_budget_gate", lambda *a, **k: {
         "decision": "deny", "action_type": "ai_budget", "reason": "nable guard: stopped"})
     _, body, _ = _run(_with(CODEX_BASH, ALLOW_CMD))
     assert body["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -311,9 +311,9 @@ def test_a_gate_crash_allows_and_says_why(payload, expected, monkeypatch):
 def test_stray_prints_cannot_corrupt_the_verdict(payload, monkeypatch):
     real = g.gate_command
 
-    def chatty(command):
+    def chatty(command, *a, **k):
         print("debug: loading policy")
-        return real(command)
+        return real(command, *a, **k)
     monkeypatch.setattr(g, "gate_command", chatty)
     code, body, err = _run(payload)
     assert code == 0 and body is not None      # stdout parsed as one JSON document

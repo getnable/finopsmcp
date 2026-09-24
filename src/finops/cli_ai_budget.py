@@ -3,14 +3,16 @@
 Run bare `finops ai-budget` the first time and it asks you two questions (flat
 subscription or metered API, and what you pay), then remembers. After that, bare
 `finops ai-budget` just prints where you stand: this window, month to date, your
-budget, burn rate. Flags (--plan-cost / --spend-cap / --tokens) skip the questions
-for scripts. Numbers come from finops.ai_budget: real local token usage from Claude
+budget, this session against its cap, burn rate, and what each model and each
+session cost. Flags (--plan-cost / --spend-cap / --tokens / --session-cap) skip
+the questions for scripts. Numbers come from finops.ai_budget: real local token usage from Claude
 Code's session logs. Nothing leaves your machine.
 """
 from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 
 _ACCENT = "\033[38;5;38m"
 _DIM = "\033[2m"
@@ -64,6 +66,11 @@ def add_parser(sub) -> None:
                    help="Metered API: monthly dollar cap, e.g. --spend-cap 2500")
     p.add_argument("--tokens", type=int, metavar="N",
                    help="Usage cap: warn before N billable tokens/month (either mode)")
+    p.add_argument("--session-cap", type=float, metavar="USD",
+                   help="Per-task cap: what one agent session may spend at list price, "
+                        "e.g. --session-cap 40 (0 clears)")
+    p.add_argument("--month", action="store_true",
+                   help="Split cost by model and session over the month, not the 5h window")
     p.add_argument("--reset", action="store_true", help="Forget the saved budget")
     p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     p.set_defaults(cmd="ai-budget")
@@ -103,11 +110,12 @@ def run(args) -> int:
     if getattr(args, "reset", False):
         ab.reset_budget()
 
+    session_cap = getattr(args, "session_cap", None)
     gave_flags = (args.plan_cost is not None or args.spend_cap is not None
-                  or args.tokens is not None)
+                  or args.tokens is not None or session_cap is not None)
     if gave_flags:
         ab.set_budget(plan_cost=args.plan_cost, spend_cap=args.spend_cap,
-                      monthly_tokens=args.tokens)
+                      monthly_tokens=args.tokens, session_cap=session_cap)
 
     # First run, nothing set, a real terminal: ask instead of making them read flags.
     if (not gave_flags and not getattr(args, "json", False)
@@ -126,7 +134,7 @@ def run(args) -> int:
     vcolor = {"ok": _OK, "warn": _WARN, "over": _OVER}[verdict]
 
     label = st["plan_label"] or {"flat": "subscription", "metered": "metered API"}.get(
-        mode, "no budget set")
+        mode, "per-session cap" if (st.get("session") or {}).get("cap_usd") else "no budget set")
     print(_c("nable ai-budget", _BOLD) + _c(f"  ·  {label}", _DIM), file=out)
     if not w["source_present"]:
         # A dead end otherwise. Claude Code is the only provider readable with no
@@ -172,9 +180,76 @@ def run(args) -> int:
                          f" ({st['billable_tokens_mtd']/b['monthly_tokens']*100:.0f}%)")
     if not mode:
         row("budget", _c("not set · run `nable ai-budget` to set one", _DIM))
+    sess = st.get("session")
+    if sess and (sess["messages"] or sess["cap_usd"]):
+        # "latest session" when the id is a guess from transcript times rather
+        # than the session this command runs in.
+        lbl = "this session" if sess["id_source"] != "latest_activity" else "latest session"
+        spent = f"~${sess['usd_equivalent']:,.2f}"
+        if sess["cap_usd"]:
+            scolor = {"ok": _OK, "warn": _WARN, "over": _OVER}[sess["verdict"]]
+            row(lbl, f"{spent} of ${sess['cap_usd']:,.2f} cap  ·  "
+                     f"{_c(sess['verdict'].upper(), scolor)} ({sess['pct_of_cap'] * 100:.0f}%)"
+                     f"  ·  ~${sess['remaining_usd']:,.2f} left")
+        else:
+            row(lbl, f"{spent} · {sess['messages']} msgs  "
+                     + _c("· no session cap (--session-cap USD)", _DIM))
     row("burn rate", f"~{_tok(st['burn_tokens_per_hour'])} tokens/hour")
+
+    _breakdown(st, out, month=getattr(args, "month", False))
 
     print(file=out)
     print("  " + _c(st["summary"], vcolor), file=out)
-    print(_c("  local · exact token counts · dollars are list-price estimates, not your bill", _DIM), file=out)
+    print(_c("  local · exact token counts · dollars are list-price estimates at each "
+             "model's rate, not your bill", _DIM), file=out)
     return 0
+
+
+_TOP_SESSIONS = 5
+
+
+def _breakdown(st: dict, out, month: bool) -> None:
+    """Where the dollars went: each model, then the costliest sessions (tasks)."""
+    u = st["month_to_date"] if month else st["window"]
+    if not u.get("cost_by_model"):
+        return
+    period = "month to date" if month else f"last {st['window_hours']:g}h"
+    total = u["usd_equivalent"] or 0.0
+    unpriced = u.get("unpriced_models") or {}
+    print(file=out)
+    print(_c(f"  by model, {period}", _DIM), file=out)
+    width = max(len(m) for m in u["cost_by_model"])
+    for model, usd in u["cost_by_model"].items():
+        share = f"{usd / total * 100:3.0f}%" if total else "  -"
+        note = _c("  unpriced, at the fallback rate", _WARN) if model in unpriced else ""
+        print(f"    {model.ljust(width)}  {_usd(usd)}  {share}{note}", file=out)
+
+    sessions = u.get("by_session") or {}
+    if not sessions:
+        return
+    count = u.get("session_count", len(sessions))
+    shown = list(sessions.items())[:_TOP_SESSIONS]
+    more = f", top {len(shown)} of {count}" if count > len(shown) else ""
+    print(_c(f"  by session, {period}{more}", _DIM), file=out)
+    cur = st.get("session") or {}
+    this_id = cur.get("id") if cur.get("id_source") != "latest_activity" else None
+    for sid, v in shown:
+        tag = _c("  (this session)", _ACCENT) if sid == this_id else ""
+        print(f"    {_usd(v['usd_equivalent'])}  {(v.get('project') or '-')[:18].ljust(18)}"
+              f"  {sid[:8]}  {_span(v['first_activity'], v['last_activity'])}"
+              f"  {v['messages']} msgs{tag}", file=out)
+
+
+def _usd(usd: float) -> str:
+    return f"{'~$' + format(usd, ',.2f'):>11}"
+
+
+def _span(first: float | None, last: float | None) -> str:
+    """'Sep 24 17:55 to 22:40', local time; the end carries its date only when it
+    differs from the start's."""
+    if not first or not last:
+        return ""
+    a = datetime.fromtimestamp(first, tz=timezone.utc).astimezone()
+    b = datetime.fromtimestamp(last, tz=timezone.utc).astimezone()
+    end = b.strftime("%H:%M") if a.date() == b.date() else b.strftime("%b %d %H:%M")
+    return f"{a.strftime('%b %d %H:%M')} to {end}"

@@ -47,6 +47,84 @@ def test_billable_excludes_cache_read(tmp_path):
     assert u["messages"] == 1
 
 
+def _block(ts_epoch, msg_id, request_id, tout, tin=2, cwrite=1000, cread=40_000,
+           model="claude-opus-5-5", session="sess-a"):
+    # One transcript line per content block, as Claude Code writes them: every
+    # block of a response repeats the response's usage, output growing as it streams.
+    rec = _assistant(ts_epoch, tin=tin, tout=tout, cwrite=cwrite, cread=cread, model=model)
+    rec["message"]["id"] = msg_id
+    rec["requestId"] = request_id
+    rec["sessionId"] = session
+    return rec
+
+
+def test_a_response_logged_as_several_blocks_counts_once(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _block(now - 60, "msg_1", "req_1", tout=8),     # thinking block
+        _block(now - 60, "msg_1", "req_1", tout=120),   # text block
+        _block(now - 60, "msg_1", "req_1", tout=351),   # tool_use, final count
+        _block(now - 30, "msg_2", "req_2", tout=40),    # a second response
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["messages"] == 2
+    assert u["input_tokens"] == 4                     # 2 per response, not per line
+    assert u["output_tokens"] == 351 + 40             # the last line of each response
+    assert u["cache_creation_tokens"] == 2000
+    assert u["cache_read_tokens"] == 80_000
+    assert u["billable_tokens"] == 4 + 391 + 2000
+
+
+def test_each_response_is_priced_at_its_own_models_rate(tmp_path):
+    # One blended $3/$15 rate read Opus 5.5 low and Haiku 4.5 high. Same tokens,
+    # three models, three prices.
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 90, tin=1_000_000, tout=1_000_000, model="claude-opus-5-5"),
+        _assistant(now - 60, tin=1_000_000, tout=1_000_000, model="claude-haiku-4-5-20251001"),
+        _assistant(now - 30, tin=1_000_000, tout=1_000_000, model="claude-sonnet-4-6"),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["cost_by_model"] == {"claude-opus-5-5": 24.0, "claude-sonnet-4-6": 18.0,
+                                  "claude-haiku-4-5-20251001": 6.0}
+    assert u["usd_equivalent"] == 48.0
+    assert u["unpriced_models"] == {}
+    assert "unpriced_note" not in u
+
+
+def test_cache_reads_and_both_cache_write_durations_have_their_own_rates(tmp_path):
+    now = time.time()
+    rec = _assistant(now - 60, cwrite=3_000_000, cread=10_000_000, model="claude-opus-5-5")
+    # Claude Code writes most of its cache with the 1-hour TTL (2x input); the
+    # remainder is 5-minute (1.25x). Opus 5.5 reads at 0.05x, not 0.1x.
+    rec["message"]["usage"]["cache_creation"] = {
+        "ephemeral_1h_input_tokens": 2_000_000, "ephemeral_5m_input_tokens": 1_000_000}
+    _write_session(tmp_path / "claude", [rec])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["usd_equivalent"] == pytest.approx(2 * 8.00 + 1 * 5.00 + 10 * 0.20)
+
+
+def test_fast_mode_responses_bill_at_the_fast_rate(tmp_path):
+    now = time.time()
+    rec = _assistant(now - 60, tin=1_000_000, tout=1_000_000, model="claude-opus-5")
+    rec["message"]["usage"]["speed"] = "fast"
+    _write_session(tmp_path / "claude", [rec])
+    assert ab.read_agent_usage(now - 3600)["usd_equivalent"] == 60.0   # $10 + $50
+
+
+def test_an_unknown_model_uses_the_fallback_and_is_named_unpriced(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 60, tin=1_000_000, tout=1_000_000, model="claude-nova-9"),
+        _assistant(now - 30, tin=1_000_000, model="claude-haiku-4-5"),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["unpriced_models"] == {"claude-nova-9": 2_000_000}
+    assert u["cost_by_model"]["claude-nova-9"] == 18.0     # the $3/$15 fallback
+    assert u["usd_equivalent"] == 19.0
+    assert "claude-nova-9" in u["unpriced_note"] and "$3/$15" in u["unpriced_note"]
+
+
 def test_window_filters_old_records(tmp_path):
     now = time.time()
     _write_session(tmp_path / "claude", [

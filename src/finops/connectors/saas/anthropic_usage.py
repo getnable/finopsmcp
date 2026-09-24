@@ -4,14 +4,13 @@ Anthropic API cost and usage connector.
 Tracks spend across Claude models via:
   1. Anthropic Cost API — /v1/organizations/cost_report (actual USD; needs an Admin key)
   2. Anthropic Usage API (beta) — /v1/organizations/{org}/usage (token counts)
-  3. Estimated from token counts × published prices (fallback)
+  3. Estimated from token counts × published prices (fallback), per model from
+     finops.llm_prices
 
 Env vars:
   ANTHROPIC_API_KEY          — standard key
   ANTHROPIC_ADMIN_KEY        — org-level key (preferred for usage data)
   ANTHROPIC_ORGANIZATION_ID  — required for org-level usage endpoint
-
-Published pricing (May 2026): https://www.anthropic.com/pricing
 """
 from __future__ import annotations
 
@@ -19,36 +18,9 @@ import logging
 from datetime import date, timedelta
 from typing import Any
 
-log = logging.getLogger(__name__)
+from ...llm_prices import price_for
 
-# Per 1M tokens (USD)
-_MODEL_PRICING: dict[str, dict[str, float]] = {
-    # Claude 4 family (current generation)
-    "claude-opus-4-20250514":          {"input": 15.00, "output": 75.00},
-    "claude-opus-4-1-20250805":        {"input": 15.00, "output": 75.00},
-    "claude-sonnet-4-20250514":        {"input": 3.00,  "output": 15.00},
-    "claude-sonnet-4-5-20250929":      {"input": 3.00,  "output": 15.00},
-    "claude-haiku-4-5-20251001":       {"input": 1.00,  "output": 5.00},
-    "claude-opus-4-latest":            {"input": 15.00, "output": 75.00},
-    "claude-sonnet-4-latest":          {"input": 3.00,  "output": 15.00},
-    "claude-haiku-4-latest":           {"input": 1.00,  "output": 5.00},
-    # Claude 3.7 / 3.5 family
-    "claude-3-7-sonnet-20250219":      {"input": 3.00,  "output": 15.00},
-    "claude-3-5-sonnet-20241022":      {"input": 3.00,  "output": 15.00},
-    "claude-3-5-sonnet-20240620":      {"input": 3.00,  "output": 15.00},
-    "claude-3-5-haiku-20241022":       {"input": 0.80,  "output": 4.00},
-    # Claude 3 family
-    "claude-3-opus-20240229":          {"input": 15.00, "output": 75.00},
-    "claude-3-sonnet-20240229":        {"input": 3.00,  "output": 15.00},
-    "claude-3-haiku-20240307":         {"input": 0.25,  "output": 1.25},
-    # Claude 2
-    "claude-2.1":                      {"input": 8.00,  "output": 24.00},
-    "claude-2.0":                      {"input": 8.00,  "output": 24.00},
-    # Shorthand aliases
-    "claude-3-5-sonnet-latest":        {"input": 3.00,  "output": 15.00},
-    "claude-3-5-haiku-latest":         {"input": 0.80,  "output": 4.00},
-    "claude-3-opus-latest":            {"input": 15.00, "output": 75.00},
-}
+log = logging.getLogger(__name__)
 
 _API_BASE = "https://api.anthropic.com"
 _ANTHROPIC_VERSION = "2023-06-01"
@@ -406,6 +378,7 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
     # path. They populate only if a future/enterprise response carries them.
     total_requests = 0
     error_requests = 0
+    unpriced: dict[str, dict[str, int]] = {}
 
     for entry in data.get("data", data.get("usage", [])):
         model      = entry.get("model") or entry.get("model_id") or "unknown"
@@ -423,15 +396,28 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
         total_requests += req
         error_requests += _int(entry.get("error_count", entry.get("num_errors", 0)))
 
-        # If actual cost is in the response, use it
-        cost = float(entry.get("cost_usd", 0.0))
+        # If actual cost is in the response, use it. Otherwise price every token
+        # class at the model's own rate: cache reads and writes are billed too,
+        # and on a cache-heavy workload they are most of the input bill.
+        cost: float | None = float(entry.get("cost_usd", 0.0) or 0.0)
         if cost == 0.0:
-            pricing = _MODEL_PRICING.get(model, {"input": 0.0, "output": 0.0})
-            cost = (input_tok / 1_000_000 * pricing["input"] +
-                    output_tok / 1_000_000 * pricing["output"])
-
-        total += cost
-        by_model[model] = by_model.get(model, 0.0) + cost
+            price = price_for(model)
+            if price is None:
+                # No confirmed price. Pricing it at $0 made its spend vanish
+                # from the estimate; list it instead. input_tokens here is all
+                # input, cached included, the shape openai_usage reports.
+                u = unpriced.setdefault(model, {"input_tokens": 0, "output_tokens": 0})
+                u["input_tokens"] += input_tok + cache_read + cache_creation
+                u["output_tokens"] += output_tok
+                cost = None
+            else:
+                split = entry.get("cache_creation")
+                write_1h = (min(cache_creation, _int(split.get("ephemeral_1h_input_tokens", 0)))
+                            if isinstance(split, dict) else 0)
+                cost = price.cost(input_tokens=input_tok, output_tokens=output_tok,
+                                  cache_read_tokens=cache_read,
+                                  cache_write_5m_tokens=cache_creation - write_1h,
+                                  cache_write_1h_tokens=write_1h)
         # Sub-keys match what ai_kpis.py reads: input_tokens / output_tokens /
         # cache_read_input_tokens / cache_creation_input_tokens.
         bucket = by_model_tokens.setdefault(model, {
@@ -449,6 +435,11 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
         # context-window utilisation compute a real per-request average. Usually 0 on
         # the token-only Usage API, in which case the KPI marks it unavailable.
         bucket["request_count"]               += req
+
+        if cost is None:
+            continue
+        total += cost
+        by_model[model] = by_model.get(model, 0.0) + cost
 
         # Accumulate daily
         existing = next((d for d in daily if d["date"] == day), None)
@@ -474,6 +465,11 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
     if total_requests > 0:
         result["total_requests"] = total_requests
         result["error_requests"] = error_requests
+    if unpriced:
+        result["unpriced_models"] = unpriced
+        result["note"] = (result.get("note", "") + f" {len(unpriced)} model(s) have no known "
+                          f"price and are excluded from total_usd: "
+                          f"{', '.join(sorted(unpriced))}.").strip()
     return result
 
 
