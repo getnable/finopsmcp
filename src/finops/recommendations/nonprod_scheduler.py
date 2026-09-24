@@ -17,6 +17,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..aws_prices import EC2_HOURLY
+from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from .envelope import INFERRED, Finding
 
 log = logging.getLogger(__name__)
@@ -26,7 +28,6 @@ try:
 except ImportError:  # pragma: no cover
     boto3 = None  # type: ignore[assignment]
 
-_HOURS_PER_MONTH = 730.0
 _BUSINESS_HOURS_PER_WEEK = 50.0   # Mon-Fri 08:00-18:00 = 10 hrs * 5 days
 _TOTAL_HOURS_PER_WEEK = 168.0
 _IDLE_CPU_THRESHOLD = 5.0          # % CPU below which hour is considered idle
@@ -41,23 +42,9 @@ _NONPROD_VALUES = {
     "qa", "sandbox", "nonprod", "non-prod",
 }
 
-# On-demand hourly prices (us-east-1) for cost estimation when no billing data
-_HOURLY_PRICE: dict[str, float] = {
-    "t3.nano": 0.0052,    "t3.micro": 0.0104,   "t3.small": 0.0208,
-    "t3.medium": 0.0416,  "t3.large": 0.0832,   "t3.xlarge": 0.1664,
-    "t3.2xlarge": 0.3328,
-    "t3a.nano": 0.0047,   "t3a.micro": 0.0094,  "t3a.small": 0.0188,
-    "t3a.medium": 0.0376, "t3a.large": 0.0752,  "t3a.xlarge": 0.1504,
-    "t3a.2xlarge": 0.3008,
-    "m5.large": 0.096,    "m5.xlarge": 0.192,   "m5.2xlarge": 0.384,
-    "m5.4xlarge": 0.768,  "m5.8xlarge": 1.536,
-    "m6i.large": 0.096,   "m6i.xlarge": 0.192,  "m6i.2xlarge": 0.384,
-    "m6i.4xlarge": 0.768, "m6i.8xlarge": 1.536,
-    "c5.large": 0.085,    "c5.xlarge": 0.17,    "c5.2xlarge": 0.34,
-    "c5.4xlarge": 0.68,   "c5.9xlarge": 1.53,
-    "r5.large": 0.126,    "r5.xlarge": 0.252,   "r5.2xlarge": 0.504,
-    "r5.4xlarge": 1.008,  "r5.8xlarge": 2.016,
-}
+# On-demand hourly prices (us-east-1) for cost estimation when no billing data.
+# Shared with every other module that prices an EC2 instance; see aws_prices.
+_HOURLY_PRICE: dict[str, float] = EC2_HOURLY
 
 
 def _get_env_tag(tags: list[dict]) -> str | None:

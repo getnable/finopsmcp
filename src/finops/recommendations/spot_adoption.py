@@ -17,6 +17,8 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..aws_prices import EC2_HOURLY
+from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from .envelope import INFERRED, Finding
 
 try:
@@ -27,18 +29,10 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 _LOOKBACK_DAYS  = 14
-_HOURS_PER_MONTH = 730.0
 
 # On-demand hourly prices (us-east-1). Used to estimate monthly costs.
-_HOURLY_PRICE: dict[str, float] = {
-    "m5.large":    0.096,  "m5.xlarge":   0.192,  "m5.2xlarge":  0.384,
-    "m5.4xlarge":  0.768,
-    "m6i.large":   0.096,  "m6i.xlarge":  0.192,  "m6i.2xlarge": 0.384,
-    "c5.large":    0.085,  "c5.xlarge":   0.170,  "c5.2xlarge":  0.340,
-    "r5.large":    0.126,  "r5.xlarge":   0.252,  "r5.2xlarge":  0.504,
-    "t3.medium":   0.0416, "t3.large":    0.0832, "t3.xlarge":   0.1664,
-    "t3.2xlarge":  0.3328,
-}
+# Shared with every other module that prices an EC2 instance; see aws_prices.
+_HOURLY_PRICE: dict[str, float] = EC2_HOURLY
 
 # Spot discount relative to on-demand (fraction saved). Source: AWS Spot pricing.
 SPOT_DISCOUNT: dict[str, float] = {

@@ -139,3 +139,44 @@ def test_graviton_scanner_prices_from_aws_prices():
     current, savings, _ = graviton._compute_savings("r5.large", "r7g.large")
     assert current == round(0.126 * 730, 2)
     assert savings == round(round(0.126 * 730, 2) - round(0.1071 * 730, 2), 2)
+
+
+# Types each of the three recommenders priced before, with what it quoted.
+_RECOMMENDER_BEFORE = [
+    ("t3.medium", 0.0416), ("t3a.large", 0.0752), ("m5.large", 0.096),
+    ("m6i.4xlarge", 0.768), ("c5.9xlarge", 1.53), ("r5.2xlarge", 0.504),
+]
+
+
+@pytest.mark.parametrize("itype,hourly", _RECOMMENDER_BEFORE)
+def test_rightsizing_fallback_quotes_what_it_used_to(itype, hourly):
+    from finops.recommendations import rightsizing
+
+    assert rightsizing._HOURLY_PRICE is EC2_HOURLY
+    assert rightsizing.monthly_cost(itype) == pytest.approx(hourly * 730)
+
+
+@pytest.mark.parametrize("itype,hourly", _RECOMMENDER_BEFORE)
+def test_nonprod_scheduler_quotes_what_it_used_to(itype, hourly):
+    from finops.recommendations import nonprod_scheduler
+
+    assert nonprod_scheduler._HOURLY_PRICE is EC2_HOURLY
+    assert nonprod_scheduler._monthly_cost_estimate(itype) == round(hourly * 730, 2)
+
+
+@pytest.mark.parametrize("itype,hourly", [p for p in _RECOMMENDER_BEFORE
+                                          if p[0] not in ("t3a.large", "m6i.4xlarge",
+                                                          "c5.9xlarge")])
+def test_spot_adoption_quotes_what_it_used_to(itype, hourly):
+    from finops.recommendations import spot_adoption
+
+    assert spot_adoption._HOURLY_PRICE is EC2_HOURLY
+    assert spot_adoption._monthly_ondemand_cost(itype) == round(hourly * 730, 2)
+
+
+def test_a_type_one_copy_lacked_is_priced_rather_than_zero():
+    # spot_adoption carried 17 types and quoted $0 on-demand, so $0 savings, for
+    # an m5.8xlarge. The shared table prices it.
+    from finops.recommendations import spot_adoption
+
+    assert spot_adoption._monthly_ondemand_cost("m5.8xlarge") == round(1.536 * 730, 2)
