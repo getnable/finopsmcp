@@ -826,106 +826,94 @@ def check_lambda_memory(
         log.warning("list_functions failed (region=%s): %s", region, exc)
         return findings
 
-    for page in pages:
-        for fn in page.get("Functions", []):
-            fn_name = fn["FunctionName"]
-            configured_memory_mb = fn.get("MemorySize", 128)
-            runtime = fn.get("Runtime", "unknown")
-            code_size_mb = fn.get("CodeSize", 0) / (1024 * 1024)
+    fns = [fn for page in pages for fn in page.get("Functions", [])]
 
-            dims = [{"Name": "FunctionName", "Value": fn_name}]
+    # Invocations (Sum) and Lambda Insights memory (Maximum) for every function,
+    # one batched read, each as a single period spanning the whole window.
+    now = datetime.now(timezone.utc)
+    series = fetch_metric_values(cw_client, [
+        MetricQuery((fn["FunctionName"], metric), namespace, metric,
+                    (("FunctionName", fn["FunctionName"]),), stat, 86400 * lookback_days)
+        for fn in fns
+        for namespace, metric, stat in (
+            ("AWS/Lambda", "Invocations", "Sum"),
+            ("LambdaInsights", "memory_utilization", "Maximum"),
+        )
+    ], now - timedelta(days=lookback_days), now)
 
-            # Check invocations — zero invocations = potentially dead function
-            try:
-                inv_resp = cw_client.get_metric_statistics(
-                    Namespace="AWS/Lambda",
-                    MetricName="Invocations",
-                    Dimensions=dims,
-                    StartTime=datetime.now(timezone.utc) - timedelta(days=lookback_days),
-                    EndTime=datetime.now(timezone.utc),
-                    Period=86400 * lookback_days,
-                    Statistics=["Sum"],
-                )
-                inv_datapoints = inv_resp.get("Datapoints", [])
-                total_invocations = sum(dp.get("Sum", 0) for dp in inv_datapoints)
-            except Exception:
-                total_invocations = None
+    for fn in fns:
+        fn_name = fn["FunctionName"]
+        configured_memory_mb = fn.get("MemorySize", 128)
+        runtime = fn.get("Runtime", "unknown")
+        code_size_mb = fn.get("CodeSize", 0) / (1024 * 1024)
 
-            if total_invocations == 0:
+        # Check invocations — zero invocations = potentially dead function
+        inv_datapoints = series.get((fn_name, "Invocations"))
+        total_invocations = None if inv_datapoints is None else sum(inv_datapoints)
+
+        if total_invocations == 0:
+            findings.append({
+                "resource_id": fn_name,
+                "resource_type": "Lambda Function",
+                "waste_type": "lambda_zero_invocations",
+                "estimated_monthly_savings": _UNKNOWN_SAVINGS,
+                "detail": (
+                    f"Lambda function '{fn_name}' ({runtime}) had 0 invocations "
+                    f"over the past {lookback_days} days. "
+                    f"Code size: {code_size_mb:.1f} MB. "
+                    f"Consider deleting if no longer needed — stored code doesn't cost "
+                    f"much but orphaned functions indicate technical debt."
+                ),
+                "severity": "low",
+                "region": region,
+                "account_id": None,
+                "runtime": runtime,
+                "configured_memory_mb": configured_memory_mb,
+                "total_invocations": 0,
+            })
+            continue
+
+        # Try Lambda Insights for actual memory usage
+        max_memory_used_mb = None
+        mem_datapoints = series.get((fn_name, "memory_utilization"))
+        if mem_datapoints:
+            max_utilization_pct = max(mem_datapoints)
+            max_memory_used_mb = configured_memory_mb * (max_utilization_pct / 100.0)
+
+        if max_memory_used_mb is not None and max_memory_used_mb > 0:
+            # We have real data from Lambda Insights
+            ratio = configured_memory_mb / max_memory_used_mb
+            if ratio >= 2.0:
+                # Recommend sizing down to 1.5x actual usage (headroom)
+                recommended_mb = _next_lambda_memory_size(int(max_memory_used_mb * 1.5))
+                memory_savings_pct = (configured_memory_mb - recommended_mb) / configured_memory_mb
+
+                # Lambda pricing: $0.0000166667/GB-second
+                # Savings depend on invocation volume — use relative savings
+                estimated_savings = 10.0 * memory_savings_pct  # rough $10 base * savings %
+
                 findings.append({
                     "resource_id": fn_name,
                     "resource_type": "Lambda Function",
-                    "waste_type": "lambda_zero_invocations",
-                    "estimated_monthly_savings": _UNKNOWN_SAVINGS,
+                    "waste_type": "lambda_memory_overprovisioned",
+                    "estimated_monthly_savings": round(estimated_savings, 2),
                     "detail": (
-                        f"Lambda function '{fn_name}' ({runtime}) had 0 invocations "
-                        f"over the past {lookback_days} days. "
-                        f"Code size: {code_size_mb:.1f} MB. "
-                        f"Consider deleting if no longer needed — stored code doesn't cost "
-                        f"much but orphaned functions indicate technical debt."
+                        f"Lambda function '{fn_name}' is configured for {configured_memory_mb} MB "
+                        f"but p99 actual usage (via Lambda Insights) is {max_memory_used_mb:.0f} MB "
+                        f"({ratio:.1f}x over-provisioned). "
+                        f"Recommended: {recommended_mb} MB (1.5x headroom). "
+                        f"This reduces cost by ~{memory_savings_pct*100:.0f}%. "
+                        f"Test with AWS Lambda Power Tuning tool for optimal size."
                     ),
-                    "severity": "low",
+                    "severity": _severity_from_savings(estimated_savings),
                     "region": region,
                     "account_id": None,
                     "runtime": runtime,
                     "configured_memory_mb": configured_memory_mb,
-                    "total_invocations": 0,
+                    "max_used_memory_mb": round(max_memory_used_mb, 1),
+                    "recommended_memory_mb": recommended_mb,
+                    "total_invocations": total_invocations,
                 })
-                continue
-
-            # Try Lambda Insights for actual memory usage
-            max_memory_used_mb = None
-            try:
-                mem_resp = cw_client.get_metric_statistics(
-                    Namespace="LambdaInsights",
-                    MetricName="memory_utilization",
-                    Dimensions=dims,
-                    StartTime=datetime.now(timezone.utc) - timedelta(days=lookback_days),
-                    EndTime=datetime.now(timezone.utc),
-                    Period=86400 * lookback_days,
-                    Statistics=["Maximum"],
-                )
-                mem_datapoints = mem_resp.get("Datapoints", [])
-                if mem_datapoints:
-                    max_utilization_pct = max(dp.get("Maximum", 0) for dp in mem_datapoints)
-                    max_memory_used_mb = configured_memory_mb * (max_utilization_pct / 100.0)
-            except Exception:
-                pass
-
-            if max_memory_used_mb is not None and max_memory_used_mb > 0:
-                # We have real data from Lambda Insights
-                ratio = configured_memory_mb / max_memory_used_mb
-                if ratio >= 2.0:
-                    # Recommend sizing down to 1.5x actual usage (headroom)
-                    recommended_mb = _next_lambda_memory_size(int(max_memory_used_mb * 1.5))
-                    memory_savings_pct = (configured_memory_mb - recommended_mb) / configured_memory_mb
-
-                    # Lambda pricing: $0.0000166667/GB-second
-                    # Savings depend on invocation volume — use relative savings
-                    estimated_savings = 10.0 * memory_savings_pct  # rough $10 base * savings %
-
-                    findings.append({
-                        "resource_id": fn_name,
-                        "resource_type": "Lambda Function",
-                        "waste_type": "lambda_memory_overprovisioned",
-                        "estimated_monthly_savings": round(estimated_savings, 2),
-                        "detail": (
-                            f"Lambda function '{fn_name}' is configured for {configured_memory_mb} MB "
-                            f"but p99 actual usage (via Lambda Insights) is {max_memory_used_mb:.0f} MB "
-                            f"({ratio:.1f}x over-provisioned). "
-                            f"Recommended: {recommended_mb} MB (1.5x headroom). "
-                            f"This reduces cost by ~{memory_savings_pct*100:.0f}%. "
-                            f"Test with AWS Lambda Power Tuning tool for optimal size."
-                        ),
-                        "severity": _severity_from_savings(estimated_savings),
-                        "region": region,
-                        "account_id": None,
-                        "runtime": runtime,
-                        "configured_memory_mb": configured_memory_mb,
-                        "max_used_memory_mb": round(max_memory_used_mb, 1),
-                        "recommended_memory_mb": recommended_mb,
-                        "total_invocations": total_invocations,
-                    })
 
     return findings
 

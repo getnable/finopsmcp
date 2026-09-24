@@ -338,3 +338,36 @@ def test_a_refused_network_series_still_protects_a_low_cpu_instance():
     })
     findings = waste.check_idle_ec2(_Pages(_ec2_pages(2)), cw, region="us-east-1")
     assert [f["resource_id"] for f in findings] == ["i-0001"]
+
+
+def _lambda_pages(n: int) -> list[dict]:
+    return [{"Functions": [
+        {"FunctionName": f"fn-{i:04d}", "MemorySize": 1024, "Runtime": "python3.12",
+         "CodeSize": 1024}
+        for i in range(n)
+    ]}]
+
+
+def test_lambda_reads_invocations_and_memory_in_one_call_per_500_series():
+    from finops.analyzers import waste
+
+    series = {("Invocations", f"fn-{i:04d}"): [10.0] for i in range(300)}
+    series[("Invocations", "fn-0003")] = []                   # read, never invoked
+    series[("memory_utilization", "fn-0004")] = [20.0]        # 205 MB of 1024
+    cw = _Metrics(series)
+
+    findings = waste.check_lambda_memory(_Pages(_lambda_pages(300)), cw, region="us-east-1")
+
+    assert cw.calls == math.ceil(300 * 2 / 500) == 2
+    assert {(f["resource_id"], f["waste_type"]) for f in findings} == {
+        ("fn-0003", "lambda_zero_invocations"),
+        ("fn-0004", "lambda_memory_overprovisioned"),
+    }
+
+
+def test_a_refused_invocations_series_is_not_zero_invocations():
+    from finops.analyzers import waste
+
+    cw = _Metrics({("Invocations", "fn-0000"): "InternalError"})
+    findings = waste.check_lambda_memory(_Pages(_lambda_pages(2)), cw, region="us-east-1")
+    assert [f["resource_id"] for f in findings] == ["fn-0001"]
