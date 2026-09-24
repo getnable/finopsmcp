@@ -498,20 +498,52 @@ def _hook_list(settings: dict, path: Path, *, create: bool):
     return pre
 
 
+def _is_our_command(cmd: Any) -> bool:
+    return isinstance(cmd, str) and _HOOK_MARKER in cmd and "finops" in cmd
+
+
+def _our_hooks(pre: Any):
+    """Every (entry, hook) pair in a PreToolUse list that is the guard's own.
+
+    Tolerant of entries that are not the shape we write: someone else's data
+    is skipped, never inspected further or rewritten."""
+    for entry in pre if isinstance(pre, list) else []:
+        if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list):
+            continue
+        for h in entry["hooks"]:
+            if isinstance(h, dict) and _is_our_command(h.get("command")):
+                yield entry, h
+
+
+def _read_our_hooks(path: Path) -> list[tuple[dict, dict]]:
+    """Read-only view of our hooks in a settings file; [] on anything odd."""
+    try:
+        s = json.loads(path.read_text())
+        return list(_our_hooks(((s.get("hooks") or {}).get("PreToolUse")) or []))
+    except Exception:
+        return []
+
+
+def _command_runs(cmd: str) -> bool:
+    """Does the program a hook command names still exist?"""
+    import shutil
+    exe = cmd[1:cmd.index('"', 1)] if cmd.startswith('"') else cmd.split()[0]
+    # The uvx form re-resolves at run time; it is healthy if uv exists.
+    probe = "uvx" if exe == "uvx" else exe
+    return bool(shutil.which(probe) or Path(probe).exists())
+
+
+def _timeout_for(cmd: str) -> int:
+    # uvx resolves an environment per call; give the cold-cache case room.
+    # Timeouts fail open in Claude Code, so a slow first call cannot block.
+    return 30 if cmd.startswith("uvx") else 10
+
+
 def is_installed(path: Path) -> bool:
     """Read-only predicate, so any structural surprise means "not installed"
     rather than a traceback. Answering False on a file we cannot parse is safe:
     the caller's next move is to install, which refuses loudly on the same file."""
-    try:
-        s = json.loads(path.read_text())
-        for entry in (s.get("hooks") or {}).get("PreToolUse") or []:
-            for h in entry.get("hooks") or []:
-                cmd = h.get("command") or ""
-                if _HOOK_MARKER in cmd and "finops" in cmd:
-                    return True
-    except Exception:
-        return False
-    return False
+    return bool(_read_our_hooks(path))
 
 
 def broken_hook_command(path: Path) -> str | None:
@@ -520,40 +552,52 @@ def broken_hook_command(path: Path) -> str | None:
     Returns None when the hook is absent or healthy. A hook Claude Code cannot
     execute is skipped silently and fails open, so "installed" on its own is not
     a safe thing to report."""
-    import shutil
     try:
-        s = json.loads(path.read_text())
-        for entry in (s.get("hooks") or {}).get("PreToolUse") or []:
-            for h in entry.get("hooks") or []:
-                cmd = h.get("command") or ""
-                if not (_HOOK_MARKER in cmd and "finops" in cmd):
-                    continue
-                exe = cmd[1:cmd.index('"', 1)] if cmd.startswith('"') else cmd.split()[0]
-                # The uvx form re-resolves at run time; it is healthy if uv exists.
-                probe = "uvx" if exe == "uvx" else exe
-                if shutil.which(probe) or Path(probe).exists():
-                    return None
-                return cmd
+        for _entry, h in _read_our_hooks(path):
+            cmd = h["command"]
+            return None if _command_runs(cmd) else cmd
     except Exception:
         return None
     return None
 
 
+def _stale(cmd: str) -> bool:
+    """Should install() rewrite this existing hook command in place?"""
+    return not _command_runs(cmd)
+
+
 def install(global_scope: bool = False) -> Path:
-    """Idempotently add the guard hook to Claude Code settings. Returns the path."""
+    """Idempotently add the guard hook to Claude Code settings. Returns the path.
+
+    Idempotent is not the same as "do nothing when an entry exists". `guard
+    status` tells anyone whose hook binary has vanished to re-run install, and
+    the 0.8.195 changelog told every uvx user the same. Both were promises this
+    function did not keep: it returned early on any existing entry, so the dead
+    hook stayed dead and the telemetry counted it as "repaired". Our own entry
+    is now rewritten in place when it is stale, keeping its position and every
+    other hook in the file exactly as found."""
     path = _settings_path(global_scope)
     settings = _load_settings(path)
-    if is_installed(path):
-        return path
     pre = _hook_list(settings, path, create=True)
-    cmd = _hook_command()
-    pre.append({
-        "matcher": "Bash",
-        # uvx resolves an environment per call; give the cold-cache case room.
-        # Timeouts fail open in Claude Code, so a slow first call cannot block.
-        "hooks": [{"type": "command", "command": cmd,
-                   "timeout": 30 if cmd.startswith("uvx") else 10}],
-    })
+    ours = list(_our_hooks(pre))
+    if ours:
+        changed = False
+        for _entry, h in ours:
+            if not _stale(h["command"]):
+                continue
+            cmd = _hook_command()
+            h["command"] = cmd
+            old = h.get("timeout")
+            h["timeout"] = max(old, _timeout_for(cmd)) if isinstance(old, int) else _timeout_for(cmd)
+            changed = True
+        if not changed:
+            return path
+    else:
+        cmd = _hook_command()
+        pre.append({
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": cmd, "timeout": _timeout_for(cmd)}],
+        })
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2) + "\n")
     return path
