@@ -344,6 +344,9 @@ def _instrumented_tool(*dargs, **dkwargs):
         # _EXTRA_TOOLS itself stays: it is still the tier-driven list of what to
         # keep out of tools/list, now enforced in the ONE place that decides
         # what is advertised rather than in two places that disagree.
+        import inspect
+        _is_coroutine_tool = inspect.iscoroutinefunction(fn)
+
         @functools.wraps(fn)
         async def _inner(*args, **kwargs):
             import time as _time
@@ -383,11 +386,23 @@ def _instrumented_tool(*dargs, **dkwargs):
                 log.debug("demo guard skipped for %s: %s", fn.__name__, _exc)
 
             try:
-                # Tools may be sync or async. Only await coroutines/awaitables,
-                # otherwise sync tools (whoami, *_api_key) raise
-                # "object dict can't be used in 'await' expression".
-                _ret = fn(*args, **kwargs)
-                result = await _ret if _inspect.isawaitable(_ret) else _ret
+                # Tools may be sync or async. A sync tool runs on a worker
+                # thread, never inline. FastMCP awaits this wrapper on the one
+                # event-loop thread, so a plain `def` tool that calls boto3 or
+                # httpx used to hold that thread for the whole round trip: no
+                # other request, no cancellation, no ping, and no
+                # asyncio.wait_for deadline elsewhere could fire until it
+                # returned. Offloading here protects every sync tool, including
+                # ones added later, without each having to remember to.
+                #
+                # Only await coroutines/awaitables, otherwise sync tools
+                # (whoami, *_api_key) raise "object dict can't be used in
+                # 'await' expression".
+                if _is_coroutine_tool:
+                    result = await fn(*args, **kwargs)
+                else:
+                    _ret = await asyncio.to_thread(fn, *args, **kwargs)
+                    result = await _ret if _inspect.isawaitable(_ret) else _ret
             except Exception as exc:
                 _duration = int((_time.monotonic() - _t0) * 1000)
                 _audit.log_tool_call(
