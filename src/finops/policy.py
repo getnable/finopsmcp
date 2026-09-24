@@ -37,7 +37,27 @@ DEFAULT_POLICY: dict[str, Any] = {
     "allowed_action_types": sorted(TWO_WAY_DOORS),  # reversible actions that are in-policy
     "max_auto_monthly_usd": 500.0,                  # a cost increase above this escalates
     "escalate_one_way_doors": True,                 # irreversible / financial always need a human
+    # Velocity cap: the monthly run-rate the shell guard lets through without a
+    # prompt, summed over a rolling window. Each action can sit under the
+    # per-action threshold while ten of them in an hour do not; this is the
+    # line for the ten. None means four times max_auto_monthly_usd ($2,000 at
+    # the default), so it takes at least five priced launches the guard let
+    # through silently to reach it, and raising the per-action threshold moves
+    # it too. 0 turns it off.
+    "velocity_cap_monthly_usd": None,
+    "velocity_window_minutes": 60.0,
 }
+
+
+VELOCITY_CAP_MULTIPLE = 4.0
+
+
+def velocity_cap(pol: dict[str, Any]) -> float:
+    """The effective velocity cap in $/mo per window; 0 when it is off."""
+    cap = pol.get("velocity_cap_monthly_usd")
+    if cap is None:
+        cap = VELOCITY_CAP_MULTIPLE * float(pol.get("max_auto_monthly_usd", 500.0))
+    return max(float(cap), 0.0)
 
 
 def door_of(action_type: str) -> str:
@@ -57,16 +77,21 @@ def load_policy() -> dict[str, Any]:
     policy without a config system:
       FINOPS_POLICY_MAX_AUTO_USD       a dollar threshold (float)
       FINOPS_POLICY_ALLOWED_ACTIONS    comma-separated action types
+      FINOPS_POLICY_VELOCITY_CAP_USD   monthly run-rate allowed per window (float, 0 = off)
+      FINOPS_POLICY_VELOCITY_WINDOW_MIN  the window, in minutes (float, default 60)
     """
     pol: dict[str, Any] = dict(DEFAULT_POLICY)
     pol["allowed_action_types"] = list(DEFAULT_POLICY["allowed_action_types"])
 
-    mx = os.getenv("FINOPS_POLICY_MAX_AUTO_USD", "").strip()
-    if mx:
-        try:
-            pol["max_auto_monthly_usd"] = float(mx)
-        except ValueError:
-            pass
+    for env, key in (("FINOPS_POLICY_MAX_AUTO_USD", "max_auto_monthly_usd"),
+                     ("FINOPS_POLICY_VELOCITY_CAP_USD", "velocity_cap_monthly_usd"),
+                     ("FINOPS_POLICY_VELOCITY_WINDOW_MIN", "velocity_window_minutes")):
+        mx = os.getenv(env, "").strip()
+        if mx:
+            try:
+                pol[key] = float(mx)
+            except ValueError:
+                pass
 
     al = os.getenv("FINOPS_POLICY_ALLOWED_ACTIONS", "").strip()
     if al:

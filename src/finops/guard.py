@@ -22,6 +22,13 @@ Verdict mapping (advisory, propose-only stays intact):
   allow, but priced near the auto threshold
            -> "warn"  runs as normal, with the figure shown alongside
 
+History (the recent end of the decision ledger, guard_ledger.recent) can
+turn an allow or a warn into an ask, never anything else:
+  velocity cap   the priced monthly run-rate the guard let through in a
+                 rolling window (60 min; 4x the per-action threshold unless
+                 FINOPS_POLICY_VELOCITY_CAP_USD says otherwise), plus this
+                 action, is over the cap
+
 The hook never executes anything itself and it fails open: any internal error
 exits 0 so a guard bug can never break the user's agent.
 
@@ -40,7 +47,14 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .policy import GATE_ALLOW, GATE_BLOCK, GATE_ESCALATE, evaluate_action_gate, load_policy
+from .policy import (
+    GATE_ALLOW,
+    GATE_BLOCK,
+    GATE_ESCALATE,
+    evaluate_action_gate,
+    load_policy,
+    velocity_cap,
+)
 
 # ── Command classification ─────────────────────────────────────────────────────
 # Ordered: first match wins. Maps shell commands to the policy action types in
@@ -652,6 +666,20 @@ _WARN_AT = 0.80
 
 def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = None,
                  via: str = "", cwd: str | None = None) -> dict[str, Any]:
+    """The policy verdict, then what the ledger's recent history adds to it.
+
+    A history check that fails leaves the policy verdict standing and puts the
+    exception under "_history_error" for the caller to record as a fail-open:
+    a guard that cannot read its own ledger must not take a position."""
+    v = _policy_verdict(command, hit, context=context, via=via, cwd=cwd)
+    try:
+        return _check_history(v, command, via=via)
+    except Exception as exc:
+        return {**v, "_history_error": exc}
+
+
+def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None = None,
+                    via: str = "", cwd: str | None = None) -> dict[str, Any]:
     """The policy verdict for one already-classified action. Always a dict:
     "allow" is a verdict too (the ledger records it, with its figure), and the
     public entry points turn it into None for their callers.
@@ -750,6 +778,76 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
     return allowed(est)
 
 
+# ── History: what the guard already let through ────────────────────────────────
+# One verdict sees one command. An agent that launches ten $400/mo instances in
+# an hour passes ten verdicts that are each correct and a total nobody agreed
+# to. These checks read the recent end of the decision ledger (guard_ledger
+# .recent: a bounded read from the end of the file, no database) and can only
+# tighten: an allow or a warn may become an ask, nothing else changes.
+
+# What the guard let run without a human. An ask is not counted: the hook exits
+# before the human answers, so the ledger cannot tell an approved ask from a
+# declined one, and counting a declined $191k ask would put every launch for
+# the next hour behind a prompt about money that was never spent.
+_LET_THROUGH = ("allow", "warn")
+_HISTORY_LISTED = 5
+
+
+def _check_history(v: dict[str, Any], command: str, *, via: str = "") -> dict[str, Any]:
+    """`v` upgraded to an ask when recent history says so, else `v` unchanged.
+    May raise; _verdict_for turns that into a fail-open."""
+    if v.get("decision") not in _LET_THROUGH:
+        return v
+    pol = load_policy()
+    new = (v.get("estimate") or {}).get("monthly_usd")
+    cap = velocity_cap(pol)
+    window = float(pol.get("velocity_window_minutes") or 60.0)
+    if not (isinstance(new, (int, float)) and new > 0 and cap > 0 and window > 0):
+        return v
+    from . import guard_ledger
+    recent = guard_ledger.recent(window)
+    reason = _velocity_reason(v, recent, new=float(new), cap=cap, window=window)
+    if reason is None:
+        return v
+    lead = f"{via}. " if via else ""
+    return {**v, "decision": "ask", "reason": f"nable guard: {lead}{reason}",
+            "history": "velocity"}
+
+
+def _usd(x: float) -> str:
+    return f"${x:,.0f}"
+
+
+def _listed(recs: list[dict[str, Any]]) -> str:
+    shown = []
+    for r in recs[-_HISTORY_LISTED:]:
+        cmd = str(r.get("command") or r.get("action_type") or "?")
+        cmd = cmd if len(cmd) <= 70 else cmd[:67] + "..."
+        shown.append(f"~{_usd(r['monthly_usd'])}/mo `{cmd}` at {str(r.get('ts', ''))[11:16]} UTC")
+    more = len(recs) - len(shown)
+    return "; ".join(shown) + (f"; and {more} earlier" if more > 0 else "")
+
+
+def _velocity_reason(v: dict[str, Any], recent: list[dict[str, Any]], *, new: float,
+                     cap: float, window: float) -> str | None:
+    """The velocity cap: priced monthly run-rate let through in the window,
+    plus this action, over the cap."""
+    counted = [r for r in recent
+               if r.get("decision") in _LET_THROUGH
+               and isinstance(r.get("monthly_usd"), (int, float)) and r["monthly_usd"] > 0]
+    total = sum(r["monthly_usd"] for r in counted)
+    if total + new <= cap:
+        return None
+    n = len(counted)
+    est = v.get("estimate") or {}
+    head = (f"{_cost_line(est)}. On top of ~{_usd(total)}/mo already let through in the "
+            f"last {window:g} minutes ({n} action{'s' if n != 1 else ''}: {_listed(counted)}), "
+            f"that is ~{_usd(total + new)}/mo in {window:g} minutes"
+            if counted else f"{_cost_line(est)}, on its own")
+    return (f"{head}, over your {_usd(cap)}/mo velocity cap per {window:g} minutes. "
+            "Confirm to proceed, or raise FINOPS_POLICY_VELOCITY_CAP_USD.")
+
+
 def gate_command(command: str, session_id: str | None = None, *, harness: str = "claude-code",
                  cwd: str | None = None, tool: str = "shell",
                  record: bool = True) -> dict[str, Any] | None:
@@ -795,7 +893,11 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
             if hit is None:
                 return None
             v = {**_verdict_for(command, hit, cwd=cwd), "harness": harness}
+        history_error = v.pop("_history_error", None)
         if record:
+            if history_error is not None:
+                _record_fail_open(history_error, harness=harness, tool=tool, command=command,
+                                  check="history")
             _record(v, tool=tool, command=command)
         return None if v["decision"] == "allow" else v
     except Exception as exc:
@@ -845,6 +947,10 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                 v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
                                  via=(f"{tool_name} would {act.summary}" if act.summary
                                       else f"{tool_name} amounts to `{act.command}`"))
+                history_error = v.pop("_history_error", None)
+                if history_error is not None and record:
+                    _record_fail_open(history_error, harness=harness, tool=tool_name,
+                                      command=act.command, check="history")
                 if worst is None or _SEVERITY[v["decision"]] > _SEVERITY[worst["decision"]]:
                     worst, summary = v, act.command
             if worst is None:
@@ -889,6 +995,8 @@ def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
             "total_usd": est.get("total_usd"),
             "basis": est.get("basis"),
             "reason": guard_ledger.redact(v.get("reason"), limit=600) if v.get("reason") else None,
+            # Which history check turned this into an ask, when one did.
+            **({"history": v["history"]} if v.get("history") else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             # Known only for a deny: the call never ran. An ask is the human's
@@ -898,8 +1006,13 @@ def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
         })
 
 
-def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: Any) -> None:
-    """A guard error let a call through unexamined; that is a verdict too."""
+def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: Any,
+                      check: str | None = None) -> None:
+    """A guard error let a call through unexamined; that is a verdict too.
+
+    `check` names the part that failed when the rest of the verdict stood (a
+    history check that could not read the ledger): the call was judged on
+    policy alone, and the verdict itself is recorded next to this line."""
     with contextlib.suppress(Exception):
         from . import guard_ledger
         guard_ledger.append({
@@ -908,6 +1021,7 @@ def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: A
             "command": guard_ledger.redact(command) if command else None,
             "decision": "fail_open",
             "error": type(exc).__name__,
+            **({"check": check} if check else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             "outcome": None,

@@ -45,6 +45,8 @@ _path_override: Path | None = None
 
 _SUMMARY_MAX = 400
 _TAIL_CHUNK = 64 * 1024
+# The most recent() reads on the hook path: a few thousand records, a few ms.
+_RECENT_MAX_BYTES = 4 * 1024 * 1024
 
 
 # ── where ─────────────────────────────────────────────────────────────────────
@@ -217,6 +219,62 @@ def verify(path: Path | None = None) -> dict[str, Any]:
             out["records"] = n
     out["head"] = prev
     return out
+
+
+def recent(minutes: float, *, path: Path | None = None, now: datetime | None = None,
+           max_bytes: int = _RECENT_MAX_BYTES) -> list[dict[str, Any]]:
+    """Records from the last `minutes`, oldest first, read from the END of the file.
+
+    This is the hook's read (the velocity cap and loop detection in guard.py),
+    so it never scans the file: it reads backwards in chunks and stops at the
+    first record older than the window. Records are appended in time order
+    under a lock, so everything before that one is older too. `max_bytes`
+    bounds the read whatever the window holds; a window that does not fit is
+    answered from its newest part. Unreadable lines are skipped. Raises on an
+    unreadable file: the caller decides what a failed read means."""
+    path = path or ledger_path()
+    since = (now or datetime.now(UTC)) - timedelta(minutes=minutes)
+    try:
+        fh = path.open("rb")
+    except FileNotFoundError:
+        return []
+    out: list[dict[str, Any]] = []
+    with fh:
+        pos = fh.seek(0, os.SEEK_END)
+        carry = b""
+        read_total = 0
+        while pos > 0 and read_total < max_bytes:
+            step = min(_TAIL_CHUNK, pos, max_bytes - read_total)
+            pos -= step
+            fh.seek(pos)
+            buf = fh.read(step) + carry
+            read_total += step
+            lines = buf.split(b"\n")
+            # The first piece may be the tail of a line that starts further
+            # back; keep it for the next chunk unless this is the file's start.
+            carry = lines.pop(0) if pos > 0 else b""
+            for raw in reversed(lines):
+                rec = _parse_recent(raw)
+                if rec is None:
+                    continue
+                if rec[0] < since:
+                    out.reverse()
+                    return out
+                out.append(rec[1])
+    # A line cut off by max_bytes is left unread rather than guessed at.
+    out.reverse()
+    return out
+
+
+def _parse_recent(raw: bytes) -> tuple[datetime, dict[str, Any]] | None:
+    if not raw.strip():
+        return None
+    try:
+        rec = json.loads(raw)
+        ts = datetime.fromisoformat(rec["ts"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    return (ts, rec) if ts.tzinfo is not None else None
 
 
 def read(days: float | None = None, path: Path | None = None) -> list[dict[str, Any]]:
