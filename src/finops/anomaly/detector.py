@@ -18,6 +18,13 @@ _MIN_HISTORY_DAYS    = 7     # need at least 7 data points
 _MIN_SPEND_THRESHOLD = 5.0   # ignore noise below $5
 _Z_SCORE_THRESHOLD   = 2.0   # flag if |z| > 2.0
 _PCT_THRESHOLD       = 20.0  # AND |pct_change| > 20%
+_MAX_STALE_DAYS      = 2     # newest snapshot older than this: history is stale
+# Floor on the baseline stdev, as a fraction of the mean and in dollars. A
+# perfectly flat baseline has stdev 0, and dividing by it (or treating z as 0)
+# made the most obvious anomaly there is, $100 a day for a month then $10,000,
+# invisible. With the floor a flat series still needs a 20%+ move to flag.
+_MIN_STDEV_FRACTION  = 0.10
+_MIN_STDEV_USD       = 1.0
 
 # Tag keys checked for cost attribution when an AWS anomaly is detected.
 # Ordered by how commonly they identify the responsible team / workload.
@@ -74,6 +81,13 @@ def _severity(z: float, pct: float) -> str:
     return "low"
 
 
+def _z_score(current_amount: float, amounts: list[float], mean: float) -> float:
+    """z of today against the baseline, with the stdev floored (see above)."""
+    stdev = statistics.stdev(amounts) if len(amounts) > 1 else 0.0
+    stdev = max(stdev, mean * _MIN_STDEV_FRACTION, _MIN_STDEV_USD)
+    return (current_amount - mean) / stdev
+
+
 def detect_for_series(
     provider: str,
     service: str,
@@ -91,8 +105,7 @@ def detect_for_series(
     if mean < _MIN_SPEND_THRESHOLD:
         return None
 
-    stdev = statistics.stdev(history_amounts) if len(history_amounts) > 1 else 0.0
-    z_score = (current_amount - mean) / stdev if stdev > 0 else 0.0
+    z_score = _z_score(current_amount, history_amounts, mean)
     pct_change = (current_amount - mean) / mean * 100
 
     if abs(z_score) < _Z_SCORE_THRESHOLD or abs(pct_change) < _PCT_THRESHOLD:
@@ -141,21 +154,20 @@ def get_tag_drivers(
         return []
 
     keys_to_check = tag_keys or _DEFAULT_TAG_KEYS
-    # Deduplicate while preserving order (handles "team"/"Team" variants)
-    seen: set[str] = set()
-    unique_keys: list[str] = []
-    for k in keys_to_check:
-        lk = k.lower()
-        if lk not in seen:
-            seen.add(lk)
-            unique_keys.append(k)
+    # Deduplicate exact repeats only, preserving order. Cost Explorer tag keys
+    # are case-sensitive, so "team" and "Team" are different tags and an org
+    # that tags with "Team" must still be queried for it.
+    unique_keys = list(dict.fromkeys(keys_to_check))
 
-    # Current window: 7 days ending on snapshot_date
+    # Both sides are per-day, like delta_usd (today minus the daily baseline
+    # mean). Current: the anomaly day itself. Baseline: a 7-day window four
+    # weeks prior, averaged to a day. Comparing a 7-day tag delta against a
+    # 1-day anomaly delta reported drivers at ~700% of the spike.
+    _BASE_DAYS  = 7
     end_dt      = snapshot_date + timedelta(days=1)   # CE end is exclusive
-    start_dt    = snapshot_date - timedelta(days=6)
-    # Baseline window: same weekday, 4 weeks prior
-    base_end_dt = start_dt - timedelta(days=21)
-    base_start_dt = base_end_dt - timedelta(days=7)
+    start_dt    = snapshot_date
+    base_end_dt = snapshot_date - timedelta(days=27)
+    base_start_dt = base_end_dt - timedelta(days=_BASE_DAYS)
 
     end_str       = end_dt.isoformat()
     start_str     = start_dt.isoformat()
@@ -200,7 +212,7 @@ def get_tag_drivers(
             baseline_map = _query(base_start_str, base_end_str)
 
             for tag_val, current_amt in current_map.items():
-                baseline_amt = baseline_map.get(tag_val, 0.0)
+                baseline_amt = baseline_map.get(tag_val, 0.0) / _BASE_DAYS
                 delta = current_amt - baseline_amt
                 if delta < 1.0:
                     continue
@@ -217,7 +229,7 @@ def get_tag_drivers(
             log.debug("Tag attribution failed for key %r: %s", tag_key, e)
             continue
 
-    # Sort by contribution and drop duplicates across tag key variants (team/Team)
+    # Sort by contribution
     drivers.sort(key=lambda d: d["delta_usd"], reverse=True)
     return drivers[:10]
 
@@ -230,8 +242,9 @@ def detect_from_snapshot(
     current_amount: float,
     lookback_days: int = 28,
     enrich_tags: bool = True,
+    region: str | None = None,
 ) -> AnomalyResult | None:
-    history   = get_history(provider, service, account_id, days=lookback_days)
+    history   = get_history(provider, service, account_id, days=lookback_days, region=region)
     today_iso = snapshot_date.isoformat()
     amounts   = [
         row["amount_usd"]
@@ -328,7 +341,15 @@ def persist_anomaly(result: AnomalyResult) -> tuple[int, bool]:
     )
 
 
-def snapshot_history_days(provider: str | None = None) -> int:
+def _snapshot_filter(query, provider: str | None, account_id: str | None):
+    if provider:
+        query = query.where(cost_snapshots.c.provider == provider)
+    if account_id:
+        query = query.where(cost_snapshots.c.account_id == account_id)
+    return query
+
+
+def snapshot_history_days(provider: str | None = None, account_id: str | None = None) -> int:
     """Count how many distinct days of cost snapshots we have on hand.
 
     This is the honest measure of whether we can detect anomalies at all. The
@@ -336,22 +357,42 @@ def snapshot_history_days(provider: str | None = None) -> int:
     cannot produce a real all-clear, only "not enough history yet".
     """
     engine = get_engine()
-    query = select(func.count(distinct(cost_snapshots.c.snapshot_date)))
-    if provider:
-        query = query.where(cost_snapshots.c.provider == provider)
+    query = _snapshot_filter(
+        select(func.count(distinct(cost_snapshots.c.snapshot_date))), provider, account_id)
     with engine.connect() as conn:
         return int(conn.execute(query).scalar() or 0)
 
 
-def has_enough_history(provider: str | None = None) -> bool:
-    """True once there are enough days of snapshots to trust a detection result."""
-    return snapshot_history_days(provider) >= _MIN_HISTORY_DAYS
+def latest_snapshot_date(provider: str | None = None, account_id: str | None = None) -> date | None:
+    """The newest snapshot day on hand, or None when there are none."""
+    engine = get_engine()
+    query = _snapshot_filter(
+        select(func.max(cost_snapshots.c.snapshot_date)), provider, account_id)
+    with engine.connect() as conn:
+        val = conn.execute(query).scalar()
+    return date.fromisoformat(val) if val else None
+
+
+def history_is_stale(provider: str | None = None, account_id: str | None = None) -> bool:
+    """True when the newest snapshot is too old for detection to have looked at
+    recent spend. A month of history that stopped two weeks ago still counts as
+    enough days, but nothing has been checked since it stopped."""
+    latest = latest_snapshot_date(provider, account_id)
+    return latest is None or latest < date.today() - timedelta(days=_MAX_STALE_DAYS)
+
+
+def has_enough_history(provider: str | None = None, account_id: str | None = None) -> bool:
+    """True once there are enough days of snapshots, recent enough, to trust a
+    detection result."""
+    return (snapshot_history_days(provider, account_id) >= _MIN_HISTORY_DAYS
+            and not history_is_stale(provider, account_id))
 
 
 def get_active_anomalies(
     provider: str | None = None,
     severity: str | None = None,
     limit: int = 50,
+    account_id: str | None = None,
 ) -> list[dict[str, Any]]:
     engine = get_engine()
     query = (
@@ -360,10 +401,15 @@ def get_active_anomalies(
         .order_by(anomalies.c.detected_at.desc())
         .limit(limit)
     )
+    # Every filter is part of the one SELECT, so it applies before the LIMIT.
+    # Filtering the returned rows afterwards made an account whose anomalies
+    # were older than the newest `limit` of everybody's read as clear.
     if provider:
         query = query.where(anomalies.c.provider == provider)
     if severity:
         query = query.where(anomalies.c.severity == severity)
+    if account_id:
+        query = query.where(anomalies.c.account_id == account_id)
     with engine.connect() as conn:
         return [dict(r._mapping) for r in conn.execute(query).fetchall()]
 

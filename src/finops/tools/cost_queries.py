@@ -46,11 +46,11 @@ async def get_cost_summary(
 
     # Multi-account: swap in an account-specific AWS connector when requested
     if account:
-        from ..accounts import get_account, get_default_account, get_boto3_session
+        from ..accounts import get_boto3_session, resolve_named_account
         from ..connectors.aws import AWSConnector as _AWSConnector
-        acct_cfg = get_account(account) or get_default_account()
-        if not acct_cfg:
-            return {"error": f"Account '{account}' not found. Run list_aws_accounts() to see configured accounts."}
+        acct_cfg, acct_err = resolve_named_account(account)
+        if acct_err:
+            return acct_err
         session = get_boto3_session(acct_cfg)
         acct_connector = _AWSConnector(session=session)
         pool = {"aws": acct_connector}
@@ -109,6 +109,8 @@ async def get_cost_summary(
         "by_provider": by_provider,
         "grand_by_service": {k: round(v, 4) for k, v in _ranked_services[:50]},
     }
+    if account:
+        result["account"] = acct_cfg.name
     # This is the front door of the funnel, so it carries the map to the next
     # room. nable advertises only entry points; the drill-down tools are callable
     # but unlisted, and naming the ones that fit THIS answer is what keeps them
@@ -201,11 +203,11 @@ async def get_costs_by_service(
         ed = _srv.date.fromisoformat(end_date)
 
     if account:
-        from ..accounts import get_account, get_default_account, get_boto3_session
+        from ..accounts import get_boto3_session, resolve_named_account
         from ..connectors.aws import AWSConnector as _AWSConnector
-        acct_cfg = get_account(account) or get_default_account()
-        if not acct_cfg:
-            return {"error": f"Account '{account}' not found. Run list_aws_accounts() to see configured accounts."}
+        acct_cfg, acct_err = resolve_named_account(account)
+        if acct_err:
+            return acct_err
         session = get_boto3_session(acct_cfg)
         acct_connector = _AWSConnector(session=session)
         targets = {"aws": acct_connector} if await acct_connector.is_configured() else {}
@@ -262,6 +264,8 @@ async def get_costs_by_service(
         "services": kept,
         "total_usd": total_usd,
     }
+    if account:
+        result["account"] = acct_cfg.name
     if omitted:
         result["services_truncated"] = True
         result["hint"] = f"Showing top {len(kept)} of {len(ranked)} services by cost to stay within token budget. total_usd reflects all services."

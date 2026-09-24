@@ -38,36 +38,56 @@ async def get_anomalies(
     if is_demo():
         return get_demo_response("get_anomalies") or {}
 
-    from ..anomaly.detector import get_active_anomalies, has_enough_history
+    from ..anomaly.detector import (
+        get_active_anomalies, has_enough_history, history_is_stale, latest_snapshot_date,
+    )
 
-    # Resolve account_id filter when a named account is requested
+    # Resolve account_id filter when a named account is requested. A name that
+    # does not exist, or an account with no account_id to filter on, is an
+    # error: answering with the default account, or with every account, would
+    # label somebody else's anomalies (or their absence) as this account's.
     account_id_filter: str | None = None
     if account:
-        from ..accounts import get_account, get_default_account
-        acct_cfg = get_account(account) or get_default_account()
-        if acct_cfg and acct_cfg.account_id:
-            account_id_filter = acct_cfg.account_id
+        from ..accounts import resolve_named_account
+        acct_cfg, acct_err = resolve_named_account(account)
+        if acct_err:
+            return acct_err
+        if not acct_cfg.account_id:
+            return {"error": (f"Account '{account}' has no account_id in accounts.yaml, "
+                              "so its anomalies cannot be told apart from other "
+                              "accounts'. Add its account_id and ask again.")}
+        account_id_filter = acct_cfg.account_id
 
-    rows = get_active_anomalies(provider=provider, severity=severity, limit=limit)
-    if account_id_filter and rows:
-        rows = [r for r in rows if r.get("account_id") == account_id_filter]
+    rows = get_active_anomalies(provider=provider, severity=severity, limit=limit,
+                                account_id=account_id_filter)
     if not rows:
-        # An empty result means one of two very different things. With enough
-        # days of snapshots behind us it is a real all-clear. On a fresh account
-        # it just means we cannot judge yet, and saying "all clear" there is a
-        # false reassurance. Check the actual history before we pick the message.
-        if has_enough_history(provider):
+        # An empty result means one of three very different things. With enough
+        # recent days of snapshots behind us it is a real all-clear. On a fresh
+        # account it just means we cannot judge yet, and with history that
+        # stopped days ago nothing recent has been checked. Saying "all clear"
+        # in either of those is a false reassurance, so check the history first.
+        last = latest_snapshot_date(provider, account_id_filter)
+        if has_enough_history(provider, account_id_filter):
             message = "No active anomalies."
+        elif last is not None and history_is_stale(provider, account_id_filter):
+            message = (
+                f"Cost history is stale: the newest snapshot is from {last.isoformat()}, "
+                "so recent spend has not been checked for anomalies. Take a cost "
+                "snapshot (or check the daily job) and ask again."
+            )
         else:
             message = (
                 "Not enough history yet to detect anomalies. Anomaly detection "
                 "needs about 7 days of daily snapshots to build a baseline. Run "
                 "daily snapshots or wait for the daily job to accumulate data."
             )
-        return {
+        empty: dict = {
             "anomalies": [],
             "message": message,
         }
+        if account:
+            empty["account"] = account
+        return empty
 
     formatted = []
     for r in rows:
@@ -107,6 +127,8 @@ async def get_anomalies(
         "anomalies": formatted,
         "tip": "Use acknowledge_anomaly(id) to dismiss resolved anomalies. Use set_alert_policy() to mute noisy services.",
     }
+    if account:
+        result["account"] = account
     if drop_count:
         result["drops_note"] = (
             "Drops are usually good news (a fix landed or a resource was removed). "

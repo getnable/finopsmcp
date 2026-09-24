@@ -113,7 +113,7 @@ async def run_attribution_now(
 
     from ..attribution.fetcher import fetch_aws_tagged_costs
     from ..attribution.mapper import _load_rules
-    from ..storage.snapshots import store_attributed_cost
+    from ..storage.snapshots import store_attributed_costs
 
     sd, ed = _srv._default_dates()
     if start_date:
@@ -122,7 +122,15 @@ async def run_attribution_now(
         ed = _srv.date.fromisoformat(end_date)
 
     cfg = _load_rules()
-    tag_keys = list({r.get("tag_key", "") for r in cfg.get("rules", []) if r.get("tag_key")})
+    # One tag key, not all of them. Cost Explorer allows SERVICE plus one tag
+    # per request, and each key's rows cover the whole bill, so storing rows
+    # for two keys would count every dollar twice in the team totals. Use the
+    # highest-priority key that decides the team, the dimension these rows
+    # are summed by.
+    _ranked = sorted((r for r in cfg.get("rules", []) if r.get("tag_key")),
+                     key=lambda r: r.get("priority", 100))
+    _team_rules = [r for r in _ranked if r.get("maps_to_field") == "team"] or _ranked
+    tag_keys = [_team_rules[0]["tag_key"]] if _team_rules else []
 
     total_stored = 0
     errors: dict[str, str] = {}
@@ -131,24 +139,28 @@ async def run_attribution_now(
         try:
             role_arns = [a.strip() for a in _srv.os.environ.get("AWS_ROLE_ARNS", "").split(",") if a.strip()]
             rows = fetch_aws_tagged_costs(sd, ed, tag_keys, role_arns or None)
-            for row in rows:
-                attr = row["attribution"]
-                store_attributed_cost(
-                    provider="aws",
-                    service=row["service"],
-                    account_id=row["account_id"],
-                    team=attr.get("team", "unattributed"),
-                    environment=attr.get("environment", ""),
-                    snapshot_date=sd,
-                    amount_usd=row["amount_usd"],
-                )
-                total_stored += 1
+            # MONTHLY periods: each row is stored at the start of its own
+            # period. Storing them all at the start date let a later month
+            # overwrite an earlier one under the same key.
+            total_stored = store_attributed_costs([
+                {
+                    "provider": "aws",
+                    "service": row["service"],
+                    "account_id": row["account_id"],
+                    "team": row["attribution"].get("team", "unattributed"),
+                    "environment": row["attribution"].get("environment", ""),
+                    "snapshot_date": _srv.date.fromisoformat(row.get("period_start") or sd.isoformat()),
+                    "amount_usd": row["amount_usd"],
+                }
+                for row in rows
+            ])
         except Exception as e:
             errors["aws"] = str(e)
 
     return {
         "status": "complete",
         "records_stored": total_stored,
+        "attributed_by_tag_key": tag_keys[0] if tag_keys else None,
         "errors": errors,
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "tip": "If data is empty, check that ~/.finops/tag_rules.yaml is configured with your tag keys.",

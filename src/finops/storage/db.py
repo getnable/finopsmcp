@@ -851,6 +851,12 @@ def _run_sqlite_migrations(engine: Engine) -> None:
                     conn.commit()
                     log.info("Migration applied: %s.%s", table, column)
             except Exception as exc:
+                # Roll back before the next step. On PostgreSQL a failed
+                # statement aborts the transaction, and without this every
+                # later step on this shared connection raised
+                # InFailedSqlTransaction and was "skipped" too, so one bad
+                # ALTER quietly took every migration after it down with it.
+                conn.rollback()
                 log.warning("Migration skipped (%s.%s): %s", table, column, exc)
 
         # Legacy cleanup, not additive: old schemas defined budgets.block_at_pct as
@@ -888,6 +894,7 @@ def _run_sqlite_migrations(engine: Engine) -> None:
                 log.info("Migration: anomaly dedup index created (%s duplicate "
                          "row(s) removed)", dupes if dupes and dupes > 0 else 0)
         except Exception as exc:
+            conn.rollback()  # same reason as above
             log.warning("anomaly dedup index migration skipped: %s", exc)
 
         for _tbl, _col in (("budgets", "block_at_pct"),):
@@ -901,6 +908,7 @@ def _run_sqlite_migrations(engine: Engine) -> None:
                     conn.commit()
                     log.info("Migration: dropped legacy %s.%s", _tbl, _col)
             except Exception as exc:
+                conn.rollback()  # same reason as above
                 log.warning("legacy %s.%s drop skipped: %s", _tbl, _col, exc)
 
 
