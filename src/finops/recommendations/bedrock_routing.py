@@ -189,9 +189,42 @@ def _get_bedrock_ce_costs(ce, start: str, end: str) -> dict[str, dict[str, float
     return model_costs
 
 
-def _get_cw_metrics(cw, model_id: str, start_dt: datetime, end_dt: datetime, period_seconds: int) -> dict[str, float]:
+def _bedrock_model_dimensions(cw) -> dict[str, list[str]] | None:
+    """{canonical model: [ModelId values]} for every model AWS/Bedrock publishes
+    Invocations under. None when the listing fails.
+
+    CloudWatch keys Bedrock metrics by the Bedrock model id
+    ("anthropic.claude-sonnet-4-5-20250929-v1:0", or "us.anthropic..." through
+    a cross-region inference profile), never by the canonical id this module
+    prices with ("claude-sonnet-4-5"). Asked by the canonical id, every read
+    came back empty, invocations read as zero, and routing never fired on a
+    real account. One model can publish under several ids (on-demand plus a
+    profile per geography), so all of them are summed. list_metrics is a
+    standard request inside CloudWatch's free tier.
     """
-    Fetch CloudWatch metrics for a Bedrock model.
+    out: dict[str, list[str]] = {}
+    try:
+        pages = cw.get_paginator("list_metrics").paginate(
+            Namespace="AWS/Bedrock", MetricName="Invocations")
+        for page in pages:
+            for metric in page.get("Metrics", []):
+                for dim in metric.get("Dimensions", []):
+                    raw = dim.get("Value")
+                    if dim.get("Name") == "ModelId" and raw:
+                        ids = out.setdefault(canonical_model(raw), [])
+                        if raw not in ids:
+                            ids.append(raw)
+    except Exception as exc:
+        log.debug("CW list_metrics for AWS/Bedrock failed: %s", exc)
+        return None
+    return out
+
+
+def _get_cw_metrics(cw, model_id: str | list[str], start_dt: datetime, end_dt: datetime,
+                    period_seconds: int) -> dict[str, float]:
+    """
+    Fetch CloudWatch metrics for a Bedrock model, summed over every ModelId
+    dimension value it publishes under (see _bedrock_model_dimensions).
 
     Returns {invocation_count, input_tokens, output_tokens}.
     """
@@ -200,9 +233,7 @@ def _get_cw_metrics(cw, model_id: str, start_dt: datetime, end_dt: datetime, per
         "input_tokens": 0.0,
         "output_tokens": 0.0,
     }
-
-    # CloudWatch Bedrock metric dimension key
-    dimension = [{"Name": "ModelId", "Value": model_id}]
+    model_ids = [model_id] if isinstance(model_id, str) else list(model_id)
     namespace = "AWS/Bedrock"
 
     metric_map = {
@@ -212,20 +243,20 @@ def _get_cw_metrics(cw, model_id: str, start_dt: datetime, end_dt: datetime, per
     }
 
     for key, metric_name in metric_map.items():
-        try:
-            resp = cw.get_metric_statistics(
-                Namespace=namespace,
-                MetricName=metric_name,
-                Dimensions=dimension,
-                StartTime=start_dt,
-                EndTime=end_dt,
-                Period=period_seconds,
-                Statistics=["Sum"],
-            )
-            total = sum(dp.get("Sum", 0.0) for dp in resp.get("Datapoints", []))
-            metrics[key] = total
-        except Exception as exc:
-            log.debug("CW metric %s failed for model %s: %s", metric_name, model_id, exc)
+        for raw_id in model_ids:
+            try:
+                resp = cw.get_metric_statistics(
+                    Namespace=namespace,
+                    MetricName=metric_name,
+                    Dimensions=[{"Name": "ModelId", "Value": raw_id}],
+                    StartTime=start_dt,
+                    EndTime=end_dt,
+                    Period=period_seconds,
+                    Statistics=["Sum"],
+                )
+                metrics[key] += sum(dp.get("Sum", 0.0) for dp in resp.get("Datapoints", []))
+            except Exception as exc:
+                log.debug("CW metric %s failed for model %s: %s", metric_name, raw_id, exc)
 
     return metrics
 
@@ -267,11 +298,15 @@ def recommend_bedrock_model_routing(
     routing_opportunities: list[dict] = []
     total_monthly_savings = 0.0
 
+    published = _bedrock_model_dimensions(cw)
+
     for model_id, cost_data in model_ce_costs.items():
         monthly_cost = cost_data["total_cost"] * (30 / days)
 
-        # Get CloudWatch metrics for this model
-        cw_metrics = _get_cw_metrics(cw, model_id, start_dt, end_dt, period_seconds)
+        # CloudWatch metrics under every ModelId this model publishes as. If the
+        # listing failed, asking by the id itself is the only guess left.
+        ids = published.get(canonical_model(model_id), []) if published is not None else [model_id]
+        cw_metrics = _get_cw_metrics(cw, ids, start_dt, end_dt, period_seconds)
         invocation_count = cw_metrics["invocation_count"]
         input_tokens = cw_metrics["input_tokens"]
         output_tokens = cw_metrics["output_tokens"]

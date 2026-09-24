@@ -149,6 +149,27 @@ def _ce_side_effect(usage_type: str, amount: float, service: str = "Amazon Bedro
     return _se
 
 
+def _cw_publishing(*model_ids: str) -> MagicMock:
+    """A CloudWatch client that lists these ModelId dimension values under
+    AWS/Bedrock and answers get_metric_statistics only for them."""
+    cw = MagicMock()
+    cw.get_paginator.return_value.paginate.return_value = [{"Metrics": [
+        {"Namespace": "AWS/Bedrock", "MetricName": "Invocations",
+         "Dimensions": [{"Name": "ModelId", "Value": m}]} for m in model_ids]}]
+    return cw
+
+
+def _only_for(model_ids, answer):
+    """Wrap a metric side effect so it answers only when asked by a published id."""
+    def side(Namespace, MetricName, Dimensions, **kw):
+        assert Namespace == "AWS/Bedrock"
+        [dim] = Dimensions
+        if dim["Name"] != "ModelId" or dim["Value"] not in model_ids:
+            return {"Datapoints": []}
+        return answer(Namespace=Namespace, MetricName=MetricName, **kw)
+    return side
+
+
 def _make_cw_metric_response(value: float) -> dict:
     return {
         "Datapoints": [{"Sum": value}]
@@ -184,7 +205,8 @@ def test_recommend_flags_short_task_sonnet():
         )
         mock_ce_fn.return_value = ce
 
-        cw = MagicMock()
+        published = ("anthropic.claude-sonnet-4-5-20250929-v1:0",)
+        cw = _cw_publishing(*published)
         # Avg tokens: 200 input, 80 output = short task
         def _metric_side(Namespace, MetricName, **kw):
             if MetricName == "Invocations":
@@ -194,7 +216,7 @@ def test_recommend_flags_short_task_sonnet():
             if MetricName == "OutputTokenCount":
                 return _make_cw_metric_response(5000 * 80)   # avg 80 tokens
             return {"Datapoints": []}
-        cw.get_metric_statistics.side_effect = _metric_side
+        cw.get_metric_statistics.side_effect = _only_for(published, _metric_side)
         mock_cw_fn.return_value = cw
 
         result = recommend_bedrock_model_routing(days=30)
@@ -241,7 +263,8 @@ def test_recommend_skips_complex_reasoning_tasks():
         )
         mock_ce_fn.return_value = ce
 
-        cw = MagicMock()
+        published = ("anthropic.claude-sonnet-4-5-20250929-v1:0",)
+        cw = _cw_publishing(*published)
         # avg 3000 input tokens = complex reasoning, should NOT route
         def _metric_side(Namespace, MetricName, **kw):
             if MetricName == "Invocations":
@@ -251,7 +274,7 @@ def test_recommend_skips_complex_reasoning_tasks():
             if MetricName == "OutputTokenCount":
                 return _make_cw_metric_response(200 * 1500)
             return {"Datapoints": []}
-        cw.get_metric_statistics.side_effect = _metric_side
+        cw.get_metric_statistics.side_effect = _only_for(published, _metric_side)
         mock_cw_fn.return_value = cw
 
         result = recommend_bedrock_model_routing(days=30)
@@ -337,3 +360,42 @@ def test_routing_savings_are_positive_and_bounded():
         assert opp["monthly_savings"] >= 0.0
         assert opp["projected_monthly_cost"] >= 0.0
         assert opp["eligible_invocations_pct"] > 0
+
+
+# ── the ModelId CloudWatch actually publishes under ───────────────────────────
+
+def test_metrics_are_read_by_the_bedrock_model_id_across_profiles():
+    """CloudWatch keys AWS/Bedrock by the Bedrock model id, and a model used
+    through a cross-region inference profile publishes under that id too.
+    Reading by the canonical id returned nothing, so routing never fired."""
+    published = ("anthropic.claude-sonnet-4-5-20250929-v1:0",
+                 "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                 "anthropic.claude-haiku-4-5-20251001-v1:0")
+    with patch("finops.recommendations.bedrock_routing._make_ce") as mock_ce_fn, \
+         patch("finops.recommendations.bedrock_routing._make_cw") as mock_cw_fn:
+        ce = MagicMock()
+        ce.get_cost_and_usage.side_effect = _ce_side_effect(
+            "USE1-anthropic.claude-sonnet-4-5-20250929-v1:0:input-tokens", 300.0)
+        mock_ce_fn.return_value = ce
+        cw = _cw_publishing(*published)
+
+        def _metric_side(Namespace, MetricName, **kw):
+            per_id = {"Invocations": 2500.0, "InputTokenCount": 2500 * 200.0,
+                      "OutputTokenCount": 2500 * 80.0}
+            return _make_cw_metric_response(per_id[MetricName])
+        cw.get_metric_statistics.side_effect = _only_for(published[:2], _metric_side)
+        mock_cw_fn.return_value = cw
+
+        result = recommend_bedrock_model_routing(days=30)
+
+    asked = {c.kwargs["Dimensions"][0]["Value"] for c in cw.get_metric_statistics.call_args_list}
+    assert asked == set(published[:2])          # both Sonnet ids, not Haiku, not "claude-sonnet-4-5"
+    [sonnet] = [m for m in result["models_in_use"] if m["model_id"] == "claude-sonnet-4-5"]
+    assert sonnet["invocation_count"] == 5000   # summed over the on-demand and profile ids
+    assert result["routing_opportunities"]
+
+
+def test_a_failed_listing_falls_back_to_the_model_key():
+    cw = MagicMock()
+    cw.get_paginator.side_effect = RuntimeError("AccessDenied")
+    assert bedrock_routing._bedrock_model_dimensions(cw) is None
