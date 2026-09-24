@@ -69,3 +69,41 @@ def test_the_snapshot_check_does_not_call_sts_on_the_default_chain(monkeypatch):
     monkeypatch.setattr(boto3, "client", default_chain)
     waste.check_ebs_snapshots(_SnapshotEC2(), "us-east-1")
     assert reached == [], "check_ebs_snapshots reached the default boto3 chain"
+
+
+def test_multipart_waste_counts_every_page_of_parts():
+    """list_parts returns at most 1,000 parts a call. A stale 1,500 part upload
+    was priced on its first 1,000 parts only."""
+    import boto3
+    from botocore.stub import Stubber
+
+    s3 = boto3.client("s3", region_name="us-east-1", aws_access_key_id="x",
+                      aws_secret_access_key="x")
+    stale = datetime.now(timezone.utc) - timedelta(days=30)
+    gib = 1024 ** 3
+
+    def parts(first: int, n: int) -> list[dict]:
+        return [{"PartNumber": i, "Size": gib} for i in range(first, first + n)]
+
+    upload = {"Bucket": "b", "Key": "big.bin", "UploadId": "u1"}
+    with Stubber(s3) as stub:
+        stub.add_response("list_buckets", {"Buckets": [{"Name": "b"}]})
+        stub.add_response(
+            "list_multipart_uploads",
+            {"Bucket": "b", "IsTruncated": False,
+             "Uploads": [{"Key": "big.bin", "UploadId": "u1", "Initiated": stale}]},
+            {"Bucket": "b"})
+        stub.add_response(
+            "list_parts",
+            {**upload, "IsTruncated": True, "NextPartNumberMarker": 1000,
+             "Parts": parts(1, 1000)},
+            dict(upload))
+        stub.add_response(
+            "list_parts",
+            {**upload, "IsTruncated": False, "Parts": parts(1001, 500)},
+            {**upload, "PartNumberMarker": 1000})
+        findings = waste.check_s3_incomplete_multipart(s3, "us-east-1")
+        stub.assert_no_pending_responses()
+
+    assert len(findings) == 1
+    assert findings[0]["wasted_gb"] == pytest.approx(1500.0)

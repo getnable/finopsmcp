@@ -1560,13 +1560,18 @@ def check_s3_incomplete_multipart(
                     if initiated and initiated < cutoff:
                         upload_id = upload.get("UploadId", "")
                         try:
-                            parts_resp = s3_client.list_parts(
+                            # Paginated: list_parts returns at most 1,000 parts
+                            # per call and an upload can hold 10,000, so one call
+                            # undercounted exactly the large stale uploads this
+                            # check exists to price.
+                            parts_pages = s3_client.get_paginator("list_parts").paginate(
                                 Bucket=bucket_name,
                                 Key=upload.get("Key", ""),
                                 UploadId=upload_id,
                             )
-                            for part in parts_resp.get("Parts", []):
-                                total_size_bytes += part.get("Size", 0)
+                            for parts_page in parts_pages:
+                                for part in parts_page.get("Parts", []):
+                                    total_size_bytes += part.get("Size", 0)
                         except Exception:
                             pass
                         old_upload_count += 1
