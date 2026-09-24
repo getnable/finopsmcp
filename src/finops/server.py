@@ -213,7 +213,7 @@ RESPONSE FORMAT INSTRUCTION: {_persona_ctx}
 # serverInfo.version in the MCP handshake. Unset, the SDK reports its own
 # version, so every client listed this server as "nable 1.30.0" whatever
 # release was installed, which is no help to anyone asking "am I current?".
-from . import __version__ as _nable_version  # noqa: E402
+from . import __version__ as _nable_version
 
 mcp._mcp_server.version = _nable_version
 

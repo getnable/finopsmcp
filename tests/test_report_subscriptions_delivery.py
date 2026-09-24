@@ -20,7 +20,7 @@ from finops.tools import notifications as nt
 def _allowed(monkeypatch):
     monkeypatch.setattr(nt._srv, "require_pro", lambda *a, **k: None)
     monkeypatch.setattr(nt._srv, "require_role", lambda *a, **k: None)
-    import finops.notifications.reports as reports
+    from finops.notifications import reports
     monkeypatch.setattr(reports, "create_subscription", lambda **kw: {
         "id": 7, "name": kw["name"], "cron": "0 9 * * 1", "sections": kw["sections"]})
 
