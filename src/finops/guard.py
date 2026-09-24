@@ -433,7 +433,8 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         if hit is None:
             continue
         v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
-                         via=f"{tool_name} would {act.summary or act.command}")
+                         via=(f"{tool_name} would {act.summary}" if act.summary
+                              else f"{tool_name} amounts to `{act.command}`"))
         if v and _SEVERITY.get(v["decision"], 0) > _SEVERITY.get((worst or {}).get("decision"), 0):
             worst = v
     return {**worst, "harness": harness, "mcp_tool": tool_name} if worst else None

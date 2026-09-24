@@ -45,7 +45,8 @@ class McpAction:
     command  the shell form, fed to the same classifier and price table as a
              Bash command (so `aws ec2 run-instances ...` from call_aws is
              priced exactly as if typed)
-    summary  what a human is told the call does
+    summary  what the call does, as a verb phrase ("delete HCP Terraform
+             workspace net"); "" when the shell form says it best
     hit      a fixed (door, action_type) for calls with no faithful shell form;
              None means "classify `command` like any shell command"
     """
@@ -127,7 +128,7 @@ def _aws_cli(args: dict[str, Any]) -> list[McpAction]:
             for c in (v if isinstance(v, list) else [v]):
                 if isinstance(c, str) and c.lstrip().startswith("aws "):
                     found.append(c)
-    return [McpAction(c.strip(), c.strip()) for c in found]
+    return [McpAction(c.strip()) for c in found]
 
 
 def _use_aws(args: dict[str, Any]) -> list[McpAction]:
@@ -137,7 +138,7 @@ def _use_aws(args: dict[str, Any]) -> list[McpAction]:
     cmd = _join("aws", svc, _kebab(op), _cli_flags(args.get("parameters")))
     if _s(args, "region"):
         cmd += f" --region {_s(args, 'region')}"
-    return [McpAction(cmd, cmd)]
+    return [McpAction(cmd)]
 
 
 def _tfc_create_run(args: dict[str, Any]) -> list[McpAction]:
@@ -145,10 +146,10 @@ def _tfc_create_run(args: dict[str, Any]) -> list[McpAction]:
     run_type = _s(args, "run_type") or "plan_and_apply"   # the server's default
     where = f"HCP Terraform workspace {ws}"
     if run_type == "is_destroy":
-        return [McpAction("terraform destroy", f"a destroy run on {where}")]
+        return [McpAction("terraform destroy", f"start a destroy run on {where}")]
     if run_type in ("plan_only", "refresh_state"):
         return []
-    return [McpAction("terraform apply", f"a {run_type} run on {where}")]
+    return [McpAction("terraform apply", f"start a {run_type} run on {where}")]
 
 
 def _tfc_action_run(args: dict[str, Any]) -> list[McpAction]:
@@ -172,15 +173,14 @@ def _tf_execute(tool: str) -> Callable[[dict[str, Any]], list[McpAction]]:
         if verb not in ("apply", "destroy", "run-all apply"):
             return []
         cmd = f"{tool} {verb}"
-        return [McpAction(cmd, _join(cmd, f"in {where}" if where else ""))]
+        return [McpAction(cmd, _join(f"run `{cmd}`", f"in {where}" if where else ""))]
     return translate
 
 
 def _k8s_delete(kind_key: str, fixed_kind: str = "") -> Callable[[dict[str, Any]], list[McpAction]]:
     def translate(args: dict[str, Any]) -> list[McpAction]:
         kind = fixed_kind or _s(args, kind_key)
-        cmd = _join("kubectl delete", kind, _s(args, "name"), _ns(args))
-        return [McpAction(cmd, cmd)]
+        return [McpAction(_join("kubectl delete", kind, _s(args, "name"), _ns(args)))]
     return translate
 
 
@@ -190,8 +190,7 @@ def _k8s_scale(kind_key: str, replicas_key: str) -> Callable[[dict[str, Any]], l
         if not replicas:
             return []                  # containers' resources_scale reads when no scale is given
         target = f"{_s(args, kind_key)}/{_s(args, 'name')}".strip("/")
-        cmd = _join("kubectl scale", target, f"--replicas={replicas}", _ns(args))
-        return [McpAction(cmd, cmd)]
+        return [McpAction(_join("kubectl scale", target, f"--replicas={replicas}", _ns(args)))]
     return translate
 
 
@@ -208,7 +207,7 @@ def _k8s_mutate(verb: str) -> Callable[[dict[str, Any]], list[McpAction]]:
     still a reversible change, so they carry the two-way hit directly."""
     def translate(args: dict[str, Any]) -> list[McpAction]:
         cmd = _join("kubectl", verb, _s(args, "resourceType"), _s(args, "name"), _ns(args))
-        return [McpAction(cmd, cmd, TWO_WAY_APPLY)]
+        return [McpAction(cmd, hit=TWO_WAY_APPLY)]
     return translate
 
 
@@ -217,22 +216,20 @@ def _k8s_rollout(args: dict[str, Any]) -> list[McpAction]:
     if sub in ("status", "history"):
         return []
     cmd = _join("kubectl rollout", sub, f"{_s(args, 'resourceType')}/{_s(args, 'name')}", _ns(args))
-    return [McpAction(cmd, cmd, TWO_WAY_APPLY)]
+    return [McpAction(cmd, hit=TWO_WAY_APPLY)]
 
 
 def _k8s_generic(args: dict[str, Any]) -> list[McpAction]:
     extra = args.get("args")
     tail = " ".join(str(a) for a in extra) if isinstance(extra, list) else ""
-    cmd = _join("kubectl", _s(args, "command"), _s(args, "subCommand"),
-                _s(args, "resourceType"), _s(args, "name"), tail, _ns(args))
-    return [McpAction(cmd, cmd)]
+    return [McpAction(_join("kubectl", _s(args, "command"), _s(args, "subCommand"),
+                            _s(args, "resourceType"), _s(args, "name"), tail, _ns(args)))]
 
 
 def _helm(verb: str) -> Callable[[dict[str, Any]], list[McpAction]]:
     def translate(args: dict[str, Any]) -> list[McpAction]:
-        cmd = _join("helm", verb, _s(args, "name"),
-                    "" if verb == "uninstall" else _s(args, "chart"), _ns(args))
-        return [McpAction(cmd, cmd)]
+        return [McpAction(_join("helm", verb, _s(args, "name"),
+                                "" if verb == "uninstall" else _s(args, "chart"), _ns(args)))]
     return translate
 
 
@@ -266,9 +263,10 @@ def _ccapi(verb: str) -> Callable[[dict[str, Any]], list[McpAction]]:
         rtype = _s(args, "resource_type")
         if not rtype.startswith("AWS::"):
             return []                  # not Cloud Control's argument shape: not ours to judge
-        summary = _join(f"Cloud Control {verb}", rtype, _s(args, "identifier"))
+        target = _join(rtype, _s(args, "identifier"))
         hit = ONE_WAY_DELETE if verb == "delete" else TWO_WAY_APPLY
-        return [McpAction(summary, summary, hit)]
+        return [McpAction(f"cloudcontrol {verb} {target}",
+                          f"{verb} {target} through the Cloud Control API", hit)]
     return translate
 
 
@@ -315,7 +313,7 @@ MCP_RULES: tuple[McpRule, ...] = (
     # Kubernetes: Flux159's kubectl-shaped server.
     McpRule(("kubectl_delete",), _k8s_delete("resourceType"), _FLUX.format("kubectl-delete"),
             family="kubernetes"),
-    McpRule(("kubectl_apply",), _k8s_apply("kubectl apply"), _FLUX.format("kubectl-apply"),
+    McpRule(("kubectl_apply",), _k8s_apply(""), _FLUX.format("kubectl-apply"),
             family="kubernetes"),
     McpRule(("kubectl_scale",), _k8s_scale("resourceType", "replicas"),
             _FLUX.format("kubectl-scale"), ("name",), family="kubernetes"),

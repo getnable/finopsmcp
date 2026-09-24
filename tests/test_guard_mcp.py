@@ -187,8 +187,20 @@ def test_use_aws_parameters_become_priceable_flags():
 def test_the_reason_says_what_the_call_amounts_to():
     v = g.gate_mcp_call("mcp__terraform__create_run",
                         {"workspace_name": "net", "run_type": "is_destroy"})
-    assert "destroy run on HCP Terraform workspace net" in v["reason"]
+    assert "would start a destroy run on HCP Terraform workspace net" in v["reason"]
     assert "one-way door" in v["reason"]
+
+
+@pytest.mark.parametrize("tool,args,says", [
+    ("mcp__aws-api__call_aws", {"cli_command": "aws ec2 terminate-instances --instance-ids i-1"},
+     "mcp__aws-api__call_aws amounts to `aws ec2 terminate-instances --instance-ids i-1`"),
+    ("mcp__ccapi__delete_resource", {"resource_type": "AWS::RDS::DBInstance", "identifier": "db"},
+     "would delete AWS::RDS::DBInstance db through the Cloud Control API"),
+    ("mcp__tf__ExecuteTerraformCommand", {"command": "destroy", "working_directory": "/infra"},
+     "would run `terraform destroy` in /infra"),
+])
+def test_mcp_reasons_read_as_a_sentence(tool, args, says):
+    assert says in g.gate_mcp_call(tool, args)["reason"]
 
 
 # ── what must pass through untouched ──────────────────────────────────────────
