@@ -217,6 +217,9 @@ async def _detect_and_alert() -> list[dict]:
             account_id=r["account_id"],
             snapshot_date=date.fromisoformat(r["snapshot_date"]),
             current_amount=r["amount_usd"],
+            # Each row is one region's spend, so its baseline is that region's
+            # history, not every region of the service averaged together.
+            region=r["region"],
         )
         if anomaly is None:
             continue

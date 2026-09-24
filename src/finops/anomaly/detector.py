@@ -242,8 +242,9 @@ def detect_from_snapshot(
     current_amount: float,
     lookback_days: int = 28,
     enrich_tags: bool = True,
+    region: str | None = None,
 ) -> AnomalyResult | None:
-    history   = get_history(provider, service, account_id, days=lookback_days)
+    history   = get_history(provider, service, account_id, days=lookback_days, region=region)
     today_iso = snapshot_date.isoformat()
     amounts   = [
         row["amount_usd"]

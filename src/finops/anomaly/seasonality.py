@@ -57,6 +57,7 @@ def detect_with_seasonality(
     snapshot_date: date,
     current_amount: float,
     lookback_days: int = 56,  # 8 weeks — enough for 8 same-weekday samples
+    region: str | None = None,
 ) -> AnomalyResult | None:
     """
     Seasonality-aware detection. Lookback extended to 56 days (8 weeks) to
@@ -66,7 +67,7 @@ def detect_with_seasonality(
     # signal that a pipeline or a backup stopped, and a floor here hid it. The
     # small-spend floor lives on the baseline side, where a series that never
     # cost more than a few dollars is ignored.
-    history = get_history(provider, service, account_id, days=lookback_days)
+    history = get_history(provider, service, account_id, days=lookback_days, region=region)
     today_iso = snapshot_date.isoformat()
     weekday = snapshot_date.weekday()
 

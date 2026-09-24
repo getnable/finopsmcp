@@ -118,21 +118,30 @@ def get_history(
     service: str,
     account_id: str,
     days: int = 28,
+    region: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Daily rows for one series over the last `days` days, oldest first.
+
+    Pass `region` to get that region's series only. Snapshots are stored per
+    region, so without it a service billing in two regions returns both sets of
+    rows interleaved, and a baseline built from them is the average of two
+    unrelated series. None keeps the all-regions answer for callers that want it.
+    """
     from datetime import timedelta
     cutoff = (date.today() - timedelta(days=days)).isoformat()
+    conds = [
+        cost_snapshots.c.provider == provider,
+        cost_snapshots.c.service == service,
+        cost_snapshots.c.account_id == account_id,
+        cost_snapshots.c.snapshot_date >= cutoff,
+    ]
+    if region is not None:
+        conds.append(cost_snapshots.c.region == region)
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
             select(cost_snapshots)
-            .where(
-                and_(
-                    cost_snapshots.c.provider == provider,
-                    cost_snapshots.c.service == service,
-                    cost_snapshots.c.account_id == account_id,
-                    cost_snapshots.c.snapshot_date >= cutoff,
-                )
-            )
+            .where(and_(*conds))
             .order_by(cost_snapshots.c.snapshot_date)
         ).fetchall()
     return [dict(r._mapping) for r in rows]
