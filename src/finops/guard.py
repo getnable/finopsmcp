@@ -38,10 +38,16 @@ from .policy import GATE_ALLOW, GATE_BLOCK, GATE_ESCALATE, evaluate_action_gate
 _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bterraform\s+(?:\S+\s+)*destroy\b", "delete_resource"),
     (r"\btofu\s+(?:\S+\s+)*destroy\b", "delete_resource"),
+    # Terragrunt wraps terraform and fans out: `terragrunt run-all destroy` (or
+    # `run --all destroy`, or the older `destroy-all`) tears down every module
+    # under the directory in one command. It had no pattern at all, so the
+    # widest destroy in the toolchain was the one the guard could not see.
+    (r"\bterragrunt\s+(?:\S+\s+)*destroy\b", "delete_resource"),
     # destroy hidden behind the apply verb: `terraform apply -destroy` is destroy.
     # Must sit in the one-way list (checked first) or the two-way apply pattern
     # would classify it as a reversible mutation.
-    (r"\b(?:terraform|tofu)\s+(?:\S+\s+)*apply\b[^|;&]*\s-destroy\b", "delete_resource"),
+    (r"\b(?:terraform|tofu|terragrunt)\s+(?:\S+\s+)*apply\b[^|;&]*\s-destroy\b",
+     "delete_resource"),
     # The same flag passed through terraform's own env hook:
     # `TF_CLI_ARGS_apply=-destroy terraform apply` is a destroy the apply
     # pattern below would otherwise wave through as a reversible mutation.
@@ -70,6 +76,7 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\baws\s+ec2\s+stop-instances\b", "stop_idle"),
     (r"\bterraform\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\btofu\s+(?:\S+\s+)*apply\b", "infra_apply"),
+    (r"\bterragrunt\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\bhelm\s+(?:install|upgrade)\b", "infra_apply"),
     (r"\bkubectl\s+(?:apply|scale)\b", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),

@@ -35,6 +35,29 @@ def test_one_way_doors_are_caught(cmd):
 
 
 @pytest.mark.parametrize("cmd", [
+    "terragrunt destroy",
+    "terragrunt run-all destroy --terragrunt-non-interactive",
+    "terragrunt run --all destroy",
+    "terragrunt destroy-all",
+    "terragrunt apply -destroy",
+])
+def test_terragrunt_destroys_are_one_way(cmd):
+    """Terragrunt fans a destroy out over every module under the directory.
+    It had no pattern at all, so the widest destroy was the invisible one."""
+    assert guard.classify_command(cmd) == ("one_way", "delete_resource"), cmd
+
+
+@pytest.mark.parametrize("cmd,expected", [
+    ("terragrunt apply", ("two_way", "infra_apply")),
+    ("terragrunt run-all apply", ("two_way", "infra_apply")),
+    ("terragrunt plan", None),
+    ("terragrunt run-all plan", None),
+])
+def test_terragrunt_applies_are_two_way_and_plans_are_reads(cmd, expected):
+    assert guard.classify_command(cmd) == expected, cmd
+
+
+@pytest.mark.parametrize("cmd", [
     "terraform apply",                          # plain apply stays reversible
     "terraform apply && echo done -destroy",    # -destroy in a CHAINED command must not leak back
 ])
