@@ -455,7 +455,9 @@ def _instrumented_tool(*dargs, **dkwargs):
                     _first_cost_query_fired = True
                     from .demo_data import is_demo as _is_demo
                     if not _is_demo():
-                        _telemetry._send_event(
+                        # Background send: we are on the event loop here, and
+                        # _send_event is a blocking POST with a 5s timeout.
+                        _telemetry.send_event_background(
                             _telemetry._get_install_id(),
                             "first_cost_query_success",
                             {"tool": fn.__name__, "plan": _telemetry._session.get("plan", "free")},
@@ -507,7 +509,7 @@ def _instrumented_tool(*dargs, **dkwargs):
                     global _unconnected_hint_fired
                     if not _unconnected_hint_fired:
                         _unconnected_hint_fired = True
-                        _telemetry._send_event(
+                        _telemetry.send_event_background(
                             _telemetry._get_install_id(),
                             "unconnected_cost_tool",
                             {"tool": fn.__name__,
@@ -835,6 +837,9 @@ def _team_nudge(message: str, context: str = "") -> str | None:
         found = _savings_found_monthly()
         # Count the impression so the funnel is measurable: which nudge moment
         # converts is the whole question. Fire-and-forget, never blocks the answer.
+        # That promise used to be false: this was a direct _send_event, a
+        # synchronous POST with a 5s timeout, and async tools call _team_nudge
+        # on the event loop. It now goes out on a daemon thread.
         #
         # The payload carries NO figure derived from the user's bill. It used to
         # send savings_found_monthly and roi_multiple, which telemetry.py's own
@@ -844,7 +849,7 @@ def _team_nudge(message: str, context: str = "") -> str | None:
         # The context alone answers the question the event exists to answer.
         try:
             from . import telemetry as _tel
-            _tel._send_event(_tel._get_install_id(), "upgrade_nudge_shown", {
+            _tel.send_event_background(_tel._get_install_id(), "upgrade_nudge_shown", {
                 "context": context or "generic",
             })
         except Exception:

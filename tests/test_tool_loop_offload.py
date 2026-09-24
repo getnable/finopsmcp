@@ -167,6 +167,80 @@ async def test_a_sync_tool_can_still_refresh_the_client_tool_list(bare_wrapper, 
     await asyncio.wait_for(sent.wait(), timeout=2)
 
 
+# ── 1b. telemetry sent from the loop ─────────────────────────────────────────
+
+@pytest.fixture
+def slow_posthog(monkeypatch):
+    """Telemetry switched on, with PostHog answering after BLOCK_S. Returns the
+    list of event names that reached it."""
+    import httpx
+    from finops import telemetry
+
+    posted: list[str] = []
+
+    def post(url, json=None, **_k):
+        time.sleep(BLOCK_S)
+        posted.append((json or {}).get("event"))
+
+    monkeypatch.setattr(telemetry, "_is_opted_out", lambda: False)
+    monkeypatch.setattr(httpx, "post", post)
+    return posted
+
+
+async def _until(pred, timeout: float = 3.0) -> bool:
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if pred():
+            return True
+        await asyncio.sleep(0.02)
+    return pred()
+
+
+async def test_the_upgrade_nudge_does_not_wait_on_posthog(slow_posthog, monkeypatch):
+    """Async tools call _team_nudge on the event loop. Its impression event was a
+    direct _send_event: a blocking POST with a 5s timeout."""
+    monkeypatch.setattr(_srv, "get_status", lambda: type("S", (), {"mode": "free"})())
+    monkeypatch.setattr(_srv, "_savings_found_monthly", lambda: 0.0)
+
+    async with _Heartbeat() as hb:
+        tip = _srv._team_nudge("idle resources found", "aws_audit")
+
+    assert tip, "the nudge itself should still be returned to a free user"
+    assert hb.max_stall < MAX_STALL_S, (
+        f"_team_nudge held the event loop for {hb.max_stall:.2f}s sending telemetry"
+    )
+    assert await _until(lambda: "upgrade_nudge_shown" in slow_posthog), (
+        "the impression event must still be sent, just not from the loop"
+    )
+
+
+async def test_the_wrapper_sends_its_funnel_events_off_the_loop(
+    slow_posthog, bare_wrapper, monkeypatch,
+):
+    """first_cost_query_success and unconnected_cost_tool are sent by
+    _instrumented_tool itself, after the tool returns, on the loop."""
+    from finops import demo_data
+    monkeypatch.setattr(demo_data, "DEMO_MODE", False)
+    monkeypatch.setattr(demo_data, "_real_provider_connected", lambda: False)
+    monkeypatch.setattr(_srv, "_first_cost_query_fired", False)
+    monkeypatch.setattr(_srv, "_unconnected_hint_fired", False)
+    monkeypatch.setattr(_srv, "_maybe_editor_confirmation", lambda: None)
+    monkeypatch.setattr(_srv, "_maybe_team_tip", lambda name: None)
+
+    def get_cost_summary() -> dict:      # a _COST_QUERY_TOOLS name
+        return {"grand_total_usd": 1.0}
+
+    async with _Heartbeat() as hb:
+        out = await bare_wrapper()(get_cost_summary)()
+
+    assert out["grand_total_usd"] == 1.0
+    assert hb.max_stall < MAX_STALL_S, (
+        f"the dispatch wrapper held the event loop for {hb.max_stall:.2f}s sending telemetry"
+    )
+    assert await _until(lambda: {"first_cost_query_success", "unconnected_cost_tool"}
+                        <= set(slow_posthog))
+
+
 # ── 2. real tools, blocked at the cloud boundary ─────────────────────────────
 
 def _sleepy(ret):

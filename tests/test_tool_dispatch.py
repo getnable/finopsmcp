@@ -96,12 +96,16 @@ def test_bedrock_costs_captures_sku_named_services(monkeypatch):
 
 
 def _record_events(monkeypatch):
-    """Capture telemetry event names fired synchronously through the dispatch
-    wrapper. first_cost_query_success is sent inline (not threaded), so it lands
-    deterministically; threaded tool_called pings are irrelevant to these asserts."""
+    """Capture telemetry event names fired through the dispatch wrapper.
+
+    The wrapper hands events to send_event_background, which posts from a daemon
+    thread so the event loop never waits on PostHog. Recording at that call,
+    rather than at _send_event inside the thread, keeps these asserts
+    deterministic; tool_called pings take the same route and are irrelevant to
+    them."""
     seen = []
     monkeypatch.setattr(
-        server._telemetry, "_send_event",
+        server._telemetry, "send_event_background",
         lambda install_id, event, properties=None: seen.append(event),
     )
     return seen

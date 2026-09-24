@@ -198,7 +198,7 @@ COST_KEY_HINTS = ("savings", "cost", "spend", "usd", "amount", "dollar",
 # hint. Kept deliberately narrow: only the _count suffix, nothing else.
 COUNT_SUFFIX = "_count"
 
-TELEMETRY_SINKS = ("_send_event", "capture", "_capture")
+TELEMETRY_SINKS = ("_send_event", "send_event_background", "capture", "_capture")
 
 
 def _telemetry_payload_keys(tree: ast.Module) -> list[tuple[int, str]]:

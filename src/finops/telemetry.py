@@ -322,12 +322,26 @@ def record_tool_call(tool_name: str) -> None:
         "plan": _session.get("plan", "free"),
         "date": date.today().isoformat(),
     }
-    t = threading.Thread(
-        target=_send_event,
-        args=(install_id, "tool_called", props),
-        daemon=True,
-    )
-    t.start()
+    send_event_background(install_id, "tool_called", props)
+
+
+def in_background(fn, *args, **kwargs) -> None:
+    """Run a telemetry send on a daemon thread and return immediately.
+
+    _send_event is a synchronous httpx.post with a 5s timeout. Called from the
+    MCP server's event loop it held that loop for the whole round trip, and on a
+    network that drops PostHog traffic silently that is the full 5s per call,
+    during which the server answers nothing. Anything that sends from an async
+    context goes through here (or send_event_background) instead.
+    """
+    threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True).start()
+
+
+def send_event_background(install_id: str, event: str, properties: dict) -> None:
+    """_send_event, fire-and-forget. Same opt-out rules; no thread when off."""
+    if _is_opted_out():
+        return
+    in_background(_send_event, install_id, event, properties)
 
 
 def set_plan(plan: str) -> None:
