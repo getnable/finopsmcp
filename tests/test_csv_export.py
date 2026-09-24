@@ -229,3 +229,11 @@ def test_an_earlier_nable_report_can_be_refreshed(three_findings, tmp_path):
     asyncio.run(EXPORT(output_path=str(dest)))
     asyncio.run(EXPORT(output_path=str(dest)))
     assert _rows(dest)[0][0] == "nable Cost Report"
+
+
+def test_the_report_names_the_connected_account(three_findings, tmp_path, monkeypatch):
+    # It called aws._client("sts"), which does not exist, so this was always "unknown".
+    monkeypatch.setattr(_FakeAWS, "_account_id", lambda self: "123456789012", raising=False)
+    dest = tmp_path / "r.csv"
+    asyncio.run(EXPORT(output_path=str(dest)))
+    assert ["AWS account", "123456789012"] in _rows(dest)

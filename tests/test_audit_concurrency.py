@@ -530,10 +530,20 @@ async def test_export_cost_report_csv_runs_without_freezing_the_loop(monkeypatch
     _install_scanner_fakes(monkeypatch, SCANNER_BLOCK_S)
 
     dest = tmp_path / "nable-report.csv"
-    async with _Heartbeat() as hb:
-        out = await notifications.export_cost_report_csv(
-            output_path=str(dest), regions=["us-east-1"]
-        )
+    # Freeze what the rest of the suite left on the heap. A full collection over
+    # it takes 250-330ms late in a full run, and the heartbeat charged that pause
+    # to the export. The assertion is about the tool's code holding the loop,
+    # not about how much the test process had allocated before it.
+    import gc
+    gc.collect()
+    gc.freeze()
+    try:
+        async with _Heartbeat() as hb:
+            out = await notifications.export_cost_report_csv(
+                output_path=str(dest), regions=["us-east-1"]
+            )
+    finally:
+        gc.unfreeze()
 
     assert isinstance(out, str) and str(dest) in out, f"export did not write a CSV: {out!r}"
     assert dest.exists(), "export reported success without writing the file"

@@ -673,10 +673,12 @@ async def export_cost_report_csv(
     total_annual = total_monthly * 12
     scan_ts = _srv.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Try to get account ID for summary
+    # Account ID for the summary. This called aws._client("sts"), a method the
+    # connector does not have, so every report said "unknown". _account_id is
+    # the connector's own lookup (its session, not the default chain), and it is
+    # a network call, so it runs off the event loop.
     try:
-        sts = aws._client("sts")
-        account_id = sts.get_caller_identity()["Account"]
+        account_id = await _srv.asyncio.to_thread(aws._account_id)
     except Exception:
         account_id = "unknown"
 
@@ -795,9 +797,9 @@ async def push_to_n8n(
         account = ""
         if aws is not None:
             try:
-                import boto3
-                sts = boto3.client("sts")
-                account = sts.get_caller_identity().get("Account", "")
+                # The connector's identity, off the loop; a bare boto3 client
+                # here read the default chain, not the connected account.
+                account = await _srv.asyncio.to_thread(aws._account_id)
             except Exception:
                 pass
 
