@@ -12,7 +12,7 @@ trial        7 days of full Pro access from first install. Kicks in
              (OS keyring + file) so deleting one source can't reset it.
 
 pro          Full access. Unlocked by a signed license key.
-             Adds: ticket auto-creation, scheduled email digests,
+             Adds: ticket auto-creation, email digests on request,
              commitment purchase recommendations, multi-team org reports.
 
 Key format:  FINOPS-2-{b64_payload}-{b64_ed25519_sig}   (current)
@@ -693,7 +693,7 @@ def require_pro(feature: str) -> dict | None:
         ("remediation",                "🔧 The fix as a pull request: rightsizing and tag PRs you approve"),
         ("agent_learning",             "🧠 The Ledger: verified savings + a gate that learns what you approve"),
         ("ticket_creation",            "🎫 Auto-create Jira / Linear / GitHub Issues from anomalies & rightsizing"),
-        ("scheduled_email_digests",    "📧 Scheduled email reports — weekly, monthly, or custom cadence"),
+        ("scheduled_email_digests",    "📧 Email reports and digests, sent on request"),
         ("commitment_recommendations", "💰 RI / Savings Plan recommendations with exact $ ROI"),
         ("org_reports",                "🏢 Org-wide cost rollup across all accounts & OUs"),
         ("cur_athena_detail",          "🔍 Line-item CUR data — per-resource costs, RI waste, tag breakdown"),

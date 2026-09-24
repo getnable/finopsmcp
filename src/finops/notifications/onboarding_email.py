@@ -233,7 +233,7 @@ def trial_ending_html(days_left: int = 3) -> str:
         + _p("The Pro plan ($25/mo) adds:")
         + f'<ul style="font-size:15px;line-height:1.9;color:{_SLATE};margin:0 0 24px;padding-left:24px">'
         f'<li>Ticket auto-creation: Jira, Linear, GitHub Issues</li>'
-        f'<li>Scheduled email reports at any cadence</li>'
+        f'<li>Email and Slack reports, sent on request</li>'
         f'<li>Commitment purchase recommendations with ROI</li>'
         f'<li>Org-wide multi-account cost rollup</li>'
         f'</ul>'
@@ -297,5 +297,5 @@ def send_trial_ending(to_email: str, days_left: int = 3) -> bool:
         to_email=to_email,
         subject=f"nable trial ends in {days_left} day{'s' if days_left != 1 else ''} — free tier stays on forever",
         html=trial_ending_html(days_left),
-        text=f"Your trial ends in {days_left} days.\n\nAfter your trial, nable stays free — cost queries, anomaly detection, rightsizing, budgets, and all connectors.\n\nPro plan ($25/mo) adds: ticket auto-creation, scheduled email reports, commitment recommendations, org rollup.\n\nUpgrade: https://buy.stripe.com/5kQeVc4PL9Vk4piaZ42Nq0a\n\nAfter checkout, run: finops setup license <your-key>",
+        text=f"Your trial ends in {days_left} days.\n\nAfter your trial, nable stays free — cost queries, anomaly detection, rightsizing, budgets, and all connectors.\n\nPro plan ($25/mo) adds: ticket auto-creation, email reports on request, commitment recommendations, org rollup.\n\nUpgrade: https://buy.stripe.com/5kQeVc4PL9Vk4piaZ42Nq0a\n\nAfter checkout, run: finops setup license <your-key>",
     )

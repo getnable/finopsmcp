@@ -366,6 +366,6 @@ def render_capabilities(
                  "Everything is read-only and runs on your machine.")
     if plan in ("free",):
         lines.append("")
-        lines.append("*Pro plan adds ticket auto-creation, scheduled email digests, "
+        lines.append("*Pro plan adds ticket auto-creation, email digests on request, "
                      "commitment recommendations, and org rollups.*")
     return "\n".join(lines)

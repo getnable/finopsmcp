@@ -210,6 +210,12 @@ moment you know one:
 USER PERSONA: {_persona}
 RESPONSE FORMAT INSTRUCTION: {_persona_ctx}
 """)
+# serverInfo.version in the MCP handshake. Unset, the SDK reports its own
+# version, so every client listed this server as "nable 1.30.0" whatever
+# release was installed, which is no help to anyone asking "am I current?".
+from . import __version__ as _nable_version  # noqa: E402
+
+mcp._mcp_server.version = _nable_version
 
 # ── telemetry: auto-instrument every tool call ───────────────────────────────
 # Wraps FastMCP's tool() decorator so record_tool_call fires on every invocation
@@ -1446,7 +1452,7 @@ def main() -> None:
 
     _FREE = [
         "✓  Cost queries across AWS, Azure, GCP & 10+ SaaS connectors",
-        "✓  Anomaly detection with Slack / Teams alerts",
+        "✓  Anomaly detection, on request",
         "✓  Rightsizing recommendations",
         "✓  Budgets, forecasts & spend alerts",
         "✓  Kubernetes cost analysis",
@@ -1455,7 +1461,7 @@ def main() -> None:
     ]
     _TEAM = [
         "   🎫  Ticket auto-creation  (Jira · Linear · GitHub Issues)",
-        "   📧  Scheduled email reports at any cadence",
+        "   📧  Email and Slack reports, sent on request",
         "   💰  RI / Savings Plan recommendations with $ ROI",
         "   🏢  Org-wide multi-account rollup & OU breakdown",
         "   🔍  Line-item CUR data, per-resource & RI waste",

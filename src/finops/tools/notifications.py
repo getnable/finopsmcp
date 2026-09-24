@@ -415,6 +415,17 @@ def send_weekly_digest_now() -> dict:
         return {"error": str(e)}
 
 
+def _scheduler_installed() -> bool:
+    """True when a scheduler that runs report subscriptions is installed. The
+    cron lives in the hosted package and arrives as finops.scheduler.cron; an
+    open install has none."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("finops.scheduler.cron") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 @_srv.mcp.tool()
 def subscribe_to_report(
     name: str,
@@ -428,8 +439,13 @@ def subscribe_to_report(
     cron: str = "",
 ) -> dict:
     """
-    Create a scheduled report subscription. Reports are delivered automatically
-    to Slack channels and/or email addresses on the configured schedule.
+    Create a scheduled report subscription for Slack channels and/or email.
+
+    Only a host running the scheduler (nable Cloud) sends it on the schedule. An
+    open install runs nothing on a timer: the subscription is saved and sent
+    when asked with send_report_now. The response's `delivery` field says which
+    applies; never tell the user a report will arrive on its own when it says
+    "on_request".
 
     Args:
         name: Report name (e.g. "Platform Team Weekly")
@@ -487,12 +503,28 @@ def subscribe_to_report(
             lookback_days=lookback_days,
             cron=cron or None,
         )
-        result = {
-            "created": True,
-            "subscription": sub,
-            "message": f"Report '{name}' scheduled (cron: {sub['cron']}). Slack delivery is active.",
-            "note": "Reports check every 5 minutes, or trigger manually with send_report_now.",
-        }
+        if _scheduler_installed():
+            result = {
+                "created": True,
+                "subscription": sub,
+                "delivery": "scheduled",
+                "message": f"Report '{name}' scheduled (cron: {sub['cron']}).",
+                "note": "Reports check every 5 minutes, or trigger manually with send_report_now.",
+            }
+        else:
+            # The cron moved to the hosted layer in 0.8.211. Saying "delivery is
+            # active" here meant a weekly report that never arrived, with nothing
+            # anywhere telling the user why.
+            result = {
+                "created": True,
+                "subscription": sub,
+                "delivery": "on_request",
+                "message": (f"Report '{name}' saved (id {sub['id']}). This install runs "
+                            "nothing on a timer, so it will not send on its own."),
+                "note": (f"Send it any time with send_report_now(subscription_id={sub['id']}). "
+                         f"nable Cloud sends it on this schedule ({sub['cron']}): "
+                         "https://getnable.com"),
+            }
         if email_note:
             result["pro_required"] = email_note
         return result

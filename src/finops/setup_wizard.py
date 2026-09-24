@@ -3382,7 +3382,7 @@ def _run_license_setup(key: str = "") -> None:
     print()
     print("  Restart Claude Desktop to activate Team features:")
     print("    • Ticket auto-creation (Jira, Linear, GitHub Issues)")
-    print("    • Scheduled email reports")
+    print("    • Email reports and digests, sent on request")
     print("    • Commitment purchase recommendations")
     print("    • Org-wide multi-account rollup")
     print("    • Business metrics and unit economics")
