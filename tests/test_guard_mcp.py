@@ -27,6 +27,15 @@ import finops.guard as g
 import finops.guard_mcp as gm
 from finops.policy import door_of
 
+# Figures come from the price table, never typed in: the p4d rate is revised
+# when AWS cuts GPU prices, and a test that pins yesterday's rate fails for a
+# reason that has nothing to do with the guard.
+from finops.connectors.terraform_estimate import _EC2_HOURLY  # noqa: E402
+
+P4D_HOURLY = _EC2_HOURLY["p4d.24xlarge"]
+P4D_X8_MONTHLY = 8 * P4D_HOURLY * 730
+P4D_X8_TEXT = f"${P4D_X8_MONTHLY:,.0f}"
+
 
 @pytest.fixture(autouse=True)
 def _clean_policy_env(monkeypatch):
@@ -173,7 +182,7 @@ def test_an_mcp_launch_is_priced_like_the_typed_command():
     typed = g.gate_command(P4D_X8)
     via_mcp = g.gate_mcp_call("mcp__aws-api__call_aws", {"cli_command": P4D_X8})
     assert via_mcp["monthly_delta_usd"] == typed["monthly_delta_usd"]
-    assert "$191,377" in via_mcp["reason"]
+    assert P4D_X8_TEXT in via_mcp["reason"]
     assert via_mcp["estimate"]["basis"] == typed["estimate"]["basis"]
 
 
@@ -181,7 +190,7 @@ def test_use_aws_parameters_become_priceable_flags():
     v = g.gate_mcp_call("mcp__q__use_aws", {
         "service_name": "ec2", "operation_name": "run_instances",
         "parameters": {"instance-type": "p4d.24xlarge", "count": 8}})
-    assert v and "$191,377" in v["reason"]
+    assert v and P4D_X8_TEXT in v["reason"]
 
 
 def test_the_reason_says_what_the_call_amounts_to():

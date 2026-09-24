@@ -14,6 +14,15 @@ import pytest
 import finops.ai_budget as ai_budget
 import finops.guard as g
 
+# Figures come from the price table, never typed in: the p4d rate is revised
+# when AWS cuts GPU prices, and a test that pins yesterday's rate fails for a
+# reason that has nothing to do with the guard.
+from finops.connectors.terraform_estimate import _EC2_HOURLY  # noqa: E402
+
+P4D_HOURLY = _EC2_HOURLY["p4d.24xlarge"]
+P4D_X8_MONTHLY = 8 * P4D_HOURLY * 730
+P4D_X8_TEXT = f"${P4D_X8_MONTHLY:,.0f}"
+
 
 @pytest.fixture(autouse=True)
 def _clean_policy_env(monkeypatch):
@@ -33,10 +42,10 @@ def _clean_policy_env(monkeypatch):
 ])
 def test_a_launch_with_global_options_is_still_priced(cmd):
     """The classifier stripped global options and the pricer did not, so these
-    classified as a launch, found no price, and passed silently at ~$191k/mo."""
+    classified as a launch, found no price, and passed silently whatever it cost."""
     v = g.gate_command(cmd)
     assert v is not None and v["decision"] == "ask", f"{cmd!r} passed silently"
-    assert "$191,377" in v["reason"]
+    assert P4D_X8_TEXT in v["reason"]
 
 
 # ── RDS ───────────────────────────────────────────────────────────────────────
@@ -266,9 +275,9 @@ def fake_tf(tmp_path, monkeypatch):
 def test_a_saved_plan_is_priced_through_terraform_show(fake_tf):
     (fake_tf["work"] / "plan.out").write_bytes(b"binary plan")
     v = g.gate_command("terraform apply plan.out", cwd=str(fake_tf["work"]))
-    assert v and v["decision"] == "ask", "a ~$24k/mo plan must not apply silently"
-    assert v["monthly_delta_usd"] == pytest.approx(32.77 * 730)
-    assert "plan.out changes the bill by +$23,922/mo" in v["reason"]
+    assert v and v["decision"] == "ask", "a GPU training plan must not apply silently"
+    assert v["monthly_delta_usd"] == pytest.approx(P4D_HOURLY * 730, abs=0.01)
+    assert f"plan.out changes the bill by +${P4D_HOURLY * 730:,.0f}/mo" in v["reason"]
     assert "terraform show -json plan.out" in v["reason"], "the basis names its source"
     assert "1 resource in the plan not priced" in v["reason"]
     call = fake_tf["calls"].read_text().split()
@@ -325,7 +334,7 @@ def test_the_hook_passes_the_session_cwd(fake_tf):
         "tool_name": "Bash", "cwd": str(fake_tf["work"]),
         "tool_input": {"command": "terraform apply plan.out"}})), stdout=out)
     body = _json.loads(out.getvalue())["hookSpecificOutput"]
-    assert "$23,922/mo" in body["permissionDecisionReason"]
+    assert f"${P4D_HOURLY * 730:,.0f}/mo" in body["permissionDecisionReason"]
 
 
 def _change(address, rtype, actions, before=None, after=None):

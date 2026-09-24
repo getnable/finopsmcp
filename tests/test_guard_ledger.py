@@ -29,6 +29,15 @@ import finops.ai_budget as ai_budget
 import finops.guard as g
 import finops.guard_ledger as gl
 
+# Figures come from the price table, never typed in: the p4d rate is revised
+# when AWS cuts GPU prices, and a test that pins yesterday's rate fails for a
+# reason that has nothing to do with the guard.
+from finops.connectors.terraform_estimate import _EC2_HOURLY  # noqa: E402
+
+P4D_HOURLY = _EC2_HOURLY["p4d.24xlarge"]
+P4D_X8_MONTHLY = 8 * P4D_HOURLY * 730
+P4D_X8_TEXT = f"${P4D_X8_MONTHLY:,.0f}"
+
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
@@ -313,9 +322,9 @@ def test_the_summary_counts_and_sums(monkeypatch):
     assert s["by_decision"]["ask"] == 3 and s["by_decision"]["deny"] == 1
     assert s["by_decision"]["allow"] == 1
     assert s["usd_per_month_escalated_or_blocked"] == pytest.approx(
-        8 * 32.77 * 730 + 730, rel=1e-3)
+        P4D_X8_MONTHLY + 730, rel=1e-3)
     assert s["usd_per_month_allowed_with_a_figure"] == pytest.approx(0.0104 * 730, rel=1e-3)
-    assert s["largest"][0]["monthly_usd"] == pytest.approx(8 * 32.77 * 730, rel=1e-3)
+    assert s["largest"][0]["monthly_usd"] == pytest.approx(P4D_X8_MONTHLY, rel=1e-3)
 
 
 def test_old_records_fall_outside_the_window():
@@ -333,7 +342,7 @@ def test_report_cli_prints_escalations_and_dollars(monkeypatch):
     out = _cli("report", guard_days=30, guard_json=False)
     assert "asked a human        3" in out
     assert "blocked              1" in out
-    assert "$192,107/mo at stake" in out
+    assert f"${P4D_X8_MONTHLY + 730:,.0f}/mo at stake" in out
     assert "aws ec2 run-instances --instance-type p4d.24xlarge --count 8" in out, \
         "the largest escalation is named"
     assert "nable guard verify-log" in out
