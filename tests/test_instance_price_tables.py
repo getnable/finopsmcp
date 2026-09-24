@@ -1,16 +1,21 @@
 """EC2 and RDS on-demand prices have one source: finops.aws_prices.
 
-They used to live in about fourteen tables. Five hourly EC2 copies were
-identical, which is the dangerous state: nothing fails while they agree, and
-nothing fails when they stop. graviton_prices had already stopped (r7g about
+They used to live in about fourteen tables. Five hourly EC2 copies agreed on
+nearly every row, which is the dangerous state: nothing fails while they agree,
+and nothing fails when they stop. graviton_prices had already stopped (r7g about
 0.4% low), the two RDS copies disagreed on every Graviton class, and the two
 monthly tables had rows that were not 730x any hourly rate in the repo.
 
 These tests pin what each consumer computed before the tables were merged, so
 the merge is shown to change nothing except the rows it corrected on purpose,
-and those are asserted at their corrected value.
+and those are asserted at their corrected value. The last section fails if a
+new instance-keyed price dict appears outside aws_prices.
 """
 from __future__ import annotations
+
+import ast
+import re
+from pathlib import Path
 
 import pytest
 
@@ -355,3 +360,117 @@ def test_kubernetes_costs_and_vscode_mirror_use_the_shared_table():
     rds = vscode_extension_prices.price_resource_py(
         "aws_db_instance", {"instance_class": "db.r6g.large"})
     assert rds["monthly"] == 140.16
+
+
+# ── no new copies ────────────────────────────────────────────────────────────
+#
+# A dict literal with an EC2 or RDS instance type for a key and a number for a
+# value is a price table, whatever it is called. Every one of the fourteen
+# started as a reasonable local convenience, so the only durable rule is that
+# none may exist outside aws_prices unless it is listed here with the reason it
+# is not an on-demand EC2/RDS price.
+
+_SRC = Path(__file__).resolve().parents[1] / "src" / "finops"
+_INSTANCE_KEY = re.compile(
+    r"^(db\.)?[a-z][a-z0-9-]*\.(nano|micro|small|medium|large|\d*xlarge|metal)$")
+
+_ALLOWED = {
+    ("aws_prices.py", "EC2_HOURLY"): "the source of truth",
+    ("aws_prices.py", "RDS_HOURLY"): "the source of truth",
+    ("connectors/aws_services/documentdb.py", "_INSTANCE_HOURLY_USD"):
+        "DocumentDB, a different service whose db.r6g.* rates are not RDS's",
+    ("connectors/databricks.py", "_NODE_DBU_MAP"):
+        "Databricks DBUs per node-hour, not dollars",
+    ("connectors/terraform_estimate.py", "_REDSHIFT_HOURLY"):
+        "Redshift node types (dc2.large), not EC2, and priced in one place",
+    ("recommendations/spot_adoption.py", "SPOT_DISCOUNT"):
+        "fraction saved on Spot, not a price",
+    ("recommendations/spot_adoption.py", "SPOT_INTERRUPTION_FREQ"):
+        "Spot Advisor interruption rate, not a price",
+}
+
+
+def _is_number(node: ast.AST) -> bool:
+    if isinstance(node, ast.UnaryOp):
+        node = node.operand
+    return (isinstance(node, ast.Constant) and isinstance(node.value, (int, float))
+            and not isinstance(node.value, bool))
+
+
+def _instance_price_dicts(source: str) -> list[tuple[str, int]]:
+    """(assigned name or "<dict>", line) for each instance-keyed numeric dict."""
+    tree = ast.parse(source)
+    names: dict[int, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    names[id(node.value)] = t.id
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        if any(isinstance(k, ast.Constant) and isinstance(k.value, str)
+               and _INSTANCE_KEY.match(k.value) and _is_number(v)
+               for k, v in zip(node.keys, node.values)):
+            found.append((names.get(id(node), "<dict>"), node.lineno))
+    return found
+
+
+def _scan() -> dict[tuple[str, str], int]:
+    hits = {}
+    for path in sorted(_SRC.rglob("*.py")):
+        rel = path.relative_to(_SRC).as_posix()
+        for name, line in _instance_price_dicts(path.read_text(encoding="utf-8")):
+            hits[(rel, name)] = line
+    return hits
+
+
+def test_no_instance_price_dict_outside_aws_prices():
+    stray = {k: line for k, line in _scan().items() if k not in _ALLOWED}
+    assert not stray, (
+        "EC2/RDS prices belong in finops/aws_prices.py (EC2_HOURLY / RDS_HOURLY); "
+        "import them from there instead of adding a table. If this dict is not an "
+        f"on-demand price, add it to _ALLOWED with the reason. Found: {stray}")
+
+
+def test_the_allowlist_has_no_stale_entries():
+    # An entry for a table that has moved or been renamed would silently allow
+    # a new one under the old name.
+    found = _scan()
+    assert not [k for k in _ALLOWED if k not in found]
+
+
+def test_the_scan_catches_a_copy_in_any_shape():
+    src = (
+        "PRICES = {'m5.large': 0.096}\n"
+        "_MONTHLY: dict[str, float] = {'db.r6g.large': 140.16}\n"
+        "def f():\n"
+        "    return {'t3.micro': 7.59}.get('t3.micro')\n"
+        "SPECS = {'m5.large': (2, 8)}\n"           # vCPU/memory, not a price
+        "MAP = {'m5.large': 'm7g.large'}\n"        # a mapping, not a price
+    )
+    assert [n for n, _ in _instance_price_dicts(src)] == ["PRICES", "_MONTHLY", "<dict>"]
+
+
+# ── the VS Code extension's TypeScript copy ──────────────────────────────────
+
+_PRICES_TS = Path(__file__).resolve().parents[1] / "vscode-extension" / "src" / "prices.ts"
+
+
+def _ts_table(name: str) -> dict[str, float]:
+    text = _PRICES_TS.read_text(encoding="utf-8")
+    body = re.search(rf"const {name}: Record<string, number> = \{{(.*?)\n\}};", text, re.S)
+    assert body, f"{name} not found in {_PRICES_TS}"
+    return {k: float(v) for k, v in re.findall(r'"([^"]+)":\s*([0-9.]+)', body.group(1))}
+
+
+@pytest.mark.skipif(not _PRICES_TS.exists(), reason="VS Code extension source not present")
+@pytest.mark.parametrize("ts_name,table", [("EC2_HOURLY", EC2_HOURLY), ("RDS_HOURLY", RDS_HOURLY)])
+def test_vscode_extension_prices_match_aws_prices(ts_name, table):
+    # TypeScript cannot import the Python table, so it is the one copy that has
+    # to stay a copy. It may carry fewer types; every one it carries must agree.
+    ts = _ts_table(ts_name)
+    assert ts
+    assert {k: v for k, v in ts.items() if table.get(k) != v} == {}
