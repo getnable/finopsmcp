@@ -254,6 +254,13 @@ async def get_costs_by_service(
         key=lambda x: -x["total_usd"],
     )
 
+    # Same rule as get_cost_summary: an errored provider adds 0, so "every
+    # provider failed" used to come back as total_usd 0 with the reason under
+    # "errors", which reads as "spent nothing on this".
+    ok = [n for n in targets if n not in errors]
+    if errors and not ok:
+        return _no_cost_data(errors)
+
     total_usd = round(sum(s["total_usd"] for s in ranked), 4)
     kept, omitted = _srv.fit_to_budget(ranked)
     result: dict[str, _srv.Any] = {
@@ -267,6 +274,7 @@ async def get_costs_by_service(
         result["hint"] = f"Showing top {len(kept)} of {len(ranked)} services by cost to stay within token budget. total_usd reflects all services."
     if errors:
         result["errors"] = errors
+        result.update(_partial(ok, errors))
     return result
 
 
@@ -353,13 +361,24 @@ async def get_cost_trends(
 
     grand_total, by_provider, _ = await _srv._gather_costs(targets, start, end, granularity)
 
-    return {
+    # Mirrors get_cost_summary: errored providers contribute 0 to grand_total,
+    # and a trend of all zeros reads as "spend fell to nothing".
+    failed = {name: p.get("error") for name, p in by_provider.items()
+              if isinstance(p, dict) and p.get("error")}
+    ok = [name for name in by_provider if name not in failed]
+    if failed and not ok:
+        return _no_cost_data(failed)
+
+    result = {
         "period": {"start": start.isoformat(), "end": end.isoformat(), "granularity": granularity},
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
         "by_provider": by_provider,
         "note": "For full time-series granularity, configure BigQuery exports (GCP) or Cost and Usage Reports (AWS).",
     }
+    if failed:
+        result.update(_partial(ok, failed))
+    return result
 
 
 @_srv.mcp.tool()
@@ -424,6 +443,10 @@ async def get_cost_summary_all_accounts(
         except Exception as exc:
             errors[acct.name] = str(exc)
 
+    # Every account failing is not a $0 estate. Same refusal as get_cost_summary.
+    if errors and not results:
+        return _no_cost_data(errors, noun="account")
+
     results.sort(key=lambda x: -x["total_usd"])
     for r in results:
         r["pct_of_total"] = round(r["total_usd"] / grand_total * 100, 1) if grand_total else 0
@@ -437,6 +460,7 @@ async def get_cost_summary_all_accounts(
     }
     if errors:
         out["errors"] = errors
+        out.update(_partial([r["account"] for r in results], errors, noun="account"))
     return out
 
 
@@ -2171,3 +2195,32 @@ async def get_nable_roi(
     except Exception as exc:
         _srv.log.error("get_nable_roi failed: %s", exc)
         return {"error": str(exc)}
+
+
+# ── a total is only a total if something was read ─────────────────────────────
+# get_cost_summary's refusal and partial label, shared by the other cost tools
+# that sum across providers or accounts. A read that failed adds 0 to the sum,
+# so without these an all-failed run answers "$0.00" and a model tells the user
+# they spent nothing.
+
+def _no_cost_data(failed: dict, noun: str = "provider") -> dict:
+    first = next(iter(failed.values()))
+    return {
+        "error": "no_cost_data",
+        "message": str(first),
+        f"failed_{noun}s": failed,
+        "note": (f"No {noun} returned cost data, so nable has no total to "
+                 "report. This is not a finding of zero spend."),
+    }
+
+
+def _partial(ok, failed: dict, noun: str = "provider") -> dict:
+    return {
+        "partial": True,
+        f"failed_{noun}s": failed,
+        "partial_warning": (
+            f"This total covers {', '.join(sorted(ok))} only. "
+            f"{', '.join(sorted(failed))} could not be read, so real spend is "
+            f"higher than the figure above."
+        ),
+    }
