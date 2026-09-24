@@ -260,7 +260,8 @@ async def connect_gcp(billing_account_id: str = "") -> dict:
     bq_table = await _srv.asyncio.to_thread(_discover_bq_export, project)
     store_billing_accounts([billing_account_id], bq_table, [project] if project else None)
     auth = "ambient_env" if str(amb.get("source", "")).startswith("GOOGLE") else "ambient_adc"
-    _gcp_emit_connected([billing_account_id], bq_table, auth)
+    # A telemetry POST (5s timeout) when telemetry is on; off the loop.
+    await _srv.asyncio.to_thread(_gcp_emit_connected, [billing_account_id], bq_table, auth)
     from .. import demo_data as _dd
     _dd._real_provider_cache = None
     _srv._tool_surface_changed()

@@ -15,7 +15,7 @@ from ..server import mcp, log
 from ..license import require_pro
 
 @mcp.tool()
-async def mark_recommendation_acted_on(recommendation_id: int) -> dict:
+def mark_recommendation_acted_on(recommendation_id: int) -> dict:
     """
     Mark a savings recommendation as acted on (you've implemented the change).
     nable will then attempt to verify the change next time verify_savings() runs.
@@ -45,7 +45,7 @@ async def mark_recommendation_acted_on(recommendation_id: int) -> dict:
 
 
 @mcp.tool()
-async def dismiss_recommendation(recommendation_id: int, reason: str = "") -> dict:
+def dismiss_recommendation(recommendation_id: int, reason: str = "") -> dict:
     """
     Dismiss a recommendation you've decided not to act on (won't fix, accepted risk, etc.).
     Dismissed recommendations won't appear in open potential savings.
@@ -140,7 +140,7 @@ async def dismiss_recommendation(recommendation_id: int, reason: str = "") -> di
 
 
 @mcp.tool()
-async def suggest_cost_policies() -> dict:
+def suggest_cost_policies() -> dict:
     """
     Propose standing cost rules nable has inferred from what your team keeps rejecting.
 
@@ -177,7 +177,7 @@ async def suggest_cost_policies() -> dict:
 
 
 @mcp.tool()
-async def remember_cost_context(
+def remember_cost_context(
     scope: str,
     match_value: str,
     reason: str,
@@ -235,7 +235,7 @@ async def remember_cost_context(
 
 
 @mcp.tool()
-async def get_learned_cost_context() -> dict:
+def get_learned_cost_context() -> dict:
     """
     Show the operating model nable has learned about this environment: every
     standing exception a human has taught it, newest first, with the reason.
@@ -263,7 +263,7 @@ async def get_learned_cost_context() -> dict:
 
 
 @mcp.tool()
-async def forget_cost_context(annotation_id: int) -> dict:
+def forget_cost_context(annotation_id: int) -> dict:
     """
     Remove a learned exception so nable resumes flagging matching findings.
 
@@ -282,7 +282,7 @@ async def forget_cost_context(annotation_id: int) -> dict:
 
 
 @mcp.tool()
-async def verify_savings() -> dict:
+def verify_savings() -> dict:
     """
     Auto-verify acted-on recommendations by checking if changes were actually
     implemented in AWS (EC2 instance type changes, etc.).
@@ -334,7 +334,7 @@ async def verify_savings() -> dict:
 
 
 @mcp.tool()
-async def get_savings_ledger(
+def get_savings_ledger(
     days: int = 30,
     account_id: str | None = None,
 ) -> str:
@@ -428,7 +428,7 @@ async def get_savings_ledger(
 
 
 @mcp.tool()
-async def get_recommendation_quality() -> dict:
+def get_recommendation_quality() -> dict:
     """
     The recommendation-quality flywheel: per recommendation type, how often recs
     get acted on and how close the predicted savings were to the measured realized
@@ -452,7 +452,7 @@ async def get_recommendation_quality() -> dict:
 
 
 @mcp.tool()
-async def get_recommendation_learning() -> dict:
+def get_recommendation_learning() -> dict:
     """
     What nable has learned about how YOU use recommendations, and how it adapts.
 

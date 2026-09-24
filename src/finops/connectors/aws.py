@@ -114,6 +114,14 @@ class AWSConnector(BaseConnector):
         return "env:" + (",".join(sorted(self._role_arns)) if self._role_arns else "default")
 
     async def is_configured(self) -> bool:
+        # to_thread, as Azure and GCP already do. Resolving the credential
+        # chain is synchronous and, off EC2 with no static keys, ends in an IMDS
+        # probe (connect timeout plus retries) or an SSO token refresh. Inline,
+        # that ran on the event loop from _active(), the front door of nearly
+        # every cost tool, and held the whole server for its duration.
+        return await asyncio.to_thread(self._credentials_resolvable)
+
+    def _credentials_resolvable(self) -> bool:
         try:
             import boto3  # noqa: F401
 

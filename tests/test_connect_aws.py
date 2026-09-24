@@ -105,7 +105,7 @@ def test_cost_tool_injects_connect_hint_when_unconnected(monkeypatch):
     monkeypatch.setenv("FINOPS_DEMO", "1")
     monkeypatch.setattr(server, "_unconnected_hint_fired", False)
     with patch("finops.demo_data._real_provider_connected", return_value=False), \
-         patch("finops.server._telemetry._send_event") as ev:
+         patch("finops.server._telemetry.send_event_background") as ev:
         out = _run(server.get_cost_summary())
     assert "connect_aws" in out["_connect_hint"]["actions"]
     assert out["_connect_hint"]["sample_data"] is True

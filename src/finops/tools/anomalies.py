@@ -10,7 +10,7 @@ from .. import server as _srv
 
 
 @_srv.mcp.tool()
-async def get_anomalies(
+def get_anomalies(
     provider: str | None = None,
     severity: str | None = None,
     limit: int = 20,
@@ -163,7 +163,7 @@ async def get_anomalies(
 
 
 @_srv.mcp.tool()
-async def acknowledge_anomaly(anomaly_id: int) -> dict:
+def acknowledge_anomaly(anomaly_id: int) -> dict:
     """
     Mark an anomaly as acknowledged (dismissed). It will no longer appear in active anomalies.
 
@@ -183,7 +183,7 @@ async def acknowledge_anomaly(anomaly_id: int) -> dict:
 
 
 @_srv.mcp.tool()
-async def get_account_anomalies(days_back: int = 30) -> dict:
+def get_account_anomalies(days_back: int = 30) -> dict:
     """
     Detect accounts with unusual spend changes versus their prior period.
     Returns accounts that significantly spiked or dropped in cost.

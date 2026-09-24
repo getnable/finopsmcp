@@ -365,7 +365,7 @@ async def audit_public_ipv4_addresses(
 
 
 @_srv.mcp.tool()
-async def get_instance_deep_analysis(
+def get_instance_deep_analysis(
     instance_id: str,
     region: str = "us-east-1",
     lookback_days: int = 14,
@@ -397,7 +397,7 @@ async def get_instance_deep_analysis(
 
 
 @_srv.mcp.tool()
-async def scan_cloudwatch_waste(
+def scan_cloudwatch_waste(
     regions: list[str] | None = None,
 ) -> dict:
     """
@@ -732,7 +732,7 @@ async def get_idle_load_balancers(
 
 
 @_srv.mcp.tool()
-async def get_s3_incomplete_multipart_uploads(
+def get_s3_incomplete_multipart_uploads(
     older_than_days: int = 7,
 ) -> dict:
     """
@@ -776,7 +776,7 @@ async def get_s3_incomplete_multipart_uploads(
 
 
 @_srv.mcp.tool()
-async def get_ecr_cleanup_recommendations(
+def get_ecr_cleanup_recommendations(
     older_than_days: int = 90,
     regions: list[str] | None = None,
 ) -> dict:
@@ -869,25 +869,33 @@ async def get_ecs_rightsizing_recommendations(
         import boto3
         from ..analyzers.waste import check_ecs_task_rightsizing
 
-        if regions is None:
-            try:
-                ec2g = boto3.client("ec2", region_name="us-east-1")
-                resp = ec2g.describe_regions(
-                    Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
-                )
-                regions = [r["RegionName"] for r in resp.get("Regions", [])]
-            except Exception:
-                regions = ["us-east-1", "us-west-2", "eu-west-1"]
+        # The region discovery and the per-region ECS + CloudWatch sweep are all
+        # synchronous boto3 calls. This tool is async (it awaits the pricing
+        # step below), so run inline they held the event loop for the whole
+        # multi-region scan. One worker thread keeps the sequential sweep as it
+        # was, just off the loop.
+        def _scan(regions):
+            if regions is None:
+                try:
+                    ec2g = boto3.client("ec2", region_name="us-east-1")
+                    resp = ec2g.describe_regions(
+                        Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}]
+                    )
+                    regions = [r["RegionName"] for r in resp.get("Regions", [])]
+                except Exception:
+                    regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
-        all_findings: list[dict] = []
-        for region in regions:
-            try:
-                ecs = boto3.client("ecs", region_name=region)
-                cw = boto3.client("cloudwatch", region_name=region)
-                findings = check_ecs_task_rightsizing(ecs, cw, region, cpu_threshold_pct=cpu_threshold)
-                all_findings.extend(findings)
-            except Exception as exc:
-                _srv.log.warning("ECS rightsizing scan failed for region %s: %s", region, exc)
+            found: list[dict] = []
+            for region in regions:
+                try:
+                    ecs = boto3.client("ecs", region_name=region)
+                    cw = boto3.client("cloudwatch", region_name=region)
+                    found.extend(check_ecs_task_rightsizing(ecs, cw, region, cpu_threshold_pct=cpu_threshold))
+                except Exception as exc:
+                    _srv.log.warning("ECS rightsizing scan failed for region %s: %s", region, exc)
+            return regions, found
+
+        regions, all_findings = await _srv.asyncio.to_thread(_scan, regions)
 
         all_findings.sort(key=lambda x: x.get("estimated_monthly_savings", 0), reverse=True)
         total_savings = sum(f.get("estimated_monthly_savings", 0) for f in all_findings)
@@ -983,7 +991,7 @@ async def list_idle_resources(
 
 
 @_srv.mcp.tool()
-async def cleanup_idle_resources(
+def cleanup_idle_resources(
     resource_ids: list[str] | None = None,
     resource_types: list[str] | None = None,
     regions: list[str] | None = None,
@@ -1023,7 +1031,7 @@ async def cleanup_idle_resources(
 
 
 @_srv.mcp.tool()
-async def open_rightsizing_pr(
+def open_rightsizing_pr(
     tf_dir: str,
     github_repo: str | None = None,
     recommendation_ids: list[int] | None = None,
@@ -1181,7 +1189,7 @@ async def scan_waste_patterns(
 
 
 @_srv.mcp.tool()
-async def get_documentdb_costs(days: int = 30, account: str = "") -> str:
+def get_documentdb_costs(days: int = 30, account: str = "") -> str:
     """
     Analyze Amazon DocumentDB costs by cluster, with rightsizing recommendations.
 
@@ -1205,7 +1213,7 @@ async def get_documentdb_costs(days: int = 30, account: str = "") -> str:
 
 
 @_srv.mcp.tool()
-async def get_kendra_costs(account: str = "") -> str:
+def get_kendra_costs(account: str = "") -> str:
     """
     Analyze Amazon Kendra costs by index, with edition and usage flags.
 
@@ -1229,7 +1237,7 @@ async def get_kendra_costs(account: str = "") -> str:
 
 
 @_srv.mcp.tool()
-async def get_textract_costs(days: int = 30, account: str = "") -> str:
+def get_textract_costs(days: int = 30, account: str = "") -> str:
     """
     Analyze AWS Textract costs by API type (sync vs async).
 
@@ -1253,7 +1261,7 @@ async def get_textract_costs(days: int = 30, account: str = "") -> str:
 
 
 @_srv.mcp.tool()
-async def audit_textract_environment_waste(days: int = 30) -> dict:
+def audit_textract_environment_waste(days: int = 30) -> dict:
     """
     Analyzes Textract spend by environment to find non-production API calls.
     Textract charges per page, QA and staging environments often call it
@@ -1811,7 +1819,7 @@ async def audit_s3_intelligent_tiering(
 
 
 @_srv.mcp.tool()
-async def audit_spot_diversification(
+def audit_spot_diversification(
     regions: list[str] | None = None,
 ) -> str:
     """

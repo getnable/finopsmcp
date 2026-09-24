@@ -141,6 +141,12 @@ class _SurfacedFastMCP(FastMCP):
         return await super().call_tool(name, arguments, **kwargs)
 
 
+# The event loop that dispatches tool calls, recorded by _instrumented_tool before
+# it hands a sync tool to a worker thread, so code on that thread can schedule
+# work back onto the loop (see _tool_surface_changed).
+_TOOL_LOOP: asyncio.AbstractEventLoop | None = None
+
+
 def _tool_surface_changed() -> None:
     """After a successful in-chat connect: re-detect families and nudge the client
     to refresh its tool list. Best-effort on both counts; hidden tools are callable
@@ -153,7 +159,16 @@ def _tool_surface_changed() -> None:
     try:
         import asyncio as _aio
         session = mcp.get_context().session
-        _aio.get_running_loop().create_task(session.send_tool_list_changed())
+        try:
+            _aio.get_running_loop().create_task(session.send_tool_list_changed())
+        except RuntimeError:
+            # No loop in this thread: the caller is a sync tool, which
+            # _instrumented_tool runs on a worker thread. Hand the send back to
+            # the loop that dispatched it; get_running_loop() here used to raise
+            # into the bare except below and the refresh was silently dropped.
+            loop = _TOOL_LOOP
+            if loop is not None and loop.is_running():
+                _aio.run_coroutine_threadsafe(session.send_tool_list_changed(), loop)
     except Exception:
         pass
 
@@ -317,6 +332,7 @@ def _instrumented_tool(*dargs, **dkwargs):
 
     def _wrap(fn):
         import functools
+        import inspect
         # There used to be an early `return fn` here for _EXTRA_TOOLS, which
         # skipped mcp.tool() entirely so those 26 were never registered at all.
         #
@@ -344,6 +360,8 @@ def _instrumented_tool(*dargs, **dkwargs):
         # _EXTRA_TOOLS itself stays: it is still the tier-driven list of what to
         # keep out of tools/list, now enforced in the ONE place that decides
         # what is advertised rather than in two places that disagree.
+        _is_coroutine_tool = inspect.iscoroutinefunction(fn)
+
         @functools.wraps(fn)
         async def _inner(*args, **kwargs):
             import time as _time
@@ -383,11 +401,25 @@ def _instrumented_tool(*dargs, **dkwargs):
                 log.debug("demo guard skipped for %s: %s", fn.__name__, _exc)
 
             try:
-                # Tools may be sync or async. Only await coroutines/awaitables,
-                # otherwise sync tools (whoami, *_api_key) raise
-                # "object dict can't be used in 'await' expression".
-                _ret = fn(*args, **kwargs)
-                result = await _ret if _inspect.isawaitable(_ret) else _ret
+                # Tools may be sync or async. A sync tool runs on a worker
+                # thread, never inline. FastMCP awaits this wrapper on the one
+                # event-loop thread, so a plain `def` tool that calls boto3 or
+                # httpx used to hold that thread for the whole round trip: no
+                # other request, no cancellation, no ping, and no
+                # asyncio.wait_for deadline elsewhere could fire until it
+                # returned. Offloading here protects every sync tool, including
+                # ones added later, without each having to remember to.
+                #
+                # Only await coroutines/awaitables, otherwise sync tools
+                # (whoami, *_api_key) raise "object dict can't be used in
+                # 'await' expression".
+                if _is_coroutine_tool:
+                    result = await fn(*args, **kwargs)
+                else:
+                    global _TOOL_LOOP
+                    _TOOL_LOOP = asyncio.get_running_loop()
+                    _ret = await asyncio.to_thread(fn, *args, **kwargs)
+                    result = await _ret if _inspect.isawaitable(_ret) else _ret
             except Exception as exc:
                 _duration = int((_time.monotonic() - _t0) * 1000)
                 _audit.log_tool_call(
@@ -423,7 +455,9 @@ def _instrumented_tool(*dargs, **dkwargs):
                     _first_cost_query_fired = True
                     from .demo_data import is_demo as _is_demo
                     if not _is_demo():
-                        _telemetry._send_event(
+                        # Background send: we are on the event loop here, and
+                        # _send_event is a blocking POST with a 5s timeout.
+                        _telemetry.send_event_background(
                             _telemetry._get_install_id(),
                             "first_cost_query_success",
                             {"tool": fn.__name__, "plan": _telemetry._session.get("plan", "free")},
@@ -475,7 +509,7 @@ def _instrumented_tool(*dargs, **dkwargs):
                     global _unconnected_hint_fired
                     if not _unconnected_hint_fired:
                         _unconnected_hint_fired = True
-                        _telemetry._send_event(
+                        _telemetry.send_event_background(
                             _telemetry._get_install_id(),
                             "unconnected_cost_tool",
                             {"tool": fn.__name__,
@@ -759,7 +793,8 @@ async def _resolve_account_id(account_id: str | None) -> str:
     aws = CLOUD_CONNECTORS.get("aws")
     try:
         if aws and await aws.is_configured():
-            return aws._account_id() or ""
+            # sts:GetCallerIdentity, synchronous; off the loop.
+            return await asyncio.to_thread(aws._account_id) or ""
     except Exception:
         pass
     return ""
@@ -803,6 +838,9 @@ def _team_nudge(message: str, context: str = "") -> str | None:
         found = _savings_found_monthly()
         # Count the impression so the funnel is measurable: which nudge moment
         # converts is the whole question. Fire-and-forget, never blocks the answer.
+        # That promise used to be false: this was a direct _send_event, a
+        # synchronous POST with a 5s timeout, and async tools call _team_nudge
+        # on the event loop. It now goes out on a daemon thread.
         #
         # The payload carries NO figure derived from the user's bill. It used to
         # send savings_found_monthly and roi_multiple, which telemetry.py's own
@@ -812,7 +850,7 @@ def _team_nudge(message: str, context: str = "") -> str | None:
         # The context alone answers the question the event exists to answer.
         try:
             from . import telemetry as _tel
-            _tel._send_event(_tel._get_install_id(), "upgrade_nudge_shown", {
+            _tel.send_event_background(_tel._get_install_id(), "upgrade_nudge_shown", {
                 "context": context or "generic",
             })
         except Exception:
@@ -989,9 +1027,13 @@ async def _credit_context(aws_connector, cache_key: str) -> dict | None:
     ctx = None
     try:
         from .connectors.credit_tracking import get_credit_status, credit_headsup
-        ce = aws_connector._make_client()
+        # Client construction inside the thread too: building a botocore client
+        # loads the service model and resolves credentials (an IMDS probe or an
+        # SSO refresh), and the 12s deadline cannot interrupt that on the loop.
         status = await asyncio.wait_for(
-            asyncio.to_thread(get_credit_status, 6, None, ce), timeout=12.0
+            asyncio.to_thread(
+                lambda: get_credit_status(6, None, aws_connector._make_client())),
+            timeout=12.0,
         )
         ctx = credit_headsup(status)
     except Exception:

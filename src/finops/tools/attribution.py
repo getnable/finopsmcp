@@ -10,7 +10,7 @@ from .. import server as _srv
 
 
 @_srv.mcp.tool()
-async def get_costs_by_team(
+def get_costs_by_team(
     start_date: str | None = None,
     end_date: str | None = None,
     provider: str | None = None,
@@ -94,7 +94,7 @@ def _attribution_diagnostic() -> str | None:
 
 
 @_srv.mcp.tool()
-async def run_attribution_now(
+def run_attribution_now(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> dict:
@@ -226,7 +226,9 @@ async def get_efficiency_scorecard(
             from ..connectors.kubernetes import KubernetesConnector
             conn = KubernetesConnector()
             if await conn.is_configured():
-                k8s_reports = conn.analyze_all_clusters()
+                # to_thread: one Kubernetes API sweep per context. Inline, it
+                # held the event loop for the whole walk of every cluster.
+                k8s_reports = await _srv.asyncio.to_thread(conn.analyze_all_clusters)
         except Exception:
             pass
 
@@ -254,7 +256,10 @@ async def get_efficiency_scorecard(
 
         try:
             from ..recommendations.commitments import analyze_commitments
-            raw_commits = analyze_commitments(tag_filter=tag_filter)
+            # Cost Explorer coverage and utilization reads; off the loop.
+            raw_commits = await _srv.asyncio.to_thread(
+                analyze_commitments, tag_filter=tag_filter,
+            )
             if raw_commits:
                 commitment = {
                     # None when neither instrument could be read. This used to
@@ -326,7 +331,7 @@ async def get_efficiency_scorecard(
 
 
 @_srv.mcp.tool()
-async def get_team_scorecards() -> dict:
+def get_team_scorecards() -> dict:
     """
     Efficiency scorecard for every team, side by side.
     Teams are discovered from your cost attribution tags (team=X).
@@ -443,7 +448,8 @@ async def get_label_costs(
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        report = connector.analyze_cluster(context)
+        # analyze_cluster lists nodes, pods and metrics from the Kubernetes API.
+        report = await _srv.asyncio.to_thread(connector.analyze_cluster, context)
         result = connector.get_label_costs(report, label_key=label_key)
 
         # Human-readable summary
@@ -463,7 +469,7 @@ async def get_label_costs(
 
 
 @_srv.mcp.tool()
-async def list_org_accounts() -> dict:
+def list_org_accounts() -> dict:
     """
     List all AWS Organization member accounts, discovering them via the
     AWS Organizations API. Syncs account metadata to local DB for future queries.
@@ -508,7 +514,7 @@ async def list_org_accounts() -> dict:
 
 
 @_srv.mcp.tool()
-async def get_org_cost_summary(days_back: int = 30) -> dict:
+def get_org_cost_summary(days_back: int = 30) -> dict:
     """
     Get a cost rollup across all AWS Organization accounts: total spend,
     per-account breakdown sorted by spend, and top services per account.
@@ -546,7 +552,7 @@ async def get_org_cost_summary(days_back: int = 30) -> dict:
 
 
 @_srv.mcp.tool()
-async def get_ou_cost_breakdown(days_back: int = 30) -> dict:
+def get_ou_cost_breakdown(days_back: int = 30) -> dict:
     """
     Break costs down by AWS Organizational Unit (OU). When OUs map to
     departments or teams, this gives you a clean chargeback report.
@@ -571,7 +577,7 @@ async def get_ou_cost_breakdown(days_back: int = 30) -> dict:
 
 
 @_srv.mcp.tool()
-async def get_tag_cost_breakdown_cur(
+def get_tag_cost_breakdown_cur(
     tag_key: str = "team",
     start_date: str | None = None,
     end_date: str | None = None,
@@ -616,7 +622,7 @@ async def get_tag_cost_breakdown_cur(
 
 
 @_srv.mcp.tool()
-async def audit_terraform_tags(
+def audit_terraform_tags(
     tf_dir: str,
     state_path: str | None = None,
 ) -> dict:
@@ -672,7 +678,7 @@ async def audit_terraform_tags(
 
 
 @_srv.mcp.tool()
-async def generate_terraform_tag_fixes(
+def generate_terraform_tag_fixes(
     tf_dir: str,
 ) -> dict:
     """
@@ -769,7 +775,7 @@ async def generate_terraform_tag_fixes(
 
 
 @_srv.mcp.tool()
-async def open_terraform_tag_pr(
+def open_terraform_tag_pr(
     tf_dir: str,
     github_repo: str,
     branch: str = "fix/add-required-tags",
@@ -936,7 +942,7 @@ async def open_terraform_tag_pr(
 
 
 @_srv.mcp.tool()
-async def get_agent_team() -> dict:
+def get_agent_team() -> dict:
     """
     The nable agent team: Budget Guard, Savings Analyst, and the Ledger, with
     each agent's status on this install and the one step that finishes its setup.
