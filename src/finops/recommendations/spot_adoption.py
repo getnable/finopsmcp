@@ -17,6 +17,7 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..analyzers.cloudwatch import MetricQuery, fetch_metric_values
 from .envelope import INFERRED, Finding
 
 try:
@@ -109,8 +110,11 @@ def _batch_get_cpu_variance(
     days: int,
 ) -> dict[str, float]:
     """
-    Fetch hourly Average CPUUtilization for multiple instances in a single
-    get_metric_data call. Returns {instance_id: stddev}. Chunks at 500 queries.
+    Fetch hourly Average CPUUtilization for many instances, one get_metric_data
+    call per 500 plus any NextToken pages. Returns {instance_id: stddev}. 14 days
+    of hourly points for 500 instances is more than one answer holds, so reading
+    only the first page computed the spread of part of a series. A series that
+    could not be read counts as no variance, as before.
     """
     if not instance_ids:
         return {}
@@ -118,45 +122,16 @@ def _batch_get_cpu_variance(
     end   = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
 
-    queries = [
-        {
-            "Id": f"m{i}",
-            "MetricStat": {
-                "Metric": {
-                    "Namespace": "AWS/EC2",
-                    "MetricName": "CPUUtilization",
-                    "Dimensions": [{"Name": "InstanceId", "Value": iid}],
-                },
-                "Period": 3600,
-                "Stat": "Average",
-            },
-            "ReturnData": True,
-        }
-        for i, iid in enumerate(instance_ids)
-    ]
+    series = fetch_metric_values(cw_client, [
+        MetricQuery(iid, "AWS/EC2", "CPUUtilization", (("InstanceId", iid),), "Average", 3600)
+        for iid in instance_ids
+    ], start, end)
 
-    raw: dict[str, list[float]] = {iid: [] for iid in instance_ids}
-
-    try:
-        chunk_size = 500
-        for chunk_start in range(0, len(queries), chunk_size):
-            chunk = queries[chunk_start : chunk_start + chunk_size]
-            resp = cw_client.get_metric_data(
-                MetricDataQueries=chunk,
-                StartTime=start,
-                EndTime=end,
-            )
-            for r in resp.get("MetricDataResults", []):
-                idx = int(r["Id"][1:])
-                iid = instance_ids[idx]
-                raw[iid] = r.get("Values", [])
-    except Exception as exc:
-        log.warning("Batched CPU variance fetch failed: %s", exc)
-
-    return {
-        iid: (statistics.stdev(vals) if len(vals) >= 2 else 0.0)
-        for iid, vals in raw.items()
-    }
+    out: dict[str, float] = {}
+    for iid in instance_ids:
+        vals = series.get(iid) or []
+        out[iid] = statistics.stdev(vals) if len(vals) >= 2 else 0.0
+    return out
 
 
 def _classify(
