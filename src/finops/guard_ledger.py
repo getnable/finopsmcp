@@ -93,8 +93,9 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"),
      "[REDACTED-AWS-KEY-ID]"),
     (re.compile(r"\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE), r"\1 [REDACTED]"),
-    # https://user:password@host
-    (re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:)[^@\s]+@"), r"\1[REDACTED]@"),
+    # A password embedded in a URL, before the @.
+    (re.compile(r"([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:)[^@\s]+@"),  # pragma: allowlist secret
+     r"\1[REDACTED]@"),
 ]
 # Long high-entropy runs: base64 or url-safe tokens (AWS secret keys, GitHub
 # and Slack tokens, JWT segments). A run counts when it mixes upper case, lower

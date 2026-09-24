@@ -144,7 +144,8 @@ def test_a_ledger_that_cannot_be_written_never_costs_the_verdict(monkeypatch, tm
 
 # ── redaction ─────────────────────────────────────────────────────────────────
 
-SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+# AWS's own documentation example key, not a credential.
+SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
 
 
 @pytest.mark.parametrize("raw,gone,kept", [
@@ -157,7 +158,8 @@ SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     ("aws configure set aws_access_key_id AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE",
      "[REDACTED-AWS-KEY-ID]"),
     ("curl -H 'Authorization: Bearer abc.def.ghi' https://api", "abc.def.ghi", "Bearer [REDACTED]"),
-    ("git clone https://me:s3cretPass@github.com/org/repo", "s3cretPass", "https://me:[REDACTED]@"),
+    ("git clone https://me:s3cretPass@github.com/org/repo",  # pragma: allowlist secret
+     "s3cretPass", "https://me:[REDACTED]@"),
     ("helm install x --set token=Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFCQ0RFRkdI", "Zm9vYmFyYmF6",
      "helm install x"),
 ])
