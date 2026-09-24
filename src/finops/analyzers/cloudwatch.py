@@ -358,85 +358,45 @@ def get_metric_stats(
     start = now - timedelta(days=period_days)
     # Use 1-day periods for long windows to stay within CW limits
     period_seconds = 86400  # 1 day
+    empty = {"average": None, "maximum": None, "minimum": None, "datapoints": 0, "unit": "None"}
 
-    queries = []
-    query_ids: list[str] = []
+    # GetMetricStatistics, inside CloudWatch's free request tier. This used to be
+    # GetMetricData, which bills every metric requested with no free tier, and
+    # the per-instance and per-database profiles call it five times each. The
+    # API takes standard statistics or percentiles in one call, not both, so a
+    # percentile request is a second call.
+    def _read(**stat_kw: Any) -> list[dict] | None:
+        try:
+            resp = cw_client.get_metric_statistics(
+                Namespace=namespace, MetricName=metric_name, Dimensions=dimensions,
+                StartTime=start, EndTime=now, Period=period_seconds, **stat_kw)
+        except Exception as exc:
+            log.debug("CloudWatch get_metric_statistics failed: %s", exc)
+            return None
+        return sorted(resp.get("Datapoints", []),
+                      key=lambda dp: (dp.get("Timestamp") is None, dp.get("Timestamp")))
 
-    # Standard stats
-    for s in ["Average", "Maximum", "Minimum"]:
-        qid = f"q_{s.lower()}"
-        query_ids.append(qid)
-        queries.append(
-            {
-                "Id": qid,
-                "MetricStat": {
-                    "Metric": {
-                        "Namespace": namespace,
-                        "MetricName": metric_name,
-                        "Dimensions": dimensions,
-                    },
-                    "Period": period_seconds,
-                    "Stat": s,
-                },
-                "ReturnData": True,
-            }
-        )
+    points = _read(Statistics=["Average", "Maximum", "Minimum"])
+    if points is None:
+        return empty
 
-    # Extended (percentile) stats
-    if extended_stats:
-        for ext in extended_stats:
-            qid = f"q_{ext.replace('.', '_')}"
-            query_ids.append(qid)
-            queries.append(
-                {
-                    "Id": qid,
-                    "MetricStat": {
-                        "Metric": {
-                            "Namespace": namespace,
-                            "MetricName": metric_name,
-                            "Dimensions": dimensions,
-                        },
-                        "Period": period_seconds,
-                        "Stat": ext,
-                    },
-                    "ReturnData": True,
-                }
-            )
-
-    try:
-        resp = cw_client.get_metric_data(
-            MetricDataQueries=queries,
-            StartTime=start,
-            EndTime=now,
-        )
-    except Exception as exc:
-        log.debug("CloudWatch get_metric_data failed: %s", exc)
-        return {"average": None, "maximum": None, "minimum": None, "datapoints": 0, "unit": "None"}
-
-    results_by_id: dict[str, list[float]] = {}
-    unit = "None"
-    for result in resp.get("MetricDataResults", []):
-        vals = result.get("Values", [])
-        results_by_id[result["Id"]] = vals
-        if vals and result.get("Label"):
-            unit = result.get("Label", "None")
-
-    def _agg(qid: str, agg_fn) -> float | None:
-        vals = results_by_id.get(qid, [])
+    def _agg(stat: str, agg_fn) -> float | None:
+        vals = [dp[stat] for dp in points if stat in dp]
         return round(agg_fn(vals), 4) if vals else None
 
     output: dict[str, Any] = {
-        "average": _agg("q_average", lambda v: sum(v) / len(v)),
-        "maximum": _agg("q_maximum", max),
-        "minimum": _agg("q_minimum", min),
-        "datapoints": len(results_by_id.get("q_average", [])),
-        "unit": unit,
+        "average": _agg("Average", lambda v: sum(v) / len(v)),
+        "maximum": _agg("Maximum", max),
+        "minimum": _agg("Minimum", min),
+        "datapoints": len(points),
+        "unit": next((dp["Unit"] for dp in points if dp.get("Unit")), "None"),
     }
 
     if extended_stats:
+        ext_points = _read(ExtendedStatistics=list(extended_stats)) or []
         for ext in extended_stats:
-            qid = f"q_{ext.replace('.', '_')}"
-            vals = results_by_id.get(qid, [])
+            vals = [dp["ExtendedStatistics"][ext] for dp in ext_points
+                    if ext in (dp.get("ExtendedStatistics") or {})]
             # CW returns one value per period; p99 over the window is max of daily p99s
             output[ext] = round(max(vals), 4) if vals else None
 
