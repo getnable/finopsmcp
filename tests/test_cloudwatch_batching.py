@@ -504,3 +504,49 @@ def test_one_failed_lb_inventory_still_reports_the_other():
         waste.check_idle_load_balancers(
             _Inventory(error=RuntimeError("AccessDenied")),
             _Inventory(error=RuntimeError("AccessDenied")), cw, region="us-east-1")
+
+
+class _ECS:
+    """One cluster of Fargate services, each on a 1024 CPU unit task."""
+
+    def __init__(self, n: int):
+        self._arns = [f"arn:aws:ecs:us-east-1:1:service/prod/svc-{i:04d}" for i in range(n)]
+
+    def get_paginator(self, name):
+        arns = self._arns
+
+        class _P:
+            def paginate(self, **_kw):
+                if name == "list_clusters":
+                    return [{"clusterArns": ["arn:aws:ecs:us-east-1:1:cluster/prod"]}]
+                return [{"serviceArns": arns}]
+        return _P()
+
+    def describe_services(self, cluster, services):
+        return {"services": [
+            {"serviceName": a.rsplit("/", 1)[-1], "serviceArn": a, "launchType": "FARGATE",
+             "taskDefinition": "td:1", "desiredCount": 2}
+            for a in services
+        ]}
+
+    def describe_task_definition(self, taskDefinition):
+        return {"taskDefinition": {"cpu": "1024", "memory": "2048"}}
+
+
+def test_ecs_services_are_read_in_one_call_per_500():
+    from finops.analyzers import waste
+
+    series = {("CpuUtilized", "prod", f"svc-{i:04d}"): [50.0] * 48 for i in range(120)}
+    series[("CpuUtilized", "prod", "svc-0001")] = [900.0] * 48   # busy
+    series[("CpuUtilized", "prod", "svc-0002")] = [50.0] * 10    # too little data
+    series[("CpuUtilized", "prod", "svc-0003")] = "Forbidden"    # unread
+    cw = _Metrics(series)
+
+    findings = waste.check_ecs_task_rightsizing(_ECS(120), cw, region="us-east-1")
+
+    assert cw.calls == math.ceil(120 / 500) == 1
+    flagged = {f["service"] for f in findings}
+    assert len(flagged) == 117
+    assert not {"svc-0001", "svc-0002", "svc-0003"} & flagged
+    # 512 units saved on 2 tasks: 0.5 vCPU * 0.04048 * 730 * 2.
+    assert {f["estimated_monthly_savings"] for f in findings} == {29.55}

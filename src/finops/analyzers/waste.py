@@ -1787,6 +1787,7 @@ def check_ecs_task_rightsizing(
         # nothing, and an empty list reads upstream as "checked, all clean".
         raise
 
+    services: list[tuple[str, dict, int, int]] = []
     for cluster_arn in clusters:
         cluster_name = cluster_arn.split("/")[-1]
 
@@ -1806,7 +1807,6 @@ def check_ecs_task_rightsizing(
                 continue
 
             for svc in resp.get("services", []):
-                svc_name = svc.get("serviceName", "")
                 task_def_arn = svc.get("taskDefinition", "")
                 launch_type = svc.get("launchType", "")
 
@@ -1820,63 +1820,58 @@ def check_ecs_task_rightsizing(
                     allocated_memory_mb = int(td.get("memory", 512))
                 except Exception:
                     continue
+                services.append((cluster_name, svc, allocated_cpu, allocated_memory_mb))
 
-                try:
-                    cpu_resp = cw_client.get_metric_statistics(
-                        Namespace="ECS/ContainerInsights",
-                        MetricName="CpuUtilized",
-                        Dimensions=[
-                            {"Name": "ClusterName", "Value": cluster_name},
-                            {"Name": "ServiceName", "Value": svc_name},
-                        ],
-                        StartTime=start,
-                        EndTime=now,
-                        Period=3600,
-                        Statistics=["Average"],
-                    )
-                    cpu_datapoints = cpu_resp.get("Datapoints", [])
-                except Exception:
-                    continue
+    series = fetch_metric_values(cw_client, [
+        MetricQuery(i, "ECS/ContainerInsights", "CpuUtilized",
+                    (("ClusterName", cluster_name), ("ServiceName", svc.get("serviceName", ""))),
+                    "Average", 3600)
+        for i, (cluster_name, svc, _, _) in enumerate(services)
+    ], start, now)
 
-                if not cpu_datapoints or len(cpu_datapoints) < 24:
-                    continue
+    for i, (cluster_name, svc, allocated_cpu, allocated_memory_mb) in enumerate(services):
+        svc_name = svc.get("serviceName", "")
 
-                avg_cpu_units = sum(dp.get("Average", 0) for dp in cpu_datapoints) / len(cpu_datapoints)
-                avg_cpu_pct = (avg_cpu_units / allocated_cpu) * 100 if allocated_cpu > 0 else 0
+        cpu_datapoints = series.get(i)
+        if not cpu_datapoints or len(cpu_datapoints) < 24:
+            continue
 
-                if avg_cpu_pct >= cpu_threshold_pct:
-                    continue
+        avg_cpu_units = sum(cpu_datapoints) / len(cpu_datapoints)
+        avg_cpu_pct = (avg_cpu_units / allocated_cpu) * 100 if allocated_cpu > 0 else 0
 
-                recommended_cpu = max(256, allocated_cpu // 2)
-                cpu_vcpu_saved = (allocated_cpu - recommended_cpu) / 1024
-                desired_count = svc.get("desiredCount", 1)
-                monthly_cpu_savings = cpu_vcpu_saved * _FARGATE_VCPU_HOURLY * 730 * desired_count
+        if avg_cpu_pct >= cpu_threshold_pct:
+            continue
 
-                if monthly_cpu_savings < 5:
-                    continue
+        recommended_cpu = max(256, allocated_cpu // 2)
+        cpu_vcpu_saved = (allocated_cpu - recommended_cpu) / 1024
+        desired_count = svc.get("desiredCount", 1)
+        monthly_cpu_savings = cpu_vcpu_saved * _FARGATE_VCPU_HOURLY * 730 * desired_count
 
-                findings.append({
-                    "resource_id": svc.get("serviceArn", svc_name),
-                    "resource_type": "ECS Fargate Service",
-                    "waste_type": "ecs_overprovisioned_cpu",
-                    "estimated_monthly_savings": round(monthly_cpu_savings, 2),
-                    "detail": (
-                        f"ECS Fargate service '{svc_name}' (cluster: {cluster_name}) "
-                        f"uses {avg_cpu_pct:.1f}% of its {allocated_cpu} CPU units on average. "
-                        f"Desired count: {desired_count}. "
-                        f"Recommend reducing CPU to {recommended_cpu} units. "
-                        f"Requires Container Insights enabled."
-                    ),
-                    "severity": _severity_from_savings(monthly_cpu_savings),
-                    "region": region,
-                    "account_id": None,
-                    "cluster": cluster_name,
-                    "service": svc_name,
-                    "allocated_cpu_units": allocated_cpu,
-                    "recommended_cpu_units": recommended_cpu,
-                    "allocated_memory_mb": allocated_memory_mb,
-                    "avg_cpu_pct": round(avg_cpu_pct, 2),
-                    "desired_count": desired_count,
-                })
+        if monthly_cpu_savings < 5:
+            continue
+
+        findings.append({
+            "resource_id": svc.get("serviceArn", svc_name),
+            "resource_type": "ECS Fargate Service",
+            "waste_type": "ecs_overprovisioned_cpu",
+            "estimated_monthly_savings": round(monthly_cpu_savings, 2),
+            "detail": (
+                f"ECS Fargate service '{svc_name}' (cluster: {cluster_name}) "
+                f"uses {avg_cpu_pct:.1f}% of its {allocated_cpu} CPU units on average. "
+                f"Desired count: {desired_count}. "
+                f"Recommend reducing CPU to {recommended_cpu} units. "
+                f"Requires Container Insights enabled."
+            ),
+            "severity": _severity_from_savings(monthly_cpu_savings),
+            "region": region,
+            "account_id": None,
+            "cluster": cluster_name,
+            "service": svc_name,
+            "allocated_cpu_units": allocated_cpu,
+            "recommended_cpu_units": recommended_cpu,
+            "allocated_memory_mb": allocated_memory_mb,
+            "avg_cpu_pct": round(avg_cpu_pct, 2),
+            "desired_count": desired_count,
+        })
 
     return findings
