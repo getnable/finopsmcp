@@ -946,56 +946,35 @@ def archive_old_snapshots(days_to_keep: int = 365) -> int:
     """Move cost_snapshots older than days_to_keep to cost_snapshots_archive.
 
     Returns the number of rows archived.
+
+    The move happens inside the database, INSERT ... SELECT and then DELETE in
+    one transaction. It used to fetchall() every old row into Python and insert
+    them back, so archiving a year of history held all of it in memory at once.
+
+    The two counts must agree or nothing moves. On PostgreSQL each statement
+    sees rows committed before it began, so an old-dated row another writer
+    commits between the copy and the delete would be deleted without having
+    been copied. Rolling back on a mismatch leaves both tables as they were.
     """
     engine = get_engine()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days_to_keep)).strftime("%Y-%m-%d")
+    names = ["provider", "service", "account_id", "region", "snapshot_date",
+             "amount_usd", "granularity", "captured_at", "category"]
+    old = cost_snapshots.c.snapshot_date < cutoff
 
     with engine.begin() as conn:
-        # Select rows to archive
-        old_rows = conn.execute(
-            select(
-                cost_snapshots.c.provider,
-                cost_snapshots.c.service,
-                cost_snapshots.c.account_id,
-                cost_snapshots.c.region,
-                cost_snapshots.c.snapshot_date,
-                cost_snapshots.c.amount_usd,
-                cost_snapshots.c.granularity,
-                cost_snapshots.c.captured_at,
-                cost_snapshots.c.category,
-            ).where(cost_snapshots.c.snapshot_date < cutoff)
-        ).fetchall()
+        copied = conn.execute(
+            cost_snapshots_archive.insert().from_select(
+                names, select(*[cost_snapshots.c[n] for n in names]).where(old))
+        ).rowcount
+        deleted = conn.execute(delete(cost_snapshots).where(old)).rowcount
+        if copied != deleted:
+            raise RuntimeError(
+                f"archive copied {copied} snapshot rows but would delete {deleted}; "
+                "rolled back, nothing was moved")
 
-        if not old_rows:
-            return 0
-
-        # Insert into archive
-        conn.execute(
-            cost_snapshots_archive.insert(),
-            [
-                {
-                    "provider": r.provider,
-                    "service": r.service,
-                    "account_id": r.account_id,
-                    "region": r.region,
-                    "snapshot_date": r.snapshot_date,
-                    "amount_usd": r.amount_usd,
-                    "granularity": r.granularity,
-                    "captured_at": r.captured_at,
-                    "category": r.category,
-                }
-                for r in old_rows
-            ],
-        )
-
-        # Delete from source
-        conn.execute(
-            delete(cost_snapshots).where(cost_snapshots.c.snapshot_date < cutoff)
-        )
-
-    count = len(old_rows)
-    log.info("Archived %d cost snapshots older than %s", count, cutoff)
-    return count
+    log.info("Archived %d cost snapshots older than %s", copied, cutoff)
+    return copied
 
 
 def _display_db_url(database_url: str) -> str:
