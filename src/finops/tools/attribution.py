@@ -122,7 +122,15 @@ async def run_attribution_now(
         ed = _srv.date.fromisoformat(end_date)
 
     cfg = _load_rules()
-    tag_keys = list({r.get("tag_key", "") for r in cfg.get("rules", []) if r.get("tag_key")})
+    # One tag key, not all of them. Cost Explorer allows SERVICE plus one tag
+    # per request, and each key's rows cover the whole bill, so storing rows
+    # for two keys would count every dollar twice in the team totals. Use the
+    # highest-priority key that decides the team, the dimension these rows
+    # are summed by.
+    _ranked = sorted((r for r in cfg.get("rules", []) if r.get("tag_key")),
+                     key=lambda r: r.get("priority", 100))
+    _team_rules = [r for r in _ranked if r.get("maps_to_field") == "team"] or _ranked
+    tag_keys = [_team_rules[0]["tag_key"]] if _team_rules else []
 
     total_stored = 0
     errors: dict[str, str] = {}
@@ -149,6 +157,7 @@ async def run_attribution_now(
     return {
         "status": "complete",
         "records_stored": total_stored,
+        "attributed_by_tag_key": tag_keys[0] if tag_keys else None,
         "errors": errors,
         "period": {"start": sd.isoformat(), "end": ed.isoformat()},
         "tip": "If data is empty, check that ~/.finops/tag_rules.yaml is configured with your tag keys.",
