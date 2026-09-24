@@ -241,6 +241,48 @@ async def test_the_wrapper_sends_its_funnel_events_off_the_loop(
                         <= set(slow_posthog))
 
 
+# ── 1c. the AWS credential probe behind _active() ───────────────────────────
+
+async def test_aws_is_configured_resolves_credentials_off_the_loop(monkeypatch):
+    """_active() gathers is_configured() across every connector before nearly
+    every cost tool. Azure and GCP already probe in a thread; AWS walked the
+    botocore chain (IMDS off EC2) inline."""
+    import botocore.session
+    from finops.connectors.aws import AWSConnector
+
+    class _SlowChain:
+        def get_credentials(self):
+            time.sleep(BLOCK_S)          # IMDS connect timeout, as the loop sees it
+            return object()
+
+    monkeypatch.setattr(botocore.session, "get_session", lambda: _SlowChain())
+
+    async with _Heartbeat() as hb:
+        assert await AWSConnector().is_configured() is True
+
+    assert hb.max_stall < MAX_STALL_S, (
+        f"AWSConnector.is_configured held the event loop for {hb.max_stall:.2f}s"
+    )
+
+
+async def test_aws_is_configured_still_answers_false_without_credentials(monkeypatch):
+    import botocore.session
+    from finops.connectors.aws import AWSConnector
+
+    class _EmptyChain:
+        def get_credentials(self):
+            return None
+
+    monkeypatch.setattr(botocore.session, "get_session", lambda: _EmptyChain())
+    assert await AWSConnector().is_configured() is False
+
+    class _Session:
+        def get_credentials(self):
+            raise RuntimeError("sso token expired")
+
+    assert await AWSConnector(session=_Session()).is_configured() is False
+
+
 # ── 2. real tools, blocked at the cloud boundary ─────────────────────────────
 
 def _sleepy(ret):
