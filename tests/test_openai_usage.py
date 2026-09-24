@@ -121,7 +121,7 @@ def test_get_costs_standard_key_falls_back_to_usage_after_costs_401(monkeypatch)
     entitled to call, and hand back the real data from there rather than a
     false credential error."""
     monkeypatch.setattr("finops.security.env.get_env",
-                        _env({"OPENAI_API_KEY": "sk-a-perfectly-good-standard-key"}))
+                        _env({"OPENAI_API_KEY": "sk-a-perfectly-good-standard-key"}))  # pragma: allowlist secret
     usage_payload = {"data": [{"start_time": 1717200000, "results": [
         {"model_id": "gpt-4o-mini", "input_tokens": 1_000_000, "output_tokens": 500_000},
     ]}]}
