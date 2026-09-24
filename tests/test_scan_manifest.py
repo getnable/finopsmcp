@@ -106,14 +106,35 @@ def test_dry_run_json_is_a_pasteable_policy(capsys):
 @pytest.mark.parametrize("check", [
     "nat", "ec2", "rds_rightsizing", "rds_idle", "s3", "lambda", "load_balancer", "ecs",
 ])
-def test_every_metric_reading_check_names_the_batched_read(check):
-    """These checks read CloudWatch through GetMetricData now. A policy that
-    grants only GetMetricStatistics lets the scan start and then fail every
+def test_every_metric_reading_check_names_the_free_read(check):
+    """These checks read CloudWatch through GetMetricStatistics, inside its free
+    request tier. A policy missing it lets the scan start and then fail every
     metric read, which the detectors treat as unread and skip, so the scan
     reports clean on an account it never measured."""
     _, calls = SCAN_CHECKS[check]
-    assert ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData") in calls
-    assert "cloudwatch:GetMetricStatistics" not in iam_actions()
+    assert ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics") in calls
+
+
+def test_the_billed_batched_read_is_only_in_the_policy_when_opted_in(monkeypatch):
+    """GetMetricData is billed per metric with no free tier. The default policy
+    must not grant it, and a host that opts in must be handed a policy that
+    does, or every batched read is denied."""
+    from finops.analyzers.cloudwatch import GET_METRIC_DATA_ENV
+    from finops.scan_manifest import GET_METRIC_DATA_ACTIONS
+
+    assert GET_METRIC_DATA_ACTIONS == [("cloudwatch.get_metric_data", "cloudwatch:GetMetricData")]
+    for _, calls in SCAN_CHECKS.values():
+        assert ("cloudwatch.get_metric_data", "cloudwatch:GetMetricData") not in calls
+
+    monkeypatch.delenv(GET_METRIC_DATA_ENV, raising=False)
+    assert "cloudwatch:GetMetricData" not in iam_actions()
+    assert "GetMetricStatistics, inside its free" in render_dry_run()
+
+    monkeypatch.setenv(GET_METRIC_DATA_ENV, "1")
+    assert "cloudwatch:GetMetricData" in iam_actions()
+    assert "cloudwatch:GetMetricData" in iam_policy()["Statement"][0]["Action"]
+    assert "cloudwatch.get_metric_data" in render_dry_run()
+    assert "cloudwatch:GetMetricData" not in iam_actions(include_get_metric_data=False)
 
 
 def test_the_s3_check_can_find_each_buckets_region():
