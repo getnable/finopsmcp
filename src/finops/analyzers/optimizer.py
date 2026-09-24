@@ -204,7 +204,7 @@ def _audit_region(
         _run("cloudwatch", check_cloudwatch_logs, logs_client, region)
 
     if "s3" in checks and s3_client and cw_client:
-        # S3 is global — only run from us-east-1 to avoid duplicate findings.
+        # S3 is global, so only run from us-east-1 to avoid duplicate findings.
         # Its storage metrics are not: each bucket's live in its own region.
         if region == "us-east-1":
             _run("s3", partial(check_s3_storage_class, cw_client_for_region=lambda r:
