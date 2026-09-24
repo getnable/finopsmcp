@@ -134,14 +134,24 @@ def _strip_aws_global_options(cmd: str) -> str:
     return _AWS_GLOBAL_OPTS_RE.sub(r"\1 ", cmd)
 
 
+def _normalize(command: str) -> str:
+    """The form every classifier and pricer reads.
+
+    Quotes do not change which program runs: `"aws" ec2 terminate-instances`
+    is a terminate. Dropping them can only over-match, which is the safe side.
+    Classification and pricing must read the SAME form: when only the
+    classifier stripped AWS global options, `aws --region us-east-1 ec2
+    run-instances --instance-type p4d.24xlarge --count 8` classified as a
+    launch, found no price, and passed silently at ~$191k/mo."""
+    cmd = command.replace('"', "").replace("'", "")
+    cmd = " ".join(cmd.split())  # normalize whitespace
+    return _strip_aws_global_options(cmd)
+
+
 def classify_command(command: str) -> tuple[str, str] | None:
     """Classify a shell command as ("one_way"|"two_way", action_type), or None
     when it is not an infrastructure mutation nable cares about."""
-    # Quotes do not change which program runs: `"aws" ec2 terminate-instances`
-    # is a terminate. Dropping them can only over-match, which is the safe side.
-    cmd = command.replace('"', "").replace("'", "")
-    cmd = " ".join(cmd.split())  # normalize whitespace
-    cmd = _strip_aws_global_options(cmd)
+    cmd = _normalize(command)
     for pattern, action in _ONE_WAY_CLASSIFIERS:
         if re.search(pattern, cmd):
             return ("one_way", action)
@@ -177,7 +187,7 @@ def estimate_command_monthly_cost(command: str) -> dict[str, Any] | None:
     uses). Anything unpriceable returns None: an unknown type must degrade to
     the guard's existing behaviour, never to an invented figure.
     """
-    cmd = " ".join(command.split())
+    cmd = _normalize(command)
     if not _RUN_INSTANCES_RE.search(cmd):
         return None
     m = _INSTANCE_TYPE_RE.search(cmd)
