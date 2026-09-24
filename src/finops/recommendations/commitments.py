@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -171,13 +171,31 @@ def _total_ec2_spend(ce_client: Any, start: str, end: str) -> float:
         return 0.0
 
 
+# Lookback for analyze_commitments. The utilization and waste figures Cost
+# Explorer returns are totals over the whole window, so this is also the divisor
+# that turns them into the per-month numbers commitment_summary reports.
+_LOOKBACK_MONTHS = 3
+
+
 def _get_date_range(months_back: int = 3) -> tuple[str, str]:
-    end = date.today().replace(day=1) - timedelta(days=1)  # last day of prior month
-    start = (end.replace(day=1) - timedelta(days=months_back * 30)).replace(day=1)
-    return start.isoformat(), end.isoformat()
+    """The last `months_back` whole calendar months, as a Cost Explorer window.
+
+    Cost Explorer's End is exclusive, so the window ends on the first of this
+    month. It used to end on the last day of the prior month (dropping that day)
+    and start 90 days before the prior month's first, which rounded back a
+    further month: months_back=3 read nearly four months, and every consumer
+    then divided by three.
+    """
+    end = date.today().replace(day=1)
+    year, month = end.year, end.month - months_back
+    while month < 1:
+        month += 12
+        year -= 1
+    return date(year, month, 1).isoformat(), end.isoformat()
 
 
 def _savings_plan_utilization(ce_client: Any, start: str, end: str) -> dict[str, float]:
+    """SP utilization over the window. unused_usd is the window TOTAL."""
     try:
         resp = ce_client.get_savings_plans_utilization(
             TimePeriod={"Start": start, "End": end},
@@ -187,7 +205,10 @@ def _savings_plan_utilization(ce_client: Any, start: str, end: str) -> dict[str,
         util = total.get("Utilization", {})
         return {
             "utilization_pct": float(util.get("UtilizationPercentage", 0)),
-            "unused_usd": float(total.get("Savings", {}).get("NetSavings", 0)),
+            # UnusedCommitment is the commitment paid for and not used. This read
+            # Savings.NetSavings, which is what the plans SAVED: the better a
+            # plan performed, the more "waste" it was reported as.
+            "unused_usd": float(util.get("UnusedCommitment", 0)),
             "total_commitment": float(util.get("TotalCommitment", 0)),
         }
     except Exception as e:
@@ -196,12 +217,47 @@ def _savings_plan_utilization(ce_client: Any, start: str, end: str) -> dict[str,
         return {"utilization_pct": 0.0, "unused_usd": 0.0, "total_commitment": 0.0}
 
 
+# Hard stop on NextToken paging. Cost Explorer pages are large, so a loop that
+# gets here is a misbehaving endpoint, not a big account.
+_MAX_COVERAGE_PAGES = 100
+
+
+def _sp_coverage_pct_from_pages(ce_client: Any, kwargs: dict[str, Any]) -> float:
+    """Spend-weighted Savings Plans coverage % across every page of the response.
+
+    GetSavingsPlansCoverage has no Total. It returns SavingsPlansCoverages, one
+    row per period (and per group), plus NextToken. Reading
+    Total.CoverageHours, as this used to, found nothing and returned 0% for
+    every account, so every Savings Plans customer was told "coverage 0%, buy a
+    Compute SP". Summing the dollars and dividing once weights each month by its
+    spend; averaging the per-row CoveragePercentage would not.
+
+    No eligible spend at all is 0.0: nothing is covered, and with nothing
+    uncovered either, the recommendation sizing has nothing to size.
+    """
+    covered = total = 0.0
+    token: str | None = None
+    for _ in range(_MAX_COVERAGE_PAGES):
+        call = dict(kwargs)
+        if token:
+            call["NextToken"] = token
+        resp = ce_client.get_savings_plans_coverage(**call)
+        for row in resp.get("SavingsPlansCoverages") or []:
+            cov = row.get("Coverage") or {}
+            covered += float(cov.get("SpendCoveredBySavingsPlans") or 0)
+            total += float(cov.get("TotalCost") or 0)
+        token = resp.get("NextToken")
+        if not token:
+            break
+    return covered / total * 100 if total > 0 else 0.0
+
+
 def _savings_plan_coverage(
     ce_client: Any,
     start: str,
     end: str,
     tag_filter: dict | None = None,
-) -> float:
+) -> float | None:
     """
     Coverage % for the account — or for a specific tag slice when tag_filter is set.
 
@@ -222,9 +278,7 @@ def _savings_plan_coverage(
             tag_key, tag_val = next(iter(tag_filter.items()))
             kwargs["Filter"] = {"Tags": {"Key": tag_key, "Values": [tag_val]}}
 
-        resp = ce_client.get_savings_plans_coverage(**kwargs)
-        totals = resp.get("Total", {}).get("CoverageHours", {})
-        return float(totals.get("CoverageHoursPercentage", 0))
+        return _sp_coverage_pct_from_pages(ce_client, kwargs)
     except Exception as e:
         # None, not 0.0. "We could not read your coverage" and "you have no
         # coverage" are opposite facts, and 0.0 conflated them into the one that
@@ -237,19 +291,21 @@ def _savings_plan_coverage(
 
 
 def _ri_utilization(ce_client: Any, start: str, end: str) -> dict[str, float]:
+    """RI utilization over the window. unused_usd is the window TOTAL."""
     try:
         resp = ce_client.get_reservation_utilization(
             TimePeriod={"Start": start, "End": end},
             Granularity="MONTHLY",
         )
+        # Total is a ReservationAggregates: UtilizationPercentage sits on it
+        # directly (there is no Utilization sub-object, unlike Savings Plans),
+        # and the cost of reserved hours nobody used is RICostForUnusedHours.
+        # The two fields this summed do not exist in the API, so RI waste was
+        # always $0 and utilization always 0%.
         total = resp.get("Total", {})
-        util = total.get("Utilization", {})
-        unused = total.get("UnusedHours", "0")
-        unused_cost = float(total.get("UnusedAmortizedUpfrontCostForRIs", 0)) + \
-                      float(total.get("UnusedRecurringFeeForRIs", 0))
         return {
-            "utilization_pct": float(util.get("UtilizationPercentage", 0)),
-            "unused_usd": unused_cost,
+            "utilization_pct": float(total.get("UtilizationPercentage", 0)),
+            "unused_usd": float(total.get("RICostForUnusedHours", 0)),
         }
     except Exception as e:
         log.warning("RI utilization fetch failed: %s", e)
@@ -387,7 +443,7 @@ def _build_recommendations(
         peak = max(series)
         basis = "your consistent monthly baseline (uncovered every month)"
     else:
-        baseline = uncovered_od / 3
+        baseline = uncovered_od / _LOOKBACK_MONTHS
         peak = baseline
         basis = "your 3-month average uncovered on-demand"
 
@@ -476,7 +532,7 @@ def estimate_coverage_for_partial_tag(
 
     try:
         ce = boto3.client("ce", region_name="us-east-1")
-        start, end = _get_date_range(months_back=3)
+        start, end = _get_date_range(months_back=_LOOKBACK_MONTHS)
 
         # ── Steps 1+2: the six Cost Explorer calls below are independent. Run them
         # concurrently (CE is 2-8s per call, so serial was ~6x the latency); the
@@ -590,7 +646,7 @@ def analyze_commitments(
 
     try:
         ce = boto3.client("ce", region_name="us-east-1")
-        start, end = _get_date_range(months_back=3)
+        start, end = _get_date_range(months_back=_LOOKBACK_MONTHS)
 
         # These five Cost Explorer calls are independent. Run them concurrently
         # rather than back-to-back: CE is 2-8s per call, so serial was 5x the
@@ -629,10 +685,14 @@ def analyze_commitments(
             savings_plan_coverage_pct=(
                 None if sp_coverage is None else round(sp_coverage, 1)),
             savings_plan_utilization_pct=round(sp_util_data["utilization_pct"], 1),
-            savings_plan_unused_usd=round(sp_util_data["unused_usd"], 2),
+            # Cost Explorer returns unused commitment as a total over the
+            # window; the fields are per month (commitment_summary labels them
+            # *_per_month and the tools print "/mo"), so divide by the months.
+            savings_plan_unused_usd=round(
+                sp_util_data["unused_usd"] / _LOOKBACK_MONTHS, 2),
             ri_coverage_pct=(None if ri_coverage is None else round(ri_coverage, 1)),
             ri_utilization_pct=round(ri_util_data["utilization_pct"], 1),
-            ri_unused_usd=round(ri_util_data["unused_usd"], 2),
+            ri_unused_usd=round(ri_util_data["unused_usd"] / _LOOKBACK_MONTHS, 2),
             uncovered_on_demand_usd=round(uncovered_od, 2),
             recommendations=recs,
         )
