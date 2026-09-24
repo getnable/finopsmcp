@@ -720,3 +720,27 @@ def test_intelligent_tiering_audit_reads_each_bucket_in_its_own_region():
         "LIKELY_WASTE_monitoring_exceeds_savings"}
     assert cws["us-east-1"].calls == math.ceil(60 * 7 / 500) == 1
     assert cws["eu-west-1"].calls == math.ceil(80 * 7 / 500) == 2
+
+
+@pytest.mark.parametrize("location, expected", [
+    (None, "us-east-1"),        # us-east-1 buckets report no constraint
+    ("", "us-east-1"),
+    ("EU", "eu-west-1"),        # the legacy constraint for eu-west-1
+    ("ap-south-1", "ap-south-1"),
+])
+def test_bucket_region_reads_location_constraint(location, expected):
+    from finops.analyzers.cloudwatch import s3_bucket_region
+
+    assert s3_bucket_region(_S3({"b": location}), {"Name": "b"}, "fallback") == expected
+
+
+def test_bucket_region_prefers_the_listed_region_and_falls_back_when_unreadable():
+    from unittest.mock import MagicMock
+    from finops.analyzers.cloudwatch import s3_bucket_region
+
+    s3 = _S3({"b": "EU"})
+    assert s3_bucket_region(s3, {"Name": "b", "BucketRegion": "sa-east-1"}, "x") == "sa-east-1"
+    assert s3.location_calls == 0
+    assert s3_bucket_region(_S3Denied({"b": None}), {"Name": "b"}, "fallback") == "fallback"
+    # A client that is not boto shaped answers with a mock, which is not a region.
+    assert s3_bucket_region(MagicMock(), {"Name": "b"}, "fallback") == "fallback"
