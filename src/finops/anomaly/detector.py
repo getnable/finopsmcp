@@ -154,21 +154,20 @@ def get_tag_drivers(
         return []
 
     keys_to_check = tag_keys or _DEFAULT_TAG_KEYS
-    # Deduplicate while preserving order (handles "team"/"Team" variants)
-    seen: set[str] = set()
-    unique_keys: list[str] = []
-    for k in keys_to_check:
-        lk = k.lower()
-        if lk not in seen:
-            seen.add(lk)
-            unique_keys.append(k)
+    # Deduplicate exact repeats only, preserving order. Cost Explorer tag keys
+    # are case-sensitive, so "team" and "Team" are different tags and an org
+    # that tags with "Team" must still be queried for it.
+    unique_keys = list(dict.fromkeys(keys_to_check))
 
-    # Current window: 7 days ending on snapshot_date
+    # Both sides are per-day, like delta_usd (today minus the daily baseline
+    # mean). Current: the anomaly day itself. Baseline: a 7-day window four
+    # weeks prior, averaged to a day. Comparing a 7-day tag delta against a
+    # 1-day anomaly delta reported drivers at ~700% of the spike.
+    _BASE_DAYS  = 7
     end_dt      = snapshot_date + timedelta(days=1)   # CE end is exclusive
-    start_dt    = snapshot_date - timedelta(days=6)
-    # Baseline window: same weekday, 4 weeks prior
-    base_end_dt = start_dt - timedelta(days=21)
-    base_start_dt = base_end_dt - timedelta(days=7)
+    start_dt    = snapshot_date
+    base_end_dt = snapshot_date - timedelta(days=27)
+    base_start_dt = base_end_dt - timedelta(days=_BASE_DAYS)
 
     end_str       = end_dt.isoformat()
     start_str     = start_dt.isoformat()
@@ -213,7 +212,7 @@ def get_tag_drivers(
             baseline_map = _query(base_start_str, base_end_str)
 
             for tag_val, current_amt in current_map.items():
-                baseline_amt = baseline_map.get(tag_val, 0.0)
+                baseline_amt = baseline_map.get(tag_val, 0.0) / _BASE_DAYS
                 delta = current_amt - baseline_amt
                 if delta < 1.0:
                     continue
@@ -230,7 +229,7 @@ def get_tag_drivers(
             log.debug("Tag attribution failed for key %r: %s", tag_key, e)
             continue
 
-    # Sort by contribution and drop duplicates across tag key variants (team/Team)
+    # Sort by contribution
     drivers.sort(key=lambda d: d["delta_usd"], reverse=True)
     return drivers[:10]
 
