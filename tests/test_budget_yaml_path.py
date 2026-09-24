@@ -11,7 +11,7 @@ SYNC = getattr(B.sync_budgets_from_yaml, "fn", B.sync_budgets_from_yaml)
 
 def test_non_yaml_path_is_refused(tmp_path):
     secret = tmp_path / "id_rsa"
-    secret.write_text("-----BEGIN PRIVATE KEY-----\nabc: [\n")
+    secret.write_text("MARKER-FILE-CONTENTS\nabc: [\n")
     out = asyncio.run(SYNC(str(secret)))
     assert "error" in out and ".yml" in out["error"]
-    assert "PRIVATE" not in str(out)
+    assert "MARKER" not in str(out)

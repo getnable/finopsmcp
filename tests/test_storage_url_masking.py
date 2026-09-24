@@ -7,10 +7,10 @@ from finops.storage import db
 
 
 @pytest.mark.parametrize("url", [
-    "postgresql://nable:S3cr3t@db.internal:5432/finops",
+    "postgresql://nable:S3cr3t@db.internal:5432/finops",  # pragma: allowlist secret
     "postgresql://db.internal/finops?user=nable&password=S3cr3t",
-    "postgresql://:S3cr3t@db/finops",
-    "postgresql+psycopg://nable:S3cr3t@db/finops?sslmode=require",
+    "postgresql://:S3cr3t@db/finops",  # pragma: allowlist secret
+    "postgresql+psycopg://nable:S3cr3t@db/finops?sslmode=require",  # pragma: allowlist secret
 ])
 def test_storage_mode_never_shows_the_password(monkeypatch, url):
     monkeypatch.setenv("DATABASE_URL", url)
