@@ -7,6 +7,8 @@ gets NO figure, never an invented one.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import finops.ai_budget as ai_budget
@@ -168,6 +170,45 @@ def test_az_vm_create_without_a_size_gets_no_figure():
 ])
 def test_priceable_launches_are_classified_so_the_threshold_can_reach_them(cmd):
     assert g.classify_command(cmd) == ("two_way", "infra_apply")
+
+
+# ── near the threshold: warn, never stop ─────────────────────────────────────
+
+NEAR = "aws ec2 run-instances --instance-type c5.4xlarge"      # ~$496/mo
+
+
+def test_a_priced_change_near_the_threshold_warns():
+    v = g.gate_command(NEAR)
+    assert v and v["decision"] == "warn"
+    assert "99% of your $500/mo auto threshold" in v["reason"]
+    assert "list price" in v["reason"]
+
+
+def test_a_warn_never_touches_the_permission_flow():
+    import io
+    out = io.StringIO()
+    g.run_hook(stdin=io.StringIO(json.dumps({"tool_name": "Bash",
+                                             "tool_input": {"command": NEAR}})), stdout=out)
+    body = json.loads(out.getvalue())
+    assert "hookSpecificOutput" not in body, "a warn must not allow, ask or deny"
+    assert "$496/mo" in body["systemMessage"]
+
+
+def test_the_warn_line_follows_the_users_threshold(monkeypatch):
+    monkeypatch.setenv("FINOPS_POLICY_MAX_AUTO_USD", "1000")
+    assert g.gate_command(NEAR) is None
+    monkeypatch.setenv("FINOPS_POLICY_MAX_AUTO_USD", "450")
+    assert g.gate_command(NEAR)["decision"] == "ask"
+
+
+def test_well_under_the_threshold_stays_silent():
+    assert g.gate_command("aws ec2 run-instances --instance-type r5.2xlarge") is None  # ~$368
+
+
+def test_an_mcp_batch_reports_its_most_severe_verdict():
+    v = g.gate_mcp_call("mcp__aws-api__call_aws", {"cli_command": [
+        NEAR, "aws ec2 terminate-instances --instance-ids i-1"]})
+    assert v["decision"] == "ask"
 
 
 # ── what is deliberately not priced ───────────────────────────────────────────

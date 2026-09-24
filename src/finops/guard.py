@@ -13,12 +13,14 @@ Codex, run_hook below for Claude Code):
   gate_command(command, *, harness)                 a shell command
   gate_mcp_call(tool_name, arguments, *, harness)   an MCP tool call
 Both return None (no opinion: stay silent) or a verdict dict whose
-"decision" is "ask" or "deny"; see gate_command for the full shape.
+"decision" is "ask", "deny" or "warn"; see gate_command for the full shape.
 
 Verdict mapping (advisory, propose-only stays intact):
   escalate -> "ask"   the human sees the command plus the policy reason
   block    -> "deny"  the agent is told why and proposes something else
   allow    -> silent  zero friction, the command runs as normal
+  allow, but priced near the auto threshold
+           -> "warn"  runs as normal, with the figure shown alongside
 
 The hook never executes anything itself and it fails open: any internal error
 exits 0 so a guard bug can never break the user's agent.
@@ -37,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .policy import GATE_ALLOW, GATE_BLOCK, GATE_ESCALATE, evaluate_action_gate
+from .policy import GATE_ALLOW, GATE_BLOCK, GATE_ESCALATE, evaluate_action_gate, load_policy
 
 # ── Command classification ─────────────────────────────────────────────────────
 # Ordered: first match wins. Maps shell commands to the policy action types in
@@ -636,6 +638,12 @@ def check_budget_gate() -> dict[str, Any] | None:
         return None  # unreadable budget is not a reason to block anyone
 
 
+# A priced change allowed by policy but at or above this share of the auto
+# threshold gets a "warn": the same 80% line ai_budget draws for the agent's
+# own spend, applied to what the agent is about to launch.
+_WARN_AT = 0.80
+
+
 def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = None,
                  via: str = "", cwd: str | None = None) -> dict[str, Any] | None:
     """The policy verdict for one already-classified action, or None (allow).
@@ -697,6 +705,16 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
             return verdict("ask", "this mutates infrastructure in what looks like a "
                            f"PRODUCTION context.{cost} Confirm to proceed, or cost it "
                            "first (ask nable to estimate_change_cost).", est=est)
+        if est is not None:
+            # Allowed, but close to the line: say so without stopping anyone.
+            # "warn" never changes the permission flow; the hook shows the
+            # figure and the call proceeds exactly as an allow would.
+            cap = float(load_policy().get("max_auto_monthly_usd", 500.0))
+            monthly = est.get("monthly_usd") or 0.0
+            if cap > 0 and monthly >= _WARN_AT * cap:
+                return verdict("warn", f"{_cost_line(est)}, {monthly / cap:.0%} of your "
+                               f"${cap:,.0f}/mo auto threshold. Proceeding without a prompt.",
+                               est=est)
         return None
 
     # One-way doors escalate whatever they cost, but the human deciding on a
@@ -732,7 +750,9 @@ def gate_command(command: str, *, harness: str = "claude-code",
     Returns None when the guard has no opinion (not infra, or an in-policy
     reversible action), else a verdict dict:
 
-        decision            "ask" (a human confirms) or "deny" (do not run)
+        decision            "ask" (a human confirms), "deny" (do not run), or
+                            "warn" (proceed, but show the reason: a priced
+                            change allowed by policy yet near its threshold)
         reason              one line for the human, starting "nable guard"
         action_type, door   the policy.py vocabulary (e.g. delete_resource, one_way)
         monthly_delta_usd   present only when the action was priced
@@ -752,7 +772,7 @@ def gate_command(command: str, *, harness: str = "claude-code",
     return {**v, "harness": harness} if v else None
 
 
-_SEVERITY = {"deny": 2, "ask": 1}
+_SEVERITY = {"deny": 3, "ask": 2, "warn": 1}
 
 
 def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
@@ -818,6 +838,11 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
         else:
             return 0
         if not verdict:
+            return 0
+        if verdict["decision"] == "warn":
+            # No permissionDecision: the call goes through the normal
+            # permission flow untouched, with the figure shown alongside.
+            json.dump({"systemMessage": verdict["reason"]}, stdout)
             return 0
         json.dump({
             "hookSpecificOutput": {
