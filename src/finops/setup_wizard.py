@@ -2297,8 +2297,9 @@ def _run_guard(parsed) -> None:
     scope_label = "~/.claude/settings.json" if global_scope else ".claude/settings.json (this project)"
 
     if action == "hook":
-        # Machine path: Claude Code invokes this on every Bash tool call.
-        raise SystemExit(guard.run_hook())
+        # Machine path: the agent harness invokes this on every shell command.
+        from .guard_adapters import run_hook
+        raise SystemExit(run_hook(getattr(parsed, "guard_harness", None)))
 
     if action == "install":
         # No license check here on purpose. The guard is free forever (see the
@@ -2868,6 +2869,9 @@ def main(args: list[str] | None = None) -> None:
                          help="Install into ~/.claude/settings.json instead of this project")
     guard_p.add_argument("--command", dest="guard_command", default="",
                          help="With 'check': a shell command to classify against your policy")
+    guard_p.add_argument("--harness", dest="guard_harness", choices=["claude", "cursor", "codex"],
+                         default=None,
+                         help="With 'hook': the payload format (detected when omitted)")
 
     iam_p = sub.add_parser("iam-template", help="Print the least-privilege IAM policy / CloudFormation nable needs")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
@@ -2887,11 +2891,13 @@ def main(args: list[str] | None = None) -> None:
     if not hasattr(parsed, "key"):
         parsed.key = ""
 
-    # The guard hook is a machine protocol: Claude Code parses this process's
-    # stdout as JSON on every Bash call, so it must run before any banner.
+    # The guard hook is a machine protocol: the agent harness parses this
+    # process's stdout as JSON on every shell call, so it must run before any
+    # banner. guard_adapters answers Cursor and Codex and hands Claude Code
+    # payloads to guard.run_hook unchanged.
     if parsed.cmd == "guard" and getattr(parsed, "guard_action", "") == "hook":
-        from .guard import run_hook
-        raise SystemExit(run_hook())
+        from .guard_adapters import run_hook
+        raise SystemExit(run_hook(getattr(parsed, "guard_harness", None)))
 
     # Answer commands own their whole output: no setup banner ahead of `scan`,
     # its branded first line must be the first thing on screen (and in --json
