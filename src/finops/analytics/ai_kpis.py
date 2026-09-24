@@ -10,6 +10,8 @@ import logging
 import math
 from typing import Any
 
+from ..llm_prices import price_for
+
 log = logging.getLogger(__name__)
 
 # Max context window sizes (tokens) per model — used for utilisation analysis
@@ -52,8 +54,6 @@ _CONTEXT_WINDOWS: dict[str, int] = {
     "_default":                  128_000,
 }
 
-# Anthropic cache pricing: cache reads cost ~10% of normal input
-_CACHE_READ_DISCOUNT = 0.10
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +71,10 @@ def cache_hit_rate(anthropic_data: dict[str, Any]) -> dict[str, Any]:
 
       hit_rate = cache_reads / (cache_reads + fresh_input_tokens)
 
-    Also estimates savings: cache reads cost 10% of normal input price.
+    Also estimates savings: what the cache reads would have cost as fresh input,
+    less what they cost as reads, at each model's rates from llm_prices (a read is
+    0.1x input on most Claude models, 0.05x on Opus 5.5, 0.025x on Fable 5.1). A
+    model without a confirmed price adds no savings and is listed instead.
 
     Parameters
     ----------
@@ -86,6 +89,7 @@ def cache_hit_rate(anthropic_data: dict[str, Any]) -> dict[str, Any]:
         fresh_input_tokens:   int
         hit_rate_pct:         float   (0–100)
         estimated_savings_usd: float
+        unpriced_models:      list[str]   (only when a model had no price)
         grade:                "A" | "B" | "C" | "D" | "F"
         recommendation:       str
     }
@@ -96,6 +100,7 @@ def cache_hit_rate(anthropic_data: dict[str, Any]) -> dict[str, Any]:
     total_cache_create = 0
     total_fresh_input  = 0
     savings_usd        = 0.0
+    unpriced: list[str] = []
 
     for model, tok in tokens.items():
         reads   = tok.get("cache_read_input_tokens", 0)
@@ -106,17 +111,14 @@ def cache_hit_rate(anthropic_data: dict[str, Any]) -> dict[str, Any]:
         total_cache_create += creates
         total_fresh_input  += fresh
 
-        # Estimate savings from cache reads
-        try:
-            from ..connectors.saas.anthropic_usage import _MODEL_PRICING
-            pricing     = _MODEL_PRICING.get(model, {"input": 3.00, "output": 15.00})
-            input_price = pricing["input"]  # per 1M tokens
-        except Exception:
-            input_price = 3.00
-
-        # Full price would have been: reads * input_price / 1M
-        # We paid:                    reads * input_price * 0.10 / 1M
-        savings_usd += reads / 1_000_000 * input_price * (1 - _CACHE_READ_DISCOUNT)
+        # Estimate savings from cache reads: full input price less the read price.
+        price = price_for(model)
+        if price is None:
+            if reads:
+                unpriced.append(model)
+            continue
+        read_price = price.cache_read if price.cache_read is not None else price.input
+        savings_usd += reads / 1_000_000 * (price.input - read_price)
 
     denominator = total_cache_reads + total_fresh_input
     hit_rate    = (total_cache_reads / denominator * 100) if denominator > 0 else 0.0
@@ -147,7 +149,7 @@ def cache_hit_rate(anthropic_data: dict[str, Any]) -> dict[str, Any]:
             "cached tokens."
         )
 
-    return {
+    out = {
         "cache_reads":           total_cache_reads,
         "cache_creations":       total_cache_create,
         "fresh_input_tokens":    total_fresh_input,
@@ -156,6 +158,9 @@ def cache_hit_rate(anthropic_data: dict[str, Any]) -> dict[str, Any]:
         "grade":                 grade,
         "recommendation":        rec,
     }
+    if unpriced:
+        out["unpriced_models"] = unpriced
+    return out
 
 
 # ---------------------------------------------------------------------------

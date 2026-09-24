@@ -64,7 +64,6 @@ _MONEYISH = re.compile(
 # Remove an entry in the same commit that fixes its site: a strict ratchet fails
 # on stale entries too, so leaving one behind is caught rather than forgotten.
 KNOWN: set[tuple[str, str]] = {
-    ("analytics/ai_kpis.py", "input_price"),
     ("focus/translators/generic.py", "_amount"),
     ("focus/translators/llm.py", "amount"),
     ("recommendations/commitments.py", "_ec2_spend_for_tag"),
