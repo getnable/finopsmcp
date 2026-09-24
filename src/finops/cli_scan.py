@@ -818,6 +818,21 @@ def run(args) -> int:
         from .scan_assembler import gather_extra_providers
         print(_dim("no AWS credentials found · scanning your other connected providers"), file=out)
         blocks, abandoned = gather_extra_providers(_fams, spend=want_spend)
+        if not any(b.status in ("ok", "no_data") for b in blocks):
+            # Nothing answered. The common case: a profile-based account in
+            # accounts.yaml puts "aws" (and so "llm") in connected_families with
+            # no usable credentials behind it, the AI block drops itself as a
+            # false positive, and the scan used to exit 0 with no providers and
+            # no findings: a clean result for an account nothing was read from.
+            for b in blocks:
+                _render_extra(out, b)
+            code = _fail(out, EXIT_NO_CREDS, [
+                "no AWS credentials found, and no other connected provider answered",
+                "  looked in: env vars, ~/.aws/credentials, ~/.aws/config (SSO), instance metadata",
+                "  fix: `aws configure sso` (company SSO) or `aws configure` (access key)",
+                "  then: `nable connect` waits and connects the moment they appear",
+            ], "no-creds", t0, props={"n_extra": len(blocks)})
+            return _finish(code, abandoned)
         _render(out, None, None, demo=False, ce_denied=False, extra_blocks=blocks)
         if as_json:
             print(json.dumps(_json_payload(
