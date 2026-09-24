@@ -17,6 +17,9 @@ Optional env vars:
 
 from __future__ import annotations
 
+import csv
+import io
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -25,6 +28,11 @@ from typing import Any
 import httpx
 
 from .base import BaseConnector, CostEntry, CostSummary
+
+log = logging.getLogger(__name__)
+
+# Jobs API runs/list accepts at most 25 runs per page.
+_RUNS_PAGE_LIMIT = 25
 
 # ── Typing helpers ─────────────────────────────────────────────────────────────
 
@@ -118,6 +126,17 @@ def _ms_to_hours(ms: int) -> float:
     return ms / 3_600_000
 
 
+def _raise_for_status(r: httpx.Response, what: str) -> None:
+    """A failed list call is an error, not an empty workspace billed at $0."""
+    if r.status_code != 200:
+        raise RuntimeError(f"Databricks {what} failed: HTTP {r.status_code}: {r.text[:300]}")
+
+
+# Suffix on every service the cluster/run fallback produces. That path prices
+# node-type guesses at a flat DBU rate; the label keeps it from reading as the bill.
+_ESTIMATED = " (estimated)"
+
+
 class DatabricksConnector(BaseConnector):
     """
     Connects to one Databricks workspace via REST API.
@@ -184,23 +203,15 @@ class DatabricksConnector(BaseConnector):
         account-level Billable Usage API is not available.
         """
         if not await self.is_configured():
-            return CostSummary(
-                provider="databricks",
-                start_date=start_date,
-                end_date=end_date,
-                total_usd=0.0,
-                by_service={},
-                by_account={},
-                by_region={},
-                entries=[],
-            )
+            raise RuntimeError(
+                "Databricks is not configured. Set DATABRICKS_HOST and DATABRICKS_TOKEN.")
 
         try:
             summary = await self._try_billable_usage_api(start_date, end_date)
             if summary:
                 return summary
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Databricks billable usage download failed, estimating instead: %s", e)
 
         # Fall back to estimating from cluster/job data
         return await self._estimated_costs_from_clusters(start_date, end_date)
@@ -252,33 +263,42 @@ class DatabricksConnector(BaseConnector):
             if r.status_code != 200:
                 return None
 
-        # Response is CSV: workspace_id, sku_name, cloud, usage_start_time,
-        # usage_end_time, usage_quantity, usage_unit, usage_metadata.*
-        lines = r.text.strip().split("\n")
-        if len(lines) < 2:
+        # Response is the billable usage log CSV: workspaceId, timestamp (end of
+        # the usage hour), clusterId, clusterName, clusterNodeType,
+        # clusterOwnerUserId, clusterCustomTags, sku, dbus, machineHours,
+        # clusterOwnerUserName, tags. The tag columns are quoted JSON with commas
+        # inside, so this needs a real CSV parser: split(",") shifted every
+        # column after them. The system-table names (sku_name, usage_quantity,
+        # workspace_id, usage_start_time) are accepted too.
+        reader = csv.DictReader(io.StringIO(r.text))
+        if not reader.fieldnames:
             return None
 
-        headers = [h.strip() for h in lines[0].split(",")]
-
-        def col(row: list[str], name: str) -> str:
-            try:
-                return row[headers.index(name)].strip().strip('"')
-            except (ValueError, IndexError):
-                return ""
+        def col(row: dict[str, str], *names: str) -> str:
+            for name in names:
+                v = (row.get(name) or "").strip()
+                if v:
+                    return v
+            return ""
 
         entries: list[CostEntry] = []
         by_service: dict[str, float] = {}
         by_account: dict[str, float] = {}
         total = 0.0
 
-        for line in lines[1:]:
-            if not line.strip():
+        for row in reader:
+            # The download is whole months; keep only the requested days.
+            ts = col(row, "timestamp", "usage_start_time", "usage_date")
+            try:
+                day = date.fromisoformat(ts[:10])
+            except ValueError:
                 continue
-            row = line.split(",")
-            sku = col(row, "sku_name") or "DATABRICKS_UNKNOWN"
-            quantity = float(col(row, "usage_quantity") or 0)
+            if day < start_date or day > end_date:
+                continue
+            sku = col(row, "sku", "sku_name") or "DATABRICKS_UNKNOWN"
+            quantity = float(col(row, "dbus", "usage_quantity") or 0)
             cost = quantity * self._dbu_price
-            workspace = col(row, "workspace_id") or "workspace"
+            workspace = col(row, "workspaceId", "workspace_id") or "workspace"
             total += cost
             by_service[sku] = by_service.get(sku, 0.0) + cost
             by_account[workspace] = by_account.get(workspace, 0.0) + cost
@@ -287,7 +307,7 @@ class DatabricksConnector(BaseConnector):
                 account_id=workspace,
                 account_name=workspace,
                 service=sku,
-                region=col(row, "cloud") or "",
+                region=col(row, "cloud"),
                 amount=cost,
                 metadata={"dbu": quantity, "sku": sku},
             ))
@@ -340,18 +360,20 @@ class DatabricksConnector(BaseConnector):
             mult = _CLUSTER_TYPE_DBU_MULTIPLIER.get("JOB", 0.15)
             cost = dbu * mult * self._dbu_price
             job_name = run.get("run_name", str(run.get("job_id", "unknown")))
+            svc = "Jobs" + _ESTIMATED
             total += cost
-            by_service["Jobs"] = by_service.get("Jobs", 0.0) + cost
+            by_service[svc] = by_service.get(svc, 0.0) + cost
             by_account["workspace"] = by_account.get("workspace", 0.0) + cost
             entries.append(CostEntry(
                 provider="databricks",
                 account_id="workspace",
                 account_name=self._host.replace("https://", ""),
-                service="Jobs",
+                service=svc,
                 region="",
                 amount=cost,
                 tags=run.get("run_tags", {}),
-                metadata={"job_id": run.get("job_id"), "run_id": run.get("run_id"), "dbu": dbu},
+                metadata={"job_id": run.get("job_id"), "run_id": run.get("run_id"), "dbu": dbu,
+                          "estimated": True},
             ))
 
         # Cost from all-purpose / interactive clusters (estimate from uptime)
@@ -376,7 +398,7 @@ class DatabricksConnector(BaseConnector):
             cost = dbu * mult * self._dbu_price
             if cost < 0.01:
                 continue
-            svc = "All-Purpose Compute"
+            svc = "All-Purpose Compute" + _ESTIMATED
             total += cost
             by_service[svc] = by_service.get(svc, 0.0) + cost
             by_account["workspace"] = by_account.get("workspace", 0.0) + cost
@@ -392,6 +414,7 @@ class DatabricksConnector(BaseConnector):
                     "cluster_id": cluster["cluster_id"],
                     "cluster_name": cluster.get("cluster_name", ""),
                     "dbu": dbu,
+                    "estimated": True,
                 },
             ))
 
@@ -477,9 +500,8 @@ class DatabricksConnector(BaseConnector):
 
     async def _list_clusters(self, client: httpx.AsyncClient) -> list[dict]:
         r = await client.get(self._url("2.0/clusters/list"), headers=self._headers())
-        if r.status_code == 200:
-            return r.json().get("clusters", [])
-        return []
+        _raise_for_status(r, "clusters/list")
+        return r.json().get("clusters", [])
 
     async def _list_jobs(self, client: httpx.AsyncClient) -> list[dict]:
         jobs = []
@@ -513,7 +535,7 @@ class DatabricksConnector(BaseConnector):
         while True:
             params: dict[str, Any] = {
                 "completed_only": "true",
-                "limit": 100,
+                "limit": _RUNS_PAGE_LIMIT,
                 "start_time_from": start_ms,
                 "start_time_to": end_ms,
             }
@@ -525,8 +547,7 @@ class DatabricksConnector(BaseConnector):
                 headers=self._headers(),
                 params=params,
             )
-            if r.status_code != 200:
-                break
+            _raise_for_status(r, "jobs/runs/list")
             data = r.json()
             runs.extend(data.get("runs", []))
             page_token = data.get("next_page_token")

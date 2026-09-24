@@ -5,7 +5,7 @@ import os
 from datetime import date, datetime, timezone
 from typing import Any
 
-from .base import BaseConnector, CostEntry, CostSummary
+from .base import BaseConnector, CostEntry, CostSummary, combined_currency
 
 # Error markers that mean "the session expired, log back in", across SSO,
 # MFA/session tokens, and an empty credential chain. Matched against both the
@@ -251,6 +251,7 @@ class AWSConnector(BaseConnector):
                         service=service,
                         region=region,
                         amount=amount,
+                        currency=unit or "USD",
                     )
                 )
 
@@ -317,6 +318,7 @@ class AWSConnector(BaseConnector):
         )
 
         _had_results = False
+        _parts: list[CostSummary] = []
         for role_arn in targets:
             # to_thread. Both of these are synchronous botocore calls and both
             # reach the network: _make_client does sts:AssumeRole when a role ARN
@@ -399,6 +401,11 @@ class AWSConnector(BaseConnector):
             for k, v in summary.by_region.items():
                 merged.by_region[k] = merged.by_region.get(k, 0.0) + v
             merged.entries.extend(summary.entries)
+            _parts.append(summary)
+
+        # Each account reports in its own billing currency; a JPY account must
+        # not come out of the merge labelled USD.
+        merged.currency = combined_currency(_parts)
 
         # Zero-spend only if CE returned rows across every account but the real
         # merged total is 0. Checked against the built total (which sums grouped

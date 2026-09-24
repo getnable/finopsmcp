@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import os
 from datetime import date
 from typing import Any
@@ -12,8 +13,10 @@ class SnowflakeConnector(BaseConnector):
     Returns actual credits consumed from ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY.
 
     Dollar conversion ONLY happens when SNOWFLAKE_CREDIT_PRICE is explicitly set
-    by the user (i.e. they know their contract rate). Without it we report credits,
-    not invented dollar amounts.
+    by the user (i.e. they know their contract rate). Without it get_costs raises
+    with the credits consumed rather than reporting an invented (or zero) dollar
+    amount. Storage is priced separately, per TB-month, and is included when
+    SNOWFLAKE_STORAGE_PRICE_PER_TB is set to the contract storage rate.
 
     NOTE: Every query nable runs against Snowflake consumes warehouse compute credits.
     Each cost query is a single SQL statement against ACCOUNT_USAGE views, which are
@@ -34,6 +37,8 @@ class SnowflakeConnector(BaseConnector):
         # Only set if the user knows their actual contract rate
         raw = os.getenv("SNOWFLAKE_CREDIT_PRICE", "")
         self._credit_price: float | None = float(raw) if raw else None
+        raw = os.getenv("SNOWFLAKE_STORAGE_PRICE_PER_TB", "")
+        self._storage_price_tb: float | None = float(raw) if raw else None
 
     async def is_configured(self) -> bool:
         has_auth = bool(self._password or self._private_key_path)
@@ -81,35 +86,42 @@ class SnowflakeConnector(BaseConnector):
             """, (start_date.isoformat(), end_date.isoformat()))
             wh_rows = cur.fetchall()
 
-            cur.execute("""
-                SELECT
-                    AVG(STORAGE_BYTES)   / POWER(1024,4) AS table_tb,
-                    AVG(STAGE_BYTES)     / POWER(1024,4) AS stage_tb,
-                    AVG(FAILSAFE_BYTES)  / POWER(1024,4) AS failsafe_tb
-                FROM SNOWFLAKE.ACCOUNT_USAGE.STORAGE_USAGE
-                WHERE USAGE_DATE >= %s AND USAGE_DATE <= %s
-            """, (start_date.isoformat(), end_date.isoformat()))
-            storage_row = cur.fetchone()
+            storage_rows: list = []
+            if self._storage_price_tb is not None:
+                # Per day, because storage bills on the daily average over each
+                # calendar month: a day's TB costs rate / days-in-that-month.
+                cur.execute("""
+                    SELECT
+                        USAGE_DATE,
+                        (STORAGE_BYTES + STAGE_BYTES + FAILSAFE_BYTES) / POWER(1024,4) AS total_tb
+                    FROM SNOWFLAKE.ACCOUNT_USAGE.STORAGE_USAGE
+                    WHERE USAGE_DATE >= %s AND USAGE_DATE <= %s
+                """, (start_date.isoformat(), end_date.isoformat()))
+                storage_rows = cur.fetchall()
         finally:
             conn.close()
+
+        if self._credit_price is None:
+            # Unpriced credits are not $0. Contributing 0 USD here made 15,000
+            # credits of warehouse spend render as $0.00 in the cost summary.
+            credits_total = sum(float(r[1] or 0) for r in wh_rows)
+            raise RuntimeError(
+                f"Snowflake used {credits_total:,.2f} credits from {start_date} to "
+                f"{end_date}, but SNOWFLAKE_CREDIT_PRICE is not set, so nable cannot "
+                f"express that in USD. Set SNOWFLAKE_CREDIT_PRICE to your contract "
+                f"price per credit. This is a missing rate, not a finding of zero spend."
+            )
 
         entries: list[CostEntry] = []
         by_service: dict[str, float] = {}
         total = 0.0
 
-        has_price = self._credit_price is not None
-
         for row in wh_rows:
             wh_name, credits = row[0], float(row[1] or 0)
             svc = f"Warehouse: {wh_name}"
-            if has_price:
-                amount = credits * self._credit_price  # type: ignore[operator]
-                total += amount
-                by_service[svc] = by_service.get(svc, 0.0) + amount
-            else:
-                # No dollar amount — store credits as metadata, amount=0
-                amount = 0.0
-                by_service[svc] = 0.0
+            amount = credits * self._credit_price
+            total += amount
+            by_service[svc] = by_service.get(svc, 0.0) + amount
             entries.append(CostEntry(
                 provider="snowflake",
                 account_id=self._account,
@@ -119,23 +131,27 @@ class SnowflakeConnector(BaseConnector):
                 amount=amount,
                 metadata={
                     "credits_consumed": credits,
-                    "cost_source": "user_contract_rate" if has_price else "not_available",
-                    "note": "" if has_price else "Set SNOWFLAKE_CREDIT_PRICE to your contract rate for USD amounts",
+                    "cost_source": "user_contract_rate",
                 },
             ))
 
-        if storage_row and has_price:
-            # Only report storage cost if we have a reliable price signal
-            # $23/TB/month is list price — skip if user hasn't confirmed their rate
-            # We intentionally leave storage cost out without a user-supplied price
-            pass
-
-        meta: dict[str, Any] = {"credits_only": not has_price}
-        if not has_price:
-            meta["note"] = (
-                "No SNOWFLAKE_CREDIT_PRICE set. "
-                "Credits consumed are in metadata. Set your contract rate for USD amounts."
-            )
+        if storage_rows:
+            storage = 0.0
+            for usage_date, tb in storage_rows:
+                d = usage_date if isinstance(usage_date, date) else date.fromisoformat(str(usage_date)[:10])
+                days = calendar.monthrange(d.year, d.month)[1]
+                storage += float(tb or 0) * self._storage_price_tb / days  # type: ignore[operator]
+            total += storage
+            by_service["Storage"] = by_service.get("Storage", 0.0) + storage
+            entries.append(CostEntry(
+                provider="snowflake",
+                account_id=self._account,
+                account_name=self._account,
+                service="Storage",
+                region="",
+                amount=storage,
+                metadata={"cost_source": "user_contract_rate", "storage_days": len(storage_rows)},
+            ))
 
         return CostSummary(
             provider="snowflake",
@@ -156,8 +172,8 @@ class SnowflakeConnector(BaseConnector):
     ) -> list:
         """Return Snowflake cost as FOCUS 1.2 records (warehouse compute as Database usage).
 
-        Credits consumed ride along in each record's Tags, so the data is complete
-        even when no contract credit price is set and the dollar amount is 0.
+        Credits consumed ride along in each record's Tags. Without a contract
+        credit price get_costs raises, so no record is ever emitted at $0.
         """
         from ...focus.translators.generic import saas_focus_records
 

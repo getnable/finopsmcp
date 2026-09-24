@@ -17,6 +17,7 @@ Required env vars:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date
 from typing import Any
 
@@ -28,6 +29,18 @@ _MGMT_BASE    = "https://management.azure.com"
 _LOGIN_BASE   = "https://login.microsoftonline.com"
 _COST_API_VER = "2023-11-01"
 _CAP_API_VER  = "2023-05-01"
+
+# Cost Management throttles hard (429) and says how long to wait. Retry a few
+# times with a capped wait, then fail loudly rather than return a short answer.
+_MAX_THROTTLE_RETRIES = 4
+_MAX_THROTTLE_WAIT_S  = 30.0
+_RETRY_AFTER_HEADERS  = (
+    "x-ms-ratelimit-microsoft.costmanagement-qpu-retry-after",
+    "x-ms-ratelimit-microsoft.costmanagement-entity-retry-after",
+    "x-ms-ratelimit-microsoft.costmanagement-tenant-retry-after",
+    "x-ms-ratelimit-microsoft.costmanagement-client-retry-after",
+    "retry-after",
+)
 
 
 # ── configuration ─────────────────────────────────────────────────────────────
@@ -105,6 +118,36 @@ def _auth_headers(token: str) -> dict[str, str]:
 
 # ── internal query helpers ────────────────────────────────────────────────────
 
+def _throttle_wait(resp: Any, attempt: int) -> float:
+    """Seconds to wait before retrying a 429, from Azure's headers if present."""
+    waits = []
+    for name in _RETRY_AFTER_HEADERS:
+        try:
+            waits.append(float(resp.headers.get(name)))
+        except (TypeError, ValueError):
+            continue
+    wait = max(waits) if waits else float(2 ** attempt)
+    return min(max(wait, 1.0), _MAX_THROTTLE_WAIT_S)
+
+
+def _post_query(httpx: Any, url: str, body: dict, headers: dict) -> dict:
+    """One Query API POST, retrying 429 with a bounded wait. Raises on failure."""
+    for attempt in range(_MAX_THROTTLE_RETRIES + 1):
+        resp = httpx.post(url, json=body, headers=headers, timeout=60)
+        if resp.status_code == 429 and attempt < _MAX_THROTTLE_RETRIES:
+            time.sleep(_throttle_wait(resp, attempt))
+            continue
+        if resp.status_code >= 400:
+            # The body carries Azure's error code (ExpiredAuthenticationToken,
+            # RBACAccessDenied, ...); keep it so callers can tell auth from data.
+            raise RuntimeError(
+                f"Azure Cost Management query failed: HTTP {resp.status_code}: "
+                f"{(resp.text or '')[:500]}"
+            )
+        return resp.json()
+    raise RuntimeError("Azure Cost Management query still throttled after retries")
+
+
 def _query_cost_management(
     token: str,
     subscription_id: str,
@@ -114,7 +157,9 @@ def _query_cost_management(
     POST to the Azure Cost Management Query API and handle pagination.
 
     Parses the columns-plus-rows response format into a list of row dicts.
-    Follows nextLink until all pages are consumed.
+    Follows nextLink until all pages are consumed. The Query API is POST-only,
+    so each nextLink is POSTed with the same body; a GET there fails, and that
+    failure used to end the loop with whatever had been read so far.
 
     Args:
         token: Valid Azure management bearer token.
@@ -123,6 +168,11 @@ def _query_cost_management(
 
     Returns:
         List of row dicts keyed by column name.
+
+    Raises:
+        RuntimeError: on any HTTP failure, including throttling that outlasts
+            the retries. A partial or empty answer is never returned as if it
+            were the whole bill.
     """
     try:
         import httpx
@@ -139,14 +189,7 @@ def _query_cost_management(
     columns: list[str] = []
 
     while url:
-        try:
-            resp = httpx.post(url, json=body, headers=headers, timeout=60)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as exc:
-            log.warning("Azure Cost Management query failed: %s", exc)
-            break
-
+        data = _post_query(httpx, url, body, headers)
         props = data.get("properties", data)
 
         # Parse columns on first page
@@ -159,21 +202,7 @@ def _query_cost_management(
         for row in props.get("rows", []):
             all_rows.append(dict(zip(columns, row)))
 
-        # Pagination
-        url = data.get("nextLink") or props.get("nextLink")
-        # For paginated requests, method switches to GET
-        if url:
-            try:
-                resp = httpx.get(url, headers=headers, timeout=60)
-                resp.raise_for_status()
-                data = resp.json()
-                props = data.get("properties", data)
-                for row in props.get("rows", []):
-                    all_rows.append(dict(zip(columns, row)))
-                url = data.get("nextLink") or props.get("nextLink")
-            except Exception as exc:
-                log.warning("Azure pagination request failed: %s", exc)
-                break
+        url = props.get("nextLink") or data.get("nextLink")
 
     return all_rows
 
@@ -278,6 +307,7 @@ def get_resource_costs(
     }
 
     all_rows: list[dict] = []
+    failed: dict[str, str] = {}
     for sub in subs:
         try:
             rows = _query_cost_management(token, sub, body)
@@ -286,6 +316,10 @@ def get_resource_costs(
             all_rows.extend(rows)
         except Exception as exc:
             log.warning("Azure resource cost query failed for sub %s: %s", sub, exc)
+            failed[sub] = str(exc)
+    if failed and len(failed) == len(subs):
+        return {**_error(f"Azure resource cost query failed: {next(iter(failed.values()))}"),
+                "failed_subscriptions": failed}
 
     # Parse and filter
     resources: list[dict] = []
@@ -309,7 +343,7 @@ def get_resource_costs(
     resources.sort(key=lambda r: r["cost_usd"], reverse=True)
     resources = resources[:limit]
 
-    return {
+    out = {
         "resources":        resources,
         "total_cost":       round(total_cost, 4),
         "total_resources":  len(resources),
@@ -317,6 +351,7 @@ def get_resource_costs(
         "period":           f"{start_date} to {end_date}",
         "source":           "azure_cost_management",
     }
+    return _mark_partial(out, failed)
 
 
 def get_tag_cost_breakdown(
@@ -375,12 +410,16 @@ def get_tag_cost_breakdown(
     }
 
     by_tag: dict[str, float] = {}
+    failed: dict[str, str] = {}
 
     for sub in subs:
         try:
             rows = _query_cost_management(token, sub, body)
             for row in rows:
-                tag_val = _str(row.get(tag_key) or row.get("TagKey") or "")
+                # A TagKey grouping returns TagKey (the key name, the same on
+                # every tagged row) and TagValue columns. Reading TagKey lumped
+                # every tagged resource under the key's own name.
+                tag_val = _str(row.get("TagValue") or "")
                 if not tag_val:
                     tag_val = "__untagged__"
                 cost = _float(row.get("Cost", row.get("totalCost", 0)))
@@ -390,16 +429,21 @@ def get_tag_cost_breakdown(
                 "Azure tag breakdown failed for sub %s tag %s: %s",
                 sub, tag_key, exc,
             )
+            failed[sub] = str(exc)
+    if failed and len(failed) == len(subs):
+        return {**_error(f"Azure tag breakdown failed: {next(iter(failed.values()))}"),
+                "failed_subscriptions": failed}
 
     untagged_cost = by_tag.get("__untagged__", 0.0)
 
-    return {
+    out = {
         "by_tag":           {k: v for k, v in sorted(by_tag.items(), key=lambda x: x[1], reverse=True)},
         "tag_key":          tag_key,
         "untagged_cost_usd": round(untagged_cost, 4),
         "period":           f"{start_date} to {end_date}",
         "source":           "azure_cost_management",
     }
+    return _mark_partial(out, failed)
 
 
 def get_reservation_utilization(
@@ -642,3 +686,11 @@ def _str(value: Any) -> str:
 
 def _error(message: str) -> dict[str, Any]:
     return {"error": message, "source": "azure_cost_management"}
+
+
+def _mark_partial(out: dict[str, Any], failed: dict[str, str]) -> dict[str, Any]:
+    """Label a result that is missing subscriptions, so it is never read as the whole bill."""
+    if failed:
+        out["partial"] = True
+        out["failed_subscriptions"] = failed
+    return out

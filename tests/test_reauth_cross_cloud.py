@@ -91,6 +91,7 @@ def test_gcp_connector_translates_expiry(monkeypatch):
 
     c = GCPConnector()
     c._billing_account_ids = ["01ABCD-XYZ"]
+    monkeypatch.setenv("GCP_BQ_BILLING_TABLE", "proj.billing.gcp_billing_export_v1")
 
     def _boom(*a, **k):
         raise RefreshError("invalid_grant: token has been expired or revoked")
