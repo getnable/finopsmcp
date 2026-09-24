@@ -136,7 +136,9 @@ def test_hash_key_different_for_different_keys():
     assert h1 != h2
 
 
-def test_profile_path_uses_env(monkeypatch):
+def test_profile_path_uses_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("finops.storage.db._DATA_DIR", None)
     monkeypatch.setenv("FINOPS_PROFILE", "govcloud")
     path = _audit_log_path()
     assert "profiles" in str(path)
@@ -144,8 +146,26 @@ def test_profile_path_uses_env(monkeypatch):
     assert str(path).endswith("audit.log")
 
 
-def test_no_profile_path_is_default(monkeypatch):
+def test_no_profile_path_is_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("finops.storage.db._DATA_DIR", None)
+    monkeypatch.delenv("FINOPS_DATA_DIR", raising=False)
     monkeypatch.delenv("FINOPS_PROFILE", raising=False)
     path = _audit_log_path()
     assert "profiles" not in str(path)
     assert str(path).endswith(".finops/audit.log")
+
+
+def test_audit_log_follows_data_dir_and_is_private(tmp_path, monkeypatch):
+    import stat
+    from finops.audit.logger import AuditLogger
+    monkeypatch.delenv("FINOPS_PROFILE", raising=False)
+    monkeypatch.delenv("FINOPS_NO_AUDIT", raising=False)
+    monkeypatch.setenv("FINOPS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr("finops.storage.db._DATA_DIR", None)
+    path = _audit_log_path()
+    assert path == tmp_path / "data" / "audit.log"
+    logger = AuditLogger()
+    logger._path = path
+    logger._write({"tool": "t"})
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600

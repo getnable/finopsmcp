@@ -2,8 +2,8 @@
 Immutable audit log for GovCloud compliance readiness.
 
 Writes append-only JSONL to:
-  ~/.finops/audit.log                         (solo mode)
-  ~/.finops/profiles/{profile}/audit.log      (if FINOPS_PROFILE is set)
+  <data dir>/audit.log, where the data dir is ~/.finops by default,
+  FINOPS_DATA_DIR when set, or ~/.finops/profiles/{profile} for FINOPS_PROFILE
 
 Disable with: FINOPS_NO_AUDIT=1
 """
@@ -26,11 +26,11 @@ _logger_instance: "AuditLogger | None" = None
 
 
 def _audit_log_path() -> Path:
-    profile = os.environ.get("FINOPS_PROFILE", "").strip()
-    base = Path.home() / ".finops"
-    if profile:
-        return base / "profiles" / profile / "audit.log"
-    return base / "audit.log"
+    # data_dir() already resolves FINOPS_PROFILE and FINOPS_DATA_DIR and keeps
+    # the directory 0700. Building ~/.finops here ignored FINOPS_DATA_DIR and
+    # created the directory under the umask (0755 on most systems).
+    from ..storage.db import data_dir
+    return data_dir() / "audit.log"
 
 
 def _hash_key(raw_key: str) -> str:
@@ -110,7 +110,9 @@ class AuditLogger:
         try:
             with _lock:
                 self._path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._path, "a", encoding="utf-8") as f:
+                # 0600 at creation: the log names tools and account IDs.
+                fd = os.open(self._path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+                with os.fdopen(fd, "a", encoding="utf-8") as f:
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except Exception as exc:
             log.warning("audit log write failed: %s", exc)

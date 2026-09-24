@@ -196,18 +196,18 @@
     },
     {
       "host": "us.i.posthog.com",
-      "purpose": "Product analytics — anonymous install telemetry (opt-out)",
+      "purpose": "Product analytics: anonymous install telemetry (opt-in, off unless the user agrees or sets NABLE_TELEMETRY=1)",
       "category": "telemetry",
       "required": false,
-      "disabled_by": "NABLE_NO_TELEMETRY=1 or FINOPS_AIRGAP=1",
+      "disabled_by": "NABLE_NO_TELEMETRY=1, DO_NOT_TRACK=1 or FINOPS_AIRGAP=1",
       "govcloud_equivalent": null
     },
     {
       "host": "pypi.org",
-      "purpose": "PyPI — version check for update notices (website only)",
+      "purpose": "PyPI: version check for the CLI update notice",
       "category": "optional",
       "required": false,
-      "disabled_by": "FINOPS_AIRGAP=1",
+      "disabled_by": "FINOPS_NO_UPDATE_CHECK=1, NABLE_NO_TELEMETRY=1, DO_NOT_TRACK=1 or FINOPS_AIRGAP=1",
       "govcloud_equivalent": null
     },
     {

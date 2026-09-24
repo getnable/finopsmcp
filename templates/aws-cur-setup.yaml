@@ -288,11 +288,20 @@ Resources:
                 Action:
                   - s3:GetObject
                   - s3:ListBucket
-                  - s3:PutObject
                   - s3:GetBucketLocation
                 Resource:
                   - !GetAtt CURBucket.Arn
                   - !Sub "${CURBucket.Arn}/*"
+
+              # Athena writes query results here. Write is scoped to this prefix
+              # so the reader role cannot overwrite the billing data itself.
+              - Sid: AthenaResultsWrite
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:AbortMultipartUpload
+                Resource:
+                  - !Sub "${CURBucket.Arn}/athena-results/*"
 
               # Athena — run queries against CUR
               - Sid: AthenaAccess

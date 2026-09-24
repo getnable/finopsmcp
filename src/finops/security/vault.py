@@ -9,6 +9,7 @@ Encrypted credential vault using Fernet symmetric encryption.
 from __future__ import annotations
 
 import base64
+import binascii
 import getpass
 import logging
 import os
@@ -58,6 +59,31 @@ def child_env(allow: Iterable[str] = (), base: Mapping[str, str] | None = None) 
         if key not in keep:
             env.pop(key, None)
     return env
+
+def _fernet_key_from_env(raw: str) -> bytes:
+    """Turn FINOPS_VAULT_KEY into a Fernet key, accepting both documented forms.
+
+    The original form is base64 of a Fernet key (decodes to 44 bytes), which
+    existing deployments use and must keep working. docker-compose.yml told
+    operators to generate `secrets.token_urlsafe(32)` instead: 32 raw bytes,
+    unpadded, which decoded to garbage and left the vault unavailable. Those 32
+    bytes are exactly Fernet key material, so they are accepted as such. A plain
+    Fernet key (also 32 bytes once decoded) lands in the same branch.
+    """
+    text = raw.strip()
+    try:
+        decoded = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("FINOPS_VAULT_KEY is not valid base64") from exc
+    if len(decoded) == 32:
+        return base64.urlsafe_b64encode(decoded)
+    if len(decoded) == 44:
+        return decoded
+    raise ValueError(
+        "FINOPS_VAULT_KEY must be 32 random bytes in URL-safe base64, e.g. "
+        'python3 -c "import secrets; print(secrets.token_urlsafe(32))"'
+    )
+
 
 _KEYRING_SERVICE_DEFAULT = "finops-mcp"
 _KEYRING_USER = "master-key"
@@ -430,7 +456,7 @@ class Vault:
         key = None
         raw_env = os.environ.get("FINOPS_VAULT_KEY", "")
         if raw_env:
-            key = base64.urlsafe_b64decode(raw_env.encode())
+            key = _fernet_key_from_env(raw_env)
 
         # 2. Key file (the silent fast path)
         if key is None and not keychain_only:

@@ -155,7 +155,7 @@ Cost {direction_word} of **{abs(pct):.1f}%** vs 28-day baseline
 - [ ] If expected, update the baseline tag/label
 
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if sev == "high" else "medium"
     labels = ["finops", "cost-anomaly", f"severity:{sev}"]
@@ -195,7 +195,7 @@ The recommended size maintains headroom while eliminating waste.
 - [ ] Update IaC (Terraform / CloudFormation) to new instance type
 {_UNTRUSTED_METADATA_NOTE}
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if monthly_savings > 500 else "medium"
     labels = ["finops", "rightsizing", "cost-savings"]
@@ -250,7 +250,7 @@ def _kubernetes_waste_ticket(finding: dict[str, Any]) -> tuple[str, str, str, li
 {action_items}
 {_UNTRUSTED_METADATA_NOTE}
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if monthly_waste > 1000 else "medium"
     labels = ["finops", "kubernetes", f"k8s-{kind.replace('_', '-')}"]
@@ -289,7 +289,7 @@ This ticket tracks remediation to bring the score above 60 (Grade C) within 30 d
 - [ ] Target: score ≥ 60 within 30 days
 
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if score < 40 else "medium"
     labels = ["finops", "scorecard", f"dimension:{dimension}", "needs-remediation"]
@@ -328,7 +328,7 @@ immediately — there's no break-even period.
 - [ ] Re-run commitment analysis in 7 days to confirm coverage improvement
 
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if monthly_uncovered > 5000 else "medium"
     labels = ["finops", "commitments", "cost-savings", "savings-plan"]
