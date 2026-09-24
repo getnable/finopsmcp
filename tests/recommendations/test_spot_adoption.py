@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from finops.analyzers.cloudwatch import GET_METRIC_DATA_ENV
 from finops.recommendations.spot_adoption import (
     SPOT_DISCOUNT,
     SPOT_INTERRUPTION_FREQ,
@@ -17,6 +18,13 @@ from finops.recommendations.spot_adoption import (
     _monthly_ondemand_cost,
     recommend_spot_adoption,
 )
+
+
+@pytest.fixture(autouse=True)
+def _free_path_unless_asked(monkeypatch):
+    """A developer shell with the GetMetricData opt-in set must not move these
+    reads onto the billed path, which the fakes here do not answer."""
+    monkeypatch.delenv(GET_METRIC_DATA_ENV, raising=False)
 
 
 # ── SPOT_DISCOUNT and SPOT_INTERRUPTION_FREQ maps ────────────────────────────
@@ -152,10 +160,11 @@ def test_get_cpu_variance_returns_zero_on_exception() -> None:
     assert variance == 0.0
 
 
-def test_batched_cpu_variance_reads_every_next_token_page() -> None:
-    """14 days of hourly points for 500 instances is more than one
-    GetMetricData answer holds. The spread must be of the whole series, not of
-    whichever page came back first."""
+def test_batched_cpu_variance_is_the_spread_of_the_whole_series() -> None:
+    """GetMetricStatistics answers at most 1,440 datapoints a call and 14 days
+    of hourly points is 336, so one call per instance returns the whole series.
+    CloudWatch hands the datapoints back in no particular order; the spread is
+    of all of them."""
     import statistics
     from datetime import datetime, timedelta, timezone
 
@@ -163,21 +172,19 @@ def test_batched_cpu_variance_reads_every_next_token_page() -> None:
 
     t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
     cw = MagicMock()
-    cw.get_metric_data.side_effect = [
-        {"MetricDataResults": [{
-            "Id": "q0", "StatusCode": "PartialData",
-            "Timestamps": [t0, t0 + timedelta(hours=1)], "Values": [10.0, 10.0],
-        }], "NextToken": "page-2"},
-        {"MetricDataResults": [{
-            "Id": "q0", "StatusCode": "Complete",
-            "Timestamps": [t0 + timedelta(hours=2), t0 + timedelta(hours=3)],
-            "Values": [90.0, 90.0],
-        }]},
-    ]
+    cw.get_metric_statistics.return_value = {"Datapoints": [
+        {"Timestamp": t0 + timedelta(hours=3), "Average": 90.0},
+        {"Timestamp": t0, "Average": 10.0},
+        {"Timestamp": t0 + timedelta(hours=2), "Average": 90.0},
+        {"Timestamp": t0 + timedelta(hours=1), "Average": 10.0},
+    ]}
 
     got = _batch_get_cpu_variance(cw, ["i-abc123"], days=14)
 
-    assert cw.get_metric_data.call_count == 2
+    assert cw.get_metric_statistics.call_count == 1
+    kw = cw.get_metric_statistics.call_args.kwargs
+    assert kw["Statistics"] == ["Average"] and kw["Period"] == 3600
+    assert (kw["EndTime"] - kw["StartTime"]).total_seconds() / kw["Period"] <= 1440
     assert got == {"i-abc123": pytest.approx(statistics.stdev([10.0, 10.0, 90.0, 90.0]))}
 
 
@@ -185,9 +192,15 @@ def test_batched_cpu_variance_is_zero_for_a_series_it_could_not_read() -> None:
     from finops.recommendations.spot_adoption import _batch_get_cpu_variance
 
     cw = MagicMock()
-    cw.get_metric_data.return_value = {"MetricDataResults": [
-        {"Id": "q0", "StatusCode": "Forbidden", "Timestamps": [], "Values": []},
-    ]}
+    cw.get_metric_statistics.side_effect = Exception("AccessDenied")
+    assert _batch_get_cpu_variance(cw, ["i-abc123"], days=14) == {"i-abc123": 0.0}
+
+
+def test_batched_cpu_variance_is_zero_for_an_empty_read() -> None:
+    from finops.recommendations.spot_adoption import _batch_get_cpu_variance
+
+    cw = MagicMock()
+    cw.get_metric_statistics.return_value = {"Datapoints": []}
     assert _batch_get_cpu_variance(cw, ["i-abc123"], days=14) == {"i-abc123": 0.0}
 
 
@@ -246,14 +259,8 @@ def _make_instance(
     return inst
 
 
-def _make_metric_data_response_empty(instance_ids: list[str]) -> dict:
-    """Return a get_metric_data response with no data points per instance."""
-    return {
-        "MetricDataResults": [
-            {"Id": f"q{i}", "Timestamps": [], "Values": []}
-            for i, _ in enumerate(instance_ids)
-        ]
-    }
+# A successful GetMetricStatistics read that found no datapoints.
+_EMPTY_READ: dict = {"Datapoints": []}
 
 
 def test_recommend_spot_skips_spot_instances() -> None:
@@ -273,7 +280,7 @@ def test_recommend_spot_skips_spot_instances() -> None:
         }
         ec2.get_paginator.return_value.paginate.return_value = _make_ec2_page([spot_inst])
         asg.get_paginator.return_value.paginate.return_value = [{"AutoScalingGroups": []}]
-        cw.get_metric_data.return_value = {"MetricDataResults": []}
+        cw.get_metric_statistics.return_value = _EMPTY_READ
 
         results = recommend_spot_adoption(regions=["us-east-1"])
     assert results == []
@@ -305,7 +312,7 @@ def test_recommend_spot_output_structure() -> None:
                 ]
             }
         ]
-        cw.get_metric_data.return_value = _make_metric_data_response_empty(["i-od123"])
+        cw.get_metric_statistics.return_value = _EMPTY_READ
 
         results = recommend_spot_adoption(regions=["us-east-1"])
 
@@ -341,9 +348,7 @@ def test_recommend_spot_sorted_by_savings_desc() -> None:
         }
         ec2.get_paginator.return_value.paginate.return_value = _make_ec2_page(instances)
         asg.get_paginator.return_value.paginate.return_value = [{"AutoScalingGroups": []}]
-        cw.get_metric_data.return_value = _make_metric_data_response_empty(
-            ["i-small", "i-large", "i-mid"]
-        )
+        cw.get_metric_statistics.return_value = _EMPTY_READ
 
         results = recommend_spot_adoption(regions=["us-east-1"])
 
@@ -369,10 +374,39 @@ def test_recommend_spot_prod_instance_not_recommended() -> None:
         }
         ec2.get_paginator.return_value.paginate.return_value = _make_ec2_page([inst])
         asg.get_paginator.return_value.paginate.return_value = [{"AutoScalingGroups": []}]
-        cw.get_metric_data.return_value = _make_metric_data_response_empty(["i-prod"])
+        cw.get_metric_statistics.return_value = _EMPTY_READ
 
         results = recommend_spot_adoption(regions=["us-east-1"])
 
     assert len(results) == 1
     assert results[0]["recommendation"] == "NOT_RECOMMENDED"
     assert results[0]["in_asg"] is False
+
+
+def test_recommend_spot_never_calls_get_metric_data() -> None:
+    """GetMetricData bills per metric with no free tier. The CPU reads behind a
+    spot recommendation are one free GetMetricStatistics call per instance,
+    and nothing billed."""
+    instances = [
+        _make_instance("i-a", "m5.large", env_tag="staging"),
+        _make_instance("i-b", "m5.xlarge", env_tag="dev"),
+        _make_instance("i-c", "c5.large", env_tag="prod"),
+    ]
+
+    with patch("finops.recommendations.spot_adoption.boto3") as mock_boto3:
+        ec2    = MagicMock()
+        cw     = MagicMock()
+        asg    = MagicMock()
+        mock_boto3.client.side_effect = lambda svc, **kw: {
+            "ec2": ec2, "cloudwatch": cw, "autoscaling": asg,
+        }[svc]
+
+        ec2.get_paginator.return_value.paginate.return_value = _make_ec2_page(instances)
+        asg.get_paginator.return_value.paginate.return_value = [{"AutoScalingGroups": []}]
+        cw.get_metric_statistics.return_value = _EMPTY_READ
+
+        results = recommend_spot_adoption(regions=["us-east-1"])
+
+    assert len(results) == 3
+    cw.get_metric_data.assert_not_called()
+    assert cw.get_metric_statistics.call_count == 3

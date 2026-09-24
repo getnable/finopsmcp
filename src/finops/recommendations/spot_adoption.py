@@ -104,11 +104,12 @@ def _batch_get_cpu_variance(
     days: int,
 ) -> dict[str, float]:
     """
-    Fetch hourly Average CPUUtilization for many instances, one get_metric_data
-    call per 500 plus any NextToken pages. Returns {instance_id: stddev}. 14 days
-    of hourly points for 500 instances is more than one answer holds, so reading
-    only the first page computed the spread of part of a series. A series that
-    could not be read counts as no variance, as before.
+    Fetch hourly Average CPUUtilization for many instances, one
+    GetMetricStatistics call per instance run concurrently, inside CloudWatch's
+    free request tier (GetMetricData only where the host opted in, see
+    analyzers.cloudwatch). Returns {instance_id: stddev}. The spread is of the
+    whole series, never of part of one. A series that could not be read, or
+    read empty, counts as no variance, as before.
     """
     if not instance_ids:
         return {}
@@ -116,13 +117,13 @@ def _batch_get_cpu_variance(
     end   = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
 
-    # This scan has always read through GetMetricData, which AWS bills per
-    # metric with no free tier. It stays that way here; the shared default is
-    # the free GetMetricStatistics path.
+    # GetMetricStatistics answers at most 1,440 datapoints a call, 60 days of
+    # hourly points. The scan passes _LOOKBACK_DAYS (14), which is 336, so one
+    # call holds the whole series.
     series = fetch_metric_values(cw_client, [
         MetricQuery(iid, "AWS/EC2", "CPUUtilization", (("InstanceId", iid),), "Average", 3600)
         for iid in instance_ids
-    ], start, end, use_get_metric_data=True)
+    ], start, end)
 
     out: dict[str, float] = {}
     for iid in instance_ids:
@@ -214,7 +215,7 @@ def _analyze_region(
     if not on_demand_instances:
         return []
 
-    # Single batched CloudWatch call for all instances
+    # One concurrent CloudWatch read for every instance
     instance_ids = [inst["InstanceId"] for inst in on_demand_instances]
     cpu_variance_by_id = _batch_get_cpu_variance(cw_client, instance_ids, _LOOKBACK_DAYS)
 

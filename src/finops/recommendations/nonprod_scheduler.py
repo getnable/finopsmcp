@@ -70,9 +70,11 @@ def _batch_get_hourly_cpu_max(
 ) -> dict[str, list[float]]:
     """
     Fetch per-hour Maximum CPUUtilization for the last _LOOKBACK_DAYS days for
-    many instances, one get_metric_data call per 500 plus any NextToken pages.
-    Returns {instance_id: [cpu_values]} oldest first. A series that could not
-    be read comes back empty, which the caller counts as "no data".
+    many instances, one GetMetricStatistics call per instance run concurrently,
+    inside CloudWatch's free request tier (GetMetricData only where the host
+    opted in, see analyzers.cloudwatch). Returns {instance_id: [cpu_values]}
+    oldest first. A series that could not be read comes back empty, which the
+    caller counts as "no data".
     """
     if not instance_ids:
         return {}
@@ -80,13 +82,13 @@ def _batch_get_hourly_cpu_max(
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=_LOOKBACK_DAYS)
 
-    # This scan has always read through GetMetricData, which AWS bills per
-    # metric with no free tier. It stays that way here; the shared default is
-    # the free GetMetricStatistics path.
+    # GetMetricStatistics answers at most 1,440 datapoints a call. Hourly over
+    # the 7-day lookback is 168, so one call holds the whole week and there is
+    # no page to miss.
     series = fetch_metric_values(cw_client, [
         MetricQuery(iid, "AWS/EC2", "CPUUtilization", (("InstanceId", iid),), "Maximum", 3600)
         for iid in instance_ids
-    ], start, end, use_get_metric_data=True)
+    ], start, end)
     return {iid: series.get(iid) or [] for iid in instance_ids}
 
 
@@ -162,7 +164,7 @@ async def identify_nonprod_resources(
             ec2 = boto3.client("ec2", region_name=region)
             cw = boto3.client("cloudwatch", region_name=region)
 
-            # Collect all non-prod instances first, then batch CloudWatch
+            # Collect all non-prod instances first, then read CloudWatch for all of them
             region_instances: list[dict] = []
             pag = ec2.get_paginator("describe_instances")
             for page in pag.paginate(
@@ -197,7 +199,7 @@ async def identify_nonprod_resources(
             if not region_instances:
                 return region_schedulable, region_assumed
 
-            # Single batched CloudWatch call for all instances in this region
+            # One concurrent CloudWatch read for every instance in this region
             instance_ids = [r["instance_id"] for r in region_instances]
             cpu_by_instance = _batch_get_hourly_cpu_max(cw, instance_ids)
 
@@ -244,7 +246,7 @@ async def identify_nonprod_resources(
             log.warning("Non-prod scan failed for region %s: %s", region, e)
         return region_schedulable, region_assumed
 
-    # Each region does an EC2 describe plus one batched CloudWatch call; run them
+    # Each region does an EC2 describe plus its CloudWatch reads; run them
     # concurrently so the scan costs the slowest region, not the sum of all regions.
     import asyncio
     per_region = await asyncio.gather(*[asyncio.to_thread(_scan_region, r) for r in regions])
