@@ -2106,12 +2106,17 @@ def _check_path_warning() -> None:
     if shutil.which("finops") is None:
         # The command is running (we got here), so find our own location
         finops_bin_dir = Path(sys.executable).parent
-        _warn(
-            f"The 'finops' command may not be in your PATH after install.\n"
+        from .welcome import amber
+        # stderr: this runs ahead of every command, `scan --json` included, and
+        # `uvx nable ...` is exactly the case where `finops` is not on PATH. On
+        # stdout it was the first line of what should have been a JSON document.
+        print(
+            f"  {amber('⚠')}  The 'finops' command may not be in your PATH after install.\n"
             f"  Your scripts directory: {finops_bin_dir}\n"
             f"  Add it to PATH with:\n"
             f"    export PATH=\"{finops_bin_dir}:$PATH\"\n"
-            f"  Or add that line to your ~/.zshrc / ~/.bashrc"
+            f"  Or add that line to your ~/.zshrc / ~/.bashrc",
+            file=sys.stderr,
         )
 
 
@@ -2895,8 +2900,12 @@ def main(args: list[str] | None = None) -> None:
     # output too: a policy verdict prefixed with a setup banner reads as a bug
     # on camera and in scripts (the `guard hook` machine path already bails
     # out above, before any output).
+    #
+    # stderr, not stdout: every other command's stdout may be a machine
+    # document too (`brief --json`, `ai-budget --json`), and a banner line
+    # ahead of it made that output unparseable. On a terminal it looks the same.
     if parsed.cmd not in ("scan", "guard"):
-        print("\n  nable setup: all credentials stay on your machine\n")
+        print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
         "aws": setup_aws_account,

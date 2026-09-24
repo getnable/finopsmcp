@@ -290,8 +290,8 @@ def test_the_banner_still_shows_for_setup_shaped_commands(capsys, monkeypatch):
         sw.main(["connect"])
     except SystemExit:
         pass
-    out = capsys.readouterr().out
-    assert "nable setup" in out
+    # stderr: stdout belongs to the command, which may be a --json document.
+    assert "nable setup" in capsys.readouterr().err
 
 
 def test_guard_try_shows_all_four_beats(capsys, monkeypatch):
