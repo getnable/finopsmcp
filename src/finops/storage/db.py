@@ -551,6 +551,8 @@ pending_actions = Table(
 Index("ix_cs_date_provider",  cost_snapshots.c.snapshot_date, cost_snapshots.c.provider)
 Index("ix_cs_date_service",   cost_snapshots.c.snapshot_date, cost_snapshots.c.service)
 Index("ix_cs_provider",       cost_snapshots.c.provider)
+# latest_captured_at reads the newest row; without this it sorted the whole table
+Index("ix_cs_captured_at",    cost_snapshots.c.captured_at)
 
 # attributed_costs: team budget checks and team cost queries
 Index("ix_ac_date_team",      attributed_costs.c.snapshot_date, attributed_costs.c.team)
@@ -607,6 +609,9 @@ Index("ix_keys_active",       api_keys.c.is_active)
 
 # report_subscriptions: scheduler filters by is_active
 Index("ix_rsub_active",       report_subscriptions.c.is_active)
+
+# kubernetes_costs: cost trends filter by a date range, optionally one cluster
+Index("ix_k8s_date_cluster",  kubernetes_costs.c.snapshot_date, kubernetes_costs.c.cluster)
 
 # cost_trends: trend queries filter by provider + service
 Index("ix_trends_prov_svc",   cost_trends.c.provider, cost_trends.c.service)
@@ -790,6 +795,12 @@ def _add_column_ddl(engine: Engine, table: str, column: str) -> str:
     return ddl
 
 
+# Indexes declared above that existing databases also need. Only non-unique
+# ones belong here: a unique index can fail on rows already stored, and needs a
+# dedupe step of its own like ux_anom_dedup.
+_LATE_INDEXES = ("ix_cs_captured_at", "ix_k8s_date_cluster")
+
+
 def _run_sqlite_migrations(engine: Engine) -> None:
     """Apply additive schema migrations. Runs for SQLite AND PostgreSQL.
 
@@ -896,6 +907,25 @@ def _run_sqlite_migrations(engine: Engine) -> None:
         except Exception as exc:
             conn.rollback()  # same reason as above
             log.warning("anomaly dedup index migration skipped: %s", exc)
+
+        # Plain indexes added after their table first shipped, for the same
+        # reason as the dedup index above: create_all builds indexes only for
+        # tables it creates. Looked up by name through the inspector and built
+        # from the model, so the DDL is right for either backend and a second
+        # run finds the index and does nothing.
+        for _name in _LATE_INDEXES:
+            _idx = next(ix for t in metadata.tables.values()
+                        for ix in t.indexes if ix.name == _name)
+            try:
+                if _name not in {
+                    ix["name"] for ix in inspect(engine).get_indexes(_idx.table.name)
+                }:
+                    _idx.create(conn)
+                    conn.commit()
+                    log.info("Migration: index %s created", _name)
+            except Exception as exc:
+                conn.rollback()  # same reason as above
+                log.warning("index %s migration skipped: %s", _name, exc)
 
         for _tbl, _col in (("budgets", "block_at_pct"),):
             try:
