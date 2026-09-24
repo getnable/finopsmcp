@@ -214,30 +214,64 @@ def store_attributed_cost(
 ) -> None:
     engine = get_engine()
     with engine.begin() as conn:
-        # Environment is part of the key: teamA/prod and teamA/dev on the same
-        # day are two rows, and leaving it out let the second replace the first.
-        conn.execute(
-            attributed_costs.delete().where(
-                and_(
-                    attributed_costs.c.provider == provider,
-                    attributed_costs.c.service == service,
-                    attributed_costs.c.account_id == account_id,
-                    attributed_costs.c.team == team,
-                    attributed_costs.c.environment == environment,
-                    attributed_costs.c.snapshot_date == snapshot_date.isoformat(),
-                )
+        _upsert_attributed(conn, provider, service, account_id, team, environment,
+                           snapshot_date.isoformat(), amount_usd)
+
+
+_AttrKey = tuple[str, str, str, str, str, str]
+
+
+def _upsert_attributed(conn, provider: str, service: str, account_id: str, team: str,
+                       environment: str, snapshot_date: str, amount_usd: float) -> None:
+    # Environment is part of the key: teamA/prod and teamA/dev on the same
+    # day are two rows, and leaving it out let the second replace the first.
+    conn.execute(
+        attributed_costs.delete().where(
+            and_(
+                attributed_costs.c.provider == provider,
+                attributed_costs.c.service == service,
+                attributed_costs.c.account_id == account_id,
+                attributed_costs.c.team == team,
+                attributed_costs.c.environment == environment,
+                attributed_costs.c.snapshot_date == snapshot_date,
             )
         )
-        conn.execute(attributed_costs.insert().values(
-            provider=provider,
-            service=service,
-            account_id=account_id,
-            team=team,
-            environment=environment,
-            snapshot_date=snapshot_date.isoformat(),
-            amount_usd=amount_usd,
-            captured_at=_now(),
-        ))
+    )
+    conn.execute(attributed_costs.insert().values(
+        provider=provider,
+        service=service,
+        account_id=account_id,
+        team=team,
+        environment=environment,
+        snapshot_date=snapshot_date,
+        amount_usd=amount_usd,
+        captured_at=_now(),
+    ))
+
+
+def store_attributed_costs(rows: list[dict[str, Any]]) -> int:
+    """Upsert many attributed-cost rows in ONE transaction. Returns rows written.
+
+    Rows that land on the same key are summed first, not written one after the
+    other: two tag values that alias to one team ("infra" and "platform-eng"
+    both meaning platform) are two slices of that team's spend, and upserting
+    them in turn kept only the last. One transaction, so a failure part way
+    through leaves the previous attribution in place instead of half of it.
+    Each row needs provider, service, account_id, team, environment,
+    snapshot_date (a date) and amount_usd.
+    """
+    totals: dict[_AttrKey, float] = {}
+    for r in rows:
+        key = (r["provider"], r["service"], r["account_id"], r["team"],
+               r["environment"], r["snapshot_date"].isoformat())
+        totals[key] = totals.get(key, 0.0) + float(r["amount_usd"])
+    if not totals:
+        return 0
+    engine = get_engine()
+    with engine.begin() as conn:
+        for key, amount in totals.items():
+            _upsert_attributed(conn, *key, amount)
+    return len(totals)
 
 
 def get_costs_by_team(

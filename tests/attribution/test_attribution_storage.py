@@ -171,3 +171,17 @@ def test_two_rule_keys_attribute_every_dollar_once(attribution_env, fake_aws):
     assert out["errors"] == {}
     assert out["attributed_by_tag_key"] == "team"
     assert _by_team_env(date(2026, 8, 1), date(2026, 8, 31)) == {("platform", ""): 300.0}
+
+
+def test_each_month_is_stored_at_its_own_date_and_nothing_overwrites(attribution_env, fake_aws):
+    """Every row was stored at the start date, so September's rows replaced
+    August's under the same key. Two tag values that alias to one team
+    (infra and platform-eng are both "platform") replaced each other too."""
+    import asyncio
+
+    fake_aws(_TWO_MONTHS)
+    out = asyncio.run(attribution_env.run_attribution_now("2026-08-01", "2026-10-01"))
+
+    assert out["errors"] == {}
+    assert _by_team_env(date(2026, 8, 1), date(2026, 8, 31)) == {("platform", ""): 300.0}
+    assert _by_team_env(date(2026, 9, 1), date(2026, 9, 30)) == {("platform", ""): 100.0}
