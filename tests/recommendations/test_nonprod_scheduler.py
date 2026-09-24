@@ -132,7 +132,7 @@ def _make_metric_data_response(instance_ids: list[str], cpu_values_per_instance:
     results = []
     for i, (iid, cpu_values) in enumerate(zip(instance_ids, cpu_values_per_instance)):
         timestamps = [base + timedelta(hours=j) for j in range(len(cpu_values))]
-        results.append({"Id": f"m{i}", "Timestamps": timestamps, "Values": cpu_values})
+        results.append({"Id": f"q{i}", "Timestamps": timestamps, "Values": cpu_values})
     return {"MetricDataResults": results}
 
 
@@ -244,7 +244,7 @@ class TestIdentifyNonprodResources:
         mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
 
         # No CloudWatch data
-        mock_cw.get_metric_data.return_value = {"MetricDataResults": [{"Id": "m0", "Timestamps": [], "Values": []}]}
+        mock_cw.get_metric_data.return_value = {"MetricDataResults": [{"Id": "q0", "Timestamps": [], "Values": []}]}
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -309,3 +309,42 @@ class TestIdentifyNonprodResources:
 
         assert result["total_instances"] == 1
         assert result["schedulable_instances"][0]["instance_id"] == "i-perf"
+
+    def test_every_next_token_page_is_read(self):
+        """CloudWatch caps a GetMetricData answer and hands back a NextToken for
+        the rest. Reading only the first page judged the instance on half its
+        week: here the first page is all idle nights and the second all busy
+        days, and the idle share is the whole week's, not the first page's."""
+        from datetime import timedelta
+
+        mock_boto3 = MagicMock()
+        mock_ec2 = MagicMock()
+        mock_cw = MagicMock()
+
+        dev_inst = _make_ec2_instance("i-dev1", "m5.large", "backend-dev", "dev")
+        page = {"Reservations": [{"Instances": [dev_inst]}]}
+        mock_ec2.get_paginator.return_value.paginate.return_value = [page]
+        mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
+
+        base = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
+        mock_cw.get_metric_data.side_effect = [
+            {"MetricDataResults": [{
+                "Id": "q0", "StatusCode": "PartialData",
+                "Timestamps": [base + timedelta(hours=84 + h) for h in range(84)],
+                "Values": [0.5] * 84,
+            }], "NextToken": "page-2"},
+            {"MetricDataResults": [{
+                "Id": "q0", "StatusCode": "Complete",
+                "Timestamps": [base + timedelta(hours=h) for h in range(84)],
+                "Values": [60.0] * 84,
+            }]},
+        ]
+
+        with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
+            result = self._run(
+                identify_nonprod_resources(aws_client=_make_aws_client(), regions=["us-east-1"])
+            )
+
+        assert mock_cw.get_metric_data.call_count == 2
+        assert mock_cw.get_metric_data.call_args.kwargs["NextToken"] == "page-2"
+        assert result["schedulable_instances"][0]["idle_hours_per_week"] == 84.0

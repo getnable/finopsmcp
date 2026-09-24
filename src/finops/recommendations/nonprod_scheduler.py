@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..analyzers.cloudwatch import MetricQuery, fetch_metric_values
 from .envelope import INFERRED, Finding
 
 log = logging.getLogger(__name__)
@@ -76,38 +77,15 @@ def _monthly_cost_estimate(instance_type: str) -> float:
     return round(hourly * _HOURS_PER_MONTH, 2)
 
 
-def _get_hourly_cpu_max(cw_client: Any, instance_id: str) -> list[float]:
-    """
-    Fetch per-hour Maximum CPUUtilization for the last _LOOKBACK_DAYS days.
-    Single-instance fallback used only when batching is not available.
-    """
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days=_LOOKBACK_DAYS)
-    try:
-        resp = cw_client.get_metric_statistics(
-            Namespace="AWS/EC2",
-            MetricName="CPUUtilization",
-            Dimensions=[{"Name": "InstanceId", "Value": instance_id}],
-            StartTime=start,
-            EndTime=end,
-            Period=3600,
-            Statistics=["Maximum"],
-        )
-        datapoints = resp.get("Datapoints", [])
-        return [dp["Maximum"] for dp in sorted(datapoints, key=lambda d: d["Timestamp"])]
-    except Exception as e:
-        log.debug("CloudWatch CPU fetch failed for %s: %s", instance_id, e)
-        return []
-
-
 def _batch_get_hourly_cpu_max(
     cw_client: Any,
     instance_ids: list[str],
 ) -> dict[str, list[float]]:
     """
-    Fetch per-hour Maximum CPUUtilization for multiple instances in one
-    get_metric_data call. Returns {instance_id: [cpu_values]}.
-    Chunks at 500 queries to stay within AWS API limits.
+    Fetch per-hour Maximum CPUUtilization for the last _LOOKBACK_DAYS days for
+    many instances, one get_metric_data call per 500 plus any NextToken pages.
+    Returns {instance_id: [cpu_values]} oldest first. A series that could not
+    be read comes back empty, which the caller counts as "no data".
     """
     if not instance_ids:
         return {}
@@ -115,44 +93,11 @@ def _batch_get_hourly_cpu_max(
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=_LOOKBACK_DAYS)
 
-    queries = [
-        {
-            "Id": f"m{i}",
-            "MetricStat": {
-                "Metric": {
-                    "Namespace": "AWS/EC2",
-                    "MetricName": "CPUUtilization",
-                    "Dimensions": [{"Name": "InstanceId", "Value": iid}],
-                },
-                "Period": 3600,
-                "Stat": "Maximum",
-            },
-            "ReturnData": True,
-        }
-        for i, iid in enumerate(instance_ids)
-    ]
-
-    results: dict[str, list[float]] = {iid: [] for iid in instance_ids}
-
-    try:
-        chunk_size = 500
-        for chunk_start in range(0, len(queries), chunk_size):
-            chunk = queries[chunk_start : chunk_start + chunk_size]
-            resp = cw_client.get_metric_data(
-                MetricDataQueries=chunk,
-                StartTime=start,
-                EndTime=end,
-            )
-            for r in resp.get("MetricDataResults", []):
-                idx = int(r["Id"][1:])
-                iid = instance_ids[idx]
-                # Values are paired with Timestamps; sort by timestamp
-                pairs = sorted(zip(r.get("Timestamps", []), r.get("Values", [])))
-                results[iid] = [v for _, v in pairs]
-    except Exception as exc:
-        log.warning("Batched CloudWatch get_metric_data failed, results may be empty: %s", exc)
-
-    return results
+    series = fetch_metric_values(cw_client, [
+        MetricQuery(iid, "AWS/EC2", "CPUUtilization", (("InstanceId", iid),), "Maximum", 3600)
+        for iid in instance_ids
+    ], start, end)
+    return {iid: series.get(iid) or [] for iid in instance_ids}
 
 
 def _idle_hours(cpu_samples: list[float]) -> int:
