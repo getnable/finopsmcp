@@ -437,11 +437,19 @@ def _load_account_names() -> dict[str, str]:
         return {}
 
 
-def top_spending_accounts(limit: int = 10, days_back: int = 30) -> list[dict[str, Any]]:
-    """Return the top N highest-spending accounts in the org."""
+def top_spending_accounts(limit: int = 10, days_back: int = 30) -> dict[str, Any]:
+    """The top N highest-spending accounts, with the summary's failure flags.
+
+    This used to return only the accounts list, so an org rollup that could
+    not read some accounts (partial, failed_accounts) or any account (error)
+    reached the tool as a short or empty list that looked complete.
+    """
     summary = org_cost_summary(days_back=days_back)
-    accounts = summary.get("accounts", [])
-    return accounts[:limit]
+    out: dict[str, Any] = {"top_accounts": summary.get("accounts", [])[:limit]}
+    for key in ("error", "partial", "failed_accounts"):
+        if summary.get(key):
+            out[key] = summary[key]
+    return out
 
 
 def account_anomalies(days_back: int = 30) -> list[dict[str, Any]]:

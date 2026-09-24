@@ -726,8 +726,7 @@ async def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dic
         return err
     try:
         from ..connectors.aws_org import top_spending_accounts
-        accounts = top_spending_accounts(limit=limit, days_back=days_back)
-        return {"top_accounts": accounts, "days_back": days_back}
+        return {**top_spending_accounts(limit=limit, days_back=days_back), "days_back": days_back}
     except Exception as e:
         return {"error": str(e)}
 

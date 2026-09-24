@@ -2934,7 +2934,10 @@ def main(args: list[str] | None = None) -> None:
             ("SNOWFLAKE_PASSWORD", "Password", True),
             ("SNOWFLAKE_WAREHOUSE", "Warehouse name (e.g. COMPUTE_WH)", False),
             ("SNOWFLAKE_ROLE", "Role (default: ACCOUNTADMIN)", False),
-            ("SNOWFLAKE_CREDIT_PRICE", "Credit price USD (your contract rate, optional)", False),
+            # Required for dollar figures: without it nable reports credits and
+            # asks for the rate rather than showing unpriced credits as $0.
+            ("SNOWFLAKE_CREDIT_PRICE", "Credit price USD (your contract rate; needed for $ figures)", False),
+            ("SNOWFLAKE_STORAGE_PRICE_PER_TB", "Storage price USD per TB-month (optional; storage is skipped without it)", False),
         ]),
         "mongodb": lambda: setup_saas_api_key("MongoDB Atlas", [
             ("MONGODB_ATLAS_PUBLIC_KEY", "Public Key", False),

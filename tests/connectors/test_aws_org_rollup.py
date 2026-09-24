@@ -176,3 +176,14 @@ def test_rollup_cache_is_keyed_by_credential(monkeypatch):
 
     assert calls["n"] == 2
     assert a["org_total_usd"] != b["org_total_usd"]
+
+
+def test_top_spending_accounts_keeps_the_partial_flags(monkeypatch):
+    from finops.connectors import aws_org
+    monkeypatch.setattr(aws_org, "org_cost_summary", lambda days_back=30: {
+        "accounts": [{"account_id": "a", "total_usd": 5.0}],
+        "partial": True, "failed_accounts": [{"account_id": "b", "error": "AccessDenied"}],
+    })
+    out = aws_org.top_spending_accounts(limit=5)
+    assert out["partial"] is True and out["failed_accounts"][0]["account_id"] == "b"
+    assert [a["account_id"] for a in out["top_accounts"]] == ["a"]
