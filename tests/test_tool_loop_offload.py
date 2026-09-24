@@ -55,7 +55,7 @@ class _Heartbeat:
             self.max_stall = max(self.max_stall, now - last - self._tick)
             last = now
 
-    async def __aenter__(self) -> "_Heartbeat":
+    async def __aenter__(self) -> _Heartbeat:
         # A full collection late in a suite run takes a few hundred ms, and the
         # heartbeat would charge that pause to the tool under test. The
         # assertion is about the tool holding the loop, not about the heap.
@@ -257,6 +257,7 @@ async def test_aws_is_configured_resolves_credentials_off_the_loop(monkeypatch):
     every cost tool. Azure and GCP already probe in a thread; AWS walked the
     botocore chain (IMDS off EC2) inline."""
     import botocore.session
+
     from finops.connectors.aws import AWSConnector
 
     class _SlowChain:
@@ -276,6 +277,7 @@ async def test_aws_is_configured_resolves_credentials_off_the_loop(monkeypatch):
 
 async def test_aws_is_configured_still_answers_false_without_credentials(monkeypatch):
     import botocore.session
+
     from finops.connectors.aws import AWSConnector
 
     class _EmptyChain:
@@ -325,7 +327,8 @@ def _block_get_textract_costs(monkeypatch):
 
 def _block_get_data_transfer_costs(monkeypatch):
     import boto3
-    import finops.analyzers.waste as waste
+
+    from finops.analyzers import waste
     monkeypatch.setattr(boto3, "client", _sleepy(_SlowBoto3Client()))
     monkeypatch.setattr(waste, "check_data_transfer_costs", lambda ce, **k: [])
     from finops.tools import aws
@@ -334,7 +337,8 @@ def _block_get_data_transfer_costs(monkeypatch):
 
 def _block_get_s3_incomplete_multipart_uploads(monkeypatch):
     import boto3
-    import finops.analyzers.waste as waste
+
+    from finops.analyzers import waste
     monkeypatch.setattr(boto3, "client", _sleepy(_SlowBoto3Client()))
     monkeypatch.setattr(waste, "check_s3_incomplete_multipart", lambda s3, **k: [])
     from finops.tools import aws_waste
@@ -361,7 +365,8 @@ def _block_get_org_cost_summary(monkeypatch):
 
 def _block_get_ecs_rightsizing_recommendations(monkeypatch):
     import boto3
-    import finops.analyzers.waste as waste
+
+    from finops.analyzers import waste
     from finops.tools import aws_waste
     monkeypatch.setattr(boto3, "client", _sleepy(_SlowBoto3Client()))
     monkeypatch.setattr(waste, "check_ecs_task_rightsizing", lambda *a, **k: [])
@@ -576,13 +581,9 @@ _BLOCKING_ALLOWED: dict[tuple[str, str, str], str] = {}
 
 def _callee(call: ast.Call) -> tuple[str, str]:
     """(dotted callee as written, its last component)."""
-    try:
-        dotted = ast.unparse(call.func)
-    except Exception:
-        dotted = ""
     f = call.func
     last = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
-    return dotted, last
+    return ast.unparse(f), last
 
 
 def _is_blocking(call: ast.Call) -> bool:

@@ -144,7 +144,7 @@ class _SurfacedFastMCP(FastMCP):
 # The event loop that dispatches tool calls, recorded by _instrumented_tool before
 # it hands a sync tool to a worker thread, so code on that thread can schedule
 # work back onto the loop (see _tool_surface_changed).
-_TOOL_LOOP: "asyncio.AbstractEventLoop | None" = None
+_TOOL_LOOP: asyncio.AbstractEventLoop | None = None
 
 
 def _tool_surface_changed() -> None:
@@ -332,6 +332,7 @@ def _instrumented_tool(*dargs, **dkwargs):
 
     def _wrap(fn):
         import functools
+        import inspect
         # There used to be an early `return fn` here for _EXTRA_TOOLS, which
         # skipped mcp.tool() entirely so those 26 were never registered at all.
         #
@@ -359,7 +360,6 @@ def _instrumented_tool(*dargs, **dkwargs):
         # _EXTRA_TOOLS itself stays: it is still the tier-driven list of what to
         # keep out of tools/list, now enforced in the ONE place that decides
         # what is advertised rather than in two places that disagree.
-        import inspect
         _is_coroutine_tool = inspect.iscoroutinefunction(fn)
 
         @functools.wraps(fn)
