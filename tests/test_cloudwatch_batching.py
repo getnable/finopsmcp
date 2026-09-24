@@ -38,6 +38,7 @@ from botocore.stub import ANY, Stubber
 from finops.analyzers.cloudwatch import (
     GET_METRIC_DATA_ENV,
     MetricQuery,
+    fetch_metric_points,
     fetch_metric_values,
 )
 
@@ -376,6 +377,22 @@ def test_a_client_that_is_not_boto_shaped_does_not_hang(batched):
     from unittest.mock import MagicMock
     assert fetch_metric_values(
         MagicMock(), [_q("a")], _T0, _ts(24), use_get_metric_data=batched) == {"a": None}
+
+
+@pytest.mark.parametrize("batched", [False, True])
+def test_points_keep_each_value_with_its_timestamp(batched):
+    """fetch_metric_points is fetch_metric_values with the timestamps kept, for
+    a caller that reports when a series was last published: the same order,
+    the same [] for a quiet series and the same None for an unread one."""
+    cw = _Metrics({("CPUUtilization", "i-1"): [3.0, 1.0, 2.0],
+                   ("CPUUtilization", "i-denied"): "Forbidden"})
+    queries = [_q("a", value="i-1"), _q("b", value="i-quiet"), _q("c", value="i-denied")]
+
+    got = fetch_metric_points(cw, queries, _T0, _ts(24), use_get_metric_data=batched)
+
+    assert got == {"a": [(_ts(0), 3.0), (_ts(1), 1.0), (_ts(2), 2.0)], "b": [], "c": None}
+    assert fetch_metric_values(cw, queries, _T0, _ts(24), use_get_metric_data=batched) == {
+        "a": [3.0, 1.0, 2.0], "b": [], "c": None}
 
 
 # ── the detectors ────────────────────────────────────────────────────────────
