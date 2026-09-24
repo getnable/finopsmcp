@@ -67,9 +67,11 @@ S3_LIST_PER_1000 = 0.005
 S3_GET_PER_1000 = 0.0004
 
 # CloudWatch GetMetricData, per METRIC requested (not per request: one call can
-# carry 500). The first million API requests a month are free, which no other
-# billing-data source offers, and it is why AWS/Billing EstimatedCharges is the
-# only "what has today cost so far" figure that does not put a meter on asking.
+# carry 500), with NO free tier. The free tier below covers the standard API
+# requests (GetMetricStatistics, ListMetrics and the like), not GetMetricData.
+# AWS Price List, AmazonCloudWatch offer file, us-east-1, checked 2026-09-24:
+# CW:GMD-Metrics is $0.01 per 1,000 metrics; CW:Requests is 1,000,000 free a
+# month (global), then $0.01 per 1,000.
 CLOUDWATCH_PER_1000_METRICS = 0.01
 CLOUDWATCH_FREE_REQUESTS_PER_MONTH = 1_000_000
 
