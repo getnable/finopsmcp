@@ -31,6 +31,41 @@ def _month_pair(today):
     return first_this, today, first_prev, last_prev, False
 
 
+# Cloud providers federate in-chat through their own connect_* MCP tool: no
+# terminal, no secret ever typed into the conversation.
+_CLOUD_CONNECT_TOOL = {"aws": "connect_aws", "azure": "connect_azure", "gcp": "connect_gcp"}
+
+# Every other provider needs a real credential, which the chat must never
+# collect (see nable_setup_status's hard rule against pasting a key into this
+# conversation), so the fix is the local `finops setup <slug>` command that
+# deep-links the key page and stores it in the vault. A registry key and its
+# CLI slug usually match; this maps the few that do not, and the one provider
+# (vertex) with no dedicated setup command of its own.
+_SAAS_CLI_SLUG = {
+    "new_relic": "newrelic",
+    "mongodb_atlas": "mongodb",
+    # Vertex billing rides on the same GCP credentials as connect_gcp / finops
+    # setup gcp; there is no separate `finops setup vertex`.
+    "vertex": "gcp",
+}
+
+
+def _remediation(name: str) -> str:
+    """The correct "go do this" string for a not-connected provider.
+
+    Every provider used to point here at "call connect_aws", whatever it
+    actually was: Azure, GCP, and all sixteen SaaS/AI providers told the user
+    to run the AWS connector. This is the one place that decides the real
+    remediation, so list_connected_providers cannot drift back to a single
+    hardcoded answer.
+    """
+    tool = _CLOUD_CONNECT_TOOL.get(name)
+    if tool:
+        return f"not connected: call {tool}, or run 'uvx nable'"
+    slug = _SAAS_CLI_SLUG.get(name, name)
+    return f"not connected: run 'finops setup {slug}' to add your key, or run 'uvx nable'"
+
+
 @_srv.mcp.tool()
 async def list_connected_providers() -> dict:
     """
@@ -73,7 +108,7 @@ async def list_connected_providers() -> dict:
             result[name] = {
                 "category": category,
                 "configured": configured,
-                "status": "connected" if configured else "not connected: call connect_aws, or run 'uvx nable'",
+                "status": "connected" if configured else _remediation(name),
             }
 
     # LLM / AI providers are module-level (not in the class registry above), so
@@ -97,7 +132,7 @@ async def list_connected_providers() -> dict:
         result[name] = {
             "category": "llm",
             "configured": configured,
-            "status": "connected" if configured else "not connected: call connect_aws, or run 'uvx nable'",
+            "status": "connected" if configured else _remediation(name),
         }
     _llm_sync = {
         "modal": gpu_infra.modal_configured,
@@ -110,7 +145,7 @@ async def list_connected_providers() -> dict:
             "category": "llm",
             "configured": configured,
             "status": "connected (cost via invoice import)" if configured
-                      else "not connected: call connect_aws, or run 'uvx nable'",
+                      else _remediation(name),
         }
 
     # Surface plan status so Claude can proactively mention upgrade when relevant

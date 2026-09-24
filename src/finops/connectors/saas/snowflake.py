@@ -2,10 +2,34 @@ from __future__ import annotations
 
 import calendar
 import os
+import re
 from datetime import date
 from typing import Any
 
 from ..base import BaseConnector, CostEntry, CostSummary
+
+_PEM_RE = re.compile(
+    r"-----BEGIN (?P<label>[A-Z ]+)-----(?P<body>.*?)-----END (?P=label)-----", re.S)
+
+
+def normalize_pem(text: str) -> str:
+    """A PEM as the parser wants it, from a PEM as a paste delivers it.
+
+    A key copied out of a terminal or through a one-line input arrives with
+    its line breaks turned into spaces, or as literal backslash-n pairs from
+    a JSON or .env file. The key is the same; only the wrapping moved. This
+    puts the header and footer on their own lines and rewraps the base64 at
+    64 columns. Text with no PEM armor is returned as-is, so the parser can
+    name the problem.
+    """
+    text = text.strip().replace("\\n", "\n")
+    m = _PEM_RE.search(text)
+    if not m:
+        return text
+    body = "".join(m.group("body").split())
+    lines = [body[i:i + 64] for i in range(0, len(body), 64)]
+    label = m.group("label")
+    return "\n".join([f"-----BEGIN {label}-----", *lines, f"-----END {label}-----"]) + "\n"
 
 
 class SnowflakeConnector(BaseConnector):
@@ -32,8 +56,15 @@ class SnowflakeConnector(BaseConnector):
         self._user = os.getenv("SNOWFLAKE_USER", "")
         self._password = os.getenv("SNOWFLAKE_PASSWORD", "")
         self._warehouse = os.getenv("SNOWFLAKE_WAREHOUSE", "")
-        self._role = os.getenv("SNOWFLAKE_ROLE", "ACCOUNTADMIN")
+        # No role means the user's default role. Forcing ACCOUNTADMIN here
+        # made every setup guide say "use ACCOUNTADMIN", when a role with
+        # IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE is all the reads need.
+        self._role = os.getenv("SNOWFLAKE_ROLE", "")
+        # Two ways to hand over the key. The path suits a laptop running the
+        # CLI. The body suits a browser paste into a hosted box, which has no
+        # file of yours on its disk. The body wins when both are set.
         self._private_key_path = os.getenv("SNOWFLAKE_PRIVATE_KEY_PATH", "")
+        self._private_key = os.getenv("SNOWFLAKE_PRIVATE_KEY", "")
         # Only set if the user knows their actual contract rate
         raw = os.getenv("SNOWFLAKE_CREDIT_PRICE", "")
         self._credit_price: float | None = float(raw) if raw else None
@@ -41,7 +72,7 @@ class SnowflakeConnector(BaseConnector):
         self._storage_price_tb: float | None = float(raw) if raw else None
 
     async def is_configured(self) -> bool:
-        has_auth = bool(self._password or self._private_key_path)
+        has_auth = bool(self._password or self._private_key_path or self._private_key)
         return bool(self._account and self._user and has_auth)
 
     def _connect(self):
@@ -52,20 +83,48 @@ class SnowflakeConnector(BaseConnector):
                 "Snowflake support needs an extra dependency. "
                 "Run: pip install 'finops-mcp[snowflake]'"
             ) from e
-        kwargs: dict[str, Any] = dict(account=self._account, user=self._user, role=self._role)
+        kwargs: dict[str, Any] = dict(account=self._account, user=self._user)
+        if self._role:
+            kwargs["role"] = self._role
         if self._warehouse:
             kwargs["warehouse"] = self._warehouse
-        if self._private_key_path:
-            from cryptography.hazmat.backends import default_backend
-            from cryptography.hazmat.primitives.serialization import (
-                Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
-            )
-            with open(self._private_key_path, "rb") as f:
-                pk = load_pem_private_key(f.read(), password=None, backend=default_backend())
-            kwargs["private_key"] = pk.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
+        pem = self._private_key_pem()
+        if pem is not None:
+            kwargs["private_key"] = self._der_from_pem(pem)
         else:
             kwargs["password"] = self._password
         return snowflake.connector.connect(**kwargs)
+
+    def _private_key_pem(self) -> bytes | None:
+        """The PEM bytes, from the body if set, else the path, else None."""
+        if self._private_key.strip():
+            return normalize_pem(self._private_key).encode()
+        if self._private_key_path:
+            with open(self._private_key_path, "rb") as f:
+                return f.read()
+        return None
+
+    @staticmethod
+    def _der_from_pem(pem: bytes) -> bytes:
+        """PKCS#8 DER, the form the Snowflake driver signs its JWT with.
+
+        A parse failure is a ValueError naming the problem: the driver would
+        otherwise report an opaque auth failure for what is really a bad
+        paste, and a hosted probe needs to tell those two apart.
+        """
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+        )
+        try:
+            pk = load_pem_private_key(pem, password=None, backend=default_backend())
+        except TypeError as e:
+            raise ValueError(
+                "the private key is encrypted; nable needs an unencrypted PKCS#8 key "
+                "(openssl pkcs8 -topk8 -nocrypt)") from e
+        except Exception as e:
+            raise ValueError(f"the private key did not parse as PEM ({e})") from e
+        return pk.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
 
     async def get_costs(
         self,

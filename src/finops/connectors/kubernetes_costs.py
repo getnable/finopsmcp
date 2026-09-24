@@ -102,6 +102,14 @@ class ClusterCostReport:
     top_pods: list[PodCost]
     recommendations: list[str]
     unpriced_nodes: dict[str, int] = field(default_factory=dict)
+    # Every number above comes from _node_daily_cost, a list-price table. That
+    # was true before these fields existed and nothing said so, which is how a
+    # customer with OpenCost on a cluster-internal URL read a list-price guess
+    # as measured cost. The reason names OpenCost when it is configured and
+    # silent, so the fix is in the sentence.
+    is_estimate: bool = True
+    cost_source: str = "list-price"
+    estimate_reason: str = ""
 
 
 # ── K8s API helpers ────────────────────────────────────────────────────────────
@@ -441,7 +449,10 @@ def allocate_cluster_costs(
 
     top_pods = sorted(pod_costs, key=lambda p: p.monthly_cost_usd, reverse=True)[:10]
 
+    from . import opencost as _oc
+
     return ClusterCostReport(
+        estimate_reason=_oc.fallback_reason(),
         cluster_name=cluster_name or "default",
         report_date=date.today().isoformat(),
         node_count=len(nodes),
@@ -464,6 +475,9 @@ def allocate_to_dict(cluster_name: str = "", context: str | None = None) -> dict
         "report_date":            report.report_date,
         "node_count":             report.node_count,
         "total_monthly_cost_usd": round(report.total_node_daily_cost_usd * 30, 2),
+        "is_estimate":            report.is_estimate,
+        "cost_source":            report.cost_source,
+        "estimate_reason":        report.estimate_reason,
         "allocated_cost_usd":     report.allocated_cost_usd,
         "idle_cost_usd":          report.idle_cost_usd,
         **({"unpriced_nodes": report.unpriced_nodes,

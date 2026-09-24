@@ -135,6 +135,17 @@ async def list_kubernetes_contexts() -> dict:
         return {"error": str(e)}
 
 
+
+def _opencost_fallback_reason() -> str:
+    """Why the built-in list-price allocator is answering instead of OpenCost."""
+    try:
+        from ..connectors import opencost as _oc
+        return _oc.fallback_reason()
+    except Exception:  # noqa: BLE001
+        return ("List-price estimate. For real rates including GPU, network, and "
+                "storage, run OpenCost and set NABLE_OPENCOST_URL.")
+
+
 @_srv.mcp.tool()
 async def get_kubernetes_costs(
     context: str | None = None,
@@ -214,8 +225,10 @@ async def get_kubernetes_costs(
             # Run OpenCost (set NABLE_OPENCOST_URL) for real, GPU-aware numbers.
             "source": "nable-estimate",
             "is_estimate": True,
-            "estimate_note": ("List-price estimate. For real rates including GPU, "
-                              "network, and storage, run OpenCost and set NABLE_OPENCOST_URL."),
+            # Names the configured OpenCost URL when there is one and it did
+            # not answer. "Go set up OpenCost" is the wrong advice for the
+            # customer who already runs it.
+            "estimate_note": _opencost_fallback_reason(),
             "node_count": report.node_count,
             "pod_count": report.pod_count,
             "total_monthly_cost_usd": report.total_monthly_cost,

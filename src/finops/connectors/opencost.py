@@ -19,11 +19,49 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Any
 
 log = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT = 20.0
+
+# The last fetch that did not answer: {"url", "error", "at"}. Empty after a
+# fetch that worked. Process-global on purpose: the built-in allocator that
+# runs when OpenCost is silent reads this to say WHY it is estimating, and
+# on a hosted box the usual why is a cluster-internal URL nothing outside the
+# cluster can reach.
+_LAST_FAILURE: dict[str, Any] = {}
+
+
+def last_failure() -> dict[str, Any] | None:
+    """The most recent OpenCost fetch failure, or None when the last one worked."""
+    return dict(_LAST_FAILURE) if _LAST_FAILURE else None
+
+
+def fallback_reason() -> str:
+    """Why nable is about to hand back a list-price estimate instead of
+    OpenCost's numbers. One sentence the customer can act on."""
+    if not is_configured():
+        return ("List-price estimate from node instance types; OpenCost is not "
+                "configured. Not your discounted or Spot rate. Run OpenCost and set "
+                "NABLE_OPENCOST_URL for measured cost including GPU, network and storage.")
+    # Host and port only: a URL can carry credentials or a query, and the
+    # raw exception can quote them back. The category is what the reader
+    # needs; the URL itself is in their own settings.
+    from urllib.parse import urlsplit
+    parts = urlsplit(opencost_url())
+    where = parts.hostname or "the configured address"
+    if parts.port:
+        where = f"{where}:{parts.port}"
+    err = str(_LAST_FAILURE.get("error", "no answer") or "no answer")
+    kind = ("connection refused" if "refused" in err.lower()
+            else "name did not resolve" if "resolve" in err.lower() or "getaddrinfo" in err.lower()
+            else "timed out" if "timed out" in err.lower() or "timeout" in err.lower()
+            else "no answer")
+    return (f"List-price estimate from node instance types. OpenCost is configured at "
+            f"{where} but did not answer from this box ({kind}); a cluster-internal "
+            f"address cannot be reached from outside the cluster.")
 # The idle/unallocated bucket OpenCost returns as an aggregation key.
 _IDLE_KEY = "__idle__"
 
@@ -76,12 +114,17 @@ def fetch_allocation(
         body = resp.json()
     except Exception as exc:
         log.debug("OpenCost fetch failed (%s); falling back to the built-in allocator.", exc)
+        _LAST_FAILURE.clear()
+        _LAST_FAILURE.update(url=base, error=f"{type(exc).__name__}: {exc}"[:200], at=time.time())
         return None
 
     data = body.get("data") if isinstance(body, dict) else None
     if not isinstance(data, list):
         log.debug("OpenCost response had no data array; falling back.")
+        _LAST_FAILURE.clear()
+        _LAST_FAILURE.update(url=base, error="response had no data array", at=time.time())
         return None
+    _LAST_FAILURE.clear()
     return data
 
 

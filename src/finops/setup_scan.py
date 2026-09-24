@@ -86,7 +86,7 @@ PROVIDER_ENV: dict[str, tuple[str, list[str], list[str]]] = {
     "cloudflare": ("Cloudflare",    ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"], []),
     "vercel":     ("Vercel",        ["VERCEL_TOKEN"],                                  ["VERCEL_TEAM_ID"]),
     "newrelic":   ("New Relic",     ["NEW_RELIC_API_KEY"],                             ["NEW_RELIC_ACCOUNT_ID"]),
-    "databricks": ("Databricks",    ["DATABRICKS_HOST", "DATABRICKS_TOKEN"],           ["DATABRICKS_ACCOUNT_ID", "DATABRICKS_ACCOUNT_TOKEN", "DATABRICKS_DBU_PRICE"]),
+    "databricks": ("Databricks",    ["DATABRICKS_HOST", "DATABRICKS_TOKEN"],           ["DATABRICKS_WAREHOUSE_ID", "DATABRICKS_ACCOUNT_ID", "DATABRICKS_ACCOUNT_TOKEN", "DATABRICKS_DBU_PRICE"]),
 }
 
 # slug -> other complete key sets, any one of which is enough on its own.

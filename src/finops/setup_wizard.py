@@ -2931,9 +2931,11 @@ def main(args: list[str] | None = None) -> None:
         "snowflake": lambda: setup_saas_api_key("Snowflake", [
             ("SNOWFLAKE_ACCOUNT", "Account identifier (e.g. xy12345.us-east-1)", False),
             ("SNOWFLAKE_USER", "Username", False),
-            ("SNOWFLAKE_PASSWORD", "Password", True),
+            ("SNOWFLAKE_PASSWORD", "Password (leave blank to use a key)", True),
+            ("SNOWFLAKE_PRIVATE_KEY_PATH", "Private key file path (key-pair auth; blank if pasting the key)", False),
+            ("SNOWFLAKE_PRIVATE_KEY", "Private key PEM body (key-pair auth; blank if using the path)", True),
             ("SNOWFLAKE_WAREHOUSE", "Warehouse name (e.g. COMPUTE_WH)", False),
-            ("SNOWFLAKE_ROLE", "Role (default: ACCOUNTADMIN)", False),
+            ("SNOWFLAKE_ROLE", "Role with IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE (blank: your default role)", False),
             # Required for dollar figures: without it nable reports credits and
             # asks for the rate rather than showing unpriced credits as $0.
             ("SNOWFLAKE_CREDIT_PRICE", "Credit price USD (your contract rate; needed for $ figures)", False),
@@ -3006,6 +3008,7 @@ def main(args: list[str] | None = None) -> None:
         "databricks": lambda: setup_saas_api_key("Databricks", [
             ("DATABRICKS_HOST", "Workspace URL (e.g. https://adb-1234567890.1.azuredatabricks.net)", False),
             ("DATABRICKS_TOKEN", "Personal Access Token or Service Principal token", True),
+            ("DATABRICKS_WAREHOUSE_ID", "SQL warehouse id (optional; with it nable reads system.billing.usage, metered DBUs)", False),
             ("DATABRICKS_ACCOUNT_ID", "Account ID for billing API (optional, leave blank for single-workspace)", False),
             ("DATABRICKS_ACCOUNT_TOKEN", "Account-level token (optional, defaults to DATABRICKS_TOKEN)", True),
             ("DATABRICKS_DBU_PRICE", "DBU price in USD (optional, default 0.40, use your contract rate)", False),
