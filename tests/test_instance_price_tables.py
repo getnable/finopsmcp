@@ -246,3 +246,88 @@ def test_rds_graviton_rates_match_terraform():
         "db.m6g.large": 0.152, "db.m6g.xlarge": 0.304, "db.m6g.2xlarge": 0.608,
         "db.r6g.large": 0.192, "db.r6g.xlarge": 0.384, "db.r6g.2xlarge": 0.768,
     }
+
+
+# ── the monthly tables: kubernetes.py and pr_comments/estimator.py ───────────
+
+# Rows that were already hourly x 730, with the figure they held.
+_MONTHLY_UNCHANGED = {
+    "t3.nano": 3.80, "t3.xlarge": 121.47, "m5.large": 70.08, "m5.24xlarge": 3363.84,
+    "m6i.4xlarge": 560.64, "m6a.2xlarge": 252.29, "c5.large": 62.05,
+    "c5.18xlarge": 2233.80, "r5.large": 91.98, "r5.16xlarge": 2943.36,
+    "r6i.2xlarge": 367.92, "g4dn.xlarge": 383.98,
+}
+
+# Rows typed in at a rate no hourly table used, and what they are now.
+_MONTHLY_CORRECTED = {
+    # kubernetes.py only: t3a at $0.038/hr, c6a at $0.0755, against the $0.0376
+    # and $0.0765 that all five hourly copies agreed on.
+    "t3a.medium": (27.74, 27.45), "t3a.large": (55.48, 54.90),
+    "t3a.xlarge": (110.95, 109.79),
+    "c6a.large": (55.08, 55.84), "c6a.xlarge": (110.16, 111.69),
+    "c6a.2xlarge": (220.32, 223.38),
+    # both monthly tables: c6i at $0.084/hr against the $0.085 list rate.
+    "c6i.large": (61.32, 62.05), "c6i.xlarge": (122.64, 124.10),
+    "c6i.2xlarge": (245.28, 248.20), "c6i.4xlarge": (490.56, 496.40),
+}
+
+
+@pytest.mark.parametrize("itype,monthly", sorted(_MONTHLY_UNCHANGED.items()))
+def test_kubernetes_node_cost_is_what_it_was(itype, monthly):
+    from finops.connectors import kubernetes
+
+    assert kubernetes._EC2_MONTHLY is EC2_MONTHLY
+    assert kubernetes._node_monthly_cost(itype) == monthly
+
+
+@pytest.mark.parametrize("itype,was_now", sorted(_MONTHLY_CORRECTED.items()))
+def test_kubernetes_node_cost_drift_is_corrected(itype, was_now):
+    from finops.connectors import kubernetes
+
+    was, now = was_now
+    assert kubernetes._node_monthly_cost(itype) == now == round(EC2_HOURLY[itype] * 730, 2)
+    assert now != was
+
+
+@pytest.mark.parametrize("itype", ["t3.nano", "m5.large", "r6i.2xlarge", "g4dn.xlarge"])
+def test_pr_estimator_ec2_is_what_it_was(itype):
+    from finops.pr_comments import estimator
+
+    assert estimator._EC2_MONTHLY is EC2_MONTHLY
+    assert estimator._ec2_monthly(itype) == _MONTHLY_UNCHANGED[itype]
+
+
+@pytest.mark.parametrize("itype", ["c6i.large", "c6i.4xlarge"])
+def test_pr_estimator_c6i_is_corrected(itype):
+    from finops.pr_comments import estimator
+
+    assert estimator._ec2_monthly(itype) == _MONTHLY_CORRECTED[itype][1]
+
+
+@pytest.mark.parametrize("db_class,was,now", [
+    # The estimator's RDS rows matched no RDS rate in the repo; waste.py,
+    # terraform_estimate and the VS Code extension all had db.t3.medium at
+    # $0.068/hr, db.m5.large $0.171, db.r5.large $0.24. test_audit_cost_math
+    # already pins db.m5.xlarge at $0.342/hr * 730 = $249.66.
+    ("db.t3.micro", 15.33, 12.41), ("db.t3.medium", 61.32, 49.64),
+    ("db.t3.xlarge", 245.28, 198.56), ("db.m5.large", 140.16, 124.83),
+    ("db.m5.xlarge", 280.32, 249.66), ("db.m6g.large", 129.00, 110.96),
+    ("db.r5.large", 183.96, 175.20), ("db.r5.2xlarge", 735.84, 700.80),
+])
+def test_pr_estimator_rds_is_the_shared_rate(monkeypatch, db_class, was, now):
+    from finops.pr_comments import estimator
+    from finops.pr_comments.parser import ResourceChange
+
+    class _ListPrice:
+        has_private_pricing = False
+        confidence = "low"
+
+        def effective_multiplier(self):
+            return 1.0
+
+    monkeypatch.setattr(estimator, "detect_effective_rates", lambda: _ListPrice())
+    assert estimator._RDS_MONTHLY is RDS_MONTHLY
+    [est] = estimator.estimate_changes([ResourceChange(
+        "add", "aws_db_instance", "db", "aws", {"instance_class": db_class})])
+    assert est.breakdown["compute"] == now == round(RDS_HOURLY[db_class] * 730, 2)
+    assert now != was

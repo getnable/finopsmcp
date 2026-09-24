@@ -34,43 +34,17 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
 
-from ..aws_prices import HOURS_PER_MONTH
-from .terraform_estimate import _EC2_HOURLY
+from ..aws_prices import EC2_MONTHLY
 
 log = logging.getLogger("finops.connectors.kubernetes")
 
-# GPU nodes are priced from the hourly list rates, not typed in as monthly
-# literals. The literals were hourly x 1000 for g4dn/g5 (g4dn.xlarge $0.526/hr
-# stored as $526/mo, 37% high), with g4dn.2xlarge/4xlarge as multiples of the
-# xlarge figure rather than their own rates.
-_GPU_NODE_TYPES = ("p3.2xlarge", "p3.8xlarge", "g4dn.xlarge", "g4dn.2xlarge",
-                   "g4dn.4xlarge", "g5.xlarge", "g5.2xlarge")
-
-# ── EC2 on-demand monthly prices (us-east-1) — same table as estimator.py ────
-_EC2_MONTHLY: dict[str, float] = {
-    # t-series
-    "t3.nano": 3.80,    "t3.micro": 7.59,    "t3.small": 15.18,
-    "t3.medium": 30.37, "t3.large": 60.74,   "t3.xlarge": 121.47,  "t3.2xlarge": 242.94,
-    "t3a.medium": 27.74,"t3a.large": 55.48,  "t3a.xlarge": 110.95,
-    # m5/m6
-    "m5.large": 70.08,  "m5.xlarge": 140.16, "m5.2xlarge": 280.32, "m5.4xlarge": 560.64,
-    "m5.8xlarge": 1121.28,
-    "m6i.large": 70.08, "m6i.xlarge": 140.16,"m6i.2xlarge": 280.32,"m6i.4xlarge": 560.64,
-    "m6a.large": 63.07, "m6a.xlarge": 126.14,"m6a.2xlarge": 252.29,
-    # c5/c6
-    "c5.large": 62.05,  "c5.xlarge": 124.10, "c5.2xlarge": 248.20, "c5.4xlarge": 496.40,
-    "c6i.large": 61.32, "c6i.xlarge": 122.64,"c6i.2xlarge": 245.28,"c6i.4xlarge": 490.56,
-    "c6a.large": 55.08, "c6a.xlarge": 110.16,"c6a.2xlarge": 220.32,
-    # r5/r6
-    "r5.large": 91.98,  "r5.xlarge": 183.96, "r5.2xlarge": 367.92, "r5.4xlarge": 735.84,
-    "r6i.large": 91.98, "r6i.xlarge": 183.96,"r6i.2xlarge": 367.92,"r6i.4xlarge": 735.84,
-    # GPU
-    **{t: round(_EC2_HOURLY[t] * HOURS_PER_MONTH, 2) for t in _GPU_NODE_TYPES},
-    # EKS managed node common types
-    "m5.12xlarge": 1681.92,"m5.24xlarge": 3363.84,
-    "c5.9xlarge": 1116.90, "c5.18xlarge": 2233.80,
-    "r5.8xlarge": 1471.68, "r5.16xlarge": 2943.36,
-}
+# ── EC2 on-demand monthly prices (us-east-1) ─────────────────────────────────
+# Every node type is priced as its hourly list rate x 730, from aws_prices. The
+# monthly figures used to be typed in here. GPU rows were hourly x 1000
+# (g4dn.xlarge $0.526/hr stored as $526/mo, 37% high), and after those were
+# fixed the CPU rows still had c6i at $0.084/hr, c6a at $0.0755 and t3a at
+# $0.038, none of them a rate any other table in the repo used.
+_EC2_MONTHLY = EC2_MONTHLY
 
 _GKE_MONTHLY: dict[str, float] = {
     "e2-standard-2": 48.91,  "e2-standard-4": 97.82,  "e2-standard-8": 195.64,
