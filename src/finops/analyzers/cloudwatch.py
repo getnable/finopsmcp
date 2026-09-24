@@ -50,6 +50,11 @@ def get_metric_data_opted_in() -> bool:
     return (os.getenv(GET_METRIC_DATA_ENV) or "").strip().lower() in ("1", "true", "yes")
 
 
+# One series as (timestamp, value) pairs, oldest first. A datapoint CloudWatch
+# returned without a Timestamp sorts last with None in its place.
+MetricPoints = list[tuple[datetime | None, float]]
+
+
 @dataclass(frozen=True)
 class MetricQuery:
     """One metric series to read. `key` is the caller's handle for the result
@@ -100,6 +105,28 @@ def fetch_metric_values(
       unread rather than returned short. Treat None exactly as a
       get_metric_statistics exception.
     """
+    points = fetch_metric_points(
+        cw_client, queries, start, end, use_get_metric_data=use_get_metric_data,
+        max_workers=max_workers, idle_timeout_s=idle_timeout_s)
+    return {key: None if p is None else [v for _, v in p] for key, p in points.items()}
+
+
+def fetch_metric_points(
+    cw_client: Any,
+    queries: Sequence[MetricQuery],
+    start: datetime,
+    end: datetime,
+    *,
+    use_get_metric_data: bool | None = None,
+    max_workers: int = DEFAULT_WORKERS,
+    idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
+) -> dict[Hashable, MetricPoints | None]:
+    """
+    fetch_metric_values with each value's timestamp kept, for a caller that
+    needs to know when the newest datapoint was published and not only what it
+    was. Returns {key: [(timestamp, value), ...]} oldest first. The same reads,
+    the same bill and the same [] versus None as fetch_metric_values.
+    """
     if not queries:
         return {}
     if use_get_metric_data is None:
@@ -112,7 +139,7 @@ def fetch_metric_values(
 
 def _read_statistics(
     cw_client: Any, q: MetricQuery, start: datetime, end: datetime,
-) -> list[float] | None:
+) -> MetricPoints | None:
     """One GetMetricStatistics call for one series, never raising."""
     try:
         resp = cw_client.get_metric_statistics(
@@ -133,7 +160,7 @@ def _read_statistics(
     # The API returns datapoints in no particular order. A missing Timestamp
     # sorts last rather than raising on None < None.
     ordered = sorted(datapoints, key=lambda dp: (dp.get("Timestamp") is None, dp.get("Timestamp")))
-    return [dp.get(q.stat, 0) for dp in ordered]
+    return [(dp.get("Timestamp"), dp.get(q.stat, 0)) for dp in ordered]
 
 
 def _fetch_with_get_metric_statistics(
@@ -143,8 +170,8 @@ def _fetch_with_get_metric_statistics(
     end: datetime,
     max_workers: int,
     idle_timeout_s: float,
-) -> dict[Hashable, list[float] | None]:
-    out: dict[Hashable, list[float] | None] = {}
+) -> dict[Hashable, MetricPoints | None]:
+    out: dict[Hashable, MetricPoints | None] = {}
     pool = ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(queries))),
                               thread_name_prefix="cw-read")
     try:
@@ -176,9 +203,9 @@ def _fetch_with_get_metric_data(
     queries: Sequence[MetricQuery],
     start: datetime,
     end: datetime,
-) -> dict[Hashable, list[float] | None]:
+) -> dict[Hashable, MetricPoints | None]:
     """The opt-in path: one billed GetMetricData call per 500 series."""
-    out: dict[Hashable, list[float] | None] = {}
+    out: dict[Hashable, MetricPoints | None] = {}
     for chunk_start in range(0, len(queries), MAX_QUERIES_PER_CALL):
         chunk = queries[chunk_start:chunk_start + MAX_QUERIES_PER_CALL]
         # Ids must match ^[a-z][a-zA-Z0-9_]*$ and be unique within the call.
@@ -238,7 +265,7 @@ def _fetch_with_get_metric_data(
             if status.get(qid) != "Complete":
                 out[q.key] = None
             else:
-                out[q.key] = [v for _, v in sorted(points[qid], key=lambda p: p[0])]
+                out[q.key] = sorted(points[qid], key=lambda p: p[0])
     return out
 
 

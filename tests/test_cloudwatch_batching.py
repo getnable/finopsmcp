@@ -38,6 +38,7 @@ from botocore.stub import ANY, Stubber
 from finops.analyzers.cloudwatch import (
     GET_METRIC_DATA_ENV,
     MetricQuery,
+    fetch_metric_points,
     fetch_metric_values,
 )
 
@@ -378,6 +379,22 @@ def test_a_client_that_is_not_boto_shaped_does_not_hang(batched):
         MagicMock(), [_q("a")], _T0, _ts(24), use_get_metric_data=batched) == {"a": None}
 
 
+@pytest.mark.parametrize("batched", [False, True])
+def test_points_keep_each_value_with_its_timestamp(batched):
+    """fetch_metric_points is fetch_metric_values with the timestamps kept, for
+    a caller that reports when a series was last published: the same order,
+    the same [] for a quiet series and the same None for an unread one."""
+    cw = _Metrics({("CPUUtilization", "i-1"): [3.0, 1.0, 2.0],
+                   ("CPUUtilization", "i-denied"): "Forbidden"})
+    queries = [_q("a", value="i-1"), _q("b", value="i-quiet"), _q("c", value="i-denied")]
+
+    got = fetch_metric_points(cw, queries, _T0, _ts(24), use_get_metric_data=batched)
+
+    assert got == {"a": [(_ts(0), 3.0), (_ts(1), 1.0), (_ts(2), 2.0)], "b": [], "c": None}
+    assert fetch_metric_values(cw, queries, _T0, _ts(24), use_get_metric_data=batched) == {
+        "a": [3.0, 1.0, 2.0], "b": [], "c": None}
+
+
 # ── the detectors ────────────────────────────────────────────────────────────
 
 class _Metrics:
@@ -565,6 +582,40 @@ def test_lambda_batches_when_opted_in(opted_in):
     cw = _lambda_run()
     assert cw.statistics_calls == 0
     assert cw.data_calls == math.ceil(300 / 500) + math.ceil(299 / 500)
+
+
+def test_lambda_reads_ask_each_namespace_by_its_own_dimension_name():
+    """AWS/Lambda publishes Invocations under FunctionName. Lambda Insights
+    publishes memory_utilization in LambdaInsights under function_name. Asked by
+    the wrong name, CloudWatch answers a successful read of nothing, so the
+    memory finding never fired from real data. _Metrics matches on dimension
+    values only, which is how that went unseen; this fake answers a series only
+    when it is asked for by the name its publisher uses."""
+    from finops.analyzers import waste
+
+    published = {
+        ("AWS/Lambda", "Invocations", (("FunctionName", "fn-0000"),)): 10.0,
+        ("LambdaInsights", "memory_utilization", (("function_name", "fn-0000"),)): 20.0,
+    }
+
+    class _ByDimensionName:
+        def __init__(self):
+            self.asked: list[tuple] = []
+
+        def get_metric_statistics(self, **kw):
+            series = (kw["Namespace"], kw["MetricName"],
+                      tuple((d["Name"], d["Value"]) for d in kw["Dimensions"]))
+            self.asked.append(series)
+            value = published.get(series)
+            stat = kw["Statistics"][0]
+            return {"Datapoints": [] if value is None else [{"Timestamp": _T0, stat: value}]}
+
+    cw = _ByDimensionName()
+    findings = waste.check_lambda_memory(_Pages(_lambda_pages(1)), cw, region="us-east-1")
+
+    assert sorted(cw.asked) == sorted(published)
+    assert [(f["resource_id"], f["waste_type"]) for f in findings] == [
+        ("fn-0000", "lambda_memory_overprovisioned")]
 
 
 def _rds_pages(n: int, db_class: str = "db.m5.xlarge") -> list[dict]:

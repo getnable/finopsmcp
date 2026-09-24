@@ -23,15 +23,27 @@ from __future__ import annotations
 
 import ast
 import inspect
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from finops.analyzers.cloudwatch import GET_METRIC_DATA_ENV
 from finops.connectors import aws_billing_metrics as bm
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class FakeCloudWatch:
-    """Records what it was asked for. The asking is half of what is under test."""
+    """Records what it was asked for. The asking is half of what is under test.
+
+    Answers GetMetricStatistics in its real shape: Datapoints keyed by the
+    statistic asked for, in no particular order. `total` lists the total's
+    values newest first, six hours apart. GetMetricData is counted, never
+    answered: it is the billed API this read must not use.
+    """
 
     def __init__(self, *, services=(), total=None, publish=True, pages=1):
         self.services = list(services)
@@ -39,8 +51,10 @@ class FakeCloudWatch:
         self.publish = publish
         self.pages = pages
         self.region = None
-        self.queries: list[dict] = []
+        self.calls: list[dict] = []
+        self.data_calls = 0
         self.list_calls = 0
+        self._lock = threading.Lock()
 
     # boto3 paginator shape
     def get_paginator(self, op):
@@ -59,24 +73,27 @@ class FakeCloudWatch:
                     ]}
         return P()
 
-    def get_metric_data(self, **kw):
-        self.queries = kw["MetricDataQueries"]
+    def get_metric_statistics(self, **kw):
+        with self._lock:
+            self.calls.append(kw)
         if not self.publish:
-            return {"MetricDataResults": []}
-        now = datetime.now(timezone.utc)
-        out = []
-        for q in self.queries:
-            dims = {d["Name"]: d["Value"]
-                    for d in q["MetricStat"]["Metric"]["Dimensions"]}
-            svc = dims.get("ServiceName")
-            if svc is None:
-                values = self.total if self.total is not None else [100.0, 80.0]
-            else:
-                values = [40.0, 30.0]
-            # ScanBy=TimestampDescending: newest first, matching the real API.
-            stamps = [now - timedelta(hours=6 * i) for i in range(len(values))]
-            out.append({"Id": q["Id"], "Values": list(values), "Timestamps": stamps})
-        return {"MetricDataResults": out}
+            return {"Label": kw["MetricName"], "Datapoints": []}
+        dims = {d["Name"]: d["Value"] for d in kw["Dimensions"]}
+        if dims.get("ServiceName") is None:
+            values = self.total if self.total is not None else [100.0, 80.0]
+        else:
+            values = [40.0, 30.0]
+        now = _now()
+        stat = kw["Statistics"][0]
+        return {"Label": kw["MetricName"], "Datapoints": [
+            {"Timestamp": now - timedelta(hours=6 * i), stat: v, "Unit": "None"}
+            for i, v in enumerate(values)
+        ]}
+
+    def get_metric_data(self, **kw):
+        with self._lock:
+            self.data_calls += 1
+        return {"MetricDataResults": []}
 
 
 class FakeSession:
@@ -109,7 +126,7 @@ def test_billing_alerts_switched_off_reads_as_unavailable_not_zero():
 
 def test_a_cloudwatch_error_is_absence_with_instructions(monkeypatch):
     class Boom(FakeCloudWatch):
-        def get_metric_data(self, **kw):
+        def get_metric_statistics(self, **kw):
             raise RuntimeError("AccessDenied")
 
     out = bm.latest_estimated_charges(FakeSession(Boom()))
@@ -128,8 +145,8 @@ def test_the_statistic_is_maximum_because_the_metric_is_cumulative():
     cw = FakeCloudWatch(services=["AmazonEC2"])
     bm.latest_estimated_charges(FakeSession(cw))
 
-    stats = {q["MetricStat"]["Stat"] for q in cw.queries}
-    assert stats == {"Maximum"}, (
+    stats = {s for c in cw.calls for s in c["Statistics"]}
+    assert cw.calls and stats == {"Maximum"}, (
         f"queried with {stats}; a cumulative metric averaged over a window "
         f"reports roughly half the month's spend")
 
@@ -188,14 +205,62 @@ def test_the_payload_says_it_is_an_estimate_in_the_data_not_just_the_docs():
 
 
 def test_reading_it_is_free_and_says_so_with_a_number():
-    """Two API calls, whatever the account size. The claim is checkable."""
+    """The payload says reading this is free, so it has to be. list_metrics and
+    one GetMetricStatistics call per series are standard requests inside
+    CloudWatch's free tier. GetMetricData bills $0.01 per 1,000 metrics with no
+    free tier, and a read that called it would make the note untrue."""
     cw = FakeCloudWatch(services=[f"Service{i}" for i in range(40)])
     out = bm.latest_estimated_charges(FakeSession(cw))
 
-    from finops.aws_prices import COST_EXPLORER_PER_REQUEST
-    assert out["cost_to_read_usd"] < COST_EXPLORER_PER_REQUEST / 10, (
-        f"cost ${out['cost_to_read_usd']}, not meaningfully cheaper than a "
-        f"Cost Explorer request")
+    assert cw.data_calls == 0, "called GetMetricData, which has no free tier"
+    assert len(cw.calls) == 1 + 40, "not one GetMetricStatistics call per series"
+    assert out["cost_to_read_usd"] == 0
+    assert "free" in out["note"].lower()
+
+
+def test_it_stays_free_on_a_host_that_opted_in_to_get_metric_data(monkeypatch):
+    """FINOPS_CLOUDWATCH_GETMETRICDATA=1 batches the scan's reads through the
+    billed API. It must not reach this one, whose note says reading is free."""
+    monkeypatch.setenv(GET_METRIC_DATA_ENV, "1")
+    cw = FakeCloudWatch(services=["AmazonEC2", "AmazonRDS"])
+    out = bm.latest_estimated_charges(FakeSession(cw))
+
+    assert cw.data_calls == 0
+    assert len(cw.calls) == 3
+    assert out["total_usd"] is not None and out["cost_to_read_usd"] == 0
+
+
+def test_the_request_matches_the_service_model():
+    """Checked against botocore's CloudWatch model: the AWS/Billing namespace,
+    the Currency=USD dimension the total is published under, a six-hour period
+    and the Maximum statistic."""
+    import boto3
+    from botocore.stub import ANY, Stubber
+
+    client = boto3.client("cloudwatch", region_name="us-east-1",
+                          aws_access_key_id="testing", aws_secret_access_key="testing")
+    now = _now()
+    with Stubber(client) as stub:
+        stub.add_response(
+            "get_metric_statistics",
+            {"Label": "EstimatedCharges", "Datapoints": [
+                {"Timestamp": now, "Maximum": 100.0, "Unit": "None"},
+                {"Timestamp": now - timedelta(hours=6), "Maximum": 80.0, "Unit": "None"},
+            ]},
+            {
+                "Namespace": "AWS/Billing",
+                "MetricName": "EstimatedCharges",
+                "Dimensions": [{"Name": "Currency", "Value": "USD"}],
+                "StartTime": ANY,
+                "EndTime": ANY,
+                "Period": 21_600,
+                "Statistics": ["Maximum"],
+            },
+        )
+        out = bm.latest_estimated_charges(FakeSession(client), include_services=False)
+        stub.assert_no_pending_responses()
+
+    assert out["total_usd"] == pytest.approx(100.0)
 
 
 def test_list_metrics_is_paginated_so_the_tail_of_the_bill_survives():
@@ -217,7 +282,8 @@ def test_the_disable_switch_works():
     finally:
         del os.environ["NABLE_NO_CLOUDWATCH_BILLING"]
     assert out["basis"] == "unavailable"
-    assert cw.queries == [], "made an API call despite being switched off"
+    assert cw.calls == [] and cw.list_calls == 0, (
+        "made an API call despite being switched off")
 
 
 # ── the structural guard ─────────────────────────────────────────────────────

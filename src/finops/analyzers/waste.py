@@ -849,7 +849,8 @@ def check_lambda_memory(
 
     CloudWatch publishes max_memory_used in the REPORT log lines, but this
     isn't a standard metric. We use the Lambda Insights metric
-    `memory_utilization` if available, falling back to the heuristic that
+    `memory_utilization` (namespace LambdaInsights, dimension function_name)
+    if available, falling back to the heuristic that
     if Duration p99 is very short the function is likely not using its memory.
 
     Also checks for functions with zero invocations over the lookback period
@@ -873,17 +874,21 @@ def check_lambda_memory(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
-    def _query(fn: dict, namespace: str, metric: str, stat: str) -> MetricQuery:
+    def _query(fn: dict, namespace: str, metric: str, stat: str, dimension: str) -> MetricQuery:
         return MetricQuery(fn["FunctionName"], namespace, metric,
-                           (("FunctionName", fn["FunctionName"]),), stat, 86400 * lookback_days)
+                           ((dimension, fn["FunctionName"]),), stat, 86400 * lookback_days)
 
-    invocations = fetch_metric_values(
-        cw_client, [_query(fn, "AWS/Lambda", "Invocations", "Sum") for fn in fns], start, now)
+    invocations = fetch_metric_values(cw_client, [
+        _query(fn, "AWS/Lambda", "Invocations", "Sum", "FunctionName") for fn in fns
+    ], start, now)
     total_by_fn = {
         name: None if values is None else sum(values) for name, values in invocations.items()
     }
+    # Lambda Insights names the function dimension function_name, not AWS/Lambda's
+    # FunctionName. Asked by FunctionName, CloudWatch answers a successful read of
+    # a series nobody publishes, and the memory finding never fired from real data.
     memory = fetch_metric_values(cw_client, [
-        _query(fn, "LambdaInsights", "memory_utilization", "Maximum")
+        _query(fn, "LambdaInsights", "memory_utilization", "Maximum", "function_name")
         for fn in fns if total_by_fn.get(fn["FunctionName"]) != 0
     ], start, now)
 
