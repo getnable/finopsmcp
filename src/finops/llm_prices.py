@@ -182,16 +182,14 @@ def canonical_model(raw: str) -> str:
     s = s.split("/")[-1]
     s = _CONTEXT_SUFFIX.sub("", s)
     s = _GEO_PREFIX.sub("", s)
-    if s.startswith("anthropic."):
-        s = s[len("anthropic."):]
+    s = s.removeprefix("anthropic.")
     if "claude" in s:
         # Display names write the version with spaces and dots ("Claude Haiku
         # 4.5"); ids use dashes. OpenAI ids keep their dots (gpt-3.5-turbo).
         s = re.sub(r"[\s.]+", "-", s)
         s = _BEDROCK_VERSION.sub("", s)
         s = _VERTEX_VERSION.sub("", s)
-        if s.endswith("-latest"):
-            s = s[: -len("-latest")]
+        s = s.removesuffix("-latest")
         s = _DATE_SUFFIX.sub("", s)
     return ALIASES.get(s, s)
 

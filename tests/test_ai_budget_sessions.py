@@ -221,8 +221,8 @@ def _cli(capsys, **flags):
 
     from finops import cli_ai_budget as cli
 
-    ns = dict(plan_cost=None, spend_cap=None, tokens=None, session_cap=None,
-              month=False, reset=False, json=False)
+    ns = {"plan_cost": None, "spend_cap": None, "tokens": None, "session_cap": None,
+          "month": False, "reset": False, "json": False}
     ns.update(flags)
     assert cli.run(argparse.Namespace(**ns)) == 0
     return capsys.readouterr().out

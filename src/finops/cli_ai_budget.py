@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 _ACCENT = "\033[38;5;38m"
 _DIM = "\033[2m"
@@ -249,6 +249,7 @@ def _span(first: float | None, last: float | None) -> str:
     differs from the start's."""
     if not first or not last:
         return ""
-    a, b = datetime.fromtimestamp(first), datetime.fromtimestamp(last)
+    a = datetime.fromtimestamp(first, tz=timezone.utc).astimezone()
+    b = datetime.fromtimestamp(last, tz=timezone.utc).astimezone()
     end = b.strftime("%H:%M") if a.date() == b.date() else b.strftime("%b %d %H:%M")
     return f"{a.strftime('%b %d %H:%M')} to {end}"

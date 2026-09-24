@@ -15,8 +15,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-import finops.ai_budget as ab
-import finops.guard as guard
+from finops import ai_budget as ab
+from finops import guard
 
 
 def _write(claude_dir, session, output_tokens):

@@ -95,8 +95,8 @@ def test_the_table_says_when_and_where():
     ("us.anthropic.claude-haiku-4-5-20251001-v1:0", "claude-haiku-4-5"),
     ("anthropic.claude-3-5-haiku-20241022-v1:0", "claude-3-5-haiku"),
     ("global.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5"),
-    ("arn:aws:bedrock:us-east-1:000000000000:inference-profile/"
-     "us.anthropic.claude-opus-4-1-20250805-v1:0", "claude-opus-4-1"),
+    (("arn:aws:bedrock:us-east-1:000000000000:inference-profile/"
+      "us.anthropic.claude-opus-4-1-20250805-v1:0"), "claude-opus-4-1"),
     ("bedrock/anthropic.claude-sonnet-4-6", "claude-sonnet-4-6"),
     ("claude-sonnet-4-5@20250929", "claude-sonnet-4-5"),
     ("Claude Sonnet 4.5 (Amazon Bedrock Edition)", "claude-sonnet-4-5"),
@@ -174,7 +174,7 @@ _SRC = Path(__file__).resolve().parents[1] / "src" / "finops"
 _MODEL_KEY = re.compile(
     r"(claude|anthropic\.|gpt-|chatgpt|^o[1-9](-|$)|gemini|llama|mistral|mixtral|nova-|"
     r"titan|command-r|deepseek|qwen|embedding|dall-e|whisper|tts-|sonnet|haiku|opus|"
-    r"bison|gecko|imagen)", re.I)
+    r"bison|gecko|imagen)", re.IGNORECASE)
 # Field names a per-model price row uses when it is a dict.
 _PRICE_FIELDS = {"input", "output", "prompt", "completion", "cache_read", "cache_write",
                  "input_price", "output_price"}
