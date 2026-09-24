@@ -19,40 +19,9 @@ import logging
 from datetime import date, timedelta
 from typing import Any
 
+from ...llm_prices import price_for
+
 log = logging.getLogger(__name__)
-
-# Current OpenAI pricing per 1M tokens (USD) — updated May 2026
-# Source: https://openai.com/pricing
-_MODEL_PRICING: dict[str, dict[str, float]] = {
-    # GPT-4o family
-    "gpt-4o":               {"input": 2.50,   "output": 10.00},
-    "gpt-4o-2024-11-20":    {"input": 2.50,   "output": 10.00},
-    "gpt-4o-mini":          {"input": 0.15,   "output": 0.60},
-    "gpt-4o-mini-2024-07-18": {"input": 0.15, "output": 0.60},
-    # o-series reasoning
-    "o1":                   {"input": 15.00,  "output": 60.00},
-    "o1-mini":              {"input": 3.00,   "output": 12.00},
-    "o3":                   {"input": 10.00,  "output": 40.00},
-    "o3-mini":              {"input": 1.10,   "output": 4.40},
-    "o4-mini":              {"input": 1.10,   "output": 4.40},
-    # GPT-4 Turbo
-    "gpt-4-turbo":          {"input": 10.00,  "output": 30.00},
-    "gpt-4-turbo-preview":  {"input": 10.00,  "output": 30.00},
-    # GPT-3.5
-    "gpt-3.5-turbo":        {"input": 0.50,   "output": 1.50},
-    # Embeddings
-    "text-embedding-3-small": {"input": 0.02, "output": 0.0},
-    "text-embedding-3-large": {"input": 0.13, "output": 0.0},
-    "text-embedding-ada-002": {"input": 0.10, "output": 0.0},
-    # Image (per image, stored as input cost, output=0)
-    "dall-e-3":             {"input": 0.04,   "output": 0.0},  # per image (1024x1024)
-    "dall-e-2":             {"input": 0.02,   "output": 0.0},
-    # Audio / TTS
-    "whisper-1":            {"input": 0.006,  "output": 0.0},  # per minute
-    "tts-1":                {"input": 0.015,  "output": 0.0},  # per 1k chars
-    "tts-1-hd":             {"input": 0.030,  "output": 0.0},
-}
-
 
 # Page sizes. /organization/costs takes 1-180 daily buckets per page; the
 # /organization/usage/* endpoints cap bucket_width=1d at 31 per page and reject
@@ -339,7 +308,7 @@ def _estimate_from_usage(
     org_id: str | None,
 ) -> dict[str, Any]:
     """
-    Fallback: fetch token usage and multiply by published prices.
+    Fallback: fetch token usage and multiply by published prices (llm_prices).
     Less accurate (doesn't include discounts/credits) but works with standard keys.
     """
     try:
@@ -386,16 +355,20 @@ def _estimate_from_usage(
             output_tok  = result.get("output_tokens", 0)
             # Same usage rows already carry the token counts the KPI engine needs.
             _accumulate_tokens(result, by_model_tokens)
-            pricing     = _MODEL_PRICING.get(model)
-            if pricing is None:
+            price       = price_for(model)
+            if price is None:
                 # No published price for this model id. Pricing it at $0 made
                 # its spend vanish from the estimate; list it instead.
                 u = unpriced.setdefault(model, {"input_tokens": 0, "output_tokens": 0})
                 u["input_tokens"] += int(input_tok or 0)
                 u["output_tokens"] += int(output_tok or 0)
                 continue
-            cost = (input_tok / 1_000_000 * pricing["input"] +
-                    output_tok / 1_000_000 * pricing["output"])
+            # input_tokens includes the cached subset, which bills at the cached
+            # rate rather than full input.
+            cached = min(int(result.get("input_cached_tokens", 0) or 0), int(input_tok or 0))
+            cost = price.cost(input_tokens=int(input_tok or 0) - cached,
+                              cache_read_tokens=cached,
+                              output_tokens=int(output_tok or 0))
             bucket_total += cost
             bucket_by_model[model] = bucket_by_model.get(model, 0.0) + cost
             by_model[model]        = by_model.get(model, 0.0) + cost
