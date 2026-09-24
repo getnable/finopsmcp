@@ -2417,6 +2417,10 @@ def _run_guard(parsed) -> None:
         _guard_report(parsed)
         return
 
+    if action == "doctor":
+        _guard_doctor(parsed)
+        return
+
     if action == "verify-log":
         from . import guard_ledger
         result = guard_ledger.verify()
@@ -2506,11 +2510,68 @@ def _run_guard(parsed) -> None:
         print(dim("  The hook only sees Bash. Widen it in place:"))
         _fix(narrow)
     print(dim("  Try:      nable guard try                 (see it judge four commands)"))
+    print(dim("  Coverage: nable guard doctor              (what is and is not guarded here)"))
+    print(dim("  History:  nable guard report              (what it asked, blocked, let through)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
     print(dim("  The hook is Claude Code (Bash and MCP tool calls). Other MCP agents"))
     print(dim("  (Cursor, etc.) get the same gate as a tool: the agent calls"))
     print(dim("  check_action_policy before acting."))
+    print()
+
+
+def _guard_doctor(parsed) -> None:
+    """`nable guard doctor`: what is covered on this machine, plainly."""
+    import json
+    import textwrap
+
+    from . import guard
+    from .welcome import amber, bold, cyan, dim, green
+
+    d = guard.doctor()
+    if getattr(parsed, "guard_json", False):
+        print(json.dumps(d, indent=2))
+        return
+    labels = {"claude-code": "Claude Code", "cursor": "Cursor", "codex": "Codex CLI"}
+    print()
+    print(f"  {bold('nable guard doctor')}   finops-mcp {d['version']}")
+    print()
+    for r in d["surfaces"]:
+        name = f"{labels.get(r['harness'], r['harness']):<12} {r['scope']:<8}"
+        if not r["installed"]:
+            state = dim("not installed")
+        elif not r.get("runs"):
+            state = amber("installed, but the hooked command no longer exists")
+        elif r["harness"] == "claude-code":
+            sees = " + ".join(s for s, on in (("Bash", r.get("bash")), ("MCP", r.get("mcp"))) if on)
+            pin = {"pinned": "pinned to this release", "other": "pinned to another release",
+                   "unpinned": amber("unpinned"), "binary": "installed binary"}[r["pin"]]
+            state = f"{green('installed')}, sees {sees or 'nothing'}, {pin}"
+        else:
+            state = green("installed")
+        print(f"  {name} {state}")
+        print(dim(f"  {'':<21} {r['path']}"))
+    print()
+    print(f"  {bold('Covered on this machine')}")
+    for c in d["covered"] or ["nothing yet"]:
+        print(f"    {green('✓') if d['covered'] else amber('!')} {c}")
+    print(f"  {bold('Not covered')}")
+    for c in d["not_covered"]:
+        print(f"    - {c}")
+    led = d["ledger"]
+    print()
+    if led["ok"]:
+        print(f"  Decision ledger: {led['records']} record(s), chain intact")
+    else:
+        print(f"  Decision ledger: {amber('chain broken at line ' + str(led['broken_at']))}")
+    print(dim(f"  {led['path']}"))
+    print()
+    for line in textwrap.wrap(d["seatbelt"], 76):
+        print(f"  {line}")
+    print()
+    print(f"  {bold('Next')}")
+    for fix in d["recommendations"]:
+        print(f"    {cyan('->')} {fix}")
     print()
 
 
@@ -2975,7 +3036,7 @@ def main(args: list[str] | None = None) -> None:
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
     guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
-                                                  "try", "report", "verify-log"],
+                                                  "try", "report", "verify-log", "doctor"],
                          nargs="?", default="status")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
@@ -2984,7 +3045,7 @@ def main(args: list[str] | None = None) -> None:
     guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
                          help="With 'report': how many days of the decision ledger to summarise")
     guard_p.add_argument("--json", dest="guard_json", action="store_true",
-                         help="With 'report' or 'verify-log': print JSON")
+                         help="With 'report', 'verify-log' or 'doctor': print JSON")
 
     iam_p = sub.add_parser("iam-template", help="Print the least-privilege IAM policy / CloudFormation nable needs")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")

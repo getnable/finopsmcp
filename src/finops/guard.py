@@ -1305,3 +1305,146 @@ def uninstall(global_scope: bool = False) -> bool:
             settings.pop("hooks", None)
         path.write_text(json.dumps(settings, indent=2) + "\n")
     return removed
+
+
+# ── Doctor ─────────────────────────────────────────────────────────────────────
+
+SEATBELT = (
+    "The guard is a seatbelt, not a security boundary. It checks what an agent "
+    "sends through the hooks listed here, and an agent can route around it: a "
+    "script that runs the command inside it, a tool or MCP server the guard does "
+    "not recognise, an edit to its own settings file. Give agents read-only cloud "
+    "credentials, and keep write access behind a human: a separate profile, role "
+    "or pipeline the agent cannot assume."
+)
+
+# What each harness's hook can see. Claude Code's comes from the matcher we
+# write; Cursor's beforeShellExecution and Codex's PreToolUse-on-Bash see shell
+# commands only (guard_adapters.py), and Codex cannot pause to ask.
+_FAMILY_LABELS = {"aws": "AWS", "kubernetes": "Kubernetes", "terraform": "Terraform"}
+_ADAPTER_SURFACES = {"cursor": ("Cursor", "shell commands"),
+                     "codex": ("Codex CLI", "shell commands (an ask becomes a deny)")}
+
+
+def _adapter_rows() -> list[dict[str, Any]]:
+    """Cursor and Codex hook state from guard_adapters, [] when this build has
+    no adapters or they cannot answer. Read-only."""
+    try:
+        from . import guard_adapters as ga      # type: ignore[attr-defined]
+        found = set(ga.detected())
+        rows = []
+        for name in _ADAPTER_SURFACES:
+            for scope, is_global in (("project", False), ("global", True)):
+                st = ga.state(name, is_global)
+                rows.append({"harness": name, "scope": scope,
+                             "path": str(ga.hooks_path(name, is_global)),
+                             "installed": st != "absent", "runs": st == "installed",
+                             "present": name in found})
+        return rows
+    except Exception:
+        return []
+
+
+def doctor() -> dict[str, Any]:
+    """Which surfaces the guard actually covers on this machine, and what it
+    does not. Read-only: it inspects settings files and the ledger, runs
+    nothing, and calls no cloud API."""
+    from . import guard_ledger
+    from .guard_mcp import MCP_RULES
+
+    rows: list[dict[str, Any]] = []
+    for scope, is_global in (("project", False), ("global", True)):
+        p = _settings_path(is_global)
+        ours = _read_our_hooks(p)
+        row: dict[str, Any] = {"harness": "claude-code", "scope": scope, "path": str(p),
+                               "installed": bool(ours)}
+        if ours:
+            cmd = ours[0][1]["command"]
+            surf = hook_surfaces(p)
+            row.update(command=cmd, runs=_command_runs(cmd), pin=hook_pin(cmd) or "binary",
+                       bash=surf["bash"], mcp=surf["mcp"])
+        rows.append(row)
+    adapter_rows = _adapter_rows()
+    rows += adapter_rows
+
+    families: dict[str, list[str]] = {}
+    for rule in MCP_RULES:
+        families.setdefault(rule.family, []).extend(rule.names)
+    n_tools = sum(len(v) for v in families.values())
+
+    covered: list[str] = []
+    gaps: list[str] = []
+    todo: dict[str, list[str]] = {}    # one line per command, however many reasons
+
+    def fix(cmd: str, why: str = "") -> None:
+        todo.setdefault(cmd, [])
+        if why:
+            todo[cmd].append(why)
+    live = [r for r in rows if r["harness"] == "claude-code" and r.get("runs")]
+    if any(r.get("bash") for r in live):
+        covered.append("Claude Code: Bash commands")
+    if any(r.get("mcp") for r in live):
+        covered.append(f"Claude Code: MCP tool calls ({n_tools} recognised tools: "
+                       + ", ".join(_FAMILY_LABELS.get(f, f) for f in sorted(families)) + ")")
+    if not live:
+        gaps.append("Claude Code: no working guard hook")
+        fix("nable guard install", "this project; add --global for every project")
+    for r in rows:
+        flag = " --global" if r["scope"] == "global" else ""
+        if r["harness"] != "claude-code" or not r["installed"]:
+            continue
+        if not r["runs"]:
+            gaps.append(f"Claude Code ({r['scope']}): the hooked command no longer exists")
+            fix(f"nable guard install{flag}", "repairs the dead hook in place")
+            continue
+        if not r.get("mcp") and not any(x.get("mcp") for x in live):
+            # Claude Code runs project and user hooks alike, so one scope that
+            # sees MCP covers it; only a machine where none does has a gap.
+            gaps.append(f"Claude Code ({r['scope']}): MCP tool calls (the hook only sees Bash)")
+            fix(f"nable guard install{flag}", "widens the hook to MCP tools")
+        if r.get("pin") == "unpinned":
+            fix(f"nable guard install{flag}", "pins the hook to this release instead of "
+                "the newest PyPI release on every call")
+
+    for name, (label, what) in _ADAPTER_SURFACES.items():
+        mine = [r for r in adapter_rows if r["harness"] == name]
+        if any(r["runs"] for r in mine):
+            covered.append(f"{label}: {what}")
+            continue
+        present = any(r["present"] for r in mine) or _harness_present(name)
+        if present:
+            if adapter_rows:
+                gaps.append(f"{label}: on this machine, no working guard hook")
+                fix(f"nable guard install --harness {name}")
+            else:
+                gaps.append(f"{label}: on this machine, and this nable has no hook for it")
+    gaps.append("commands inside scripts the agent runs (the guard sees `bash deploy.sh`, "
+                "not what is in it)")
+    gaps.append("MCP servers outside the recognised table (the guard stays silent on them)")
+
+    ledger = guard_ledger.verify()
+    if not ledger["ok"]:
+        fix("nable guard verify-log", f"the decision ledger breaks at line "
+            f"{ledger.get('broken_at')}: a record was edited, removed, reordered or torn")
+    fixes = [f"{cmd}  ({'; '.join(why)})" if why else cmd for cmd, why in todo.items()]
+    fixes.append("give agents read-only cloud credentials; keep write access behind a human")
+
+    return {
+        "ok": bool(live) and ledger["ok"],
+        "surfaces": rows,
+        "covered": covered,
+        "not_covered": gaps,
+        "mcp_tools": families,
+        "ledger": ledger,
+        "recommendations": fixes,
+        "seatbelt": SEATBELT,
+        "version": __version__,
+    }
+
+
+def _harness_present(name: str) -> bool:
+    """Is this agent installed here at all? Its user config directory is the
+    signal guard_adapters uses too (CODEX_HOME for Codex)."""
+    if name == "codex":
+        return Path(os.getenv("CODEX_HOME") or Path.home() / ".codex").is_dir()
+    return (Path.home() / f".{name}").is_dir()
