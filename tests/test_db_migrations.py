@@ -185,3 +185,71 @@ def test_detection_does_not_use_a_sqlite_only_pragma():
         "raises, the error is swallowed as a warning, and the ALTER never runs"
     )
     assert "get_columns" in body
+
+
+# ── one failed step must not poison the rest (PostgreSQL semantics) ─────────
+
+
+def _emulate_postgres_aborted_transactions(eng) -> None:
+    """Make SQLite behave like PostgreSQL after an error inside a transaction.
+
+    On PostgreSQL a failed statement aborts the transaction, and every later
+    statement on that connection raises InFailedSqlTransaction until somebody
+    rolls back. SQLite has no such state, which is why the suite never saw it.
+    These listeners add it: an error marks the DBAPI connection aborted, any
+    statement on an aborted connection raises, and a rollback clears it.
+    """
+    from sqlalchemy import event
+
+    @event.listens_for(eng, "handle_error")
+    def _abort(ctx):
+        if ctx.connection is not None:
+            ctx.connection.info["aborted"] = True
+
+    @event.listens_for(eng, "before_cursor_execute")
+    def _refuse(conn, cursor, statement, params, context, executemany):
+        if conn.info.get("aborted"):
+            raise RuntimeError("InFailedSqlTransaction: current transaction is "
+                               "aborted, commands ignored until end of transaction block")
+
+    @event.listens_for(eng, "rollback")
+    def _clear(conn):
+        conn.info.pop("aborted", None)
+
+    @event.listens_for(eng.pool, "reset")
+    def _clear_on_return(dbapi_conn, record, reset_state):
+        record.info.pop("aborted", None)
+
+
+def test_one_failed_migration_does_not_abort_the_ones_after_it(tmp_path, monkeypatch):
+    """All the migrations shared one connection and nothing rolled back after a
+    failed step. On PostgreSQL that aborted transaction made every later step
+    fail too, so one bad ALTER silently skipped every column after it."""
+    from finops.storage import db as _db
+
+    eng = sa.create_engine(f"sqlite:///{tmp_path / 'old.db'}")
+    old = sa.MetaData()
+    sa.Table(
+        "savings_recommendations", old,
+        *[c._copy() for c in savings_recommendations.columns
+          if c.name not in ("environment_bucket", "regressed_at", "regression_count")],
+    )
+    old.create_all(eng)
+    _emulate_postgres_aborted_transactions(eng)
+
+    real_ddl = _db._add_column_ddl
+
+    def _ddl(engine, table, column):
+        if (table, column) == ("savings_recommendations", "environment_bucket"):
+            return "ALTER TABLE savings_recommendations ADD COLUMN this is not sql"
+        return real_ddl(engine, table, column)
+
+    monkeypatch.setattr(_db, "_add_column_ddl", _ddl)
+
+    _db._run_sqlite_migrations(eng)
+
+    after = {r["name"] for r in sa.inspect(eng).get_columns("savings_recommendations")}
+    assert "environment_bucket" not in after  # the step that was made to fail
+    assert {"regressed_at", "regression_count"} <= after, (
+        "a failed migration step poisoned the shared transaction and every "
+        "later step was skipped")
