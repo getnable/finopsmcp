@@ -38,6 +38,11 @@ def _dashboard_dir() -> Path:
     return _DASHBOARD_DIR
 
 
+def _today() -> date:
+    """Today, as one seam, so the month arithmetic can be tested on any date."""
+    return date.today()
+
+
 def _fmt_usd(amount: float, decimals: int = 0) -> str:
     if decimals == 0:
         return f"${amount:,.0f}"
@@ -57,8 +62,8 @@ def _delta_label(this_month: float, last_month: float) -> tuple[str, str]:
 
 def _build_html(
     account_id: str,
-    this_month: float,
-    last_month: float,
+    this_month: float | None,
+    last_month: float | None,
     projected: float | None,
     top_services: list[dict],          # [{service, this_month, last_month}]
     opportunities: list[dict],         # [{description, category, estimated_monthly_savings_usd}]
@@ -66,8 +71,25 @@ def _build_html(
     savings_ledger: list[dict],        # acted_on + verified items
     budgets: list[dict],               # from check_all_budgets()
     generated_at: str,
+    comparison_days: int | None = None,  # last_month covers the first N days of it
+    aws_error: str | None = None,        # why spend could not be read, if it could not
 ) -> str:
-    delta_text, delta_class = _delta_label(this_month, last_month)
+    # None is "could not read", not $0. Rendering it as $0 told the reader they
+    # had spent nothing this month whenever AWS was unreachable.
+    spend_known = this_month is not None and last_month is not None
+    if spend_known:
+        delta_text, delta_class = _delta_label(this_month, last_month)
+        this_month_html = _fmt_usd(this_month)
+        last_month_html = _fmt_usd(last_month)
+    else:
+        delta_text, delta_class = "n/a", "neutral"
+        this_month_html = last_month_html = "unavailable"
+    this_month_sub = (_esc(aws_error) if aws_error and not spend_known
+                      else "Month to date")
+    compare_label = (f"vs first {comparison_days} days of last month"
+                     if comparison_days else "vs last month")
+    last_month_col = (f"Last month, days 1-{comparison_days}"
+                      if comparison_days else "Last month")
     opp_count = len(opportunities)
     opp_total = sum(o.get("estimated_monthly_savings_usd", 0) for o in opportunities)
     verified_savings = savings_summary.get("verified_monthly_usd", 0)
@@ -424,12 +446,12 @@ def _build_html(
   <div class="stats">
     <div class="stat">
       <div class="stat-label">Total spend this month</div>
-      <div class="stat-value">{_fmt_usd(this_month)}</div>
-      <div class="stat-sub">Month to date</div>
+      <div class="stat-value">{this_month_html}</div>
+      <div class="stat-sub">{this_month_sub}</div>
     </div>
     <div class="stat">
-      <div class="stat-label">vs last month</div>
-      <div class="stat-value">{_fmt_usd(last_month)}</div>
+      <div class="stat-label">{compare_label}</div>
+      <div class="stat-value">{last_month_html}</div>
       <div class="{delta_card_cls}">{delta_text}</div>
     </div>
     <div class="stat">
@@ -448,7 +470,7 @@ def _build_html(
     <h2>Top Cost Drivers</h2>
     <table>
       <thead>
-        <tr><th>Service</th><th>This month</th><th>Last month</th><th>Delta</th></tr>
+        <tr><th>Service</th><th>This month</th><th>{last_month_col}</th><th>Delta</th></tr>
       </thead>
       <tbody>{svc_rows}</tbody>
     </table>
@@ -506,65 +528,99 @@ async def generate_account_dashboard(
     Returns:
         {"path": str, "summary": str}
     """
-    from datetime import date as _date, timedelta
+    import asyncio
+    import calendar
+    from datetime import timedelta
 
-    today = _date.today()
+    today = _today()
     month_start = today.replace(day=1)
-    if today.month == 1:
-        last_month_start = _date(today.year - 1, 12, 1)
-        last_month_end = _date(today.year - 1, 12, 31)
-    else:
-        last_month_start = _date(today.year, today.month - 1, 1)
-        last_month_end = month_start - timedelta(days=1)
+    last_month_start = (month_start - timedelta(days=1)).replace(day=1)
+    # Cost Explorer's End is exclusive. Last month used to be requested with
+    # End = its last day, which dropped that day from every previous month.
+    # Month to date is [1st, today): the complete days so far.
+    elapsed_days = (today - month_start).days
+    # Compare like with like. Month to date against the whole previous month
+    # showed a steep drop on every day but the last, which was only the
+    # calendar. Compare against the same number of days of last month, capped
+    # at its length (the 31st of March compares with all 28 days of February).
+    compare_end = min(last_month_start + timedelta(days=elapsed_days), month_start)
+    comparison_days = (compare_end - last_month_start).days
 
     # ── AWS cost data ─────────────────────────────────────────────────────────
-    this_month_total = 0.0
-    last_month_total = 0.0
+    # None until read. A failed or absent read used to leave these at 0.0 and
+    # render "Spend this month: $0.00", which reads as a fact about the bill.
+    this_month_total: float | None = None
+    last_month_total: float | None = None
+    same_period_total: float | None = None
+    aws_error: str | None = None if aws_connector is not None else "AWS is not connected"
     top_services: list[dict] = []
     resolved_account = account_id or "unknown"
 
     if aws_connector is not None:
         try:
-            this_summary = await aws_connector.get_costs(month_start, today)
-            this_month_total = this_summary.total_usd
+            this_by_svc: dict = {}
+            this_total = 0.0
+            if elapsed_days > 0:   # on the 1st there are no complete days yet
+                this_summary = await aws_connector.get_costs(month_start, today)
+                this_total, this_by_svc = this_summary.total_usd, this_summary.by_service
             if not account_id:
                 accounts = await aws_connector.list_accounts()
                 resolved_account = accounts[0]["id"] if accounts else "unknown"
 
-            last_summary = await aws_connector.get_costs(last_month_start, last_month_end)
-            last_month_total = last_summary.total_usd
+            last_summary = await aws_connector.get_costs(last_month_start, month_start)
+            if comparison_days <= 0:
+                same_total, same_by_svc = 0.0, {}
+            elif compare_end == month_start:
+                same_total, same_by_svc = last_summary.total_usd, last_summary.by_service
+            else:
+                same_summary = await aws_connector.get_costs(last_month_start, compare_end)
+                same_total, same_by_svc = same_summary.total_usd, same_summary.by_service
 
-            # Build top-5 services with month-over-month comparison
-            this_by_svc = this_summary.by_service
-            last_by_svc = last_summary.by_service
-            all_svcs = set(this_by_svc) | set(last_by_svc)
+            this_month_total = this_total
+            last_month_total = last_summary.total_usd
+            same_period_total = same_total
+
+            # Top-5 services, month to date against the same days of last month
+            all_svcs = set(this_by_svc) | set(same_by_svc)
             svc_list = sorted(all_svcs, key=lambda s: -this_by_svc.get(s, 0))
             for svc in svc_list[:5]:
                 top_services.append({
                     "service": svc,
                     "this_month": this_by_svc.get(svc, 0.0),
-                    "last_month": last_by_svc.get(svc, 0.0),
+                    "last_month": same_by_svc.get(svc, 0.0),
                 })
-        except Exception:
-            pass  # surface what we can; missing AWS data is non-fatal
+        except Exception as e:
+            # Surface it: the dashboard still renders, but spend says it is
+            # unavailable and why, instead of $0.
+            aws_error = f"AWS cost data could not be read: {e}"
+            this_month_total = last_month_total = same_period_total = None
+            top_services = []
 
     # ── Forecast data ─────────────────────────────────────────────────────────
     projected: float | None = None
-    if resolved_account != "unknown":
+    if resolved_account != "unknown" and this_month_total is not None:
         try:
             from ..ml.forecasting import Forecaster
-            f = Forecaster.for_account(resolved_account, days=90, aws_connector=aws_connector)
+            f = await asyncio.to_thread(
+                Forecaster.for_account, resolved_account, days=90,
+                aws_connector=aws_connector)
             if f._series:
                 # Project full month = month-to-date actual + forecast of the
                 # remaining days. The old code used the wrong dict key
                 # (monthly_projection_usd, which never exists, so it always
                 # rendered "n/a") and forecast only the remaining days without
                 # adding MTD, under-counting the month.
-                remaining_days = max(0, 30 - today.day)
+                #
+                # Remaining days come from the real month length: 30 - today.day
+                # was wrong for every month that is not 30 days long, and missed
+                # today, which month to date does not include. The forecast is
+                # summed day by day; monthly_projection is a 30-day figure.
+                days_in_month = calendar.monthrange(today.year, today.month)[1]
+                remaining_days = max(0, days_in_month - elapsed_days)
                 remaining_forecast = 0.0
                 if remaining_days > 0:
-                    pred = f.predict_dict(remaining_days)
-                    remaining_forecast = pred.get("monthly_projection") or 0.0
+                    pred = await asyncio.to_thread(f.predict, remaining_days)
+                    remaining_forecast = sum(pred.point)
                 if this_month_total or remaining_forecast:
                     projected = round(this_month_total + remaining_forecast, 2)
         except Exception:
@@ -618,7 +674,7 @@ async def generate_account_dashboard(
     html = _build_html(
         account_id=resolved_account,
         this_month=this_month_total,
-        last_month=last_month_total,
+        last_month=same_period_total,
         projected=projected,
         top_services=top_services,
         opportunities=opportunities,
@@ -626,6 +682,8 @@ async def generate_account_dashboard(
         savings_ledger=savings_ledger,
         budgets=budgets,
         generated_at=generated_at,
+        comparison_days=comparison_days,
+        aws_error=aws_error,
     )
 
     # ── Write file ────────────────────────────────────────────────────────────
@@ -644,13 +702,19 @@ async def generate_account_dashboard(
     opp_count = len(opportunities)
     opp_total = sum(o.get("estimated_monthly_savings_usd", 0) for o in opportunities)
     verified = savings_summary.get("verified_monthly_usd", 0)
-    delta = this_month_total - last_month_total
-    sign = "+" if delta >= 0 else ""
-    summary_parts = [
-        f"Account {resolved_account}.",
-        f"Spend this month: {_fmt_usd(this_month_total, 2)} "
-        f"({sign}{_fmt_usd(delta, 2)} vs last month).",
-    ]
+    summary_parts = [f"Account {resolved_account}."]
+    if this_month_total is None or same_period_total is None:
+        summary_parts.append(f"Spend this month: unavailable ({aws_error}).")
+    elif comparison_days <= 0:
+        summary_parts.append(
+            f"Spend this month: {_fmt_usd(this_month_total, 2)} (month just started).")
+    else:
+        delta = this_month_total - same_period_total
+        sign = "+" if delta >= 0 else ""
+        summary_parts.append(
+            f"Spend this month: {_fmt_usd(this_month_total, 2)} "
+            f"({sign}{_fmt_usd(delta, 2)} vs the first {comparison_days} days "
+            f"of last month).")
     if opp_count:
         summary_parts.append(
             f"{opp_count} open opportunit{'y' if opp_count == 1 else 'ies'} "
@@ -663,8 +727,14 @@ async def generate_account_dashboard(
         "path": str(out),
         "summary": " ".join(summary_parts),
         "account_id": resolved_account,
-        "this_month_usd": round(this_month_total, 2),
-        "last_month_usd": round(last_month_total, 2),
+        "this_month_usd": (None if this_month_total is None
+                           else round(this_month_total, 2)),
+        "last_month_usd": (None if last_month_total is None
+                           else round(last_month_total, 2)),
+        "last_month_same_period_usd": (None if same_period_total is None
+                                       else round(same_period_total, 2)),
+        "comparison_days": comparison_days,
+        "aws_error": aws_error,
         "projected_usd": round(projected, 2) if projected else None,
         "open_opportunities": opp_count,
         "opportunity_savings_usd": round(opp_total, 2),

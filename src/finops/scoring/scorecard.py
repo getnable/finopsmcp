@@ -278,6 +278,21 @@ def _score_waste_reduction(
 
     total_waste = 0.0
 
+    # Nothing to look at is not the same as nothing wasted. With no inputs this
+    # scored 75/B ("No significant waste detected"), or 100/A once a spend
+    # figure was supplied, for an account nobody had scanned. An empty list is
+    # different: it means a source was read and found nothing.
+    if idle_resources is None and k8s_reports is None and orphaned_helm_releases is None:
+        meta["total_waste_usd"] = 0.0
+        return DimensionScore(
+            name="waste_reduction", display_name="Waste Reduction",
+            raw_score=50, weight=WEIGHTS["waste_reduction"],
+            weighted_score=50 * WEIGHTS["waste_reduction"] / 100,
+            grade="C", findings=["No waste data available yet: run a resource scan"],
+            actions=["Run `scan_waste_patterns` to find idle and orphaned resources"],
+            data_available=False, metadata=meta,
+        )
+
     # ── Idle cloud resources ───────────────────────────────────────────────────
     if idle_resources:
         idle_cost = sum(r.get("monthly_cost_usd", 0) for r in idle_resources)
@@ -392,7 +407,21 @@ def _score_commitment_coverage(
             data_available=False, metadata=meta,
         )
 
-    coverage_pct = commitment_data.get("coverage_pct", 0)
+    # Coverage that could not be read is not 0% coverage. Scoring it as 0 graded
+    # the account F and told it nothing was committed, off a missing IAM action.
+    coverage_pct = commitment_data.get("coverage_pct")
+    if coverage_pct is None or commitment_data.get("coverage_known") is False:
+        meta["coverage_pct"] = None
+        return DimensionScore(
+            name="commitment_coverage", display_name="Commitment Coverage",
+            raw_score=50, weight=WEIGHTS["commitment_coverage"],
+            weighted_score=50 * WEIGHTS["commitment_coverage"] / 100,
+            grade="C",
+            findings=["Commitment coverage could not be read, so it is not scored"],
+            actions=["Grant ce:GetSavingsPlansCoverage and ce:GetReservationCoverage, "
+                     "then run `get_commitment_analysis`"],
+            data_available=False, metadata=meta,
+        )
     on_demand_spend = commitment_data.get("on_demand_usd", 0)
     potential_savings = commitment_data.get("potential_savings_usd", 0)
     meta["coverage_pct"] = coverage_pct

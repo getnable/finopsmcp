@@ -343,24 +343,29 @@ class _CostExplorer:
                 f"User is not authorized to perform: ce:{op}")
 
     def get_savings_plans_coverage(self, **_kw):
+        # The real shape: no Total, one SavingsPlansCoverages row per period.
         self._guard("GetSavingsPlansCoverage")
-        return {"Total": {"CoverageHours": {
-            "CoverageHoursPercentage": self._sp_coverage_pct}}}
+        covered = float(self._sp_coverage_pct) * 100
+        return {"SavingsPlansCoverages": [{"Coverage": {
+            "SpendCoveredBySavingsPlans": str(covered),
+            "OnDemandCost": str(10000 - covered),
+            "TotalCost": "10000",
+            "CoveragePercentage": self._sp_coverage_pct}}]}
 
     def get_savings_plans_utilization(self, **_kw):
         self._guard("GetSavingsPlansUtilization")
         return {"Total": {
             "Utilization": {"UtilizationPercentage": "99.4",
-                            "TotalCommitment": "60000"},
+                            "TotalCommitment": "60000",
+                            "UnusedCommitment": "0"},
             "Savings": {"NetSavings": "0"},
         }}
 
     def get_reservation_utilization(self, **_kw):
         return {"Total": {
-            "Utilization": {"UtilizationPercentage": "98.0"},
+            "UtilizationPercentage": "98.0",
             "UnusedHours": "0",
-            "UnusedAmortizedUpfrontCostForRIs": "0",
-            "UnusedRecurringFeeForRIs": "0",
+            "RICostForUnusedHours": "0",
         }}
 
     def get_reservation_coverage(self, **_kw):

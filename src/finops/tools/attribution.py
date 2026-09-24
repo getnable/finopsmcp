@@ -245,10 +245,12 @@ async def get_efficiency_scorecard(
             raw_commits = analyze_commitments(tag_filter=tag_filter)
             if raw_commits:
                 commitment = {
-                    # None-safe: either instrument may be unreadable. Falls back
-                    # to 0.0 only for the scorecard's numeric contract, and
-                    # coverage_known says which it was.
-                    "coverage_pct": raw_commits.combined_coverage_pct or 0.0,
+                    # None when neither instrument could be read. This used to
+                    # fall back to 0.0 "for the numeric contract", and the
+                    # scorecard never looked at coverage_known, so unreadable
+                    # coverage was graded F as "0% of compute is under
+                    # commitments". The scorecard now reports it as no data.
+                    "coverage_pct": raw_commits.combined_coverage_pct,
                     "coverage_known": raw_commits.combined_coverage_pct is not None,
                     "on_demand_usd": raw_commits.uncovered_on_demand_usd,
                     "potential_savings_usd": sum(

@@ -31,10 +31,16 @@ def _ce_cost_response(monthly_amount: float) -> dict:
 
 
 def _ce_coverage_response(pct: float) -> dict:
+    # The documented GetSavingsPlansCoverage shape: no Total, one row per period.
+    covered = 10_000.0 * pct / 100
     return {
-        "Total": {
-            "CoverageHours": {"CoverageHoursPercentage": str(pct)}
-        }
+        "SavingsPlansCoverages": [{
+            "Attributes": {},
+            "Coverage": {"SpendCoveredBySavingsPlans": str(covered),
+                         "OnDemandCost": str(10_000.0 - covered),
+                         "TotalCost": "10000.0",
+                         "CoveragePercentage": str(pct)},
+        }]
     }
 
 
@@ -109,17 +115,33 @@ class TestGetDatabaseSpCoverage:
         result = _get_database_sp_coverage(ce, "2026-04-01", "2026-05-01")
         assert abs(result - 65.0) < 0.01
 
-    def test_returns_zero_on_exception(self):
+    def test_returns_none_on_exception(self):
+        # A failed read is unknown, not 0%: 0% means "none of it is covered" and
+        # sizes the commitment to the whole bill, spend already covered included.
         ce = MagicMock()
         ce.get_savings_plans_coverage.side_effect = Exception("not supported")
         result = _get_database_sp_coverage(ce, "2026-04-01", "2026-05-01")
-        assert result == 0.0
+        assert result is None
 
     def test_returns_zero_when_no_coverage_data(self):
         ce = MagicMock()
-        ce.get_savings_plans_coverage.return_value = {"Total": {}}
+        ce.get_savings_plans_coverage.return_value = {"SavingsPlansCoverages": []}
         result = _get_database_sp_coverage(ce, "2026-04-01", "2026-05-01")
         assert result == 0.0
+
+    def test_reads_the_real_response_shape_across_pages(self):
+        # GetSavingsPlansCoverage has no Total. Reading Total.CoverageHours
+        # returned 0% for every account, so covered spend was sized as uncovered.
+        ce = MagicMock()
+        ce.get_savings_plans_coverage.side_effect = [
+            {"SavingsPlansCoverages": [{"Coverage": {
+                "SpendCoveredBySavingsPlans": "3000", "TotalCost": "5000"}}],
+             "NextToken": "t2"},
+            {"SavingsPlansCoverages": [{"Coverage": {
+                "SpendCoveredBySavingsPlans": "1000", "TotalCost": "5000"}}]},
+        ]
+        result = _get_database_sp_coverage(ce, "2026-04-01", "2026-05-01")
+        assert abs(result - 40.0) < 0.01
 
 
 # ── integration: recommend_database_savings_plans ─────────────────────────────
@@ -249,6 +271,36 @@ class TestRecommendDatabaseSavingsPlans:
         assert result is not None
         assert result.get("data_incomplete") is True
         assert "current_monthly_rds_spend" not in result
+
+    def test_covered_spend_is_not_sized_into_the_commitment(self):
+        # 40% of the 10,000 is already on a Savings Plan: only 6,000 is uncovered.
+        ce = _make_ce_client(spend=10_000.0, coverage_pct=40.0)
+        mock_boto3 = MagicMock()
+        mock_boto3.client.return_value = ce
+
+        with patch("finops.recommendations.database_savings_plans.boto3", mock_boto3):
+            result = recommend_database_savings_plans()
+
+        assert result["current_sp_coverage_pct"] == 40.0
+        assert result["uncovered_monthly_spend"] == 6_000.0
+        assert abs(result["estimated_monthly_savings"]
+                   - 6_000.0 * DATABASE_SP_DISCOUNT_1YR_NO_UPFRONT) < 0.01
+
+    def test_unreadable_coverage_makes_no_recommendation(self):
+        # Unknown coverage used to become 0%, which recommended committing to
+        # the whole database bill, including whatever a plan already covers.
+        ce = _make_ce_client(spend=10_000.0, coverage_pct=0.0)
+        ce.get_savings_plans_coverage.side_effect = Exception("AccessDenied")
+        mock_boto3 = MagicMock()
+        mock_boto3.client.return_value = ce
+
+        with patch("finops.recommendations.database_savings_plans.boto3", mock_boto3):
+            result = recommend_database_savings_plans()
+
+        assert result is not None
+        assert result.get("data_incomplete") is True
+        assert result.get("finding") is None
+        assert "estimated_monthly_savings" not in result
 
     def test_returns_none_on_exception(self):
         mock_boto3 = MagicMock()

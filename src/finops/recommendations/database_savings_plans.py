@@ -77,25 +77,30 @@ def _get_rds_spend(ce_client: Any, start: str, end: str) -> float | None:
         return None
 
 
-def _get_database_sp_coverage(ce_client: Any, start: str, end: str) -> float:
+def _get_database_sp_coverage(ce_client: Any, start: str, end: str) -> float | None:
     """
-    Savings Plans coverage % for RDS/Aurora services.
+    Savings Plans coverage % for RDS/Aurora services, or None if unreadable.
 
     AWS Cost Explorer supports filtering SP coverage by service dimension
-    for Database Savings Plans.
+    for Database Savings Plans. The response has no Total (it is
+    SavingsPlansCoverages plus NextToken), so this shares the spend-weighted,
+    paginated reader in commitments. Reading Total.CoverageHours returned 0%
+    for every account, and the caller then sized the commitment to the whole
+    database bill, the part a plan already covers included.
     """
+    from .commitments import _sp_coverage_pct_from_pages
     try:
-        resp = ce_client.get_savings_plans_coverage(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="MONTHLY",
-            Filter={"Dimensions": {"Key": "SERVICE", "Values": _RDS_SERVICES}},
-        )
-        totals = resp.get("Total", {}).get("CoverageHours", {})
-        return float(totals.get("CoverageHoursPercentage", 0))
+        return _sp_coverage_pct_from_pages(ce_client, {
+            "TimePeriod": {"Start": start, "End": end},
+            "Granularity": "MONTHLY",
+            "Filter": {"Dimensions": {"Key": "SERVICE", "Values": _RDS_SERVICES}},
+        })
     except Exception as e:
+        # None, not 0.0, for the same reason as commitments._savings_plan_coverage:
+        # 0% reads as "none of it is covered" and recommends buying all of it.
         from .._logutil import note_sp_error
         note_sp_error(log, "Database SP coverage", e)
-        return 0.0
+        return None
 
 
 def recommend_database_savings_plans() -> dict[str, Any] | None:
@@ -133,6 +138,16 @@ def recommend_database_savings_plans() -> dict[str, Any] | None:
                 "finding": None,
             }
         sp_coverage_pct = _get_database_sp_coverage(ce, start, end)
+        if sp_coverage_pct is None:
+            # Without coverage there is no telling how much of that spend a plan
+            # already covers, and sizing to all of it can double-commit.
+            return {
+                "data_incomplete": True,
+                "error": "Could not read Savings Plans coverage for RDS/Aurora "
+                         "(ce:GetSavingsPlansCoverage). No recommendation made.",
+                "recommendation_type": "database_savings_plan_1yr_no_upfront",
+                "finding": None,
+            }
 
         uncovered_fraction = max(0.0, 1.0 - sp_coverage_pct / 100)
         uncovered_monthly = monthly_rds_spend * uncovered_fraction

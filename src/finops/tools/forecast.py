@@ -48,7 +48,11 @@ async def forecast_costs(
                 "error": "No account_id provided and none could be auto-discovered.",
                 "hint": "Connect AWS with `finops setup aws`, or pass account_id explicitly.",
             }
-        f = Forecaster.for_account(
+        # to_thread: for_account is synchronous and slow, a DB read, possibly a
+        # Cost Explorer call, then a Holt-Winters parameter grid search. On the
+        # event loop it froze every other tool call for the duration.
+        f = await _srv.asyncio.to_thread(
+            Forecaster.for_account,
             account_id,
             service=service,
             days=history_days,
@@ -59,6 +63,6 @@ async def forecast_costs(
                 "error": "No historical data found for this account/service.",
                 "hint": "Connect your AWS account with `finops setup aws` to enable forecasting.",
             }
-        return f.predict_dict(horizon_days)
+        return await _srv.asyncio.to_thread(f.predict_dict, horizon_days)
     except Exception as e:
         return {"error": str(e)}

@@ -230,7 +230,7 @@ class ForecastResult:
     horizon_days: int
     method: str                   # "holt_winters" | "linear" | "naive"
     mape: float                   # in-sample accuracy %
-    monthly_projection: float     # sum of 30-day forward values
+    monthly_projection: float     # forecast daily mean over the first 30 days x 30
     point: list[float]
     lower: list[float]
     upper: list[float]
@@ -300,20 +300,46 @@ class Forecaster:
             f.fit(series)
         return f
 
+    def _ce_client_for_account(self, aws_connector) -> Any | None:
+        """A Cost Explorer client that reads self.account_id, or None.
+
+        Goes through the connector, the way AWSConnector.get_costs does: its
+        injected session or one of its role ARNs, and billing_access's gate. The
+        fallback used to build its own CE client from default credentials, so
+        asking for account B on a machine whose default profile is account A
+        forecast A's bill under B's name. No credential here that answers for
+        the requested account means no data, never somebody else's.
+        """
+        role_arns = list(getattr(aws_connector, "_role_arns", None) or []) or [None]
+        for role_arn in role_arns:
+            try:
+                acct = aws_connector._account_id(role_arn)
+            except Exception as e:
+                log.debug("CE fallback: could not resolve account for %s: %s", role_arn, e)
+                continue
+            if str(acct) == str(self.account_id):
+                return aws_connector._make_client(role_arn)
+        log.info("CE fallback: no configured credential reads account %s; "
+                 "not forecasting from another account's bill", self.account_id)
+        return None
+
     def _load_series_from_ce(self, aws_connector, days: int) -> list[float]:
         """Pull daily cost totals directly from AWS Cost Explorer.
 
         Returns up to `days` days of history. Works on day one — Cost Explorer
         has 13 months of history available without any local setup.
+
+        Synchronous: forecast_costs runs the whole fit in a worker thread. There
+        used to be an unused asyncio.get_event_loop() here, which raises in a
+        worker thread, so the fallback returned [] exactly where it runs.
         """
-        import asyncio
         try:
-            import boto3
             end = date.today()
             start = end - timedelta(days=days)
 
-            loop = asyncio.get_event_loop()
-            ce = boto3.client("ce", region_name="us-east-1")
+            ce = self._ce_client_for_account(aws_connector)
+            if ce is None:
+                return []
 
             kwargs: dict = dict(
                 TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
@@ -325,12 +351,7 @@ class Forecaster:
                     "Dimensions": {"Key": "SERVICE", "Values": [self.service]}
                 }
 
-            def _fetch():
-                return ce.get_cost_and_usage(**kwargs)
-
-            # Always run synchronously via a thread — this method is called
-            # from within an async context via run_in_executor by the caller.
-            resp = _fetch()
+            resp = ce.get_cost_and_usage(**kwargs)
 
             series = []
             for period in resp.get("ResultsByTime", []):
@@ -451,7 +472,11 @@ class Forecaster:
             method = "holt_winters"
             mape   = self._mape
 
-        monthly_projection = round(sum(point[:30]), 2)
+        # A 30-day basis whatever the horizon. sum(point[:30]) was only a month
+        # when the horizon was at least 30 days: a 7-day forecast reported a
+        # week of spend as its monthly projection.
+        month = point[:30]
+        monthly_projection = round(sum(month) / len(month) * 30, 2) if month else 0.0
 
         return ForecastResult(
             account_id=self.account_id,
