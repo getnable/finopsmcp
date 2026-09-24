@@ -18,6 +18,12 @@ _MIN_HISTORY_DAYS    = 7     # need at least 7 data points
 _MIN_SPEND_THRESHOLD = 5.0   # ignore noise below $5
 _Z_SCORE_THRESHOLD   = 2.0   # flag if |z| > 2.0
 _PCT_THRESHOLD       = 20.0  # AND |pct_change| > 20%
+# Floor on the baseline stdev, as a fraction of the mean and in dollars. A
+# perfectly flat baseline has stdev 0, and dividing by it (or treating z as 0)
+# made the most obvious anomaly there is, $100 a day for a month then $10,000,
+# invisible. With the floor a flat series still needs a 20%+ move to flag.
+_MIN_STDEV_FRACTION  = 0.10
+_MIN_STDEV_USD       = 1.0
 
 # Tag keys checked for cost attribution when an AWS anomaly is detected.
 # Ordered by how commonly they identify the responsible team / workload.
@@ -74,6 +80,13 @@ def _severity(z: float, pct: float) -> str:
     return "low"
 
 
+def _z_score(current_amount: float, amounts: list[float], mean: float) -> float:
+    """z of today against the baseline, with the stdev floored (see above)."""
+    stdev = statistics.stdev(amounts) if len(amounts) > 1 else 0.0
+    stdev = max(stdev, mean * _MIN_STDEV_FRACTION, _MIN_STDEV_USD)
+    return (current_amount - mean) / stdev
+
+
 def detect_for_series(
     provider: str,
     service: str,
@@ -91,8 +104,7 @@ def detect_for_series(
     if mean < _MIN_SPEND_THRESHOLD:
         return None
 
-    stdev = statistics.stdev(history_amounts) if len(history_amounts) > 1 else 0.0
-    z_score = (current_amount - mean) / stdev if stdev > 0 else 0.0
+    z_score = _z_score(current_amount, history_amounts, mean)
     pct_change = (current_amount - mean) / mean * 100
 
     if abs(z_score) < _Z_SCORE_THRESHOLD or abs(pct_change) < _PCT_THRESHOLD:

@@ -23,6 +23,7 @@ from .detector import (
     _PCT_THRESHOLD,
     _Z_SCORE_THRESHOLD,
     _severity,
+    _z_score,
     detect_for_series,
 )
 from ..storage.snapshots import get_history
@@ -109,8 +110,7 @@ def _detect_against_baseline(
     if mean < _MIN_SPEND_THRESHOLD:
         return None
 
-    stdev = statistics.stdev(baseline_amounts) if len(baseline_amounts) > 1 else 0.0
-    z_score = (current_amount - mean) / stdev if stdev > 0 else 0.0
+    z_score = _z_score(current_amount, baseline_amounts, mean)
     pct_change = (current_amount - mean) / mean * 100
 
     if abs(z_score) < _Z_SCORE_THRESHOLD or abs(pct_change) < _PCT_THRESHOLD:
