@@ -21,6 +21,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .cloudwatch import MetricQuery, fetch_metric_values
+
 log = logging.getLogger(__name__)
 
 # ── Pricing constants (on-demand approximations) ──────────────────────────────
@@ -301,71 +303,68 @@ def check_nat_gateways(
     start = now - timedelta(days=lookback_days)
     period_seconds = 86400  # daily
 
-    for page in pages:
-        for nat in page.get("NatGateways", []):
-            nat_id = nat["NatGatewayId"]
-            vpc_id = nat.get("VpcId", "")
-            subnet_id = nat.get("SubnetId", "")
-            name_tag = next(
-                (t["Value"] for t in nat.get("Tags", []) if t["Key"] == "Name"), ""
-            )
+    nats = [nat for page in pages for nat in page.get("NatGateways", [])]
 
-            # Fetch BytesOutToDestination (egress through NAT GW)
-            try:
-                resp = cw_client.get_metric_statistics(
-                    Namespace="AWS/NATGateway",
-                    MetricName="BytesOutToDestination",
-                    Dimensions=[{"Name": "NatGatewayId", "Value": nat_id}],
-                    StartTime=start,
-                    EndTime=now,
-                    Period=period_seconds,
-                    Statistics=["Sum"],
-                )
-                datapoints = resp.get("Datapoints", [])
-            except Exception as exc:
-                # A failed read is not zero traffic. Collapsing it to 0.0 flagged
-                # every NAT gateway in the region as idle the moment CloudWatch
-                # was unreachable or the IAM permission was missing, and the
-                # trust envelope then stamped each one MEASURED/high. The sibling
-                # detectors (EBS at :673, EC2 CPU at :1018) already skip on this
-                # exact failure. BytesOutToDestination is the only evidence this
-                # detector has, so without it there is no finding to make.
-                log.debug("CW metrics failed for NAT GW %s: %s", nat_id, exc)
-                continue
+    # BytesOutToDestination (egress through NAT GW), one batched read for all
+    sums = fetch_metric_values(cw_client, [
+        MetricQuery(nat["NatGatewayId"], "AWS/NATGateway", "BytesOutToDestination",
+                    (("NatGatewayId", nat["NatGatewayId"]),), "Sum", period_seconds)
+        for nat in nats
+    ], start, now)
 
-            if not datapoints:
-                # The read SUCCEEDED and returned nothing, which is different from
-                # the read failing: the gateway is new, or genuinely carrying no
-                # traffic. That is a real observation.
-                avg_bytes_per_day = 0.0
-            else:
-                total_bytes = sum(dp.get("Sum", 0) for dp in datapoints)
-                avg_bytes_per_day = total_bytes / len(datapoints)
+    for nat in nats:
+        nat_id = nat["NatGatewayId"]
+        vpc_id = nat.get("VpcId", "")
+        subnet_id = nat.get("SubnetId", "")
+        name_tag = next(
+            (t["Value"] for t in nat.get("Tags", []) if t["Key"] == "Name"), ""
+        )
 
-            avg_gb_per_day = avg_bytes_per_day / (1024 ** 3)
+        datapoints = sums.get(nat_id)
+        if datapoints is None:
+            # A failed read is not zero traffic. Collapsing it to 0.0 flagged
+            # every NAT gateway in the region as idle the moment CloudWatch
+            # was unreachable or the IAM permission was missing, and the
+            # trust envelope then stamped each one MEASURED/high. The sibling
+            # detectors (EBS at :673, EC2 CPU at :1018) already skip on this
+            # exact failure. BytesOutToDestination is the only evidence this
+            # detector has, so without it there is no finding to make.
+            log.debug("CW metrics failed for NAT GW %s", nat_id)
+            continue
 
-            if avg_gb_per_day < low_throughput_gb_per_day:
-                # Savings: fixed hourly cost only (data processing cost is minimal at low volume)
-                monthly_savings = _NAT_GW_BASE_MONTHLY
-                findings.append({
-                    "resource_id": nat_id,
-                    "resource_type": "NAT Gateway",
-                    "waste_type": "idle_nat_gateway",
-                    "estimated_monthly_savings": round(monthly_savings, 2),
-                    "detail": (
-                        f"NAT Gateway {nat_id} in {subnet_id} (VPC: {vpc_id}) averaged "
-                        f"{avg_gb_per_day:.3f} GB/day over {lookback_days} days "
-                        f"(threshold: {low_throughput_gb_per_day} GB/day). "
-                        f"Fixed cost ~${_NAT_GW_BASE_MONTHLY:.2f}/mo regardless of usage. "
-                        f"Name: {name_tag or 'untagged'}. "
-                        f"Consider consolidating to fewer AZs or using VPC endpoints."
-                    ),
-                    "severity": _severity_from_savings(monthly_savings),
-                    "region": region,
-                    "account_id": None,
-                    "avg_gb_per_day": round(avg_gb_per_day, 4),
-                    "vpc_id": vpc_id,
-                })
+        if not datapoints:
+            # The read SUCCEEDED and returned nothing, which is different from
+            # the read failing: the gateway is new, or genuinely carrying no
+            # traffic. That is a real observation.
+            avg_bytes_per_day = 0.0
+        else:
+            total_bytes = sum(datapoints)
+            avg_bytes_per_day = total_bytes / len(datapoints)
+
+        avg_gb_per_day = avg_bytes_per_day / (1024 ** 3)
+
+        if avg_gb_per_day < low_throughput_gb_per_day:
+            # Savings: fixed hourly cost only (data processing cost is minimal at low volume)
+            monthly_savings = _NAT_GW_BASE_MONTHLY
+            findings.append({
+                "resource_id": nat_id,
+                "resource_type": "NAT Gateway",
+                "waste_type": "idle_nat_gateway",
+                "estimated_monthly_savings": round(monthly_savings, 2),
+                "detail": (
+                    f"NAT Gateway {nat_id} in {subnet_id} (VPC: {vpc_id}) averaged "
+                    f"{avg_gb_per_day:.3f} GB/day over {lookback_days} days "
+                    f"(threshold: {low_throughput_gb_per_day} GB/day). "
+                    f"Fixed cost ~${_NAT_GW_BASE_MONTHLY:.2f}/mo regardless of usage. "
+                    f"Name: {name_tag or 'untagged'}. "
+                    f"Consider consolidating to fewer AZs or using VPC endpoints."
+                ),
+                "severity": _severity_from_savings(monthly_savings),
+                "region": region,
+                "account_id": None,
+                "avg_gb_per_day": round(avg_gb_per_day, 4),
+                "vpc_id": vpc_id,
+            })
 
     return findings
 

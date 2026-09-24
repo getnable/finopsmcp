@@ -207,3 +207,94 @@ def test_no_queries_means_no_calls():
     cw = _CountingCloudWatch()
     assert fetch_metric_values(cw, [], _T0, _ts(24)) == {}
     assert cw.calls == []
+
+
+# ── the detectors ────────────────────────────────────────────────────────────
+
+class _Metrics:
+    """A CloudWatch account with some series in it, served through both read
+    APIs so the same test can run against the per-resource code and the batched
+    code and count what each one costs.
+
+    `series` maps (MetricName, *dimension values) to the values CloudWatch
+    holds, or to a StatusCode string for a series it refuses. Anything absent is
+    a Complete series with no datapoints, which is what CloudWatch answers for a
+    metric nobody published.
+    """
+
+    def __init__(self, series: dict | None = None):
+        self.series = series or {}
+        self.calls = 0
+
+    @staticmethod
+    def _key(metric: str, dims: list[dict]) -> tuple:
+        return (metric, *(d["Value"] for d in dims))
+
+    def get_metric_statistics(self, **kw):
+        self.calls += 1
+        got = self.series.get(self._key(kw["MetricName"], kw["Dimensions"]), [])
+        if isinstance(got, str):
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": got}},
+                              "GetMetricStatistics")
+        stat = kw["Statistics"][0]
+        return {"Datapoints": [
+            {"Timestamp": _ts(i), stat: v, "Unit": "None"} for i, v in enumerate(got)
+        ]}
+
+    def get_metric_data(self, **kw):
+        self.calls += 1
+        results = []
+        for q in kw["MetricDataQueries"]:
+            metric = q["MetricStat"]["Metric"]
+            got = self.series.get(self._key(metric["MetricName"], metric["Dimensions"]), [])
+            if isinstance(got, str):
+                results.append({"Id": q["Id"], "Timestamps": [], "Values": [],
+                                "StatusCode": got})
+            else:
+                results.append({"Id": q["Id"], "Timestamps": [_ts(i) for i in range(len(got))],
+                                "Values": list(got), "StatusCode": "Complete"})
+        return {"MetricDataResults": results, "Messages": []}
+
+
+class _Pages:
+    """A describe_* client: one page set whatever the operation name."""
+
+    def __init__(self, pages: list[dict]):
+        self._pages = pages
+
+    def get_paginator(self, _name: str):
+        pages = self._pages
+
+        class _P:
+            def paginate(self, **_kw):
+                return list(pages)
+        return _P()
+
+
+def _nat_pages(n: int) -> list[dict]:
+    return [{"NatGateways": [
+        {"NatGatewayId": f"nat-{i:04d}", "VpcId": "vpc-1", "SubnetId": "subnet-1", "Tags": []}
+        for i in range(n)
+    ]}]
+
+
+def test_nat_gateways_are_read_in_one_call_per_500():
+    from finops.analyzers import waste
+
+    busy = 40 * 1024 ** 3
+    cw = _Metrics({("BytesOutToDestination", "nat-0001"): [busy] * 7})
+
+    findings = waste.check_nat_gateways(_Pages(_nat_pages(600)), cw, region="us-east-1")
+
+    assert cw.calls == math.ceil(600 * 1 / 500) == 2
+    # nat-0001 carries 40 GB/day; the other 599 read Complete and empty.
+    assert len(findings) == 599
+    assert "nat-0001" not in {f["resource_id"] for f in findings}
+
+
+def test_a_nat_gateway_whose_series_is_refused_is_not_idle():
+    from finops.analyzers import waste
+
+    cw = _Metrics({("BytesOutToDestination", "nat-0000"): "Forbidden"})
+    findings = waste.check_nat_gateways(_Pages(_nat_pages(2)), cw, region="us-east-1")
+    assert [f["resource_id"] for f in findings] == ["nat-0001"]
