@@ -92,6 +92,44 @@ def replace_provider_day(provider: str, day: date, rows: list[dict]) -> int:
     return len(rows)
 
 
+def store_zero_for_stopped_series(
+    provider: str,
+    day: date,
+    seen: set[tuple[str, str, str]],
+    recent_days: int = 7,
+) -> int:
+    """Write a $0 row for each recently billed series missing from `day`'s fetch.
+
+    Snapshots store only what the provider billed, so a service that stopped
+    billing had no row for the day at all, and anomaly detection, which walks the
+    day's rows, never looked at it. A $4,000/day pipeline going to $0 is exactly
+    the drop worth catching. `seen` holds the (service, account_id, region) keys
+    the fetch did return. Bounded to series with spend in the last `recent_days`,
+    so a service retired months ago is not zero-filled forever. Returns rows written.
+    """
+    from datetime import timedelta
+    start = (day - timedelta(days=recent_days)).isoformat()
+    engine = get_engine()
+    with engine.connect() as conn:
+        recent = conn.execute(
+            select(cost_snapshots.c.service, cost_snapshots.c.account_id,
+                   cost_snapshots.c.region)
+            .where(
+                and_(
+                    cost_snapshots.c.provider == provider,
+                    cost_snapshots.c.snapshot_date >= start,
+                    cost_snapshots.c.snapshot_date < day.isoformat(),
+                    cost_snapshots.c.amount_usd > 0,
+                )
+            )
+            .distinct()
+        ).fetchall()
+    missing = {tuple(r) for r in recent} - seen
+    for service, account_id, region in sorted(missing):
+        store_snapshot(provider, service, account_id, region, day, 0.0)
+    return len(missing)
+
+
 def latest_captured_at() -> str | None:
     """ISO timestamp of the most recent cost snapshot, or None if there are none.
 
@@ -118,21 +156,30 @@ def get_history(
     service: str,
     account_id: str,
     days: int = 28,
+    region: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Daily rows for one series over the last `days` days, oldest first.
+
+    Pass `region` to get that region's series only. Snapshots are stored per
+    region, so without it a service billing in two regions returns both sets of
+    rows interleaved, and a baseline built from them is the average of two
+    unrelated series. None keeps the all-regions answer for callers that want it.
+    """
     from datetime import timedelta
     cutoff = (date.today() - timedelta(days=days)).isoformat()
+    conds = [
+        cost_snapshots.c.provider == provider,
+        cost_snapshots.c.service == service,
+        cost_snapshots.c.account_id == account_id,
+        cost_snapshots.c.snapshot_date >= cutoff,
+    ]
+    if region is not None:
+        conds.append(cost_snapshots.c.region == region)
     engine = get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
             select(cost_snapshots)
-            .where(
-                and_(
-                    cost_snapshots.c.provider == provider,
-                    cost_snapshots.c.service == service,
-                    cost_snapshots.c.account_id == account_id,
-                    cost_snapshots.c.snapshot_date >= cutoff,
-                )
-            )
+            .where(and_(*conds))
             .order_by(cost_snapshots.c.snapshot_date)
         ).fetchall()
     return [dict(r._mapping) for r in rows]
@@ -167,27 +214,64 @@ def store_attributed_cost(
 ) -> None:
     engine = get_engine()
     with engine.begin() as conn:
-        conn.execute(
-            attributed_costs.delete().where(
-                and_(
-                    attributed_costs.c.provider == provider,
-                    attributed_costs.c.service == service,
-                    attributed_costs.c.account_id == account_id,
-                    attributed_costs.c.team == team,
-                    attributed_costs.c.snapshot_date == snapshot_date.isoformat(),
-                )
+        _upsert_attributed(conn, provider, service, account_id, team, environment,
+                           snapshot_date.isoformat(), amount_usd)
+
+
+_AttrKey = tuple[str, str, str, str, str, str]
+
+
+def _upsert_attributed(conn, provider: str, service: str, account_id: str, team: str,
+                       environment: str, snapshot_date: str, amount_usd: float) -> None:
+    # Environment is part of the key: teamA/prod and teamA/dev on the same
+    # day are two rows, and leaving it out let the second replace the first.
+    conn.execute(
+        attributed_costs.delete().where(
+            and_(
+                attributed_costs.c.provider == provider,
+                attributed_costs.c.service == service,
+                attributed_costs.c.account_id == account_id,
+                attributed_costs.c.team == team,
+                attributed_costs.c.environment == environment,
+                attributed_costs.c.snapshot_date == snapshot_date,
             )
         )
-        conn.execute(attributed_costs.insert().values(
-            provider=provider,
-            service=service,
-            account_id=account_id,
-            team=team,
-            environment=environment,
-            snapshot_date=snapshot_date.isoformat(),
-            amount_usd=amount_usd,
-            captured_at=_now(),
-        ))
+    )
+    conn.execute(attributed_costs.insert().values(
+        provider=provider,
+        service=service,
+        account_id=account_id,
+        team=team,
+        environment=environment,
+        snapshot_date=snapshot_date,
+        amount_usd=amount_usd,
+        captured_at=_now(),
+    ))
+
+
+def store_attributed_costs(rows: list[dict[str, Any]]) -> int:
+    """Upsert many attributed-cost rows in ONE transaction. Returns rows written.
+
+    Rows that land on the same key are summed first, not written one after the
+    other: two tag values that alias to one team ("infra" and "platform-eng"
+    both meaning platform) are two slices of that team's spend, and upserting
+    them in turn kept only the last. One transaction, so a failure part way
+    through leaves the previous attribution in place instead of half of it.
+    Each row needs provider, service, account_id, team, environment,
+    snapshot_date (a date) and amount_usd.
+    """
+    totals: dict[_AttrKey, float] = {}
+    for r in rows:
+        key = (r["provider"], r["service"], r["account_id"], r["team"],
+               r["environment"], r["snapshot_date"].isoformat())
+        totals[key] = totals.get(key, 0.0) + float(r["amount_usd"])
+    if not totals:
+        return 0
+    engine = get_engine()
+    with engine.begin() as conn:
+        for key, amount in totals.items():
+            _upsert_attributed(conn, *key, amount)
+    return len(totals)
 
 
 def get_costs_by_team(

@@ -99,6 +99,11 @@ class CostCodeLensProvider implements vscode.CodeLensProvider {
 
 // ── Hover provider ────────────────────────────────────────────────────────────
 
+/** Backslash-escape Markdown punctuation (and HTML brackets) in untrusted text. */
+export function mdEscape(text: string): string {
+  return String(text).replace(/[\\`*_{}\[\]()#+\-.!|<>~]/g, (c) => `\\${c}`);
+}
+
 class CostHoverProvider implements vscode.HoverProvider {
   provideHover(
     document: vscode.TextDocument,
@@ -116,30 +121,34 @@ class CostHoverProvider implements vscode.HoverProvider {
 
     const entry = priceResource(block.resourceType, block.attrs);
 
+    // Untrusted on purpose: resource names, types and instance types come from
+    // the .tf file, so a repo could plant a `command:` link that runs in the
+    // user's terminal on click. The hover links only to https URLs, which work
+    // without trust, and every file-derived value is escaped.
     const md = new vscode.MarkdownString();
-    md.isTrusted = true;
-    md.appendMarkdown(`**nable cost estimate** — \`${block.resourceType}.${block.resourceName}\`\n\n`);
+    md.isTrusted = false;
+    md.appendMarkdown(`**nable cost estimate**: ${mdEscape(`${block.resourceType}.${block.resourceName}`)}\n\n`);
 
     if (!entry) {
-      md.appendMarkdown(`_No pricing data for \`${block.resourceType}\`_\n\n`);
+      md.appendMarkdown(`_No pricing data for ${mdEscape(block.resourceType)}_\n\n`);
       md.appendMarkdown(`[View AWS pricing →](https://aws.amazon.com/pricing/)`);
       return new vscode.Hover(md);
     }
 
     if (entry.monthly === 0) {
-      md.appendMarkdown(`**Pay-per-use** — ${entry.detail}\n\n`);
+      md.appendMarkdown(`**Pay-per-use**: ${mdEscape(entry.detail)}\n\n`);
     } else {
       const mo = entry.monthly;
       const yr = mo * 12;
       md.appendMarkdown(`| | |\n|---|---|\n`);
       md.appendMarkdown(`| **Monthly** | **$${mo.toLocaleString("en-US", { minimumFractionDigits: 2 })}** |\n`);
       md.appendMarkdown(`| Annual | $${yr.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} |\n`);
-      md.appendMarkdown(`| Detail | ${entry.detail} |\n`);
+      md.appendMarkdown(`| Detail | ${mdEscape(entry.detail)} |\n`);
       md.appendMarkdown(`| Pricing | On-demand, us-east-1 |\n\n`);
     }
 
     if (entry.note) {
-      md.appendMarkdown(`\n> 💡 **Savings tip:** ${entry.note}\n\n`);
+      md.appendMarkdown(`\n> 💡 **Savings tip:** ${mdEscape(entry.note)}\n\n`);
     }
 
     md.appendMarkdown(`\n---\n_[nable finops](https://github.com/getnable/finopsmcp) · prices are estimates, us-east-1 on-demand_`);
@@ -182,7 +191,7 @@ function updateDecorations(editor: vscode.TextEditor) {
     );
 
     const hoverMessage = new vscode.MarkdownString();
-    if (entry.note) hoverMessage.appendMarkdown(`💡 ${entry.note}`);
+    if (entry.note) hoverMessage.appendMarkdown(`💡 ${mdEscape(entry.note)}`);
 
     const decoration: vscode.DecorationOptions = {
       range,

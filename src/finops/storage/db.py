@@ -851,6 +851,12 @@ def _run_sqlite_migrations(engine: Engine) -> None:
                     conn.commit()
                     log.info("Migration applied: %s.%s", table, column)
             except Exception as exc:
+                # Roll back before the next step. On PostgreSQL a failed
+                # statement aborts the transaction, and without this every
+                # later step on this shared connection raised
+                # InFailedSqlTransaction and was "skipped" too, so one bad
+                # ALTER quietly took every migration after it down with it.
+                conn.rollback()
                 log.warning("Migration skipped (%s.%s): %s", table, column, exc)
 
         # Legacy cleanup, not additive: old schemas defined budgets.block_at_pct as
@@ -888,6 +894,7 @@ def _run_sqlite_migrations(engine: Engine) -> None:
                 log.info("Migration: anomaly dedup index created (%s duplicate "
                          "row(s) removed)", dupes if dupes and dupes > 0 else 0)
         except Exception as exc:
+            conn.rollback()  # same reason as above
             log.warning("anomaly dedup index migration skipped: %s", exc)
 
         for _tbl, _col in (("budgets", "block_at_pct"),):
@@ -901,6 +908,7 @@ def _run_sqlite_migrations(engine: Engine) -> None:
                     conn.commit()
                     log.info("Migration: dropped legacy %s.%s", _tbl, _col)
             except Exception as exc:
+                conn.rollback()  # same reason as above
                 log.warning("legacy %s.%s drop skipped: %s", _tbl, _col, exc)
 
 
@@ -960,14 +968,27 @@ def archive_old_snapshots(days_to_keep: int = 365) -> int:
     return count
 
 
+def _display_db_url(database_url: str) -> str:
+    """Host, port and database only. This reaches the model via get_storage_info.
+
+    A regex over user:pass@ missed `?password=` query strings and an empty user
+    (`://:pw@host`), so the password went out unmasked. Rebuild from parts
+    instead: nothing that could carry a credential is copied over.
+    """
+    from sqlalchemy.engine import make_url
+    try:
+        u = make_url(database_url)
+    except Exception:
+        return "postgresql://(unparseable URL)"
+    port = f":{u.port}" if u.port else ""
+    return f"{u.drivername}://{u.host or ''}{port}/{u.database or ''}"
+
+
 def storage_mode() -> dict:
     """Return info about the current storage backend."""
     database_url = os.environ.get("DATABASE_URL", "")
     if database_url and _is_postgres(database_url):
-        # Mask credentials for display
-        import re
-        masked = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", database_url)
-        return {"mode": "postgres", "url": masked, "shared": True}
+        return {"mode": "postgres", "url": _display_db_url(database_url), "shared": True}
     db_path_env = os.environ.get("FINOPS_DB_PATH", "")
     db_path = Path(db_path_env).expanduser() if db_path_env else data_dir() / "finops.db"
     return {"mode": "sqlite", "path": str(db_path), "shared": False}

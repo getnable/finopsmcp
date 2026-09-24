@@ -46,11 +46,11 @@ async def get_cost_summary(
 
     # Multi-account: swap in an account-specific AWS connector when requested
     if account:
-        from ..accounts import get_account, get_default_account, get_boto3_session
+        from ..accounts import get_boto3_session, resolve_named_account
         from ..connectors.aws import AWSConnector as _AWSConnector
-        acct_cfg = get_account(account) or get_default_account()
-        if not acct_cfg:
-            return {"error": f"Account '{account}' not found. Run list_aws_accounts() to see configured accounts."}
+        acct_cfg, acct_err = resolve_named_account(account)
+        if acct_err:
+            return acct_err
         session = get_boto3_session(acct_cfg)
         acct_connector = _AWSConnector(session=session)
         pool = {"aws": acct_connector}
@@ -109,6 +109,8 @@ async def get_cost_summary(
         "by_provider": by_provider,
         "grand_by_service": {k: round(v, 4) for k, v in _ranked_services[:50]},
     }
+    if account:
+        result["account"] = acct_cfg.name
     # This is the front door of the funnel, so it carries the map to the next
     # room. nable advertises only entry points; the drill-down tools are callable
     # but unlisted, and naming the ones that fit THIS answer is what keeps them
@@ -201,11 +203,11 @@ async def get_costs_by_service(
         ed = _srv.date.fromisoformat(end_date)
 
     if account:
-        from ..accounts import get_account, get_default_account, get_boto3_session
+        from ..accounts import get_boto3_session, resolve_named_account
         from ..connectors.aws import AWSConnector as _AWSConnector
-        acct_cfg = get_account(account) or get_default_account()
-        if not acct_cfg:
-            return {"error": f"Account '{account}' not found. Run list_aws_accounts() to see configured accounts."}
+        acct_cfg, acct_err = resolve_named_account(account)
+        if acct_err:
+            return acct_err
         session = get_boto3_session(acct_cfg)
         acct_connector = _AWSConnector(session=session)
         targets = {"aws": acct_connector} if await acct_connector.is_configured() else {}
@@ -254,6 +256,13 @@ async def get_costs_by_service(
         key=lambda x: -x["total_usd"],
     )
 
+    # Same rule as get_cost_summary: an errored provider adds 0, so "every
+    # provider failed" used to come back as total_usd 0 with the reason under
+    # "errors", which reads as "spent nothing on this".
+    ok = [n for n in targets if n not in errors]
+    if errors and not ok:
+        return _no_cost_data(errors)
+
     total_usd = round(sum(s["total_usd"] for s in ranked), 4)
     kept, omitted = _srv.fit_to_budget(ranked)
     result: dict[str, _srv.Any] = {
@@ -262,11 +271,14 @@ async def get_costs_by_service(
         "services": kept,
         "total_usd": total_usd,
     }
+    if account:
+        result["account"] = acct_cfg.name
     if omitted:
         result["services_truncated"] = True
         result["hint"] = f"Showing top {len(kept)} of {len(ranked)} services by cost to stay within token budget. total_usd reflects all services."
     if errors:
         result["errors"] = errors
+        result.update(_partial(ok, errors))
     return result
 
 
@@ -353,13 +365,24 @@ async def get_cost_trends(
 
     grand_total, by_provider, _ = await _srv._gather_costs(targets, start, end, granularity)
 
-    return {
+    # Mirrors get_cost_summary: errored providers contribute 0 to grand_total,
+    # and a trend of all zeros reads as "spend fell to nothing".
+    failed = {name: p.get("error") for name, p in by_provider.items()
+              if isinstance(p, dict) and p.get("error")}
+    ok = [name for name in by_provider if name not in failed]
+    if failed and not ok:
+        return _no_cost_data(failed)
+
+    result = {
         "period": {"start": start.isoformat(), "end": end.isoformat(), "granularity": granularity},
         "grand_total_usd": round(grand_total, 4),
         "grand_total_formatted": _srv._fmt_usd(grand_total),
         "by_provider": by_provider,
         "note": "For full time-series granularity, configure BigQuery exports (GCP) or Cost and Usage Reports (AWS).",
     }
+    if failed:
+        result.update(_partial(ok, failed))
+    return result
 
 
 @_srv.mcp.tool()
@@ -424,6 +447,10 @@ async def get_cost_summary_all_accounts(
         except Exception as exc:
             errors[acct.name] = str(exc)
 
+    # Every account failing is not a $0 estate. Same refusal as get_cost_summary.
+    if errors and not results:
+        return _no_cost_data(errors, noun="account")
+
     results.sort(key=lambda x: -x["total_usd"])
     for r in results:
         r["pct_of_total"] = round(r["total_usd"] / grand_total * 100, 1) if grand_total else 0
@@ -437,6 +464,7 @@ async def get_cost_summary_all_accounts(
     }
     if errors:
         out["errors"] = errors
+        out.update(_partial([r["account"] for r in results], errors, noun="account"))
     return out
 
 
@@ -698,8 +726,7 @@ async def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dic
         return err
     try:
         from ..connectors.aws_org import top_spending_accounts
-        accounts = top_spending_accounts(limit=limit, days_back=days_back)
-        return {"top_accounts": accounts, "days_back": days_back}
+        return {**top_spending_accounts(limit=limit, days_back=days_back), "days_back": days_back}
     except Exception as e:
         return {"error": str(e)}
 
@@ -2171,3 +2198,32 @@ async def get_nable_roi(
     except Exception as exc:
         _srv.log.error("get_nable_roi failed: %s", exc)
         return {"error": str(exc)}
+
+
+# ── a total is only a total if something was read ─────────────────────────────
+# get_cost_summary's refusal and partial label, shared by the other cost tools
+# that sum across providers or accounts. A read that failed adds 0 to the sum,
+# so without these an all-failed run answers "$0.00" and a model tells the user
+# they spent nothing.
+
+def _no_cost_data(failed: dict, noun: str = "provider") -> dict:
+    first = next(iter(failed.values()))
+    return {
+        "error": "no_cost_data",
+        "message": str(first),
+        f"failed_{noun}s": failed,
+        "note": (f"No {noun} returned cost data, so nable has no total to "
+                 "report. This is not a finding of zero spend."),
+    }
+
+
+def _partial(ok, failed: dict, noun: str = "provider") -> dict:
+    return {
+        "partial": True,
+        f"failed_{noun}s": failed,
+        "partial_warning": (
+            f"This total covers {', '.join(sorted(ok))} only. "
+            f"{', '.join(sorted(failed))} could not be read, so real spend is "
+            f"higher than the figure above."
+        ),
+    }

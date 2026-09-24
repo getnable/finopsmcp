@@ -28,6 +28,7 @@ import logging
 import os
 import re
 import io
+import ssl
 from dataclasses import dataclass
 from datetime import date, datetime
 from email.header import decode_header
@@ -222,7 +223,11 @@ class InvoiceMailbox:
         self._conn: imaplib.IMAP4_SSL | None = None
 
     def connect(self) -> None:
-        self._conn = imaplib.IMAP4_SSL(self.host, self.port)
+        # Explicit context: with ssl_context=None imaplib does not verify the
+        # server certificate, so anyone on the path could collect the password.
+        self._conn = imaplib.IMAP4_SSL(
+            self.host, self.port, ssl_context=ssl.create_default_context()
+        )
         self._conn.login(self.user, self.password)
 
     def disconnect(self) -> None:
@@ -239,12 +244,16 @@ class InvoiceMailbox:
         assert self._conn is not None
 
         self._conn.select(self.folder)
-        _, data = self._conn.search(None, search)
-        uid_list = data[0].split() if data[0] else []
+        # UIDs, not sequence numbers: sequence numbers shift as soon as a
+        # message leaves the folder, so moving message 1 made "2" point at a
+        # different email and unrelated mail was moved and parsed as spend.
+        _, data = self._conn.uid("SEARCH", None, search)
+        uid_list = data[0].split() if data and data[0] else []
 
         results: list[ParsedInvoice] = []
+        processed: list[bytes] = []
         for uid in uid_list:
-            _, msg_data = self._conn.fetch(uid, "(RFC822)")
+            _, msg_data = self._conn.uid("FETCH", uid, "(RFC822)")
             if not msg_data or not msg_data[0]:
                 continue
             raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else None
@@ -254,22 +263,37 @@ class InvoiceMailbox:
             parsed = _parse_email_message(msg, uid.decode())
             if parsed:
                 results.append(parsed)
-                self._mark_processed(uid)
+                processed.append(uid)
+        if processed:
+            self._mark_processed(processed)
         return results
 
-    def _mark_processed(self, uid: bytes) -> None:
+    def _mark_processed(self, uids: list[bytes]) -> None:
+        """Move processed messages out of the folder, touching only those UIDs.
+
+        Never a bare EXPUNGE: that also purges whatever the user had already
+        flagged \\Deleted. Without MOVE or UIDPLUS the messages are copied and
+        marked read, and the originals stay where they are.
+        """
         assert self._conn is not None
-        # Try to move to processed folder; if it doesn't exist just mark read
+        uid_set = b",".join(uids)
         try:
             self._conn.create(self.processed_folder)
         except Exception:
             pass
+        caps = {c.upper() for c in (getattr(self._conn, "capabilities", ()) or ())}
         try:
-            self._conn.copy(uid, self.processed_folder)
-            self._conn.store(uid, "+FLAGS", "\\Deleted")
-            self._conn.expunge()
-        except Exception:
-            self._conn.store(uid, "+FLAGS", "\\Seen")
+            if "MOVE" in caps:
+                self._conn.uid("MOVE", uid_set, self.processed_folder)
+                return
+            self._conn.uid("COPY", uid_set, self.processed_folder)
+            if "UIDPLUS" in caps:
+                self._conn.uid("STORE", uid_set, "+FLAGS", "(\\Deleted)")
+                self._conn.uid("EXPUNGE", uid_set)
+                return
+        except Exception as exc:
+            log.warning("Could not move processed invoices: %s", exc)
+        self._conn.uid("STORE", uid_set, "+FLAGS", "(\\Seen)")
 
 
 def _store_invoice(inv: ParsedInvoice, account_id: str) -> dict[str, Any]:

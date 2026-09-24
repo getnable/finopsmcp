@@ -64,6 +64,47 @@ def test_scan_demo_json_stdout_is_pure():
     assert doc["recoverable"]["monthly_usd"] > 0
 
 
+def _run_isolated(tmp_path, *argv: str):
+    """_run_entry with a throwaway HOME and data dir, and a PATH without the
+    `finops` script on it (the `uvx nable` case, which also triggers the PATH
+    warning). No AWS keys: nothing here may reach a cloud."""
+    env = {k: v for k, v in _ENV.items()
+           if not k.startswith(("AWS_", "FINOPS_", "NABLE_BRIEF"))}
+    env.update(HOME=str(tmp_path), FINOPS_DATA_DIR=str(tmp_path / "data"),
+               PATH="/usr/bin:/bin", AWS_EC2_METADATA_DISABLED="true")
+    code = (
+        "import sys; sys.argv = ['nable', *sys.argv[1:]]; "
+        "from finops.entry import main; main()"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", code, *argv],
+        capture_output=True, text=True, timeout=60.0, env=env, cwd=str(REPO),
+    )
+
+
+def test_brief_json_stdout_is_pure(tmp_path):
+    """The setup banner used to print to stdout ahead of every command but
+    scan and guard, so `nable brief --json | jq` failed on line one."""
+    proc = _run_isolated(tmp_path, "brief", "--latest", "--json")
+    assert proc.returncode == 0, proc.stderr
+    doc = json.loads(proc.stdout)  # any chrome on stdout breaks this parse
+    assert doc == {"error": "no_brief"}
+
+
+def test_ai_budget_json_stdout_is_pure(tmp_path):
+    proc = _run_isolated(tmp_path, "ai-budget", "--json")
+    assert proc.returncode == 0, proc.stderr
+    doc = json.loads(proc.stdout)
+    assert "verdict" in doc
+
+
+def test_scan_json_stdout_is_pure_without_finops_on_path(tmp_path):
+    """The PATH warning ran ahead of scan too, on stdout."""
+    proc = _run_isolated(tmp_path, "scan", "--demo", "--json")
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["command"] == "scan"
+
+
 def test_help_leads_with_get_answers():
     proc = _run_entry("--help")
     assert proc.returncode == 0

@@ -18,7 +18,7 @@ import json
 import logging
 import os
 import re
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import httpx
@@ -76,15 +76,36 @@ def _get_pr_files(repo: str, pr_number: int) -> list[dict]:
     return files
 
 
+_TOKEN_LOGIN: str | None = None
+
+
+def _token_login() -> str | None:
+    """The login GITHUB_TOKEN authenticates as, or None if it cannot be read."""
+    global _TOKEN_LOGIN
+    if _TOKEN_LOGIN is None:
+        try:
+            r = httpx.get("https://api.github.com/user", headers=_github_headers(), timeout=10)
+            if r.is_success:
+                _TOKEN_LOGIN = r.json().get("login") or None
+        except httpx.HTTPError:
+            return None
+    return _TOKEN_LOGIN
+
+
 def _post_or_update_comment(repo: str, pr_number: int, body: str) -> None:
     """Post a new comment or update the existing nable comment on the PR."""
     # Find existing comment
     comments_url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
     resp = httpx.get(comments_url, headers=_github_headers())
     existing_id: int | None = None
-    if resp.is_success:
+    # Only a comment we wrote can be ours to edit. Matching the tag alone let a
+    # PR author post the tag first, have nable write its estimate into their
+    # comment, then edit the numbers afterwards under their own name.
+    me = _token_login()
+    if resp.is_success and me:
         for comment in resp.json():
-            if COMMENT_TAG in comment.get("body", ""):
+            if (comment.get("body", "").startswith(COMMENT_TAG)
+                    and (comment.get("user") or {}).get("login") == me):
                 existing_id = comment["id"]
                 break
 
@@ -165,14 +186,32 @@ def _handle_pr_event(payload: dict) -> None:
     _post_or_update_comment(repo, pr_number, comment)
 
 
+# GitHub caps webhook payloads at 25 MB.
+MAX_PAYLOAD_BYTES = 25 * 1024 * 1024
+
+
 class WebhookHandler(BaseHTTPRequestHandler):
+    # Per-connection socket timeout, so one client that never finishes sending
+    # cannot hold a worker forever.
+    timeout = 30
+
     def do_POST(self) -> None:
         if self.path != "/webhook/github":
             self.send_response(404)
             self.end_headers()
             return
 
-        length = int(self.headers.get("Content-Length", 0))
+        # Bounded before anything is read. An unchecked Content-Length of -1 made
+        # rfile.read() wait for EOF, and on the single-threaded server one
+        # unauthenticated connection stalled every later delivery.
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            length = -1
+        if not 0 < length <= MAX_PAYLOAD_BYTES:
+            self.send_response(413 if length > MAX_PAYLOAD_BYTES else 400)
+            self.end_headers()
+            return
         payload_bytes = self.rfile.read(length)
 
         sig = self.headers.get("X-Hub-Signature-256", "")
@@ -206,7 +245,7 @@ def main() -> None:
         print("Error: GITHUB_TOKEN not set. PR comments won't be posted.")
 
     port = int(os.getenv("PR_WEBHOOK_PORT", "8080"))
-    server = HTTPServer(("0.0.0.0", port), WebhookHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", port), WebhookHandler)
     print(f"nable PR webhook listening on port {port}")
     print(f"  GitHub webhook URL: http://your-host:{port}/webhook/github")
     print(f"  Cost threshold: ${COST_THRESHOLD}/month")

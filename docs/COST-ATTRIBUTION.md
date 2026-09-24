@@ -112,7 +112,9 @@ them in your IaC:
 - `open_terraform_tag_pr` opens a pull request with it
 
 This is optional and Terraform-only. Opening PRs is off by default; see
-`FINOPS_REMEDIATION_ENABLED` and `nable.policy.yaml`.
+`FINOPS_REMEDIATION_ENABLED`, or `nable.policy.yaml` in the nable data directory
+(`~/.finops`) or at the path in `FINOPS_POLICY_FILE`. A policy file in the working
+directory is ignored, so a repository cannot enable PRs for itself.
 
 For the reporting side, `get_untagged_resource_cost` tells you how much spend is
 missing a given tag and which services are the worst offenders, which is usually

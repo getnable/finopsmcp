@@ -61,7 +61,7 @@ def test_top_spending_accounts_reuses_the_org_summary_fetch():
         aws_org.org_cost_summary(days_back=30)          # primes the cache
         top = aws_org.top_spending_accounts(limit=2, days_back=30)  # should hit cache
 
-    assert [x["account_id"] for x in top] == ["a", "b"]
+    assert [x["account_id"] for x in top["top_accounts"]] == ["a", "b"]
     assert calls["n"] == 1  # top_spending_accounts did not trigger a second CE query
 
 

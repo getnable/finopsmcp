@@ -34,6 +34,18 @@ class CostSummary:
                                    # nable does not convert — non-USD is surfaced, not relabeled.
 
 
+def combined_currency(summaries: list[CostSummary]) -> str:
+    """The currency label for a merge of per-account summaries.
+
+    Only summaries that actually carried rows vote: an empty account defaults
+    to "USD" and would otherwise turn a single-currency JPY rollup into MIXED.
+    """
+    found = {s.currency for s in summaries if s.entries and s.currency}
+    if len(found) == 1:
+        return found.pop()
+    return "MIXED" if found else "USD"
+
+
 class BaseConnector(ABC):
     provider: str = ""
 

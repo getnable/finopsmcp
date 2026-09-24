@@ -45,44 +45,53 @@ def fetch_aws_tagged_costs(
             sts = boto3.client("sts")
             account_id = sts.get_caller_identity()["Account"]
 
-        # Group by SERVICE + each tag key
-        group_by = [{"Type": "DIMENSION", "Key": "SERVICE"}]
-        for key in tag_keys:
-            group_by.append({"Type": "TAG", "Key": key})
+        # Cost Explorer accepts at most two GroupBy entries, so it is SERVICE
+        # plus ONE tag key per request. SERVICE plus every rule key was rejected
+        # outright as soon as a user had two. Each key's rows cover the whole
+        # bill on their own, so a caller must not sum rows across keys.
+        for tag_key in tag_keys or [None]:
+            group_by = [{"Type": "DIMENSION", "Key": "SERVICE"}]
+            if tag_key:
+                group_by.append({"Type": "TAG", "Key": tag_key})
 
-        kwargs: dict[str, Any] = dict(
-            TimePeriod={"Start": start_date.isoformat(), "End": end_date.isoformat()},
-            Granularity="MONTHLY",
-            Metrics=["UnblendedCost"],
-            GroupBy=group_by,
-        )
+            kwargs: dict[str, Any] = dict(
+                TimePeriod={"Start": start_date.isoformat(), "End": end_date.isoformat()},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+                GroupBy=group_by,
+            )
 
-        while True:
-            resp = ce.get_cost_and_usage(**kwargs)
-            for period in resp.get("ResultsByTime", []):
-                for group in period.get("Groups", []):
-                    keys = group.get("Keys", [])
-                    service = keys[0] if keys else "Unknown"
-                    tags: dict[str, str] = {}
-                    for i, tag_key in enumerate(tag_keys, start=1):
-                        raw = keys[i] if i < len(keys) else ""
-                        # AWS prefixes tag values with "tag_key$"
-                        val = raw.split("$", 1)[-1] if "$" in raw else raw
-                        if val:
-                            tags[tag_key] = val
-                    amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
-                    if amount > 0:
-                        results.append({
-                            "account_id": account_id,
-                            "service": service,
-                            "tags": tags,
-                            "amount_usd": amount,
-                            "attribution": tags_to_attribution(tags),
-                        })
-            token = resp.get("NextPageToken")
-            if not token:
-                break
-            kwargs["NextPageToken"] = token
+            while True:
+                resp = ce.get_cost_and_usage(**kwargs)
+                for period in resp.get("ResultsByTime", []):
+                    # MONTHLY over a range spanning months returns one period
+                    # per month; each row carries the start of its own.
+                    period_start = period.get("TimePeriod", {}).get("Start") or start_date.isoformat()
+                    for group in period.get("Groups", []):
+                        keys = group.get("Keys", [])
+                        service = keys[0] if keys else "Unknown"
+                        tags: dict[str, str] = {}
+                        if tag_key:
+                            raw = keys[1] if len(keys) > 1 else ""
+                            # AWS prefixes tag values with "tag_key$"
+                            val = raw.split("$", 1)[-1] if "$" in raw else raw
+                            if val:
+                                tags[tag_key] = val
+                        amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                        if amount > 0:
+                            results.append({
+                                "account_id": account_id,
+                                "service": service,
+                                "tags": tags,
+                                "tag_key": tag_key,
+                                "period_start": period_start,
+                                "amount_usd": amount,
+                                "attribution": tags_to_attribution(tags),
+                            })
+                token = resp.get("NextPageToken")
+                if not token:
+                    break
+                kwargs["NextPageToken"] = token
 
     return results
 

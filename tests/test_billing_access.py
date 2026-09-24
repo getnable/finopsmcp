@@ -253,7 +253,7 @@ LEGACY_CE_SITES: frozenset[str] = frozenset({
     "connectors/aws_services/bedrock.py", "connectors/aws_services/documentdb.py",
     "connectors/aws_services/marketplace.py", "connectors/aws_services/textract.py",
     "connectors/kubernetes_costs.py", "connectors/llm_costs.py",
-    "connectors/universal.py", "doctor.py", "ml/forecasting.py",
+    "connectors/universal.py", "doctor.py",
     "recommendations/bedrock_routing.py", "recommendations/commitments.py",
     "recommendations/database_savings_plans.py", "recommendations/genuine_savings.py",
     "recommendations/rate_detector.py", "recommendations/textract_env.py",
@@ -450,6 +450,114 @@ def test_a_genuine_zero_is_still_reported_as_zero(monkeypatch):
     out = _summary(monkeypatch, {"aws": {"total_usd": 0.0, "services": {}}})
     assert out.get("error") != "no_cost_data"
     assert out["grand_total_usd"] == 0.0
+
+
+# The same rule for the other tools that sum a total across providers or
+# accounts. Each used to answer total 0 when every read failed.
+
+def _trends(monkeypatch, providers: dict):
+    import asyncio
+
+    import finops.server as srv
+
+    async def fake_gather(targets, sd, ed, granularity):
+        total = sum(p.get("total_usd", 0.0) for p in providers.values() if not p.get("error"))
+        return total, dict(providers), {}
+
+    async def fake_active(pool):
+        return {k: object() for k in providers}
+
+    monkeypatch.setattr(srv, "_gather_costs", fake_gather)
+    monkeypatch.setattr(srv, "_active", fake_active)
+    return asyncio.run(srv.get_cost_trends())
+
+
+def test_cost_trends_refuse_when_every_provider_failed(monkeypatch):
+    out = _trends(monkeypatch, {"aws": {"error": "Cost Explorer is off. Deploy ..."}})
+    assert out["error"] == "no_cost_data"
+    assert "grand_total_usd" not in out
+    assert "Deploy" in out["message"]
+
+
+def test_cost_trends_label_a_partial_read(monkeypatch):
+    out = _trends(monkeypatch, {"aws": {"total_usd": 50.0}, "gcp": {"error": "no export"}})
+    assert out["partial"] is True and "gcp" in out["failed_providers"]
+    assert out["grand_total_usd"] == 50.0
+
+
+def _by_service(monkeypatch, results: dict):
+    """results: provider -> {service: usd} or an Exception to raise."""
+    import asyncio
+    from types import SimpleNamespace
+
+    import finops.server as srv
+
+    async def fake_active(pool):
+        return {k: object() for k in results}
+
+    async def fake_fetch(name, connector, sd, ed):
+        r = results[name]
+        if isinstance(r, Exception):
+            raise r
+        return SimpleNamespace(by_service=r)
+
+    monkeypatch.setattr(srv, "_active", fake_active)
+    monkeypatch.setattr(srv, "_fetch_costs_cached", fake_fetch)
+    return asyncio.run(srv.get_costs_by_service())
+
+
+def test_costs_by_service_refuse_when_every_provider_failed(monkeypatch):
+    out = _by_service(monkeypatch, {"aws": RuntimeError("AccessDenied on ce:GetCostAndUsage")})
+    assert out["error"] == "no_cost_data"
+    assert "total_usd" not in out
+    assert "AccessDenied" in out["message"]
+
+
+def test_costs_by_service_label_a_partial_read(monkeypatch):
+    out = _by_service(monkeypatch, {"aws": {"EC2": 10.0}, "azure": RuntimeError("no export")})
+    assert out["partial"] is True and "azure" in out["failed_providers"]
+    assert out["total_usd"] == 10.0
+
+
+def _all_accounts(monkeypatch, per_account: dict):
+    """per_account: account name -> total usd, or an Exception to raise."""
+    import asyncio
+    from types import SimpleNamespace
+
+    import finops.accounts as accounts
+    import finops.connectors.aws as aws_conn
+    import finops.server as srv
+
+    monkeypatch.setattr(accounts, "list_accounts", lambda: [
+        accounts.AccountConfig(name=n) for n in per_account])
+    monkeypatch.setattr(accounts, "get_boto3_session", lambda acct: acct.name)
+
+    class _Conn:
+        def __init__(self, session, identity=None):
+            self.name = session
+
+        async def get_costs(self, sd, ed, granularity="MONTHLY"):
+            r = per_account[self.name]
+            if isinstance(r, Exception):
+                raise r
+            return SimpleNamespace(total_usd=r, by_service={"EC2": r}, by_account={})
+
+    monkeypatch.setattr(aws_conn, "AWSConnector", _Conn)
+    return asyncio.run(srv.get_cost_summary_all_accounts())
+
+
+def test_all_accounts_summary_refuses_when_every_account_failed(monkeypatch):
+    out = _all_accounts(monkeypatch, {"prod": RuntimeError("ExpiredToken"),
+                                      "staging": RuntimeError("ExpiredToken")})
+    assert out["error"] == "no_cost_data"
+    assert "grand_total_usd" not in out
+    assert set(out["failed_accounts"]) == {"prod", "staging"}
+
+
+def test_all_accounts_summary_labels_a_partial_read(monkeypatch):
+    out = _all_accounts(monkeypatch, {"prod": 700.0, "staging": RuntimeError("ExpiredToken")})
+    assert out["partial"] is True and "staging" in out["failed_accounts"]
+    assert out["grand_total_usd"] == 700.0
 
 
 # ── the price the product quotes, in one place ───────────────────────────────

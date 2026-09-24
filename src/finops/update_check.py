@@ -23,10 +23,11 @@ _checked: list[str | None] = []  # memoized result for the life of the process
 
 
 def _disabled() -> bool:
-    for var in ("FINOPS_AIRGAP", "FINOPS_NO_UPDATE_CHECK", "NABLE_NO_TELEMETRY"):
-        if os.environ.get(var, "").strip().lower() in ("1", "true", "yes"):
-            return True
-    return False
+    from .telemetry import env_flag_set
+    return any(
+        env_flag_set(var)
+        for var in ("FINOPS_AIRGAP", "FINOPS_NO_UPDATE_CHECK", "NABLE_NO_TELEMETRY", "DO_NOT_TRACK")
+    )
 
 
 def _parse(v: str) -> tuple[int, ...]:

@@ -76,7 +76,7 @@ async def _snapshot_all() -> dict:
     from ..connectors.saas.datadog import DatadogConnector
     from ..connectors.saas.mongodb_atlas import MongoDBAtlasConnector
     from ..connectors.saas.twilio import TwilioConnector
-    from ..storage.snapshots import store_snapshot
+    from ..storage.snapshots import store_snapshot, store_zero_for_stopped_series
 
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -154,6 +154,7 @@ async def _snapshot_all() -> dict:
             # billing_access refuse, and the billing export above has already
             # covered the same day for free.
             summary = await connector.get_costs(yesterday, today, granularity="DAILY")
+            seen: dict[str, set[tuple[str, str, str]]] = {}
             for entry in summary.entries:
                 if entry.amount > 0:
                     store_snapshot(
@@ -165,6 +166,14 @@ async def _snapshot_all() -> dict:
                         amount_usd=entry.amount,
                         granularity="DAILY",
                     )
+                    seen.setdefault(entry.provider, set()).add(
+                        (entry.service, entry.account_id, entry.region))
+            # A service that stopped billing gets a $0 row so the detector can
+            # see the drop. Only when the fetch returned spend for the day: an
+            # empty answer is far more likely late data than every service
+            # stopping at once, and zero-filling it would page a drop for all.
+            for prov, keys in seen.items():
+                store_zero_for_stopped_series(prov, yesterday, keys)
             results[name] = f"ok — {len(summary.entries)} entries"
             log.info("Snapshot: %s — %d entries, $%.2f", name, len(summary.entries), summary.total_usd)
         except BillingAccessError as exc:
@@ -217,6 +226,9 @@ async def _detect_and_alert() -> list[dict]:
             account_id=r["account_id"],
             snapshot_date=date.fromisoformat(r["snapshot_date"]),
             current_amount=r["amount_usd"],
+            # Each row is one region's spend, so its baseline is that region's
+            # history, not every region of the service averaged together.
+            region=r["region"],
         )
         if anomaly is None:
             continue

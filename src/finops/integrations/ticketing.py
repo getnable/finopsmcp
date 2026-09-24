@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from datetime import date
 from typing import Any
@@ -52,8 +53,38 @@ _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF = [1, 2, 4]  # seconds
 
 
+_IDEMPOTENT = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS"})
+_RETRY_AFTER_CAP = 30.0
+
+
+def _retryable(method: str, exc: Exception) -> bool:
+    """Whether a failed request is safe to send again.
+
+    Every caller here POSTs to create a ticket or a PR. A read timeout or a 502
+    can arrive after the server already created it, so resending made duplicate
+    tickets; a 400 or 401 will never succeed on a retry. A POST is retried only
+    when the request provably did not land: no connection, 429, or 503.
+    """
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code in (429, 503):
+            return True
+        return method.upper() in _IDEMPOTENT and code in (500, 502, 504)
+    return method.upper() in _IDEMPOTENT and isinstance(exc, httpx.TransportError)
+
+
+def _retry_delay(exc: Exception, attempt: int) -> float:
+    if isinstance(exc, httpx.HTTPStatusError):
+        ra = exc.response.headers.get("Retry-After", "")
+        if ra.isdigit():
+            return min(float(ra), _RETRY_AFTER_CAP)
+    return float(_RETRY_BACKOFF[attempt])
+
+
 def http_with_retry(method: str, url: str, **kwargs: Any) -> httpx.Response:
-    """Execute an HTTP request with exponential backoff retry."""
+    """Execute an HTTP request, retrying only failures that are safe to resend."""
     last_exc: Exception | None = None
     for attempt in range(_RETRY_ATTEMPTS):
         try:
@@ -62,19 +93,30 @@ def http_with_retry(method: str, url: str, **kwargs: Any) -> httpx.Response:
             return r
         except (httpx.HTTPStatusError, httpx.TransportError) as exc:
             last_exc = exc
-            if attempt < _RETRY_ATTEMPTS - 1:
-                delay = _RETRY_BACKOFF[attempt]
+            if attempt < _RETRY_ATTEMPTS - 1 and _retryable(method, exc):
+                delay = _retry_delay(exc, attempt)
                 log.warning(
-                    "HTTP %s %s failed (attempt %d/%d): %s — retrying in %ds",
+                    "HTTP %s %s failed (attempt %d/%d): %s, retrying in %ss",
                     method, url, attempt + 1, _RETRY_ATTEMPTS, exc, delay,
                 )
                 time.sleep(delay)
             else:
                 log.error(
-                    "HTTP %s %s failed after %d attempts: %s",
-                    method, url, _RETRY_ATTEMPTS, exc,
+                    "HTTP %s %s failed after %d attempt(s): %s",
+                    method, url, attempt + 1, exc,
                 )
+                break
     raise last_exc  # type: ignore[misc]
+
+
+# Same rule webhook.py applies: owner/repo, nothing that can walk the API path.
+_GH_REPO = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+
+def _check_repo(repo: str) -> str:
+    if not _GH_REPO.match(repo or "") or ".." in repo:
+        raise ValueError(f"GitHub repo must look like owner/repo, got {repo!r}")
+    return repo
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SETUP — required env vars per provider
@@ -155,7 +197,7 @@ Cost {direction_word} of **{abs(pct):.1f}%** vs 28-day baseline
 - [ ] If expected, update the baseline tag/label
 
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if sev == "high" else "medium"
     labels = ["finops", "cost-anomaly", f"severity:{sev}"]
@@ -195,7 +237,7 @@ The recommended size maintains headroom while eliminating waste.
 - [ ] Update IaC (Terraform / CloudFormation) to new instance type
 {_UNTRUSTED_METADATA_NOTE}
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if monthly_savings > 500 else "medium"
     labels = ["finops", "rightsizing", "cost-savings"]
@@ -250,7 +292,7 @@ def _kubernetes_waste_ticket(finding: dict[str, Any]) -> tuple[str, str, str, li
 {action_items}
 {_UNTRUSTED_METADATA_NOTE}
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if monthly_waste > 1000 else "medium"
     labels = ["finops", "kubernetes", f"k8s-{kind.replace('_', '-')}"]
@@ -289,7 +331,7 @@ This ticket tracks remediation to bring the score above 60 (Grade C) within 30 d
 - [ ] Target: score ≥ 60 within 30 days
 
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if score < 40 else "medium"
     labels = ["finops", "scorecard", f"dimension:{dimension}", "needs-remediation"]
@@ -328,7 +370,7 @@ immediately — there's no break-even period.
 - [ ] Re-run commitment analysis in 7 days to confirm coverage improvement
 
 ---
-*Created automatically by [nable FinOps MCP](https://github.com/nable-finops/nable)*
+*Created automatically by [nable FinOps MCP](https://github.com/getnable/finopsmcp)*
 """
     priority = "high" if monthly_uncovered > 5000 else "medium"
     labels = ["finops", "commitments", "cost-savings", "savings-plan"]
@@ -457,7 +499,7 @@ def _post_github(title: str, body: str, priority: str, labels: list[str]) -> str
     try:
         r = http_with_retry(
             "POST",
-            f"https://api.github.com/repos/{repo}/issues",
+            f"https://api.github.com/repos/{_check_repo(repo)}/issues",
             json=payload,
             headers={
                 "Authorization": f"Bearer {token}",
@@ -659,7 +701,7 @@ def create_github_pr(
 
     r = http_with_retry(
         "POST",
-        f"https://api.github.com/repos/{repo}/pulls",
+        f"https://api.github.com/repos/{_check_repo(repo)}/pulls",
         json=payload,
         headers={
             "Authorization": f"Bearer {resolved_token}",

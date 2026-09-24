@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from ..security.env import get_env
@@ -118,6 +118,25 @@ def _partition_filter(start_date: date, end_date: date) -> str:
     return " OR ".join(clauses)
 
 
+def _period_filter(start_date: date, end_date: date) -> str:
+    """
+    The year/month partitions for the range AND the day bounds within them.
+
+    Partitions alone are whole months: a Sep 10-20 question read all of
+    September, and the default 30-day window read about 55 days. The partition
+    clause stays so Athena still prunes; the date bounds make the answer right.
+    Same shape as slice/cur_engine.build_cur_sql, with its literal escaping.
+    """
+    from ..slice.cur_engine import _safe_literal
+
+    return (
+        f"({_partition_filter(start_date, end_date)})"
+        f"\n  AND line_item_usage_start_date >= DATE {_safe_literal(start_date.isoformat())}"
+        f"\n  AND line_item_usage_start_date < DATE "
+        f"{_safe_literal((end_date + timedelta(days=1)).isoformat())}"
+    )
+
+
 # ── Athena query engine ───────────────────────────────────────────────────────
 
 def _athena_query(sql: str, timeout_secs: int = 30) -> list[dict]:
@@ -161,14 +180,15 @@ def _athena_query(sql: str, timeout_secs: int = 30) -> list[dict]:
     execution_id = start_resp["QueryExecutionId"]
     log.debug("Athena query submitted: %s", execution_id)
 
-    # Poll with exponential backoff
+    # Poll with exponential backoff. The deadline is wall-clock: counting only
+    # the sleeps ignored the time each status call took, so a slow API let the
+    # loop run several times longer than timeout_secs.
     delay = 0.1
     max_delay = 1.6
-    elapsed = 0.0
+    deadline = time.monotonic() + timeout_secs
 
-    while elapsed < timeout_secs:
+    while time.monotonic() < deadline:
         time.sleep(delay)
-        elapsed += delay
 
         try:
             status_resp = athena.get_query_execution(QueryExecutionId=execution_id)
@@ -190,6 +210,11 @@ def _athena_query(sql: str, timeout_secs: int = 30) -> list[dict]:
 
         delay = min(delay * 2, max_delay)
     else:
+        # Athena keeps scanning, and billing per byte, after we stop waiting.
+        try:
+            athena.stop_query_execution(QueryExecutionId=execution_id)
+        except Exception as exc:
+            log.warning("Could not stop timed-out Athena query %s: %s", execution_id, exc)
         raise CURQueryError(
             f"Athena query {execution_id} timed out after {timeout_secs}s"
         )
@@ -259,7 +284,7 @@ def get_resource_costs(
         return _error("CUR not configured. Set CUR_S3_BUCKET, CUR_ATHENA_DATABASE, "
                       "CUR_ATHENA_TABLE, CUR_ATHENA_RESULTS_BUCKET.")
 
-    partition = _partition_filter(start_date, end_date)
+    partition = _period_filter(start_date, end_date)
     table = f"{_db()}.{_table()}"
 
     extra_filters = ""
@@ -289,7 +314,7 @@ SELECT
     SUM(line_item_unblended_cost)        AS unblended_cost,
     SUM(pricing_public_on_demand_cost)   AS on_demand_equivalent
 FROM {table}
-WHERE ({partition})
+WHERE {partition}
   AND line_item_line_item_type IN ('Usage', 'DiscountedUsage', 'SavingsPlanCoveredUsage')
   AND line_item_resource_id IS NOT NULL
   AND line_item_resource_id != ''
@@ -365,7 +390,17 @@ def get_ri_waste(
     if not is_configured():
         return _error("CUR not configured.")
 
-    partition = _partition_filter(start_date, end_date)
+    from ..slice.cur_engine import _safe_literal
+
+    # RIFee is a monthly line item whose usage period is the whole month, so a
+    # start-in-range bound would drop it for any window not starting on the
+    # 1st. Keep the lines whose usage period overlaps the requested days.
+    partition = (
+        f"({_partition_filter(start_date, end_date)})"
+        f"\n  AND line_item_usage_start_date < DATE "
+        f"{_safe_literal((end_date + timedelta(days=1)).isoformat())}"
+        f"\n  AND line_item_usage_end_date > DATE {_safe_literal(start_date.isoformat())}"
+    )
     table = f"{_db()}.{_table()}"
 
     sql = f"""
@@ -379,7 +414,7 @@ SELECT
         / NULLIF(SUM(reservation_unused_quantity)
                  + SUM(line_item_usage_amount), 0) * 100  AS waste_pct
 FROM {table}
-WHERE ({partition})
+WHERE {partition}
   AND line_item_line_item_type = 'RIFee'
   AND reservation_reservation_a_r_n IS NOT NULL
   AND reservation_reservation_a_r_n != ''
@@ -451,7 +486,7 @@ def get_tag_cost_breakdown(
     if not is_configured():
         return _error("CUR not configured.")
 
-    partition = _partition_filter(start_date, end_date)
+    partition = _period_filter(start_date, end_date)
     table = f"{_db()}.{_table()}"
     try:
         tag_col = _safe_tag_column(tag_key)
@@ -476,7 +511,7 @@ SELECT
     COALESCE(NULLIF({tag_col}, ''), '__untagged__') AS tag_value,
     {cost_expr} AS cost_usd
 FROM {table}
-WHERE ({partition})
+WHERE {partition}
   AND line_item_line_item_type IN ('Usage', 'DiscountedUsage', 'SavingsPlanCoveredUsage')
 GROUP BY COALESCE(NULLIF({tag_col}, ''), '__untagged__')
 ORDER BY cost_usd DESC
@@ -530,7 +565,7 @@ def get_untagged_resource_cost(
     if not is_configured():
         return _error("CUR not configured.")
 
-    partition = _partition_filter(start_date, end_date)
+    partition = _period_filter(start_date, end_date)
     table = f"{_db()}.{_table()}"
     try:
         tag_col = _safe_tag_column(tag_key)
@@ -543,7 +578,7 @@ SELECT
     SUM(line_item_unblended_cost)       AS cost_usd,
     COUNT(DISTINCT line_item_resource_id) AS resource_count
 FROM {table}
-WHERE ({partition})
+WHERE {partition}
   AND line_item_line_item_type IN ('Usage', 'DiscountedUsage', 'SavingsPlanCoveredUsage')
   AND line_item_resource_id IS NOT NULL
   AND line_item_resource_id != ''
@@ -645,7 +680,7 @@ def get_savings_plan_showback(
         return _error("CUR not configured. Set CUR_S3_BUCKET, CUR_ATHENA_DATABASE, "
                       "CUR_ATHENA_TABLE, CUR_ATHENA_RESULTS_BUCKET.")
 
-    partition = _partition_filter(start_date, end_date)
+    partition = _period_filter(start_date, end_date)
     table     = f"{_db()}.{_table()}"
     try:
         tag_col = _safe_tag_column(tag_key)
@@ -686,7 +721,7 @@ SELECT
     SUM(pricing_public_on_demand_cost)                                 AS total_on_demand_equiv
 
 FROM {table}
-WHERE ({partition})
+WHERE {partition}
   AND line_item_line_item_type IN ({li_types})
 GROUP BY COALESCE(NULLIF({tag_col}, ''), '__untagged__')
 ORDER BY total_effective_cost DESC

@@ -23,6 +23,7 @@ from .detector import (
     _PCT_THRESHOLD,
     _Z_SCORE_THRESHOLD,
     _severity,
+    _z_score,
     detect_for_series,
 )
 from ..storage.snapshots import get_history
@@ -56,15 +57,17 @@ def detect_with_seasonality(
     snapshot_date: date,
     current_amount: float,
     lookback_days: int = 56,  # 8 weeks — enough for 8 same-weekday samples
+    region: str | None = None,
 ) -> AnomalyResult | None:
     """
     Seasonality-aware detection. Lookback extended to 56 days (8 weeks) to
     collect enough same-weekday readings; falls back to rolling mean if sparse.
     """
-    if current_amount < _MIN_SPEND_THRESHOLD:
-        return None
-
-    history = get_history(provider, service, account_id, days=lookback_days)
+    # No noise floor on today's amount. A drop from $4,000/day to $0 is the
+    # signal that a pipeline or a backup stopped, and a floor here hid it. The
+    # small-spend floor lives on the baseline side, where a series that never
+    # cost more than a few dollars is ignored.
+    history = get_history(provider, service, account_id, days=lookback_days, region=region)
     today_iso = snapshot_date.isoformat()
     weekday = snapshot_date.weekday()
 
@@ -109,8 +112,7 @@ def _detect_against_baseline(
     if mean < _MIN_SPEND_THRESHOLD:
         return None
 
-    stdev = statistics.stdev(baseline_amounts) if len(baseline_amounts) > 1 else 0.0
-    z_score = (current_amount - mean) / stdev if stdev > 0 else 0.0
+    z_score = _z_score(current_amount, baseline_amounts, mean)
     pct_change = (current_amount - mean) / mean * 100
 
     if abs(z_score) < _Z_SCORE_THRESHOLD or abs(pct_change) < _PCT_THRESHOLD:

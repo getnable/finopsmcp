@@ -34,7 +34,17 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
 
+from ..aws_prices import HOURS_PER_MONTH
+from .terraform_estimate import _EC2_HOURLY
+
 log = logging.getLogger("finops.connectors.kubernetes")
+
+# GPU nodes are priced from the hourly list rates, not typed in as monthly
+# literals. The literals were hourly x 1000 for g4dn/g5 (g4dn.xlarge $0.526/hr
+# stored as $526/mo, 37% high), with g4dn.2xlarge/4xlarge as multiples of the
+# xlarge figure rather than their own rates.
+_GPU_NODE_TYPES = ("p3.2xlarge", "p3.8xlarge", "g4dn.xlarge", "g4dn.2xlarge",
+                   "g4dn.4xlarge", "g5.xlarge", "g5.2xlarge")
 
 # ── EC2 on-demand monthly prices (us-east-1) — same table as estimator.py ────
 _EC2_MONTHLY: dict[str, float] = {
@@ -55,9 +65,7 @@ _EC2_MONTHLY: dict[str, float] = {
     "r5.large": 91.98,  "r5.xlarge": 183.96, "r5.2xlarge": 367.92, "r5.4xlarge": 735.84,
     "r6i.large": 91.98, "r6i.xlarge": 183.96,"r6i.2xlarge": 367.92,"r6i.4xlarge": 735.84,
     # GPU
-    "p3.2xlarge": 2234.00,"p3.8xlarge": 8937.00,
-    "g4dn.xlarge": 526.00,"g4dn.2xlarge": 1052.00,"g4dn.4xlarge": 2104.00,
-    "g5.xlarge": 1006.00, "g5.2xlarge": 1212.00,
+    **{t: round(_EC2_HOURLY[t] * HOURS_PER_MONTH, 2) for t in _GPU_NODE_TYPES},
     # EKS managed node common types
     "m5.12xlarge": 1681.92,"m5.24xlarge": 3363.84,
     "c5.9xlarge": 1116.90, "c5.18xlarge": 2233.80,

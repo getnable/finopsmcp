@@ -305,9 +305,22 @@ def _upsert_comment(
     comments_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{pr_number}/comments"
     existing = _gh_get(comments_url, headers)
 
+    # Only edit a comment nable itself wrote. Matching the tag alone let a PR
+    # author post it first and have nable write the estimate into a comment
+    # they could then re-edit under their own name. A PAT resolves to a login
+    # via /user; an installation token cannot, and its comments are Bot-typed.
+    try:
+        me = _gh_get(f"{GITHUB_API_BASE}/user", headers).get("login")
+    except Exception:
+        me = None
+
+    def _ours(comment: dict) -> bool:
+        user = comment.get("user") or {}
+        return user.get("login") == me if me else user.get("type") == "Bot"
+
     existing_id = None
     for comment in existing:
-        if f"<!-- {COMMENT_TAG} -->" in comment.get("body", ""):
+        if f"<!-- {COMMENT_TAG} -->" in comment.get("body", "") and _ours(comment):
             existing_id = comment["id"]
             break
 

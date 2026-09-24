@@ -642,7 +642,7 @@ def _check_llm_cost_concentration(ctx: PatternContext) -> PatternMatch | None:
             "Route lower-complexity tasks to cheaper models: "
             "GPT-4o → GPT-4o-mini (90% cheaper), "
             "Claude Opus → Claude Haiku (97% cheaper). "
-            "Use `get_llm_unit_economics` to measure cost per request."
+            "Use `get_llm_cost_by_model` to see which models drive the spend."
         ),
         tags=["ai", "llm", "openai", "anthropic", "model-selection"],
     )

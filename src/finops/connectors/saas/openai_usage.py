@@ -54,6 +54,31 @@ _MODEL_PRICING: dict[str, dict[str, float]] = {
 }
 
 
+# Page sizes. /organization/costs takes 1-180 daily buckets per page; the
+# /organization/usage/* endpoints cap bucket_width=1d at 31 per page and reject
+# anything larger, which silently emptied every token fetch that asked for 180.
+_COSTS_PAGE_LIMIT = 180
+_USAGE_1D_PAGE_LIMIT = 31
+_MAX_PAGES = 100
+
+
+def _get_all_buckets(httpx: Any, url: str, params: dict[str, Any],
+                     headers: dict[str, str]) -> list[dict]:
+    """Every bucket of a paged Organization API call (has_more / next_page)."""
+    params = dict(params)
+    buckets: list[dict] = []
+    for _ in range(_MAX_PAGES):
+        resp = httpx.get(url, params=params, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        buckets.extend(data.get("data", []))
+        nxt = data.get("next_page")
+        if not data.get("has_more") or not nxt:
+            return buckets
+        params["page"] = nxt
+    raise RuntimeError(f"{url} still had more pages after {_MAX_PAGES}")
+
+
 def _headers(api_key: str, org_id: str | None = None) -> dict[str, str]:
     h = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     if org_id:
@@ -146,7 +171,7 @@ def get_costs(
         "start_time": start_ts,
         "end_time":   end_ts,
         "bucket_width": "1d",
-        "limit": 180,
+        "limit": _COSTS_PAGE_LIMIT,
     }
     if group_by:
         params["group_by"] = group_by
@@ -154,14 +179,10 @@ def get_costs(
         params["group_by"] = ["model", "project_id"]
 
     try:
-        resp = httpx.get(
-            "https://api.openai.com/v1/organization/costs",
-            params=params,
-            headers=_headers(api_key, org_id),
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = {"data": _get_all_buckets(
+            httpx, "https://api.openai.com/v1/organization/costs",
+            params, _headers(api_key, org_id),
+        )}
     except Exception as e:
         log.warning("OpenAI costs API failed: %s — falling back to usage estimate", e)
         return _estimate_from_usage(start_date, end_date, api_key, org_id)
@@ -292,23 +313,20 @@ def _fetch_usage_tokens(
     end_ts   = int(datetime(end_date.year, end_date.month, end_date.day,
                             tzinfo=timezone.utc).timestamp())
 
-    resp = httpx.get(
-        "https://api.openai.com/v1/organization/usage/completions",
-        params={
+    buckets = _get_all_buckets(
+        httpx, "https://api.openai.com/v1/organization/usage/completions",
+        {
             "start_time": start_ts,
             "end_time":   end_ts,
             "bucket_width": "1d",
             "group_by": ["model"],
-            "limit": 180,
+            "limit": _USAGE_1D_PAGE_LIMIT,
         },
-        headers=_headers(api_key, org_id),
-        timeout=30,
+        _headers(api_key, org_id),
     )
-    resp.raise_for_status()
-    data = resp.json()
 
     by_model_tokens: dict[str, dict[str, int]] = {}
-    for bucket in data.get("data", []):
+    for bucket in buckets:
         for result in bucket.get("results", []):
             _accumulate_tokens(result, by_model_tokens)
     return by_model_tokens
@@ -337,20 +355,17 @@ def _estimate_from_usage(
                             tzinfo=timezone.utc).timestamp())
 
     try:
-        resp = httpx.get(
-            "https://api.openai.com/v1/organization/usage/completions",
-            params={
+        buckets = _get_all_buckets(
+            httpx, "https://api.openai.com/v1/organization/usage/completions",
+            {
                 "start_time": start_ts,
                 "end_time":   end_ts,
                 "bucket_width": "1d",
                 "group_by": ["model"],
-                "limit": 180,
+                "limit": _USAGE_1D_PAGE_LIMIT,
             },
-            headers=_headers(api_key, org_id),
-            timeout=30,
+            _headers(api_key, org_id),
         )
-        resp.raise_for_status()
-        data = resp.json()
     except Exception as e:
         log.warning("OpenAI usage API also failed: %s", e)
         return _empty_result("api_error")
@@ -358,9 +373,10 @@ def _estimate_from_usage(
     total = 0.0
     by_model: dict[str, float] = {}
     by_model_tokens: dict[str, dict[str, int]] = {}
+    unpriced: dict[str, dict[str, int]] = {}
     daily: list[dict] = []
 
-    for bucket in data.get("data", []):
+    for bucket in buckets:
         bucket_total = 0.0
         bucket_by_model: dict[str, float] = {}
 
@@ -368,14 +384,21 @@ def _estimate_from_usage(
             model       = result.get("model_id") or "unknown"
             input_tok   = result.get("input_tokens", 0)
             output_tok  = result.get("output_tokens", 0)
-            pricing     = _MODEL_PRICING.get(model, {"input": 0.0, "output": 0.0})
+            # Same usage rows already carry the token counts the KPI engine needs.
+            _accumulate_tokens(result, by_model_tokens)
+            pricing     = _MODEL_PRICING.get(model)
+            if pricing is None:
+                # No published price for this model id. Pricing it at $0 made
+                # its spend vanish from the estimate; list it instead.
+                u = unpriced.setdefault(model, {"input_tokens": 0, "output_tokens": 0})
+                u["input_tokens"] += int(input_tok or 0)
+                u["output_tokens"] += int(output_tok or 0)
+                continue
             cost = (input_tok / 1_000_000 * pricing["input"] +
                     output_tok / 1_000_000 * pricing["output"])
             bucket_total += cost
             bucket_by_model[model] = bucket_by_model.get(model, 0.0) + cost
             by_model[model]        = by_model.get(model, 0.0) + cost
-            # Same usage rows already carry the token counts the KPI engine needs.
-            _accumulate_tokens(result, by_model_tokens)
 
         total += bucket_total
         ts = bucket.get("start_time", 0)
@@ -384,7 +407,7 @@ def _estimate_from_usage(
         daily.append({"date": day_str, "total_usd": round(bucket_total, 4),
                       "by_model": {k: round(v, 4) for k, v in bucket_by_model.items()}})
 
-    return {
+    out = {
         "total_usd":  round(total, 4),
         "by_model":   {k: round(v, 4) for k, v in
                        sorted(by_model.items(), key=lambda x: x[1], reverse=True)},
@@ -394,6 +417,11 @@ def _estimate_from_usage(
         "source":     "estimated",
         "note":       "Costs estimated from token counts × published prices. Does not reflect discounts or credits.",
     }
+    if unpriced:
+        out["unpriced_models"] = unpriced
+        out["note"] += (f" {len(unpriced)} model(s) have no known price and are "
+                        f"excluded from total_usd: {', '.join(sorted(unpriced))}.")
+    return out
 
 
 def _empty_result(reason: str) -> dict[str, Any]:

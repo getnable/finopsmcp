@@ -170,11 +170,8 @@ async def export_cost_report(
 
     # Open HTML in browser if requested
     if open_file and "html" in output:
-        try:
-            import subprocess
-            subprocess.Popen(["open", output["html"]])
-        except Exception:
-            pass
+        from ..open_file import open_local_file
+        open_local_file(output["html"])
 
     result = {
         "title": title,
@@ -585,6 +582,15 @@ async def cancel_report_subscription(subscription_id: int) -> dict:
         return {"error": str(e)}
 
 
+def _is_nable_csv(path) -> bool:
+    """True when path is a report this tool wrote earlier (safe to overwrite)."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.readline().strip().strip('"') == "nable Cost Report"
+    except OSError:
+        return False
+
+
 @_srv.mcp.tool()
 async def export_cost_report_csv(
     output_path: str | None = None,
@@ -629,6 +635,12 @@ async def export_cost_report_csv(
         if isinstance(resolved, dict):
             return resolved["error"]
         dest = pathlib.Path(resolved)
+        # The path arrives from the model, so it is only ever a CSV and never
+        # clobbers a file nable did not write (a document, a startup script).
+        if dest.suffix.lower() != ".csv":
+            return "output_path must end in .csv."
+        if dest.exists() and not _is_nable_csv(dest):
+            return f"{dest} already exists and is not a nable report. Choose a new file name."
     else:
         dest = pathlib.Path.home() / "Downloads" / f"nable-report-{today}.csv"
 
@@ -661,10 +673,12 @@ async def export_cost_report_csv(
     total_annual = total_monthly * 12
     scan_ts = _srv.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Try to get account ID for summary
+    # Account ID for the summary. This called aws._client("sts"), a method the
+    # connector does not have, so every report said "unknown". _account_id is
+    # the connector's own lookup (its session, not the default chain), and it is
+    # a network call, so it runs off the event loop.
     try:
-        sts = aws._client("sts")
-        account_id = sts.get_caller_identity()["Account"]
+        account_id = await _srv.asyncio.to_thread(aws._account_id)
     except Exception:
         account_id = "unknown"
 
@@ -783,9 +797,9 @@ async def push_to_n8n(
         account = ""
         if aws is not None:
             try:
-                import boto3
-                sts = boto3.client("sts")
-                account = sts.get_caller_identity().get("Account", "")
+                # The connector's identity, off the loop; a bare boto3 client
+                # here read the default chain, not the connected account.
+                account = await _srv.asyncio.to_thread(aws._account_id)
             except Exception:
                 pass
 

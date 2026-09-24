@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: nable Budget Check
-        uses: nable-finops/nable/.github/actions/budget-check@main
+        uses: getnable/finopsmcp/.github/actions/budget-check@3f0b1db0168029fb49d808331c51a99a24c2c18f # v0.8.216
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

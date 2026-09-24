@@ -94,3 +94,80 @@ def test_verify_signature_is_constant_time_and_correct():
     assert ga.verify_signature(body, good, secret) is True
     assert ga.verify_signature(body, "sha256=deadbeef", secret) is False
     assert ga.verify_signature(body, "", secret) is False
+
+
+# ── comment ownership and request bounds ─────────────────────────────────────
+
+class _Resp:
+    def __init__(self, data, ok=True):
+        self._d, self.is_success = data, ok
+
+    def json(self):
+        return self._d
+
+
+def test_webhook_never_edits_a_comment_it_did_not_write(monkeypatch):
+    calls = []
+    comments = [{"id": 7, "body": f"{wh.COMMENT_TAG}\nfake estimate", "user": {"login": "pr-author"}}]
+
+    def fake_get(url, **_):
+        return _Resp({"login": "nable-bot"}) if url.endswith("/user") else _Resp(comments)
+
+    monkeypatch.setattr(wh, "_TOKEN_LOGIN", None)
+    monkeypatch.setattr(wh.httpx, "get", fake_get)
+    monkeypatch.setattr(wh.httpx, "patch", lambda url, **_: calls.append(("patch", url)))
+    monkeypatch.setattr(wh.httpx, "post", lambda url, **_: calls.append(("post", url)))
+    wh._post_or_update_comment("acme/infra", 3, "real estimate")
+    assert [c[0] for c in calls] == ["post"]
+
+
+def test_webhook_updates_its_own_comment(monkeypatch):
+    calls = []
+    comments = [{"id": 9, "body": f"{wh.COMMENT_TAG}\nold", "user": {"login": "nable-bot"}}]
+
+    def fake_get(url, **_):
+        return _Resp({"login": "nable-bot"}) if url.endswith("/user") else _Resp(comments)
+
+    monkeypatch.setattr(wh, "_TOKEN_LOGIN", None)
+    monkeypatch.setattr(wh.httpx, "get", fake_get)
+    monkeypatch.setattr(wh.httpx, "patch", lambda url, **_: calls.append(("patch", url)))
+    monkeypatch.setattr(wh.httpx, "post", lambda url, **_: calls.append(("post", url)))
+    wh._post_or_update_comment("acme/infra", 3, "new")
+    assert calls == [("patch", "https://api.github.com/repos/acme/infra/issues/comments/9")]
+
+
+def test_app_never_edits_a_human_comment(monkeypatch):
+    calls = []
+    tag = f"<!-- {ga.COMMENT_TAG} -->"
+
+    def fake_get(url, headers):
+        if url.endswith("/user"):
+            raise RuntimeError("installation tokens cannot call /user")
+        return [{"id": 5, "body": tag, "user": {"login": "pr-author", "type": "User"}}]
+
+    monkeypatch.setattr(ga, "_gh_get", fake_get)
+    monkeypatch.setattr(ga, "_gh_patch", lambda *a: calls.append("patch"))
+    monkeypatch.setattr(ga, "_gh_post", lambda *a: calls.append("post"))
+    ga._upsert_comment("acme", "infra", 3, tag + "\nbody", {})
+    assert calls == ["post"]
+
+
+def test_webhook_rejects_unbounded_content_length():
+    import io
+    import threading
+    import http.client
+    from http.server import ThreadingHTTPServer
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), wh.WebhookHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        for length, want in (("-1", 400), ("abc", 400), (str(wh.MAX_PAYLOAD_BYTES + 1), 413)):
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+            conn.putrequest("POST", "/webhook/github")
+            conn.putheader("Content-Length", length)
+            conn.endheaders()
+            assert conn.getresponse().status == want
+            conn.close()
+    finally:
+        server.shutdown()

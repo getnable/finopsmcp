@@ -222,6 +222,15 @@ def _get_install_id() -> str:
         return str(uuid.uuid4())
 
 
+def env_flag_set(name: str) -> bool:
+    """One truthiness rule for every opt-out variable: set to anything but off.
+
+    update_check used to accept only 1/true/yes while this module accepted any
+    value, so NABLE_NO_TELEMETRY=on silenced telemetry but still pinged PyPI.
+    """
+    return os.environ.get(name, "").strip().lower() not in ("", "0", "false", "no", "off")
+
+
 def _is_opted_out() -> bool:
     """Telemetry is OFF unless explicitly switched on. Opt-in, not opt-out.
 
@@ -250,9 +259,11 @@ def _is_opted_out() -> bool:
         return True  # CI / build runners are not users; never count or ping
     # The explicit opt-out still wins, even against an explicit opt-in: someone
     # who set it once meant it, and a later env var should not quietly undo it.
-    _out = os.environ.get(_OPT_OUT_ENV, "").strip()
-    if _out not in ("", "0", "false", "no"):
-        return True
+    # DO_NOT_TRACK is the cross-tool convention (consoledonottrack.com); it is
+    # honoured the same way so one setting covers every tool on the machine.
+    for _var in (_OPT_OUT_ENV, "DO_NOT_TRACK"):
+        if env_flag_set(_var):
+            return True
     _in = os.environ.get(_OPT_IN_ENV, "").strip()
     if _in not in ("", "0", "false", "no"):
         return False        # explicit env opt-in still works, unchanged
