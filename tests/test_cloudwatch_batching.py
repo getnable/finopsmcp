@@ -677,3 +677,46 @@ def test_the_deep_audit_hands_the_s3_check_a_client_per_region():
     assert findings.checks_completed == {"s3"}
     assert {(f["resource_id"], f["region"]) for f in findings} == {
         ("logs-virginia", "us-east-1"), ("logs-ireland", "eu-west-1")}
+
+
+class _S3WithTiering(_S3):
+    def list_bucket_intelligent_tiering_configurations(self, Bucket):
+        return {"IntelligentTieringConfigurationList": [{"Id": "default"}]}
+
+
+def _it_series(names, objects=1_000_000.0, size=10 * 1024 ** 3) -> dict:
+    out = {}
+    for n in names:
+        out[("NumberOfObjects", n, "AllStorageTypes")] = [objects]
+        out[("BucketSizeBytes", n, "IntelligentTieringFAStorage")] = [size]
+    return out
+
+
+def test_intelligent_tiering_audit_reads_each_bucket_in_its_own_region():
+    """Before, all seven series per bucket were read one call at a time from
+    us-east-1, so a bucket in any other region came back 'enable bucket metrics'
+    although its metrics were there all along."""
+    import asyncio
+    from finops.recommendations.s3_intelligent_tiering import audit_s3_intelligent_tiering
+
+    virginia = [f"it-va-{i:03d}" for i in range(60)]
+    ireland = [f"it-ie-{i:03d}" for i in range(80)]
+    cws = {"us-east-1": _Metrics(_it_series(virginia)),
+           "eu-west-1": _Metrics(_it_series(ireland))}
+    s3 = _S3WithTiering({**{n: None for n in virginia}, **{n: "EU" for n in ireland}})
+
+    class _Session:
+        def client(self, service, region_name=None, **_kw):
+            return s3 if service == "s3" else cws[region_name]
+
+    class _Connector:
+        _session = _Session()
+
+    results = asyncio.run(audit_s3_intelligent_tiering(_Connector()))
+
+    assert len(results) == 140
+    # 1M objects of 10 KB each: monitoring outweighs tiering, in both regions.
+    assert {r["recommendation"] for r in results} == {
+        "LIKELY_WASTE_monitoring_exceeds_savings"}
+    assert cws["us-east-1"].calls == math.ceil(60 * 7 / 500) == 1
+    assert cws["eu-west-1"].calls == math.ceil(80 * 7 / 500) == 2

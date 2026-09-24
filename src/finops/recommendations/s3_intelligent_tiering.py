@@ -14,6 +14,11 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..analyzers.cloudwatch import (
+    MetricQuery,
+    fetch_metric_values_by_region,
+    s3_bucket_region,
+)
 from .envelope import INFERRED, Finding
 
 log = logging.getLogger(__name__)
@@ -48,80 +53,65 @@ def _make_boto_session(aws_client: Any):
     return boto3.Session()
 
 
-def _get_bucket_storage_stats(
-    cw_client: Any,
+# Size: BucketSizeBytes has NO AllStorageTypes aggregate, so it must be summed
+# per storage class. On an Intelligent-Tiering bucket the bytes live under the
+# IntelligentTiering* classes, not StandardStorage. Querying StandardStorage
+# alone read ~0 and made avg-object-size tiny, which falsely flagged EVERY
+# IT bucket as waste. Sum the classes an IT bucket actually uses.
+_SIZE_STORAGE_TYPES = [
+    "StandardStorage",
+    "IntelligentTieringFAStorage",   # frequent access
+    "IntelligentTieringIAStorage",   # infrequent access
+    "IntelligentTieringAAStorage",   # archive instant access
+    "IntelligentTieringAIAStorage",  # archive access
+    "IntelligentTieringDAAStorage",  # deep archive access
+]
+
+
+def _bucket_storage_queries(bucket_name: str) -> list[MetricQuery]:
+    """The CloudWatch series behind a bucket's object count and total size, as
+    one period spanning the lookback window. Object count: AllStorageTypes
+    covers every class in one query."""
+    period = _LOOKBACK_DAYS * 86400
+    return [
+        MetricQuery((bucket_name, metric, storage_type), "AWS/S3", metric,
+                    (("BucketName", bucket_name), ("StorageType", storage_type)),
+                    "Average", period)
+        for metric, storage_type in (
+            [("NumberOfObjects", "AllStorageTypes")]
+            + [("BucketSizeBytes", st) for st in _SIZE_STORAGE_TYPES]
+        )
+    ]
+
+
+def _bucket_storage_stats(
+    series: dict,
     bucket_name: str,
-    start: datetime,
-    end: datetime,
 ) -> tuple[int | None, float | None]:
     """
-    Fetch object count and total size for a bucket from CloudWatch bucket metrics.
+    Object count and total size for a bucket from its batched CloudWatch series.
 
     Returns (object_count, total_size_bytes). Both may be None if metrics are
-    not available (bucket-level metrics must be explicitly enabled in S3).
+    not available (bucket-level metrics must be explicitly enabled in S3), and
+    a series that could not be read counts as not available.
     """
-    period = _LOOKBACK_DAYS * 86400
+    def _latest(key) -> float | None:
+        values = series.get(key)
+        return values[-1] if values else None   # oldest first
+
     object_count: int | None = None
+    v = _latest((bucket_name, "NumberOfObjects", "AllStorageTypes"))
+    if v is not None:
+        object_count = int(v)
+
     total_size_bytes: float | None = None
-
-    def _latest(resp) -> float | None:
-        dps = resp.get("Datapoints", [])
-        if not dps:
-            return None
-        # Sentinel must be a datetime, not int 0: boto Timestamps are tz-aware
-        # datetimes and `datetime > 0` raises TypeError. Skip datapoints with no
-        # usable Average rather than KeyError-ing the whole storage class.
-        _floor = datetime.min.replace(tzinfo=timezone.utc)
-        usable = [d for d in dps if d.get("Average") is not None]
-        if not usable:
-            return None
-        return max(usable, key=lambda d: d.get("Timestamp") or _floor)["Average"]
-
-    def _query(metric: str, storage_type: str):
-        return cw_client.get_metric_statistics(
-            Namespace="AWS/S3",
-            MetricName=metric,
-            Dimensions=[
-                {"Name": "BucketName", "Value": bucket_name},
-                {"Name": "StorageType", "Value": storage_type},
-            ],
-            StartTime=start,
-            EndTime=end,
-            Period=period,
-            Statistics=["Average"],
-        )
-
-    # Object count: AllStorageTypes covers every class in one query.
-    try:
-        v = _latest(_query("NumberOfObjects", "AllStorageTypes"))
-        if v is not None:
-            object_count = int(v)
-    except Exception as exc:
-        log.debug("CW NumberOfObjects failed for %s: %s", bucket_name, exc)
-
-    # Size: BucketSizeBytes has NO AllStorageTypes aggregate, so it must be summed
-    # per storage class. On an Intelligent-Tiering bucket the bytes live under the
-    # IntelligentTiering* classes, not StandardStorage. Querying StandardStorage
-    # alone read ~0 and made avg-object-size tiny, which falsely flagged EVERY
-    # IT bucket as waste. Sum the classes an IT bucket actually uses.
-    _SIZE_STORAGE_TYPES = [
-        "StandardStorage",
-        "IntelligentTieringFAStorage",   # frequent access
-        "IntelligentTieringIAStorage",   # infrequent access
-        "IntelligentTieringAAStorage",   # archive instant access
-        "IntelligentTieringAIAStorage",  # archive access
-        "IntelligentTieringDAAStorage",  # deep archive access
-    ]
     size_sum = 0.0
     found_size = False
     for st in _SIZE_STORAGE_TYPES:
-        try:
-            v = _latest(_query("BucketSizeBytes", st))
-            if v is not None:
-                size_sum += v
-                found_size = True
-        except Exception as exc:
-            log.debug("CW BucketSizeBytes[%s] failed for %s: %s", st, bucket_name, exc)
+        v = _latest((bucket_name, "BucketSizeBytes", st))
+        if v is not None:
+            size_sum += v
+            found_size = True
     if found_size:
         total_size_bytes = size_sum
 
@@ -176,8 +166,9 @@ async def audit_s3_intelligent_tiering(
 
     Args:
         aws_client: AWSConnector instance (provides boto3 session).
-        regions:    Unused (S3 is global but scanned from us-east-1). Kept for
-                    API consistency with other audit tools.
+        regions:    Unused. Buckets are listed once from us-east-1 and each one's
+                    storage metrics are read in its own region. Kept for API
+                    consistency with other audit tools.
 
     Returns:
         List of dicts with findings, sorted by net_monthly_cost descending.
@@ -185,7 +176,6 @@ async def audit_s3_intelligent_tiering(
     session = _make_boto_session(aws_client)
 
     s3_client = session.client("s3", region_name="us-east-1")
-    cw_client = session.client("cloudwatch", region_name="us-east-1")
 
     end_time = datetime.now(tz=timezone.utc)
     start_time = end_time - timedelta(days=_LOOKBACK_DAYS)
@@ -198,15 +188,28 @@ async def audit_s3_intelligent_tiering(
 
     findings: list[dict] = []
 
-    for bucket in buckets_resp.get("Buckets", []):
+    it_buckets = [
+        bucket for bucket in buckets_resp.get("Buckets", [])
+        if _has_intelligent_tiering(s3_client, bucket["Name"])
+    ]
+
+    # S3 publishes storage metrics in the bucket's own region. Reading them all
+    # from us-east-1 answered every other bucket with no data, which surfaced as
+    # "enable bucket metrics" on buckets that have them. One batched read per
+    # region, seven series per bucket.
+    queries_by_region: dict[str, list[MetricQuery]] = {}
+    for bucket in it_buckets:
+        region = s3_bucket_region(s3_client, bucket, "us-east-1")
+        queries_by_region.setdefault(region, []).extend(
+            _bucket_storage_queries(bucket["Name"]))
+    series = fetch_metric_values_by_region(
+        lambda r: session.client("cloudwatch", region_name=r),
+        queries_by_region, start_time, end_time)
+
+    for bucket in it_buckets:
         bucket_name = bucket["Name"]
 
-        if not _has_intelligent_tiering(s3_client, bucket_name):
-            continue
-
-        object_count, total_size_bytes = _get_bucket_storage_stats(
-            cw_client, bucket_name, start_time, end_time
-        )
+        object_count, total_size_bytes = _bucket_storage_stats(series, bucket_name)
 
         avg_size_kb = _calculate_avg_object_size_kb(object_count, total_size_bytes)
 

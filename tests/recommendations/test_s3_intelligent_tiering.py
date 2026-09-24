@@ -32,6 +32,27 @@ def _make_bucket(name: str) -> dict:
     return {"Name": name}
 
 
+def _metric_data(stored: dict[tuple[str, str], float]):
+    """A get_metric_data that answers the way the real API does: one Complete
+    series per query, holding the value stored for its (MetricName,
+    StorageType), or no datapoints when nothing is stored."""
+    def _get_metric_data(**kwargs):
+        results = []
+        for q in kwargs["MetricDataQueries"]:
+            metric = q["MetricStat"]["Metric"]
+            st = next(d["Value"] for d in metric["Dimensions"] if d["Name"] == "StorageType")
+            value = stored.get((metric["MetricName"], st))
+            results.append({
+                "Id": q["Id"],
+                "Timestamps": [] if value is None else [kwargs["EndTime"]],
+                "Values": [] if value is None else [value],
+                "StatusCode": "Complete",
+            })
+        return {"MetricDataResults": results}
+
+    return _get_metric_data
+
+
 # ── unit: _calculate_avg_object_size_kb ──────────────────────────────────────
 
 def test_avg_size_with_data():
@@ -141,12 +162,10 @@ def test_small_object_bucket_flagged_as_likely_waste():
             "IntelligentTieringConfigurationList": [{"Id": "default"}]
         }
         # 1M objects, 10 KB each = 10 GB total — avg 10 KB (well below 128 KB)
-        cw_client.get_metric_statistics.side_effect = [
-            # NumberOfObjects
-            {"Datapoints": [{"Average": 1_000_000}]},
-            # BucketSizeBytes: 1M * 10 KB = 10 GB
-            {"Datapoints": [{"Average": 10 * 1024 ** 3}]},
-        ]
+        cw_client.get_metric_data.side_effect = _metric_data({
+            ("NumberOfObjects", "AllStorageTypes"): 1_000_000,
+            ("BucketSizeBytes", "StandardStorage"): 10 * 1024 ** 3,
+        })
 
         result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
 
@@ -186,10 +205,10 @@ def test_large_object_bucket_not_flagged_as_waste():
             "IntelligentTieringConfigurationList": [{"Id": "default"}]
         }
         # 1000 objects, 10 MB each = 10 GB total — avg 10 MB (well above 128 KB)
-        cw_client.get_metric_statistics.side_effect = [
-            {"Datapoints": [{"Average": 1000}]},
-            {"Datapoints": [{"Average": 10 * 1024 ** 3}]},
-        ]
+        cw_client.get_metric_data.side_effect = _metric_data({
+            ("NumberOfObjects", "AllStorageTypes"): 1000,
+            ("BucketSizeBytes", "StandardStorage"): 10 * 1024 ** 3,
+        })
 
         result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
 
@@ -215,7 +234,7 @@ def test_no_cw_data_returns_unknown_recommendation():
         s3_client.list_bucket_intelligent_tiering_configurations.return_value = {
             "IntelligentTieringConfigurationList": [{"Id": "default"}]
         }
-        cw_client.get_metric_statistics.return_value = {"Datapoints": []}
+        cw_client.get_metric_data.side_effect = _metric_data({})
 
         result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
 
@@ -243,10 +262,10 @@ def test_net_cost_negative_means_it_is_saving_money():
         }
         # 100 objects, 10 GB each = 1 TB total — tiny monitoring cost, big savings
         one_tb_bytes = 1024 ** 4
-        cw_client.get_metric_statistics.side_effect = [
-            {"Datapoints": [{"Average": 100}]},
-            {"Datapoints": [{"Average": one_tb_bytes}]},
-        ]
+        cw_client.get_metric_data.side_effect = _metric_data({
+            ("NumberOfObjects", "AllStorageTypes"): 100,
+            ("BucketSizeBytes", "StandardStorage"): one_tb_bytes,
+        })
 
         result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
 
@@ -266,15 +285,11 @@ def test_it_bucket_size_read_from_intelligent_tiering_storage_not_falsely_flagge
     Now the size is summed across IT classes, so a large-object bucket is not flagged."""
     aws_client = _make_aws_client()
 
-    def _cw(**kwargs):
-        metric = kwargs.get("MetricName")
-        st = next((d["Value"] for d in kwargs.get("Dimensions", [])
-                   if d["Name"] == "StorageType"), None)
-        if metric == "NumberOfObjects":
-            return {"Datapoints": [{"Average": 1000}]}          # 1000 objects
-        if metric == "BucketSizeBytes" and st == "IntelligentTieringFAStorage":
-            return {"Datapoints": [{"Average": 10 * 1024 ** 3}]}  # 10 GB -> 10 MB/obj
-        return {"Datapoints": []}  # StandardStorage etc: empty, like a real IT bucket
+    # StandardStorage etc: empty, like a real IT bucket
+    _cw = _metric_data({
+        ("NumberOfObjects", "AllStorageTypes"): 1000,                     # 1000 objects
+        ("BucketSizeBytes", "IntelligentTieringFAStorage"): 10 * 1024 ** 3,  # 10 MB/obj
+    })
 
     with patch("boto3.Session") as mock_cls:
         session = MagicMock()
@@ -286,7 +301,7 @@ def test_it_bucket_size_read_from_intelligent_tiering_storage_not_falsely_flagge
         s3_client.list_bucket_intelligent_tiering_configurations.return_value = {
             "IntelligentTieringConfigurationList": [{"Id": "default"}]
         }
-        cw_client.get_metric_statistics.side_effect = _cw
+        cw_client.get_metric_data.side_effect = _cw
 
         result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
 
@@ -321,10 +336,10 @@ def test_roi_marginal_band_when_monitoring_is_large_share_of_savings():
         s3_client.list_bucket_intelligent_tiering_configurations.return_value = {
             "IntelligentTieringConfigurationList": [{"Id": "default"}]
         }
-        cw_client.get_metric_statistics.side_effect = [
-            {"Datapoints": [{"Average": 200_000}]},          # objects
-            {"Datapoints": [{"Average": 200 * 1024 ** 3}]},   # 200 GB
-        ]
+        cw_client.get_metric_data.side_effect = _metric_data({
+            ("NumberOfObjects", "AllStorageTypes"): 200_000,
+            ("BucketSizeBytes", "StandardStorage"): 200 * 1024 ** 3,
+        })
 
         result = _run(audit_s3_intelligent_tiering(aws_client=aws_client))
 

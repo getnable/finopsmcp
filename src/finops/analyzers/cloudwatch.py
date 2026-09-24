@@ -160,8 +160,10 @@ def s3_bucket_region(s3_client: Any, bucket: dict, default: str) -> str:
     except Exception as exc:
         log.debug("get_bucket_location failed for %s: %s", bucket.get("Name"), exc)
         return default
-    if not location:
+    if location is None or location == "":
         return "us-east-1"
+    if not isinstance(location, str):
+        return default
     if location == "EU":
         return "eu-west-1"
     return location
