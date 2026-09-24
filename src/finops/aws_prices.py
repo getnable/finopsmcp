@@ -100,7 +100,11 @@ CLB_PER_MONTH = round(CLB_HOURLY * HOURS_PER_MONTH, 2)   # 18.25
 # they asked for a rightsizing finding or a Terraform estimate.
 #
 # Hourly on-demand list, us-east-1, Linux, shared tenancy, no RI or Savings
-# Plan: the AWS price list as of May 2026, the date every copy carried. Monthly
+# Plan. Checked entry by entry against the public AWS Price List (AmazonEC2
+# and AmazonRDS us-east-1 offer files, version 20260924211011). That check
+# found the P4/P5 rows still at pre-cut prices (p5.48xlarge 98.32, now 55.04),
+# i4i ten percent low and the Graviton RDS classes wrong; p5e.48xlarge has no
+# us-east-1 on-demand listing and is left out rather than guessed. Monthly
 # is never typed in; EC2_MONTHLY and RDS_MONTHLY below are derived. A new type
 # goes here, not in the module that first needs it:
 # tests/test_instance_price_tables.py fails on an instance-keyed price dict
@@ -164,30 +168,30 @@ EC2_HOURLY: dict[str, float] = {
     "x2idn.16xlarge": 6.669,
     # GPU. List price, not a discounted or Spot rate.
     "p3.2xlarge": 3.06, "p3.8xlarge": 12.24, "p3.16xlarge": 24.48,
-    "p4d.24xlarge": 32.77, "p4de.24xlarge": 40.97,
-    "p5.48xlarge": 98.32, "p5e.48xlarge": 98.32, "p5en.48xlarge": 98.32,
+    "p4d.24xlarge": 21.957642, "p4de.24xlarge": 27.44705,
+    "p5.48xlarge": 55.04, "p5en.48xlarge": 63.296,
     "g4dn.xlarge": 0.526, "g4dn.2xlarge": 0.752,
-    "g4dn.4xlarge": 1.204, "g4dn.8xlarge": 2.264, "g4dn.12xlarge": 3.912,
+    "g4dn.4xlarge": 1.204, "g4dn.8xlarge": 2.176, "g4dn.12xlarge": 3.912,
     "g4dn.16xlarge": 4.352, "g4dn.metal": 7.824,
     "g5.xlarge": 1.006, "g5.2xlarge": 1.212, "g5.4xlarge": 1.624,
     "g5.8xlarge": 2.448, "g5.12xlarge": 5.672, "g5.16xlarge": 4.096,
     "g5.24xlarge": 8.144, "g5.48xlarge": 16.288,
-    "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776, "g6.4xlarge": 1.323,
+    "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776, "g6.4xlarge": 1.3232,
     "g6.8xlarge": 2.0144, "g6.12xlarge": 4.6016, "g6.16xlarge": 3.3968,
     "g6.24xlarge": 6.6752, "g6.48xlarge": 13.3504,
     "g6e.xlarge": 1.861, "g6e.2xlarge": 2.24208, "g6e.4xlarge": 3.00424,
-    "g6e.8xlarge": 4.52856, "g6e.12xlarge": 10.49264, "g6e.16xlarge": 7.577,
-    "g6e.24xlarge": 15.066, "g6e.48xlarge": 30.13,
+    "g6e.8xlarge": 4.52856, "g6e.12xlarge": 10.49264, "g6e.16xlarge": 7.57719,
+    "g6e.24xlarge": 15.06559, "g6e.48xlarge": 30.13118,
     # Trainium / Inferentia accelerators
-    "trn1.2xlarge": 1.3438, "trn1.32xlarge": 21.50, "trn1n.32xlarge": 24.78,
+    "trn1.2xlarge": 1.34375, "trn1.32xlarge": 21.50, "trn1n.32xlarge": 24.78,
     "inf1.xlarge": 0.228, "inf1.2xlarge": 0.362, "inf1.6xlarge": 1.180,
     "inf1.24xlarge": 4.721,
-    "inf2.xlarge": 0.7582, "inf2.8xlarge": 1.9679, "inf2.24xlarge": 6.4906,
-    "inf2.48xlarge": 12.9813,
+    "inf2.xlarge": 0.7582, "inf2.8xlarge": 1.96786, "inf2.24xlarge": 6.49063,
+    "inf2.48xlarge": 12.98127,
     # Storage optimised
     "i3.large": 0.156, "i3.xlarge": 0.312, "i3.2xlarge": 0.624,
     "i3.4xlarge": 1.248, "i3.8xlarge": 2.496,
-    "i4i.large": 0.156, "i4i.xlarge": 0.312, "i4i.2xlarge": 0.624,
+    "i4i.large": 0.172, "i4i.xlarge": 0.343, "i4i.2xlarge": 0.686,
 }
 
 # RDS, single-AZ, MySQL / PostgreSQL / MariaDB. Multi-AZ is twice this, applied
@@ -196,16 +200,16 @@ RDS_HOURLY: dict[str, float] = {
     "db.t3.micro": 0.017, "db.t3.small": 0.034, "db.t3.medium": 0.068,
     "db.t3.large": 0.136, "db.t3.xlarge": 0.272, "db.t3.2xlarge": 0.544,
     "db.t4g.micro": 0.016, "db.t4g.small": 0.032, "db.t4g.medium": 0.065,
-    "db.t4g.large": 0.13,
+    "db.t4g.large": 0.129,
     "db.m5.large": 0.171, "db.m5.xlarge": 0.342, "db.m5.2xlarge": 0.684,
-    "db.m5.4xlarge": 1.368, "db.m5.8xlarge": 2.736, "db.m5.12xlarge": 4.104,
+    "db.m5.4xlarge": 1.368, "db.m5.8xlarge": 2.74, "db.m5.12xlarge": 4.104,
     "db.m6i.large": 0.171, "db.m6i.xlarge": 0.342, "db.m6i.2xlarge": 0.684,
     "db.m6g.large": 0.152, "db.m6g.xlarge": 0.304, "db.m6g.2xlarge": 0.608,
     "db.r5.large": 0.24, "db.r5.xlarge": 0.48, "db.r5.2xlarge": 0.96,
     "db.r5.4xlarge": 1.92, "db.r5.8xlarge": 3.84,
     "db.r6i.large": 0.24, "db.r6i.xlarge": 0.48, "db.r6i.2xlarge": 0.96,
-    "db.r6g.large": 0.192, "db.r6g.xlarge": 0.384, "db.r6g.2xlarge": 0.768,
-    "db.r7g.large": 0.204, "db.r7g.xlarge": 0.408, "db.r7g.2xlarge": 0.816,
+    "db.r6g.large": 0.215, "db.r6g.xlarge": 0.43, "db.r6g.2xlarge": 0.859,
+    "db.r7g.large": 0.239, "db.r7g.xlarge": 0.478, "db.r7g.2xlarge": 0.956,
 }
 
 # Rounded to cents at definition, for the reason given above ALB_PER_MONTH.

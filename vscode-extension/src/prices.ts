@@ -58,13 +58,13 @@ const EC2_HOURLY: Record<string, number> = {
 const RDS_HOURLY: Record<string, number> = {
   "db.t3.micro": 0.017, "db.t3.small": 0.034,  "db.t3.medium": 0.068,
   "db.t3.large": 0.136, "db.t4g.micro": 0.016, "db.t4g.small": 0.032,
-  "db.t4g.medium": 0.065,"db.t4g.large": 0.13,
+  "db.t4g.medium": 0.065,"db.t4g.large": 0.129,
   "db.m5.large": 0.171, "db.m5.xlarge": 0.342, "db.m5.2xlarge": 0.684,
   "db.m5.4xlarge": 1.368,"db.m6i.large": 0.171,"db.m6i.xlarge": 0.342,
   "db.m6g.large": 0.152,"db.m6g.xlarge": 0.304,
   "db.r5.large": 0.24,  "db.r5.xlarge": 0.48,  "db.r5.2xlarge": 0.96,
   "db.r5.4xlarge": 1.92,"db.r6i.large": 0.24,  "db.r6i.xlarge": 0.48,
-  "db.r6g.large": 0.192,"db.r6g.xlarge": 0.384,"db.r7g.large": 0.204,
+  "db.r6g.large": 0.215,"db.r6g.xlarge": 0.43,"db.r7g.large": 0.239,
 };
 
 // ── ElastiCache ───────────────────────────────────────────────────────────────

@@ -33,13 +33,13 @@ _EC2_BEFORE = {
     "c7g.medium": 0.0363, "c7i.large": 0.08925, "r5.8xlarge": 2.016,
     "r6i.large": 0.126, "r6g.2xlarge": 0.4032, "x1e.xlarge": 0.834,
     "p3.2xlarge": 3.06, "g4dn.xlarge": 0.526, "g5.48xlarge": 16.288,
-    "inf2.xlarge": 0.7582, "i4i.large": 0.156,
+    "inf2.xlarge": 0.7582, "i4i.large": 0.172,
 }
 
 _RDS_BEFORE = {
     "db.t3.micro": 0.017, "db.t3.medium": 0.068, "db.t3.2xlarge": 0.544,
-    "db.t4g.large": 0.13, "db.m5.large": 0.171, "db.m5.4xlarge": 1.368,
-    "db.r5.large": 0.24, "db.r7g.large": 0.204,
+    "db.t4g.large": 0.129, "db.m5.large": 0.171, "db.m5.4xlarge": 1.368,
+    "db.r5.large": 0.24, "db.r7g.large": 0.239,
 }
 
 
@@ -88,6 +88,12 @@ def _units(size: str) -> float | None:
     return None
 
 
+# AWS publishes these to three decimals, so a size can sit 0.3% off the others
+# (i4i.large 0.172 against i4i.xlarge 0.343 / 2 = 0.1715). The values are the
+# list, so the family is exempt rather than the list rounded to fit.
+_THREE_DECIMAL_FAMILIES = {"i4i"}
+
+
 def test_every_cpu_family_is_priced_per_vcpu():
     # AWS publishes four decimal places, so a medium can be off by the half a
     # hundredth of a cent that rounding adds (c7g.medium 0.0363 = 0.0725 / 2).
@@ -96,7 +102,7 @@ def test_every_cpu_family_is_priced_per_vcpu():
     for itype, hourly in EC2_HOURLY.items():
         family, size = itype.split(".", 1)
         units = _units(size)
-        if family in _NONLINEAR_FAMILIES or units is None:
+        if family in _NONLINEAR_FAMILIES or family in _THREE_DECIMAL_FAMILIES or units is None:
             continue
         by_family.setdefault(family, []).append((itype, hourly / units))
     off = []
@@ -224,8 +230,8 @@ def test_idle_rds_quotes_what_it_used_to(db_class, hourly):
     ("db.m6g.large", 0.162, 0.152),
     ("db.m6g.xlarge", 0.325, 0.304),
     ("db.m6g.2xlarge", 0.650, 0.608),
-    ("db.r6g.large", 0.228, 0.192),
-    ("db.r6g.xlarge", 0.456, 0.384),
+    ("db.r6g.large", 0.228, 0.215),
+    ("db.r6g.xlarge", 0.456, 0.43),
 ])
 def test_idle_rds_graviton_uses_the_corrected_rate(db_class, was, now):
     from finops.analyzers import waste
@@ -236,20 +242,22 @@ def test_idle_rds_graviton_uses_the_corrected_rate(db_class, was, now):
 
 
 def test_rds_rightsizing_saving_for_a_graviton_downsize_uses_the_corrected_rate():
-    # db.r6g.xlarge to db.r6g.large: (0.384 - 0.192) * 730 = 140.16, where the
-    # old local copy said (0.456 - 0.228) * 730 = 166.44.
+    # db.r6g.xlarge to db.r6g.large: (0.43 - 0.215) * 730 = 156.95 at the AWS
+    # list price, where the old local copy said (0.456 - 0.228) * 730 = 166.44.
     from finops.analyzers import waste
 
     [f] = waste.check_rds_rightsizing(*_idle_rds("db.r6g.xlarge"), region="us-east-1")
-    assert f["estimated_monthly_savings"] == 140.16
+    assert f["estimated_monthly_savings"] == 156.95
 
 
-def test_rds_graviton_rates_match_terraform():
-    # The whole Graviton column, as terraform_estimate had it before the merge.
+def test_rds_graviton_rates_match_the_aws_price_list():
+    # The whole Graviton column at the AWS list price (AmazonRDS us-east-1 offer
+    # file, version 20260924211011, MySQL Single-AZ). Both pre-merge copies were
+    # wrong: waste.py had 0.228 and terraform_estimate 0.192 for db.r6g.large.
     graviton = {k: v for k, v in RDS_HOURLY.items() if k.startswith(("db.m6g.", "db.r6g."))}
     assert graviton == {
         "db.m6g.large": 0.152, "db.m6g.xlarge": 0.304, "db.m6g.2xlarge": 0.608,
-        "db.r6g.large": 0.192, "db.r6g.xlarge": 0.384, "db.r6g.2xlarge": 0.768,
+        "db.r6g.large": 0.215, "db.r6g.xlarge": 0.43, "db.r6g.2xlarge": 0.859,
     }
 
 
@@ -345,8 +353,8 @@ def test_guard_prices_run_instances_from_the_shared_table():
 
     est = estimate_command_monthly_cost(
         "aws ec2 run-instances --instance-type p4d.24xlarge --count 8")
-    assert est["hourly_usd"] == 32.77
-    assert est["monthly_usd"] == round(32.77 * 8 * 730, 2)
+    assert est["hourly_usd"] == 21.957642
+    assert est["monthly_usd"] == round(21.957642 * 8 * 730, 2)
 
 
 def test_kubernetes_costs_and_vscode_mirror_use_the_shared_table():
@@ -359,7 +367,7 @@ def test_kubernetes_costs_and_vscode_mirror_use_the_shared_table():
     assert vscode_extension_prices._RDS_HOURLY is RDS_HOURLY
     rds = vscode_extension_prices.price_resource_py(
         "aws_db_instance", {"instance_class": "db.r6g.large"})
-    assert rds["monthly"] == 140.16
+    assert rds["monthly"] == 156.95
 
 
 # ── no new copies ────────────────────────────────────────────────────────────
