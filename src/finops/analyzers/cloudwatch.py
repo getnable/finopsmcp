@@ -77,6 +77,7 @@ def fetch_metric_values(
     use_get_metric_data: bool | None = None,
     max_workers: int = DEFAULT_WORKERS,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
+    failures: dict[Hashable, str] | None = None,
 ) -> dict[Hashable, list[float] | None]:
     """
     Read many metric series without one sequential round trip per series. The
@@ -104,10 +105,14 @@ def fetch_metric_values(
       which is how a busy resource gets called idle, so it is reported as
       unread rather than returned short. Treat None exactly as a
       get_metric_statistics exception.
+
+    `failures`, when given, is filled with {key: why} for every None: the AWS
+    error code (AccessDenied, Throttling), "Timeout" for a read the fetch gave
+    up on, or the GetMetricData status. Never the message, which carries ARNs.
     """
     points = fetch_metric_points(
         cw_client, queries, start, end, use_get_metric_data=use_get_metric_data,
-        max_workers=max_workers, idle_timeout_s=idle_timeout_s)
+        max_workers=max_workers, idle_timeout_s=idle_timeout_s, failures=failures)
     return {key: None if p is None else [v for _, v in p] for key, p in points.items()}
 
 
@@ -120,6 +125,7 @@ def fetch_metric_points(
     use_get_metric_data: bool | None = None,
     max_workers: int = DEFAULT_WORKERS,
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S,
+    failures: dict[Hashable, str] | None = None,
 ) -> dict[Hashable, MetricPoints | None]:
     """
     fetch_metric_values with each value's timestamp kept, for a caller that
@@ -132,13 +138,24 @@ def fetch_metric_points(
     if use_get_metric_data is None:
         use_get_metric_data = get_metric_data_opted_in()
     if use_get_metric_data:
-        return _fetch_with_get_metric_data(cw_client, queries, start, end)
+        return _fetch_with_get_metric_data(cw_client, queries, start, end, failures)
     return _fetch_with_get_metric_statistics(
-        cw_client, queries, start, end, max_workers, idle_timeout_s)
+        cw_client, queries, start, end, max_workers, idle_timeout_s, failures)
+
+
+def _exc_code(exc: BaseException) -> str:
+    """The AWS error code or the exception type, never the message."""
+    resp = getattr(exc, "response", None)
+    if isinstance(resp, dict):
+        code = (resp.get("Error") or {}).get("Code")
+        if code:
+            return str(code)
+    return type(exc).__name__
 
 
 def _read_statistics(
     cw_client: Any, q: MetricQuery, start: datetime, end: datetime,
+    failures: dict[Hashable, str] | None = None,
 ) -> MetricPoints | None:
     """One GetMetricStatistics call for one series, never raising."""
     try:
@@ -154,8 +171,12 @@ def _read_statistics(
         datapoints = resp.get("Datapoints", [])
     except Exception as exc:
         log.debug("CloudWatch %s read failed for %s: %s", q.metric_name, q.dimensions, exc)
+        if failures is not None:
+            failures[q.key] = _exc_code(exc)
         return None
     if not isinstance(datapoints, list):
+        if failures is not None:
+            failures[q.key] = "MalformedResponse"
         return None
     # The API returns datapoints in no particular order. A missing Timestamp
     # sorts last rather than raising on None < None.
@@ -170,12 +191,14 @@ def _fetch_with_get_metric_statistics(
     end: datetime,
     max_workers: int,
     idle_timeout_s: float,
+    failures: dict[Hashable, str] | None = None,
 ) -> dict[Hashable, MetricPoints | None]:
     out: dict[Hashable, MetricPoints | None] = {}
     pool = ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(queries))),
                               thread_name_prefix="cw-read")
     try:
-        futures = {pool.submit(_read_statistics, cw_client, q, start, end): q for q in queries}
+        futures = {pool.submit(_read_statistics, cw_client, q, start, end, failures): q
+                   for q in queries}
         pending = set(futures)
         last_progress = time.monotonic()
         while pending:
@@ -191,6 +214,8 @@ def _fetch_with_get_metric_statistics(
             log.warning("CloudWatch reads stalled; %d series left unread", len(pending))
             for f in pending:
                 out[futures[f].key] = None
+                if failures is not None:
+                    failures[futures[f].key] = "Timeout"
     finally:
         # Never wait on a hung call: queued reads are cancelled, and a running
         # one finishes (or times out in botocore) on its own thread.
@@ -203,6 +228,7 @@ def _fetch_with_get_metric_data(
     queries: Sequence[MetricQuery],
     start: datetime,
     end: datetime,
+    failures: dict[Hashable, str] | None = None,
 ) -> dict[Hashable, MetricPoints | None]:
     """The opt-in path: one billed GetMetricData call per 500 series."""
     out: dict[Hashable, MetricPoints | None] = {}
@@ -259,11 +285,15 @@ def _fetch_with_get_metric_data(
             log.warning("CloudWatch get_metric_data failed for %d series: %s", len(chunk), exc)
             for q in chunk:
                 out[q.key] = None
+                if failures is not None:
+                    failures[q.key] = _exc_code(exc)
             continue
 
         for qid, q in by_id.items():
             if status.get(qid) != "Complete":
                 out[q.key] = None
+                if failures is not None:
+                    failures[q.key] = status.get(qid) or "Missing"
             else:
                 out[q.key] = sorted(points[qid], key=lambda p: p[0])
     return out
@@ -276,6 +306,7 @@ def fetch_metric_values_by_region(
     end: datetime,
     *,
     use_get_metric_data: bool | None = None,
+    failures: dict[Hashable, str] | None = None,
 ) -> dict[Hashable, list[float] | None]:
     """fetch_metric_values for series that live in different regions, one
     CloudWatch client per region. A region whose client cannot be built reads
@@ -287,9 +318,12 @@ def fetch_metric_values_by_region(
         except Exception as exc:
             log.warning("CloudWatch client for %s unavailable: %s", region, exc)
             out.update({q.key: None for q in queries})
+            if failures is not None:
+                failures.update({q.key: _exc_code(exc) for q in queries})
             continue
         out.update(fetch_metric_values(cw, queries, start, end,
-                                       use_get_metric_data=use_get_metric_data))
+                                       use_get_metric_data=use_get_metric_data,
+                                       failures=failures))
     return out
 
 

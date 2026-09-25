@@ -18,8 +18,9 @@ Monetary estimates use on-demand approximations — not exact billing figures.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from ..aws_prices import (
@@ -77,6 +78,76 @@ def _get_account_id(sts_client: Any | None) -> str | None:
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# ── Reads that failed inside a check ──────────────────────────────────────────
+
+def error_code(exc: BaseException | str) -> str:
+    """The AWS error code (AccessDenied, Throttling...) or the exception type.
+    Never the message: it carries ARNs and account ids, and this reaches the
+    brief, Slack, and `nable scan --json`."""
+    if isinstance(exc, str):
+        return exc
+    resp = getattr(exc, "response", None)
+    if isinstance(resp, dict):
+        code = (resp.get("Error") or {}).get("Code")
+        if code:
+            return str(code)
+    return type(exc).__name__
+
+
+class CheckFindings(list):
+    """A check's findings, plus the reads inside it that failed.
+
+    A list subclass so every caller that treats the result as a plain findings
+    list keeps working. A check whose inventory read works but whose follow-up
+    read is denied (the AMI list behind the snapshot filter, a trail's status,
+    one cluster's services) used to swallow that denial and report whatever was
+    left as the whole answer. Each such read lands here instead, and the audit
+    records it as a partial failure of the check, with its error code and how
+    many resources it left unread.
+    """
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.partial_failures: list[dict] = []
+
+    def note_failure(self, call: str, exc: BaseException | str, count: int = 1,
+                     unit: str = "resources", effect: str = "") -> None:
+        code = error_code(exc)
+        for f in self.partial_failures:
+            if f["call"] == call and f["error_code"] == code and f["unit"] == unit:
+                f["count"] += count
+                return
+        self.partial_failures.append({
+            "call": call, "error_code": code, "count": count, "unit": unit,
+            "effect": effect,
+        })
+
+
+def _metric_call() -> str:
+    """The CloudWatch call a metric read went through, for a failure record."""
+    from .cloudwatch import get_metric_data_opted_in
+    return ("cloudwatch.get_metric_data" if get_metric_data_opted_in()
+            else "cloudwatch.get_metric_statistics")
+
+
+def _note_unread(findings: CheckFindings, failed: dict, unit: str, metric: str) -> None:
+    """Record the metric reads that failed, by error code, with how many
+    resources each left unassessed.
+
+    A resource whose metric could not be read is skipped, never called idle:
+    unread is not idle. But skipping it quietly made a denied
+    cloudwatch:GetMetricStatistics drop every NAT gateway and load balancer
+    finding while the scan reported clean. The skip stays; the silence goes.
+    """
+    by_code: dict[str, int] = {}
+    for code in failed.values():
+        by_code[code] = by_code.get(code, 0) + 1
+    for code, n in sorted(by_code.items()):
+        findings.note_failure(
+            _metric_call(), code, count=n, unit=unit,
+            effect=f"{metric} not read, so these were not assessed (unread is not idle)")
 
 
 # ── EBS volumes ───────────────────────────────────────────────────────────────
@@ -183,7 +254,7 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
     EBS snapshot storage is $0.05/GB-month.
     """
     _SNAPSHOT_STORAGE_PER_GB_MONTH = EBS_SNAPSHOT_PER_GB_MONTH
-    findings: list[dict] = []
+    findings = CheckFindings()
     cutoff = _now_utc() - timedelta(days=older_than_days)
 
     # The audit stamps the account id on every finding it returns; this check
@@ -209,6 +280,7 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
 
     # Gather AMI snapshot IDs so we don't flag snapshots backing AMIs
     ami_snapshot_ids: set[str] = set()
+    ami_read_error: Exception | None = None
     try:
         ami_paginator = ec2_client.get_paginator("describe_images")
         for page in ami_paginator.paginate(Owners=["self"]):
@@ -217,8 +289,14 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
                     snap_id = bdm.get("Ebs", {}).get("SnapshotId")
                     if snap_id:
                         ami_snapshot_ids.add(snap_id)
-    except Exception:
-        pass  # If we can't list AMIs, skip this filter
+    except Exception as exc:
+        # This used to `pass` and carry on with an empty AMI set, which turned
+        # the filter off: every snapshot behind a registered AMI was then
+        # flagged as waste, and deleting one breaks the AMI. Any snapshot can
+        # back an AMI, so without the list none of them can be called orphaned.
+        log.warning("describe_images failed (region=%s): %s", region, exc)
+        ami_read_error = exc
+    unassessed = 0
 
     for page in pages:
         for snap in page.get("Snapshots", []):
@@ -235,6 +313,10 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
 
             if snap_id in ami_snapshot_ids:
                 continue  # Backing an AMI — needed
+
+            if ami_read_error is not None:
+                unassessed += 1
+                continue
 
             size_gb = snap.get("VolumeSize", 0) or 0
             monthly_cost = size_gb * _SNAPSHOT_STORAGE_PER_GB_MONTH
@@ -262,6 +344,10 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
                 "age_days": age_days,
             })
 
+    if ami_read_error is not None:
+        findings.note_failure(
+            "ec2.describe_images", ami_read_error, count=unassessed, unit="snapshots",
+            effect="old snapshots not assessed: the AMI list that protects them could not be read")
     return findings
 
 
@@ -322,7 +408,7 @@ def check_nat_gateways(
     Detect NAT Gateways with low throughput — they still cost ~$32/mo in fixed
     charges even with zero traffic. If a NAT GW processes <1 GB/day it's likely idle.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         paginator = ec2_client.get_paginator("describe_nat_gateways")
@@ -340,11 +426,13 @@ def check_nat_gateways(
     nats = [nat for page in pages for nat in page.get("NatGateways", [])]
 
     # BytesOutToDestination (egress through NAT GW), one batched read for all
+    failed: dict = {}
     sums = fetch_metric_values(cw_client, [
         MetricQuery(nat["NatGatewayId"], "AWS/NATGateway", "BytesOutToDestination",
                     (("NatGatewayId", nat["NatGatewayId"]),), "Sum", period_seconds)
         for nat in nats
-    ], start, now)
+    ], start, now, failures=failed)
+    _note_unread(findings, failed, "NAT gateways", "traffic (BytesOutToDestination)")
 
     for nat in nats:
         nat_id = nat["NatGatewayId"]
@@ -478,7 +566,7 @@ def check_cloudtrail_waste(
     CloudTrail management events: free for first trail, $2/100k events for additional.
     Data events: $0.10/100k events — these add up FAST on busy S3 buckets.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         resp = cloudtrail_client.describe_trails(includeShadowTrails=False)
@@ -534,6 +622,9 @@ def check_cloudtrail_waste(
 
         except Exception as exc:
             log.debug("get_event_selectors failed for %s: %s", trail_name, exc)
+            findings.note_failure(
+                "cloudtrail.get_event_selectors", exc, unit="trails",
+                effect="data events and duplicate trails not checked")
 
         # Get trail status — check if trail is actually logging
         try:
@@ -555,8 +646,11 @@ def check_cloudtrail_waste(
                     "account_id": None,
                     "trail_name": trail_name,
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("get_trail_status failed for %s: %s", trail_name, exc)
+            findings.note_failure(
+                "cloudtrail.get_trail_status", exc, unit="trails",
+                effect="stopped trails not checked")
 
     # Flag duplicate management event trails (more than 1 trail = paying for duplicates)
     if len(management_event_trails) > 1:
@@ -1023,7 +1117,7 @@ def check_idle_ec2(
     """
     _APPROX_MONTHLY_PER_VCPU = 15.0  # very rough: $15/vCPU/month on-demand
 
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         paginator = ec2_client.get_paginator("describe_instances")
@@ -1054,11 +1148,13 @@ def check_idle_ec2(
     # CPU for every candidate, then NetworkOut only where CPU came back low:
     # the same reads the per-resource loop made, so the free path spends no
     # more requests and the opt-in path bills no more metrics than it must.
+    cpu_failed: dict = {}
     cpu_series = fetch_metric_values(cw_client, [
         MetricQuery(inst["InstanceId"], "AWS/EC2", "CPUUtilization",
                     (("InstanceId", inst["InstanceId"]),), "Average", 3600)  # hourly
         for inst in candidates
-    ], start, now)
+    ], start, now, failures=cpu_failed)
+    _note_unread(findings, cpu_failed, "instances", "CPUUtilization")
 
     low_cpu: list[tuple[dict, float, float]] = []
     for inst in candidates:
@@ -1082,11 +1178,13 @@ def check_idle_ec2(
     # per-collection-interval samples (Statistics=Average) would return mean
     # bytes-per-sample, ~12x too low against a per-hour threshold, so the guard
     # would never fire. Use Sum.
+    net_failed: dict = {}
     net_series = fetch_metric_values(cw_client, [
         MetricQuery(inst["InstanceId"], "AWS/EC2", "NetworkOut",
                     (("InstanceId", inst["InstanceId"]),), "Sum", 3600)
         for inst, _, _ in low_cpu
-    ], start, now)
+    ], start, now, failures=net_failed)
+    _note_unread(findings, net_failed, "instances", "NetworkOut")
 
     for inst, avg_cpu, max_cpu in low_cpu:
         inst_id = inst["InstanceId"]
@@ -1190,7 +1288,7 @@ def check_rds_rightsizing(
 
     Excludes Aurora Serverless (scales automatically) and read replicas.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         paginator = rds_client.get_paginator("describe_db_instances")
@@ -1216,11 +1314,13 @@ def check_rds_rightsizing(
                 continue
             candidates.append(db)
 
+    failed: dict = {}
     series = fetch_metric_values(cw_client, [
         MetricQuery(db["DBInstanceIdentifier"], "AWS/RDS", "CPUUtilization",
                     (("DBInstanceIdentifier", db["DBInstanceIdentifier"]),), "Average", 3600)
         for db in candidates
-    ], start, now)
+    ], start, now, failures=failed)
+    _note_unread(findings, failed, "databases", "CPUUtilization")
 
     for db in candidates:
         db_id = db["DBInstanceIdentifier"]
@@ -1291,7 +1391,7 @@ def check_rds_idle(
     Detect RDS instances with near-zero database connections over the lookback
     period. Zero-connection instances are likely unused and can be stopped or deleted.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         paginator = rds_client.get_paginator("describe_db_instances")
@@ -1308,11 +1408,13 @@ def check_rds_idle(
         if db.get("DBInstanceStatus", "") == "available"
     ]
 
+    failed: dict = {}
     series = fetch_metric_values(cw_client, [
         MetricQuery(db["DBInstanceIdentifier"], "AWS/RDS", "DatabaseConnections",
                     (("DBInstanceIdentifier", db["DBInstanceIdentifier"]),), "Maximum", 86400)
         for db in candidates
-    ], start, now)
+    ], start, now, failures=failed)
+    _note_unread(findings, failed, "databases", "DatabaseConnections")
 
     for db in candidates:
         db_id = db["DBInstanceIdentifier"]
@@ -1421,7 +1523,7 @@ def check_idle_load_balancers(
     Load balancers with fewer than request_threshold total requests over
     lookback_days are flagged as idle. They still incur the hourly LCU base cost.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
     listing_errors: list[Exception] = []
 
     now = datetime.now(timezone.utc)
@@ -1475,7 +1577,9 @@ def check_idle_load_balancers(
             ("classic", i), "AWS/ELB", "RequestCount",
             (("LoadBalancerName", lb.get("LoadBalancerName", "")),), "Sum", 86400,
         ))
-    series = fetch_metric_values(cw_client, queries, start, now)
+    failed: dict = {}
+    series = fetch_metric_values(cw_client, queries, start, now, failures=failed)
+    _note_unread(findings, failed, "load balancers", "request and flow counts")
 
     for i, lb in enumerate(v2_lbs):
         lb_name = lb.get("LoadBalancerName", "")
@@ -1564,7 +1668,7 @@ def check_s3_incomplete_multipart(
     Incomplete multipart uploads accumulate silently and are billed at STANDARD
     storage rates. A lifecycle rule is the fix.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
 
@@ -1581,6 +1685,7 @@ def check_s3_incomplete_multipart(
         bucket_name = bucket["Name"]
         total_size_bytes = 0
         old_upload_count = 0
+        unsized = 0
 
         try:
             paginator = s3_client.get_paginator("list_multipart_uploads")
@@ -1599,17 +1704,51 @@ def check_s3_incomplete_multipart(
                                 Key=upload.get("Key", ""),
                                 UploadId=upload_id,
                             )
+                            upload_bytes = 0
                             for parts_page in parts_pages:
                                 for part in parts_page.get("Parts", []):
-                                    total_size_bytes += part.get("Size", 0)
-                        except Exception:
-                            pass
+                                    upload_bytes += part.get("Size", 0)
+                            total_size_bytes += upload_bytes
+                        except Exception as exc:
+                            # Not 0 bytes: the size is unknown. Counting it as
+                            # zero priced the upload at $0 and hid the denial.
+                            findings.note_failure(
+                                "s3.list_parts", exc, unit="uploads",
+                                effect="abandoned upload sizes unknown, left unpriced")
+                            unsized += 1
                         old_upload_count += 1
         except Exception as exc:
             log.debug("list_multipart_uploads failed for %s: %s", bucket_name, exc)
+            findings.note_failure(
+                "s3.list_multipart_uploads", exc, unit="buckets",
+                effect="abandoned uploads not checked")
             continue
 
         if old_upload_count == 0:
+            continue
+
+        if unsized:
+            # Part of the size could not be read, so any figure is a floor
+            # dressed up as an estimate. Report the uploads, unpriced.
+            findings.append({
+                "resource_id": f"s3://{bucket_name}",
+                "resource_type": "S3 Bucket",
+                "waste_type": "s3_incomplete_multipart_uploads",
+                "estimated_monthly_savings": None,
+                "unpriced": True,
+                "detail": (
+                    f"Bucket '{bucket_name}' has {old_upload_count} incomplete multipart "
+                    f"upload(s) older than {older_than_days} days. The size of "
+                    f"{unsized} could not be read (s3:ListMultipartUploadParts), so "
+                    f"this is not priced. Add a lifecycle rule: "
+                    f"AbortIncompleteMultipartUpload with DaysAfterInitiation=7."
+                ),
+                "severity": "low",
+                "region": region,
+                "account_id": None,
+                "bucket": bucket_name,
+                "incomplete_upload_count": old_upload_count,
+            })
             continue
 
         size_gb = total_size_bytes / (1024 ** 3)
@@ -1807,6 +1946,140 @@ def check_data_transfer_costs(
     return findings
 
 
+# ── DynamoDB provisioned capacity ────────────────────────────────────────────
+
+# Provisioned capacity, per unit-hour, us-east-1, from the AWS Price List
+# (AmazonDynamoDB offer, us-east-1 index.csv, version 20260911124422, published
+# 2026-09-11): ReadCapacityUnit-Hrs $0.00013 and WriteCapacityUnit-Hrs $0.00065
+# for the Standard table class, $0.00016 and $0.00081 for Standard-IA. The first
+# 25 RCU and 25 WCU a month are free across the account; that is not netted
+# out here, so a figure on a tiny table can overstate by up to about $14/mo.
+_DDB_RCU_HOURLY = {"STANDARD": 0.00013, "STANDARD_INFREQUENT_ACCESS": 0.00016}
+_DDB_WCU_HOURLY = {"STANDARD": 0.00065, "STANDARD_INFREQUENT_ACCESS": 0.00081}
+_DDB_HEADROOM = 2.0        # recommend twice the busiest hour's average rate
+_DDB_MIN_SAVINGS = 5.0     # below this a capacity change is not worth a finding
+
+
+def check_dynamodb_provisioned(
+    dynamodb_client: Any,
+    cw_client: Any,
+    region: str = "unknown",
+    lookback_days: int = 14,
+) -> list[dict]:
+    """
+    Detect provisioned-mode DynamoDB tables whose read or write capacity is well
+    above what they consume.
+
+    Free APIs only: ListTables and DescribeTable, and CloudWatch
+    ConsumedRead/WriteCapacityUnits through the shared GetMetricStatistics
+    reader. The busiest hour over the lookback sets the bar, and the
+    recommendation keeps twice that hour's average rate, because a burst
+    inside an hour runs above its average.
+
+    A table younger than the lookback is skipped: an empty metric on it means
+    "too new to say", not "idle". On an older table, no datapoints means
+    nothing was consumed, which DynamoDB reports by publishing nothing.
+    """
+    findings = CheckFindings()
+
+    names: list[str] = []
+    paginator = dynamodb_client.get_paginator("list_tables")
+    for page in paginator.paginate():
+        names.extend(page.get("TableNames", []))
+
+    now = datetime.now(UTC)
+    start = now - timedelta(days=lookback_days)
+
+    tables: list[dict] = []
+    for name in names:
+        try:
+            table = dynamodb_client.describe_table(TableName=name).get("Table", {})
+        except Exception as exc:  # noqa: BLE001 - recorded as a partial failure
+            findings.note_failure("dynamodb.describe_table", exc, unit="tables",
+                                  effect="tables not checked")
+            continue
+        mode = (table.get("BillingModeSummary") or {}).get("BillingMode", "PROVISIONED")
+        if mode != "PROVISIONED" or table.get("TableStatus") != "ACTIVE":
+            continue
+        created = table.get("CreationDateTime")
+        if created is not None:
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=UTC)
+            if created > start:
+                continue
+        tables.append(table)
+
+    failed: dict = {}
+    series = fetch_metric_values(cw_client, [
+        MetricQuery((t["TableName"], metric), "AWS/DynamoDB", metric,
+                    (("TableName", t["TableName"]),), "Sum", 3600)
+        for t in tables
+        for metric in ("ConsumedReadCapacityUnits", "ConsumedWriteCapacityUnits")
+    ], start, now, failures=failed)
+    # One record per table, however many of its two metrics failed.
+    unread: dict[str, str] = {}
+    for (table_name, _metric), code in failed.items():
+        unread.setdefault(table_name, code)
+    _note_unread(findings, unread, "tables", "consumed capacity")
+
+    for table in tables:
+        name = table["TableName"]
+        if name in unread:
+            continue
+        cls = (table.get("TableClassSummary") or {}).get("TableClass", "STANDARD")
+        rcu_price = _DDB_RCU_HOURLY.get(cls, _DDB_RCU_HOURLY["STANDARD"])
+        wcu_price = _DDB_WCU_HOURLY.get(cls, _DDB_WCU_HOURLY["STANDARD"])
+        throughput = table.get("ProvisionedThroughput") or {}
+
+        savings = 0.0
+        parts: list[str] = []
+        recommended: dict[str, int] = {}
+        for label, key, metric, price in (
+            ("read", "ReadCapacityUnits", "ConsumedReadCapacityUnits", rcu_price),
+            ("write", "WriteCapacityUnits", "ConsumedWriteCapacityUnits", wcu_price),
+        ):
+            provisioned = int(throughput.get(key) or 0)
+            hourly_sums = series.get((name, metric)) or []
+            peak_per_sec = max(hourly_sums, default=0.0) / 3600.0
+            target = max(1, math.ceil(peak_per_sec * _DDB_HEADROOM))
+            recommended[key] = min(provisioned, target) if provisioned else 0
+            if provisioned > target:
+                saved = (provisioned - target) * price * 730
+                savings += saved
+                parts.append(
+                    f"{label}: {provisioned} provisioned, busiest hour averaged "
+                    f"{peak_per_sec:.1f}/s, {target} would keep {_DDB_HEADROOM:.0f}x "
+                    f"headroom (${saved:,.2f}/mo)")
+
+        if savings < _DDB_MIN_SAVINGS:
+            continue
+        findings.append({
+            "resource_id": name,
+            "resource_type": "DynamoDB Table",
+            "waste_type": "dynamodb_overprovisioned_capacity",
+            "estimated_monthly_savings": round(savings, 2),
+            "detail": (
+                f"DynamoDB table '{name}' ({cls.lower().replace('_', '-')} class) over "
+                f"{lookback_days} days: " + "; ".join(parts) + ". "
+                f"If auto scaling manages this table, lower its minimum capacity "
+                f"instead. Command: aws dynamodb update-table --table-name {name} "
+                f"--provisioned-throughput ReadCapacityUnits="
+                f"{recommended['ReadCapacityUnits']},WriteCapacityUnits="
+                f"{recommended['WriteCapacityUnits']} --region {region}"
+            ),
+            "severity": _severity_from_savings(savings),
+            "region": region,
+            "account_id": None,
+            "table_class": cls,
+            "provisioned_rcu": int(throughput.get("ReadCapacityUnits") or 0),
+            "provisioned_wcu": int(throughput.get("WriteCapacityUnits") or 0),
+            "recommended_rcu": recommended["ReadCapacityUnits"],
+            "recommended_wcu": recommended["WriteCapacityUnits"],
+        })
+
+    return findings
+
+
 # ── ECS Fargate rightsizing ───────────────────────────────────────────────────
 
 def check_ecs_task_rightsizing(
@@ -1824,7 +2097,7 @@ def check_ecs_task_rightsizing(
 
     Fargate billing: $0.04048/vCPU-hr, $0.004445/GB-hr.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
@@ -1851,14 +2124,22 @@ def check_ecs_task_rightsizing(
             service_arns = []
             for page in service_paginator.paginate(cluster=cluster_arn):
                 service_arns.extend(page.get("serviceArns", []))
-        except Exception:
+        except Exception as exc:
+            # This used to `continue` without a trace, so a denied
+            # ecs:ListServices read as "no oversized services".
+            findings.note_failure(
+                "ecs.list_services", exc, unit="clusters",
+                effect="services in these clusters not checked")
             continue
 
         for i in range(0, len(service_arns), 10):
             batch = service_arns[i:i+10]
             try:
                 resp = ecs_client.describe_services(cluster=cluster_arn, services=batch)
-            except Exception:
+            except Exception as exc:
+                findings.note_failure(
+                    "ecs.describe_services", exc, count=len(batch), unit="services",
+                    effect="services not checked")
                 continue
 
             for svc in resp.get("services", []):
@@ -1873,16 +2154,21 @@ def check_ecs_task_rightsizing(
                     td = td_resp.get("taskDefinition", {})
                     allocated_cpu = int(td.get("cpu", 256))
                     allocated_memory_mb = int(td.get("memory", 512))
-                except Exception:
+                except Exception as exc:
+                    findings.note_failure(
+                        "ecs.describe_task_definition", exc, unit="services",
+                        effect="services not checked")
                     continue
                 services.append((cluster_name, svc, allocated_cpu, allocated_memory_mb))
 
+    failed: dict = {}
     series = fetch_metric_values(cw_client, [
         MetricQuery(i, "ECS/ContainerInsights", "CpuUtilized",
                     (("ClusterName", cluster_name), ("ServiceName", svc.get("serviceName", ""))),
                     "Average", 3600)
         for i, (cluster_name, svc, _, _) in enumerate(services)
-    ], start, now)
+    ], start, now, failures=failed)
+    _note_unread(findings, failed, "services", "CpuUtilized")
 
     for i, (cluster_name, svc, allocated_cpu, allocated_memory_mb) in enumerate(services):
         svc_name = svc.get("serviceName", "")

@@ -24,8 +24,10 @@ EXIT_NOTHING = 0        # an empty brief is good news, not a failure
 def add_parser(sub) -> None:
     p = sub.add_parser(
         "brief",
-        help="What nable found overnight: ranked, reviewed, with each change drafted",
+        help="Ranked, reviewed findings, with a drafted change where nable has one",
     )
+    p.add_argument("--regions", nargs="+", action="extend", metavar="REGION",
+                   help="scan only these regions (space or comma separated)")
     p.add_argument("--latest", action="store_true",
                    help="show the last saved brief instead of running a new scan")
     p.add_argument("--json", action="store_true", help="machine-readable output on stdout")
@@ -60,6 +62,8 @@ def _print_saved(payload: dict, as_json: bool) -> int:
         print()
     for gap in payload.get("gaps") or []:
         print(f"  not checked: {gap}")
+    for line in payload.get("not_shown") or []:
+        print(f"  not shown: {line}")
     return EXIT_OK
 
 
@@ -78,11 +82,22 @@ def run(args) -> int:
             return EXIT_NOTHING
         return _print_saved(saved, as_json)
 
+    from .cli_scan import _REGION_RE, _split_regions
+    regions = _split_regions(getattr(args, "regions", None)) or None
+    bad = [r for r in regions or [] if not _REGION_RE.match(r)]
+    if bad:
+        msg = f"not valid region name(s): {', '.join(bad)}"
+        print(json.dumps({"error": "bad_region"}) if as_json else msg,
+              file=sys.stdout if as_json else sys.stderr)
+        return EXIT_ERROR
+
     try:
         result = run_overnight(
             deliver_to=None if getattr(args, "deliver", False) else (),
             do_persist=not getattr(args, "no_save", False),
             limit=int(getattr(args, "limit", 10) or 10),
+            regions=regions,
+            trigger="on_demand",
         )
     except KeyboardInterrupt:
         print("\nCancelled.", file=sys.stderr)

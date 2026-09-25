@@ -45,6 +45,7 @@ _ALL_CHECKS = frozenset([
     "load_balancer", # idle ALBs, NLBs, Classic ELBs
     "ecr",           # old untagged ECR images
     "ecs",           # ECS Fargate over-provisioned CPU
+    "dynamodb",      # DynamoDB provisioned capacity well above use
 ])
 
 _DEFAULT_REGIONS = ["us-east-1"]
@@ -76,15 +77,26 @@ def _get_boto3_session(role_arn: str | None = None):
     return boto3.Session()
 
 
+class _Regions(list):
+    """Region names, plus the error code when they are a fallback because
+    ec2:DescribeRegions failed. A list subclass so callers and test doubles
+    that expect a plain list keep working; the CLI reads `error_code` to say
+    that only the fallback was scanned instead of implying it saw them all."""
+
+    error_code: str | None = None
+
+
 def _discover_regions(session) -> list[str]:
     """List all opted-in EC2 regions for this account."""
     try:
         ec2 = session.client("ec2", region_name="us-east-1")
         resp = ec2.describe_regions(Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}])
-        return [r["RegionName"] for r in resp.get("Regions", [])]
+        return _Regions(r["RegionName"] for r in resp.get("Regions", []))
     except Exception as exc:
         log.warning("Could not discover regions: %s — defaulting to us-east-1", exc)
-        return _DEFAULT_REGIONS
+        out = _Regions(_DEFAULT_REGIONS)
+        out.error_code = _error_code(exc)
+        return out
 
 
 # ── Per-region audit runner ───────────────────────────────────────────────────
@@ -109,12 +121,8 @@ def _error_code(exc: Exception) -> str:
     """The AWS error code (AccessDenied, Throttling...) or the exception type.
     Never the message: it carries ARNs and account ids, and this reaches the
     brief, Slack, and `nable scan --json`."""
-    resp = getattr(exc, "response", None)
-    if isinstance(resp, dict):
-        code = (resp.get("Error") or {}).get("Code")
-        if code:
-            return str(code)
-    return type(exc).__name__
+    from .waste import error_code
+    return error_code(exc)
 
 
 def _audit_region(
@@ -141,6 +149,7 @@ def _audit_region(
         check_idle_load_balancers,
         check_ecr_old_images,
         check_ecs_task_rightsizing,
+        check_dynamodb_provisioned,
     )
 
     findings = _RegionFindings()
@@ -152,7 +161,7 @@ def _audit_region(
     ec2_client = _client("ec2") if checks & {"ebs", "snapshots", "eips", "nat", "ec2"} else None
     cw_client = _client("cloudwatch") if checks & {
         "nat", "s3", "lambda", "ec2", "cloudwatch",
-        "rds_rightsizing", "rds_idle", "load_balancer", "ecs",
+        "rds_rightsizing", "rds_idle", "load_balancer", "ecs", "dynamodb",
     } else None
     rds_client = _client("rds") if checks & {"rds", "rds_rightsizing", "rds_idle"} else None
     lambda_client = _client("lambda") if "lambda" in checks else None
@@ -163,6 +172,7 @@ def _audit_region(
     elb_client = _client("elb") if "load_balancer" in checks else None
     ecr_client = _client("ecr") if "ecr" in checks else None
     ecs_client = _client("ecs") if "ecs" in checks else None
+    dynamodb_client = _client("dynamodb") if "dynamodb" in checks else None
 
     def _run(name: str, fn, *args):
         try:
@@ -171,6 +181,15 @@ def _audit_region(
                 finding.setdefault("region", region)
             findings.extend(result)
             findings.checks_completed.add(name)
+            # A read inside the check that failed (the AMI list behind the
+            # snapshot filter, a cluster's services, a metric). The check ran,
+            # but not over everything, so it is recorded as a partial failure:
+            # the report is partial and the CLI says which check and why.
+            for pf in getattr(result, "partial_failures", None) or ():
+                findings.checks_failed.append(
+                    {"check": name, "region": region, "error_code": pf["error_code"],
+                     "partial": True, "call": pf["call"], "count": pf["count"],
+                     "unit": pf["unit"], "effect": pf.get("effect", "")})
         except Exception as exc:
             log.warning("Check '%s' failed in %s: %s", name, region, exc)
             findings.checks_failed.append(
@@ -223,6 +242,9 @@ def _audit_region(
 
     if "ecs" in checks and ecs_client and cw_client:
         _run("ecs", check_ecs_task_rightsizing, ecs_client, cw_client, region)
+
+    if "dynamodb" in checks and dynamodb_client and cw_client:
+        _run("dynamodb", check_dynamodb_provisioned, dynamodb_client, cw_client, region)
 
     if "lambda" in checks and lambda_client and cw_client:
         _run("lambda", check_lambda_memory, lambda_client, cw_client, region)
@@ -555,6 +577,7 @@ def run_deep_audit(
     max_workers: int = 8,
     progress_callback: Callable[[str, int, int, int], None] | None = None,
     deadline_seconds: float | None = None,
+    session=None,
 ) -> dict:
     """
     Run a full deep AWS waste audit and return a structured report.
@@ -579,6 +602,9 @@ def run_deep_audit(
                 calls cannot be interrupted; their threads finish in the
                 background and their results are discarded. None (default)
                 means no deadline, exactly the prior behavior.
+        session: Optional boto3 Session to scan with. The CLI passes the one
+                it built from `--profile`, so the audit reads the account the
+                identity check read, not whatever keys the environment holds.
 
     Returns:
         {
@@ -604,7 +630,8 @@ def run_deep_audit(
             role_arn = role_arns_env.split(",")[0].strip() or None
 
     try:
-        session = _get_boto3_session(role_arn)
+        if session is None:
+            session = _get_boto3_session(role_arn)
     except Exception as exc:
         # error_type alongside the message: the message carries a path or an
         # account id so it can never be sent anywhere, and formatting the
@@ -735,13 +762,16 @@ def run_deep_audit(
     # one fact that matters. A check stays in checks_run only if it completed
     # somewhere; one that failed everywhere never looked at anything, and
     # counting it as run is how "0 findings" read as "clean".
-    _grouped: dict[tuple[str, str], list[str]] = {}
+    _grouped: dict[tuple[str, str, str], list[str]] = {}
     for f in checks_failed:
-        _grouped.setdefault((f["check"], f["error_code"]), []).append(f["region"])
-    for (check, code), where in sorted(_grouped.items()):
+        _grouped.setdefault((f["check"], f["error_code"], f.get("call", "")),
+                            []).append(f["region"])
+    for (check, code, call), where in sorted(_grouped.items()):
+        regions_where = sorted(set(where))
+        how = f"could not fully run ({call}: {code})" if call else f"could not run ({code})"
         errors.append(
-            f"Check '{check}' could not run ({code}) in {len(where)} region(s): "
-            f"{', '.join(sorted(where)[:5])}{' ...' if len(where) > 5 else ''}"
+            f"Check '{check}' {how} in {len(regions_where)} region(s): "
+            f"{', '.join(regions_where[:5])}{' ...' if len(regions_where) > 5 else ''}"
         )
     failed_everywhere = {f["check"] for f in checks_failed} - checks_completed
     checks_run = sorted(active_checks - failed_everywhere)

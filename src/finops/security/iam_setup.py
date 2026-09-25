@@ -5,23 +5,16 @@ Two outputs:
   1. CloudFormation template  — paste into AWS Console or deploy via CLI
   2. Terraform snippet        — drop into your infra repo
 
-Permissions nable needs (strictly read-only):
-  Cost Explorer   → ce:Get*, ce:Describe*, ce:List*
-  Compute Opt.    → compute-optimizer:Get* (EC2, Lambda, RDS, ECS)
-  CloudWatch      → cloudwatch:GetMetricData, GetMetricStatistics, ListMetrics
-  EC2 deep audit  → ec2:Describe{Instances,Regions,Volumes,Snapshots,
-                     Addresses,NatGateways,Images}
-  RDS deep audit  → rds:Describe{DBInstances,DBSnapshots}
-  Lambda audit    → lambda:ListFunctions, GetFunctionConfiguration
-  CW Logs audit   → logs:DescribeLogGroups, DescribeLogStreams
-  CloudTrail      → cloudtrail:DescribeTrails, GetTrailStatus, GetEventSelectors
-  S3              → s3:ListAllMyBuckets, GetBucketLocation,
-                     GetBucketIntelligentTieringConfiguration
-  Organizations   → organizations:List*, Describe* (org rollup)
-  STS             → sts:GetCallerIdentity (account id only)
+The policy has two parts:
+  NableReadOnlyScan   exactly what `nable scan` calls, generated from the same
+                      manifest as `nable scan --dry-run --json`
+  Optional*           one statement per other nable feature (billed Cost
+                      Explorer, metric discovery, deeper inventory, CUR
+                      discovery, Organizations), each naming what it unlocks and
+                      each switchable off with a template parameter
 
-Nothing in this list can create, modify, delete, or terminate any resource. It
-is strictly read-only.
+Nothing in either part can create, modify, delete, or terminate any resource.
+It is strictly read-only.
 """
 from __future__ import annotations
 
@@ -33,94 +26,143 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# ── Exact IAM actions required ────────────────────────────────────────────────
+# ── IAM actions ───────────────────────────────────────────────────────────────
+#
+# Two parts, kept apart on purpose.
+#
+# The scan statement is generated from scan_manifest, the same source as
+# `nable scan --dry-run --json`, and a test derives that manifest from the calls
+# the checks make. It is never listed by hand here: this file used to carry its
+# own list of 58 actions, described as "exact permissions nable needs, nothing
+# more", while the dry run printed 23 and the two disagreed in both directions.
+#
+# The optional statements are for the rest of nable (the MCP server's cost,
+# reservation, rightsizing and cleanup tools). Each is a separate statement
+# named for what it unlocks, each can be switched off with a template
+# parameter, and the billed one says so. None is needed for `nable scan`.
 
-_REQUIRED_ACTIONS: list[str] = [
-    # Cost Explorer
-    "ce:GetCostAndUsage",
-    "ce:GetCostForecast",
-    "ce:GetReservationUtilization",
-    "ce:GetReservationCoverage",
-    "ce:GetSavingsPlansPurchaseRecommendation",
-    "ce:GetSavingsPlansUtilization",
-    "ce:GetSavingsPlansUtilizationDetails",
-    "ce:GetSavingsPlansCoverage",
-    "ce:GetRightsizingRecommendation",
-    "ce:ListCostAllocationTags",
-    "ce:DescribeCostCategoryDefinition",
-    # Compute Optimizer (deep audit)
-    "compute-optimizer:GetEC2InstanceRecommendations",
-    "compute-optimizer:GetLambdaFunctionRecommendations",
-    "compute-optimizer:GetRDSDatabaseRecommendations",
-    "compute-optimizer:GetECSServiceRecommendations",
-    "compute-optimizer:GetEnrollmentStatus",
-    "compute-optimizer:GetRecommendationSummaries",
-    # CloudWatch (rightsizing + deep audit metrics)
-    "cloudwatch:GetMetricData",
-    "cloudwatch:GetMetricStatistics",
-    "cloudwatch:ListMetrics",
-    # EC2 (region/instance discovery + deep audit)
-    "ec2:DescribeInstances",
-    "ec2:DescribeRegions",
-    "ec2:DescribeVolumes",
-    "ec2:DescribeSnapshots",
-    "ec2:DescribeAddresses",
-    "ec2:DescribeNatGateways",
-    "ec2:DescribeImages",
-    # Elastic Load Balancing (idle load balancer detection)
-    "elasticloadbalancing:DescribeLoadBalancers",
-    # RDS (deep audit — backup retention, utilization)
-    "rds:DescribeDBInstances",
-    "rds:DescribeDBSnapshots",
-    # Lambda (deep audit — memory analysis)
-    "lambda:ListFunctions",
-    "lambda:GetFunctionConfiguration",
-    # ECR (image cleanup recommendations)
-    "ecr:DescribeRepositories",
-    "ecr:DescribeImages",
-    # ECS (service rightsizing)
-    "ecs:ListClusters",
-    "ecs:ListServices",
-    "ecs:DescribeServices",
-    "ecs:DescribeTaskDefinition",
-    # CloudWatch Logs (retention audit — read only; the fix nable surfaces is a
-    # copy-paste `aws logs put-retention-policy` CLI command the user runs
-    # themselves, so the connect key needs no write permission)
-    "logs:DescribeLogGroups",
-    "logs:DescribeLogStreams",
-    # CloudTrail (waste pattern detection)
-    "cloudtrail:DescribeTrails",
-    "cloudtrail:GetTrailStatus",
-    "cloudtrail:GetEventSelectors",
-    # S3 (storage class + abandoned multipart-upload analysis)
-    "s3:ListAllMyBuckets",
-    "s3:GetBucketLocation",
-    "s3:GetBucketIntelligentTieringConfiguration",
-    "s3:ListBucketMultipartUploads",
-    "s3:ListMultipartUploadParts",
-    # Cost & Usage Report discovery. Account-level describe (Resource:"*"), so it
-    # is safe in the shared list; it returns WHERE the CUR is delivered (bucket,
-    # prefix, report name) so the box can read the export directly from S3 instead
-    # of paying for Cost Explorer. Reading the CUR OBJECTS needs s3:GetObject, which
-    # is NOT here: it is granted separately, scoped to just the CUR bucket, so the
-    # role never gains "read every object in the account". See the CUR-read grant
-    # in nable-enterprise aws_oidc.cloudformation_template (CurBucket parameter).
-    "cur:DescribeReportDefinitions",
-    # Organizations (org rollup — optional but harmless to include)
-    "organizations:ListAccounts",
-    "organizations:ListRoots",
-    "organizations:ListOrganizationalUnitsForParent",
-    "organizations:ListParents",
-    "organizations:DescribeOrganizationalUnit",
-    "organizations:DescribeOrganization",
-    "organizations:DescribeAccount",
-    # STS (account id only). sts:AssumeRole is deliberately NOT here: the
-    # single-account connect key never assumes a role, and granting AssumeRole on
-    # "*" turns a "read-only" key into a privilege-escalation primitive (it can
-    # assume any role whose trust policy allows the account root, which is common).
-    # Cross-account setups grant AssumeRole separately, scoped to the specific role.
-    "sts:GetCallerIdentity",
+from ..scan_manifest import iam_actions as _scan_manifest_actions
+
+_SCAN_ACTIONS: list[str] = _scan_manifest_actions(include_spend=False,
+                                                  include_get_metric_data=False)
+
+# (Sid, template parameter, what it unlocks, actions)
+_OPTIONAL_GROUPS: list[tuple[str, str, str, list[str]]] = [
+    ("OptionalCostExplorerBilled", "IncludeCostExplorer",
+     ("BILLED: every Cost Explorer request costs $0.01 on your AWS bill. Unlocks "
+      "`nable scan --spend`, Bedrock spend in the AI view, cost anomalies, and the "
+      "MCP server's cost, reservation and Savings Plans tools."),
+     [
+         "ce:GetCostAndUsage",
+         "ce:GetCostForecast",
+         "ce:GetAnomalies",
+         "ce:GetReservationUtilization",
+         "ce:GetReservationCoverage",
+         "ce:GetSavingsPlansPurchaseRecommendation",
+         "ce:GetSavingsPlansUtilization",
+         "ce:GetSavingsPlansUtilizationDetails",
+         "ce:GetSavingsPlansCoverage",
+         "ce:GetRightsizingRecommendation",
+         "ce:ListCostAllocationTags",
+         "ce:DescribeCostCategoryDefinition",
+     ]),
+    ("OptionalMetricDiscovery", "IncludeMetricDiscovery",
+     ("cloudwatch:ListMetrics is free. cloudwatch:GetMetricData is BILLED at $0.01 "
+      "per 1,000 metrics and is used only when FINOPS_CLOUDWATCH_GETMETRICDATA=1. "
+      "Unlocks metric discovery for the AI routing and CloudWatch cardinality "
+      "tools, and batched metric reads."),
+     [
+         "cloudwatch:GetMetricData",
+         "cloudwatch:ListMetrics",
+     ]),
+    ("OptionalDeeperInventory", "IncludeDeeperInventory",
+     ("Free reads. Unlocks the MCP server's rightsizing, cleanup and "
+      "recommendation tools: load balancer target health, RDS snapshots, Lambda "
+      "concurrency, S3 Intelligent-Tiering configuration, and Compute Optimizer "
+      "enrollment and ECS recommendations."),
+     [
+         "elasticloadbalancing:DescribeTargetGroups",
+         "elasticloadbalancing:DescribeTargetHealth",
+         "rds:DescribeDBSnapshots",
+         "lambda:GetFunctionConfiguration",
+         "logs:DescribeLogStreams",
+         "s3:GetIntelligentTieringConfiguration",
+         "compute-optimizer:GetEnrollmentStatus",
+         "compute-optimizer:GetECSServiceRecommendations",
+         "compute-optimizer:GetRecommendationSummaries",
+     ]),
+    # Account-level describe (Resource:"*"): it returns WHERE the CUR is
+    # delivered (bucket, prefix, report name) so the export can be read from
+    # S3 instead of paying for Cost Explorer. Reading the CUR OBJECTS needs
+    # s3:GetObject, which is NOT here: it is granted separately, scoped to the
+    # CUR bucket, so the role never gains "read every object in the account".
+    ("OptionalCurDiscovery", "IncludeCurDiscovery",
+     ("Free. Finds where your Cost and Usage Report is delivered, so it can be "
+      "read in place of Cost Explorer. Reading the report itself is a separate "
+      "grant, scoped to its bucket."),
+     ["cur:DescribeReportDefinitions"]),
+    ("OptionalOrganizations", "IncludeOrganizations",
+     ("Free. Unlocks the org rollup: listing member accounts and organizational "
+      "units from the management account."),
+     [
+         "organizations:ListAccounts",
+         "organizations:ListRoots",
+         "organizations:ListOrganizationalUnitsForParent",
+         "organizations:ListParents",
+         "organizations:DescribeOrganizationalUnit",
+         "organizations:DescribeOrganization",
+         "organizations:DescribeAccount",
+     ]),
 ]
+
+# Everything any template can grant: the scan, then every optional group.
+# sts:AssumeRole is deliberately NOT here: the single-account connect key never
+# assumes a role, and granting AssumeRole on "*" turns a "read-only" key into a
+# privilege-escalation primitive (it can assume any role whose trust policy
+# allows the account root, which is common). Cross-account setups grant
+# AssumeRole separately, scoped to the specific role.
+_REQUIRED_ACTIONS: list[str] = list(dict.fromkeys(
+    _SCAN_ACTIONS + [a for _, _, _, actions in _OPTIONAL_GROUPS for a in actions]))
+
+
+def _policy_statements() -> list[dict[str, Any]]:
+    """The scan statement, then each optional group behind its parameter."""
+    statements: list[dict[str, Any]] = [{
+        "Sid": "NableReadOnlyScan",
+        "Effect": "Allow",
+        "Action": list(_SCAN_ACTIONS),
+        "Resource": "*",
+    }]
+    for sid, param, _what, actions in _OPTIONAL_GROUPS:
+        statements.append({"Fn::If": [
+            param,
+            {"Sid": sid, "Effect": "Allow", "Action": list(actions), "Resource": "*"},
+            {"Ref": "AWS::NoValue"},
+        ]})
+    return statements
+
+
+def _optional_parameters() -> dict[str, Any]:
+    return {
+        param: {
+            "Type": "String",
+            "AllowedValues": ["true", "false"],
+            "Default": "true",
+            "Description": f"{what} Set to false to leave statement {sid} out.",
+        }
+        for sid, param, what, _ in _OPTIONAL_GROUPS
+    }
+
+
+def _optional_conditions() -> dict[str, Any]:
+    return {param: {"Fn::Equals": [{"Ref": param}, "true"]}
+            for _, param, _, _ in _OPTIONAL_GROUPS}
+
+
+_POLICY_DESCRIPTION = (
+    "Read-only. Statement NableReadOnlyScan is exactly what `nable scan` calls; "
+    "each Optional statement adds another nable feature and can be switched off "
+    "with its parameter.")
 
 # Actions that WOULD indicate over-provisioned credentials
 _DANGEROUS_ACTIONS_PREFIXES = [
@@ -137,8 +179,8 @@ CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
     "AWSTemplateFormatVersion": "2010-09-09",
     "Description": (
         "Least-privilege IAM role for nable (finops-mcp). "
-        "Grants read access to Cost Explorer, Compute Optimizer, CloudWatch metrics, "
-        "EC2/RDS/Lambda/S3/CloudTrail describe APIs, and CloudWatch Logs. "
+        "The NableReadOnlyScan statement is exactly what `nable scan` calls; the "
+        "Optional statements add other nable features and can each be switched off. "
         "Strictly read-only: no create, modify, or delete permissions of any kind."
     ),
     "Parameters": {
@@ -164,29 +206,24 @@ CLOUDFORMATION_TEMPLATE: dict[str, Any] = {
                 "(confused-deputy protection). Recommended for the managed offering."
             ),
         },
+        **_optional_parameters(),
     },
     "Conditions": {
         # Cross-account trust when a TrustedAccountId is supplied; otherwise the role
         # trusts the EC2 service (same-account instance profile) as before.
         "HasTrustedAccount": {"Fn::Not": [{"Fn::Equals": [{"Ref": "TrustedAccountId"}, ""]}]},
         "HasExternalId": {"Fn::Not": [{"Fn::Equals": [{"Ref": "ExternalId"}, ""]}]},
+        **_optional_conditions(),
     },
     "Resources": {
         "NableReadOnlyPolicy": {
             "Type": "AWS::IAM::ManagedPolicy",
             "Properties": {
                 "ManagedPolicyName": "NableFinopsReadOnlyPolicy",
-                "Description": "Exact permissions nable needs — nothing more.",
+                "Description": _POLICY_DESCRIPTION,
                 "PolicyDocument": {
                     "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Sid": "NableReadOnly",
-                            "Effect": "Allow",
-                            "Action": _REQUIRED_ACTIONS,
-                            "Resource": "*",
-                        }
-                    ],
+                    "Statement": _policy_statements(),
                 },
             },
         },
@@ -282,21 +319,18 @@ def org_stackset_template() -> "dict[str, Any]":
                 "Default": "FinOpsReadOnly",
                 "Description": "Role name created in each member account. Must match what nable assumes (FINOPS_ORG_ROLE_NAME).",
             },
+            **_optional_parameters(),
         },
+        "Conditions": _optional_conditions(),
         "Resources": {
             "NableOrgReadOnlyPolicy": {
                 "Type": "AWS::IAM::ManagedPolicy",
                 "Properties": {
                     "ManagedPolicyName": "NableFinopsOrgReadOnlyPolicy",
-                    "Description": "Exact read APIs nable needs in each member account, nothing more.",
+                    "Description": _POLICY_DESCRIPTION,
                     "PolicyDocument": {
                         "Version": "2012-10-17",
-                        "Statement": [{
-                            "Sid": "NableOrgReadOnly",
-                            "Effect": "Allow",
-                            "Action": _REQUIRED_ACTIONS,
-                            "Resource": "*",
-                        }],
+                        "Statement": _policy_statements(),
                     },
                 },
             },
@@ -339,9 +373,10 @@ CLOUDFORMATION_TEMPLATE_KEY: dict[str, Any] = {
     "AWSTemplateFormatVersion": "2010-09-09",
     "Description": (
         "Read-only IAM user and access key for nable (finops-mcp). "
-        "Scoped to the exact read APIs nable needs (Cost Explorer, Compute "
-        "Optimizer, CloudWatch metrics, EC2/RDS/Lambda/S3 describe, CloudTrail, "
-        "Logs). No create, modify, or delete permissions of any kind. The access "
+        "The NableReadOnlyScan statement is exactly what `nable scan` calls; the "
+        "Optional statements add other nable features (billed Cost Explorer "
+        "among them) and can each be switched off with a parameter. No create, "
+        "modify, or delete permissions of any kind. The access "
         "key id and secret appear in the Outputs tab once: copy them into the "
         "nable setup wizard. You can delete this stack any time to revoke access."
     ),
@@ -351,23 +386,18 @@ CLOUDFORMATION_TEMPLATE_KEY: dict[str, Any] = {
             "Default": "nable-finops-readonly",
             "Description": "Name for the read-only IAM user",
         },
+        **_optional_parameters(),
     },
+    "Conditions": _optional_conditions(),
     "Resources": {
         "NableReadOnlyPolicy": {
             "Type": "AWS::IAM::ManagedPolicy",
             "Properties": {
                 "ManagedPolicyName": "NableFinopsReadOnlyPolicy",
-                "Description": "Exact permissions nable needs — nothing more.",
+                "Description": _POLICY_DESCRIPTION,
                 "PolicyDocument": {
                     "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Sid": "NableReadOnly",
-                            "Effect": "Allow",
-                            "Action": _REQUIRED_ACTIONS,
-                            "Resource": "*",
-                        }
-                    ],
+                    "Statement": _policy_statements(),
                 },
             },
         },
@@ -437,26 +467,20 @@ def quick_create_available() -> bool:
     return bool(CFN_KEY_TEMPLATE_S3_URL) and CFN_KEY_TEMPLATE_S3_URL != _CFN_TEMPLATE_PLACEHOLDER
 
 _TERRAFORM_TEMPLATE = '''\
-# ── nable (finops-mcp) least-privilege IAM role ───────────────────────────────
-# Grants read-only access to Cost Explorer, Compute Optimizer, CloudWatch
-# metrics, EC2 describe, and Organizations. No write permissions of any kind.
-
-locals {{
-  nable_actions = {actions}
-}}
+# ── nable (finops-mcp) read-only IAM role ─────────────────────────────────────
+# NableReadOnlyScan is exactly what `nable scan` calls. Each Optional statement
+# adds another nable feature; delete the ones you do not want. No write
+# permissions of any kind.
 
 resource "aws_iam_policy" "nable_readonly" {{
   name        = "NableFinopsReadOnlyPolicy"
-  description = "Exact permissions nable needs — nothing more."
+  description = "Read-only. NableReadOnlyScan is exactly what nable scan calls; Optional statements add other features."
 
   policy = jsonencode({{
     Version = "2012-10-17"
-    Statement = [{{
-      Sid      = "NableReadOnly"
-      Effect   = "Allow"
-      Action   = local.nable_actions
-      Resource = "*"
-    }}]
+    Statement = [
+{statements}
+    ]
   }})
 
   tags = {{
@@ -530,13 +554,31 @@ def quick_create_url(region: str = "us-east-1", stack_name: str = "nable-readonl
 
 def generate_terraform() -> str:
     """Return Terraform HCL snippet string."""
-    actions_json = json.dumps(_REQUIRED_ACTIONS, indent=4)
-    # indent the list to look nice inside the locals block
-    indented = "\n".join(
-        "  " + line if i > 0 else line
-        for i, line in enumerate(actions_json.splitlines())
-    )
-    return _TERRAFORM_TEMPLATE.format(actions=indented)
+    def _stmt(sid: str, actions: list[str], comment: str = "") -> str:
+        lines = []
+        if comment:
+            words, line = comment.split(), "      #"
+            for w in words:
+                if len(line) + len(w) > 78:
+                    lines.append(line)
+                    line = "      #"
+                line += " " + w
+            lines.append(line)
+        lines.append("      {")
+        lines.append(f'        Sid      = "{sid}"')
+        lines.append('        Effect   = "Allow"')
+        lines.append("        Action   = [")
+        lines += [f'          "{a}",' for a in actions]
+        lines.append("        ]")
+        lines.append('        Resource = "*"')
+        lines.append("      },")
+        return "\n".join(lines)
+
+    parts = [_stmt("NableReadOnlyScan", _SCAN_ACTIONS,
+                   "Exactly what `nable scan` calls (nable scan --dry-run --json).")]
+    parts += [_stmt(sid, actions, f"Optional. {what}")
+              for sid, _param, what, actions in _OPTIONAL_GROUPS]
+    return _TERRAFORM_TEMPLATE.format(statements="\n".join(parts))
 
 
 # ── Credential scope validator ────────────────────────────────────────────────
@@ -675,23 +717,26 @@ def _probe_permissions() -> dict[str, str]:
 # ── CLI output ────────────────────────────────────────────────────────────────
 
 def print_iam_template(fmt: str = "cloudformation") -> None:
-    """Print IAM template to stdout in requested format."""
-    print()
+    """Print the template on stdout and everything else on stderr.
+
+    `nable iam-template > nable-iam.json` is the obvious thing to type, and it
+    wrote comment lines and a footer around the JSON, so the file did not
+    parse and the deploy command below failed on it. Only the template goes
+    to stdout now.
+    """
+    err = sys.stderr
     if fmt == "terraform":
-        print("# ── Terraform — copy into your infra repo ──────────────────")
+        print("# Terraform: copy into your infra repo", file=err)
         print(generate_terraform())
     else:
-        print("# ── CloudFormation — deploy with: ──────────────────────────")
-        print("#   aws cloudformation deploy \\")
-        print("#     --template-file nable-iam.json \\")
-        print("#     --stack-name nable-readonly \\")
-        print("#     --capabilities CAPABILITY_NAMED_IAM")
-        print()
+        print("CloudFormation template on stdout. Deploy with:", file=err)
+        print("  nable iam-template > nable-iam.json", file=err)
+        print("  aws cloudformation deploy --template-file nable-iam.json \\", file=err)
+        print("    --stack-name nable-readonly --capabilities CAPABILITY_NAMED_IAM", file=err)
         print(generate_cloudformation())
 
-    print()
-    print("─" * 60)
-    print("  These permissions are strictly read-only. nable cannot create,")
-    print("  modify, terminate, or delete any resource with this policy.")
-    print("─" * 60)
-    print()
+    print(file=err)
+    print("NableReadOnlyScan is exactly what `nable scan` calls. Each Optional", file=err)
+    print("statement adds another feature and names it; Cost Explorer is billed", file=err)
+    print("at $0.01 per request. Every statement is read-only: nable cannot create,", file=err)
+    print("modify, terminate, or delete any resource with this policy.", file=err)

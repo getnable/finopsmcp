@@ -84,7 +84,13 @@ def _gather_ai(spend: bool, days: int = 30) -> ProviderBlock:
 
     blk = ProviderBlock(family="ai", label="AI & GPU", estimated=True,
                         early_recoverable=True, by_provider=by_provider)
-    if not by_provider and total == 0.0:
+    # Under --spend the cloud-native legs are always asked, so Bedrock (and
+    # Vertex) came back as {"bedrock": 0.0} on every AWS account, and a scan
+    # of an account with no AI anywhere printed "AI & GPU $0.00/mo [estimated]"
+    # and "across 2 providers". Zero from only those legs is the same false
+    # positive as no data.
+    only_cloud_native = set(by_provider) <= {"bedrock", "vertex"}
+    if total == 0.0 and (not by_provider or only_cloud_native):
         # "llm" is in connected_families() for every AWS user (Bedrock rides on
         # AWS), so an empty AI result is usually that false positive, not a real
         # AI connection. Drop the block so an AWS-only scan stays byte-identical

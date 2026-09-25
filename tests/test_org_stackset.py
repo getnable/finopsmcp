@@ -26,7 +26,9 @@ def test_role_name_defaults_to_what_nable_assumes():
 
 def test_template_is_strictly_read_only():
     tpl = org_stackset_template()
-    actions = tpl["Resources"]["NableOrgReadOnlyPolicy"]["Properties"]["PolicyDocument"]["Statement"][0]["Action"]
+    actions = [a for st in tpl["Resources"]["NableOrgReadOnlyPolicy"]["Properties"]
+               ["PolicyDocument"]["Statement"]
+               for a in (st["Fn::If"][1] if "Fn::If" in st else st)["Action"]]
     assert actions == _REQUIRED_ACTIONS
     banned = (":Create", ":Delete", ":Modify", ":Put", ":Run", ":Terminate", ":Update", "sts:Assume")
     for a in actions:

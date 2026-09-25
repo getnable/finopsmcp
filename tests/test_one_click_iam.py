@@ -13,8 +13,15 @@ from finops.security import iam_setup as I
 
 
 def _policy_actions(template: dict) -> list:
+    """Every action across the scan statement and the optional ones (each
+    optional statement sits behind an Fn::If on its parameter)."""
     res = template["Resources"]["NableReadOnlyPolicy"]["Properties"]
-    return res["PolicyDocument"]["Statement"][0]["Action"]
+    out: list = []
+    for st in res["PolicyDocument"]["Statement"]:
+        if "Fn::If" in st:
+            st = st["Fn::If"][1]
+        out += st["Action"]
+    return out
 
 
 def test_key_template_creates_user_policy_and_access_key():

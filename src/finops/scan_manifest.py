@@ -22,7 +22,9 @@ SCAN_CHECKS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "ebs": ("Unattached volumes, and gp2 that should be gp3", [
         ("ec2.describe_volumes", "ec2:DescribeVolumes")]),
     "snapshots": ("EBS snapshots older than the retention you'd choose", [
-        ("ec2.describe_snapshots", "ec2:DescribeSnapshots")]),
+        ("ec2.describe_snapshots", "ec2:DescribeSnapshots"),
+        # The AMI list: a snapshot behind a registered AMI is never flagged.
+        ("ec2.describe_images", "ec2:DescribeImages")]),
     "eips": ("Elastic IPs billing while unassociated", [
         ("ec2.describe_addresses", "ec2:DescribeAddresses")]),
     "nat": ("NAT gateways with no meaningful traffic", [
@@ -39,33 +41,55 @@ SCAN_CHECKS: dict[str, tuple[str, list[tuple[str, str]]]] = {
     "rds_idle": ("Databases with no connections", [
         ("rds.describe_db_instances", "rds:DescribeDBInstances"),
         ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
-    "cloudtrail": ("Duplicate trails and expensive data events", [
+    "cloudtrail": ("Duplicate trails, expensive data events, and stopped trails", [
         ("cloudtrail.describe_trails", "cloudtrail:DescribeTrails"),
-        ("cloudtrail.get_event_selectors", "cloudtrail:GetEventSelectors")]),
+        ("cloudtrail.get_event_selectors", "cloudtrail:GetEventSelectors"),
+        ("cloudtrail.get_trail_status", "cloudtrail:GetTrailStatus")]),
     "cloudwatch": ("Log groups with no retention set, stored forever", [
         ("logs.describe_log_groups", "logs:DescribeLogGroups")]),
     "s3": ("Buckets on a storage class their access pattern doesn't justify", [
         ("s3.list_buckets", "s3:ListAllMyBuckets"),
         ("s3.get_bucket_location", "s3:GetBucketLocation"),
-        ("s3.get_bucket_lifecycle_configuration", "s3:GetLifecycleConfiguration"),
         ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
     "s3_multipart": ("Incomplete multipart uploads billing silently", [
-        ("s3.list_multipart_uploads", "s3:ListBucketMultipartUploads")]),
+        ("s3.list_buckets", "s3:ListAllMyBuckets"),
+        ("s3.list_multipart_uploads", "s3:ListBucketMultipartUploads"),
+        # The size of each stale upload, which is what prices it.
+        ("s3.list_parts", "s3:ListMultipartUploadParts")]),
     "lambda": ("Functions provisioned well above their observed memory", [
         ("lambda.list_functions", "lambda:ListFunctions"),
         ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
-    "load_balancer": ("Load balancers with no healthy targets", [
+    "load_balancer": ("Load balancers carrying almost no traffic", [
         ("elbv2.describe_load_balancers", "elasticloadbalancing:DescribeLoadBalancers"),
-        ("elbv2.describe_target_health", "elasticloadbalancing:DescribeTargetHealth"),
+        ("elb.describe_load_balancers", "elasticloadbalancing:DescribeLoadBalancers"),
         ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
     "ecr": ("Untagged images nothing has pulled in months", [
         ("ecr.describe_repositories", "ecr:DescribeRepositories"),
         ("ecr.describe_images", "ecr:DescribeImages")]),
     "ecs": ("Fargate tasks reserving far more CPU than they use", [
         ("ecs.list_clusters", "ecs:ListClusters"),
+        ("ecs.list_services", "ecs:ListServices"),
         ("ecs.describe_services", "ecs:DescribeServices"),
+        ("ecs.describe_task_definition", "ecs:DescribeTaskDefinition"),
+        ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
+    "dynamodb": ("Provisioned tables reserving far more read/write capacity than they use", [
+        ("dynamodb.list_tables", "dynamodb:ListTables"),
+        ("dynamodb.describe_table", "dynamodb:DescribeTable"),
         ("cloudwatch.get_metric_statistics", "cloudwatch:GetMetricStatistics")]),
 }
+
+# Asked once per scan, from us-east-1, when the ec2, lambda or rds checks run.
+# Free: Compute Optimizer does not bill for reading its recommendations. It is
+# an enrichment, so an account that has not opted in to Compute Optimizer, or a
+# policy without these, loses only the extra rightsizing findings.
+COMPUTE_OPTIMIZER_ACTIONS: list[tuple[str, str]] = [
+    ("compute-optimizer.get_ec2_instance_recommendations",
+     "compute-optimizer:GetEC2InstanceRecommendations"),
+    ("compute-optimizer.get_lambda_function_recommendations",
+     "compute-optimizer:GetLambdaFunctionRecommendations"),
+    ("compute-optimizer.get_rds_database_recommendations",
+     "compute-optimizer:GetRDSDatabaseRecommendations"),
+]
 
 # Only when a host opts in to batched CloudWatch reads
 # (FINOPS_CLOUDWATCH_GETMETRICDATA=1). AWS bills GetMetricData at $0.01 per
@@ -84,11 +108,12 @@ BASE_ACTIONS: list[tuple[str, str]] = [
 
 # Only on `--spend`, and only because each request is BILLED at $0.01. The
 # default scan never calls Cost Explorer, which is the whole reason this is a
-# separate list rather than folded into the policy above.
+# separate list rather than folded into the policy above. The spend breakdown
+# and the Bedrock leg of the AI view both read through GetCostAndUsage alone;
+# GetCostForecast and GetDimensionValues were listed here and nothing on the
+# `--spend` path calls them.
 SPEND_ACTIONS: list[tuple[str, str]] = [
     ("ce.get_cost_and_usage", "ce:GetCostAndUsage"),
-    ("ce.get_cost_forecast", "ce:GetCostForecast"),
-    ("ce.get_dimension_values", "ce:GetDimensionValues"),
 ]
 
 # Only for `nable guard reconcile`, which reads CloudTrail's management events
@@ -120,6 +145,7 @@ def iam_actions(include_spend: bool = False,
     actions = {a for _, a in BASE_ACTIONS}
     for _, calls in SCAN_CHECKS.values():
         actions.update(a for _, a in calls)
+    actions.update(a for _, a in COMPUTE_OPTIMIZER_ACTIONS)
     if include_spend:
         actions.update(a for _, a in SPEND_ACTIONS)
     if _get_metric_data_in_use(include_get_metric_data):
@@ -157,6 +183,9 @@ def render_dry_run(include_spend: bool = False) -> str:
         out.append(f"      {what}")
         for call, action in calls:
             out.append(f"      {call:<38} {action}")
+    out += ["", "ONCE PER SCAN, free (skipped if Compute Optimizer is not enabled):"]
+    for call, action in COMPUTE_OPTIMIZER_ACTIONS:
+        out.append(f"  {call:<55} {action}")
     if include_spend:
         out += ["", "WITH --spend (each Cost Explorer request is billed $0.01):"]
         for call, action in SPEND_ACTIONS:
@@ -177,6 +206,6 @@ def render_dry_run(include_spend: bool = False) -> str:
         f"{len(iam_actions(include_spend))} IAM actions, every one a "
         "Describe/List/Get. The scan changes nothing.",
         "",
-        "Policy JSON:  nable scan --dry-run --json",
+        "Policy JSON:  nable scan --dry-run" + (" --spend" if include_spend else "") + " --json",
     ]
     return "\n".join(out)

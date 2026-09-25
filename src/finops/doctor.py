@@ -157,6 +157,29 @@ def _check_aws_scope() -> dict:
         account_id = identity["Account"]
         identity_arn = identity["Arn"]
     except Exception as e:
+        from .cli_scan import _classify_boto_error
+        if _classify_boto_error(e) == "expired":
+            # An expired SSO session read as "No AWS credentials configured",
+            # an info dot with no fix, and doctor exited clean. It is the most
+            # common AWS failure there is, and it has a one-line fix.
+            if os.environ.get("AWS_ACCESS_KEY_ID"):
+                return {
+                    "name": "AWS credential scope",
+                    "ok": None,
+                    "detail": "AWS credentials expired: the session keys in your environment",
+                    "warnings": ["AWS_SESSION_TOKEN in your environment has expired"],
+                    "recommendation": ("Refresh AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and "
+                                       "AWS_SESSION_TOKEN, or unset them to use your AWS profiles"),
+                }
+            profile = (os.environ.get("AWS_PROFILE") or os.environ.get("AWS_DEFAULT_PROFILE")
+                       or "default")
+            return {
+                "name": "AWS credential scope",
+                "ok": None,
+                "detail": f"AWS credentials expired: the SSO session for profile {profile}",
+                "warnings": [f"AWS SSO session for profile {profile} has expired or was never started"],
+                "recommendation": f"Run: aws sso login --profile {profile}",
+            }
         return {
             "name": "AWS credential scope",
             "ok": None,

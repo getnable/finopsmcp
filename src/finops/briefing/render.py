@@ -201,6 +201,15 @@ def to_html(brief: Brief, *, title: str = "This morning") -> str:
     if brief.gaps:
         rows = "".join(f"<li>{escape(g)}</li>" for g in brief.gaps)
         gaps = f'<h2>What nable could not check</h2><ol class="gap">{rows}</ol>'
+    if brief.not_shown:
+        rows = "".join(f"<li>{escape(g)}</li>" for g in brief.not_shown)
+        gaps += f'<h2>Checked, not shown here</h2><ol class="gap">{rows}</ol>'
+    on_demand = brief.trigger == "on_demand"
+    run_label = "On-demand run" if on_demand else "Overnight run"
+    sub = ("nable scanned just now, reviewed what it found, and drafted a change "
+           "where it could. It has not run any of them." if on_demand else
+           "nable scanned while you were asleep, reviewed what it found, and drafted "
+           "a change where it could. It has not run any of them.")
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -209,10 +218,9 @@ def to_html(brief: Brief, *, title: str = "This morning") -> str:
 <!-- No webfont link: this page must render with zero network calls. -->
 <style>{_CSS}</style></head>
 <body><div class="wrap">
-  <div class="eyebrow">Overnight run &middot; {escape(brief.generated_at[:16].replace("T", " "))} UTC</div>
+  <div class="eyebrow">{run_label} &middot; {escape(brief.generated_at[:16].replace("T", " "))} UTC</div>
   <h1>{escape(brief.headline())}</h1>
-  <p class="sub">nable scanned while you were asleep, reviewed what it found, and
-  drafted each change. It has not run any of them.</p>
+  <p class="sub">{sub}</p>
 
   {f"<h2>Ready to act on</h2>{items}" if items else ""}
   {f"<h2>Worth a look, not yet confirmed</h2>{invs}" if invs else ""}
@@ -227,9 +235,10 @@ def to_html(brief: Brief, *, title: str = "This morning") -> str:
 # ── terminal / markdown ───────────────────────────────────────────────────────
 
 def to_markdown(brief: Brief) -> str:
+    run_label = "On-demand run" if brief.trigger == "on_demand" else "Overnight run"
     out = [f"# {brief.headline()}", "",
-           f"_Overnight run, {brief.generated_at[:16].replace('T', ' ')} UTC. "
-           f"nable drafted these changes and ran none of them._", ""]
+           f"_{run_label}, {brief.generated_at[:16].replace('T', ' ')} UTC. "
+           f"nable drafted what changes it could and ran none of them._", ""]
 
     def block(item: BriefItem, n: int) -> list[str]:
         m = item.resource_map
@@ -265,6 +274,9 @@ def to_markdown(brief: Brief) -> str:
     if brief.gaps:
         out += ["---", "# What nable could not check", ""]
         out += [f"- {g}" for g in brief.gaps]
+    if brief.not_shown:
+        out += ["---", "# Checked, not shown here", ""]
+        out += [f"- {g}" for g in brief.not_shown]
     return "\n".join(out)
 
 
@@ -279,7 +291,9 @@ def to_slack_blocks(brief: Brief, *, url: str | None = None) -> list[dict[str, A
     worth less than no channel."""
     blocks: list[dict[str, Any]] = [
         {"type": "header",
-         "text": {"type": "plain_text", "text": "nable overnight run", "emoji": False}},
+         "text": {"type": "plain_text", "emoji": False,
+                  "text": ("nable on-demand run" if brief.trigger == "on_demand"
+                           else "nable overnight run")}},
         {"type": "section",
          "text": {"type": "mrkdwn", "text": f"*{brief.headline()}*"}},
     ]
