@@ -114,8 +114,8 @@ _CURSOR_ALLOW = {"permission": "allow"}
 # Codex has no "ask" in PreToolUse: it logs permissionDecision "ask" as an
 # unsupported value and runs the command anyway. A one-way door the policy wants
 # a human to see must not quietly go through, so it becomes a deny that says so.
-_CODEX_NO_ASK = (" Codex hooks cannot pause for a confirmation, so nable blocked it "
-                 "instead. If you intend it, run the command yourself.")
+_CODEX_NO_ASK = (" Codex hooks cannot pause to ask you, so nable blocked it. If you "
+                 "intend it, run the command yourself.")
 # Codex matchers are regexes against tool_name. Shell calls are "Bash"; MCP
 # tools are mcp__<server>__<tool>, the same shape guard.gate_mcp_call reads.
 _CODEX_MATCHER = "^(Bash|mcp__.*)$"
@@ -128,8 +128,8 @@ _CODEX_LEGACY_MATCHER = "^Bash$"          # what releases before MCP coverage wr
 # reference's "Cloud agent execution environment" table.
 _COPILOT_CLOUD_ENV = ("COPILOT_AGENT_PROMPT", "GITHUB_COPILOT_API_TOKEN")
 _COPILOT_SHELLS = ("bash", "powershell")
-_COPILOT_NO_ASK = (" The Copilot cloud agent has no one to ask for a confirmation, so nable "
-                   "blocked it instead. If you intend it, run the command yourself.")
+_COPILOT_NO_ASK = (" The Copilot cloud agent has no one to ask, so nable blocked it. If "
+                   "you intend it, run the command yourself.")
 # The file name is ours: Copilot loads every *.json in its hooks directories,
 # so the guard never has to share (or rewrite) a file another tool owns.
 _COPILOT_FILE = "nable-guard.json"
@@ -141,16 +141,16 @@ _COPILOT_FILE = "nable-guard.json"
 _GEMINI_EVENT = "BeforeTool"
 _GEMINI_SHELL = "run_shell_command"
 _GEMINI_ALLOW = {"decision": "allow"}
-_GEMINI_NO_ASK = (" A Gemini CLI hook cannot reliably pause for a confirmation (a headless "
-                  "run would wait forever), so nable blocked it instead. If you intend it, "
-                  "run the command yourself.")
+_GEMINI_NO_ASK = (" A Gemini CLI hook cannot reliably pause to ask you (a headless run "
+                  "would wait forever), so nable blocked it. If you intend it, run the "
+                  "command yourself.")
 _GEMINI_NAME = "nable-guard"
 
 # Cline's only answer is cancel, which stops the task; there is no ask.
 _CLINE_SHELLS = ("run_commands", "execute_command")
 _CLINE_ALLOW = {"cancel": False}
-_CLINE_NO_ASK = (" Cline hooks cannot pause for a confirmation, so nable stopped the task "
-                 "instead. If you intend it, run the command yourself.")
+_CLINE_NO_ASK = (" Cline hooks cannot pause to ask you, so nable stopped the task. If you "
+                 "intend it, run the command yourself.")
 _CLINE_FILE = "PreToolUse"
 _CLINE_MARKER = "# nable guard hook for Cline"
 
@@ -188,6 +188,25 @@ def detect_harness(payload: dict) -> str:
 
 
 # ── Verdict to response ────────────────────────────────────────────────────────
+
+# The guard's reasons end by asking for a confirmation ("It cannot be undone;
+# confirm to proceed."). Where the harness cannot ask, that request is taken
+# out before saying why the command was blocked instead.
+_CONFIRM_RES = (
+    (re.compile(r"[;,]\s*confirm to proceed\.", re.IGNORECASE), "."),
+    (re.compile(r"\s+or confirm to proceed\.", re.IGNORECASE), "."),
+    (re.compile(r"Confirm to proceed, or (\w)"), lambda m: m.group(1).upper()),
+    (re.compile(r"\s*Confirm to proceed\.", re.IGNORECASE), ""),
+)
+
+
+def _cannot_ask(reason: str, why: str) -> str:
+    """`reason` without its request for a confirmation, then `why` the
+    harness blocked the command instead."""
+    for pattern, repl in _CONFIRM_RES:
+        reason = pattern.sub(repl, reason)
+    return reason.rstrip() + why
+
 
 def _decision(verdict: dict[str, Any] | None) -> tuple[str, str]:
     """("allow"|"ask"|"deny", reason). Anything unrecognised reads as allow."""
@@ -229,7 +248,7 @@ def codex_response(verdict: dict[str, Any] | None) -> dict[str, Any] | None:
     if decision == "ask" and (verdict or {}).get("action_type") == "ai_budget":
         return {"systemMessage": reason}
     if decision == "ask":
-        reason += _CODEX_NO_ASK
+        reason = _cannot_ask(reason, _CODEX_NO_ASK)
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                    "permissionDecision": "deny",
                                    "permissionDecisionReason": reason}}
@@ -386,7 +405,7 @@ def copilot_response(verdict: dict[str, Any] | None, *, cloud: bool = False) -> 
     if decision == "ask" and not cloud:
         return {"permissionDecision": "ask", "permissionDecisionReason": reason}
     if decision == "ask":
-        reason += _COPILOT_NO_ASK
+        reason = _cannot_ask(reason, _COPILOT_NO_ASK)
     return {"permissionDecision": "deny", "permissionDecisionReason": reason}
 
 
@@ -422,7 +441,7 @@ def gemini_response(verdict: dict[str, Any] | None) -> dict[str, Any]:
     if decision == "allow":
         return dict(_GEMINI_ALLOW)
     if decision == "ask":
-        reason += _GEMINI_NO_ASK
+        reason = _cannot_ask(reason, _GEMINI_NO_ASK)
     # reason goes to the model as the tool error; systemMessage to the human.
     return {"decision": "deny", "reason": reason, "systemMessage": reason}
 
@@ -455,7 +474,7 @@ def cline_response(verdict: dict[str, Any] | None) -> dict[str, Any]:
     if decision == "allow":
         return dict(_CLINE_ALLOW)
     if decision == "ask":
-        reason += _CLINE_NO_ASK
+        reason = _cannot_ask(reason, _CLINE_NO_ASK)
     return {"cancel": True, "errorMessage": reason}
 
 
@@ -799,14 +818,24 @@ def _refuse(path: Path, what: str) -> SystemExit:
 
 def _backup(path: Path, raw: bytes) -> Path | None:
     """Keep a copy of a file we could not parse, named by its content so a
-    repeated attempt on the same bytes does not pile up copies."""
+    repeated attempt on the same bytes does not pile up copies. The copy is
+    never more readable than the file: a hooks file can hold a token, and a
+    0600 file copied at the umask's 0644 hands it to every local user."""
     dest = path.with_name(f"{path.name}.nable-backup-{hashlib.sha256(raw).hexdigest()[:8]}")
     try:
-        with open(dest, "xb") as f:
-            f.write(raw)
+        mode = stat.S_IMODE(path.stat().st_mode) & 0o600
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                     mode)
     except FileExistsError:
-        pass
+        return dest
     except OSError:
+        return None
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(dest)
         return None
     return dest
 
@@ -820,12 +849,15 @@ def _load(path: Path, *, comments_allowed: bool = False) -> dict:
     try:
         data = json.loads(raw)
     except ValueError:
-        saved = _backup(path, raw)
-        note = f" (a copy is at {saved.name})" if saved else ""
         if comments_allowed:
             # Gemini CLI reads its settings with comments stripped. Rewriting
             # the file as JSON would drop them, so it is refused the same way.
-            note += "; if it has comments, nable will not rewrite it and drop them"
+            # No copy: nothing is rewritten, and settings.json is where the
+            # user's MCP server tokens live.
+            raise _refuse(path, "exists but is not valid JSON; if it has comments, nable "
+                                "will not rewrite it and drop them") from None
+        saved = _backup(path, raw)
+        note = f" (a copy is at {saved.name})" if saved else ""
         raise _refuse(path, f"exists but is not valid JSON{note}")
     if not isinstance(data, dict):
         raise _refuse(path, f"contains a JSON {type(data).__name__}, not an object")
@@ -1069,7 +1101,8 @@ def _codex_uninstall(doc: dict, path: Path) -> bool:
 
 
 def _repair(ours: list[dict], cmd: str, *, timeout_key: str = "timeout",
-            timeout: int | None = None, stale: tuple[str, ...] = ()) -> str:
+            timeout: int | None = None, stale: tuple[str, ...] = (),
+            command_key: Any = lambda entry: "command") -> str:
     """Our entry is already there. Point a dead one at a command that runs
     (the uv-cache-path failure), and re-pin a uvx one that is unpinned or
     pinned to another release (re-running install is an explicit choice of
@@ -1077,15 +1110,18 @@ def _repair(ours: list[dict], cmd: str, *, timeout_key: str = "timeout",
     was written, unless it is one of `stale` (this machine's absolute uvx path
     in a project file that teammates share).
 
+    `command_key(entry)` names the key an entry keeps its command under.
+
     Returns "repaired" (a dead or stale command), "repinned", or "already"."""
     kinds = set()
     for entry in ours:
-        current = entry.get("command")
+        key = command_key(entry)
+        current = entry.get(key)
         if current == cmd:
             continue
         dead = current in stale or not _runnable(current or "")
         if dead or _needs_repin(current):
-            entry["command"] = cmd
+            entry[key] = cmd
             entry[timeout_key] = _hook_timeout() if timeout is None else timeout
             kinds.add("repaired" if dead else "repinned")
     return "repaired" if "repaired" in kinds else "repinned" if kinds else "already"
@@ -1146,17 +1182,28 @@ def _copilot_entries(doc: dict, path: Path, *, create: bool) -> list | None:
     return _list_at(hooks, "preToolUse", path, "hooks.preToolUse", create=create)
 
 
+def _copilot_key(entry: dict) -> str:
+    """Where a preToolUse entry keeps its command: `command` (what nable
+    writes), else the documented per-shell `bash` key a hand-written entry
+    may use."""
+    return "command" if "command" in entry or "bash" not in entry else "bash"
+
+
+def _copilot_is_ours(entry: Any) -> bool:
+    return isinstance(entry, dict) and _is_ours(entry.get(_copilot_key(entry)))
+
+
 def _copilot_commands(doc: dict) -> list[Any]:
     hooks = doc.get("hooks")
     entries = hooks.get("preToolUse") if isinstance(hooks, dict) else None
     if not isinstance(entries, list):
         return []
-    return [e.get("command") or e.get("bash") for e in entries if isinstance(e, dict)]
+    return [e.get(_copilot_key(e)) for e in entries if isinstance(e, dict)]
 
 
 def _copilot_install(doc: dict, path: Path, cmd: str) -> str:
     entries = _copilot_entries(doc, path, create=True)
-    ours = [e for e in entries if isinstance(e, dict) and _is_ours(e.get("command"))]
+    ours = [e for e in entries if _copilot_is_ours(e)]
     if not ours:
         # The matcher is a regex anchored as ^(?:PATTERN)$ against toolName:
         # bash on macOS and Linux (and the cloud agent), powershell on Windows.
@@ -1164,14 +1211,15 @@ def _copilot_install(doc: dict, path: Path, cmd: str) -> str:
                         "matcher": "|".join(_COPILOT_SHELLS),
                         "timeoutSec": _hook_timeout()})
         return "new"
-    return _repair(ours, _fail_safe(cmd), timeout_key="timeoutSec")
+    return _repair(ours, _fail_safe(cmd), timeout_key="timeoutSec", stale=(cmd,),
+                   command_key=_copilot_key)
 
 
 def _copilot_uninstall(doc: dict, path: Path) -> bool:
     entries = _copilot_entries(doc, path, create=False)
     if not entries:
         return False
-    kept = [e for e in entries if not (isinstance(e, dict) and _is_ours(e.get("command")))]
+    kept = [e for e in entries if not _copilot_is_ours(e)]
     if len(kept) == len(entries):
         return False
     if kept:

@@ -553,6 +553,7 @@ def test_malformed_json_is_refused_backed_up_and_left_alone(harness):
     assert len(backups) == 1, f"expected one backup for one broken file, got {backups}"
     assert backups[0].read_bytes() == body
     assert backups[0].name in str(e.value.code)
+    assert stat.S_IMODE(backups[0].stat().st_mode) & 0o077 == 0, "the copy is owner-only"
 
 
 @pytest.mark.parametrize("harness,body,described_as", [
