@@ -34,11 +34,26 @@ turn an allow or a warn into an ask, never anything else:
                  retry loop"
 
 The hook never executes anything itself and it fails open: any internal error
-exits 0 so a guard bug can never break the user's agent.
+exits 0 so a guard bug can never break the user's agent. It answers before
+it records (answer_first), waits at most 200 ms on the ledger's lock, and
+asks rather than judges a command over 256 KB, so neither the ledger file
+nor a padded command can run it past the harness timeout.
 
 Strict mode (FINOPS_GUARD_STRICT=1) additionally asks on reversible
 mutations (terraform apply, helm upgrade, kubectl apply/scale,
 aws ec2 run-instances) with a nudge to cost the change first.
+
+What happened afterwards (setup_wizard's `nable guard ...`):
+  report [--session ID]   what it asked, blocked and let through, in dollars,
+                          overall and per agent session
+  verify-log              the hash chain, plus an anchor that notices records
+                          cut from the end
+  reconcile [--hours N] [--region R ...]
+                          CloudTrail's creates, destroys and commitments
+                          against the ledger (guard_reconcile.py)
+  export [--since ...] [--format jsonl|cef]
+                          the verified ledger for a SIEM, each record with its
+                          chain hash
 """
 from __future__ import annotations
 

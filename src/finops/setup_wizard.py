@@ -2571,6 +2571,8 @@ def _run_guard(parsed) -> None:
     print(dim("  Try:      nable guard try                 (see it judge four commands)"))
     print(dim("  Coverage: nable guard doctor              (what is and is not guarded here)"))
     print(dim("  History:  nable guard report              (what it asked, blocked, let through)"))
+    print(dim("            nable guard reconcile           (the ledger against CloudTrail)"))
+    print(dim("            nable guard export --format cef (the verified ledger, for a SIEM)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
     print(dim("            nable guard install --all       (Claude Code, Cursor, Codex: each one found)"))
@@ -2774,7 +2776,7 @@ def _guard_reconcile(parsed) -> None:
     print(dim(f"  {r['events_read']} CloudTrail event(s), {r['ledger_records_in_window']} "
               f"ledger record(s), {r['lookup_calls']} LookupEvents call(s)"))
     for region, err in r["region_errors"].items():
-        print(f"  {amber('!')} {region} not read: {err}")
+        print(f"  {amber('✗')} {region} not read: {err}")
     show("Denied by the guard, happened anyway", r["denied_but_happened"], mark=amber("✗"))
     show("No guard record", r["no_guard_record"], mark=amber("?"))
     show("Seen by the guard, and happened", r["seen_and_happened"], mark=green("✓"))
