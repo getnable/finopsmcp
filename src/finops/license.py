@@ -221,7 +221,6 @@ PRO_FEATURE_COPY: dict[str, str] = {
     "agent_learning":             "The Ledger: verified savings and a gate that learns what you approve",
 }
 
-
 TEAM_FEATURE_COPY: dict[str, str] = {
     "slack_conversational_bot": "The conversational @nable Slack bot: questions, RCA, thread memory",
     "slack_remediation":        "Draft PRs and tickets from Slack, behind the approval gate",

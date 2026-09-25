@@ -3663,7 +3663,8 @@ def _run_license_status() -> None:
                finops license-status
     """
     from .license import (
-        _TRIAL_DAYS, _UPGRADE_URL, check_license, checkout_url, plan_label, trial_line,
+        _TRIAL_DAYS, _UPGRADE_URL, check_license, checkout_url, fmt_day, plan_label,
+        trial_last_day, trial_line,
     )
 
     status = check_license()
@@ -3682,12 +3683,17 @@ def _run_license_status() -> None:
         print(f"  Issued:  {status.issued}")
     if status.expires:
         print(f"  Expires: {status.expires}")
-    line = trial_line(status)
-    if line:
-        print(f"  Trial:   {line}")
-    elif status.mode == "trial" and status.days_remaining >= 0:
-        print(f"  Trial:   {status.days_remaining} day(s) remaining of {_TRIAL_DAYS}")
-    print(f"  Message: {status.message}")
+    if status.mode == "trial":
+        last = trial_last_day(status)
+        n = status.days_remaining
+        through = f", through {fmt_day(last)}" if last else ""
+        print(f"  Trial:   {n} day{'s' if n != 1 else ''} left of {_TRIAL_DAYS}{through}. "
+              "All Pro features unlocked.")
+    else:
+        line = trial_line(status)
+        if line:
+            print(f"  Trial:   {line}")
+        print(f"  Message: {status.message}")
 
     if status.mode in ("free", "trial", "invalid"):
         print(f"\n  {plan_label('pro')}: {checkout_url('pro')}")

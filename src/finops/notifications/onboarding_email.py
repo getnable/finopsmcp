@@ -298,5 +298,5 @@ def send_trial_ending(to_email: str, days_left: int = 3) -> bool:
         to_email=to_email,
         subject=f"nable trial ends in {days_left} day{'s' if days_left != 1 else ''} — free tier stays on forever",
         html=trial_ending_html(days_left),
-        text=f"Your trial ends in {days_left} days.\n\nAfter your trial, nable stays free — cost queries, anomaly detection, rightsizing, budgets, and all connectors.\n\n{pro_pitch()}\n\nUpgrade: {checkout_url('pro')}\n\nAfter checkout, run: finops login",
+        text=f"Your trial ends in {days_left} days.\n\nAfter your trial, nable stays free: cost queries, anomaly detection, rightsizing, budgets, and all connectors.\n\n{pro_pitch()}\n\nUpgrade: {checkout_url('pro')}\n\nAfter checkout, run: finops login",
     )
