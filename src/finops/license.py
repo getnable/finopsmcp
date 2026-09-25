@@ -12,7 +12,7 @@ trial        7 days of full Pro access from first install. Kicks in
              (OS keyring + file) so deleting one source can't reset it.
 
 pro          Full access. Unlocked by a signed license key.
-             Adds: ticket auto-creation, scheduled email digests,
+             Adds: ticket auto-creation, email digests on request,
              commitment purchase recommendations, multi-team org reports.
 
 Key format:  FINOPS-2-{b64_payload}-{b64_ed25519_sig}   (current)
@@ -151,6 +151,118 @@ TEAM_FEATURES: set[str] = {
 }
 
 
+# ── Plans and prices: the one table every surface reads ──────────────────────
+# The CLI, the MCP banner, the status resource, upgrade prompts and the trial
+# email all state a plan name, a price and a checkout link. They used to each
+# carry their own copy, and the copies drifted: a Pro key was greeted as "nable
+# Team", the trial was a "Team trial" that kept "Team features ($25/mo)", and Pro
+# activation linked to the $1,000 Team checkout. Say it here, once, and read it.
+# Prices and plan structure are an owner decision; this table only states them.
+PLANS: dict[str, dict] = {
+    "free": {
+        "name": "Free",
+        "price": "$0",
+        "monthly_usd": 0.0,
+        "checkout_url": "",
+        "summary": "the local tool: every cost query, anomaly detection, rightsizing, "
+                   "budgets and every connector, answered on request",
+    },
+    "trial": {
+        "name": "Pro trial",
+        "price": f"free for {_TRIAL_DAYS} days",
+        "monthly_usd": 0.0,
+        "checkout_url": _PRO_CHECKOUT_URL,
+        "summary": f"{_TRIAL_DAYS}-day trial of Pro features from first run, no card",
+    },
+    "pro": {
+        "name": "Pro",
+        "price": "$25/mo",
+        "monthly_usd": 25.0,
+        "checkout_url": _PRO_CHECKOUT_URL,
+        "summary": "the Pro features on this install, sent on request",
+    },
+    "team": {
+        "name": "Team",
+        "price": "$1,000/mo flat, unlimited seats",
+        "monthly_usd": 1000.0,
+        "checkout_url": _CHECKOUT_URL,
+        "summary": "everything in Pro plus the conversational Slack bot and chat remediation",
+    },
+    "enterprise": {
+        "name": "Enterprise",
+        "price": "custom",
+        "monthly_usd": None,
+        "checkout_url": _UPGRADE_URL,
+        "summary": "Team with a contract",
+    },
+}
+
+# Scheduled, unattended delivery (reports and alerts on a timer) exists only in
+# the hosted product. The open install answers when asked and runs nothing on
+# a timer, whatever the plan.
+HOSTED_NAME = "nable Cloud"
+HOSTED_URL = "https://getnable.com"
+DELIVERY_NOTE = (
+    "This install sends reports and alerts when you ask. "
+    f"Sending them on a schedule is {HOSTED_NAME}: {HOSTED_URL}"
+)
+
+# What each gated feature is called wherever a locked list is printed. Only
+# locked_features() decides which of these a user is shown as locked.
+PRO_FEATURE_COPY: dict[str, str] = {
+    "ticket_creation":            "Ticket creation (Jira, Linear, GitHub Issues) from any finding",
+    "scheduled_email_digests":    "Email reports and digests, sent on request",
+    "org_reports":                "Org-wide cost rollup across all accounts and OUs",
+    "commitment_recommendations": "RI / Savings Plan purchase recommendations with $ ROI",
+    "alerts":                     "Alert policies and Slack/Teams reports, sent on request",
+    "forecasting":                "Cost, Azure and LLM forecasts",
+    "ai_unit_economics":          "AI cost per PR, AI KPIs and engineering attribution",
+    "remediation":                "The fix as a pull request: rightsizing and tag PRs you approve",
+    "agent_learning":             "The Ledger: verified savings and a gate that learns what you approve",
+}
+
+TEAM_FEATURE_COPY: dict[str, str] = {
+    "slack_conversational_bot": "The conversational @nable Slack bot: questions, RCA, thread memory",
+    "slack_remediation":        "Draft PRs and tickets from Slack, behind the approval gate",
+}
+
+
+def plan_name(mode: str) -> str:
+    """Display name for a license mode ("pro" -> "Pro")."""
+    return PLANS.get(mode, {}).get("name") or (mode or "unknown").title()
+
+
+def plan_price(mode: str) -> str:
+    return PLANS.get(mode, {}).get("price", "")
+
+
+def plan_label(mode: str) -> str:
+    """"Pro ($25/mo)", "Team ($1,000/mo flat, unlimited seats)", "Free"."""
+    price = plan_price(mode)
+    if mode in ("free", "trial", "") or not price:
+        return plan_name(mode)
+    return f"{plan_name(mode)} ({price})"
+
+
+def checkout_url(mode: str = "pro") -> str:
+    return PLANS.get(mode, {}).get("checkout_url") or _UPGRADE_URL
+
+
+def locked_features() -> list[str]:
+    """The Pro features a free user is actually locked out of today: PRO_FEATURES
+    minus the ones on the temporary free hold. Every "Pro adds" list reads this,
+    so none of them advertises as paid a thing the user already has for free."""
+    return [f for f in PRO_FEATURE_COPY
+            if f in PRO_FEATURES and not _is_ungated_now(f)]
+
+
+def pro_pitch() -> str:
+    """One sentence: what Pro adds over Free, today, and what it costs."""
+    items = [PRO_FEATURE_COPY[f] for f in locked_features()]
+    body = "; ".join(i[0].lower() + i[1:] for i in items) if items else "nothing beyond Free today"
+    return f"{plan_label('pro')} adds: {body}."
+
+
 @dataclass
 class LicenseStatus:
     mode: str          # "free" | "trial" | "pro" | "team" | "enterprise" | "invalid"
@@ -158,6 +270,7 @@ class LicenseStatus:
     issued: str        # YYYY-MM-DD or ""
     message: str
     days_remaining: int = -1   # trial days left (-1 = not applicable)
+    expires: str = ""  # YYYY-MM-DD a key stops working, "" when not a key
 
     @property
     def is_pro(self) -> bool:
@@ -172,6 +285,38 @@ class LicenseStatus:
     @property
     def is_free(self) -> bool:
         return self.mode in ("free", "pro", "team", "enterprise", "trial")
+
+
+def fmt_day(d: date) -> str:
+    """"Sep 27, 2026": unambiguous in every locale, no platform strftime flags."""
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def trial_last_day(status: "LicenseStatus") -> date | None:
+    """The last day the trial unlocks Pro, for a trial status or the free status
+    that follows it (both carry the trial start in `issued`). None otherwise."""
+    if status.mode not in ("trial", "free") or not status.issued:
+        return None
+    try:
+        start = date.fromisoformat(status.issued)
+    except ValueError:
+        return None
+    return start + timedelta(days=_TRIAL_DAYS - 1)
+
+
+def trial_line(status: "LicenseStatus") -> str:
+    """The trial, stated for the day it is read: days left and the last day, or
+    that it has ended. A first-run banner printing "7-day free trial" on day 6,
+    or after the trial, told the user something that was not true for them."""
+    last = trial_last_day(status)
+    if status.mode == "trial":
+        n = status.days_remaining
+        through = f", through {fmt_day(last)}" if last else ""
+        return (f"{plan_name('trial')}: {n} day{'s' if n != 1 else ''} left{through}. "
+                "All Pro features unlocked, no card.")
+    if status.mode == "free" and last:
+        return f"Your {_TRIAL_DAYS}-day Pro trial ended after {fmt_day(last)}. Free stays on."
+    return ""
 
 
 # ── Crypto helpers ────────────────────────────────────────────────────────────
@@ -420,8 +565,13 @@ def validate_key(key: str) -> LicenseStatus:
     if not key:
         # No key — give a 7-day pro trial, then drop to free forever
         trial_start   = _get_or_create_trial_start()
+        if trial_start > date.today():
+            # A start in the future (clock moved back, or a copied store) would
+            # grant more than the trial length. Treat it as starting today.
+            trial_start = date.today()
+            _file_set(trial_start)
         days_used     = (date.today() - trial_start).days
-        days_remaining = max(0, _TRIAL_DAYS - days_used)
+        days_remaining = min(_TRIAL_DAYS, max(0, _TRIAL_DAYS - days_used))
 
         if days_remaining > 0:
             return LicenseStatus(
@@ -520,22 +670,26 @@ def validate_key(key: str) -> LicenseStatus:
     if expiry is None and issued is not None:
         expiry = issued + timedelta(days=_KEY_TTL_DAYS)
 
+    expires_str = expiry.isoformat() if expiry is not None else ""
     if expiry is not None and date.today() > expiry:
         return LicenseStatus(
             mode="invalid",
             email=email,
             issued=issued_str,
             message=(
-                f"License key expired on {expiry.isoformat()}. "
+                f"License key expired on {expires_str}. "
                 f"Renew your subscription at {_UPGRADE_URL}"
             ),
+            expires=expires_str,
         )
 
+    until = f", valid through {expires_str}" if expires_str else ""
     return LicenseStatus(
         mode=plan,
         email=email,
         issued=issued_str,
-        message=f"Pro license active: {email}, issued {issued_str}.",
+        message=f"{plan_name(plan)} license active: {email}, issued {issued_str}{until}.",
+        expires=expires_str,
     )
 
 
@@ -568,16 +722,22 @@ def store_license(key: str) -> LicenseStatus:
     return status
 
 
-def clear_license() -> None:
-    """Remove the locally stored license (used by `finops logout`). An explicit
-    FINOPS_LICENSE_KEY env var, if set, is left untouched."""
+def clear_license() -> str:
+    """Remove the locally stored license (used by `finops logout`, which also
+    removes copies earlier releases wrote into editor MCP configs). An explicit
+    FINOPS_LICENSE_KEY in the process environment is left untouched; logout
+    warns about it.
+
+    Returns what happened, so logout can say it: "removed", "none" (the vault
+    held no license) or "failed" (the vault could not be opened or changed)."""
     global _status
     try:
         from .security.vault import Vault
-        Vault.default().delete("FINOPS_LICENSE_KEY")
+        result = "removed" if Vault.default().delete("FINOPS_LICENSE_KEY") else "none"
     except Exception:
-        pass
+        result = "failed"
     _status = None
+    return result
 
 
 def check_license() -> LicenseStatus:
@@ -628,11 +788,11 @@ def require_team(feature: str) -> dict | None:
 
     friendly = feature.replace("_", " ")
     return {
-        "error": f"{friendly} requires the Pro plan.",
+        "error": f"{friendly} requires the Team plan.",
         "plan": s.mode,
         "upgrade": (
-            f"The conversational Slack bot and chat remediation are part of nable Team "
-            f"($1,000/mo flat, unlimited seats). Start a free trial or see plans: {_UPGRADE_URL} "
+            f"The conversational Slack bot and chat remediation are part of nable "
+            f"{plan_label('team')}. Team checkout: {_CHECKOUT_URL} (all plans: {_UPGRADE_URL}). "
             f"Then sign in: {_ACTIVATE_CMD}"
         ),
     }
@@ -672,52 +832,36 @@ def require_pro(feature: str) -> dict | None:
     # Free tier — explain what they're missing and how to unlock it
     friendly = feature.replace("_", " ")
 
-    # Craft a contextual upgrade message based on whether trial expired recently
-    if s.mode == "free" and s.issued:
-        try:
-            trial_start = date.fromisoformat(s.issued)
-            days_since_expiry = (date.today() - trial_start).days - _TRIAL_DAYS
-            if 0 < days_since_expiry <= 30:
-                urgency = (
-                    f"Your {_TRIAL_DAYS}-day trial ended {days_since_expiry} day{'s' if days_since_expiry != 1 else ''} ago. "
-                )
-            else:
-                urgency = ""
-        except Exception:
-            urgency = ""
+    # Say why this user is locked out. The trial starts on first run, so a user
+    # who reaches a gate on the free tier has already had it; offering them a
+    # "7-day free trial" was new-customer copy they could not act on. A key that
+    # expired (a lapsed subscription) or does not validate says that instead.
+    if s.mode == "invalid" and s.expires:
+        why = f"Your license key expired on {s.expires}. Renew to turn Pro back on."
+    elif s.mode == "invalid":
+        why = f"The license key on this machine did not validate: {s.message}"
     else:
-        urgency = ""
+        why = trial_line(s) or f"Your {_TRIAL_DAYS}-day Pro trial has ended. Free stays on."
 
-    # Build a concise FOMO block showing everything Team unlocks
-    _TEAM_FEATURES = [
-        ("remediation",                "🔧 The fix as a pull request: rightsizing and tag PRs you approve"),
-        ("agent_learning",             "🧠 The Ledger: verified savings + a gate that learns what you approve"),
-        ("ticket_creation",            "🎫 Auto-create Jira / Linear / GitHub Issues from anomalies & rightsizing"),
-        ("scheduled_email_digests",    "📧 Scheduled email reports — weekly, monthly, or custom cadence"),
-        ("commitment_recommendations", "💰 RI / Savings Plan recommendations with exact $ ROI"),
-        ("org_reports",                "🏢 Org-wide cost rollup across all accounts & OUs"),
-        ("cur_athena_detail",          "🔍 Line-item CUR data — per-resource costs, RI waste, tag breakdown"),
-        ("azure_detail",               "☁️  Azure resource-level cost detail & reservation utilization"),
-        ("business_metrics",           "📈 Unit economics — cost per customer, hosting % of MRR"),
-    ]
-
-    lines = ["⬡  nable Pro — everything in free, plus:\n"]
-    for key, desc in _TEAM_FEATURES:
-        # Don't advertise a feature that is currently on the free hold as a paid
-        # unlock; it would list things the user already has for free.
-        if _is_ungated_now(key):
-            continue
+    # What Pro unlocks today, from the one list: PRO_FEATURES minus the free
+    # hold. This used to be its own list, which also named line-item CUR, Azure
+    # detail and business metrics, none of them gated.
+    lines = [f"⬡  nable {plan_label('pro')}: everything in Free, plus:\n"]
+    for key in locked_features():
         marker = "▶" if key == feature else " "
-        lines.append(f"  {marker} {desc}")
-    lines.append(f"\n  You hit this because '{friendly}' requires Pro.")
-    lines.append(f"\n  → 7-day free trial: {_PRO_CHECKOUT_URL}")
+        lines.append(f"  {marker} {PRO_FEATURE_COPY[key]}")
+    lines.append(f"\n  You hit this because '{friendly}' requires Pro. {why}")
+    lines.append(f"\n  → {plan_label('pro')}: {_PRO_CHECKOUT_URL}")
     lines.append(f"  → Already subscribed? Sign in:  {_ACTIVATE_CMD}")
 
     return {
         "error": "pro_required",
         "feature": feature,
         "message": "\n".join(lines),
-        "upgrade_url": _CHECKOUT_URL,
+        # The Pro checkout, matching the text above. This returned the Team
+        # ($1,000/mo) link, so an agent relaying upgrade_url sent a user who hit
+        # a $25 Pro gate to a $1,000 checkout.
+        "upgrade_url": _PRO_CHECKOUT_URL,
         "activate_command": _ACTIVATE_CMD,
         "free_tier_available": True,
     }

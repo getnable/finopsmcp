@@ -11,7 +11,8 @@ Usage:
     $ finops estimate plan.json
 
 What it prices:
-    EC2 instances, RDS, Aurora, ElastiCache, EKS, NAT Gateways,
+    EC2 instances, RDS (MySQL, MariaDB, PostgreSQL; Aurora, SQL Server,
+    Oracle and Db2 are listed as not priced), ElastiCache, EKS, NAT Gateways,
     ALB/NLB, ECS Fargate, Lambda, S3, EBS volumes,
     OpenSearch domains, MSK clusters, Redshift nodes.
 
@@ -30,89 +31,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..aws_prices import (
+    CLB_HOURLY, EBS_PER_GB_MONTH, EC2_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY,
+    NAT_GATEWAY_PER_GB, RDS_HOURLY, ebs_volume_monthly, lb_hourly, rds_hourly,
+)
+
 log = logging.getLogger(__name__)
 
 # ── Pricing tables (USD/hour unless noted) ───────────────────────────────────
 # All prices on-demand us-east-1, May 2026
 
-_EC2_HOURLY: dict[str, float] = {
-    # General purpose
-    "t3.nano": 0.0052, "t3.micro": 0.0104, "t3.small": 0.0208,
-    "t3.medium": 0.0416, "t3.large": 0.0832, "t3.xlarge": 0.1664,
-    "t3.2xlarge": 0.3328,
-    "t3a.nano": 0.0047, "t3a.micro": 0.0094, "t3a.small": 0.0188,
-    "t3a.medium": 0.0376, "t3a.large": 0.0752, "t3a.xlarge": 0.1504,
-    "t3a.2xlarge": 0.3008,
-    "t4g.nano": 0.0042, "t4g.micro": 0.0084, "t4g.small": 0.0168,
-    "t4g.medium": 0.0336, "t4g.large": 0.0672, "t4g.xlarge": 0.1344,
-    "t4g.2xlarge": 0.2688,
-    "m5.large": 0.096, "m5.xlarge": 0.192, "m5.2xlarge": 0.384,
-    "m5.4xlarge": 0.768, "m5.8xlarge": 1.536, "m5.12xlarge": 2.304,
-    "m5.16xlarge": 3.072, "m5.24xlarge": 4.608,
-    "m6i.large": 0.096, "m6i.xlarge": 0.192, "m6i.2xlarge": 0.384,
-    "m6i.4xlarge": 0.768, "m6i.8xlarge": 1.536, "m6i.12xlarge": 2.304,
-    "m6g.large": 0.077, "m6g.xlarge": 0.154, "m6g.2xlarge": 0.308,
-    "m6g.4xlarge": 0.616, "m6g.8xlarge": 1.232, "m6g.12xlarge": 1.848,
-    "m7i.large": 0.1008, "m7i.xlarge": 0.2016, "m7i.2xlarge": 0.4032,
-    "m7i.4xlarge": 0.8064, "m7g.large": 0.0816, "m7g.xlarge": 0.1632,
-    "m7g.2xlarge": 0.3264, "m7g.4xlarge": 0.6528,
-    # Compute optimised
-    "c5.large": 0.085, "c5.xlarge": 0.17, "c5.2xlarge": 0.34,
-    "c5.4xlarge": 0.68, "c5.9xlarge": 1.53, "c5.18xlarge": 3.06,
-    "c6i.large": 0.085, "c6i.xlarge": 0.17, "c6i.2xlarge": 0.34,
-    "c6g.large": 0.068, "c6g.xlarge": 0.136, "c6g.2xlarge": 0.272,
-    "c7g.large": 0.0725, "c7g.xlarge": 0.145, "c7g.2xlarge": 0.29,
-    "c7i.large": 0.08925, "c7i.xlarge": 0.1785, "c7i.2xlarge": 0.357,
-    # Memory optimised
-    "r5.large": 0.126, "r5.xlarge": 0.252, "r5.2xlarge": 0.504,
-    "r5.4xlarge": 1.008, "r5.8xlarge": 2.016, "r5.12xlarge": 3.024,
-    "r6i.large": 0.126, "r6i.xlarge": 0.252, "r6i.2xlarge": 0.504,
-    "r6g.large": 0.1008, "r6g.xlarge": 0.2016, "r6g.2xlarge": 0.4032,
-    "r7g.large": 0.1071, "r7g.xlarge": 0.2142, "r7g.2xlarge": 0.4284,
-    "x1e.xlarge": 0.834, "x1e.2xlarge": 1.668, "x1e.4xlarge": 3.336,
-    "x2idn.16xlarge": 6.669,
-    # GPU (on-demand, us-east-1). List price, not your discounted/Spot rate.
-    "p3.2xlarge": 3.06, "p3.8xlarge": 12.24, "p3.16xlarge": 24.48,
-    "p4d.24xlarge": 32.77, "p4de.24xlarge": 40.97,
-    "p5.48xlarge": 98.32, "p5e.48xlarge": 98.32, "p5en.48xlarge": 98.32,
-    "g4dn.xlarge": 0.526, "g4dn.2xlarge": 0.752,
-    "g4dn.4xlarge": 1.204, "g4dn.8xlarge": 2.264, "g4dn.12xlarge": 3.912,
-    "g4dn.16xlarge": 4.352, "g4dn.metal": 7.824,
-    "g5.xlarge": 1.006, "g5.2xlarge": 1.212, "g5.4xlarge": 1.624,
-    "g5.8xlarge": 2.448, "g5.12xlarge": 5.672, "g5.16xlarge": 4.096,
-    "g5.24xlarge": 8.144, "g5.48xlarge": 16.288,
-    "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776, "g6.4xlarge": 1.323,
-    "g6.8xlarge": 2.0144, "g6.12xlarge": 4.6016, "g6.16xlarge": 3.3968,
-    "g6.24xlarge": 6.6752, "g6.48xlarge": 13.3504,
-    "g6e.xlarge": 1.861, "g6e.2xlarge": 2.24208, "g6e.4xlarge": 3.00424,
-    "g6e.8xlarge": 4.52856, "g6e.12xlarge": 10.49264, "g6e.16xlarge": 7.577,
-    "g6e.24xlarge": 15.066, "g6e.48xlarge": 30.13,
-    # Trainium / Inferentia accelerators
-    "trn1.2xlarge": 1.3438, "trn1.32xlarge": 21.50, "trn1n.32xlarge": 24.78,
-    "inf1.xlarge": 0.228, "inf1.2xlarge": 0.362, "inf1.6xlarge": 1.180, "inf1.24xlarge": 4.721,
-    "inf2.xlarge": 0.7582, "inf2.8xlarge": 1.9679, "inf2.24xlarge": 6.4906, "inf2.48xlarge": 12.9813,
-    # Storage optimised
-    "i3.large": 0.156, "i3.xlarge": 0.312, "i3.2xlarge": 0.624,
-    "i3.4xlarge": 1.248, "i3.8xlarge": 2.496,
-    "i4i.large": 0.156, "i4i.xlarge": 0.312, "i4i.2xlarge": 0.624,
-}
-
-_RDS_HOURLY: dict[str, float] = {
-    # MySQL / PostgreSQL / MariaDB
-    "db.t3.micro": 0.017, "db.t3.small": 0.034, "db.t3.medium": 0.068,
-    "db.t3.large": 0.136, "db.t4g.micro": 0.016, "db.t4g.small": 0.032,
-    "db.t4g.medium": 0.065, "db.t4g.large": 0.13,
-    "db.m5.large": 0.171, "db.m5.xlarge": 0.342, "db.m5.2xlarge": 0.684,
-    "db.m5.4xlarge": 1.368, "db.m5.8xlarge": 2.736, "db.m5.12xlarge": 4.104,
-    "db.m6i.large": 0.171, "db.m6i.xlarge": 0.342, "db.m6i.2xlarge": 0.684,
-    "db.m6g.large": 0.152, "db.m6g.xlarge": 0.304, "db.m6g.2xlarge": 0.608,
-    "db.r5.large": 0.24, "db.r5.xlarge": 0.48, "db.r5.2xlarge": 0.96,
-    "db.r5.4xlarge": 1.92, "db.r5.8xlarge": 3.84,
-    "db.r6i.large": 0.24, "db.r6i.xlarge": 0.48, "db.r6i.2xlarge": 0.96,
-    "db.r6g.large": 0.192, "db.r6g.xlarge": 0.384, "db.r6g.2xlarge": 0.768,
-    "db.r7g.large": 0.204, "db.r7g.xlarge": 0.408, "db.r7g.2xlarge": 0.816,
-    # Aurora Serverless v2 priced separately below
-}
+# EC2 and RDS are shared with half a dozen other modules and live in aws_prices.
+# The underscored names stay for anything that still imports them from here.
+_EC2_HOURLY = EC2_HOURLY
+_RDS_HOURLY = RDS_HOURLY
 
 _ELASTICACHE_HOURLY: dict[str, float] = {
     "cache.t3.micro": 0.017, "cache.t3.small": 0.034, "cache.t3.medium": 0.068,
@@ -124,17 +56,14 @@ _ELASTICACHE_HOURLY: dict[str, float] = {
 }
 
 # EBS: $/GB/month
-_EBS_PER_GB_MONTH: dict[str, float] = {
-    "gp2": 0.10, "gp3": 0.08, "io1": 0.125, "io2": 0.125,
-    "st1": 0.045, "sc1": 0.025, "standard": 0.05,
-}
+_EBS_PER_GB_MONTH: dict[str, float] = EBS_PER_GB_MONTH
 
 # Flat rates ($/hour)
 _FLAT_RATES: dict[str, float] = {
-    "aws_nat_gateway": 0.045,                    # + data processing
-    "aws_lb": 0.008,                             # ALB/NLB base (+ LCU)
-    "aws_alb": 0.008,
-    "aws_elb": 0.025,                            # classic ELB
+    "aws_nat_gateway": NAT_GATEWAY_HOURLY,       # + data processing
+    "aws_lb": lb_hourly("application"),          # ALB/NLB base (+ LCU); GWLB priced by type
+    "aws_alb": lb_hourly("application"),
+    "aws_elb": CLB_HOURLY,                       # classic ELB
     "aws_eks_cluster": 0.10,                     # control plane only
     "aws_elasticsearchdomain": 0.0,              # priced by node below
     "aws_opensearch_domain": 0.0,                # priced by node below
@@ -167,7 +96,6 @@ _REDSHIFT_HOURLY: dict[str, float] = {
     "ra3.xlplus": 1.086, "ra3.4xlplus": 3.26, "ra3.16xlarge": 13.04,
 }
 
-HOURS_PER_MONTH = 730.0
 DAYS_PER_MONTH = 30.0
 
 
@@ -268,38 +196,64 @@ def _estimate_ec2(rc: ResourceChange) -> CostLine | None:
                     f"{instance_type} @ ${hourly:.4f}/hr", "high")
 
 
-def _estimate_rds(rc: ResourceChange) -> CostLine | None:
+def _rds_rate(cfg: dict, default_engine: str = "") -> tuple[float | None, str]:
+    """(single-AZ hourly rate or None, engine) for one side of a plan change.
+
+    The engine picks the table: RDS for PostgreSQL runs 4-7% above MySQL, and
+    Aurora, SQL Server, Oracle and Db2 have no table, so they come back None
+    rather than borrowing a MySQL rate. A plan that does not carry the engine
+    gets RDS_HOURLY, the MySQL table aws_prices keeps for exactly that case.
+    """
+    class_ = cfg.get("instance_class") or ""
+    engine = str(cfg.get("engine") or default_engine).strip().lower()
+    if engine:
+        return rds_hourly(class_, engine), engine
+    return _RDS_HOURLY.get(class_), engine
+
+
+def _rds_unpriced(rc: ResourceChange, action: str, what: str) -> CostLine:
+    return CostLine(rc.address, rc.type, action, 0.0,
+                    f"{what}: not in nable's RDS price table, not priced", "low")
+
+
+def _estimate_rds(rc: ResourceChange, default_engine: str = "") -> CostLine | None:
     cfg = rc.net_config
     class_ = cfg.get("instance_class", "")
     multi_az = bool(cfg.get("multi_az", False))
-    hourly = _RDS_HOURLY.get(class_, 0.0)
+    hourly, engine = _rds_rate(cfg, default_engine)
+    if rc.is_update:
+        before = rc.before or cfg
+        after = rc.after or cfg
+        before_class = before.get("instance_class", class_)
+        after_class  = after.get("instance_class", class_)
+        before_maz   = bool(before.get("multi_az", False))
+        after_maz    = bool(after.get("multi_az", False))
+        bh, before_engine = _rds_rate(before, default_engine)
+        ah, after_engine = _rds_rate(after, default_engine)
+        note = f"{before_class}{'×2' if before_maz else ''} → {after_class}{'×2' if after_maz else ''}"
+        if bh is None or ah is None:
+            return _rds_unpriced(rc, "change", f"{note} on {after_engine or before_engine or 'mysql'}")
+        delta = (ah * (2 if after_maz else 1) - bh * (2 if before_maz else 1)) * HOURS_PER_MONTH
+        return CostLine(rc.address, rc.type, "change", delta, note, "high" if engine else "medium")
+    if hourly is None:
+        return _rds_unpriced(rc, _action_label(rc),
+                             f"{class_ or 'no instance_class'} on {engine or 'mysql'}")
     if multi_az:
         hourly *= 2
-    if rc.is_update:
-        before_class = (rc.before or {}).get("instance_class", class_)
-        after_class  = (rc.after  or {}).get("instance_class", class_)
-        before_maz   = bool((rc.before or {}).get("multi_az", False))
-        after_maz    = bool((rc.after  or {}).get("multi_az", False))
-        bh = _RDS_HOURLY.get(before_class, 0.0) * (2 if before_maz else 1)
-        ah = _RDS_HOURLY.get(after_class,  0.0) * (2 if after_maz  else 1)
-        delta = (ah - bh) * HOURS_PER_MONTH
-        note = f"{before_class}{'×2' if before_maz else ''} → {after_class}{'×2' if after_maz else ''}"
-        return CostLine(rc.address, rc.type, "change", delta, note, "high")
     monthly = hourly * HOURS_PER_MONTH * _sign(rc)
     az_note = " (Multi-AZ)" if multi_az else ""
+    engine_note = "" if engine else " (engine not in the plan, MySQL rate)"
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{class_}{az_note} @ ${hourly:.4f}/hr", "high" if hourly else "low")
+                    f"{class_}{az_note} @ ${hourly:.4f}/hr{engine_note}",
+                    "high" if engine else "medium")
 
 
 def _estimate_aurora(rc: ResourceChange) -> CostLine | None:
-    """Aurora cluster — price per instance in cluster."""
-    cfg = rc.net_config
-    class_ = cfg.get("instance_class", "")
-    # Aurora uses same pricing tiers as RDS roughly
-    hourly = _RDS_HOURLY.get(class_, 0.0) * 1.1  # ~10% premium
-    monthly = hourly * HOURS_PER_MONTH * _sign(rc)
-    return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{class_} (Aurora) @ ${hourly:.4f}/hr", "medium")
+    """Aurora cluster instance. Aurora bills at its own per-class rates, and
+    aws_prices has no Aurora table, so this is unpriced rather than the MySQL
+    rate times a guessed 10% premium. rds_hourly answers for Aurora the day
+    that table exists, and this starts pricing without a change here."""
+    return _estimate_rds(rc, default_engine="aurora")
 
 
 def _estimate_elasticache(rc: ResourceChange) -> CostLine | None:
@@ -315,20 +269,19 @@ def _estimate_elasticache(rc: ResourceChange) -> CostLine | None:
 
 def _estimate_ebs(rc: ResourceChange) -> CostLine | None:
     cfg = rc.net_config
-    vol_type = cfg.get("type", "gp2")
-    size_gb  = float(cfg.get("size", 0))
-    iops     = float(cfg.get("iops", 0))
-    price_gb = _EBS_PER_GB_MONTH.get(vol_type, 0.10)
-    monthly  = size_gb * price_gb
-    # io1/io2: additional IOPS charge
-    iops_charge = 0.0
-    if vol_type in ("io1", "io2") and iops:
-        iops_charge = iops * 0.065  # $/IOPS-month
-        monthly += iops_charge
-    monthly *= _sign(rc)
+    # A plan writes null for anything computed at apply time (iops on gp2,
+    # size on a volume restored from a snapshot), so .get(k, 0) is not enough.
+    vol_type = cfg.get("type") or "gp2"
+    size_gb  = float(cfg.get("size") or 0)
+    iops     = float(cfg.get("iops") or 0)
+    tput     = float(cfg.get("throughput") or 0)
+    price_gb = _EBS_PER_GB_MONTH.get(vol_type, _EBS_PER_GB_MONTH["gp2"])
+    storage  = size_gb * price_gb
+    total    = ebs_volume_monthly(vol_type, size_gb, iops, tput)
+    monthly  = total * _sign(rc)
     detail = f"{size_gb:.0f} GB {vol_type} @ ${price_gb}/GB-mo"
-    if iops_charge:
-        detail += f" + {iops:.0f} IOPS"
+    if total - storage > 0.005:
+        detail += f" + ${total - storage:,.2f}/mo provisioned IOPS/throughput"
     return CostLine(rc.address, rc.type, _action_label(rc), monthly, detail, "high")
 
 
@@ -336,12 +289,15 @@ def _estimate_nat_gateway(rc: ResourceChange) -> CostLine | None:
     hourly  = _FLAT_RATES["aws_nat_gateway"]
     monthly = hourly * HOURS_PER_MONTH * _sign(rc)
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"${hourly}/hr base (+ $0.045/GB data processed)", "high")
+                    f"${hourly}/hr base (+ ${NAT_GATEWAY_PER_GB}/GB data processed)", "high")
 
 
 def _estimate_load_balancer(rc: ResourceChange) -> CostLine | None:
     rtype   = rc.type
-    hourly  = _FLAT_RATES.get(rtype, 0.008)
+    if rtype == "aws_elb":
+        hourly = CLB_HOURLY
+    else:
+        hourly = lb_hourly((rc.net_config or {}).get("load_balancer_type"))
     monthly = hourly * HOURS_PER_MONTH * _sign(rc)
     return CostLine(rc.address, rtype, _action_label(rc), monthly,
                     f"${hourly}/hr base (+ LCU/data charges)", "medium")

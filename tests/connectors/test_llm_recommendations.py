@@ -16,12 +16,24 @@ def test_gpt4o_savings_from_real_prices():
     assert "gpt-4o-mini" in r["recommendation"]
 
 
-def test_opus3_to_sonnet_savings():
-    # opus-3 blended 15+75=90; 3.5-sonnet 3+15=18 -> 80% savings.
-    r = _rec_for("claude-3-opus-20240229", 500.0)
+def test_opus_4_1_to_sonnet_savings():
+    # opus-4.1 blended 15+75=90; sonnet-4.5 3+15=18 -> 80% savings.
+    r = _rec_for("claude-opus-4-1-20250805", 500.0)
     assert r is not None
     assert r["estimated_savings_pct"] == "80%"
     assert abs(r["estimated_savings_usd"] - 400.0) < 2.0
+
+
+def test_a_pair_without_confirmed_prices_gets_no_invented_saving():
+    # Claude 3 Opus and 3.5 Sonnet are off the pricing page. The old tables
+    # still carried them, so this rec quoted 80% off rates nobody publishes.
+    assert _rec_for("claude-3-opus-20240229", 500.0) is None
+
+
+def test_prices_come_from_the_shared_table():
+    from finops.connectors import llm_costs
+
+    assert not hasattr(llm_costs, "_BEDROCK_PRICING")
 
 
 def test_noise_below_threshold_skipped():
@@ -30,8 +42,9 @@ def test_noise_below_threshold_skipped():
 
 def test_bedrock_prefixed_id_still_matches():
     # Provider-prefixed ids must still match the downgrade table.
-    recs = _generate_recommendations({"bedrock/anthropic.claude-3-opus-20240229": 300.0}, {})
-    assert any("claude-3-5-sonnet" in r["recommendation"] for r in recs)
+    recs = _generate_recommendations(
+        {"bedrock/anthropic.claude-opus-4-1-20250805-v1:0": 300.0}, {})
+    assert any("claude-sonnet-4-5" in r["recommendation"] for r in recs)
 
 
 def test_bedrock_sku_display_name_sonnet_to_haiku():
@@ -40,10 +53,10 @@ def test_bedrock_sku_display_name_sonnet_to_haiku():
     # canonical id and fire a Sonnet -> Haiku rec for Bedrock-only users.
     r = _rec_for("Claude Sonnet 4.5", 3224.0)
     assert r is not None
-    assert "claude-haiku-3-5" in r["recommendation"]
-    # sonnet blended 3+15=18, haiku-3-5 blended 0.8+4=4.8 -> ~73% savings.
-    assert r["estimated_savings_pct"] == "73%"
-    expected = 3224.0 * (1 - 4.8 / 18.0)
+    assert "claude-haiku-4-5" in r["recommendation"]
+    # sonnet blended 3+15=18, haiku-4-5 blended 1+5=6 -> ~67% savings.
+    assert r["estimated_savings_pct"] == "67%"
+    expected = 3224.0 * (1 - 6.0 / 18.0)
     assert abs(r["estimated_savings_usd"] - expected) < 5.0
     assert r["estimated_savings_usd"] > 0
     # Honesty/basis labeling is preserved.
@@ -53,7 +66,7 @@ def test_bedrock_sku_display_name_sonnet_to_haiku():
 def test_bedrock_sku_display_name_sonnet_4_6_also_matches():
     r = _rec_for("Claude Sonnet 4.6", 100.0)
     assert r is not None
-    assert "claude-haiku-3-5" in r["recommendation"]
+    assert "claude-haiku-4-5" in r["recommendation"]
     assert r["estimated_savings_usd"] > 0
 
 

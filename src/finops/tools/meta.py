@@ -7,6 +7,7 @@ import-order coupling exists."""
 from __future__ import annotations
 
 from .. import server as _srv
+from ..license import checkout_url, plan_label, plan_name, pro_pitch, trial_line
 
 
 def _month_pair(today):
@@ -31,6 +32,41 @@ def _month_pair(today):
     return first_this, today, first_prev, last_prev, False
 
 
+# Cloud providers federate in-chat through their own connect_* MCP tool: no
+# terminal, no secret ever typed into the conversation.
+_CLOUD_CONNECT_TOOL = {"aws": "connect_aws", "azure": "connect_azure", "gcp": "connect_gcp"}
+
+# Every other provider needs a real credential, which the chat must never
+# collect (see nable_setup_status's hard rule against pasting a key into this
+# conversation), so the fix is the local `finops setup <slug>` command that
+# deep-links the key page and stores it in the vault. A registry key and its
+# CLI slug usually match; this maps the few that do not, and the one provider
+# (vertex) with no dedicated setup command of its own.
+_SAAS_CLI_SLUG = {
+    "new_relic": "newrelic",
+    "mongodb_atlas": "mongodb",
+    # Vertex billing rides on the same GCP credentials as connect_gcp / finops
+    # setup gcp; there is no separate `finops setup vertex`.
+    "vertex": "gcp",
+}
+
+
+def _remediation(name: str) -> str:
+    """The correct "go do this" string for a not-connected provider.
+
+    Every provider used to point here at "call connect_aws", whatever it
+    actually was: Azure, GCP, and all sixteen SaaS/AI providers told the user
+    to run the AWS connector. This is the one place that decides the real
+    remediation, so list_connected_providers cannot drift back to a single
+    hardcoded answer.
+    """
+    tool = _CLOUD_CONNECT_TOOL.get(name)
+    if tool:
+        return f"not connected: call {tool}, or run 'uvx nable'"
+    slug = _SAAS_CLI_SLUG.get(name, name)
+    return f"not connected: run 'finops setup {slug}' to add your key, or run 'uvx nable'"
+
+
 @_srv.mcp.tool()
 async def list_connected_providers() -> dict:
     """
@@ -44,20 +80,27 @@ async def list_connected_providers() -> dict:
         - "Is GCP set up yet?"
         - "What plan am I on?"
     """
-    from ..demo_data import is_demo, connected_providers as _demo_connected
+    from ..demo_data import (
+        SAMPLE_PROVIDERS_NOTE, is_demo, connected_providers as _demo_connected,
+    )
 
     result: dict[str, dict] = {}
 
-    # Demo mode: advertise the seeded provider set as connected. The live probes
-    # below read real credentials, which a demo instance does not have, so without
-    # this the "what am I connected to" view would show everything not-configured.
+    # Demo mode: list the sample provider set, as sample data. The live probes
+    # below read real credentials, which a demo instance does not have. These
+    # were reported "connected" with no demo flag, while what_can_nable_do said
+    # nothing was connected; both now say the same thing: sample providers,
+    # none of the user's own accounts.
     if is_demo():
         for entry in _demo_connected():
             result[entry["name"]] = {
                 "category": entry["category"],
-                "configured": True,
-                "status": "connected",
+                "configured": False,
+                "sample_data": True,
+                "status": "sample data (demo mode), not a connected account",
             }
+        result["_demo_mode"] = True  # type: ignore[assignment]
+        result["_demo_note"] = SAMPLE_PROVIDERS_NOTE  # type: ignore[assignment]
         status = _srv.get_status()
         if status.mode == "trial":
             result["_plan"] = {"plan": "trial", "days_remaining": status.days_remaining}
@@ -67,13 +110,16 @@ async def list_connected_providers() -> dict:
             result["_plan"] = {"plan": status.mode}
         return result
 
+    # is_configured() checks that credentials are present, not that they work.
+    # Calling that "connected" told users a typo'd key was live.
+    _configured = "configured (not yet verified)"
     for category, pool in [("cloud", _srv.CLOUD_CONNECTORS), ("saas", _srv.SAAS_CONNECTORS)]:
         for name, connector in pool.items():
             configured = await connector.is_configured()
             result[name] = {
                 "category": category,
                 "configured": configured,
-                "status": "connected" if configured else "not connected: call connect_aws, or run 'uvx nable'",
+                "status": _configured if configured else _remediation(name),
             }
 
     # LLM / AI providers are module-level (not in the class registry above), so
@@ -97,7 +143,7 @@ async def list_connected_providers() -> dict:
         result[name] = {
             "category": "llm",
             "configured": configured,
-            "status": "connected" if configured else "not connected: call connect_aws, or run 'uvx nable'",
+            "status": _configured if configured else _remediation(name),
         }
     _llm_sync = {
         "modal": gpu_infra.modal_configured,
@@ -109,9 +155,13 @@ async def list_connected_providers() -> dict:
         result[name] = {
             "category": "llm",
             "configured": configured,
-            "status": "connected (cost via invoice import)" if configured
-                      else "not connected: call connect_aws, or run 'uvx nable'",
+            "status": "configured (cost via invoice import)" if configured
+                      else _remediation(name),
         }
+    result["_note"] = (
+        "configured means the credentials are present, not that they work. "
+        "Run check_connector_health to verify each one."
+    )
 
     # Surface plan status so Claude can proactively mention upgrade when relevant
     status = _srv.get_status()
@@ -120,23 +170,22 @@ async def list_connected_providers() -> dict:
             "plan": "trial",
             "days_remaining": status.days_remaining,
             "note": (
-                f"Team trial active: {status.days_remaining} day{'s' if status.days_remaining != 1 else ''} remaining. "
-                f"All features unlocked. Subscribe at {_srv._UPGRADE_URL} before trial ends to keep Team features."
+                f"{trial_line(status)} Keep Pro after the trial: {plan_label('pro')}, "
+                f"{checkout_url('pro')}"
             ),
         }
     elif status.mode == "free":
         result["_plan"] = {
             "plan": "free",
             "note": (
-                f"Free tier: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
-                f"PR comments, budgets, K8s analysis, Helm visibility, and all connectors included. "
-                f"Pro plan ($25/mo) adds: Slack anomaly alerts, ticket auto-creation "
-                f"(Jira/Linear/GitHub), email reports, commitment recommendations, "
-                f"and org rollup. Upgrade at {_srv._UPGRADE_URL}."
+                f"Free tier: cost queries, anomaly detection, rightsizing, Slack/Teams alerts "
+                f"on request, PR comments, budgets, K8s analysis, Helm visibility, and all "
+                f"connectors included. {pro_pitch()} Upgrade at {checkout_url('pro')}."
             ),
         }
-    elif status.mode == "pro":
-        result["_plan"] = {"plan": "pro", "email": status.email}
+    elif status.mode in ("pro", "team", "enterprise"):
+        result["_plan"] = {"plan": status.mode, "name": plan_name(status.mode),
+                           "email": status.email, "expires": status.expires}
 
     return result
 
@@ -152,25 +201,35 @@ async def check_connector_health() -> dict:
         - "Which connectors are broken or stale?"
         - "Why am I not getting data from Datadog?"
     """
-    from ..demo_data import is_demo, connected_providers as _demo_connected
+    from ..demo_data import (
+        SAMPLE_PROVIDERS_NOTE, is_demo, connected_providers as _demo_connected,
+    )
     if is_demo():
+        # Nothing real to probe in demo. Say so rather than report nine
+        # "healthy" connectors the user never connected.
         probes = [{
-            "name": e["name"], "configured": True, "healthy": True,
-            "last_data": "12m ago", "response_ms": 180, "error": None, "fix": None,
+            "name": e["name"], "configured": False, "sample_data": True,
+            "healthy": None, "last_data": None, "response_ms": None,
+            "error": None, "fix": None,
         } for e in _demo_connected()]
         return {
-            "summary": f"{len(probes)} healthy",
-            "healthy_count": len(probes),
+            "summary": (f"Demo mode: {len(probes)} sample-data providers, no real "
+                        "connectors to test"),
+            "healthy_count": 0,
             "broken_count": 0,
             "unconfigured_count": 0,
+            "sample_count": len(probes),
             "connectors": probes,
             "broken": [],
-            "tip": None,
+            "tip": ("Connect a real account with connect_aws, connect_gcp or "
+                    "connect_azure, then check health again."),
+            "_demo_mode": True,
+            "_demo_note": SAMPLE_PROVIDERS_NOTE,
         }
 
     import asyncio
     import time
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
     from sqlalchemy import select, func, text as sql_text
     from ..storage.db import get_engine, cost_snapshots
 
@@ -241,8 +300,51 @@ async def check_connector_health() -> dict:
                 result["fix"] = f"Re-run setup: finops setup {name}"
         return result
 
+    # LLM providers are module-level readers, not registry connectors, so the
+    # loop above never saw them and an AI-spend user's health check listed
+    # every cloud and none of the keys they had set. Probe each with a one-day
+    # cost read: that is the call the cost tools make, so it fails the same way.
+    from ..connectors.llm_costs import _unread_reason
+    from ..connectors.saas import anthropic_usage, litellm, openai_usage, openrouter
+    _llm_readers = {
+        "openai": openai_usage, "anthropic": anthropic_usage,
+        "openrouter": openrouter, "litellm": litellm,
+    }
+
+    async def _probe_llm(name: str, mod) -> dict:
+        t0 = time.monotonic()
+        result: dict = {"name": name, "configured": False, "healthy": False,
+                        "last_data": "n/a", "response_ms": None, "error": None, "fix": None}
+        try:
+            result["configured"] = bool(await mod.is_configured())
+            if not result["configured"]:
+                result["fix"] = f"Run: finops setup {name}"
+                return result
+            today = datetime.now(timezone.utc).date()
+            data = await asyncio.wait_for(
+                asyncio.to_thread(mod.get_costs, today - timedelta(days=1), today),
+                timeout=10.0)
+            reason = _unread_reason(data or {})
+            if reason is None:
+                result["healthy"] = True
+                result["response_ms"] = int((time.monotonic() - t0) * 1000)
+            else:
+                result["error"] = reason[:200]
+                result["fix"] = (
+                    f"Re-run: finops setup {name}. Cost data needs an admin key "
+                    "(OpenAI sk-admin-..., Anthropic sk-ant-admin-...), not a regular API key."
+                    if name in ("openai", "anthropic") else f"Re-run: finops setup {name}")
+        except asyncio.TimeoutError:
+            result["error"] = "Timeout (>10s), credentials may be valid but API is slow"
+            result["fix"] = "Check network connectivity or API endpoint status"
+        except Exception as e:
+            result["error"] = str(e)[:200]
+            result["fix"] = f"Re-run setup: finops setup {name}"
+        return result
+
     # Run all probes in parallel (don't await serially, would take minutes)
     tasks = [_probe(name, conn) for name, conn in _srv._ALL_CONNECTORS.items()]
+    tasks += [_probe_llm(name, mod) for name, mod in _llm_readers.items()]
     probes = await asyncio.gather(*tasks, return_exceptions=False)
 
     healthy = [p for p in probes if p["healthy"]]
@@ -292,43 +394,10 @@ async def compare_providers(
         - "Compare our SaaS tool spending"
         - "How does AWS compare to Azure and GCP?"
     """
-    from ..demo_data import (
-        is_demo, _PROVIDER_SERVICES, _DEMO_PROVIDERS, _DEMO_PROVIDER_CATEGORY,
-    )
+    from ..demo_data import compare_providers as _demo_compare, is_demo
     if is_demo():
-        want = None
-        if category == "cloud":
-            want = {"cloud"}
-        elif category == "saas":
-            want = {"saas", "llm"}
-        provs = [p for p in _DEMO_PROVIDERS
-                 if want is None or _DEMO_PROVIDER_CATEGORY.get(p) in want]
-        rows: list[dict] = []
-        grand = 0.0
-        for p in provs:
-            svcs = _PROVIDER_SERVICES[p]
-            total = round(sum(s["amount"] for s in svcs), 2)
-            grand += total
-            rows.append({
-                "provider": p,
-                "category": _DEMO_PROVIDER_CATEGORY.get(p, "cloud"),
-                "total_usd": total,
-                "total_formatted": _srv._fmt_usd(total),
-                "top_services": [
-                    {"service": s["service"], "amount_usd": round(s["amount"], 2)}
-                    for s in sorted(svcs, key=lambda x: -x["amount"])[:5]
-                ],
-            })
-        for r in rows:
-            r["pct_of_total"] = round(r["total_usd"] / grand * 100, 1) if grand else 0
-        rows.sort(key=lambda x: -x["total_usd"])
-        return {
-            "period": {"start": _srv._default_dates()[0].isoformat(),
-                       "end": _srv._default_dates()[1].isoformat()},
-            "grand_total_usd": round(grand, 2),
-            "grand_total_formatted": _srv._fmt_usd(grand),
-            "providers": rows,
-        }
+        return _demo_compare({"category": category, "start_date": start_date,
+                              "end_date": end_date})
 
     sd, ed = _srv._default_dates()
     if start_date:
@@ -413,7 +482,7 @@ async def list_accounts(provider: str | None = None) -> dict:
 
 
 @_srv.mcp.tool()
-async def set_alert_policy(
+def set_alert_policy(
     provider: str = "*",
     service_pattern: str = "*",
     muted: bool = False,
@@ -487,7 +556,7 @@ async def set_alert_policy(
 
 
 @_srv.mcp.tool()
-async def list_alert_policies() -> dict:
+def list_alert_policies() -> dict:
     """
     List all custom alert policies for anomaly detection.
 
@@ -529,7 +598,7 @@ async def list_alert_policies() -> dict:
 
 
 @_srv.mcp.tool()
-async def delete_alert_policy(policy_id: int) -> dict:
+def delete_alert_policy(policy_id: int) -> dict:
     """
     Remove a custom alert policy. The service will revert to the default threshold.
 
@@ -557,7 +626,7 @@ async def delete_alert_policy(policy_id: int) -> dict:
 
 
 @_srv.mcp.tool()
-async def list_vault_credentials() -> dict:
+def list_vault_credentials() -> dict:
     """
     List the names of credentials stored in the encrypted vault (never the values).
 
@@ -579,7 +648,7 @@ async def list_vault_credentials() -> dict:
 
 
 @_srv.mcp.tool()
-async def list_savings_recommendations(
+def list_savings_recommendations(
     status: str | None = None,
     source: str | None = None,
     limit: int = 30,
@@ -667,7 +736,7 @@ async def list_savings_recommendations(
 
 
 @_srv.mcp.tool()
-async def list_profiles() -> str:
+def list_profiles() -> str:
     """
     List all configured nable profiles (for multi-account or multi-client setups).
 
@@ -916,7 +985,7 @@ def whoami() -> dict:
 
 
 @_srv.mcp.tool()
-async def get_ai_budget_status() -> dict:
+def get_ai_budget_status(session_id: str | None = None) -> dict:
     """Where your AI coding agent stands against its budget, right now.
 
     Reads your agent's real token usage locally (Claude Code session logs) and reports
@@ -924,29 +993,42 @@ async def get_ai_budget_status() -> dict:
     a verdict (ok / warn / over). Nothing leaves your machine. It does NOT claim a
     percentage of a Claude/Cursor plan's hidden rate limit (no API exposes that); it
     reports your real usage against the budget you set with set_ai_budget. Token counts
-    are exact; any dollar figure is a list-price estimate, never presented as your bill."""
+    are exact; any dollar figure is a list-price estimate at each model's own rate,
+    never presented as your bill. cost_by_model and by_session split the month;
+    unpriced_models names any model priced at a fallback rate.
+
+    `session` is this Claude Code session's spend so far and its per-session cap, and
+    `headroom` is what is left under each cap. session_id defaults to the calling
+    session (session.id_source says how it was found)."""
     from ..ai_budget import status
-    return status()
+    return status(session_id=session_id or None)
 
 
 @_srv.mcp.tool()
-async def check_ai_budget(estimated_next_tokens: int = 0) -> dict:
+def check_ai_budget(estimated_next_tokens: int = 0,
+                    session_id: str | None = None) -> dict:
     """Advisory gate: before a big task, is the agent about to blow its AI budget?
 
     Call this before an expensive run. Returns a verdict (ok / warn / over), the
-    reason, and a recommendation. Advice only, it never blocks; relay the verdict and
-    let the human decide. Pass estimated_next_tokens to test whether the next task
-    would tip a token budget over."""
+    reason, a recommendation, and `headroom`: dollars left under this session's cap,
+    and dollars or tokens left under the monthly budget. Advice only, it never blocks;
+    relay the verdict and let the human decide. Pass estimated_next_tokens to test
+    whether the next task would tip a token budget over. session_id defaults to the
+    calling session."""
     from ..ai_budget import check
-    return check(estimated_next_tokens=int(estimated_next_tokens or 0))
+    return check(estimated_next_tokens=int(estimated_next_tokens or 0),
+                 session_id=session_id or None)
 
 
 @_srv.mcp.tool()
-async def set_ai_budget(mode: str | None = None,
-                        plan_cost: float | None = None,
-                        spend_cap: float | None = None,
-                        monthly_tokens: int | None = None,
-                        plan_label: str | None = None) -> dict:
+def set_ai_budget(mode: str | None = None,
+                  plan_cost: float | None = None,
+                  spend_cap: float | None = None,
+                  monthly_tokens: int | None = None,
+                  plan_label: str | None = None,
+                  session_cap: float | None = None,
+                  every_session: bool = False,
+                  session_id: str | None = None) -> dict:
     """Set the coding agent's monthly AI budget. Two lenses:
 
     - Flat subscription (Claude Pro/Max, Cursor): pass plan_cost = what you pay per
@@ -958,11 +1040,39 @@ async def set_ai_budget(mode: str | None = None,
 
     monthly_tokens is an optional usage cap for either lens. Ask the human which
     lens fits and what they pay rather than assuming. Stored locally in ~/.nable,
-    nothing uploaded."""
-    from ..ai_budget import set_budget
-    return {"budget": set_budget(mode=mode, plan_cost=plan_cost, spend_cap=spend_cap,
-                                 monthly_tokens=monthly_tokens, plan_label=plan_label),
-            "note": "Saved. Call get_ai_budget_status to see where you stand."}
+    nothing uploaded.
+
+    session_cap is a per-task cap in dollars at list price, for "this task may spend
+    at most $40". It caps the current session (subagents included) unless
+    every_session is true, which makes it the cap for every session. 0 clears it.
+    The current session must be known, from session_id or the agent's own
+    environment; a cap on a guessed session is refused and nothing is saved."""
+    from ..ai_budget import resolve_session, set_budget
+    sid, source = (None, None)
+    if session_cap is not None and not every_session:
+        sid, source = resolve_session(session_id or None)
+        # Only a session named by the caller or by the agent's own environment
+        # is "this session". The latest transcript may be another agent's, and
+        # no session at all is not a reason to cap every session.
+        if source not in ("argument", "env"):
+            return {
+                "error": ("session_cap needs to know which session to cap: pass "
+                          "session_id (Claude Code sets CLAUDE_CODE_SESSION_ID, Codex "
+                          "CODEX_SESSION_ID), or every_session=true to cap every "
+                          "session. Nothing was saved."),
+                "guessed_session_id": sid,
+            }
+    try:
+        budget = set_budget(mode=mode, plan_cost=plan_cost, spend_cap=spend_cap,
+                            monthly_tokens=monthly_tokens, plan_label=plan_label,
+                            session_cap=session_cap, session_id=sid)
+    except ValueError as e:                     # a negative cap: refused, not cleared
+        return {"error": str(e)}
+    out = {"budget": budget, "note": "Saved. Call get_ai_budget_status to see where you stand."}
+    if session_cap is not None:
+        out["session_cap_applies_to"] = (
+            {"session_id": sid, "id_source": source} if sid else "every_session")
+    return out
 
 
 @_srv.mcp.tool()
@@ -976,6 +1086,8 @@ async def check_action_policy(
     budget_name: str = "",
 ) -> dict:
     """Advisory policy gate: should a proposed remediation action proceed?
+    Changes nothing. It is not marked read-only only because tf_dir runs
+    `terraform plan` there, which executes that directory's provider plugins.
 
     The request-path guardrail, advisory. Describe a remediation action you are
     considering (action_type), optionally with the change to cost (a Terraform plan,
@@ -1066,7 +1178,7 @@ async def check_action_policy(
 
 
 @_srv.mcp.tool()
-async def list_views() -> dict:
+def list_views() -> dict:
     """
     List all pre-built cost views available to your team.
 
@@ -1396,7 +1508,7 @@ async def get_view(
 
 
 @_srv.mcp.tool()
-async def pin_view(
+def pin_view(
     title: str,
     dimensions: list[str] | None = None,
     filters: list[dict] | None = None,
@@ -1455,7 +1567,7 @@ async def pin_view(
 
 
 @_srv.mcp.tool()
-async def list_pinned_views() -> dict:
+def list_pinned_views() -> dict:
     """
     List the cost cards pinned to the dashboard: every saved view with its id,
     title, template, metric and dimensions, so you can re-run one with
@@ -1502,7 +1614,7 @@ async def get_pinned_view(view_id: int) -> dict:
 
 
 @_srv.mcp.tool()
-async def unpin_view(view_id: int) -> dict:
+def unpin_view(view_id: int) -> dict:
     """
     Remove a pinned cost card from the dashboard by id, so the dashboard stops
     tracking that saved view. The underlying saved view is not deleted, only
@@ -1538,6 +1650,10 @@ async def what_can_nable_do(detailed: bool = False) -> str:
         - "List your capabilities"
 
     """
+    from ..demo_data import capabilities_text, is_demo
+    if is_demo():
+        return capabilities_text(detailed=detailed)
+
     connected: set[str] = set()
 
     # Cloud + SaaS connectors live in the class registries.
@@ -1598,7 +1714,7 @@ async def what_can_nable_do(detailed: bool = False) -> str:
 
 
 @_srv.mcp.tool()
-async def get_tableau_connection_info(port: int = 8080) -> str:
+def get_tableau_connection_info(port: int = 8080) -> str:
     """
     Returns the Tableau Web Data Connector URL for connecting Tableau Desktop to nable.
 

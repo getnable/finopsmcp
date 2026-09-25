@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from finops.analyzers.cloudwatch import GET_METRIC_DATA_ENV
 from finops.recommendations.nonprod_scheduler import (
     _get_env_tag,
     _idle_hours,
@@ -115,25 +116,29 @@ def _make_ec2_instance(iid: str, itype: str, name: str, env_value: str) -> dict:
     }
 
 
-def _make_cw_datapoints(cpu_values: list[float]) -> list[dict]:
-    """Legacy helper kept for reference. Tests now use _make_metric_data_response."""
-    base = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
-    from datetime import timedelta
-    return [
-        {"Timestamp": base + timedelta(hours=i), "Maximum": v}
-        for i, v in enumerate(cpu_values)
-    ]
+_BASE = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
 
 
-def _make_metric_data_response(instance_ids: list[str], cpu_values_per_instance: list[list[float]]) -> dict:
-    """Return a get_metric_data response with one MetricDataResult per instance."""
-    base = datetime(2026, 5, 1, 0, 0, tzinfo=timezone.utc)
-    from datetime import timedelta
-    results = []
-    for i, (iid, cpu_values) in enumerate(zip(instance_ids, cpu_values_per_instance)):
-        timestamps = [base + timedelta(hours=j) for j in range(len(cpu_values))]
-        results.append({"Id": f"m{i}", "Timestamps": timestamps, "Values": cpu_values})
-    return {"MetricDataResults": results}
+@pytest.fixture(autouse=True)
+def _free_path_unless_asked(monkeypatch):
+    """A developer shell with the GetMetricData opt-in set must not move these
+    reads onto the billed path, which the fakes here do not answer."""
+    monkeypatch.delenv(GET_METRIC_DATA_ENV, raising=False)
+
+
+def _answer_cpu(cpu_by_instance: dict[str, list[float]]):
+    """A get_metric_statistics side effect answering each instance's hourly CPU
+    in the shape CloudWatch returns: Datapoints keyed by the statistic asked
+    for, in no particular order (newest first here). An instance not listed
+    has no datapoints."""
+    def get_metric_statistics(**kw):
+        values = cpu_by_instance.get(kw["Dimensions"][0]["Value"], [])
+        stat = kw["Statistics"][0]
+        return {"Datapoints": [
+            {"Timestamp": _BASE + timedelta(hours=h), stat: v}
+            for h, v in reversed(list(enumerate(values)))
+        ]}
+    return get_metric_statistics
 
 
 class TestIdentifyNonprodResources:
@@ -195,7 +200,7 @@ class TestIdentifyNonprodResources:
 
         # 100 hours, 80 of them idle (CPU < 5%)
         cpu_values = [0.5] * 80 + [50.0] * 20
-        mock_cw.get_metric_data.return_value = _make_metric_data_response(["i-dev1"], [cpu_values])
+        mock_cw.get_metric_statistics.side_effect = _answer_cpu({"i-dev1": cpu_values})
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -223,7 +228,7 @@ class TestIdentifyNonprodResources:
 
         # Only ~6% idle: 10 out of 168 hours idle per week
         cpu_values = [0.5] * 10 + [60.0] * 158
-        mock_cw.get_metric_data.return_value = _make_metric_data_response(["i-dev2"], [cpu_values])
+        mock_cw.get_metric_statistics.side_effect = _answer_cpu({"i-dev2": cpu_values})
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -244,7 +249,7 @@ class TestIdentifyNonprodResources:
         mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
 
         # No CloudWatch data
-        mock_cw.get_metric_data.return_value = {"MetricDataResults": [{"Id": "m0", "Timestamps": [], "Values": []}]}
+        mock_cw.get_metric_statistics.return_value = {"Datapoints": []}
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -255,6 +260,7 @@ class TestIdentifyNonprodResources:
         assert result["total_instances"] == 1
         inst = result["schedulable_instances"][0]
         assert inst["idle_hours_per_week"] == 118.0
+        assert result["finding"]["metadata"]["instances_with_assumed_idle"] == 1
 
     def test_result_sorted_by_savings_descending(self):
         mock_boto3 = MagicMock()
@@ -270,8 +276,8 @@ class TestIdentifyNonprodResources:
         # Both heavily idle
         cpu_values_large = [0.5] * 168
         cpu_values_small = [0.5] * 168
-        mock_cw.get_metric_data.return_value = _make_metric_data_response(
-            ["i-large", "i-small"], [cpu_values_large, cpu_values_small]
+        mock_cw.get_metric_statistics.side_effect = _answer_cpu(
+            {"i-large": cpu_values_large, "i-small": cpu_values_small}
         )
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
@@ -296,7 +302,7 @@ class TestIdentifyNonprodResources:
         mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
 
         cpu_values = [0.5] * 120 + [60.0] * 48
-        mock_cw.get_metric_data.return_value = _make_metric_data_response(["i-perf"], [cpu_values])
+        mock_cw.get_metric_statistics.side_effect = _answer_cpu({"i-perf": cpu_values})
 
         with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
             result = self._run(
@@ -309,3 +315,101 @@ class TestIdentifyNonprodResources:
 
         assert result["total_instances"] == 1
         assert result["schedulable_instances"][0]["instance_id"] == "i-perf"
+
+    def _run_dev_instances(self, instances: list[dict], mock_cw: MagicMock) -> dict:
+        mock_boto3 = MagicMock()
+        mock_ec2 = MagicMock()
+        page = {"Reservations": [{"Instances": instances}]}
+        mock_ec2.get_paginator.return_value.paginate.return_value = [page]
+        mock_boto3.client.side_effect = lambda svc, **kw: mock_ec2 if svc == "ec2" else mock_cw
+
+        with patch("finops.recommendations.nonprod_scheduler.boto3", mock_boto3):
+            return self._run(
+                identify_nonprod_resources(aws_client=_make_aws_client(), regions=["us-east-1"])
+            )
+
+    def test_one_read_holds_the_whole_week(self):
+        """GetMetricStatistics answers at most 1,440 datapoints a call and a
+        week of hourly points is 168, so one call per instance returns all of
+        it. Here the busy days and idle nights come back in no particular
+        order, and the idle share is the whole week's."""
+        mock_cw = MagicMock()
+        mock_cw.get_metric_statistics.side_effect = _answer_cpu(
+            {"i-dev1": [60.0] * 84 + [0.5] * 84})
+
+        result = self._run_dev_instances(
+            [_make_ec2_instance("i-dev1", "m5.large", "backend-dev", "dev")], mock_cw)
+
+        assert mock_cw.get_metric_statistics.call_count == 1
+        kw = mock_cw.get_metric_statistics.call_args.kwargs
+        assert kw["Statistics"] == ["Maximum"] and kw["Period"] == 3600
+        assert (kw["EndTime"] - kw["StartTime"]).total_seconds() / kw["Period"] <= 1440
+        assert result["schedulable_instances"][0]["idle_hours_per_week"] == 84.0
+
+    def test_a_failed_read_is_skipped_and_counted_not_assumed_idle(self):
+        """A throttled or denied read is not a quiet week, and it is not the
+        no-data case either. It used to collapse into [] and take the
+        nights-and-weekends worst case (118 idle hours a week), which put a
+        stop schedule in front of a machine nobody had looked at. Now the
+        instance is left out and counted as unread."""
+        answer = _answer_cpu({"i-dev1": [0.5] * 168})
+
+        def cpu(**kw):
+            if kw["Dimensions"][0]["Value"] == "i-dev3":
+                raise RuntimeError("Throttling")
+            return answer(**kw)
+
+        mock_cw = MagicMock()
+        mock_cw.get_metric_statistics.side_effect = cpu
+
+        result = self._run_dev_instances([
+            _make_ec2_instance("i-dev1", "m5.xlarge", "api-dev", "dev"),
+            _make_ec2_instance("i-dev3", "m5.xlarge", "db-dev", "test"),
+        ], mock_cw)
+
+        assert [i["instance_id"] for i in result["schedulable_instances"]] == ["i-dev1"]
+        assert result["instances_cpu_unread"] == 1
+        meta = result["finding"]["metadata"]
+        assert meta["instances_cpu_unread"] == 1
+        assert meta["instances_with_assumed_idle"] == 0
+        assert any("1 non-prod instance(s) were not assessed" in a
+                   for a in result["finding"]["assumptions"])
+
+    def test_a_scan_where_every_read_failed_is_not_clean(self):
+        mock_cw = MagicMock()
+        mock_cw.get_metric_statistics.side_effect = RuntimeError("AccessDenied")
+
+        result = self._run_dev_instances(
+            [_make_ec2_instance("i-dev3", "m5.xlarge", "db-dev", "test")], mock_cw)
+
+        assert result["schedulable_instances"] == []
+        assert result["instances_cpu_unread"] == 1
+
+    def test_an_empty_read_still_takes_the_stated_worst_case(self):
+        """No datapoints from a read that worked is the no-data case, which
+        keeps its nights-and-weekends assumption and says so."""
+        mock_cw = MagicMock()
+        mock_cw.get_metric_statistics.return_value = {"Datapoints": []}
+
+        result = self._run_dev_instances(
+            [_make_ec2_instance("i-dev3", "m5.xlarge", "db-dev", "test")], mock_cw)
+
+        assert result["schedulable_instances"][0]["idle_hours_per_week"] == 118.0
+        assert result["finding"]["metadata"]["instances_with_assumed_idle"] == 1
+        assert result["instances_cpu_unread"] == 0
+
+    def test_the_default_path_never_calls_get_metric_data(self):
+        """GetMetricData bills per metric with no free tier. Reading CPU for a
+        non-prod sweep must not add to the bill the sweep is trying to shrink:
+        one free GetMetricStatistics call per instance, and nothing else."""
+        mock_cw = MagicMock()
+        mock_cw.get_metric_statistics.side_effect = _answer_cpu(
+            {"i-dev1": [0.5] * 168, "i-dev2": [0.5] * 168})
+
+        self._run_dev_instances([
+            _make_ec2_instance("i-dev1", "m5.large", "backend-dev", "dev"),
+            _make_ec2_instance("i-dev2", "m5.large", "worker-dev", "staging"),
+        ], mock_cw)
+
+        mock_cw.get_metric_data.assert_not_called()
+        assert mock_cw.get_metric_statistics.call_count == 2

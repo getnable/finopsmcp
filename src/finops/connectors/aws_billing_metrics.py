@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""What the bill looks like right now, from the one AWS source that is free.
+"""What the bill looks like right now, from an AWS source that is free to read.
 
 THE GAP THIS FILLS
 
@@ -12,9 +12,13 @@ question anyone asks is "what about today".
 
 Cost Explorer answers that for $0.01 a question. CloudWatch answers it for
 nothing. AWS publishes AWS/Billing EstimatedCharges into CloudWatch metrics,
-and the first million CloudWatch API requests each month are free, which no
-other billing source offers. That is the entire reason this module exists: it
-closes the freshness gap without putting a meter on asking.
+and the read here is standard requests only: list_metrics to find the
+services, then one GetMetricStatistics call for the total and one per
+service. Those sit in CloudWatch's free request tier, 1,000,000 a month (AWS
+Price List, CW:Requests). GetMetricData would batch the series into one call,
+but it bills $0.01 per 1,000 metrics with no free tier (CW:GMD-Metrics), so
+it is never called here. That is the reason this module exists: it closes the
+freshness gap without putting a meter on asking.
 
 WHAT THIS IS NOT
 
@@ -48,7 +52,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from ..aws_prices import CLOUDWATCH_PER_1000_METRICS
+from ..analyzers.cloudwatch import MetricPoints, MetricQuery, fetch_metric_points
 
 log = logging.getLogger(__name__)
 
@@ -78,13 +82,15 @@ class EstimatedCharges:
     total_usd: float | None = None
     by_service: list[ServiceCharge] = field(default_factory=list)
     as_of: datetime | None = None
-    metrics_requested: int = 0
     currency: str = "USD"
 
     @property
     def cost_usd(self) -> float:
-        """What asking cost, before the free tier. Almost always zero in practice."""
-        return (self.metrics_requested / 1000.0) * CLOUDWATCH_PER_1000_METRICS
+        """What asking cost: nothing. Every call is a standard CloudWatch request
+        (ListMetrics, GetMetricStatistics) inside the free tier of 1,000,000 a
+        month (aws_prices.CLOUDWATCH_FREE_REQUESTS_PER_MONTH), and GetMetricData,
+        which bills per metric with no free tier, is never called."""
+        return 0.0
 
     @property
     def stale_hours(self) -> float | None:
@@ -167,9 +173,12 @@ def latest_estimated_charges(session: Any = None, *,
                              include_services: bool = True) -> dict[str, Any]:
     """Month-to-date estimated charges, total and per service.
 
-    One get_metric_data call carries up to 500 queries, so the whole read is two
-    API calls regardless of how many services an account uses. Both fall inside
-    CloudWatch's free tier at any plausible frequency.
+    list_metrics finds the services, then each series (the total, and one per
+    service) is one GetMetricStatistics call through the shared CloudWatch
+    reader, eight at a time. All of them are standard requests inside
+    CloudWatch's free tier (see cost_usd). The read never takes the billed
+    GetMetricData path, even on a host that opted in to it for scans, because
+    the payload tells the reader that reading this is free.
     """
     if (os.getenv("NABLE_NO_CLOUDWATCH_BILLING") or "").strip().lower() in ("1", "true", "yes"):
         return unavailable("CloudWatch billing metrics are disabled here "
@@ -188,81 +197,63 @@ def latest_estimated_charges(session: Any = None, *,
         log.debug("list_metrics for AWS/Billing failed: %s", exc)
         services = []
 
-    queries: list[dict] = [{
-        "Id": "total",
-        "MetricStat": {
-            "Metric": {"Namespace": NAMESPACE, "MetricName": METRIC,
-                       "Dimensions": [{"Name": "Currency", "Value": "USD"}]},
-            "Period": _PERIOD_SECONDS,
-            # Maximum, because the metric is cumulative month-to-date: the
-            # largest value in the window is the most recent one. Average would
-            # report roughly half the month's spend and look plausible.
-            "Stat": "Maximum",
-        },
-        "ReturnData": True,
-    }]
-    # 500 is the hard API limit per call, minus the total query. Truncation is
-    # logged rather than silent: a quietly dropped tail is a smaller bill.
-    capped = services[:499]
-    if len(capped) < len(services):
-        log.warning("AWS/Billing publishes %d services; reading the largest %d",
-                    len(services), len(capped))
-    for i, svc in enumerate(capped):
-        queries.append({
-            "Id": f"s{i}",
-            "MetricStat": {
-                "Metric": {"Namespace": NAMESPACE, "MetricName": METRIC,
-                           "Dimensions": [{"Name": "Currency", "Value": "USD"},
-                                          {"Name": "ServiceName", "Value": svc}]},
-                "Period": _PERIOD_SECONDS,
-                "Stat": "Maximum",
-            },
-            "ReturnData": True,
-        })
+    # Maximum, because the metric is cumulative month-to-date: the largest
+    # value in a period is the most recent one in it. Average would report
+    # roughly half the month's spend and look plausible.
+    usd = ("Currency", "USD")
+    queries = [MetricQuery("total", NAMESPACE, METRIC, (usd,), "Maximum", _PERIOD_SECONDS)]
+    queries += [
+        MetricQuery(("service", svc), NAMESPACE, METRIC, (usd, ("ServiceName", svc)),
+                    "Maximum", _PERIOD_SECONDS)
+        for svc in services
+    ]
+    series = fetch_metric_points(cw, queries, start, end, use_get_metric_data=False)
 
-    try:
-        resp = cw.get_metric_data(MetricDataQueries=queries,
-                                  StartTime=start, EndTime=end, ScanBy="TimestampDescending")
-    except Exception as exc:
-        return unavailable(
-            f"CloudWatch returned no billing metrics: {exc}. This usually means "
-            f"billing alerts have never been switched on for this account.")
-
-    results = {r["Id"]: r for r in resp.get("MetricDataResults", [])}
-
-    def latest(res: dict | None) -> tuple[float, datetime] | None:
-        if not res:
+    def latest(points: MetricPoints | None) -> tuple[float, datetime] | None:
+        # Oldest first, so the last stamped point is the newest. Never
+        # max(values): a restatement downward would then be ignored forever.
+        stamped = [(ts, v) for ts, v in points or [] if ts is not None]
+        if not stamped:
             return None
-        values, stamps = res.get("Values") or [], res.get("Timestamps") or []
-        if not values or not stamps:
-            return None
-        # ScanBy=TimestampDescending, so index 0 is newest. Never max(values):
-        # a restatement downward would then be ignored forever.
-        ts = stamps[0]
+        ts, value = stamped[-1]
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        return float(values[0]), ts
+        return float(value), ts
 
-    total = latest(results.get("total"))
+    if series.get("total") is None:
+        return unavailable(
+            "CloudWatch returned no billing metrics: the read failed. This usually "
+            "means billing alerts have never been switched on for this account, or "
+            "that this identity may not call cloudwatch:GetMetricStatistics.")
+    total = latest(series["total"])
     if total is None:
         return unavailable(
             "AWS is not publishing AWS/Billing EstimatedCharges for this "
             "account. Billing alerts are almost certainly switched off.")
 
-    out = EstimatedCharges(total_usd=total[0], as_of=total[1],
-                           metrics_requested=len(queries))
-    for i, svc in enumerate(capped):
-        got = latest(results.get(f"s{i}"))
+    out = EstimatedCharges(total_usd=total[0], as_of=total[1])
+    unread: list[str] = []
+    for svc in services:
+        points = series.get(("service", svc))
+        if points is None:
+            # A failed read is not a $0 service. Left out of by_service like
+            # one, it made the breakdown look complete and sum short of total.
+            unread.append(svc)
+            continue
+        got = latest(points)
         if got and got[0] > 0:
             out.by_service.append(ServiceCharge(service=svc, amount_usd=got[0],
                                                 as_of=got[1]))
-    return out.as_dict()
+    result = out.as_dict()
+    if unread:
+        result["unread_services"] = sorted(unread)
+    return result
 
 
 def is_available(session: Any = None) -> bool:
     """Whether this account publishes billing metrics at all.
 
-    Used to decide whether the free path can cover the freshness gap, so it has
+    Used to decide whether the CloudWatch path can cover the freshness gap, so it has
     to be a real read rather than a guess at configuration.
     """
     return latest_estimated_charges(session, include_services=False).get(

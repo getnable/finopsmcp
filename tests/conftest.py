@@ -37,6 +37,17 @@ def _no_real_keychain(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _guard_ledger_sandbox(monkeypatch, tmp_path_factory):
+    """Every guard verdict is appended to a decision ledger under the user's
+    data dir. A suite full of `terraform destroy` fixtures must not land in the
+    developer's real audit log, so each test writes to a throwaway one (tests
+    that read it back take its path from guard_ledger.ledger_path())."""
+    import finops.guard_ledger as ledger
+    monkeypatch.setattr(ledger, "_path_override",
+                        tmp_path_factory.mktemp("guard-ledger") / ledger.LEDGER_NAME)
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_service_creds(monkeypatch):
     """Unit tests must not inherit the developer's live service credentials.
 
@@ -46,6 +57,19 @@ def _no_ambient_service_creds(monkeypatch):
     layers on top of this fixture for their duration.
     """
     for var in ("GITHUB_TOKEN", "GITHUB_ORGS"):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_agent_usage(monkeypatch, tmp_path_factory):
+    """The AI budget reads every agent harness on the machine: Claude Code's
+    transcripts (tests point CLAUDE_CONFIG_DIR at a sandbox), Codex CLI's
+    rollouts under CODEX_HOME, and Cursor's Admin API when a key is set. A dev
+    box with a real ~/.codex, a Codex session id in its environment, or a
+    Cursor key must not leak its usage (or a network call) into a unit test.
+    Tests that exercise those readers set their own values on top."""
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path_factory.mktemp("codex-home")))
+    for var in ("CODEX_SESSION_ID", "CURSOR_ADMIN_API_KEY", "CURSOR_ADMIN_USER_EMAIL"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -77,7 +101,7 @@ def _no_test_may_spend_money():
 
     def guarded(self, operation_name, api_params):
         service = self.meta.service_model.service_name
-        if service in billed:
+        if service in billed and not getattr(self, "_nable_billed_stub", False):
             raise AssertionError(
                 f"A test reached {service}.{operation_name} — {billed[service]}. "
                 f"This spends real money on whoever runs the suite. Stub the "
@@ -90,3 +114,28 @@ def _no_test_may_spend_money():
         yield
     finally:
         botocore.client.BaseClient._make_api_call = original
+
+
+@pytest.fixture
+def billed_stub():
+    """The one way a test reaches a billed client: through botocore's Stubber.
+
+    `with billed_stub(ce_client) as stub:` activates a Stubber on the client
+    and lets it past the block above for the duration. The Stubber answers
+    every call from its queue and raises on anything unqueued, so nothing
+    reaches AWS; the request parameters and the queued responses are still
+    checked against the real service model."""
+    import contextlib
+
+    from botocore.stub import Stubber
+
+    @contextlib.contextmanager
+    def _stub(client):
+        with Stubber(client) as stub:
+            client._nable_billed_stub = True
+            try:
+                yield stub
+            finally:
+                client._nable_billed_stub = False
+
+    return _stub

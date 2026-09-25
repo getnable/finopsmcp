@@ -10,7 +10,7 @@ from .. import server as _srv
 
 
 @_srv.mcp.tool()
-async def connect_azure() -> dict:
+def connect_azure() -> dict:
     """
     Guide connecting Azure while keeping the service-principal secret off the model.
 
@@ -65,7 +65,7 @@ async def connect_azure() -> dict:
 
 
 @_srv.mcp.tool()
-async def get_resource_cost_breakdown_azure(
+def get_resource_cost_breakdown_azure(
     start_date: str | None = None,
     end_date: str | None = None,
     subscription_id: str | None = None,
@@ -131,7 +131,7 @@ async def get_resource_cost_breakdown_azure(
 
 
 @_srv.mcp.tool()
-async def get_azure_reservation_utilization(
+def get_azure_reservation_utilization(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> dict:

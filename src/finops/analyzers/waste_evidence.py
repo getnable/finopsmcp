@@ -59,7 +59,7 @@ WASTE_EVIDENCE: dict[str, EvidenceSpec] = {
     ),
     "gp2_should_migrate_to_gp3": EvidenceSpec(
         MEASURED, "high",
-        assumptions=("Same-size gp3 with the free 3,000 IOPS / 125 MB/s baseline.",),
+        assumptions=("Same-size gp3 provisioned to the gp2 volume's IOPS and throughput.",),
     ),
     "unassociated_elastic_ip": EvidenceSpec(MEASURED, "high"),
     "s3_incomplete_multipart_uploads": EvidenceSpec(
@@ -129,6 +129,19 @@ WASTE_EVIDENCE: dict[str, EvidenceSpec] = {
         confirm_steps=(
             "Check task memory utilization before trimming the reservation.",
             "Confirm the service is not scaling on CPU, or you will change its scaling behaviour.",
+        ),
+    ),
+    "dynamodb_overprovisioned_capacity": EvidenceSpec(
+        INFERRED, "medium",
+        why_unsure=(
+            "Provisioned and consumed capacity are both measured, but hourly sums hide "
+            "bursts inside the hour, auto scaling may own the setting, and the account's "
+            "free 25 RCU and 25 WCU are not netted out."
+        ),
+        confirm_steps=(
+            ("Check ThrottledRequests and the per-minute ConsumedRead/WriteCapacityUnits "
+             "peak before lowering capacity."),
+            "If Application Auto Scaling manages the table, lower its minimum instead.",
         ),
     ),
 

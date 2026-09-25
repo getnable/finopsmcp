@@ -15,7 +15,9 @@ names, and cost numbers appear across all tools so the demo flows naturally.
 """
 from __future__ import annotations
 
+import math
 import os
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -114,42 +116,12 @@ _ACCOUNT_NAME = "streamco-production"
 _REGION       = "us-east-1"
 
 _TODAY = date.today()
-_MONTH_START = _TODAY.replace(day=1).isoformat()
-_YESTERDAY   = (_TODAY - timedelta(days=1)).isoformat()
 
 
 # ── Tool response stubs ───────────────────────────────────────────────────────
 
-def cost_summary() -> dict[str, Any]:
-    return {
-        "period": f"{_MONTH_START} to {_YESTERDAY}",
-        "total_usd": 2407600.00,
-        "vs_last_month_pct": 16.8,
-        "by_service": {
-            "Amazon CloudFront":            724800.00,
-            "Amazon EC2":                   431600.00,
-            "AWS Data Transfer":            408200.00,
-            "Amazon S3":                    312400.00,
-            "AWS Elemental MediaConvert":   188900.00,
-            "AWS Elemental MediaLive":      151300.00,
-            "Amazon RDS":                    88400.00,
-            "Amazon CloudWatch":             61700.00,
-            "AWS Lambda":                    40300.00,
-        },
-        "account_id":   _ACCOUNT_ID,
-        "account_name": _ACCOUNT_NAME,
-        "note": "Spans 312 linked accounts; figures are the org rollup.",
-        "summary": (
-            "Total AWS spend this month: $2.41M (+17% vs last month) across 312 "
-            "linked accounts. CloudFront is the top driver at $724,800, up $120,800 "
-            "as streaming egress rose after the new season dropped."
-        ),
-    }
-
-
-def anomalies() -> dict[str, Any]:
-    return {
-        "anomalies": [
+def _anomaly_rows() -> list[dict[str, Any]]:
+    return [
             {
                 "id":          "anom-001",
                 "service":     "Amazon CloudFront",
@@ -197,11 +169,7 @@ def anomalies() -> dict[str, Any]:
                 "projected_monthly_impact":  28400.00,
                 "cause":                     "unknown",
             },
-        ],
-        "total_anomalies": 3,
-        "high_severity":   1,
-        "summary": "3 cost anomalies detected. The season launch drove CloudFront and data-transfer egress up ~$229k/mo combined; a $28k S3 request spike has no identified cause yet.",
-    }
+    ]
 
 
 def rightsizing() -> dict[str, Any]:
@@ -386,12 +354,158 @@ def cluster_efficiency() -> dict[str, Any]:
     }
 
 
-def cost_summary_cur() -> dict[str, Any]:
-    """Demo response for CUR/Athena line-item query."""
+# ── Registry: maps tool name → demo response function ─────────────────────────
+
+def _pct_text(p: float | None) -> str:
+    return "n/a" if p is None else f"{p:+.1f}%"
+
+
+def cost_summary(args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """get_cost_summary on the sample: every selected provider over the window
+    the arguments name (default: the 30 days ending yesterday, like the live
+    tool), derived from the one daily series every other demo tool reads."""
+    args = args or {}
+    provs = _pick_providers(args.get("provider"), args.get("category"))
+    if provs is None:
+        return _not_in_sample(f"Provider '{args.get('provider')}'")
+    first, last = demo_window(args)
+    period = _period(first, last)
+    rows = _window_rows(provs, first, last)
+    total = round(sum(r["amount"] for r in rows), 2)
+    prev = round(sum(r["previous"] for r in rows), 2)
+    detail = 15 if len(provs) == 1 else 5
+    by_provider = {}
+    for p in provs:
+        mine = [r for r in rows if r["provider"] == p]
+        by_provider[p] = {
+            "total_usd": round(sum(r["amount"] for r in mine), 2),
+            "by_service": {r["service"]: r["amount"] for r in mine[:detail]},
+        }
+    by_service = {r["service"]: r["amount"] for r in rows[:15]}
+    top = rows[0]
+    change = _pct(total, prev)
+    story = (" Streaming egress rose after the new season dropped."
+             if top["service"] == "Amazon CloudFront" and top["delta"] > 0 else "")
+    out: dict[str, Any] = {
+        "period": period,
+        "grand_total_usd": total,
+        "grand_total_formatted": _usd(total),
+        "total_usd": total,
+        "previous_period_total_usd": prev,
+        "vs_previous_period_pct": change,
+        "by_provider": by_provider,
+        "grand_by_service": by_service,
+        "by_service": by_service,
+        "summary": (
+            f"Sample data: {_scope(provs)} spent {_usd(total)} over {period['label']}, "
+            f"{_pct_text(change)} vs the {period['days']} days before. The top line is "
+            f"{top['service']} at {_usd(top['amount'])}, "
+            f"{'up' if top['delta'] >= 0 else 'down'} {_usd(abs(top['delta']))}.{story}"
+        ),
+    }
+    if "aws" in provs:
+        out["account_id"] = _ACCOUNT_ID
+        out["account_name"] = _ACCOUNT_NAME
+        out["note"] = "AWS spans 312 linked accounts; AWS figures are the org rollup."
+    return out
+
+
+def cost_drivers(args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """'Why did the bill change': the window vs the same-length window before it,
+    across every sample provider (the live tool compares everything connected)."""
+    args = args or {}
+    provs = _pick_providers(args.get("provider"), args.get("category"))
+    if provs is None:
+        return _not_in_sample(f"Provider '{args.get('provider')}'")
+    first, last = demo_window(args)
+    period = _period(first, last)
+    n = period["days"]
+    rows = _window_rows(provs, first, last)
+    cur = round(sum(r["amount"] for r in rows), 2)
+    prev = round(sum(r["previous"] for r in rows), 2)
+    net = round(cur - prev, 2)
+    top_n = args.get("top_n") or args.get("limit") or 10
+    top_n = max(1, int(top_n)) if isinstance(top_n, (int, float)) else 10
+
+    def _driver(r: dict[str, Any]) -> dict[str, Any]:
+        return {"key": r["service"], "provider": r["provider"], "current": r["amount"],
+                "previous": r["previous"], "delta": r["delta"], "delta_pct": r["delta_pct"],
+                "direction": "increase" if r["delta"] > 0 else "decrease"}
+
+    ups = sorted((r for r in rows if r["delta"] > 0), key=lambda r: -r["delta"])
+    downs = sorted((r for r in rows if r["delta"] < 0), key=lambda r: r["delta"])
+    inc = [_driver(r) for r in ups[:top_n]]
+    dec = [_driver(r) for r in downs[:top_n]]
+    lead = ", ".join(f"{d['key']} {_usd(d['delta'])} ({d['delta_pct']:+.0f}%)" for d in inc[:4])
+    top4 = round(sum(d["delta"] for d in inc[:4]), 2)
+    story = ""
+    if inc and inc[0]["key"] == "Amazon CloudFront":
+        story = (" The season launch is the story: delivery to SmartCast devices drove "
+                 "CloudFront egress and origin data transfer.")
+    fall = (f" The largest decrease is {dec[0]['key']} at {_usd(dec[0]['delta'])}."
+            if dec else "")
+    share = (f" The top four increases add {_usd(top4)} of the {_usd(net)} net change."
+             if net > 0 else "")
+    return {
+        "period": period,
+        "comparison_period": _period(first - timedelta(days=n), first - timedelta(days=1)),
+        "scope": _scope(provs),
+        "total_current_usd": cur,
+        "total_previous_usd": prev,
+        "net_change_usd": net,
+        "net_change_pct": _pct(cur, prev),
+        "top_increases": inc,
+        "top_decreases": dec,
+        "all_drivers": [],
+        "summary": (
+            f"Sample data: across {_scope(provs)}, costs "
+            f"{'rose' if net >= 0 else 'fell'} {_usd(abs(net))} ({_pct_text(_pct(cur, prev))}) "
+            f"over the last {n} days vs the {n} days before. Largest increases: {lead}."
+            f"{story}{fall}{share}"
+            + (f" Start with {inc[0]['key']}." if inc else "")
+        ),
+    }
+
+
+# 30-day AWS spend by the `team` tag, as the CUR sample records it. It sums to the
+# AWS reference total, so a window's team split is these shares of that window's
+# AWS spend and always adds back up to it.
+_AWS_TEAM_30D = {
+    "streaming-delivery": 742000.00,
+    "content-platform":   388000.00,
+    "ad-platform":        296000.00,
+    "data-analytics":     174000.00,
+    "recommendations":    118000.00,
+    "untagged":           689600.00,
+}
+# All-provider spend by the `env` tag (sums to the all-provider reference total).
+_ENV_30D = {"production": 3708000.00, "untagged": 689600.00,
+            "staging": 463000.00, "dev": 287000.00}
+
+
+def _split(shares: dict[str, float], total: float) -> dict[str, float]:
+    base = sum(shares.values())
+    return {k: round(total * v / base, 2) for k, v in shares.items()}
+
+
+def cost_summary_cur(args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Demo response for CUR/Athena line-item query (AWS only, like the CUR)."""
+    args = args or {}
+    tag = str(args.get("tag_key") or "team").strip().lower()
+    if tag != "team":
+        out = _not_in_sample(f"The AWS '{tag}' tag")
+        out["note"] += (" The sample CUR carries the `team` tag; slice_costs with "
+                        "dimensions ['Tags[env]'] splits all providers by env.")
+        return out
+    first, last = demo_window(args)
+    rows = {r["service"]: r["amount"] for r in _window_rows(["aws"], first, last)}
+    total = round(sum(rows.values()), 2)
+    by_team = _split(_AWS_TEAM_30D, total)
+    untagged_pct = round(by_team["untagged"] / total * 100, 1) if total else 0.0
     return {
         "source":  "AWS Cost and Usage Report (Athena)",
-        "period":  f"{_MONTH_START} to {_YESTERDAY}",
-        "total_usd": 2407600.00,
+        "period":  _period(first, last),
+        "total_usd": total,
         "top_resources": [
             {
                 "resource_id":   "E2QK8S1TREAM01",
@@ -399,7 +513,7 @@ def cost_summary_cur() -> dict[str, Any]:
                 "service":       "Amazon CloudFront",
                 "instance_type": "distribution",
                 "region":        "global",
-                "monthly_cost":  724800.00,
+                "cost_usd":      rows.get("Amazon CloudFront", 0.0),
                 "tags": {},  # the biggest line has no owner tag: the core attribution gap
             },
             {
@@ -408,66 +522,91 @@ def cost_summary_cur() -> dict[str, Any]:
                 "service":       "Amazon EC2",
                 "instance_type": "g5.4xlarge",
                 "region":        "us-east-1",
-                "monthly_cost":  431600.00,
+                "cost_usd":      rows.get("Amazon EC2", 0.0),
                 "tags": {"team": "content-platform", "env": "production"},
             },
         ],
-        "by_tag_team": {
-            "streaming-delivery": 742000.00,
-            "content-platform":   388000.00,
-            "ad-platform":        296000.00,
-            "data-analytics":     174000.00,
-            "recommendations":    118000.00,
-            "untagged":           689600.00,
-        },
-        "untagged_pct": 28.6,
-        "note": "29% of spend ($689,600/mo) is untagged — mostly shared CDN, data transfer, and cross-account networking with no owner tag. That's the first attribution gap to close, and where most of the unallocated egress hides.",
+        "by_tag_team": by_team,
+        "untagged_pct": untagged_pct,
+        "note": (f"Sample data: {untagged_pct:.0f}% of AWS spend ({_usd(by_team['untagged'])}) "
+                 "is untagged, mostly shared CDN, data transfer, and cross-account networking "
+                 "with no owner tag. That's the first attribution gap to close, and where most "
+                 "of the unallocated egress hides."),
     }
 
 
-# ── Registry: maps tool name → demo response function ─────────────────────────
+# AI / LLM spend. The model lines are the openai/anthropic services above; Bedrock
+# is billed inside AWS and priced at this much per 30 days, scaled with AWS.
+_LLM_MODELS = [
+    ("gpt-4o",                     "openai",    "GPT-4o"),
+    ("claude-sonnet-4-5-20250929", "anthropic", "Claude Sonnet"),
+    ("o3",                         "openai",    "o3"),
+    ("claude-haiku-4-5-20251001",  "anthropic", "Claude Haiku"),
+    ("gpt-4o-mini",                "openai",    "GPT-4o mini"),
+]
+_BEDROCK_30D = 40000.00
 
-def llm_costs() -> dict[str, Any]:
-    # AI/LLM spend for the streamco-production story: ~$66,000/mo, ~10% of the
-    # ~$673k total bill. AI powers recommendations, content metadata auto-tagging,
-    # search relevance, and moderation. gpt-4o leads. The wedge: show the money
-    # answer AND the switch that recovers it, with zero creds.
-    daily = []
-    for i in range(13, -1, -1):
-        d = (_TODAY - timedelta(days=i)).isoformat()
-        # gentle upward drift, ~$15k/day average
-        daily.append({"date": d, "total_usd": round(13800 + (13 - i) * 170.0, 2)})
+
+def llm_costs(args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """AI/LLM spend for the StreamCo story over the requested window (default
+    the 30 days ending yesterday). AI powers recommendations, content metadata
+    auto-tagging, search relevance, and moderation; gpt-4o leads. The wedge: show
+    the money answer AND the switch that recovers it, with zero creds."""
+    args = args or {}
+    want = str(args.get("provider") or "").strip().lower()
+    if want and want not in ("openai", "anthropic", "bedrock"):
+        return _not_in_sample(f"LLM provider '{want}'")
+    first, last = demo_window(args)
+    period = _period(first, last)
+    ref = _ref_end()
+    svc = {s["service"]: s for p in ("openai", "anthropic") for s in _PROVIDER_SERVICES[p]}
+    aws_ref = sum(s["amount"] for s in _PROVIDER_SERVICES["aws"])
+    days = _days(first, last)
+
+    def _model_day(name: str, d: date) -> float:
+        s = svc[name]
+        return _svc_day(s["amount"], s["delta_pct"], d, ref)
+
+    def _bedrock_day(d: date) -> float:
+        return _BEDROCK_30D / aws_ref * sum(
+            _svc_day(s["amount"], s["delta_pct"], d, ref) for s in _PROVIDER_SERVICES["aws"])
+
+    models = [(m, p, s) for m, p, s in _LLM_MODELS if not want or p == want]
+    by_model = {m: round(sum(_model_day(s, d) for d in days), 2) for m, _, s in models}
+    by_provider: dict[str, float] = {}
+    for m, p, _ in models:
+        by_provider[p] = round(by_provider.get(p, 0.0) + by_model[m], 2)
+    if not want or want == "bedrock":
+        by_model["bedrock/anthropic.claude"] = round(sum(_bedrock_day(d) for d in days), 2)
+        by_provider["bedrock"] = by_model["bedrock/anthropic.claude"]
+    by_model = dict(sorted(by_model.items(), key=lambda kv: -kv[1]))
+    total = round(sum(by_model.values()), 2)
+    daily = [{"date": d.isoformat(),
+              "total_usd": round(sum(_model_day(s, d) for _, _, s in models)
+                                 + (_bedrock_day(d) if "bedrock" in by_provider else 0.0), 2)}
+             for d in days[-31:]]
+    all_total = _sum_days(_DEMO_PROVIDERS, first, last)
+    pct = round(total / all_total * 100, 1) if all_total else None
+    provider_of = {m: p for m, p, _ in _LLM_MODELS}
+    provider_of["bedrock/anthropic.claude"] = "bedrock"
+    top_model, top_cost = next(iter(by_model.items()))
     return {
-        "period": f"{_MONTH_START} to {_YESTERDAY}",
-        "total_usd": 450000.00,
-        "pct_of_total_cloud_spend": 8.8,
-        "by_provider": {
-            "openai":    260000.00,
-            "anthropic": 150000.00,
-            "bedrock":    40000.00,
-        },
-        "by_model": {
-            "gpt-4o":                       168000.00,
-            "claude-sonnet-4-5-20250929":   102000.00,
-            "o3":                            62000.00,
-            "claude-haiku-4-5-20251001":     48000.00,
-            "bedrock/anthropic.claude":      40000.00,
-            "gpt-4o-mini":                   30000.00,
-        },
-        "model_count": 6,
-        "top_spenders": [
-            {"model": "gpt-4o",            "provider": "openai",    "cost_usd": 168000.00},
-            {"model": "claude-sonnet-4-5", "provider": "anthropic", "cost_usd": 102000.00},
-            {"model": "o3",                "provider": "openai",    "cost_usd":  62000.00},
-        ],
+        "period": period,
+        "total_usd": total,
+        "pct_of_total_cloud_spend": pct,
+        "by_provider": by_provider,
+        "by_model": by_model,
+        "model_count": len(by_model),
+        "top_spenders": [{"model": m, "provider": provider_of[m], "cost_usd": c}
+                         for m, c in list(by_model.items())[:3]],
         "daily": daily,
         "recommendations": [
             {
                 "title": "Route title auto-tagging off o3",
                 "detail": (
-                    "The nightly metadata auto-tagging job runs on o3 ($62,000/mo). On a "
-                    "sampled eval, gpt-4o-mini matches its labels at ~1/15th the price. "
-                    "Routing it saves an estimated $52,000/mo."
+                    "The nightly metadata auto-tagging job runs on o3. On a sampled eval, "
+                    "gpt-4o-mini matches its labels at ~1/15th the price. Routing it saves "
+                    "an estimated $52,000/mo."
                 ),
                 "estimated_savings_usd": 52000.00,
                 "effort": "medium",
@@ -485,40 +624,38 @@ def llm_costs() -> dict[str, Any]:
         ],
         "sources": {"openai": "ok", "anthropic": "ok", "bedrock": "ok"},
         "summary": (
-            "AI/LLM spend this month: $450,000 (~9% of total cloud cost). gpt-4o drives "
-            "37% of it. Two changes recover ~$88,000/mo: route metadata auto-tagging off "
-            "o3 to gpt-4o-mini ($52,000) and cache the catalog context ($36,000)."
+            f"Sample data: AI/LLM spend over {period['label']}: {_usd(total)}"
+            + (f" (~{pct:.0f}% of total spend)" if pct is not None else "")
+            + f". {top_model} drives {top_cost / total * 100:.0f}% of it. Two changes "
+            "recover ~$88,000/mo: route metadata auto-tagging off o3 to gpt-4o-mini "
+            "($52,000) and cache the catalog context ($36,000)."
         ),
     }
 
 
-def cost_drivers() -> dict[str, Any]:
-    """Demo 'why did the bill change' answer, consistent with the $12,847
-    acme-production story (up 23.4% vs the prior month)."""
+def anomalies(args: dict[str, Any] | None = None) -> dict[str, Any]:
+    args = args or {}
+    rows = _anomaly_rows()
+    provider = str(args.get("provider") or "").strip().lower()
+    if provider and provider != "aws":
+        rows = []
+    severity = str(args.get("severity") or "").strip().lower()
+    if severity:
+        rows = [a for a in rows if a["severity"] == severity]
+    limit = args.get("limit")
+    if isinstance(limit, int) and limit > 0:
+        rows = rows[:limit]
     return {
-        "period": f"{_MONTH_START} to {_TODAY}",
-        "comparison_period": "prior 30 days",
-        "total_current_usd": 2407600.00,
-        "total_previous_usd": 2061300.00,
-        "net_change_usd": 346300.00,
-        "net_change_pct": 16.8,
-        "top_increases": [
-            {"key": "Amazon CloudFront", "current": 724800.00, "previous": 604000.00, "delta": 120800.00, "delta_pct": 20.0, "direction": "increase"},
-            {"key": "AWS Data Transfer", "current": 408200.00, "previous": 300100.00, "delta": 108100.00, "delta_pct": 36.0, "direction": "increase"},
-            {"key": "Amazon EC2", "current": 431600.00, "previous": 395000.00, "delta": 36600.00, "delta_pct": 9.3, "direction": "increase"},
-            {"key": "AWS Elemental MediaLive", "current": 151300.00, "previous": 128200.00, "delta": 23100.00, "delta_pct": 18.0, "direction": "increase"},
-        ],
-        "top_decreases": [
-            {"key": "Amazon S3", "current": 312400.00, "previous": 326000.00, "delta": -13600.00, "delta_pct": -4.2, "direction": "decrease"},
-        ],
-        "all_drivers": [],
+        "anomalies": rows,
+        "total_anomalies": len(rows),
+        "high_severity": sum(1 for a in rows if a["severity"] == "high"),
         "summary": (
-            "Costs rose $346,300 (+16.8%) vs the prior 30 days. The season launch is the "
-            "story: CloudFront egress up $120,800 (20%) and data transfer up $108,100 (36%) "
-            "as delivery to SmartCast devices spiked. EC2 added $36,600 and MediaLive $23,100 "
-            "from more live channels. S3 fell $13,600 on Glacier tiering. The top four drivers "
-            "account for ~$275k of the $346k; the rest is spread across many small line items "
-            "and a $28k S3 request spike with no identified cause yet. Start with CloudFront."
+            "Sample data: 3 cost anomalies detected. The season launch drove CloudFront "
+            "and data-transfer egress up ~$229k/mo combined; a $28k S3 request spike has "
+            "no identified cause yet."
+            if len(rows) == 3 else
+            f"Sample data: {len(rows)} matching anomalies in the sample (all sample "
+            "anomalies are on AWS)."
         ),
     }
 
@@ -668,6 +805,212 @@ _DEMO_REGIONS = [
 ]
 
 
+# ── The one source every demo number comes from ────────────────────────────────
+# _PROVIDER_SERVICES holds each service's cost over the REFERENCE WINDOW: the 30
+# days ending yesterday (the last complete day), which is the window the live cost
+# tools default to. delta_pct is the change against the 30 days before that.
+#
+# Every figure a demo tool reports, for any window, is a sum of _svc_day() over
+# the days in that window. The sample used to hard-code each tool's answer, so
+# AWS was $2,407,600 "month to date" in get_cost_summary and $2,002,363 summed
+# from get_cost_trends, the all-provider total was $4,281,177 in one place and
+# $5,147,600 in another, and the forecast ($5.6M) sat above a month-to-date that
+# was already $5.15M on the 23rd. Two tools asked about the same days now agree
+# to the cent, and a 7-day question gets a 7-day answer.
+
+_REF_DAYS = 30
+
+
+def _ref_end() -> date:
+    """The last complete day the sample has data for (yesterday)."""
+    return date.today() - timedelta(days=1)
+
+
+def _svc_day(amount: float, delta_pct: float, d: date, ref_end: date) -> float:
+    """One service's cost on day `d`.
+
+    Days are counted back from `ref_end` in 30-day blocks. Block b totals
+    amount / g**b, where g = 1 + delta_pct/100, so the reference window sums to
+    exactly `amount` and the 30 days before it to exactly amount / g: the
+    month-over-month change every tool quotes is the same number. Inside a block
+    a linear ramp (zero-sum, and continuous across block edges) and a 7.5-day
+    ripple (four whole cycles per block, so also zero-sum) make the series look
+    like a bill without moving any block total. Days after `ref_end` extend the
+    same curve, which is what the forecast reads."""
+    k = (ref_end - d).days
+    g = 1.0 + delta_pct / 100.0
+    block, j = divmod(k, _REF_DAYS)
+    ramp = (g - 1.0) / (g + 1.0)
+    shape = (1.0 + ramp * (1.0 - 2.0 * j / (_REF_DAYS - 1))
+             + 0.05 * math.sin(2.0 * math.pi * 4.0 * k / _REF_DAYS))
+    return amount * g ** (-block) / _REF_DAYS * shape
+
+
+def _days(first: date, last: date) -> list[date]:
+    return [first + timedelta(days=i) for i in range((last - first).days + 1)]
+
+
+def _sum_days(provs: list[str], first: date, last: date,
+              service: str | None = None) -> float:
+    ref = _ref_end()
+    days = _days(first, last)
+    return sum(_svc_day(s["amount"], s["delta_pct"], d, ref)
+               for p in provs for s in _PROVIDER_SERVICES[p]
+               if service is None or s["service"] == service
+               for d in days)
+
+
+def _iso(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
+        return None
+
+
+def demo_window(args: dict[str, Any] | None = None,
+                day_keys: tuple[str, ...] = ("days", "compare_days")) -> tuple[date, date]:
+    """(first_day, last_day), both inclusive, for a tool's period arguments.
+
+    Mirrors the live tools: start_date/end_date are ISO dates with end_date
+    exclusive, a `days`-style argument is a lookback ending yesterday, and the
+    default is the 30 days ending yesterday. The sample has no data after
+    yesterday, so the window is clipped there."""
+    args = args or {}
+    ref = _ref_end()
+    end = _iso(args.get("end_date"))
+    last = min(end - timedelta(days=1), ref) if end else ref
+    first = _iso(args.get("start_date"))
+    if first is None:
+        n = _REF_DAYS
+        for key in day_keys:
+            v = args.get(key)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+                n = int(v)
+                break
+        first = last - timedelta(days=min(n, 731) - 1)
+    first = min(first, last)
+    return max(first, last - timedelta(days=730)), last
+
+
+def _period(first: date, last: date) -> dict[str, Any]:
+    n = (last - first).days + 1
+    return {"start": first.isoformat(), "end": (last + timedelta(days=1)).isoformat(),
+            "days": n, "label": f"{first.isoformat()} to {last.isoformat()} ({n} days)"}
+
+
+def _pick_providers(provider: Any = None, category: Any = None) -> list[str] | None:
+    """The sample providers a provider/category filter selects; None when the
+    filter names a provider the sample does not have."""
+    if provider:
+        p = str(provider).strip().lower()
+        return [p] if p in _PROVIDER_SERVICES else None
+    if category == "cloud":
+        return [p for p in _DEMO_PROVIDERS if _DEMO_PROVIDER_CATEGORY.get(p) == "cloud"]
+    if category == "saas":
+        return [p for p in _DEMO_PROVIDERS if _DEMO_PROVIDER_CATEGORY.get(p) in ("saas", "llm")]
+    return list(_DEMO_PROVIDERS)
+
+
+def _not_in_sample(what: str) -> dict[str, Any]:
+    return {
+        "_demo_mode": True,
+        "not_in_sample": True,
+        "note": (f"{what} is not in the StreamCo sample dataset. The sample covers "
+                 f"{', '.join(_DEMO_PROVIDERS)}. Connect a real account with connect_aws, "
+                 "connect_gcp or connect_azure to ask about your own."),
+    }
+
+
+def _window_rows(provs: list[str], first: date, last: date) -> list[dict[str, Any]]:
+    """Every selected service's cost in the window and in the same-length window
+    right before it, largest first."""
+    ref = _ref_end()
+    n = (last - first).days + 1
+    cur_days = _days(first, last)
+    prev_days = _days(first - timedelta(days=n), first - timedelta(days=1))
+    rows = []
+    for p in provs:
+        for s in _PROVIDER_SERVICES[p]:
+            cur = sum(_svc_day(s["amount"], s["delta_pct"], d, ref) for d in cur_days)
+            prev = sum(_svc_day(s["amount"], s["delta_pct"], d, ref) for d in prev_days)
+            rows.append({
+                "provider": p, "service": s["service"],
+                "amount": round(cur, 2), "previous": round(prev, 2),
+                "delta": round(cur - prev, 2),
+                "delta_pct": round((cur - prev) / prev * 100, 1) if prev else None,
+            })
+    rows.sort(key=lambda r: -r["amount"])
+    return rows
+
+
+def _usd(n: float) -> str:
+    return f"-${abs(n):,.0f}" if n < 0 else f"${n:,.0f}"
+
+
+def _pct(cur: float, prev: float) -> float | None:
+    return round((cur - prev) / prev * 100, 1) if prev else None
+
+
+def _scope(provs: list[str]) -> str:
+    if len(provs) == 1:
+        return _PROVIDER_LABEL.get(provs[0], provs[0])
+    if provs == _DEMO_PROVIDERS:
+        return f"all {len(provs)} sample providers"
+    return ", ".join(_PROVIDER_LABEL.get(p, p) for p in provs)
+
+
+def _month_bounds(day: date) -> tuple[date, date]:
+    start = day.replace(day=1)
+    nxt = (start + timedelta(days=32)).replace(day=1)
+    return start, nxt - timedelta(days=1)
+
+
+def month_forecast(provs: list[str], service: str | None = None) -> dict[str, Any]:
+    """This calendar month for the selected providers: actuals to date, the rest
+    of the month projected along the same curve, and a range around it. The
+    projection can never fall below what is already spent."""
+    ref = _ref_end()
+    today = ref + timedelta(days=1)
+    m_start, m_end = _month_bounds(today)
+    mtd = _sum_days(provs, m_start, ref, service) if ref >= m_start else 0.0
+    rest = _sum_days(provs, today, m_end, service)
+    band = 0.10
+    return {
+        "month": today.strftime("%B %Y"),
+        "month_to_date_usd": round(mtd, 2),
+        "days_elapsed": (ref - m_start).days + 1 if ref >= m_start else 0,
+        "days_in_month": m_end.day,
+        "projected_month_total": round(mtd + rest, 2),
+        "projected_range": {"low": round(mtd + rest * (1 - band), 2),
+                            "high": round(mtd + rest * (1 + band), 2)},
+    }
+
+
+# Monthly budgets in the sample, judged on the month-end forecast.
+_DEMO_BUDGETS = [
+    ("AWS Monthly Budget", "aws", 2_600_000.0),
+    ("Snowflake Monthly Budget", "snowflake", 400_000.0),
+    ("GCP Monthly Budget", "gcp", 780_000.0),
+]
+_ORG_MONTHLY_BUDGET = 5_800_000.0
+
+
+def budgets() -> list[dict[str, Any]]:
+    out = []
+    for name, prov, limit in _DEMO_BUDGETS:
+        f = month_forecast([prov])
+        used, proj = f["month_to_date_usd"], f["projected_month_total"]
+        proj_pct = round(proj / limit * 100, 1)
+        out.append({
+            "name": name, "provider": prov, "limit": limit,
+            "used": used, "pct": round(used / limit * 100, 1),
+            "projected_month_total": proj, "projected_pct": proj_pct,
+            "status": "over" if proj_pct >= 100 else ("warn" if proj_pct >= 85 else "ok"),
+            "month": f["month"],
+        })
+    return out
+
+
 def _demo_category_payload(active_services: list[dict[str, Any]], window_total: float):
     """Category totals + AI split for the demo, classified the SAME way live is.
 
@@ -719,22 +1062,17 @@ def _attach_daily_categories(daily: list[dict[str, Any]], category_totals: dict[
 
 
 def _daily_series(days: int, provs: list[str], end: date | None = None) -> list[dict[str, Any]]:
-    """A believable per-provider daily spend series over the window. Deterministic
-    (seeded by day index) so it does not jump on every refresh, with a gentle
-    upward drift and weekly ripple. `end` anchors the last day (defaults to today),
-    so a custom date range that ends in the past renders its own window."""
-    import math
+    """Per-provider daily spend over the `days` ending on `end` (default: the
+    last complete day). Read from _svc_day, the same curve every demo tool sums,
+    so the chart and the tools never disagree about a day."""
+    last = end or _ref_end()
+    ref = _ref_end()
     out = []
-    base = {p: sum(s["amount"] for s in _PROVIDER_SERVICES[p]) / 30.0 for p in provs}
-    today = end or date.today()
-    for i in range(days - 1, -1, -1):
-        d = today - timedelta(days=i)
-        pos = (days - i) / max(days, 1)              # 0..1 across the window
-        drift = 0.85 + 0.30 * pos                    # ramps up over the window
-        ripple = 1.0 + 0.06 * math.sin(i / 7.0 * math.tau)  # weekly wobble
+    for d in _days(last - timedelta(days=days - 1), last):
         row: dict[str, Any] = {"date": d.isoformat()}
         for p in provs:
-            row[p] = round(base[p] * drift * ripple, 2)
+            row[p] = round(sum(_svc_day(s["amount"], s["delta_pct"], d, ref)
+                               for s in _PROVIDER_SERVICES[p]), 2)
         out.append(row)
     return out
 
@@ -763,22 +1101,23 @@ def dashboard_data(
     if start and end and end >= start:
         days = max(1, min((end - start).days + 1, 366))
 
-    # Window scaling: figures for the selected lookback. 30d is the reference
-    # month; 7d shows ~a quarter of it, 90d ~three months. MTD/projection stay
-    # month-anchored (they are calendar figures, not lookback figures).
-    win_factor = max(days, 1) / 30.0
+    # Window figures: summed from the same daily curve the MCP tools read, over
+    # the days the range spans. MTD/projection stay month-anchored (they are
+    # calendar figures, not lookback figures).
+    w_last = min(end, _ref_end()) if end else _ref_end()
+    w_first = w_last - timedelta(days=max(days, 1) - 1)
+    resources = {(p, s["service"]): s["resources"] for p in provs for s in _PROVIDER_SERVICES[p]}
 
     # Flatten selected providers' services into the active-services inventory.
     active_services: list[dict[str, Any]] = []
-    for p in provs:
-        for s in _PROVIDER_SERVICES[p]:
-            active_services.append({
-                "service": s["service"],
-                "provider": p,
-                "resources": s["resources"],
-                "amount": round(s["amount"] * win_factor, 2),
-                "delta_pct": s["delta_pct"],
-            })
+    for r in _window_rows(provs, w_first, w_last):
+        active_services.append({
+            "service": r["service"],
+            "provider": r["provider"],
+            "resources": resources[(r["provider"], r["service"])],
+            "amount": r["amount"],
+            "delta_pct": r["delta_pct"] or 0.0,
+        })
     active_services.sort(key=lambda x: -x["amount"])
     window_total = sum(s["amount"] for s in active_services) or 1.0
     for s in active_services:
@@ -789,13 +1128,15 @@ def dashboard_data(
         for s in active_services[:8]
     ]
 
-    # Month figures: sum the selected providers' full monthly service cost.
-    month_total = round(sum(s["amount"] for p in provs for s in _PROVIDER_SERVICES[p]), 2)
-    delta_pct = 16.8 if "aws" in provs else round(sum(
-        s["amount"] * s["delta_pct"] for p in provs for s in _PROVIDER_SERVICES[p]
-    ) / max(month_total, 1), 1)
-    last_month = round(month_total / (1 + delta_pct / 100), 2)
-    projected = round(month_total * 1.088, 2)
+    # Reference 30 days vs the 30 before, the calendar month forecast, and the
+    # closed calendar months, all read off the one daily curve.
+    ref = _ref_end()
+    month_total = round(_sum_days(provs, ref - timedelta(days=_REF_DAYS - 1), ref), 2)
+    prior_30 = _sum_days(provs, ref - timedelta(days=2 * _REF_DAYS - 1),
+                         ref - timedelta(days=_REF_DAYS))
+    delta_pct = _pct(month_total, prior_30) or 0.0
+    this_month = month_forecast(provs)
+    projected = this_month["projected_month_total"]
 
     recent_opportunities = [o for p in provs for o in _PROVIDER_OPPS.get(p, [])]
     recent_opportunities.sort(key=lambda o: -o["monthly_saving"])
@@ -825,18 +1166,20 @@ def dashboard_data(
     score = 66.0 if "aws" in provs else (81.0 if provs == ["azure"] else 69.0)
     grade = "B" if score >= 70 else "C"
 
-    _today = date.today()
+    _today = ref + timedelta(days=1)
     m1 = (_today.replace(day=1) - timedelta(days=1)).replace(day=1)      # last month
     m2 = (m1 - timedelta(days=1)).replace(day=1)                          # two months ago
+    last_month = round(_sum_days(provs, *_month_bounds(m1)), 2)
     trend = [
-        {"month": m2.strftime("%B"), "actual": round(last_month * 0.90, 2), "projected": None},
+        {"month": m2.strftime("%B"), "actual": round(_sum_days(provs, *_month_bounds(m2)), 2),
+         "projected": None},
         {"month": m1.strftime("%B"), "actual": last_month, "projected": last_month},
         {"month": f"{_today.strftime('%B')} (projected)", "actual": None, "projected": projected},
     ]
 
     # Windowed total (what the range actually spans) and the daily provider series.
     window_total_spend = round(window_total, 2)
-    daily = _daily_series(days, provs, end=end)
+    daily = _daily_series(days, provs, end=w_last)
 
     # AI and GPU as a real number: classify the demo inventory the same way live
     # does and split the six buckets. The per-day category slice is attached at
@@ -850,17 +1193,9 @@ def dashboard_data(
     # two cards apart. Summing the days of the current calendar month out of the
     # series the chart already draws keeps the number consistent with the chart
     # instead of being a second opinion about the same month.
-    _m = (end or date.today()).strftime("%Y-%m")
-    mtd_total = round(
-        sum(v for r in daily if str(r.get("date", "")).startswith(_m)
-            for k, v in r.items() if k != "date"),
-        2,
-    )
-    # A window that starts mid-month cannot see the earlier days, so it would
-    # under-report. Fall back to the month figure rather than print something
-    # smaller than the truth.
-    if not mtd_total:
-        mtd_total = month_total
+    # Read from the same curve rather than from `daily`, which a short window
+    # would cut off before the 1st.
+    mtd_total = this_month["month_to_date_usd"]
     # Headline sparklines: last ~12 windowed daily totals, smoothed.
     def _spark(scale: float) -> list[float]:
         tail = daily[-12:] if len(daily) >= 12 else daily
@@ -900,17 +1235,19 @@ def dashboard_data(
         "amount": round(window_total_spend * r["share"], 2),
     } for r in _DEMO_REGIONS]
 
-    # Budgets & alerts.
-    budgets = [
-        {"name": "AWS Monthly Budget",       "provider": "aws",       "used": 2407600, "limit": 2600000},
-        {"name": "Snowflake Monthly Budget", "provider": "snowflake", "used": 420000,  "limit": 400000},
-        {"name": "GCP Monthly Budget",       "provider": "gcp",       "used": 680000,  "limit": 780000},
-    ]
-    for b in budgets:
-        b["pct"] = round(b["used"] / b["limit"] * 100, 1)
-        b["status"] = "over" if b["pct"] >= 100 else ("warn" if b["pct"] >= 85 else "ok")
+    def _money(n: float) -> str:
+        if n >= 1e6: return f"${n/1e6:.1f}M"
+        if n >= 1e3: return f"${n/1e3:.1f}k"
+        return f"${n:,.0f}"
+
+    # Budgets & alerts: used is month to date, status is judged on the forecast.
+    budget_rows = budgets()
     alerts = [
-        {"kind": "warn",  "title": "Snowflake budget exceeded", "body": "102% of budget used, ad-analytics warehouses running hot"},
+        {"kind": "warn", "title": f"{b['name']} forecast over",
+         "body": (f"On track for {_money(b['projected_month_total'])}, "
+                  f"{b['projected_pct']:.0f}% of the {_money(b['limit'])} budget")}
+        for b in budget_rows if b["status"] == "over"
+    ] + [
         {"kind": "info",  "title": "Forecast alert",            "body": f"{provs[0].upper() if provs else 'AWS'} forecast tracking above run rate after the season launch"},
     ]
 
@@ -946,16 +1283,14 @@ def dashboard_data(
         ],
     }
 
-    # Forecast vs budget with a confidence band.
-    def _money(n: float) -> str:
-        if n >= 1e6: return f"${n/1e6:.1f}M"
-        if n >= 1e3: return f"${n/1e3:.1f}k"
-        return f"${n:,.0f}"
+    # Forecast vs budget with a confidence band, on the same curve as the tools.
     hist = [round(sum(v for k, v in row.items() if k != "date"), 2) for row in daily]
-    last = hist[-1] if hist else (month_total / 30.0)
-    forecast = [round(last * (1.0 + 0.012 * i), 2) for i in range(1, 13)]
-    budget = round(month_total * 1.14, 2)
-    proj_end = round(month_total * 1.088, 2)
+    forecast = [round(_sum_days(provs, d, d), 2)
+                for d in _days(ref + timedelta(days=1), ref + timedelta(days=12))]
+    limits = {b["provider"]: b["limit"] for b in budget_rows}
+    budget = (_ORG_MONTHLY_BUDGET if provider == "all"
+              else limits.get(provs[0], round(projected * 1.1, 2)))
+    proj_end = projected
     vs_budget = round((proj_end - budget) / budget * 100, 1)
     forecast_panel = {
         "history": hist,
@@ -1012,7 +1347,7 @@ def dashboard_data(
         "spend_by_region": spend_by_region,
         "recommendations_table": recommendations,
         "ai_insights": ai_insights,
-        "budgets": budgets,
+        "budgets": budget_rows,
         "alerts": alerts,
         "window_days": days,
         "provider": provider,
@@ -1027,7 +1362,7 @@ def dashboard_data(
             "ledger": verified_ledger,
         },
         "anomalies_open": 2 if "aws" in provs else 1,
-        "budget_pct_used": 68.0,
+        "budget_pct_used": round(mtd_total / budget * 100, 1) if budget else None,
         "recent_opportunities": recent_opportunities,
         "suppressed_opportunities": [
             {"description": "RDS metadata-catalog-01 flagged underutilized, but memory sits at 82%. "
@@ -1077,6 +1412,61 @@ def connected_providers() -> list[dict[str, str]]:
         {"name": p, "category": _DEMO_PROVIDER_CATEGORY.get(p, "cloud")}
         for p in _DEMO_PROVIDERS
     ]
+
+
+_PROVIDER_LABEL = {
+    "aws": "AWS", "gcp": "GCP", "azure": "Azure", "kubernetes": "Kubernetes",
+    "openai": "OpenAI", "anthropic": "Anthropic", "datadog": "Datadog",
+    "snowflake": "Snowflake", "databricks": "Databricks",
+}
+
+# One sentence every "what am I connected to" view uses in demo, so
+# list_connected_providers, check_connector_health, nable_setup_status and
+# what_can_nable_do all tell the same story: nine sample providers, none of the
+# user's own accounts.
+SAMPLE_PROVIDERS_NOTE = (
+    "Demo mode: these are the providers in the StreamCo sample environment, shown with "
+    "sample data. They are not accounts the user connected; none of the user's own "
+    "accounts are connected. connect_aws, connect_gcp or connect_azure connects a real one.")
+
+
+def capabilities_text(detailed: bool = False) -> str:
+    """what_can_nable_do in demo mode. The live renderer reports what is really
+    connected, which in demo is nothing, so it answered "nothing's connected"
+    while list_connected_providers answered "nine connected". This says what is
+    true: the answers are sample data, here is what the sample covers, and here
+    is how to swap it for the user's own account."""
+    from .capabilities import TOTAL_TOOLS
+
+    names = ", ".join(_PROVIDER_LABEL.get(p, p) for p in _DEMO_PROVIDERS)
+    lines = [
+        "## What nable can do (demo mode, sample data)",
+        "",
+        "This session answers from the StreamCo sample environment: sample data for "
+        f"{names}. None of your own accounts are connected, so no answer here is about "
+        "your spend.",
+        "",
+        "Try asking (each one answers from the sample):",
+        '- "What did we spend in the last 30 days?"  (get_cost_summary)',
+        '- "Why did the bill go up?"  (explain_recent_cost_drivers)',
+        '- "Break spend down by team, account or region"  (slice_costs)',
+        '- "Any cost anomalies?"  (get_anomalies)',
+        '- "What can we save?"  (get_savings_summary, get_rightsizing_recommendations)',
+        '- "Where will this month land?"  (forecast_costs)',
+        '- "What are we spending on AI?"  (get_llm_costs, optimize_ai_spend)',
+        '- "How efficient is our Kubernetes cluster?"  (get_kubernetes_costs)',
+        "",
+        "To see your own numbers, connect an account right here: connect_aws or "
+        "connect_gcp (they detect credentials already on this machine) or connect_azure. "
+        "Answers switch from sample data to your account as soon as one is connected.",
+        "",
+        f"nable ships {TOTAL_TOOLS}+ read-only tools. The ones the sample cannot answer "
+        "light up once a real account is connected.",
+    ]
+    if detailed:
+        lines += ["", "### Tools that answer from the sample",
+                  ", ".join(sorted(demo_tool_names()))]
+    return "\n".join(lines)
 
 
 def demo_accounts() -> dict[str, list[dict[str, Any]]]:
@@ -1232,15 +1622,18 @@ DEMO_RESPONSES: dict[str, Any] = {
 }
 
 
-def get_demo_response(tool_name: str) -> dict[str, Any] | None:
+def get_demo_response(tool_name: str, args: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """
     Return a demo response for the given tool name, or None if not available.
-    Call this at the top of each MCP tool when FINOPS_DEMO_MODE=1.
+    Call this at the top of each MCP tool when FINOPS_DEMO_MODE=1. `args` are the
+    tool's own arguments, so period and provider filters shape the sample answer.
     """
     fn = DEMO_RESPONSES.get(tool_name)
     if fn is None:
         return None
-    result = fn()
+    import inspect
+
+    result = fn(args or {}) if inspect.signature(fn).parameters else fn()
     result["_demo_mode"] = True
     return result
 
@@ -1261,13 +1654,11 @@ _AGENT_SELF_DEMO = set(DEMO_RESPONSES) | {
     "compare_providers", "check_connector_health", "whoami", "what_can_nable_do",
 }
 _AGENT_LOCAL_OK = {"pin_view", "list_pinned_views", "get_pinned_view", "unpin_view"}
-
-
-def _demo_total() -> dict[str, Any]:
-    by_provider = {p: round(sum(s["amount"] for s in _PROVIDER_SERVICES[p]), 2)
-                   for p in _DEMO_PROVIDERS}
-    return {"total_usd": round(sum(by_provider.values()), 2), "by_provider": by_provider,
-            "period": cost_summary()["period"], "_demo_mode": True}
+# The way out of demo. These run for real in demo mode, so a user trying the sample
+# can connect their own account from the same chat; server.py labels the result
+# with whether the session has left the sample.
+_DEMO_EXIT_TOOLS = {"connect_aws", "connect_gcp", "connect_azure", "connect_opencost",
+                    "nable_setup_status"}
 
 
 def _demo_commitment() -> dict[str, Any]:
@@ -1282,83 +1673,377 @@ def _demo_commitment() -> dict[str, Any]:
     }
 
 
+# The dimensions the sample can break spend down by, and the spellings a model
+# uses for each (plain names, FOCUS column names, snake_case).
+_SLICE_DIMS: dict[str, set[str]] = {
+    "provider": {"provider", "providername", "cloud", "publisher", "publishername"},
+    "service": {"service", "product", "servicename", "service_name"},
+    "account": {"account", "subaccount", "subaccountid", "subaccountname", "account_id",
+                "accountid", "linkedaccount", "billingaccount"},
+    "region": {"region", "regionid", "regionname", "location"},
+    "team": {"team", "tag", "tags", "owner", "costcenter", "cost_center"},
+    "env": {"env", "environment", "stage"},
+}
+_TAG_DIM = re.compile(r"^(?:tags?|labels?)\s*[\[.:/]\s*['\"]?([^\]'\"]+)['\"]?\]?$", re.I)
+
+
+def _slice_dimension(raw: Any) -> tuple[str | None, str]:
+    """(sample dimension or None, what the caller asked for). A tag dimension
+    such as Tags[team] or tag:env resolves to its key."""
+    text = str(raw).strip()
+    m = _TAG_DIM.match(text)
+    if m:
+        key = m.group(1).strip().lower()
+        return (key if key in ("team", "env") else None), f"tag '{m.group(1).strip()}'"
+    low = text.lower()
+    for dim, names in _SLICE_DIMS.items():
+        if low in names:
+            return dim, text
+    return None, f"dimension '{text}'"
+
+
 def _demo_slice(args: dict[str, Any]) -> dict[str, Any]:
     """Synthetic 'moldable view' slice from the demo dataset, in the shape the
-    web Ask tab renders as a pinnable cost card."""
+    web Ask tab renders as a pinnable cost card. Summed over the requested
+    window from the same curve as every other demo tool; account, region and
+    team splits are AWS's (the sample's linked accounts, regions and CUR tags
+    are AWS ones), so they add back up to AWS's total for the window."""
     dims = args.get("dimensions") or []
-    dim = (str(dims[0]) if dims else "provider").lower()
+    if isinstance(dims, str):
+        dims = [dims]
+    dim, asked = _slice_dimension(dims[0]) if dims else ("provider", "provider")
+    if dim is None:
+        # Never answer a different question: Tags[team] used to come back as a
+        # by-provider breakdown with nothing saying the dimension was dropped.
+        out = _not_in_sample(f"The {asked}")
+        out["available_dimensions"] = ["provider", "service", "account", "region",
+                                       "Tags[team]", "Tags[env]"]
+        out["note"] += (" slice_costs on the sample can break spend down by provider, "
+                        "service, account, region, Tags[team] (AWS) or Tags[env].")
+        return out
     metric = args.get("metric") or "EffectiveCost"
-    total_all = sum(s["amount"] for p in _DEMO_PROVIDERS for s in _PROVIDER_SERVICES[p])
-    if dim in ("service", "product", "service_name"):
+    provs = _pick_providers(args.get("provider"), None)
+    if provs is None:
+        return _not_in_sample(f"Provider '{args.get('provider')}'")
+    first, last = demo_window(args)
+    wrows = _window_rows(provs, first, last)
+    aws_total = sum(r["amount"] for r in wrows if r["provider"] == "aws")
+    scope = _scope(provs)
+    if dim == "service":
         key = "service"
-        rows = sorted(
-            ({"service": s["service"], "metric": s["amount"]}
-             for p in _DEMO_PROVIDERS for s in _PROVIDER_SERVICES[p]),
-            key=lambda x: -x["metric"])[:15]
-    elif dim in ("team", "tag", "owner", "costcenter", "cost_center"):
-        key = "team"
-        rows = [{"team": k, "metric": round(v, 2)} for k, v in cost_summary_cur()["by_tag_team"].items()]
-    elif dim in ("account", "subaccount", "subaccountid", "account_id", "linkedaccount"):
-        key = "account"
-        rows = [{"account": a["name"], "metric": round(total_all * a["share"], 2)} for a in _DEMO_ACCOUNTS]
-    elif dim in ("region", "regionid", "location"):
-        key = "region"
-        rows = [{"region": r["region"], "metric": round(total_all * r["share"], 2)} for r in _DEMO_REGIONS]
+        rows = [{"service": r["service"], "metric": r["amount"]} for r in wrows]
+    elif dim == "team":
+        key, scope = "team", "AWS (team tag from the CUR)"
+        rows = [{"team": k, "metric": v} for k, v in _split(_AWS_TEAM_30D, aws_total).items()]
+    elif dim == "env":
+        key = "env"
+        total = sum(r["amount"] for r in wrows)
+        rows = [{"env": k, "metric": v} for k, v in _split(_ENV_30D, total).items()]
+    elif dim == "account":
+        key, scope = "account", "AWS linked accounts"
+        rows = [{"account": a["name"], "metric": round(aws_total * a["share"], 2)}
+                for a in _DEMO_ACCOUNTS]
+    elif dim == "region":
+        key, scope = "region", "AWS regions"
+        rows = [{"region": r["region"], "metric": round(aws_total * r["share"], 2)}
+                for r in _DEMO_REGIONS]
     else:
         key = "provider"
-        rows = [{"provider": p, "metric": round(sum(s["amount"] for s in _PROVIDER_SERVICES[p]), 2)}
-                for p in _DEMO_PROVIDERS]
+        rows = [{"provider": p, "metric": round(sum(r["amount"] for r in wrows
+                                                     if r["provider"] == p), 2)}
+                for p in provs]
     rows.sort(key=lambda x: -x["metric"])
     total = round(sum(r["metric"] for r in rows), 2)
-    return {
+    limit = args.get("limit")
+    if isinstance(limit, int) and limit > 0:
+        rows = rows[:limit]
+    out = {
         "card": {"title": f"{metric} by {key}", "template": "bar", "metric": metric,
-                 "dimensions": [key], "period": {"start": _MONTH_START, "end": _YESTERDAY}},
+                 "dimensions": [key], "period": _period(first, last)},
         "result": {"rows": rows, "total": total, "record_count": len(rows),
-                   "metric": metric, "dimensions": [key]},
+                   "metric": metric, "dimensions": [key], "scope": scope},
         "_demo_mode": True,
     }
+    if len(dims) > 1:
+        out["dimensions_not_applied"] = [str(d) for d in dims[1:]]
+        out["note"] = ("The sample breaks spend down one dimension at a time; only "
+                       f"{key} was applied.")
+    return out
+
+
+def _demo_total(args: dict[str, Any] | None = None,
+                provs: list[str] | None = None) -> dict[str, Any]:
+    first, last = demo_window(args)
+    provs = provs or list(_DEMO_PROVIDERS)
+    by_provider = {p: round(_sum_days([p], first, last), 2) for p in provs}
+    return {"total_usd": round(sum(by_provider.values()), 2), "by_provider": by_provider,
+            "period": _period(first, last), "_demo_mode": True}
+
+
+def compare_providers(args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """compare_providers on the sample, over the requested window."""
+    args = args or {}
+    provs = _pick_providers(None, args.get("category")) or []
+    first, last = demo_window(args)
+    rows = _window_rows(provs, first, last)
+    grand = round(sum(r["amount"] for r in rows), 2)
+    out = []
+    for p in provs:
+        mine = [r for r in rows if r["provider"] == p]
+        total = round(sum(r["amount"] for r in mine), 2)
+        out.append({
+            "provider": p,
+            "category": _DEMO_PROVIDER_CATEGORY.get(p, "cloud"),
+            "total_usd": total,
+            "total_formatted": _usd(total),
+            "pct_of_total": round(total / grand * 100, 1) if grand else 0,
+            "top_services": [{"service": r["service"], "amount_usd": r["amount"]}
+                             for r in mine[:5]],
+        })
+    out.sort(key=lambda x: -x["total_usd"])
+    return {"period": _period(first, last), "grand_total_usd": grand,
+            "grand_total_formatted": _usd(grand), "providers": out}
+
+
+def _costs_by_service(args: dict[str, Any]) -> dict[str, Any]:
+    provs = _pick_providers(args.get("provider"), args.get("category"))
+    if provs is None:
+        return _not_in_sample(f"Provider '{args.get('provider')}'")
+    first, last = demo_window(args)
+    rows = _window_rows(provs, first, last)
+    want = str(args.get("service_filter") or "").strip().lower()
+    if want:
+        rows = [r for r in rows if want in r["service"].lower()]
+        if not rows:
+            return _not_in_sample(f"A service matching '{want}'")
+    total = round(sum(r["amount"] for r in rows), 2)
+    return {"period": _period(first, last), "total_usd": total,
+            "services": [{"service": r["service"], "provider": r["provider"],
+                          "total_usd": r["amount"]} for r in rows],
+            "_demo_mode": True}
+
+
+def _top_cost_drivers(args: dict[str, Any]) -> dict[str, Any]:
+    res = _costs_by_service({k: v for k, v in args.items() if k != "service_filter"})
+    if "services" not in res:
+        return res
+    limit = args.get("limit")
+    limit = int(limit) if isinstance(limit, (int, float)) and limit > 0 else 10
+    grand = res["total_usd"]
+    top = [dict(s, pct_of_total=round(s["total_usd"] / grand * 100, 1) if grand else 0)
+           for s in res["services"][:limit]]
+    return {"period": res["period"], "top_services": top, "grand_total_usd": grand,
+            "grand_total_formatted": _usd(grand), "_demo_mode": True}
+
+
+def _costs_by_team(args: dict[str, Any]) -> dict[str, Any]:
+    provider = str(args.get("provider") or "").strip().lower()
+    if provider and provider != "aws":
+        out = _not_in_sample(f"Team attribution for '{provider}'")
+        out["note"] += " In the sample, team tags come from the AWS CUR."
+        return out
+    cur = cost_summary_cur(args)
+    return {"by_team": cur["by_tag_team"], "untagged_pct": cur["untagged_pct"],
+            "total_usd": cur["total_usd"], "period": cur["period"],
+            "scope": "AWS (team tags from the CUR)", "_demo_mode": True}
+
+
+def _cost_trends(args: dict[str, Any]) -> dict[str, Any]:
+    provs = _pick_providers(args.get("provider"), args.get("category"))
+    if provs is None:
+        return _not_in_sample(f"Provider '{args.get('provider')}'")
+    first, last = demo_window(args)
+    n = (last - first).days + 1
+    series = _daily_series(n, provs, end=last)
+    for row in series:
+        row["total"] = round(sum(v for k, v in row.items() if k != "date"), 2)
+    total = round(_sum_days(provs, first, last), 2)
+    out: dict[str, Any] = {"period": _period(first, last), "total_usd": total,
+                           "providers": provs, "_demo_mode": True}
+    if str(args.get("granularity") or "DAILY").upper() == "MONTHLY":
+        months: dict[str, float] = {}
+        for row in series:
+            months[row["date"][:7]] = months.get(row["date"][:7], 0.0) + row["total"]
+        out["monthly_series"] = [{"month": m, "total": round(v, 2)} for m, v in months.items()]
+    else:
+        out["daily_series"] = series
+    return out
+
+
+def _cost_history(args: dict[str, Any]) -> dict[str, Any]:
+    provs = _pick_providers(args.get("provider"), None)
+    if provs is None:
+        return _not_in_sample(f"Provider '{args.get('provider')}'")
+    want = str(args.get("service") or "").strip().lower()
+    matches = [(p, s) for p in provs for s in _PROVIDER_SERVICES[p]
+               if not want or want in s["service"].lower()]
+    if not matches:
+        return _not_in_sample(f"A service matching '{want}'")
+    first, last = demo_window(args)
+    ref = _ref_end()
+    days = _days(first, last)
+    series = [{"date": d.isoformat(),
+               "cost_usd": round(sum(_svc_day(s["amount"], s["delta_pct"], d, ref)
+                                     for _, s in matches), 2)} for d in days]
+    return {"period": _period(first, last), "services": [s["service"] for _, s in matches],
+            "total_usd": round(sum(r["cost_usd"] for r in series), 2),
+            "history": series, "_demo_mode": True}
+
+
+def _forecast(args: dict[str, Any]) -> dict[str, Any]:
+    """forecast_costs on the sample: an estimate with a range, never a point
+    figure presented as fact, anchored on the same actuals the cost tools show."""
+    want = str(args.get("service") or "").strip()
+    service = None
+    if want:
+        hits = [s["service"] for p in _DEMO_PROVIDERS for s in _PROVIDER_SERVICES[p]
+                if want.lower() in s["service"].lower()]
+        if not hits:
+            return _not_in_sample(f"A service matching '{want}'")
+        service = hits[0]
+    provs = [p for p in _DEMO_PROVIDERS
+             if service is None or any(s["service"] == service for s in _PROVIDER_SERVICES[p])]
+    month = month_forecast(provs, service)
+    horizon = args.get("horizon_days")
+    horizon = int(horizon) if isinstance(horizon, (int, float)) and horizon > 0 else 30
+    horizon = min(horizon, 365)
+    today = _ref_end() + timedelta(days=1)
+    ahead = _sum_days(provs, today, today + timedelta(days=horizon - 1), service)
+    band = min(0.05 + 0.0025 * horizon, 0.30)
+    out: dict[str, Any] = {
+        "estimate": True,
+        "scope": service or _scope(provs),
+        **month,
+        "horizon_days": horizon,
+        "forecast_next_days_usd": round(ahead, 2),
+        "forecast_range": {"low": round(ahead * (1 - band), 2),
+                           "high": round(ahead * (1 + band), 2)},
+        "method": ("Sample-data estimate: this month's actuals to date plus the remaining "
+                   "days projected on the recent daily trend. The range is +/-10% on the "
+                   "projected days, wider for longer horizons. It is an estimate, not a "
+                   "commitment."),
+        "_demo_mode": True,
+    }
+    rng = month["projected_range"]
+    note = (f"Sample data, estimate: {month['month']} is on track to finish between "
+            f"{_usd(rng['low'])} and {_usd(rng['high'])} (central {_usd(month['projected_month_total'])}), "
+            f"with {_usd(month['month_to_date_usd'])} spent in the first "
+            f"{month['days_elapsed']} days.")
+    if service is None:
+        out["budget"] = _ORG_MONTHLY_BUDGET
+        out["vs_budget_pct"] = _pct(month["projected_month_total"], _ORG_MONTHLY_BUDGET)
+        note += (f" That is {abs(out['vs_budget_pct']):.1f}% "
+                 f"{'over' if out['vs_budget_pct'] > 0 else 'under'} the "
+                 f"{_usd(_ORG_MONTHLY_BUDGET)} monthly budget.")
+    out["note"] = note
+    return out
+
+
+def _budget_status(args: dict[str, Any]) -> dict[str, Any]:
+    rows = budgets()
+    name = str(args.get("budget_name") or "").strip().lower()
+    if name:
+        rows = [b for b in rows if name in b["name"].lower()]
+        if not rows:
+            return _not_in_sample(f"A budget named '{args.get('budget_name')}'")
+    return {"budgets": rows, "_demo_mode": True,
+            "basis": "used is month-to-date; status is judged on the month-end forecast"}
+
+
+def _fixed_window(result: dict[str, Any], args: dict[str, Any], *keys: str) -> dict[str, Any]:
+    """Say so when a tool whose sample figures cover a fixed 30 days was asked
+    for a different window, rather than answer a 7-day question with 30 days."""
+    for key in keys:
+        v = args.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and int(v) != _REF_DAYS:
+            result["sample_window"] = (
+                f"The sample's figures for this tool cover a fixed {_REF_DAYS}-day window; "
+                f"the requested {key}={int(v)} is not applied.")
+    return result
+
+
+def _savings_summary(args: dict[str, Any]) -> dict[str, Any]:
+    d = dashboard_data()
+    return {"potential_monthly": d["opportunities_total_saving"],
+            "verified_monthly": d["verified_savings"]["monthly"],
+            "recommendations": d["recommendations_table"], "_demo_mode": True}
+
+
+def _savings_ledger(args: dict[str, Any]) -> dict[str, Any]:
+    d = dashboard_data()
+    return _fixed_window({"ledger": d["verified_savings"]["ledger"],
+                          "monthly": d["verified_savings"]["monthly"], "_demo_mode": True},
+                         args, "days")
+
+
+def _savings_recommendations(args: dict[str, Any]) -> dict[str, Any]:
+    d = dashboard_data()
+    return {"recommendations": d["recommendations_table"],
+            "open_potential_usd": d["opportunities_total_saving"], "_demo_mode": True}
+
+
+def _scorecard(args: dict[str, Any]) -> dict[str, Any]:
+    return {"scorecard": dashboard_data()["scorecard"], "_demo_mode": True}
+
+
+def _roi(args: dict[str, Any]) -> dict[str, Any]:
+    d = dashboard_data()
+    return _fixed_window({"verified_monthly": d["verified_savings"]["monthly"],
+                          "verified_annual": d["verified_savings"]["annual"],
+                          "_demo_mode": True}, args, "period_days")
+
+
+def _ai_kpis(args: dict[str, Any]) -> dict[str, Any]:
+    d = dashboard_data()
+    return _fixed_window({"metrics": d["ai_efficiency"]["metrics"],
+                          "ai_pct_of_spend": d["ai_efficiency"]["ai_pct_of_spend"],
+                          "_demo_mode": True}, args, "days")
 
 
 def _agent_intercepts() -> dict[str, Any]:
-    """Lazily built so dashboard_data() (heavier) is only computed on a hit."""
-    dd = dashboard_data()
+    """Tool name -> demo answer builder, called with the tool's arguments. Each
+    builder runs only on a hit, so dashboard_data() (heavier) is computed only
+    when a tool needs one of its panels."""
     return {
-        "get_costs_by_service": {"by_service": cost_summary()["by_service"],
-                                 "total_usd": cost_summary()["total_usd"],
-                                 "period": cost_summary()["period"], "_demo_mode": True},
-        "get_top_cost_drivers": cost_drivers(),
-        "explain_cost_change": cost_drivers(),
-        "get_costs_by_team": {"by_team": cost_summary_cur()["by_tag_team"],
-                              "untagged_pct": cost_summary_cur()["untagged_pct"],
-                              "total_usd": cost_summary_cur()["total_usd"], "_demo_mode": True},
-        "get_total_spend_all_sources": _demo_total(),
-        "get_cost_summary_all_accounts": _demo_total(),
-        "get_saas_spend_summary": {"by_provider": {p: round(sum(s["amount"] for s in _PROVIDER_SERVICES[p]), 2)
-                                                   for p in ("datadog", "snowflake", "databricks")},
-                                   "_demo_mode": True},
-        "forecast_costs": {"projected_month_total": dd["projected_month_total"],
-                           "budget": dd["forecast_panel"]["budget"],
-                           "vs_budget_pct": dd["forecast_panel"]["vs_budget_pct"],
-                           "note": dd["forecast_panel"]["note"], "_demo_mode": True},
-        "get_commitment_analysis": _demo_commitment(),
-        "get_commitment_coverage_by_tag": _demo_commitment(),
-        "check_budget_status": {"budgets": dd["budgets"], "_demo_mode": True},
-        "list_budgets": {"budgets": dd["budgets"], "_demo_mode": True},
-        "get_savings_summary": {"potential_monthly": dd["opportunities_total_saving"],
-                                "verified_monthly": dd["verified_savings"]["monthly"],
-                                "recommendations": dd["recommendations_table"], "_demo_mode": True},
-        "get_savings_ledger": {"ledger": dd["verified_savings"]["ledger"],
-                               "monthly": dd["verified_savings"]["monthly"], "_demo_mode": True},
-        "list_savings_recommendations": {"recommendations": dd["recommendations_table"],
-                                         "open_potential_usd": dd["opportunities_total_saving"], "_demo_mode": True},
-        "get_efficiency_scorecard": {"scorecard": dd["scorecard"], "_demo_mode": True},
-        "get_nable_roi": {"verified_monthly": dd["verified_savings"]["monthly"],
-                          "verified_annual": dd["verified_savings"]["annual"], "_demo_mode": True},
-        "get_cost_trends": {"daily_series": dd["daily_series"], "_demo_mode": True},
-        "get_cost_history": {"trend": dd["trend"], "_demo_mode": True},
-        "get_ai_kpis": {"metrics": dd["ai_efficiency"]["metrics"],
-                        "ai_pct_of_spend": dd["ai_efficiency"]["ai_pct_of_spend"], "_demo_mode": True},
+        "get_costs_by_service": _costs_by_service,
+        "get_top_cost_drivers": _top_cost_drivers,
+        "explain_cost_change": lambda a: cost_drivers({"days": a.get("compare_days")}),
+        "get_costs_by_team": _costs_by_team,
+        "get_total_spend_all_sources": _demo_total,
+        "get_cost_summary_all_accounts": _demo_total,
+        "get_saas_spend_summary": lambda a: _demo_total(a, ["datadog", "snowflake", "databricks"]),
+        "forecast_costs": _forecast,
+        "get_commitment_analysis": lambda a: _demo_commitment(),
+        "get_commitment_coverage_by_tag": lambda a: _demo_commitment(),
+        "check_budget_status": _budget_status,
+        "list_budgets": _budget_status,
+        "get_savings_summary": _savings_summary,
+        "get_savings_ledger": _savings_ledger,
+        "list_savings_recommendations": _savings_recommendations,
+        "get_efficiency_scorecard": _scorecard,
+        "get_nable_roi": _roi,
+        "get_cost_trends": _cost_trends,
+        "get_cost_history": _cost_history,
+        "get_ai_kpis": _ai_kpis,
     }
+
+
+_demo_tool_names: "frozenset[str] | None" = None
+
+
+def demo_tool_names() -> frozenset[str]:
+    """The tools worth advertising in demo mode: every tool that answers from the
+    sample dataset, plus the connect and setup tools that lead out of it.
+
+    Demo used to advertise all ~198 tools (~48k tokens of definitions) while 107
+    of them could only answer "not in the sample dataset". A model picks from
+    what it is shown, so it kept reaching for tools that had nothing to say."""
+    global _demo_tool_names
+    if _demo_tool_names is None:
+        _demo_tool_names = frozenset(
+            _AGENT_SELF_DEMO | _AGENT_LOCAL_OK | _DEMO_EXIT_TOOLS
+            | {"slice_costs"} | set(_agent_intercepts()))
+    return _demo_tool_names
 
 
 def demo_bridge_result(name: str, args: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1366,17 +2051,103 @@ def demo_bridge_result(name: str, args: dict[str, Any] | None) -> dict[str, Any]
     demo-safe) tool run. Guarantees no agent tool reaches real credentials in
     demo mode: unknown tools get a placeholder, never a live call."""
     args = args or {}
-    if name in _AGENT_SELF_DEMO or name in _AGENT_LOCAL_OK:
+    # The registry tools answer here, with their arguments, rather than in each
+    # tool's own demo branch: one place applies the period and provider filters,
+    # and a tool that lacks a branch (get_tag_cost_breakdown_cur ran the live
+    # CUR query in demo) can no longer slip past.
+    if name in DEMO_RESPONSES:
+        return get_demo_response(name, args)
+    if name in _AGENT_SELF_DEMO or name in _AGENT_LOCAL_OK or name in _DEMO_EXIT_TOOLS:
         return None
     if name == "slice_costs":
         return _demo_slice(args)
-    hit = _agent_intercepts().get(name)
-    if hit is not None:
-        return hit
+    build = _agent_intercepts().get(name)
+    if build is not None:
+        return build(args)
     return {
+        "_demo_mode": True,
         "demo_mode": True,
         "note": (
             "This is the StreamCo sample environment, so that specific detail isn't in the sample "
             "dataset. Ask about total spend, cost drivers, spend by service / team / account / region, "
             "anomalies, rightsizing, commitments, budgets, forecast, savings, or AI and LLM cost."),
     }
+
+
+def after_connect_in_demo(result: Any) -> Any:
+    """Label a connect_* result that ran while the session was in demo mode.
+
+    A connect is how a demo user leaves the sample from chat. Whether it worked
+    decides what every later answer is, so the result says it outright: either
+    the sample is gone and answers are now the user's own numbers, or nothing
+    changed and answers are still sample data."""
+    global _real_provider_cache
+    _real_provider_cache = None  # re-detect now, not in 30s
+    if not isinstance(result, dict):
+        return result
+    if not is_demo():
+        result["_demo_mode"] = False
+        result["_demo_exit"] = (
+            "Demo mode is off: a real account is connected, so answers from the next "
+            "call on are the user's own numbers, not the StreamCo sample data. Earlier "
+            "answers in this conversation were sample data; do not mix the two.")
+        return result
+    result["_demo_mode"] = True
+    if result.get("connected") and os.environ.get("FINOPS_DEMO_FORCE", "").lower() in _TRUTHY:
+        result["_demo_note"] = (
+            "Connected, but FINOPS_DEMO_FORCE=1 keeps this session on sample data. "
+            "Restart nable without FINOPS_DEMO_FORCE and FINOPS_DEMO to see real numbers.")
+    else:
+        result["_demo_note"] = (
+            "Still in demo mode: no account is connected yet, so answers remain the "
+            "StreamCo sample data. Follow the steps above; nable switches to the "
+            "user's real numbers as soon as an account is connected.")
+    return result
+
+
+DEMO_TEXT_HEADER = "Sample data (demo mode): the StreamCo sample environment, not your account."
+DEMO_NOTE = (
+    "Sample data (demo mode): every figure comes from the StreamCo sample environment, "
+    "not the user's account. None of the user's own accounts are connected. To see real "
+    "numbers, connect one here with connect_aws, connect_gcp or connect_azure.")
+
+
+def label_demo(value: Any) -> Any:
+    """Stamp a demo-mode answer so no reader, model or human, can take it for
+    the user's own numbers: `_demo_mode: true` and a sample-data note on a dict,
+    the sample-data header on text, the flag on each dict in a list.
+
+    Applied once, at the server chokepoint, to every tool that answers in demo
+    mode. Several tools used to answer with no flag at all (list_connected_providers
+    reported nine providers "connected"), so the label depended on each tool
+    remembering it."""
+    if isinstance(value, dict):
+        value.setdefault("_demo_mode", True)
+        value.setdefault("_demo_note", DEMO_NOTE)
+    elif isinstance(value, str):
+        return render_text(value)
+    elif isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                item.setdefault("_demo_mode", True)
+    return value
+
+
+def render_text(value: Any) -> str:
+    """A demo answer as text, for a tool whose declared return type is str.
+
+    The demo layer answers in dicts, and a tool declared `-> str` fails output
+    validation on a dict, so the model saw a pydantic error instead of the
+    sample. The text always opens with the sample-data label so no reader can
+    take it for their own numbers."""
+    if isinstance(value, str):
+        body = value
+    elif isinstance(value, dict) and set(value) <= {"_demo_mode", "demo_mode", "note"}:
+        body = str(value.get("note", ""))
+    else:
+        import json
+
+        body = json.dumps(value, indent=2, default=str)
+    if body.lower().startswith("sample data"):
+        return body
+    return f"{DEMO_TEXT_HEADER}\n\n{body}".rstrip()

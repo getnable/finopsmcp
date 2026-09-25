@@ -35,6 +35,29 @@ def test_one_way_doors_are_caught(cmd):
 
 
 @pytest.mark.parametrize("cmd", [
+    "terragrunt destroy",
+    "terragrunt run-all destroy --terragrunt-non-interactive",
+    "terragrunt run --all destroy",
+    "terragrunt destroy-all",
+    "terragrunt apply -destroy",
+])
+def test_terragrunt_destroys_are_one_way(cmd):
+    """Terragrunt fans a destroy out over every module under the directory.
+    It had no pattern at all, so the widest destroy was the invisible one."""
+    assert guard.classify_command(cmd) == ("one_way", "delete_resource"), cmd
+
+
+@pytest.mark.parametrize("cmd,expected", [
+    ("terragrunt apply", ("two_way", "infra_apply")),
+    ("terragrunt run-all apply", ("two_way", "infra_apply")),
+    ("terragrunt plan", None),
+    ("terragrunt run-all plan", None),
+])
+def test_terragrunt_applies_are_two_way_and_plans_are_reads(cmd, expected):
+    assert guard.classify_command(cmd) == expected, cmd
+
+
+@pytest.mark.parametrize("cmd", [
     "terraform apply",                          # plain apply stays reversible
     "terraform apply && echo done -destroy",    # -destroy in a CHAINED command must not leak back
 ])
@@ -85,8 +108,11 @@ def test_hook_command_quotes_paths_with_spaces():
 def test_hook_command_falls_back_to_uvx():
     # A uvx user has no finops on PATH; the bare command would fail on every
     # Bash call. uv is guaranteed present for anyone who installed via uvx.
+    # Pinned to this release: unpinned, it pulled the newest PyPI release on
+    # every agent tool call (test_guard_hook_upgrade.py has the rest).
+    from finops import __version__
     with patch("shutil.which", return_value=None):
-        assert guard._hook_command() == "uvx --from finops-mcp finops guard hook"
+        assert guard._hook_command() == f"uvx --from finops-mcp=={__version__} finops guard hook"
 
 
 def test_install_marker_matches_all_command_forms(tmp_path, monkeypatch):

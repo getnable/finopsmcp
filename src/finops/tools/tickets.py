@@ -9,8 +9,26 @@ from __future__ import annotations
 from .. import server as _srv
 
 
+def _no_tracker() -> dict | None:
+    """A result that says no tracker is configured, or None when one is.
+    "tickets_created: 0" with no tracker read as "nothing needed a ticket"."""
+    from ..integrations.ticketing import list_configured_providers
+    if list_configured_providers():
+        return None
+    return {
+        "tickets_created": 0,
+        "error": "no_ticket_tracker",
+        "message": (
+            "No ticket tracker is configured, so no tickets were created. Set one of: "
+            "Jira (JIRA_BASE_URL, JIRA_API_TOKEN, JIRA_USER_EMAIL, JIRA_PROJECT_KEY), "
+            "Linear (LINEAR_API_KEY, LINEAR_TEAM_ID), or GitHub Issues "
+            "(GITHUB_TOKEN, GITHUB_FINOPS_REPO)."
+        ),
+    }
+
+
 @_srv.mcp.tool()
-async def send_onboarding_email(
+def send_onboarding_email(
     to_email: str,
     variant: str = "welcome",
     days_left: int = 3,
@@ -33,6 +51,13 @@ async def send_onboarding_email(
         - "Send a day 7 nudge to user@company.com"
         - "Send the trial ending email to someone@corp.com with 3 days left"
     """
+    # A nable marketing email, for nable's own staff. A customer's model must
+    # not be able to send it from the customer's SMTP account, so it runs only
+    # with the internal flag set (and tool_surface never advertises it without).
+    from ..tool_surface import internal_tools_enabled
+    if not internal_tools_enabled():
+        return {"error": ("send_onboarding_email is an internal nable tool and is "
+                          "disabled. It sends nable's own onboarding emails.")}
     if err := _srv.require_role("admin"):
         return err
     try:
@@ -146,7 +171,7 @@ async def generate_account_dashboard(
 
 
 @_srv.mcp.tool()
-async def create_anomaly_tickets(limit: int = 20) -> dict:
+def create_anomaly_tickets(limit: int = 20) -> dict:
     """
     Create tickets in Jira, Linear, or GitHub Issues for all active high/medium
     anomalies that don't already have a ticket. Uses the first configured
@@ -163,13 +188,19 @@ async def create_anomaly_tickets(limit: int = 20) -> dict:
     if err := _srv.require_pro("ticket_creation"):
         return err
 
+    if (none := _no_tracker()) is not None:
+        return none
     try:
         from ..integrations.ticketing import create_tickets_for_unnotified
         urls = create_tickets_for_unnotified(limit=limit)
-        return {
+        out = {
             "tickets_created": len(urls),
             "ticket_urls": urls,
         }
+        if not urls:
+            out["message"] = ("No new tickets: no active high or medium anomaly is without "
+                              "one, or the tracker did not accept them (see the server log).")
+        return out
     except Exception as e:
         return {"error": str(e)}
 
@@ -200,14 +231,25 @@ async def create_rightsizing_tickets(
             "message": "Rightsizing analysis is AWS-only (Compute Optimizer + CloudWatch).",
             "tickets_created": 0,
         }
+    if (none := _no_tracker()) is not None:
+        return none
 
     try:
         from ..integrations.ticketing import create_rightsizing_ticket
-        from ..recommendations.rightsizing import analyze_rightsizing
+        from ..recommendations.rightsizing import _coverage_note, analyze_rightsizing
 
-        recs = await _srv.asyncio.to_thread(analyze_rightsizing, min_monthly_savings=min_monthly_savings)
+        coverage: dict = {}
+        recs = await _srv.asyncio.to_thread(
+            analyze_rightsizing, min_monthly_savings=min_monthly_savings, coverage=coverage)
         if not recs:
-            return {"message": "No rightsizing recommendations found", "tickets_created": 0}
+            note, evaluated = _coverage_note(coverage, 0, 0)
+            return {
+                "message": ("No rightsizing recommendations found. " if evaluated else "")
+                + note,
+                "evaluated": evaluated,
+                "coverage": coverage,
+                "tickets_created": 0,
+            }
 
         urls = []
         skipped = 0
@@ -224,7 +266,8 @@ async def create_rightsizing_tickets(
                 "recommended_type": r.recommended_type,
                 "monthly_savings_usd": savings,
             }
-            url = create_rightsizing_ticket(rec)
+            # A synchronous httpx POST to Jira, Linear or GitHub; off the loop.
+            url = await _srv.asyncio.to_thread(create_rightsizing_ticket, rec)
             if url:
                 urls.append({"resource": r.instance_id, "savings": savings, "url": url})
 
@@ -239,7 +282,7 @@ async def create_rightsizing_tickets(
 
 
 @_srv.mcp.tool()
-async def create_scorecard_tickets(
+def create_scorecard_tickets(
     score_threshold: int = 50,
     team: str = "",
 ) -> dict:
@@ -258,6 +301,8 @@ async def create_scorecard_tickets(
     """
     if err := _srv.require_pro("ticket_creation"):
         return err
+    if (none := _no_tracker()) is not None:
+        return none
 
     try:
         from ..scoring.scorecard import build_scorecard
@@ -292,7 +337,7 @@ async def create_scorecard_tickets(
 
 
 @_srv.mcp.tool()
-async def create_ticket(
+def create_ticket(
     title: str,
     body: str,
     priority: str = "medium",
@@ -356,8 +401,15 @@ async def export_board_summary(period_days: int = 30) -> dict:
 
     econ = await _srv.get_unit_economics(period_days=period_days)
     if econ.get("error"):
+        # No board-ready markdown full of $0.00 when no cost data was read.
+        if econ.get("error") == "no_cost_data":
+            econ = {**econ, "board_summary_written": False}
         return econ
     change = await _srv.explain_cost_change(compare_days=period_days)
+    if isinstance(change, dict) and (
+            change.get("error") or change.get("comparison_unavailable")):
+        # A change against a period that was not read is not a change.
+        change = {}
 
     ue = econ.get("unit_economics", {})
     runway = econ.get("runway", {})
@@ -378,7 +430,10 @@ async def export_board_summary(period_days: int = 30) -> dict:
     ai_monthly = None
     try:
         from ..connectors.llm_costs import get_all_llm_costs
-        _ai = get_all_llm_costs(
+        # One HTTP call per configured LLM provider, synchronous; every other
+        # caller already runs it with to_thread.
+        _ai = await _srv.asyncio.to_thread(
+            get_all_llm_costs,
             start_date=_srv.date.today() - _srv.timedelta(days=period_days),
             end_date=_srv.date.today(),
         )
@@ -392,6 +447,8 @@ async def export_board_summary(period_days: int = 30) -> dict:
     lines.append("## Infrastructure & AI Spend")
     lines.append("")
     lines.append(f"- **Total infra + AI cost ({period_days}d):** {econ.get('total_infrastructure_cost', 'n/a')}")
+    if econ.get("partial_warning"):
+        lines.append(f"- **Coverage:** {econ['partial_warning']}")
     if isinstance(change, dict) and change.get("cost_change", {}).get("now"):
         cc = change["cost_change"]
         lines.append(f"- **Spend vs last period:** {cc.get('now')} ({cc.get('pct', 'n/a')})")
@@ -457,7 +514,7 @@ async def export_board_summary(period_days: int = 30) -> dict:
 
 
 @_srv.mcp.tool()
-async def start_dashboard_server(
+def start_dashboard_server(
     port: int = 8080,
     host: str = "127.0.0.1",
     expose: bool = False,

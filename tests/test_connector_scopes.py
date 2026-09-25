@@ -37,7 +37,7 @@ def test_no_scope_documents_a_source_that_does_not_exist():
 @pytest.mark.parametrize("slug", sorted(cs.CONNECTOR_SCOPES))
 def test_scope_entries_are_complete(slug):
     scope = cs.CONNECTOR_SCOPES[slug]
-    assert scope.grade in (cs.SCOPED, cs.ROLE, cs.ACCOUNT)
+    assert scope.grade in (cs.SCOPED, cs.INVENTORY, cs.ROLE, cs.ACCOUNT)
     assert scope.credential and scope.permission, slug
     assert scope.calls, f"{slug} claims a scope but names nothing it calls with it"
 
@@ -91,6 +91,20 @@ def test_render_never_claims_write_access():
     for verb in ("delete", "terminate", "modify", "write access to"):
         assert f"grants {verb}" not in out
     assert "nothing above grants write access" in out
+
+
+def test_aws_scope_admits_it_reads_environment_variables():
+    """lambda:ListFunctions, lambda:GetFunctionConfiguration and
+    ecs:DescribeTaskDefinition return environment variables, which can hold
+    secrets. The copy used to say the key reads no data inside resources."""
+    aws = cs.CONNECTOR_SCOPES["aws"].note
+    for action in ("lambda:ListFunctions", "lambda:GetFunctionConfiguration",
+                   "ecs:DescribeTaskDefinition"):
+        assert action in aws
+    assert "environment variables" in aws
+    assert "Secrets Manager" in aws and "Parameter Store" in aws
+    assert "environment variables" in cs.GRADE_LABEL[cs.INVENTORY]
+    assert "not the data inside" not in (cs.__doc__ or "")
 
 
 # ── Twilio: the scope reduction that is code, not documentation ──────────────

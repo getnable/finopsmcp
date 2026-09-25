@@ -59,12 +59,21 @@ async def _section_spend(filters: dict, lookback_days: int) -> tuple[list[dict],
             total = period_total(start, today.isoformat())
             prev  = period_total(prev_start, start)
 
+            # The breakdowns honour the provider filter the total does, so a
+            # scoped report cannot show other providers' rows under its total.
+            in_scope = ([cost_snapshots.c.provider == filters["provider"]]
+                        if filters.get("provider") else [])
+            # Labelled "usd", not "t": Row.t is a SQLAlchemy Row attribute, so
+            # r.t returned the Row itself and float() raised, which dropped
+            # the spend section from every report that had data to show.
             rows = conn.execute(
                 select(
                     cost_snapshots.c.provider,
-                    func.sum(cost_snapshots.c.amount_usd).label("t"),
+                    func.sum(cost_snapshots.c.amount_usd).label("usd"),
                 )
-                .where(cost_snapshots.c.snapshot_date >= start)
+                .where(cost_snapshots.c.snapshot_date >= start,
+                       cost_snapshots.c.snapshot_date < today.isoformat(),
+                       *in_scope)
                 .group_by(cost_snapshots.c.provider)
                 .order_by(func.sum(cost_snapshots.c.amount_usd).desc())
             ).fetchall()
@@ -72,29 +81,46 @@ async def _section_spend(filters: dict, lookback_days: int) -> tuple[list[dict],
             svc_rows = conn.execute(
                 select(
                     cost_snapshots.c.service,
-                    func.sum(cost_snapshots.c.amount_usd).label("t"),
+                    func.sum(cost_snapshots.c.amount_usd).label("usd"),
                 )
-                .where(cost_snapshots.c.snapshot_date >= start)
+                .where(cost_snapshots.c.snapshot_date >= start,
+                       cost_snapshots.c.snapshot_date < today.isoformat(),
+                       *in_scope)
                 .group_by(cost_snapshots.c.service)
                 .order_by(func.sum(cost_snapshots.c.amount_usd).desc())
                 .limit(5)
             ).fetchall()
 
-        delta_pct = ((total - prev) / prev * 100) if prev else 0
-        trend = "📈" if delta_pct > 2 else "📉" if delta_pct < -2 else "➡️"
-        sign = "+" if delta_pct >= 0 else ""
+        if not rows:
+            # Nothing has been read for this window. "$0 (+0.0%)" here was a
+            # finding about data nobody had fetched.
+            msg = (f"No cost data yet for the last {lookback_days} full days. Take a snapshot "
+                   "(ask nable to take a cost snapshot, take_snapshot_now) and the next report has numbers.")
+            return ([{"type": "section", "text": {"type": "mrkdwn",
+                                                  "text": f"*💰 Spend*: {msg}"}}],
+                    f"Spend: no cost data yet for the last {lookback_days} days")
+
+        if prev:
+            delta_pct = (total - prev) / prev * 100
+            trend = "📈" if delta_pct > 2 else "📉" if delta_pct < -2 else "➡️"
+            sign = "+" if delta_pct >= 0 else ""
+            change = f"{trend} {sign}{delta_pct:.1f}%"
+            change_text = f"{sign}{delta_pct:.1f}% vs prior {lookback_days}d"
+        else:
+            change = "no prior data to compare"
+            change_text = f"no data for the prior {lookback_days}d to compare"
 
         provider_lines = "\n".join(
-            f"  • *{r.provider.upper()}*: ${float(r.t):,.0f}" for r in rows
+            f"  • *{r.provider.upper()}*: ${float(r.usd):,.0f}" for r in rows
         )
         svc_lines = "\n".join(
-            f"  {i+1}. {esc(r.service)}: *${float(r.t):,.0f}*" for i, r in enumerate(svc_rows)
+            f"  {i+1}. {esc(r.service)}: *${float(r.usd):,.0f}*" for i, r in enumerate(svc_rows)
         )
 
         blocks: list[dict] = [
             {"type": "section", "fields": [
                 {"type": "mrkdwn", "text": f"*💰 Total spend ({lookback_days}d)*\n${total:,.0f}"},
-                {"type": "mrkdwn", "text": f"*vs prior period*\n{trend} {sign}{delta_pct:.1f}%"},
+                {"type": "mrkdwn", "text": f"*vs prior period*\n{change}"},
             ]},
         ]
         if provider_lines:
@@ -102,11 +128,25 @@ async def _section_spend(filters: dict, lookback_days: int) -> tuple[list[dict],
         if svc_lines:
             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Top services*\n{svc_lines}"}})
 
-        text = f"Total spend: ${total:,.0f} ({sign}{delta_pct:.1f}% vs prior {lookback_days}d)"
+        text = f"Total spend: ${total:,.0f} ({change_text})"
         return blocks, text
     except Exception as e:
         log.warning("spend section failed: %s", e)
         return [], ""
+
+
+def _has_cost_data(filters: dict, lookback_days: int) -> bool:
+    """True when any cost snapshot exists for this window (and provider filter).
+    A section that judges spend has nothing to judge without one."""
+    from ..storage.db import cost_snapshots, get_engine
+    from sqlalchemy import func, select
+    start = (date.today() - timedelta(days=lookback_days)).isoformat()
+    q = select(func.count()).select_from(cost_snapshots).where(
+        cost_snapshots.c.snapshot_date >= start)
+    if filters.get("provider"):
+        q = q.where(cost_snapshots.c.provider == filters["provider"])
+    with get_engine().connect() as conn:
+        return bool(conn.execute(q).scalar())
 
 
 async def _section_anomalies(filters: dict, lookback_days: int) -> tuple[list[dict], str]:
@@ -117,7 +157,14 @@ async def _section_anomalies(filters: dict, lookback_days: int) -> tuple[list[di
             anomalies = [a for a in anomalies if a.get("provider") == filters["provider"]]
 
         if not anomalies:
-            return [{"type": "section", "text": {"type": "mrkdwn", "text": "✅ *Anomalies* — None detected"}}], ""
+            if not _has_cost_data(filters, lookback_days):
+                # "None detected" on an install that has read no costs is a
+                # clean bill of health for data nobody checked.
+                return ([{"type": "section", "text": {"type": "mrkdwn", "text": (
+                    "*Anomalies*: not checked, no cost data yet for this period")}}],
+                    "Anomalies: not checked, no cost data yet")
+            return [{"type": "section", "text": {"type": "mrkdwn", "text": (
+                f"✅ *Anomalies*: none in the cost data read for the last {lookback_days} days")}}], ""
 
         high = [a for a in anomalies if a.get("severity") == "high"]
         med  = [a for a in anomalies if a.get("severity") == "medium"]
@@ -264,7 +311,11 @@ async def _section_budgets(**_) -> tuple[list[dict], str]:
         from ..budget.enforcer import check_all_budgets
         results = check_all_budgets()
         if not results:
-            return [{"type": "section", "text": {"type": "mrkdwn", "text": "💚 *Budgets* — All within limits"}}], ""
+            # check_all_budgets returns one row per active budget, so empty
+            # means none are set, not that every budget is within its limit.
+            return ([{"type": "section", "text": {"type": "mrkdwn", "text": (
+                "*Budgets*: no budgets set. Ask nable to set one.")}}],
+                "Budgets: no budgets set")
 
         exceeded = [b for b in results if b.get("status") == "exceeded"]
         warning  = [b for b in results if b.get("status") == "warning"]
@@ -295,7 +346,7 @@ async def _section_teams(filters: dict, lookback_days: int) -> tuple[list[dict],
             rows = conn.execute(
                 select(
                     attributed_costs.c.team,
-                    func.sum(attributed_costs.c.amount_usd).label("t"),
+                    func.sum(attributed_costs.c.amount_usd).label("usd"),
                 )
                 .where(attributed_costs.c.snapshot_date >= start)
                 .group_by(attributed_costs.c.team)
@@ -306,13 +357,14 @@ async def _section_teams(filters: dict, lookback_days: int) -> tuple[list[dict],
         if not rows:
             return [], ""
 
-        total = sum(float(r.t) for r in rows)
+        total = sum(float(r.usd) for r in rows)
         lines = "\n".join(
-            f"  {i+1}. *{esc(r.team)}*: ${float(r.t):,.0f} ({float(r.t)/total*100:.1f}%)"
+            f"  {i+1}. *{esc(r.team)}*: ${float(r.usd):,.0f} "
+            f"({(float(r.usd) / total * 100) if total else 0:.1f}%)"
             for i, r in enumerate(rows)
         )
         blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": f"👥 *By team* ({lookback_days}d)\n{lines}"}}]
-        return blocks, f"Top team: {esc(rows[0].team)} (${float(rows[0].t):,.0f})"
+        return blocks, f"Top team: {esc(rows[0].team)} (${float(rows[0].usd):,.0f})"
     except Exception as e:
         log.warning("teams section failed: %s", e)
         return [], ""
@@ -385,6 +437,25 @@ async def build_report(
 
 # ── Delivery ──────────────────────────────────────────────────────────────────
 
+def _dedupe(items: list, fold: bool = False) -> list:
+    """Keep the first of each destination, in order. fold=True compares
+    case-insensitively (email addresses)."""
+    seen: set = set()
+    out = []
+    for it in items:
+        key = str(it).strip().lower() if fold else str(it).strip()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(it)
+    return out
+
+
+def delivered(results: dict) -> bool:
+    """True when at least one channel really took the report."""
+    return any(isinstance(e, dict) and e.get("ok")
+               for ch in ("slack", "email", "teams") for e in results.get(ch, []))
+
+
 async def deliver_report(
     sub: dict[str, Any],
     blocks: list[dict],
@@ -404,14 +475,23 @@ async def deliver_report(
         results["skipped"] = "FINOPS_AIRGAP is set; external report delivery is disabled."
         return results
 
-    # Slack
-    slack_channels = json.loads(sub.get("slack_channels") or "[]")
+    # Slack. Every requested channel gets a result with a reason: an
+    # unconfigured Slack used to vanish from the result, so "sent" and "not
+    # configured" looked the same to whoever asked.
+    slack_channels = _dedupe(json.loads(sub.get("slack_channels") or "[]"))
     bot_token = slack_mod._bot_token()
     webhook_url = slack_mod._webhook_url()
 
-    for channel in slack_channels:
-        try:
-            if bot_token:
+    if slack_channels and not (bot_token or webhook_url):
+        for channel in slack_channels:
+            results["slack"].append({
+                "channel": channel, "ok": False,
+                "reason": ("Slack is not configured: set SLACK_WEBHOOK_URL or "
+                           "SLACK_BOT_TOKEN (run `nable slack`)."),
+            })
+    elif slack_channels and bot_token:
+        for channel in slack_channels:
+            try:
                 import httpx
                 async with httpx.AsyncClient(timeout=15) as client:
                     r = await client.post(
@@ -419,17 +499,34 @@ async def deliver_report(
                         headers={"Authorization": f"Bearer {bot_token}"},
                         json={"channel": channel, "text": plain_text, "blocks": blocks},
                     )
-                    ok = r.json().get("ok", False)
-                    results["slack"].append({"channel": channel, "ok": ok})
-            elif webhook_url:
-                ok = await slack_mod.send_webhook(blocks, plain_text)
-                results["slack"].append({"channel": "webhook", "ok": ok})
+                    body = r.json()
+                    entry = {"channel": channel, "ok": bool(body.get("ok", False))}
+                    if not entry["ok"]:
+                        entry["reason"] = f"Slack refused the post: {body.get('error', 'unknown error')}"
+                    results["slack"].append(entry)
+            except Exception as e:
+                log.warning("Slack delivery to %s failed: %s", channel, e)
+                results["slack"].append({"channel": channel, "ok": False, "reason": str(e)})
+    elif slack_channels:
+        # An incoming webhook posts to the one channel it was created for, so
+        # one post per named channel was the same message N times in one place.
+        entry: dict[str, Any] = {
+            "channel": "webhook", "requested_channels": slack_channels,
+            "note": ("A Slack incoming webhook posts to the one channel it was created "
+                     "for; the report was posted there once."),
+        }
+        try:
+            entry["ok"] = bool(await slack_mod.send_webhook(blocks, plain_text))
+            if not entry["ok"]:
+                entry["reason"] = "The Slack webhook did not accept the post."
         except Exception as e:
-            log.warning("Slack delivery to %s failed: %s", channel, e)
-            results["slack"].append({"channel": channel, "ok": False, "error": str(e)})
+            log.warning("Slack webhook delivery failed: %s", e)
+            entry["ok"] = False
+            entry["reason"] = str(e)
+        results["slack"].append(entry)
 
     # Email — Pro only (scheduled_email_digests)
-    email_addresses = json.loads(sub.get("email_addresses") or "[]")
+    email_addresses = _dedupe(json.loads(sub.get("email_addresses") or "[]"), fold=True)
     if email_addresses:
         try:
             from ..license import require_pro
@@ -438,12 +535,20 @@ async def deliver_report(
             gate = None
         if gate is not None:
             results["email"] = [{
-                "skipped": True,
+                "ok": False, "skipped": True,
                 "reason": "Email delivery requires Pro (scheduled_email_digests). Slack delivery is free.",
                 "upgrade_url": gate.get("upgrade_url", ""),
             }]
         else:
+            from .email_digest import missing_smtp_vars
+            missing = missing_smtp_vars()
             for addr in email_addresses:
+                if missing:
+                    results["email"].append({
+                        "to": addr, "ok": False,
+                        "reason": "Email is not configured: set " + ", ".join(missing) + ".",
+                    })
+                    continue
                 try:
                     ok = send_custom_digest(
                         recipient=addr,
@@ -451,10 +556,13 @@ async def deliver_report(
                         body_text=plain_text,
                         report_name=sub.get("name", "FinOps Report"),
                     )
-                    results["email"].append({"to": addr, "ok": ok})
+                    entry = {"to": addr, "ok": bool(ok)}
+                    if not ok:
+                        entry["reason"] = "The SMTP server did not take the message; see the server log."
+                    results["email"].append(entry)
                 except Exception as e:
                     log.warning("Email delivery to %s failed: %s", addr, e)
-                    results["email"].append({"to": addr, "ok": False, "error": str(e)})
+                    results["email"].append({"to": addr, "ok": False, "reason": str(e)})
 
     # Teams
     teams_webhook = sub.get("teams_webhook", "")
@@ -462,9 +570,13 @@ async def deliver_report(
         try:
             from . import teams as teams_mod
             ok = await teams_mod.send_to_webhook(teams_webhook, plain_text)
-            results["teams"].append({"ok": ok})
+            entry = {"ok": bool(ok)}
+            if not ok:
+                entry["reason"] = "The Teams webhook did not accept the post, or is not an Office webhook URL."
+            results["teams"].append(entry)
         except Exception as e:
             log.warning("Teams delivery failed: %s", e)
+            results["teams"].append({"ok": False, "reason": str(e)})
 
     return results
 
@@ -616,18 +728,24 @@ async def run_subscription(sub_id: int) -> dict[str, Any]:
 
     blocks, plain_text = await build_report(sections, filters, lookback, name)
     delivery = await deliver_report(sub, blocks, plain_text)
+    ok = delivered(delivery)
 
-    # Update last_sent_at
-    with engine.begin() as conn:
-        conn.execute(
-            update(report_subscriptions)
-            .where(report_subscriptions.c.id == sub_id)
-            .values(last_sent_at=datetime.now(timezone.utc))
-        )
+    # last_sent_at means sent. It moved on every run, delivered or not, so a
+    # report that reached nobody read as sent and the schedule skipped it.
+    if ok:
+        with engine.begin() as conn:
+            conn.execute(
+                update(report_subscriptions)
+                .where(report_subscriptions.c.id == sub_id)
+                .values(last_sent_at=datetime.now(timezone.utc))
+            )
 
     return {
         "subscription_id": sub_id,
         "name": name,
-        "sections_sent": sections,
+        "sections_sent": sections if ok else [],
+        "delivered": ok,
         "delivery": delivery,
+        "message": (f"Report '{name}' delivered." if ok else
+                    f"Report '{name}' was not delivered to any channel; see delivery for why."),
     }

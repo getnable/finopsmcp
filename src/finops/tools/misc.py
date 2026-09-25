@@ -63,7 +63,9 @@ async def nable_setup_status() -> dict:
         (connected if ok else not_connected).append(name)
 
     try:
-        found = scan_ambient_credentials()
+        # Reads the vault (the OS keychain, which can sit behind a password
+        # dialog) and probes credential files per provider; off the loop.
+        found = await _srv.asyncio.to_thread(scan_ambient_credentials)
     except Exception:
         found = []
     detected = [
@@ -72,7 +74,15 @@ async def nable_setup_status() -> dict:
         for f in found
     ]
 
+    from ..demo_data import SAMPLE_PROVIDERS_NOTE, connected_providers, is_demo
+    demo_bits = {
+        "_demo_mode": True,
+        "sample_providers": [e["name"] for e in connected_providers()],
+        "_demo_note": SAMPLE_PROVIDERS_NOTE,
+    } if is_demo() else {}
+
     return {
+        **demo_bits,
         "connected": sorted(connected),
         "not_connected": sorted(not_connected),
         "ambient_credentials_detected": detected,
@@ -90,7 +100,7 @@ async def nable_setup_status() -> dict:
 
 
 @_srv.mcp.tool()
-async def get_savings_summary() -> dict:
+def get_savings_summary() -> dict:
     """
     Show the realized-savings dashboard: how much nable has recommended, how much
     has been acted on, and how much has been verified as actually saved.
@@ -166,7 +176,7 @@ async def get_savings_summary() -> dict:
 
 
 @_srv.mcp.tool()
-async def activate_pro() -> dict:
+def activate_pro() -> dict:
     """
     Show how to activate your nable Pro or Team license on this machine.
 

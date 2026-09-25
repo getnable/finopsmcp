@@ -1,17 +1,30 @@
 """
-Thin Python mirror of vscode-extension/src/prices.ts.
+Python counterpart of vscode-extension/src/prices.ts.
 
 Used by the GitHub App diff analyser and any server-side code that needs
-the same pricing logic as the VS Code extension — without importing the
+the same pricing logic as the VS Code extension, without importing the
 heavier terraform_estimate module.
+
+A counterpart, not an exact mirror. The rates come from aws_prices here and
+are typed into prices.ts there, and the TypeScript tables carry fewer instance
+types; tests/test_instance_price_tables.py pins every rate the TypeScript copy
+does carry (EC2, RDS for MySQL and PostgreSQL, load balancers, EBS per GB and
+the EBS IOPS and throughput rates) to aws_prices. The shapes also differ at the
+edges: for example, for a resource with no instance type or class set,
+prices.ts returns null where this returns a zero-dollar entry.
 """
 from __future__ import annotations
 from typing import Any
 
+from .aws_prices import EC2_HOURLY as _EC2_HOURLY
+from .aws_prices import (
+    CLB_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY, ebs_volume_monthly, lb_hourly,
+    rds_hourly,
+)
+from .aws_prices import RDS_HOURLY as _RDS_HOURLY
 from .connectors.terraform_estimate import (
-    _EC2_HOURLY, _RDS_HOURLY, _ELASTICACHE_HOURLY,
-    _EBS_PER_GB_MONTH, _OPENSEARCH_HOURLY, _REDSHIFT_HOURLY, _MSK_BROKER_HOURLY,
-    HOURS_PER_MONTH,
+    _ELASTICACHE_HOURLY,
+    _OPENSEARCH_HOURLY, _REDSHIFT_HOURLY, _MSK_BROKER_HOURLY,
 )
 
 
@@ -21,7 +34,8 @@ def price_resource_py(
 ) -> dict[str, Any] | None:
     """
     Return {"monthly": float, "detail": str, "note": str|None} or None.
-    Mirrors priceResource() in prices.ts exactly.
+    Follows priceResource() in prices.ts; see the module docstring for where
+    the two differ.
     """
     def _f(v: str | None, default: float = 0.0) -> float:
         try:
@@ -49,7 +63,15 @@ def price_resource_py(
 
     if t in ("aws_db_instance", "aws_rds_cluster_instance"):
         cls = attrs.get("instance_class", "")
-        h   = _RDS_HOURLY.get(cls, 0.0)
+        # A cluster instance is Aurora, which has no table. Without an engine
+        # the MySQL table is the documented default, as in prices.ts rdsHourly.
+        engine = (attrs.get("engine")
+                  or ("aurora" if t == "aws_rds_cluster_instance" else "")).lower()
+        rate = rds_hourly(cls, engine) if engine else _RDS_HOURLY.get(cls)
+        if rate is None:
+            return {"monthly": 0.0, "detail": f"{cls}{f' on {engine}' if engine else ''}: not priced",
+                    "note": "Aurora, SQL Server, Oracle and Db2 are not in the price table"}
+        h   = rate
         maz = _b(attrs.get("multi_az"))
         if maz: h *= 2
         note = "Multi-AZ doubles cost — wasteful in dev/staging" if maz else None
@@ -62,25 +84,25 @@ def price_resource_py(
         return {"monthly": round(h * count * HOURS_PER_MONTH, 2), "detail": f"{count}× {node}"}
 
     if t == "aws_ebs_volume":
-        vtype = attrs.get("type", "gp2")
+        vtype = attrs.get("type") or "gp2"
         size  = _f(attrs.get("size"))
-        price = _EBS_PER_GB_MONTH.get(vtype, 0.10)
-        iops  = _f(attrs.get("iops"))
-        m     = size * price
-        if vtype in ("io1", "io2") and iops:
-            m += iops * 0.065
-        note = "Switch to gp3 to save 20% with same/better IOPS" if vtype == "gp2" else None
+        m     = ebs_volume_monthly(vtype, size, _f(attrs.get("iops")), _f(attrs.get("throughput")))
+        note = ("gp3 is 20% less per GB; over 170 GB, provision gp3 IOPS/throughput to match"
+                if vtype == "gp2" else None)
         return {"monthly": round(m, 2), "detail": f"{size:.0f} GB {vtype}", "note": note}
 
     if t == "aws_nat_gateway":
-        return {"monthly": round(0.045 * HOURS_PER_MONTH, 2), "detail": "$0.045/hr base",
+        return {"monthly": round(NAT_GATEWAY_HOURLY * HOURS_PER_MONTH, 2),
+                "detail": f"${NAT_GATEWAY_HOURLY}/hr base",
                 "note": "Add VPC endpoints for S3/DynamoDB to cut data transfer charges"}
 
     if t in ("aws_lb", "aws_alb"):
-        return {"monthly": round(0.008 * HOURS_PER_MONTH, 2), "detail": "$0.008/hr + LCU"}
+        h = lb_hourly(attrs.get("load_balancer_type"))
+        return {"monthly": round(h * HOURS_PER_MONTH, 2), "detail": f"${h}/hr base + LCU"}
 
     if t == "aws_elb":
-        return {"monthly": round(0.025 * HOURS_PER_MONTH, 2), "detail": "$0.025/hr classic ELB"}
+        return {"monthly": round(CLB_HOURLY * HOURS_PER_MONTH, 2),
+                "detail": f"${CLB_HOURLY}/hr classic ELB"}
 
     if t == "aws_eks_cluster":
         return {"monthly": round(0.10 * HOURS_PER_MONTH, 2), "detail": "$0.10/hr control plane",

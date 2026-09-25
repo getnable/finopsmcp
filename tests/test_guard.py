@@ -90,7 +90,7 @@ def test_one_way_asks(monkeypatch):
     monkeypatch.delenv("FINOPS_GUARD_STRICT", raising=False)
     v = g.gate_command("terraform destroy")
     assert v["decision"] == "ask"
-    assert "one-way" in v["reason"]
+    assert "cannot be undone" in v["reason"] and v["door"] == "one_way"
 
 
 def test_reversible_silent_by_default(monkeypatch):
@@ -153,7 +153,8 @@ def test_install_uninstall_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(g, "_settings_path", lambda global_scope: tmp_path / "settings.json")
     p = g.install()
     s = json.loads(p.read_text())
-    assert s["hooks"]["PreToolUse"][0]["matcher"] == "Bash"
+    # Bash plus every MCP tool (test_guard_mcp.py covers the matcher itself).
+    assert s["hooks"]["PreToolUse"][0]["matcher"] == g._HOOK_MATCHER
     assert g.is_installed(p)
     # idempotent
     g.install()
@@ -188,11 +189,13 @@ def test_install_preserves_existing_settings(tmp_path, monkeypatch):
 def test_expensive_launch_asks_with_the_number(monkeypatch):
     monkeypatch.delenv("FINOPS_POLICY_MAX_AUTO_USD", raising=False)
     v = g.gate_command("aws ec2 run-instances --instance-type p4d.24xlarge --count 8")
-    assert v is not None, "a ~$191k/mo launch must not pass silently"
+    # p4d.24xlarge on-demand is $21.957642/hr (AWS Price List, us-east-1,
+    # version 20260924211011), after the 2025 P4/P5 price cut.
+    assert v is not None, "a ~$128k/mo launch must not pass silently"
     assert v["decision"] == "ask"
-    assert v["monthly_delta_usd"] == pytest.approx(8 * 32.77 * 730.0, rel=1e-3)
+    assert v["monthly_delta_usd"] == pytest.approx(8 * 21.957642 * 730.0, rel=1e-3)
     assert "8x p4d.24xlarge" in v["reason"]
-    assert "$191,377" in v["reason"]
+    assert "$128,233" in v["reason"]
     assert "list price" in v["reason"], "an estimate must state its basis"
 
 
@@ -244,7 +247,7 @@ def test_strict_mode_includes_the_figure_when_it_has_one(monkeypatch):
     monkeypatch.setenv("FINOPS_POLICY_MAX_AUTO_USD", "1000000")   # below cap: strict path
     v = g.gate_command("aws ec2 run-instances --instance-type p4d.24xlarge --count 8")
     assert v and v["decision"] == "ask"
-    assert "$191,377" in v["reason"]
+    assert "$128,233" in v["reason"]
 
 
 def test_the_hook_carries_the_cost_verdict(monkeypatch):
@@ -255,7 +258,7 @@ def test_the_hook_carries_the_cost_verdict(monkeypatch):
     assert g.run_hook(stdin=io.StringIO(json.dumps(payload)), stdout=out) == 0
     verdict = json.loads(out.getvalue())["hookSpecificOutput"]
     assert verdict["permissionDecision"] == "ask"
-    assert "$191,377" in verdict["permissionDecisionReason"]
+    assert "$128,233" in verdict["permissionDecisionReason"]
 
 
 # ── guard output belongs to the guard ─────────────────────────────────────────
@@ -307,8 +310,8 @@ def test_guard_try_shows_all_four_beats(capsys, monkeypatch):
     out = capsys.readouterr().out
     assert "nothing is executed" in out
     assert out.count("stays silent") >= 2, "the zero-friction beats are missing"
-    assert "$191,377" in out, "the expensive-launch beat is missing"
-    assert "one-way door" in out, "the irreversibility beat is missing"
+    assert "$128,233" in out, "the expensive-launch beat is missing"
+    assert "It cannot be undone; confirm to proceed." in out, "the irreversibility beat is missing"
     assert "nable guard install" in out, "the tryout must end at the install step"
     assert "nable setup" not in out
 

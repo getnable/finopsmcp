@@ -105,6 +105,54 @@ def test_one_click_is_opt_in_local_steps_are_the_default(monkeypatch, capsys):
     assert "console.aws.amazon.com/cloudformation" in out2
 
 
+def test_one_click_copy_says_the_secret_stays_in_the_stack_outputs(monkeypatch, capsys):
+    """The one-click stack leaves the secret access key in its Outputs, readable
+    by anyone with cloudformation:DescribeStacks. Every place that sends someone
+    there says so and how to close it."""
+    monkeypatch.setattr(I, "CFN_KEY_TEMPLATE_S3_URL", "https://real.s3.amazonaws.com/t.json")
+    W._print_one_click_key_offer()
+    out = capsys.readouterr().out
+    assert "cloudformation:DescribeStacks" in out
+    assert "new access key" in out and "Deleting the stack" in out
+
+
+def test_one_click_setup_warns_about_the_outputs_after_the_paste(monkeypatch, capsys):
+    import builtins
+    import webbrowser
+
+    class _Vault:
+        def __init__(self):
+            self.data = {}
+
+        def store(self, k, v):
+            self.data[k] = v
+
+        def load_to_env(self):
+            return 0
+
+    vault = _Vault()
+    from finops.security import vault as vault_mod
+    monkeypatch.setattr(vault_mod.Vault, "default", classmethod(lambda cls: vault))
+    monkeypatch.setattr(I, "quick_create_available", lambda: True)
+    monkeypatch.setattr(I, "quick_create_url", lambda **k: "https://example.invalid/stack")
+    monkeypatch.setattr(webbrowser, "open", lambda *a, **k: False)
+    monkeypatch.setattr(builtins, "input", lambda *a: "")
+    import finops.telemetry as tel
+    monkeypatch.setattr(tel, "_send_event", lambda *a, **k: None)
+    answers = iter(["1", "AKIAABCDEFGHIJKLMNOP:" + "s" * 40, "us-east-1", ""])
+    monkeypatch.setattr(W, "_prompt", lambda *a, **k: next(answers))
+    import boto3
+
+    def _no_aws(*a, **k):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(boto3, "client", _no_aws)
+    W.setup_aws()
+    out = capsys.readouterr().out
+    assert vault.data["AWS_ACCESS_KEY_ID"] == "AKIAABCDEFGHIJKLMNOP"
+    assert "cloudformation:DescribeStacks" in out
+
+
 def test_value_moment_does_not_hang_on_blocking_scan(monkeypatch):
     # The bug: get_cost_summary can make a blocking call (SSO refresh, slow Cost
     # Explorer) that pins the event loop, so an asyncio timeout never fires and
@@ -329,7 +377,11 @@ def test_doctor_license_check_reports_tier(monkeypatch):
     monkeypatch.setattr(L, "get_status",
                         lambda: SimpleNamespace(mode="free", email="", days_remaining=0))
     res = D._check_license()
-    assert res["ok"] is None and "FINOPS_LICENSE_KEY" in res["detail"]
+    # The advice is the vault path, not an env var in the MCP config: a key
+    # there outranks the vault and survives `nable logout`.
+    assert res["ok"] is None and "nable login" in res["detail"]
+    assert "nable license <key>" in res["detail"]
+    assert "env block" not in res["detail"]
 
     monkeypatch.setattr(L, "get_status",
                         lambda: SimpleNamespace(mode="invalid", email="", days_remaining=0))

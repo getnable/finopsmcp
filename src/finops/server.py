@@ -68,7 +68,8 @@ class _SurfacedFastMCP(FastMCP):
     Overrides list_tools (the handler binds self.list_tools at __init__, so the
     subclass override is picked up) and filters through tool_surface.advertise:
     core tools always, provider families only when locally detected as connected,
-    everything under FINOPS_ALL_TOOLS=1 or demo mode. Advertisement-only: the
+    everything under FINOPS_ALL_TOOLS=1, the sample-backed tools in demo mode.
+    Advertisement-only: the
     call path resolves against the full registry, so a hidden tool called by
     name still runs, which keeps the in-chat connect flow intact.
     """
@@ -138,7 +139,51 @@ class _SurfacedFastMCP(FastMCP):
             # A scoping failure must not silently WIDEN access, so this re-raises
             # rather than falling through to the unscoped arguments.
             raise
+        _reject_dropped_write_arguments(self, name, arguments)
         return await super().call_tool(name, arguments, **kwargs)
+
+
+def _reject_dropped_write_arguments(server, name, arguments) -> None:
+    """Refuse a WRITE tool call that carries arguments the tool does not take.
+
+    FastMCP validates arguments against the signature and ignores extras, so
+    set_business_metrics(mrr=5000) stored nothing and answered saved:true. For a
+    read that is harmless; for a write it reports success for input it threw
+    away. Only write tools are checked, so a model's stray extra on a read keeps
+    working as before.
+    """
+    from .tool_surface import WRITE_TOOLS
+
+    if name not in WRITE_TOOLS or not isinstance(arguments, dict) or not arguments:
+        return
+    try:
+        tool = server._tool_manager.get_tool(name)
+        accepted = set((tool.parameters or {}).get("properties", {})) if tool else None
+    except Exception:
+        return
+    if not accepted:
+        return
+    unknown = sorted(k for k in arguments if k not in accepted)
+    if not unknown:
+        return
+    import difflib
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    hints = []
+    for k in unknown:
+        close = difflib.get_close_matches(k, sorted(accepted), n=1, cutoff=0.5)
+        hints.append(f"{k} (did you mean {close[0]}?)" if close else k)
+    raise ToolError(
+        f"{name} does not take {', '.join(hints)}. Nothing was saved. "
+        f"It accepts: {', '.join(sorted(accepted))}."
+    )
+
+
+# The event loop that dispatches tool calls, recorded by _instrumented_tool before
+# it hands a sync tool to a worker thread, so code on that thread can schedule
+# work back onto the loop (see _tool_surface_changed).
+_TOOL_LOOP: asyncio.AbstractEventLoop | None = None
 
 
 def _tool_surface_changed() -> None:
@@ -153,7 +198,16 @@ def _tool_surface_changed() -> None:
     try:
         import asyncio as _aio
         session = mcp.get_context().session
-        _aio.get_running_loop().create_task(session.send_tool_list_changed())
+        try:
+            _aio.get_running_loop().create_task(session.send_tool_list_changed())
+        except RuntimeError:
+            # No loop in this thread: the caller is a sync tool, which
+            # _instrumented_tool runs on a worker thread. Hand the send back to
+            # the loop that dispatched it; get_running_loop() here used to raise
+            # into the bare except below and the refresh was silently dropped.
+            loop = _TOOL_LOOP
+            if loop is not None and loop.is_running():
+                _aio.run_coroutine_threadsafe(session.send_tool_list_changed(), loop)
     except Exception:
         pass
 
@@ -195,6 +249,12 @@ moment you know one:
 USER PERSONA: {_persona}
 RESPONSE FORMAT INSTRUCTION: {_persona_ctx}
 """)
+# serverInfo.version in the MCP handshake. Unset, the SDK reports its own
+# version, so every client listed this server as "nable 1.30.0" whatever
+# release was installed, which is no help to anyone asking "am I current?".
+from . import __version__ as _nable_version
+
+mcp._mcp_server.version = _nable_version
 
 # ── telemetry: auto-instrument every tool call ───────────────────────────────
 # Wraps FastMCP's tool() decorator so record_tool_call fires on every invocation
@@ -214,20 +274,40 @@ _unconnected_hint_fired = False
 # tool wrapper surfaces it IN CHAT once per session so the user actually sees it.
 _stale_note: str | None = None
 _stale_note_shown = False
-# Injected into cost-tool responses when nothing is connected. Tells the user the
-# data is sample/empty and hands the model the exact tool to fix it in-client, so
-# they never have to leave the conversation for a terminal wizard.
+# Injected into cost-tool responses when nothing is connected. Tells the user
+# what they are looking at and hands the model the exact tool to fix it in-client,
+# so they never have to leave the conversation for a terminal wizard.
+_CONNECT_HOW = (
+    "To see your own numbers, connect in-chat, no terminal needed: connect_aws or "
+    "connect_gcp detect credentials already on this machine and connect them; "
+    "connect_azure walks through the Cloud Shell one-paste. They only read billing "
+    "data; they never change anything in your cloud."
+)
+# Demo mode: the answer IS sample data, and connecting replaces it.
 _CONNECT_HINT = {
     "sample_data": True,
+    "message": ("This is sample data (demo mode), not your real costs. " + _CONNECT_HOW),
+    "actions": ["connect_aws", "connect_gcp", "connect_azure"],
+}
+# Not demo, nothing connected. This used to say "nable can only show sample data"
+# here too, but nothing in chat could turn sample data on, so it promised a
+# path that did not exist. It now names the real one: demo is a server setting.
+_NO_ACCOUNT_HINT = {
+    "sample_data": False,
     "message": (
-        "No cloud account is connected, so nable can only show sample data, not "
-        "your real costs. To see your own numbers, connect in-chat, no terminal needed: "
-        "connect_aws or connect_gcp detect credentials already on this machine "
-        "and connect them; connect_azure walks through the Cloud Shell one-paste. "
-        "They only read billing data; they never change anything in your cloud."
+        "No cloud account is connected, so there are no costs of yours to show yet. "
+        + _CONNECT_HOW
+        + " To try nable on sample data first, restart the nable MCP server with "
+        "FINOPS_DEMO=1 in its environment (in the editor's MCP config), or run "
+        "`nable scan --demo` in a terminal."
     ),
     "actions": ["connect_aws", "connect_gcp", "connect_azure"],
 }
+
+
+def _connect_hint() -> dict:
+    from .demo_data import is_demo
+    return _CONNECT_HINT if is_demo() else _NO_ACCOUNT_HINT
 
 
 # ── First-contact confirmation (the restart cliff) ─────────────────────────────
@@ -262,11 +342,27 @@ def _maybe_editor_confirmation() -> str | None:
     )
 
 
-def _first_run_onboarding_directive() -> dict:
+def _first_run_onboarding_directive(demo: bool = False) -> dict:
     """The magic moment. Attached once to the user's first successful cost answer
     so the model proactively surfaces real, dollar-quantified waste instead of just
     answering the literal question. The scan it triggers (list_idle_resources) also
-    records findings that the upgrade nudge later cites, closing the value loop."""
+    records findings that the upgrade nudge later cites, closing the value loop.
+
+    In demo mode list_idle_resources has nothing in the sample dataset, so the
+    directive sent the model to a placeholder on the user's first impression.
+    The demo version points at a tool the sample answers and at the way out."""
+    if demo:
+        return {
+            "first_cost_query": True,
+            "directive": (
+                "This is the user's FIRST cost answer from nable, and it is SAMPLE DATA "
+                "(the StreamCo demo environment), not their account. Say so plainly. "
+                "Then proactively run get_savings_summary and lead with the sample's "
+                "open monthly savings in plain dollars, for example 'in this sample, "
+                "nable finds about $X/mo to recover,' and offer connect_aws, connect_gcp "
+                "or connect_azure to run the same checks on their own account."
+            ),
+        }
     return {
         "first_cost_query": True,
         "directive": (
@@ -278,6 +374,40 @@ def _first_run_onboarding_directive() -> dict:
             "moment; show them money they can save, do not just answer the literal question."
         ),
     }
+
+
+def _declared_return(fn) -> type | None:
+    """str, list or dict when that is what `fn` is declared to return, else None.
+
+    FastMCP validates a tool's result against its return annotation, so the
+    annotation is a contract the demo layer has to keep too."""
+    import typing
+
+    try:
+        hint = typing.get_type_hints(fn).get("return")
+    except Exception:
+        hint = getattr(fn, "__annotations__", {}).get("return")
+    if isinstance(hint, str):
+        return {"str": str, "list": list, "dict": dict}.get(hint.split("[", 1)[0].strip())
+    origin = typing.get_origin(hint) or hint
+    return origin if origin in (str, list, dict) else None
+
+
+def _demo_as_declared(fn, value):
+    """A demo answer in the shape `fn` promises.
+
+    The demo layer answers in dicts. 22 tools are declared `-> str` or `-> list`,
+    and for those a dict failed output validation, so a demo user asking for a
+    full audit or a CSV export got a pydantic error instead of the sample."""
+    want = _declared_return(fn)
+    if want is str and not isinstance(value, str):
+        from .demo_data import render_text
+        return render_text(value)
+    if want is list and not isinstance(value, list):
+        return [value]
+    if want is dict and not isinstance(value, dict):
+        return {"result": value, "_demo_mode": True}
+    return value
 
 # ── Extras gating ───────────────────────────────────────────────────────────────
 # Every registered tool's definition is loaded into the model's context by the MCP
@@ -317,6 +447,7 @@ def _instrumented_tool(*dargs, **dkwargs):
 
     def _wrap(fn):
         import functools
+        import inspect
         # There used to be an early `return fn` here for _EXTRA_TOOLS, which
         # skipped mcp.tool() entirely so those 26 were never registered at all.
         #
@@ -344,6 +475,8 @@ def _instrumented_tool(*dargs, **dkwargs):
         # _EXTRA_TOOLS itself stays: it is still the tier-driven list of what to
         # keep out of tools/list, now enforced in the ONE place that decides
         # what is advertised rather than in two places that disagree.
+        _is_coroutine_tool = inspect.iscoroutinefunction(fn)
+
         @functools.wraps(fn)
         async def _inner(*args, **kwargs):
             import time as _time
@@ -373,21 +506,45 @@ def _instrumented_tool(*dargs, **dkwargs):
             #
             # Per-tool is_demo() branches were the alternative and are how this
             # happened: 60-odd tools, each needing to remember, and four did not.
+            #
+            # The demo answer replaces the tool call, not the rest of this
+            # wrapper: the first-answer directive and the connect hint below
+            # apply to it like to any other answer.
+            _was_demo = False
+            _demo = None
             try:
                 from .demo_data import demo_bridge_result, is_demo
                 if is_demo():
+                    _was_demo = True
                     _demo = demo_bridge_result(fn.__name__, kwargs or {})
                     if _demo is not None:
-                        return _demo
+                        _demo = _demo_as_declared(fn, _demo)
             except Exception as _exc:   # never let the guard break a real call
                 log.debug("demo guard skipped for %s: %s", fn.__name__, _exc)
+                _demo = None
 
             try:
-                # Tools may be sync or async. Only await coroutines/awaitables,
-                # otherwise sync tools (whoami, *_api_key) raise
-                # "object dict can't be used in 'await' expression".
-                _ret = fn(*args, **kwargs)
-                result = await _ret if _inspect.isawaitable(_ret) else _ret
+                # Tools may be sync or async. A sync tool runs on a worker
+                # thread, never inline. FastMCP awaits this wrapper on the one
+                # event-loop thread, so a plain `def` tool that calls boto3 or
+                # httpx used to hold that thread for the whole round trip: no
+                # other request, no cancellation, no ping, and no
+                # asyncio.wait_for deadline elsewhere could fire until it
+                # returned. Offloading here protects every sync tool, including
+                # ones added later, without each having to remember to.
+                #
+                # Only await coroutines/awaitables, otherwise sync tools
+                # (whoami, *_api_key) raise "object dict can't be used in
+                # 'await' expression".
+                if _demo is not None:
+                    result = _demo
+                elif _is_coroutine_tool:
+                    result = await fn(*args, **kwargs)
+                else:
+                    global _TOOL_LOOP
+                    _TOOL_LOOP = asyncio.get_running_loop()
+                    _ret = await asyncio.to_thread(fn, *args, **kwargs)
+                    result = await _ret if _inspect.isawaitable(_ret) else _ret
             except Exception as exc:
                 _duration = int((_time.monotonic() - _t0) * 1000)
                 _audit.log_tool_call(
@@ -398,6 +555,23 @@ def _instrumented_tool(*dargs, **dkwargs):
                 )
                 raise
             _duration = int((_time.monotonic() - _t0) * 1000)
+            # An in-chat connect is the way out of demo. Say which side of the
+            # line the session is on now, so the model never presents the sample
+            # as the user's account or the user's account as the sample.
+            if _was_demo and fn.__name__.startswith("connect_"):
+                try:
+                    from .demo_data import after_connect_in_demo
+                    result = after_connect_in_demo(result)
+                except Exception as _exc:
+                    log.debug("demo connect label skipped: %s", _exc)
+            elif _was_demo:
+                # Every answer given in demo mode carries the sample-data label,
+                # including the tools that serve the sample themselves.
+                try:
+                    from .demo_data import label_demo
+                    result = label_demo(result)
+                except Exception as _exc:
+                    log.debug("demo label skipped: %s", _exc)
             # Determine outcome: check for RBAC-denied results
             _outcome = "success"
             if isinstance(result, dict) and result.get("error", "").startswith("Access denied"):
@@ -423,7 +597,9 @@ def _instrumented_tool(*dargs, **dkwargs):
                     _first_cost_query_fired = True
                     from .demo_data import is_demo as _is_demo
                     if not _is_demo():
-                        _telemetry._send_event(
+                        # Background send: we are on the event loop here, and
+                        # _send_event is a blocking POST with a 5s timeout.
+                        _telemetry.send_event_background(
                             _telemetry._get_install_id(),
                             "first_cost_query_success",
                             {"tool": fn.__name__, "plan": _telemetry._session.get("plan", "free")},
@@ -432,7 +608,8 @@ def _instrumented_tool(*dargs, **dkwargs):
                     # to proactively surface real waste. Turns "it works" into "it found
                     # money" without slowing this query, and the scan it triggers records
                     # findings the upgrade nudge later cites. Once per session only.
-                    result.setdefault("_onboarding", _first_run_onboarding_directive())
+                    result.setdefault("_onboarding",
+                                      _first_run_onboarding_directive(demo=_is_demo()))
             # First contact after install: confirm the editor wiring worked.
             # Closes the restart cliff (setup ends in "restart and hope"; this
             # is the "it worked"). Once per install, MCP sessions only.
@@ -469,13 +646,19 @@ def _instrumented_tool(*dargs, **dkwargs):
             # connect in-client. Record it once per session so the funnel finally
             # shows the "used a tool, never connected" drop-off.
             if fn.__name__ in _COST_QUERY_TOOLS and isinstance(result, dict):
+                from .categories import _provider_is_ai as _is_llm
                 from .demo_data import _real_provider_connected as _rpc
-                if not _rpc():
-                    result.setdefault("_connect_hint", _CONNECT_HINT)
+                # An answer read from an AI provider's own billing (a cost
+                # summary for provider="anthropic", say) is real data, not the
+                # "no cloud connected, sample data only" wall.
+                _llm_answer = (_is_llm(str(kwargs.get("provider") or ""))
+                               and "error" not in result)
+                if not _rpc() and not _llm_answer:
+                    result.setdefault("_connect_hint", _connect_hint())
                     global _unconnected_hint_fired
                     if not _unconnected_hint_fired:
                         _unconnected_hint_fired = True
-                        _telemetry._send_event(
+                        _telemetry.send_event_background(
                             _telemetry._get_install_id(),
                             "unconnected_cost_tool",
                             {"tool": fn.__name__,
@@ -544,22 +727,21 @@ async def connection_status() -> str:
             "no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."
         )
 
+    from .license import checkout_url, plan_label, plan_name, pro_pitch, trial_line
     lic = get_status()
     if lic.mode == "trial":
         plan_line = (
-            f"Plan: Team trial: {lic.days_remaining} day{'s' if lic.days_remaining != 1 else ''} remaining. "
-            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Team features ($25/mo)."
+            f"Plan: {trial_line(lic)} "
+            f"Keep Pro after the trial: {plan_label('pro')}, {checkout_url('pro')}"
         )
     elif lic.mode == "free":
         plan_line = (
-            f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
-            f"PR comments, budgets, K8s analysis, and all connectors included. "
-            f"Pro plan ($25/mo) adds: Slack anomaly alerts, ticket auto-creation, "
-            f"email digests, commitment recommendations, and org rollup. "
-            f"Upgrade at {_UPGRADE_URL}."
+            f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts "
+            f"on request, PR comments, budgets, K8s analysis, and all connectors included. "
+            f"{pro_pitch()} Upgrade at {checkout_url('pro')}."
         )
-    elif lic.mode == "pro":
-        plan_line = f"Plan: Team: {lic.email}"
+    elif lic.mode in ("pro", "team", "enterprise"):
+        plan_line = f"Plan: {plan_name(lic.mode)}: {lic.email}"
     else:
         plan_line = f"Plan: {lic.mode}"
 
@@ -679,19 +861,37 @@ def _fmt_usd(amount: float) -> str:
 
 _PRO_MONTHLY_USD = 25.0  # single source of truth for the Pro price in code
 
-# Contextual Team upsells: shown to free users at most once per topic per session,
-# keyed to the kind of question they just asked, so the nudge names the exact Team
-# capability they are missing instead of a generic "upgrade." Frequent but not
-# spammy: a user who asks different kinds of questions sees the specific thing Team
-# adds for each, once. The model surfaces it in one short sentence when it fits.
-_TEAM_UPSELLS = {
-    "anomaly":     "Pro auto-posts anomalies to Slack or Teams the moment they fire and opens a Jira, Linear, or GitHub ticket, so a spike never sits unnoticed.",
-    "rightsizing": "Pro takes this further: it opens the PR with the change and tracks whether it actually shipped, not just the recommendation.",
-    "attribution": "Pro delivers this as a scheduled weekly digest to whoever owns the budget, so nobody has to remember to run it.",
-    "commitment":  "Pro models your Savings Plan and reserved-instance coverage gap and recommends exactly what to commit to.",
-    "org":         "Pro rolls spend up across every account in your org automatically and emails the report.",
-    "budget":      "Pro enforces budgets and alerts at 80% and 100%, before you blow past them.",
-    "scorecard":   "Pro turns these scorecards into auto-created tickets so the worst offenders actually get fixed.",
+# Contextual upsells: shown to free users at most once per topic per session,
+# keyed to the kind of question they just asked, so the nudge names the exact
+# paid capability they are missing instead of a generic "upgrade." Frequent but
+# not spammy. The model surfaces it in one short sentence when it fits.
+#
+# Each tip names a feature by its gate, and a topic whose feature is free today
+# (on the _HOLD_AI_UNGATE hold) shows nothing: the tips used to sell rightsizing
+# PRs and commitment recommendations as Pro while every free user had them.
+# Anything that posts on a timer is nable Cloud: the open install answers when
+# asked, and the tip promising that Pro posts anomalies to Slack as they fire
+# was never true of it.
+_TEAM_UPSELLS: dict[str, tuple[str, str]] = {
+    "anomaly":     ("ticket_creation",
+                    "Pro opens a Jira, Linear, or GitHub ticket from an anomaly, so a spike has an "
+                    "owner. Posting alerts to Slack or Teams as they fire, unattended, is nable Cloud."),
+    "rightsizing": ("remediation",
+                    "Pro opens the PR with the change and tracks whether it shipped, not just the "
+                    "recommendation."),
+    "attribution": ("scheduled_email_digests",
+                    "Pro emails this breakdown to whoever owns the budget, on request. A weekly "
+                    "digest sent on a schedule is nable Cloud."),
+    "commitment":  ("commitment_recommendations",
+                    "Pro recommends exactly which Savings Plan or reserved instances to buy, with ROI."),
+    "org":         ("org_reports",
+                    "Pro rolls spend up across every account and OU in your org, and emails the "
+                    "report on request."),
+    "budget":      ("alerts",
+                    "Pro sets alert policies that post to Slack or Teams when a budget crosses 80% "
+                    "or 100%, each time you check. Checking on a schedule is nable Cloud."),
+    "scorecard":   ("ticket_creation",
+                    "Pro turns these scorecards into tickets so the worst offenders actually get fixed."),
 }
 
 _TOOL_UPSELL_TOPIC = {
@@ -716,19 +916,23 @@ _team_tips_shown: set = set()
 def _maybe_team_tip(tool_name: str) -> dict | None:
     """For free users only, a one-time contextual Team upsell for this tool's topic.
     Returns None for paying users, unmapped tools, or a topic already nudged."""
+    from .license import checkout_url, locked_features, plan_label
     topic = _TOOL_UPSELL_TOPIC.get(tool_name)
-    if not topic or topic in _team_tips_shown:
+    if not topic or topic in _team_tips_shown or topic not in _TEAM_UPSELLS:
         return None
+    feature, pitch = _TEAM_UPSELLS[topic]
     try:
-        if get_status().mode in ("pro", "trial", "enterprise"):
+        if get_status().mode in ("pro", "team", "trial", "enterprise"):
+            return None
+        if feature not in locked_features():   # free today: nothing to sell
             return None
     except Exception:
         return None
     _team_tips_shown.add(topic)
     return {
         "_note_to_model": "Mention this in one short, non-pushy sentence after your answer, only if it fits naturally.",
-        "missing_with_team": _TEAM_UPSELLS[topic],
-        "upgrade": f"Pro is ${_PRO_MONTHLY_USD:.0f}/mo flat, one price for your whole team, with a 7-day free trial: {_UPGRADE_URL}",
+        "missing_with_team": pitch,
+        "upgrade": f"{plan_label('pro')}: {checkout_url('pro')}",
     }
 
 
@@ -759,7 +963,8 @@ async def _resolve_account_id(account_id: str | None) -> str:
     aws = CLOUD_CONNECTORS.get("aws")
     try:
         if aws and await aws.is_configured():
-            return aws._account_id() or ""
+            # sts:GetCallerIdentity, synchronous; off the loop.
+            return await asyncio.to_thread(aws._account_id) or ""
     except Exception:
         pass
     return ""
@@ -803,6 +1008,9 @@ def _team_nudge(message: str, context: str = "") -> str | None:
         found = _savings_found_monthly()
         # Count the impression so the funnel is measurable: which nudge moment
         # converts is the whole question. Fire-and-forget, never blocks the answer.
+        # That promise used to be false: this was a direct _send_event, a
+        # synchronous POST with a 5s timeout, and async tools call _team_nudge
+        # on the event loop. It now goes out on a daemon thread.
         #
         # The payload carries NO figure derived from the user's bill. It used to
         # send savings_found_monthly and roi_multiple, which telemetry.py's own
@@ -812,7 +1020,7 @@ def _team_nudge(message: str, context: str = "") -> str | None:
         # The context alone answers the question the event exists to answer.
         try:
             from . import telemetry as _tel
-            _tel._send_event(_tel._get_install_id(), "upgrade_nudge_shown", {
+            _tel.send_event_background(_tel._get_install_id(), "upgrade_nudge_shown", {
                 "context": context or "generic",
             })
         except Exception:
@@ -871,6 +1079,12 @@ def _summary_to_dict(summary: CostSummary) -> dict:
             f"Amounts are in {currency}, not USD. nable does not convert currencies; "
             f"the figures and any '$' formatting reflect {currency} values."
         )
+    from .connectors.base import no_rows_message, returned_no_rows
+    if returned_no_rows(summary):
+        # Read, and nothing came back. Distinct from a $0 bill (below): the
+        # caller must not present total_usd as what was spent.
+        d["no_rows"] = True
+        d["no_rows_note"] = no_rows_message(summary.provider)
     if getattr(summary, "_zero_spend_account", False):
         d["note"] = (
             "Cost Explorer is connected and returning data, but this account has $0.00 in "
@@ -989,9 +1203,13 @@ async def _credit_context(aws_connector, cache_key: str) -> dict | None:
     ctx = None
     try:
         from .connectors.credit_tracking import get_credit_status, credit_headsup
-        ce = aws_connector._make_client()
+        # Client construction inside the thread too: building a botocore client
+        # loads the service model and resolves credentials (an IMDS probe or an
+        # SSO refresh), and the 12s deadline cannot interrupt that on the loop.
         status = await asyncio.wait_for(
-            asyncio.to_thread(get_credit_status, 6, None, ce), timeout=12.0
+            asyncio.to_thread(
+                lambda: get_credit_status(6, None, aws_connector._make_client())),
+            timeout=12.0,
         )
         ctx = credit_headsup(status)
     except Exception:
@@ -1345,6 +1563,73 @@ def _denied_action(msg: str) -> str:
 
 
 
+_BANNER_FREE = [
+    "✓  Cost queries across AWS, Azure, GCP & 10+ SaaS connectors",
+    "✓  Anomaly detection, on request",
+    "✓  Rightsizing recommendations",
+    "✓  Budgets, forecasts & spend alerts",
+    "✓  Kubernetes cost analysis",
+    "✓  PR cost comments",
+    "✓  Connector health & savings tracking",
+]
+
+
+def _banner_pro() -> list[str]:
+    """What Pro unlocks today: PRO_FEATURES minus the temporary free hold. The
+    list this replaced also named line-item CUR, Azure detail and business
+    metrics, none of which is gated, and commitment recommendations, which are
+    free during the hold."""
+    from .license import PRO_FEATURE_COPY, locked_features
+    return [f"   ▸  {PRO_FEATURE_COPY[f]}" for f in locked_features()]
+
+
+def _plan_banner_lines(status) -> list[str]:
+    """The MCP server's start banner, named from the plan table in license.py.
+
+    It greeted a Pro key as "nable Team", a Team key as the free tier, and gave
+    the trial deadline as "Subscribe before day N", a number with no calendar
+    behind it. The name and the date now come from the one table."""
+    from .license import checkout_url, fmt_day, plan_label, plan_name, trial_last_day
+
+    W = 62
+    border = "─" * W
+    out: list[str] = []
+    mode = status.mode
+    if mode in ("pro", "team", "enterprise"):
+        until = f"  ·  through {status.expires}" if getattr(status, "expires", "") else ""
+        out += [f"\n  {border}", f"  nable {plan_name(mode)}  ·  {status.email}{until}", f"  {border}"]
+        out += [f"  {f}" for f in _BANNER_FREE]
+        out.append(f"  {'─' * W}")
+        out += [f"  {t.replace('   ', '', 1)}" for t in _banner_pro()]
+        out.append(f"  {border}\n")
+    elif mode == "trial":
+        days = status.days_remaining
+        last = trial_last_day(status)
+        through = f", through {fmt_day(last)}" if last else ""
+        out += [f"\n  {border}",
+                f"  nable {plan_name('trial')}  ·  {days} day{'s' if days != 1 else ''} left{through}",
+                f"  {border}"]
+        out += [f"  {f}" for f in _BANNER_FREE]
+        out += [f"  {t.replace('   ', '', 1)}" for t in _banner_pro()]
+        out.append(f"  {'─' * W}")
+        when = f" after {fmt_day(last)}" if last else ""
+        out.append(f"  Keep Pro{when}: {plan_label('pro')}")
+        out.append(f"  {checkout_url('pro')}")
+        out.append(f"  {border}\n")
+    else:
+        out += [f"\n  {border}", "  nable  ·  free tier", f"  {border}"]
+        out += [f"  {f}" for f in _BANNER_FREE]
+        out.append(f"  {'─' * W}")
+        locked = _banner_pro()
+        if locked:
+            out.append("  Locked on free tier  ↓")
+            out += [f"  {t}" for t in locked]
+            out.append(f"  {'─' * W}")
+        out.append(f"  {plan_label('pro')}  →  {checkout_url('pro')}")
+        out.append(f"  {border}\n")
+    return out
+
+
 def main() -> None:
     import contextlib
     import logging
@@ -1399,26 +1684,6 @@ def main() -> None:
     set_current_identity(ident)
 
     status = get_status()
-    W = 62
-    border = "─" * W
-
-    _FREE = [
-        "✓  Cost queries across AWS, Azure, GCP & 10+ SaaS connectors",
-        "✓  Anomaly detection with Slack / Teams alerts",
-        "✓  Rightsizing recommendations",
-        "✓  Budgets, forecasts & spend alerts",
-        "✓  Kubernetes cost analysis",
-        "✓  PR cost comments",
-        "✓  Connector health & savings tracking",
-    ]
-    _TEAM = [
-        "   🎫  Ticket auto-creation  (Jira · Linear · GitHub Issues)",
-        "   📧  Scheduled email reports at any cadence",
-        "   💰  RI / Savings Plan recommendations with $ ROI",
-        "   🏢  Org-wide multi-account rollup & OU breakdown",
-        "   🔍  Line-item CUR data, per-resource & RI waste",
-        "   📈  Unit economics, cost per customer, % of MRR",
-    ]
 
     # This banner is for a human. On the MCP-server path (the only path that
     # reaches here, the TTY case returned above) stdout is the JSON-RPC channel
@@ -1426,44 +1691,8 @@ def main() -> None:
     # mcp.run() can corrupt it so the client silently loads no tools. Route the
     # whole banner to stderr, where it still shows in the client's server logs.
     with contextlib.redirect_stdout(sys.stderr):
-        if status.mode == "pro":
-            print(f"\n  {border}")
-            print(f"  nable Team  ·  {status.email}")
-            print(f"  {border}")
-            for f in _FREE:
-                print(f"  {f}")
-            print(f"  {'─' * (W - 0)}")
-            for t in _TEAM:
-                print(f"  {t.replace('   ', '', 1)}")
-            print(f"  {border}\n")
-
-        elif status.mode == "trial":
-            days = status.days_remaining
-            print(f"\n  {border}")
-            print(f"  nable Team trial  ·  {days} day{'s' if days != 1 else ''} remaining  ·  all features unlocked")
-            print(f"  {border}")
-            for f in _FREE:
-                print(f"  {f}")
-            for t in _TEAM:
-                print(f"  {t.replace('   ', '', 1)}")
-            print(f"  {'─' * W}")
-            print(f"  Subscribe before day {30 - (30 - days) + 1} to keep Team features:")
-            print(f"  {_UPGRADE_URL}")
-            print(f"  {border}\n")
-
-        else:
-            print(f"\n  {border}")
-            print("  nable  ·  free tier")
-            print(f"  {border}")
-            for f in _FREE:
-                print(f"  {f}")
-            print(f"  {'─' * W}")
-            print("  Locked on free tier  ↓")
-            for t in _TEAM:
-                print(f"  {t}")
-            print(f"  {'─' * W}")
-            print(f"  First month free → {_UPGRADE_URL}")
-            print(f"  {border}\n")
+        for line in _plan_banner_lines(status):
+            print(line)
 
     # Warn if running in Postgres mode without auth enforcement
     if os.getenv("DATABASE_URL") and os.getenv("FINOPS_REQUIRE_AUTH") != "1":
@@ -1996,6 +2225,7 @@ from .tools.kubernetes import (  # noqa: E402,F401
 )
 from .tools.llm import (  # noqa: E402,F401
     forecast_llm_costs,
+    get_ai_cost_attribution,
     get_ai_engineering_report,
     get_ai_kpis,
     get_ai_spend_monitor,

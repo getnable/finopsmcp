@@ -47,6 +47,84 @@ def test_billable_excludes_cache_read(tmp_path):
     assert u["messages"] == 1
 
 
+def _block(ts_epoch, msg_id, request_id, tout, tin=2, cwrite=1000, cread=40_000,
+           model="claude-opus-5-5", session="sess-a"):
+    # One transcript line per content block, as Claude Code writes them: every
+    # block of a response repeats the response's usage, output growing as it streams.
+    rec = _assistant(ts_epoch, tin=tin, tout=tout, cwrite=cwrite, cread=cread, model=model)
+    rec["message"]["id"] = msg_id
+    rec["requestId"] = request_id
+    rec["sessionId"] = session
+    return rec
+
+
+def test_a_response_logged_as_several_blocks_counts_once(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _block(now - 60, "msg_1", "req_1", tout=8),     # thinking block
+        _block(now - 60, "msg_1", "req_1", tout=120),   # text block
+        _block(now - 60, "msg_1", "req_1", tout=351),   # tool_use, final count
+        _block(now - 30, "msg_2", "req_2", tout=40),    # a second response
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["messages"] == 2
+    assert u["input_tokens"] == 4                     # 2 per response, not per line
+    assert u["output_tokens"] == 351 + 40             # the last line of each response
+    assert u["cache_creation_tokens"] == 2000
+    assert u["cache_read_tokens"] == 80_000
+    assert u["billable_tokens"] == 4 + 391 + 2000
+
+
+def test_each_response_is_priced_at_its_own_models_rate(tmp_path):
+    # One blended $3/$15 rate read Opus 5.5 low and Haiku 4.5 high. Same tokens,
+    # three models, three prices.
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 90, tin=1_000_000, tout=1_000_000, model="claude-opus-5-5"),
+        _assistant(now - 60, tin=1_000_000, tout=1_000_000, model="claude-haiku-4-5-20251001"),
+        _assistant(now - 30, tin=1_000_000, tout=1_000_000, model="claude-sonnet-4-6"),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["cost_by_model"] == {"claude-opus-5-5": 24.0, "claude-sonnet-4-6": 18.0,
+                                  "claude-haiku-4-5-20251001": 6.0}
+    assert u["usd_equivalent"] == 48.0
+    assert u["unpriced_models"] == {}
+    assert "unpriced_note" not in u
+
+
+def test_cache_reads_and_both_cache_write_durations_have_their_own_rates(tmp_path):
+    now = time.time()
+    rec = _assistant(now - 60, cwrite=3_000_000, cread=10_000_000, model="claude-opus-5-5")
+    # Claude Code writes most of its cache with the 1-hour TTL (2x input); the
+    # remainder is 5-minute (1.25x). Opus 5.5 reads at 0.05x, not 0.1x.
+    rec["message"]["usage"]["cache_creation"] = {
+        "ephemeral_1h_input_tokens": 2_000_000, "ephemeral_5m_input_tokens": 1_000_000}
+    _write_session(tmp_path / "claude", [rec])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["usd_equivalent"] == pytest.approx(2 * 8.00 + 1 * 5.00 + 10 * 0.20)
+
+
+def test_fast_mode_responses_bill_at_the_fast_rate(tmp_path):
+    now = time.time()
+    rec = _assistant(now - 60, tin=1_000_000, tout=1_000_000, model="claude-opus-5")
+    rec["message"]["usage"]["speed"] = "fast"
+    _write_session(tmp_path / "claude", [rec])
+    assert ab.read_agent_usage(now - 3600)["usd_equivalent"] == 60.0   # $10 + $50
+
+
+def test_an_unknown_model_uses_the_fallback_and_is_named_unpriced(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 60, tin=1_000_000, tout=1_000_000, model="claude-nova-9"),
+        _assistant(now - 30, tin=1_000_000, model="claude-haiku-4-5"),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["unpriced_models"] == {"claude-nova-9": 2_000_000}
+    assert u["cost_by_model"]["claude-nova-9"] == 18.0     # the $3/$15 fallback
+    assert u["usd_equivalent"] == 19.0
+    assert "claude-nova-9" in u["unpriced_note"] and "$3/$15" in u["unpriced_note"]
+
+
 def test_window_filters_old_records(tmp_path):
     now = time.time()
     _write_session(tmp_path / "claude", [
@@ -202,3 +280,159 @@ def test_empty_state_names_a_next_step_for_non_claude_code_users(capsys):
     assert "nable connect openai" in out, "empty state offers no next step"
     for provider in ("anthropic", "openrouter", "litellm", "mistral"):
         assert provider in out, f"{provider} missing from the connect hint"
+
+
+def test_the_fallback_cache_rates_follow_the_fallback_input_rate(tmp_path, monkeypatch):
+    """Someone who sets FINOPS_AI_USD_PER_MTOK_IN to what their model costs
+    should not have its cache writes and reads priced at Sonnet's rates."""
+    monkeypatch.setenv("FINOPS_AI_USD_PER_MTOK_IN", "10")
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 60, cwrite=1_000_000, cread=1_000_000, model="claude-nova-9"),
+    ])
+    # 1.25x input to write, 0.1x input to read: $12.50 + $1.00.
+    assert ab.read_agent_usage(now - 3600)["usd_equivalent"] == 13.5
+    monkeypatch.setenv("FINOPS_AI_USD_PER_MTOK_CACHE_READ", "0.5")
+    assert ab.read_agent_usage(now - 3600)["usd_equivalent"] == 13.0
+
+
+def test_the_unpriced_note_names_every_rate_it_used(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 60, tin=1_000_000, model="claude-nova-9"),
+    ])
+    note = ab.read_agent_usage(now - 3600)["unpriced_note"]
+    assert "FINOPS_AI_USD_PER_MTOK_IN/OUT" in note
+    assert "FINOPS_AI_USD_PER_MTOK_CACHE_WRITE" in note
+    assert "FINOPS_AI_USD_PER_MTOK_CACHE_READ" in note
+
+
+def test_the_headline_says_how_much_rests_on_a_fallback_rate(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 60, tin=1_000_000, tout=1_000_000, model="claude-nova-9"),  # $18
+        _assistant(now - 30, tin=1_000_000, model="claude-haiku-4-5"),               # $1
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["unpriced_usd"] == 18.0
+    st = ab.status()
+    assert "includes ~$18.00 priced at a fallback rate" in st["summary"]
+    ab.set_budget(spend_cap=100)
+    assert "includes ~$18.00 priced at a fallback rate" in ab.status()["summary"]
+    assert "includes ~$18.00 priced at a fallback rate" in ab.check()["reason"]
+
+
+def test_no_fallback_note_when_every_model_is_priced(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [_assistant(now - 30, tin=1_000_000,
+                                                    model="claude-haiku-4-5")])
+    assert ab.read_agent_usage(now - 3600)["unpriced_usd"] == 0.0
+    assert "fallback" not in ab.status()["summary"]
+
+
+def test_the_spend_summary_promises_nothing_status_does_not_do(tmp_path):
+    """status() estimates at list price from local logs. It never reads a
+    provider's billing, so it must not tell anyone an Admin key would make the
+    figure exact."""
+    now = time.time()
+    _write_session(tmp_path / "claude", [_assistant(now - 30, tin=1_000_000,
+                                                    model="claude-haiku-4-5")])
+    ab.set_budget(spend_cap=100)
+    st = ab.status()
+    assert st["verdict_basis"] == "spend"
+    assert "Admin key" not in st["summary"] and "exact spend" not in st["summary"]
+    assert "estimated at list price of your $100 spend cap" in st["summary"]
+
+
+# ── the per-transcript parse cache ───────────────────────────────────────────
+#
+# The guard re-read every transcript of the month on each tool call when a
+# monthly cap was set. Each transcript's parse is now kept in the data dir and
+# reused while the file is unchanged, or extended when it has only grown.
+
+def _append(f, records, partial=None):
+    with f.open("a") as fh:
+        for r in records:
+            fh.write(json.dumps(r) + "\n")
+        if partial is not None:
+            fh.write(partial)
+
+
+def test_an_unchanged_transcript_is_not_parsed_again(tmp_path, monkeypatch):
+    now = time.time()
+    _write_session(tmp_path / "claude", [_block(now - 60, "m1", "r1", tout=10)])
+    assert ab.read_agent_usage(now - 3600)["messages"] == 1
+    parsed = []
+    real = ab._parse_usage_line
+    monkeypatch.setattr(ab, "_parse_usage_line",
+                        lambda *a: parsed.append(a) or real(*a))
+    u = ab.read_agent_usage(now - 3600)
+    assert (u["messages"], u["output_tokens"], parsed) == (1, 10, [])
+
+
+def test_a_grown_transcript_is_read_from_where_it_stopped(tmp_path, monkeypatch):
+    now = time.time()
+    f = _write_session(tmp_path / "claude", [_block(now - 60, "m1", "r1", tout=10)])
+    ab.read_agent_usage(now - 3600)
+    parsed = []
+    real = ab._parse_usage_line
+    monkeypatch.setattr(ab, "_parse_usage_line",
+                        lambda *a: parsed.append(a) or real(*a))
+    # The same response's next block, a new response, and a line still being written.
+    partial = json.dumps(_block(now - 20, "m3", "r3", tout=7))
+    _append(f, [_block(now - 60, "m1", "r1", tout=99), _block(now - 30, "m2", "r2", tout=5)],
+            partial=partial[:40])
+    u = ab.read_agent_usage(now - 3600)
+    assert len(parsed) == 2                          # only the two new whole lines
+    assert (u["messages"], u["output_tokens"]) == (2, 99 + 5)
+    _append(f, [], partial=partial[40:] + "\n")
+    u = ab.read_agent_usage(now - 3600)
+    assert (u["messages"], u["output_tokens"]) == (3, 99 + 5 + 7)
+
+
+def test_a_rewritten_transcript_is_read_again_whole(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [_block(now - 60, "m1", "r1", tout=10)])
+    ab.read_agent_usage(now - 3600)
+    # Rewritten in place, same size and the same last line position.
+    _write_session(tmp_path / "claude", [_block(now - 60, "m9", "r9", tout=20)])
+    u = ab.read_agent_usage(now - 3600)
+    assert (u["messages"], u["output_tokens"]) == (1, 20)
+    _write_session(tmp_path / "claude", [_block(now - 60, "m8", "r8", tout=3)] * 2)
+    assert ab.read_agent_usage(now - 3600)["output_tokens"] == 3
+
+
+def test_a_response_in_two_transcripts_still_counts_once_from_the_cache(tmp_path):
+    """A resumed session copies the conversation it resumes into its own
+    transcript. The dedupe is per response across files, so the cache keeps
+    each file's responses, not a per-file total."""
+    now = time.time()
+    proj = tmp_path / "claude" / "projects" / "-Users-x-proj"
+    proj.mkdir(parents=True)
+    for name in ("sess-a.jsonl", "sess-b.jsonl"):
+        (proj / name).write_text(json.dumps(_block(now - 60, "m1", "r1", tout=10)) + "\n")
+    for _ in range(2):                               # cold, then from the cache
+        u = ab.read_agent_usage(now - 3600)
+        assert (u["messages"], u["output_tokens"]) == (1, 10)
+
+
+def test_the_cache_serves_every_window_and_session(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _block(now - 7200, "m1", "r1", tout=10, session="sess-a"),
+        _block(now - 60, "m2", "r2", tout=20, session="sess-b"),
+    ])
+    assert ab.read_agent_usage(0)["output_tokens"] == 30
+    assert ab.read_agent_usage(now - 3600)["output_tokens"] == 20      # window from the cache
+    assert ab.read_agent_usage(0)["output_tokens"] == 30
+
+
+def test_the_cache_drops_entries_for_transcripts_that_are_gone(tmp_path):
+    now = time.time()
+    f = _write_session(tmp_path / "claude", [_block(now - 60, "m1", "r1", tout=10)])
+    ab.read_agent_usage(now - 3600)
+    shards = tmp_path / "data" / "ai-budget-tally"
+    assert len(list(shards.iterdir())) == 1
+    f.unlink()
+    assert ab.read_agent_usage(now - 3600)["messages"] == 0
+    assert list(shards.iterdir()) == []

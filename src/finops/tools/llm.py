@@ -77,7 +77,8 @@ async def get_llm_costs(
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
-        return get_demo_response("get_llm_costs") or {}
+        return get_demo_response("get_llm_costs", {
+            "days": days, "start_date": start_date, "end_date": end_date}) or {}
     try:
         from datetime import date as _date
         sd = _date.fromisoformat(start_date) if start_date else None
@@ -358,26 +359,44 @@ async def get_llm_cost_by_model(
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
-        return get_demo_response("get_llm_cost_by_model") or {}
+        return get_demo_response("get_llm_cost_by_model",
+                                 {"days": days, "provider": provider}) or {}
     try:
         from datetime import date as _date, timedelta
         ed = _date.today()
         sd = ed - timedelta(days=days)
         from ..connectors.llm_costs import get_all_llm_costs
-        result = await _srv.asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed)
+        result = await _srv.asyncio.to_thread(get_all_llm_costs, start_date=sd, end_date=ed,
+                                              include_provider_results=True)
+        per_provider = result.pop("provider_results", {}) or {}
 
         if provider:
-            # Filter to specific provider
-            prov_cost = result["by_provider"].get(provider, 0.0)
+            key = provider.strip().lower()
+            failed = (result.get("failed_providers") or {}).get(key)
+            if failed:
+                # Returning total_usd 0.0 here reported a read that failed as
+                # "this provider costs nothing".
+                return {"provider": key, "error": f"{key} could not be read: {failed}",
+                        "partial": True, "period": result["period"],
+                        "hint": ("Org cost needs an admin key (sk-admin-...); a regular "
+                                 "API key cannot read billing.")}
+            if key not in per_provider:
+                return {"provider": key, "error": f"{key} is not connected.",
+                        "connected": sorted(per_provider), "period": result["period"],
+                        "hint": f"Run `nable {key}` to connect it." if key in ("openai", "anthropic")
+                                else "Connect it first; see list_connected_providers."}
+            prov_models = per_provider[key].get("by_model") or {}
             return {
-                "provider":    provider,
-                "total_usd":   prov_cost,
-                "by_model":    dict(sorted(result["by_model"].items(), key=lambda kv: kv[1], reverse=True)[:50]),
+                "provider":    key,
+                "total_usd":   result["by_provider"].get(key, 0.0),
+                "by_model":    dict(sorted(prov_models.items(), key=lambda kv: kv[1], reverse=True)[:50]),
                 "period":      result["period"],
                 "recommendations": result.get("recommendations", []),
             }
+        if result.get("error") and not per_provider:
+            return {"error": result["error"], "period": result["period"]}
 
-        return {
+        out = {
             "period":          result["period"],
             "total_usd":       result["total_usd"],
             "by_provider":     result["by_provider"],
@@ -385,6 +404,84 @@ async def get_llm_cost_by_model(
             "top_spenders":    result["top_spenders"],
             "recommendations": result.get("recommendations", []),
         }
+        # A provider that failed to read is missing from total_usd; say so.
+        for k in ("partial", "failed_providers", "note", "unpriced_models"):
+            if k in result:
+                out[k] = result[k]
+        return out
+    except Exception as e:
+        return {"error": str(e)}
+
+
+_ATTRIBUTION_GROUP_CAP = 50
+
+
+@_srv.mcp.tool()
+async def get_ai_cost_attribution(
+    dimension: str = "project",
+    provider: str | None = None,
+    days: int = 30,
+) -> dict:
+    """
+    AI/LLM spend split by who or what it was for: per project, workspace, API
+    key, team, user, tag or session. Answers "what does each team / feature /
+    customer / agent spend on AI" where get_llm_costs only splits by model.
+
+    Sources, each labelled in the answer: OpenAI projects and API keys (billed
+    costs) and users (estimated); Anthropic workspaces (billed) and API keys
+    and users (estimated); LiteLLM teams, virtual keys, users and request tags;
+    Langfuse trace tags, users and sessions. Customer, feature and agent map
+    to tags, since no provider has those fields. A provider that has no such
+    field says so under not_available; one that could not be read is listed
+    under failed_providers, never shown as $0. Read-only.
+
+    Args:
+        dimension: "project", "workspace", "api_key", "team", "user", "tag" or
+                   "session" ("customer", "feature" and "agent" read tags).
+        provider: Limit to "openai", "anthropic", "litellm" or "langfuse".
+        days: Lookback window in days (default 30).
+
+    Examples:
+        - "What does each team spend on AI?"
+        - "AI cost by customer / by feature for the last 30 days"
+        - "Which OpenAI project or API key costs the most?"
+        - "Spend per Anthropic workspace"
+    """
+    from ..demo_data import is_demo, get_demo_response
+    if is_demo():
+        return get_demo_response("get_ai_cost_attribution", {
+            "dimension": dimension, "provider": provider, "days": days}) or {
+            "_demo_mode": True, "dimension": dimension,
+            "note": ("AI cost attribution is not in the sample dataset. Connect OpenAI, "
+                     "Anthropic, LiteLLM or Langfuse to split real AI spend.")}
+    try:
+        from ..connectors.ai_attribution import get_ai_cost_attribution as _attribute
+        result = await _srv.asyncio.to_thread(_attribute, dimension, provider, days)
+        if result.get("error") and "groups" not in result:
+            return result
+
+        groups = result.get("groups") or []
+        result["group_count"] = len(groups)
+        if len(groups) > _ATTRIBUTION_GROUP_CAP:
+            kept = groups[:_ATTRIBUTION_GROUP_CAP]
+            result["groups"] = kept
+            result["groups_truncated"] = (
+                f"showing the top {_ATTRIBUTION_GROUP_CAP} of {len(groups)} groups by cost "
+                f"(${sum(g['cost_usd'] for g in kept):,.2f} shown); by_provider totals cover "
+                f"all of them")
+
+        # AI cost per customer / MAU / request, when the total is safe to divide
+        # and business metrics are on file. Local metrics only: no Stripe call.
+        try:
+            from ..connectors.business_metrics import resolve_business_metrics
+            from ..connectors.llm_unit_economics import attribution_unit_economics
+            metrics = await resolve_business_metrics(allow_stripe=False)
+            econ = attribution_unit_economics(result, metrics or {}, days)
+            if econ:
+                result["unit_economics"] = econ
+        except Exception as e:
+            _srv.log.debug("AI unit economics skipped: %s", e)
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -598,7 +695,8 @@ async def optimize_ai_spend(days: int = 30) -> dict:
         # demonstrates (routing + caching levers, dollar savings), no creds.
         from ..demo_data import llm_costs as _demo_llm, bedrock_split as _demo_split
         from ..analytics.ai_optimizer import build_optimization_plan
-        plan = build_optimization_plan(_demo_llm(), days=days, bedrock_split=_demo_split())
+        plan = build_optimization_plan(_demo_llm({"days": days}), days=days,
+                                       bedrock_split=_demo_split())
         plan["_demo_mode"] = True
         return plan
     try:
@@ -622,7 +720,8 @@ async def optimize_ai_spend(days: int = 30) -> dict:
 
         # Bedrock input/output/cache cost split from Cost Explorer (best effort).
         try:
-            bedrock_split = bedrock_token_cost_split(sd, ed)
+            # A synchronous ce:GetCostAndUsage, so to_thread like the fetches above.
+            bedrock_split = await _srv.asyncio.to_thread(bedrock_token_cost_split, sd, ed)
         except Exception as e:
             _srv.log.debug("Bedrock token split for optimizer: %s", e)
             bedrock_split = None
@@ -634,10 +733,11 @@ async def optimize_ai_spend(days: int = 30) -> dict:
 
 
 @_srv.mcp.tool()
-async def recommend_bedrock_model_routing(days: int = 30) -> dict:
+def recommend_bedrock_model_routing(days: int = 30) -> dict:
     """
     Analyzes Bedrock model usage to find invocations that could route to
-    cheaper models without quality loss. Sonnet costs 20x more than Haiku.
+    cheaper models without quality loss. Sonnet 4.x costs 3x what Haiku 4.5
+    does per token.
     Classification, extraction, and short-context tasks rarely need Sonnet.
 
     Identifies which Lambda functions are using Sonnet for tasks that Haiku

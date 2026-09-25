@@ -58,6 +58,12 @@ _GRADE_MAP = [
     (90, "A"), (75, "B"), (60, "C"), (40, "D"), (0, "F"),
 ]
 
+# Grade only when at least this much of the weighted picture was actually
+# measured. Below it a letter is noise dressed as a verdict, so the scorecard
+# reports N/A and leans on the dimension list instead. Half the total weight:
+# e.g. compute+waste, or waste+commitment+anomaly.
+_MIN_GRADED_WEIGHT = 50
+
 
 def _grade(score: float) -> str:
     for threshold, letter in _GRADE_MAP:
@@ -134,6 +140,7 @@ class Scorecard:
     total_score: float        # 0–100 weighted sum
     grade: str
     trend: str                # "improving" | "declining" | "stable" | "no_history"
+                              # | "not_comparable" (different dimensions measured)
     trend_delta: float        # pts change vs 7 days ago
 
     # Dimension breakdown
@@ -371,7 +378,54 @@ def _score_waste_reduction(
         raw_score=raw, weight=WEIGHTS["waste_reduction"],
         weighted_score=raw * WEIGHTS["waste_reduction"] / 100,
         grade=_grade(raw), findings=findings, actions=actions, metadata=meta,
+        data_available=True,
     )
+
+
+def _normalize_commitment_data(commitment_data: dict) -> tuple[float | None, float, float]:
+    """Read (coverage_pct, on_demand_spend, potential_savings) from either
+    shape a caller hands in.
+
+    The scorer's contract is coverage_pct / on_demand_usd /
+    potential_savings_usd: finops/tools/attribution.py builds exactly that,
+    sourced from CommitmentAnalysis.combined_coverage_pct and
+    uncovered_on_demand_usd. The hosted dashboard's producer
+    (nable-enterprise's server_web._get_commitment_data) never emitted those
+    three keys; it emits savings_plan_coverage_pct + ri_coverage_pct +
+    uncovered_on_demand_usd instead. The legacy keys were therefore always
+    absent on a hosted tenant, coverage_pct always read the dict .get()
+    default of 0, and every hosted tenant was graded an F on commitment
+    coverage ("Only 0% of compute is under commitments"), regardless of real
+    coverage.
+
+    coverage_pct wins outright when present and non-null (checked with a
+    not-None test, not truthiness, so a caller that legitimately passes 0% is
+    trusted rather than treated as absent, while a present-but-null value falls
+    back to the components rather than reaching _clamp as None). Only when it is
+    absent or null do we derive the
+    same "average of the instruments that answered" figure
+    combined_coverage_pct already computes elsewhere in this codebase, from
+    whichever of the hosted keys showed up.
+    """
+    if commitment_data.get("coverage_pct") is not None:
+        coverage_pct = commitment_data["coverage_pct"]
+    else:
+        parts = [v for v in (
+            commitment_data.get("savings_plan_coverage_pct"),
+            commitment_data.get("ri_coverage_pct"),
+        ) if v is not None]
+        # None, not 0, when no instrument answered: unread coverage is not
+        # zero coverage, and the caller reports it as not scored.
+        coverage_pct = sum(parts) / len(parts) if parts else None
+
+    if commitment_data.get("on_demand_usd") is not None:
+        on_demand_spend = commitment_data["on_demand_usd"]
+    else:
+        on_demand_spend = commitment_data.get("uncovered_on_demand_usd") or 0
+
+    potential_savings = commitment_data.get("potential_savings_usd", 0)
+
+    return coverage_pct, on_demand_spend, potential_savings
 
 
 def _score_commitment_coverage(
@@ -407,9 +461,9 @@ def _score_commitment_coverage(
             data_available=False, metadata=meta,
         )
 
+    coverage_pct, on_demand_spend, potential_savings = _normalize_commitment_data(commitment_data)
     # Coverage that could not be read is not 0% coverage. Scoring it as 0 graded
     # the account F and told it nothing was committed, off a missing IAM action.
-    coverage_pct = commitment_data.get("coverage_pct")
     if coverage_pct is None or commitment_data.get("coverage_known") is False:
         meta["coverage_pct"] = None
         return DimensionScore(
@@ -422,8 +476,6 @@ def _score_commitment_coverage(
                      "then run `get_commitment_analysis`"],
             data_available=False, metadata=meta,
         )
-    on_demand_spend = commitment_data.get("on_demand_usd", 0)
-    potential_savings = commitment_data.get("potential_savings_usd", 0)
     meta["coverage_pct"] = coverage_pct
     meta["on_demand_spend_usd"] = on_demand_spend
     # build_scorecard reads this key back out to compute the headline
@@ -552,6 +604,12 @@ def _score_anomaly_response(
     findings: list[str] = []
     actions:  list[str] = []
     meta:     dict[str, Any] = {}
+    # Availability, not a fabricated middle. The DB-error fallback below reports a
+    # 50 with "data unavailable"; without this flag that 50 flowed into the grade
+    # like a measured score. An abstaining dimension must not count toward it. (A
+    # successful query that finds no anomalies is a real measurement and stays
+    # available.)
+    anomaly_available = True
 
     try:
         from ..storage.db import anomalies, get_engine
@@ -645,6 +703,7 @@ def _score_anomaly_response(
     except Exception as e:
         log.debug("Could not query anomaly response data: %s", e)
         raw = 50.0
+        anomaly_available = False
         findings.append("Anomaly response data unavailable")
         actions.append("Ensure nable has run at least one snapshot to track anomalies")
         meta["error"] = str(e)
@@ -657,15 +716,29 @@ def _score_anomaly_response(
         raw_score=raw, weight=WEIGHTS["anomaly_response"],
         weighted_score=raw * WEIGHTS["anomaly_response"] / 100,
         grade=_grade(raw), findings=findings, actions=actions, metadata=meta,
+        data_available=anomaly_available,
     )
 
 
 # ── Trend tracking ────────────────────────────────────────────────────────────
 
-def _get_score_trend(scope: str, current_score: float) -> tuple[str, float]:
+# The key, in a persisted score's details, that lists the dimensions it was
+# measured over (the only ones a later total can be compared with it on).
+_AVAILABLE_KEY = "available_dimensions"
+
+def _get_score_trend(scope: str, current_score: float,
+                     available: list[str] | None = None) -> tuple[str, float]:
     """
     Compare current score against the score from 7 days ago.
     Returns (trend_label, delta_pts).
+
+    `available` is the set of dimensions measured for the current score. A
+    total is renormalized over the dimensions measured, so two totals over
+    different sets are different quantities: a tag scan that ran this week
+    and not last week would read as a swing nobody made. When `available` is
+    given, the old score is compared only if it was measured over the same
+    set (persisted with it); otherwise, including a score saved before the
+    set was recorded, the trend is "not_comparable".
     """
     try:
         from ..storage.db import get_engine, scorecard_history
@@ -686,7 +759,7 @@ def _get_score_trend(scope: str, current_score: float) -> tuple[str, float]:
         # looking perfectly healthy.
         with engine.connect() as conn:
             row = conn.execute(
-                select(scorecard_history.c.total_score)
+                select(scorecard_history.c.total_score, scorecard_history.c.details)
                 .where(scorecard_history.c.scope == scope)
                 .where(scorecard_history.c.score_date <= week_ago)
                 .order_by(scorecard_history.c.score_date.desc())
@@ -697,6 +770,14 @@ def _get_score_trend(scope: str, current_score: float) -> tuple[str, float]:
             return "no_history", 0.0
 
         prev_score = row[0]
+        if available is not None:
+            try:
+                prev = json.loads(row[1] or "{}")
+            except (TypeError, ValueError):
+                prev = {}
+            then = prev.get(_AVAILABLE_KEY) if isinstance(prev, dict) else None
+            if not isinstance(then, list) or sorted(then) != sorted(available):
+                return "not_comparable", 0.0
         delta = current_score - prev_score
 
         if abs(delta) < 2:
@@ -787,11 +868,26 @@ def build_scorecard(
     anomaly  = _score_anomaly_response(anomaly_lookback_days)
 
     dimensions = [compute, waste, commits, tags, anomaly]
-    total = sum(d.weighted_score for d in dimensions)
-    grade = _grade(total)
+    # Grade only the dimensions actually measured. An unavailable dimension (no
+    # k8s/EC2 rightsizing data, Cost Explorer gated on a hosted box, no tag data,
+    # no waste scan) used to inject a placeholder raw score straight into the
+    # customer's headline letter — a "C" built partly from numbers nobody
+    # measured. Renormalize the weighted sum over the available weight so an
+    # unavailable dimension abstains, and refuse to grade at all below the floor.
+    available = [d for d in dimensions if d.data_available]
+    avail_weight = sum(d.weight for d in available)
+    graded = avail_weight >= _MIN_GRADED_WEIGHT
+    total = (sum(d.weighted_score for d in available) * 100.0 / avail_weight
+             if avail_weight > 0 else 0.0)
+    grade = _grade(total) if graded else "N/A"
 
-    # Trend
-    trend, delta = _get_score_trend(scope, total)
+    # Trend: only record and compare a real grade. An N/A, or a total scaled from
+    # a lone dimension, would pollute the history the trend reads back.
+    measured_dims = sorted(d.name for d in available)
+    if graded:
+        trend, delta = _get_score_trend(scope, total, measured_dims)
+    else:
+        trend, delta = "no_history", 0.0
 
     # Potential savings. Both keys are read across a dimension boundary, so both
     # go through _require_published: a .get() default here quietly turns a
@@ -818,14 +914,24 @@ def build_scorecard(
         "declining": f"↓ {abs(delta):.0f}pts vs last week",
         "stable":    "→ stable vs last week",
         "no_history": "first score recorded",
+        "not_comparable": "no trend (last week measured different dimensions)",
     }[trend]
 
-    lowest_dim = sorted_dims[0]
-    summary = (
-        f"{label}: {grade} ({total:.0f}/100)  {trend_str}. "
-        f"Biggest gap: {lowest_dim.display_name} ({lowest_dim.raw_score:.0f}/100). "
-        f"Estimated ${potential:,.0f}/month recoverable."
-    )
+    if graded:
+        gap = min(available, key=lambda d: d.raw_score)
+        summary = (
+            f"{label}: {grade} ({total:.0f}/100)  {trend_str}. "
+            f"Biggest gap: {gap.display_name} ({gap.raw_score:.0f}/100). "
+            f"Estimated ${potential:,.0f}/month recoverable."
+        )
+    else:
+        measured = ", ".join(d.display_name for d in available) or "nothing yet"
+        summary = (
+            f"{label}: not enough measured to grade yet "
+            f"({avail_weight} of 100 weight: {measured}). "
+            f"Connect Cost Explorer or run the scans to complete the scorecard. "
+            f"Estimated ${potential:,.0f}/month recoverable so far."
+        )
 
     scorecard = Scorecard(
         scope=scope,
@@ -842,9 +948,13 @@ def build_scorecard(
         top_wins=top_wins,
     )
 
-    # Persist for future trend tracking
-    _persist_score(scope, total, grade, {
-        d.name: round(d.raw_score, 1) for d in dimensions
-    })
+    # Persist for future trend tracking — but only a real grade. Recording an N/A
+    # (or a total scaled from too little data) would seed the trend line with a
+    # number the next run compares against and reports as a swing.
+    if graded:
+        _persist_score(scope, total, grade, {
+            **{d.name: round(d.raw_score, 1) for d in dimensions},
+            _AVAILABLE_KEY: measured_dims,
+        })
 
     return scorecard

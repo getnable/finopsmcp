@@ -222,3 +222,21 @@ def test_cost_summary_carries_the_map(monkeypatch):
         body = fh.read()
     assert "drilldown_for" in body, "get_cost_summary no longer names its children"
     assert '"next_tools"' in body
+
+
+# ── A connected family brings its own front door ─────────────────────────────
+
+def test_llm_keys_advertise_the_llm_cost_tools():
+    """An AI-spend user with OPENAI_API_KEY set saw no LLM cost tool at all:
+    every llm tool was tier 2, so "what are we spending on OpenAI" had no door."""
+    listed = {t.name for t in _advertised(OPENAI_API_KEY="sk-test")}  # pragma: allowlist secret
+    assert "get_llm_costs" in listed
+    assert "get_llm_cost_by_model" in listed
+
+
+def test_aws_alone_does_not_advertise_the_llm_cost_tools():
+    """llm is inferred for every AWS user (Bedrock), which must not put the
+    OpenAI/Anthropic doors on an AWS-only front door."""
+    listed = {t.name for t in _advertised(AWS_ACCESS_KEY_ID="AKIATEST")}
+    assert "get_llm_costs" not in listed
+    assert "get_llm_cost_by_model" not in listed

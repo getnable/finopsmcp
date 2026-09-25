@@ -15,6 +15,11 @@ For providers that don't support metadata grouping in their usage API
   - OpenAI: project_id maps to team/product area
   - Anthropic: workspace_id maps to team
   - AWS Bedrock: cost allocation tags on the IAM role/key
+
+Per-group attribution itself lives in connectors/ai_attribution.py (the
+get_ai_cost_attribution tool). compute_unit_economics is wired into that tool
+through attribution_unit_economics(). get_cost_per_project predates it and is
+kept because plugins import it (tests/test_extension_surface.py).
 """
 from __future__ import annotations
 
@@ -103,7 +108,7 @@ def get_cost_per_project(
     if "anthropic" in missing_project_data:
         tagging_guide["anthropic"] = (
             "Create Anthropic Workspaces per team (Enterprise plan). "
-            "Set ANTHROPIC_ADMIN_KEY + ANTHROPIC_ORGANIZATION_ID to retrieve workspace costs. "
+            "Set ANTHROPIC_ADMIN_KEY (sk-ant-admin...) to retrieve workspace costs. "
             "On non-enterprise plans, all usage appears under the default workspace."
         )
 
@@ -340,4 +345,51 @@ def compute_unit_economics(
     if flags:
         out["flags"] = flags
 
+    return out
+
+
+# Sources whose dollars are the provider's own figure for all of its spend,
+# not a token-price estimate over part of it.
+_WHOLE_SOURCES = frozenset({"cost_api", "api"})
+
+
+def attribution_unit_economics(
+    attribution: dict[str, Any],
+    business_metrics: dict[str, Any],
+    days: int,
+) -> dict[str, Any] | None:
+    """
+    AI cost per customer, per MAU and per request, and as a share of MRR, for a
+    get_ai_cost_attribution() result, via compute_unit_economics().
+
+    Only when dividing is honest: the result has a total (no double counting
+    across providers or tags), nothing failed or was left out, every source is
+    the provider's own dollar figure rather than a partial estimate, and there
+    are stored business metrics to divide by. Otherwise None. The period total
+    is scaled to 30 days so it lines up with monthly metrics, by the days the
+    result actually covers (its own `days`) when it says, else `days`.
+    """
+    days = attribution.get("days") or days
+    total = attribution.get("total_usd")
+    if total is None or attribution.get("partial") or attribution.get("error"):
+        return None
+    sources = {v.get("source") for v in (attribution.get("by_provider") or {}).values()}
+    if not sources or not sources <= _WHOLE_SOURCES or days <= 0:
+        return None
+    mrr = business_metrics.get("mrr_usd") or (
+        business_metrics["arr_usd"] / 12 if business_metrics.get("arr_usd") else None)
+    metrics = {
+        "customers": business_metrics.get("paying_customers"),
+        "mau": business_metrics.get("mau"),
+        "api_requests": business_metrics.get("api_calls_monthly"),
+        "mrr": mrr,
+    }
+    if not any(metrics.values()):
+        return None
+    monthly = total * 30.0 / days
+    out = compute_unit_economics(monthly, metrics)
+    out["basis"] = (
+        f"AI spend attributed here ({', '.join(sorted(attribution['by_provider']))}), "
+        f"scaled from {days} days to 30, against your stored business metrics. "
+        f"Bedrock, Vertex AI and OpenRouter spend is not included.")
     return out

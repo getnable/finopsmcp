@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, bindparam, select
 
 from .db import attributed_costs, cost_snapshots, get_engine
 
@@ -22,31 +22,76 @@ def store_snapshot(
     granularity: str = "DAILY",
     category: str | None = None,
 ) -> None:
+    store_snapshots([{
+        "provider": provider,
+        "service": service,
+        "account_id": account_id,
+        "region": region,
+        "snapshot_date": snapshot_date,
+        "amount_usd": amount_usd,
+        "granularity": granularity,
+        "category": category,
+    }])
+
+
+_SnapKey = tuple[str, str, str, str, str]
+
+# One DELETE per row key, run as a single executemany. Bound names carry a
+# prefix so they cannot collide with the column names they are compared to.
+_DELETE_BY_KEY = cost_snapshots.delete().where(
+    and_(
+        cost_snapshots.c.provider == bindparam("k_provider"),
+        cost_snapshots.c.service == bindparam("k_service"),
+        cost_snapshots.c.account_id == bindparam("k_account_id"),
+        cost_snapshots.c.region == bindparam("k_region"),
+        cost_snapshots.c.snapshot_date == bindparam("k_snapshot_date"),
+    )
+)
+
+
+def store_snapshots(rows: Iterable[dict[str, Any]]) -> int:
+    """Upsert many snapshot rows in ONE transaction. Returns rows written.
+
+    The result is the same as calling store_snapshot once per row in order:
+    each row replaces whatever was stored under its (provider, service,
+    account_id, region, date) key, and when two rows in the batch share a key
+    the later one wins. The difference is the cost. store_snapshot opens a
+    transaction per row, so a 1,500 row backfill paid for 1,500 commits and
+    took well over ten times longer than the same rows written here. One
+    transaction also means a failure part way through leaves the previous
+    rows in place instead of half of the new ones.
+
+    Each row needs provider, service, account_id, region, snapshot_date (a
+    date) and amount_usd; granularity and category are optional.
+    """
+    latest: dict[_SnapKey, dict[str, Any]] = {}
+    for r in rows:
+        day = r["snapshot_date"].isoformat()
+        key = (r["provider"], r["service"], r["account_id"], r["region"], day)
+        latest[key] = {
+            "provider": r["provider"],
+            "service": r["service"],
+            "account_id": r["account_id"],
+            "region": r["region"],
+            "snapshot_date": day,
+            "amount_usd": r["amount_usd"],
+            "granularity": r.get("granularity") or "DAILY",
+            "category": r.get("category"),
+        }
+    if not latest:
+        return 0
+    now = _now()
     engine = get_engine()
     with engine.begin() as conn:
-        # Upsert: delete existing row for same key, then insert
-        conn.execute(
-            cost_snapshots.delete().where(
-                and_(
-                    cost_snapshots.c.provider == provider,
-                    cost_snapshots.c.service == service,
-                    cost_snapshots.c.account_id == account_id,
-                    cost_snapshots.c.region == region,
-                    cost_snapshots.c.snapshot_date == snapshot_date.isoformat(),
-                )
-            )
-        )
-        conn.execute(cost_snapshots.insert().values(
-            provider=provider,
-            service=service,
-            account_id=account_id,
-            region=region,
-            snapshot_date=snapshot_date.isoformat(),
-            amount_usd=amount_usd,
-            granularity=granularity,
-            captured_at=_now(),
-            category=category,
-        ))
+        # Upsert: delete existing rows for each key, then insert
+        conn.execute(_DELETE_BY_KEY, [
+            {"k_provider": k[0], "k_service": k[1], "k_account_id": k[2],
+             "k_region": k[3], "k_snapshot_date": k[4]}
+            for k in latest
+        ])
+        conn.execute(cost_snapshots.insert(),
+                     [{**v, "captured_at": now} for v in latest.values()])
+    return len(latest)
 
 
 def replace_provider_day(provider: str, day: date, rows: list[dict]) -> int:
@@ -125,8 +170,11 @@ def store_zero_for_stopped_series(
             .distinct()
         ).fetchall()
     missing = {tuple(r) for r in recent} - seen
-    for service, account_id, region in sorted(missing):
-        store_snapshot(provider, service, account_id, region, day, 0.0)
+    store_snapshots([
+        {"provider": provider, "service": service, "account_id": account_id,
+         "region": region, "snapshot_date": day, "amount_usd": 0.0}
+        for service, account_id, region in sorted(missing)
+    ])
     return len(missing)
 
 
@@ -134,9 +182,9 @@ def latest_captured_at() -> str | None:
     """ISO timestamp of the most recent cost snapshot, or None if there are none.
 
     This is the freshness of the cost data a budget's run-rate is computed from, so
-    the pre-action gate can label its budget verdict with a data age. A small sorted
-    read (add an index on cost_snapshots.captured_at if the table grows large); never
-    a live provider call.
+    the pre-action gate can label its budget verdict with a data age. One row read
+    off the ix_cs_captured_at index, not a sort of the whole table; never a live
+    provider call.
     """
     engine = get_engine()
     with engine.connect() as conn:

@@ -136,10 +136,11 @@ and uses no model at all.
 | Open source | Yes (Apache-2.0) | No | Partly | No |
 | Runs locally, no data egress | Yes | N/A (in-console) | Yes | No (SaaS) |
 | Cross-cloud (AWS + Azure + GCP) | Yes | AWS only | Pre-deploy IaC | Yes |
-| AI / LLM / GPU cost | Yes | No | No | Limited |
+| AI / LLM / GPU cost | Yes | Bedrock only | No | Vantage: yes; CloudHealth: token dashboard |
 | Terminal + CI | Yes | Console only | CI (PR comments) | Dashboard |
-| Works inside Claude / Cursor (MCP) | Yes | No | No | No |
-| Proposes fixes as PRs | Yes | No | No | No |
+| Works inside Claude / Cursor (MCP) | Yes, local | Billing MCP server (read-only) | Yes | Vantage: hosted MCP; CloudHealth: no |
+| Checks an agent's command before it runs | Yes (cost + policy) | No | No | No |
+| Proposes fixes as PRs | Yes, on running waste | No | AutoFix PRs on IaC before deploy | No |
 | Price | Free to start | Free (AWS-native) | Free tier | Paid |
 
 nable is the open-source, cross-cloud option that also covers AI and GPU spend
@@ -151,9 +152,13 @@ cloud, SaaS, and AI provider in one place, in the terminal, with fixes you appro
 
 **Is nable free?**
 Yes. The terminal scan, every cost query, anomaly detection, all waste and
-rightsizing findings, and every connector are free forever. Ticket
-auto-creation, scheduled digests, commitment recommendations, and the agent team
-are Pro.
+rightsizing findings, and every connector are free forever. Every install starts
+with a 7-day trial of Pro features. Pro ($25/mo) adds ticket creation, email
+reports and digests sent on request, and the org-wide rollup. Team ($1,000/mo
+flat, unlimited seats) adds the conversational Slack bot and chat remediation.
+Forecasts, commitment recommendations, remediation PRs, and the Ledger are free
+today while their pricing is decided. Reports and alerts on a schedule are nable
+Cloud; this install sends them when you ask.
 
 **Does my billing data leave my machine?**
 No. nable is local-first and read-only by default. It reads your cost and usage

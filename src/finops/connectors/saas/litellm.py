@@ -7,8 +7,10 @@ When run as a proxy with a database it records per-request spend and tokens,
 which nable reads from the admin API and normalises into the LLM cost view.
 
 Reads GET {proxy}/spend/logs (returns per-request rows with model, spend, and
-token counts) and aggregates by model and day. No data leaves the user's
-network: the proxy URL is their own host.
+token counts) and aggregates by model and day. get_cost_attribution reads the
+daily team, user and tag spend endpoints for spend by team, virtual key, user
+and request tag. No data leaves the user's network: the proxy URL is their
+own host.
 
 Env vars:
   LITELLM_PROXY_URL   — base URL of the proxy, e.g. http://localhost:4000
@@ -115,6 +117,113 @@ def _fetch_spend_logs(
     if isinstance(data, dict):
         return data.get("data", [])
     return data if isinstance(data, list) else []
+
+
+# ── Cost attribution: spend by team, virtual key, user or request tag ────────
+# The proxy's daily spend tables answer these directly: /team/daily/activity,
+# /user/daily/activity and /tag/daily/activity each return one paginated
+# SpendAnalyticsPaginatedResponse, whose breakdown carries per-entity (team,
+# user or tag) and per-key spend with the team alias, user email and key alias
+# as metadata. The per-request /spend/logs rows are not needed, and would mean
+# paging through every request of the month.
+_ACTIVITY: dict[str, tuple[str, str]] = {
+    # dimension -> (endpoint, which breakdown map holds the groups)
+    "team":    ("/team/daily/activity", "entities"),
+    "user":    ("/user/daily/activity", "entities"),
+    "api_key": ("/user/daily/activity", "api_keys"),
+    "tag":     ("/tag/daily/activity", "entities"),
+}
+_LABEL_FIELDS = {"team": ("team_alias",), "user": ("user_email", "user_alias"),
+                 "api_key": ("key_alias",), "tag": ()}
+_UNASSIGNED = {"team": "(no team)", "user": "(no user)", "api_key": "(no key)",
+               "tag": "(untagged)"}
+_NOT_AVAILABLE = {
+    "project": ("LiteLLM groups spend by team, key, user and tag, not project. Use "
+                "dimension='team', or tag requests with the project and use dimension='tag'."),
+    "workspace": ("LiteLLM groups spend by team, key, user and tag, not workspace. Use "
+                  "dimension='team'."),
+    "session": "LiteLLM's daily spend endpoints do not aggregate by session.",
+}
+_ACTIVITY_PAGE_SIZE = 1000
+_ACTIVITY_PAGE_CAP = 100
+
+
+def get_cost_attribution(dimension: str, start_date: date, end_date: date) -> dict[str, Any]:
+    """
+    LiteLLM proxy spend for [start_date, end_date] split by team, virtual key,
+    user or request tag, in the shared attribution shape (_attribution.py).
+
+    Spend is what the proxy logged per request (source="api"): LiteLLM's own
+    price for each call, not the provider's invoice. Tag spend is counted once
+    per tag, so a request with two tags appears under both (groups_overlap).
+    """
+    from ._attribution import groups_result, unread, unsupported
+
+    base, api_key = _base_url(), _api_key()
+    if not base or not api_key:
+        return unread("not_configured")
+    if dimension in _NOT_AVAILABLE:
+        return unsupported(_NOT_AVAILABLE[dimension])
+    if dimension not in _ACTIVITY:
+        return unsupported(f"LiteLLM cannot attribute cost by '{dimension}'.")
+    try:
+        import httpx
+    except ImportError:
+        return unread("httpx_missing")
+
+    path, section = _ACTIVITY[dimension]
+    sums: dict[str | None, float] = {}
+    names: dict[str, str] = {}
+    try:
+        for page in range(1, _ACTIVITY_PAGE_CAP + 1):
+            resp = httpx.get(
+                f"{base}{path}",
+                params={"start_date": start_date.isoformat(), "end_date": end_date.isoformat(),
+                        "page": page, "page_size": _ACTIVITY_PAGE_SIZE},
+                headers=_headers(api_key), timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json() or {}
+            for day in data.get("results", []):
+                groups = ((day.get("breakdown") or {}).get(section)) or {}
+                for gid, entry in groups.items():
+                    spend = _float(((entry or {}).get("metrics") or {}).get("spend"))
+                    # LiteLLM files spend with no team or user under "Unassigned".
+                    key = None if gid in ("", "Unassigned") else gid
+                    sums[key] = sums.get(key, 0.0) + spend
+                    meta = (entry or {}).get("metadata") or {}
+                    label = next((meta[f] for f in _LABEL_FIELDS[dimension] if meta.get(f)), None)
+                    if key and label:
+                        names[key] = label
+                    elif key and dimension == "api_key":
+                        names.setdefault(key, f"key {key[:12]}")
+            if not (data.get("metadata") or {}).get("has_more"):
+                break
+        else:
+            return unread("truncated", f"{path} still had pages left after "
+                                       f"{_ACTIVITY_PAGE_CAP} of {_ACTIVITY_PAGE_SIZE} rows")
+    except Exception as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status in (401, 403):
+            return unread("credential_invalid",
+                          f"LiteLLM refused the key on {path}; it needs an admin or master "
+                          f"key ({e}).", source="error")
+        if status == 404:
+            return unread("endpoint_missing",
+                          f"This LiteLLM proxy has no {path} endpoint (an older release, or "
+                          f"no database connected).")
+        return unread("api_error", f"{path}: {e}")
+
+    note = "Spend as logged by the LiteLLM proxy at its own model prices, not the provider invoice."
+    overlap = dimension == "tag"
+    if overlap:
+        note += (" A request with several tags counts under each tag, and untagged requests "
+                 "are not in any tag, so tag rows do not add up to total spend.")
+    out = groups_result(sums, names, source="api", unassigned=_UNASSIGNED[dimension],
+                        note=note, groups_overlap=overlap)
+    if overlap:
+        out["total_usd"] = None
+    return out
 
 
 def _float(v: Any) -> float:

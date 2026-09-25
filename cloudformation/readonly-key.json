@@ -1,11 +1,98 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Read-only IAM user and access key for nable (finops-mcp). Scoped to the exact read APIs nable needs (Cost Explorer, Compute Optimizer, CloudWatch metrics, EC2/RDS/Lambda/S3 describe, CloudTrail, Logs). No create, modify, or delete permissions of any kind. The access key id and secret appear in the Outputs tab once: copy them into the nable setup wizard. You can delete this stack any time to revoke access.",
+  "Description": "Read-only IAM user and access key for nable (finops-mcp). The NableReadOnlyScan statement is exactly what `nable scan` calls; the Optional statements add other nable features (billed Cost Explorer among them) and can each be switched off with a parameter. No create, modify, or delete permissions of any kind. The access key id and secret appear in the Outputs tab once: copy them into the nable setup wizard. You can delete this stack any time to revoke access.",
   "Parameters": {
     "UserName": {
       "Type": "String",
       "Default": "nable-finops-readonly",
       "Description": "Name for the read-only IAM user"
+    },
+    "IncludeCostExplorer": {
+      "Type": "String",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "true",
+      "Description": "BILLED: every Cost Explorer request costs $0.01 on your AWS bill. Unlocks `nable scan --spend`, Bedrock spend in the AI view, cost anomalies, and the MCP server's cost, reservation and Savings Plans tools. Set to false to leave statement OptionalCostExplorerBilled out."
+    },
+    "IncludeMetricDiscovery": {
+      "Type": "String",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "true",
+      "Description": "cloudwatch:ListMetrics is free. cloudwatch:GetMetricData is BILLED at $0.01 per 1,000 metrics and is used only when FINOPS_CLOUDWATCH_GETMETRICDATA=1. Unlocks metric discovery for the AI routing and CloudWatch cardinality tools, and batched metric reads. Set to false to leave statement OptionalMetricDiscovery out."
+    },
+    "IncludeDeeperInventory": {
+      "Type": "String",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "true",
+      "Description": "Free reads. Unlocks the MCP server's rightsizing, cleanup and recommendation tools: load balancer target health, RDS snapshots, Lambda concurrency, S3 Intelligent-Tiering configuration, and Compute Optimizer enrollment and ECS recommendations. Set to false to leave statement OptionalDeeperInventory out."
+    },
+    "IncludeCurDiscovery": {
+      "Type": "String",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "true",
+      "Description": "Free. Finds where your Cost and Usage Report is delivered, so it can be read in place of Cost Explorer. Reading the report itself is a separate grant, scoped to its bucket. Set to false to leave statement OptionalCurDiscovery out."
+    },
+    "IncludeOrganizations": {
+      "Type": "String",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Default": "true",
+      "Description": "Free. Unlocks the org rollup: listing member accounts and organizational units from the management account. Set to false to leave statement OptionalOrganizations out."
+    }
+  },
+  "Conditions": {
+    "IncludeCostExplorer": {
+      "Fn::Equals": [
+        {
+          "Ref": "IncludeCostExplorer"
+        },
+        "true"
+      ]
+    },
+    "IncludeMetricDiscovery": {
+      "Fn::Equals": [
+        {
+          "Ref": "IncludeMetricDiscovery"
+        },
+        "true"
+      ]
+    },
+    "IncludeDeeperInventory": {
+      "Fn::Equals": [
+        {
+          "Ref": "IncludeDeeperInventory"
+        },
+        "true"
+      ]
+    },
+    "IncludeCurDiscovery": {
+      "Fn::Equals": [
+        {
+          "Ref": "IncludeCurDiscovery"
+        },
+        "true"
+      ]
+    },
+    "IncludeOrganizations": {
+      "Fn::Equals": [
+        {
+          "Ref": "IncludeOrganizations"
+        },
+        "true"
+      ]
     }
   },
   "Resources": {
@@ -13,72 +100,153 @@
       "Type": "AWS::IAM::ManagedPolicy",
       "Properties": {
         "ManagedPolicyName": "NableFinopsReadOnlyPolicy",
-        "Description": "Exact permissions nable needs \u2014 nothing more.",
+        "Description": "Read-only. Statement NableReadOnlyScan is exactly what `nable scan` calls; each Optional statement adds another nable feature and can be switched off with its parameter.",
         "PolicyDocument": {
           "Version": "2012-10-17",
           "Statement": [
             {
-              "Sid": "NableReadOnly",
+              "Sid": "NableReadOnlyScan",
               "Effect": "Allow",
               "Action": [
-                "ce:GetCostAndUsage",
-                "ce:GetCostForecast",
-                "ce:GetReservationUtilization",
-                "ce:GetReservationCoverage",
-                "ce:GetSavingsPlansPurchaseRecommendation",
-                "ce:GetSavingsPlansUtilization",
-                "ce:GetSavingsPlansUtilizationDetails",
-                "ce:GetSavingsPlansCoverage",
-                "ce:GetRightsizingRecommendation",
-                "ce:ListCostAllocationTags",
-                "ce:DescribeCostCategoryDefinition",
+                "cloudtrail:DescribeTrails",
+                "cloudtrail:GetEventSelectors",
+                "cloudtrail:GetTrailStatus",
+                "cloudwatch:GetMetricStatistics",
                 "compute-optimizer:GetEC2InstanceRecommendations",
                 "compute-optimizer:GetLambdaFunctionRecommendations",
                 "compute-optimizer:GetRDSDatabaseRecommendations",
-                "compute-optimizer:GetECSServiceRecommendations",
-                "compute-optimizer:GetEnrollmentStatus",
-                "compute-optimizer:GetRecommendationSummaries",
-                "cloudwatch:GetMetricData",
-                "cloudwatch:GetMetricStatistics",
-                "cloudwatch:ListMetrics",
-                "ec2:DescribeInstances",
-                "ec2:DescribeRegions",
-                "ec2:DescribeVolumes",
-                "ec2:DescribeSnapshots",
+                "dynamodb:DescribeTable",
+                "dynamodb:ListTables",
                 "ec2:DescribeAddresses",
-                "ec2:DescribeNatGateways",
                 "ec2:DescribeImages",
-                "elasticloadbalancing:DescribeLoadBalancers",
-                "rds:DescribeDBInstances",
-                "rds:DescribeDBSnapshots",
-                "lambda:ListFunctions",
-                "lambda:GetFunctionConfiguration",
-                "ecr:DescribeRepositories",
+                "ec2:DescribeInstances",
+                "ec2:DescribeNatGateways",
+                "ec2:DescribeRegions",
+                "ec2:DescribeSnapshots",
+                "ec2:DescribeVolumes",
                 "ecr:DescribeImages",
-                "ecs:ListClusters",
-                "ecs:ListServices",
+                "ecr:DescribeRepositories",
                 "ecs:DescribeServices",
                 "ecs:DescribeTaskDefinition",
+                "ecs:ListClusters",
+                "ecs:ListServices",
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "lambda:ListFunctions",
                 "logs:DescribeLogGroups",
-                "logs:DescribeLogStreams",
-                "cloudtrail:DescribeTrails",
-                "cloudtrail:GetTrailStatus",
-                "cloudtrail:GetEventSelectors",
-                "s3:ListAllMyBuckets",
+                "rds:DescribeDBInstances",
                 "s3:GetBucketLocation",
-                "s3:GetBucketIntelligentTieringConfiguration",
+                "s3:ListAllMyBuckets",
                 "s3:ListBucketMultipartUploads",
                 "s3:ListMultipartUploadParts",
-                "organizations:ListAccounts",
-                "organizations:ListRoots",
-                "organizations:ListOrganizationalUnitsForParent",
-                "organizations:ListParents",
-                "organizations:DescribeOrganizationalUnit",
-                "organizations:DescribeOrganization",
-                "organizations:DescribeAccount",
                 "sts:GetCallerIdentity"
               ],
               "Resource": "*"
+            },
+            {
+              "Fn::If": [
+                "IncludeCostExplorer",
+                {
+                  "Sid": "OptionalCostExplorerBilled",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ce:GetCostAndUsage",
+                    "ce:GetCostForecast",
+                    "ce:GetAnomalies",
+                    "ce:GetReservationUtilization",
+                    "ce:GetReservationCoverage",
+                    "ce:GetSavingsPlansPurchaseRecommendation",
+                    "ce:GetSavingsPlansUtilization",
+                    "ce:GetSavingsPlansUtilizationDetails",
+                    "ce:GetSavingsPlansCoverage",
+                    "ce:GetRightsizingRecommendation",
+                    "ce:ListCostAllocationTags",
+                    "ce:DescribeCostCategoryDefinition"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
+            },
+            {
+              "Fn::If": [
+                "IncludeMetricDiscovery",
+                {
+                  "Sid": "OptionalMetricDiscovery",
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudwatch:GetMetricData",
+                    "cloudwatch:ListMetrics"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
+            },
+            {
+              "Fn::If": [
+                "IncludeDeeperInventory",
+                {
+                  "Sid": "OptionalDeeperInventory",
+                  "Effect": "Allow",
+                  "Action": [
+                    "elasticloadbalancing:DescribeTargetGroups",
+                    "elasticloadbalancing:DescribeTargetHealth",
+                    "rds:DescribeDBSnapshots",
+                    "lambda:GetFunctionConfiguration",
+                    "logs:DescribeLogStreams",
+                    "s3:GetIntelligentTieringConfiguration",
+                    "compute-optimizer:GetEnrollmentStatus",
+                    "compute-optimizer:GetECSServiceRecommendations",
+                    "compute-optimizer:GetRecommendationSummaries"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
+            },
+            {
+              "Fn::If": [
+                "IncludeCurDiscovery",
+                {
+                  "Sid": "OptionalCurDiscovery",
+                  "Effect": "Allow",
+                  "Action": [
+                    "cur:DescribeReportDefinitions"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
+            },
+            {
+              "Fn::If": [
+                "IncludeOrganizations",
+                {
+                  "Sid": "OptionalOrganizations",
+                  "Effect": "Allow",
+                  "Action": [
+                    "organizations:ListAccounts",
+                    "organizations:ListRoots",
+                    "organizations:ListOrganizationalUnitsForParent",
+                    "organizations:ListParents",
+                    "organizations:DescribeOrganizationalUnit",
+                    "organizations:DescribeOrganization",
+                    "organizations:DescribeAccount"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
             }
           ]
         }

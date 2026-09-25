@@ -59,9 +59,14 @@ _NODE_CAPACITY: dict[str, tuple[float, float]] = {
     "i3.large": (2, 15.25), "i3.xlarge": (4, 30.5),
 }
 
-# EC2 hourly on-demand (us-east-1) — for cost estimation when CE tags are missing
-from .terraform_estimate import _EC2_HOURLY
-HOURS_PER_MONTH = 730.0
+# EC2 hourly on-demand (us-east-1), for cost estimation when CE tags are missing
+from ..aws_prices import EC2_HOURLY as _EC2_HOURLY
+from ..aws_prices import HOURS_PER_MONTH
+
+# Daily cost to monthly, on the same 730-hour month as every other monthly
+# figure in nable. This used to be x30 (a 720-hour month), 1.4% under the
+# EC2_MONTHLY a rightsizing finding quotes for the same node.
+_DAYS_PER_MONTH = HOURS_PER_MONTH / 24
 
 
 @dataclass
@@ -102,6 +107,14 @@ class ClusterCostReport:
     top_pods: list[PodCost]
     recommendations: list[str]
     unpriced_nodes: dict[str, int] = field(default_factory=dict)
+    # Every number above comes from _node_daily_cost, a list-price table. That
+    # was true before these fields existed and nothing said so, which is how a
+    # customer with OpenCost on a cluster-internal URL read a list-price guess
+    # as measured cost. The reason names OpenCost when it is configured and
+    # silent, so the fix is in the sentence.
+    is_estimate: bool = True
+    cost_source: str = "list-price"
+    estimate_reason: str = ""
 
 
 # ── K8s API helpers ────────────────────────────────────────────────────────────
@@ -344,7 +357,7 @@ def allocate_cluster_costs(
                 mem_req_mib=0,
                 share_fraction=1.0,
                 daily_cost_usd=node_daily,
-                monthly_cost_usd=node_daily * 30,
+                monthly_cost_usd=node_daily * _DAYS_PER_MONTH,
             ))
             continue
 
@@ -373,7 +386,7 @@ def allocate_cluster_costs(
                 mem_req_mib=p["mem_req_mib"],
                 share_fraction=share,
                 daily_cost_usd=round(daily, 4),
-                monthly_cost_usd=round(daily * 30, 2),
+                monthly_cost_usd=round(daily * _DAYS_PER_MONTH, 2),
             ))
 
     # ── Aggregate by namespace ────────────────────────────────────────────────
@@ -441,7 +454,10 @@ def allocate_cluster_costs(
 
     top_pods = sorted(pod_costs, key=lambda p: p.monthly_cost_usd, reverse=True)[:10]
 
+    from . import opencost as _oc
+
     return ClusterCostReport(
+        estimate_reason=_oc.fallback_reason(),
         cluster_name=cluster_name or "default",
         report_date=date.today().isoformat(),
         node_count=len(nodes),
@@ -463,7 +479,10 @@ def allocate_to_dict(cluster_name: str = "", context: str | None = None) -> dict
         "cluster":                report.cluster_name,
         "report_date":            report.report_date,
         "node_count":             report.node_count,
-        "total_monthly_cost_usd": round(report.total_node_daily_cost_usd * 30, 2),
+        "total_monthly_cost_usd": round(report.total_node_daily_cost_usd * _DAYS_PER_MONTH, 2),
+        "is_estimate":            report.is_estimate,
+        "cost_source":            report.cost_source,
+        "estimate_reason":        report.estimate_reason,
         "allocated_cost_usd":     report.allocated_cost_usd,
         "idle_cost_usd":          report.idle_cost_usd,
         **({"unpriced_nodes": report.unpriced_nodes,

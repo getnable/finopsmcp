@@ -17,6 +17,9 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ..analyzers.cloudwatch import MetricQuery, fetch_metric_values
+from ..aws_prices import EC2_HOURLY
+from ..aws_prices import HOURS_PER_MONTH as _HOURS_PER_MONTH
 from .envelope import INFERRED, Finding
 
 try:
@@ -27,18 +30,10 @@ except ImportError:
 log = logging.getLogger(__name__)
 
 _LOOKBACK_DAYS  = 14
-_HOURS_PER_MONTH = 730.0
 
 # On-demand hourly prices (us-east-1). Used to estimate monthly costs.
-_HOURLY_PRICE: dict[str, float] = {
-    "m5.large":    0.096,  "m5.xlarge":   0.192,  "m5.2xlarge":  0.384,
-    "m5.4xlarge":  0.768,
-    "m6i.large":   0.096,  "m6i.xlarge":  0.192,  "m6i.2xlarge": 0.384,
-    "c5.large":    0.085,  "c5.xlarge":   0.170,  "c5.2xlarge":  0.340,
-    "r5.large":    0.126,  "r5.xlarge":   0.252,  "r5.2xlarge":  0.504,
-    "t3.medium":   0.0416, "t3.large":    0.0832, "t3.xlarge":   0.1664,
-    "t3.2xlarge":  0.3328,
-}
+# Shared with every other module that prices an EC2 instance; see aws_prices.
+_HOURLY_PRICE: dict[str, float] = EC2_HOURLY
 
 # Spot discount relative to on-demand (fraction saved). Source: AWS Spot pricing.
 SPOT_DISCOUNT: dict[str, float] = {
@@ -107,10 +102,16 @@ def _batch_get_cpu_variance(
     cw_client: Any,
     instance_ids: list[str],
     days: int,
-) -> dict[str, float]:
+) -> dict[str, float | None]:
     """
-    Fetch hourly Average CPUUtilization for multiple instances in a single
-    get_metric_data call. Returns {instance_id: stddev}. Chunks at 500 queries.
+    Fetch hourly Average CPUUtilization for many instances, one
+    GetMetricStatistics call per instance run concurrently, inside CloudWatch's
+    free request tier (GetMetricData only where the host opted in, see
+    analyzers.cloudwatch). Returns {instance_id: stddev}. The spread is of the
+    whole series, never of part of one. A series that read empty counts as no
+    variance. A series that could not be read comes back None: zero variance
+    is the "stable load" half of a RECOMMENDED verdict, so a failed read must
+    not supply it.
     """
     if not instance_ids:
         return {}
@@ -118,45 +119,22 @@ def _batch_get_cpu_variance(
     end   = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
 
-    queries = [
-        {
-            "Id": f"m{i}",
-            "MetricStat": {
-                "Metric": {
-                    "Namespace": "AWS/EC2",
-                    "MetricName": "CPUUtilization",
-                    "Dimensions": [{"Name": "InstanceId", "Value": iid}],
-                },
-                "Period": 3600,
-                "Stat": "Average",
-            },
-            "ReturnData": True,
-        }
-        for i, iid in enumerate(instance_ids)
-    ]
+    # GetMetricStatistics answers at most 1,440 datapoints a call, 60 days of
+    # hourly points. The scan passes _LOOKBACK_DAYS (14), which is 336, so one
+    # call holds the whole series.
+    series = fetch_metric_values(cw_client, [
+        MetricQuery(iid, "AWS/EC2", "CPUUtilization", (("InstanceId", iid),), "Average", 3600)
+        for iid in instance_ids
+    ], start, end)
 
-    raw: dict[str, list[float]] = {iid: [] for iid in instance_ids}
-
-    try:
-        chunk_size = 500
-        for chunk_start in range(0, len(queries), chunk_size):
-            chunk = queries[chunk_start : chunk_start + chunk_size]
-            resp = cw_client.get_metric_data(
-                MetricDataQueries=chunk,
-                StartTime=start,
-                EndTime=end,
-            )
-            for r in resp.get("MetricDataResults", []):
-                idx = int(r["Id"][1:])
-                iid = instance_ids[idx]
-                raw[iid] = r.get("Values", [])
-    except Exception as exc:
-        log.warning("Batched CPU variance fetch failed: %s", exc)
-
-    return {
-        iid: (statistics.stdev(vals) if len(vals) >= 2 else 0.0)
-        for iid, vals in raw.items()
-    }
+    out: dict[str, float | None] = {}
+    for iid in instance_ids:
+        vals = series.get(iid)
+        if vals is None:
+            out[iid] = None
+            continue
+        out[iid] = statistics.stdev(vals) if len(vals) >= 2 else 0.0
+    return out
 
 
 def _classify(
@@ -216,12 +194,25 @@ def _get_asg_members(autoscaling_client: Any, regions_hint: list[str]) -> set[st
     return members
 
 
+class SpotResults(list):
+    """recommend_spot_adoption's list of per-instance results, plus the ids of
+    the instances skipped because their CPU read failed. A list subclass so
+    every caller that treats the result as a plain list keeps working."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.cpu_unread_instances: list[str] = []
+
+
 def _analyze_region(
     ec2_client: Any,
     cw_client: Any,
     asg_members: set[str],
     region: str,
+    unread: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """Per-instance results for one region. Instances whose CPU series could
+    not be read are left out and their ids appended to `unread`."""
     # Collect all on-demand instances first
     on_demand_instances: list[dict[str, Any]] = []
     try:
@@ -242,7 +233,7 @@ def _analyze_region(
     if not on_demand_instances:
         return []
 
-    # Single batched CloudWatch call for all instances
+    # One concurrent CloudWatch read for every instance
     instance_ids = [inst["InstanceId"] for inst in on_demand_instances]
     cpu_variance_by_id = _batch_get_cpu_variance(cw_client, instance_ids, _LOOKBACK_DAYS)
 
@@ -259,9 +250,15 @@ def _analyze_region(
             or ""
         )
 
+        cpu_var = cpu_variance_by_id.get(iid)
+        if cpu_var is None:
+            # The read failed: no evidence the load is stable, so no verdict.
+            if unread is not None:
+                unread.append(iid)
+            continue
+
         in_asg       = iid in asg_members
         is_stateless = _is_stateless(inst)
-        cpu_var      = cpu_variance_by_id.get(iid, 0.0)
         freq         = _get_interruption_freq(itype)
         discount     = _get_spot_discount(itype)
 
@@ -316,7 +313,8 @@ def recommend_spot_adoption(
         except Exception:
             regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
-    all_results: list[dict[str, Any]] = []
+    all_results = SpotResults()
+    unread: list[str] = []
 
     def _one_region(region: str) -> list[dict[str, Any]]:
         try:
@@ -325,7 +323,7 @@ def recommend_spot_adoption(
             asg = boto3.client("autoscaling",  region_name=region)
 
             asg_members = _get_asg_members(asg, [region])
-            return _analyze_region(ec2, cw, asg_members, region)
+            return _analyze_region(ec2, cw, asg_members, region, unread)
         except Exception as exc:
             log.warning("Region %s failed: %s", region, exc)
             return []
@@ -338,6 +336,9 @@ def recommend_spot_adoption(
             all_results.extend(region_results)
 
     all_results.sort(key=lambda r: r["monthly_savings"], reverse=True)
+    all_results.cpu_unread_instances = sorted(unread)
+    if unread:
+        log.warning("Spot adoption: %d instance(s) not assessed, CPU read failed", len(unread))
 
     # Classify the finding by the STRENGTH OF EVIDENCE behind it. We can MEASURE the
     # on-demand instance and its type, but the saving rests on the customer adopting
@@ -377,7 +378,10 @@ def recommend_spot_adoption(
                 "Env tags correctly indicate a stateless or non-prod instance.",
                 f"Spot discount of about {top['savings_pct']:.0f}% holds (public average; "
                 "actual price moves with capacity).",
-            ],
+            ] + ([
+                f"{len(unread)} on-demand instance(s) were not assessed: their CloudWatch "
+                "CPU read failed, so they are not in this list or its total."
+            ] if unread else []),
             rough_monthly=round(rough, 2),
             confirm_steps=[
                 "Confirm the workload is interruption-tolerant: stateless, checkpointed, "
@@ -411,6 +415,7 @@ def recommend_spot_adoption(
                 "monthly_spot_estimate": top["monthly_spot_estimate"],
                 "candidate_count": n,
                 "candidates_sampled": [r["instance_id"] for r in actionable[:8]],
+                "instances_cpu_unread": len(unread),
             },
         )
         top["finding"] = finding.to_dict()

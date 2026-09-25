@@ -41,7 +41,8 @@ def _parse_combined_aws_paste(combined: str) -> tuple[str, str] | None:
     return None
 
 
-def _prompt(msg: str, secret: bool = False, default: str = "") -> str:
+def _prompt(msg: str, secret: bool = False, default: str = "",
+            on_eof: str | None = None) -> str:
     # Avoid a doubled default marker. Some callers embed a yes/no hint like
     # "[Y/n]" or "(y/N)" in the message themselves; only append "[default]"
     # when there is not already a choice hint there, so prompts never read
@@ -54,8 +55,49 @@ def _prompt(msg: str, secret: bool = False, default: str = "") -> str:
         val = getpass.getpass(msg) if secret else input(msg)
     except (KeyboardInterrupt, EOFError):
         print()
-        return default
+        # on_eof: what a closed input means, where taking the default would
+        # make a decision the person never made.
+        return default if on_eof is None else on_eof
     return val.strip() or default
+
+
+# Set when the AWS connect step ended with nothing connected (declined, or no
+# answer on a closed input), so the close does not say "Done".
+_DECLINED = [False]
+
+
+def _select_providers(providers: list[str], attempts: int = 3) -> list[str]:
+    """Numbers, names, or 'all'. Anything unrecognised is refused by name and
+    asked again, instead of silently selecting nothing."""
+    for _ in range(attempts):
+        raw = _prompt("\n  Enter numbers or names (comma-separated), 'all', "
+                      "or press Enter for aws only", default="1")
+        if raw.lower() == "all":
+            return list(providers)
+        selected: list[str] = []
+        bad: list[str] = []
+        for tok in (t.strip().lower() for t in raw.replace(" ", ",").split(",")):
+            if not tok:
+                continue
+            if tok.isdigit() and 1 <= int(tok) <= len(providers):
+                pick = providers[int(tok) - 1]
+            elif tok in providers:
+                pick = tok
+            else:
+                bad.append(tok)
+                continue
+            if pick not in selected:
+                selected.append(pick)
+        if bad:
+            # Not echoed back: a key pasted into the wrong prompt would be
+            # printed to the terminal (and CodeQL flags the prompt's text as
+            # possibly sensitive).
+            n = len(bad)
+            print(f"  {n} entr{'y was' if n == 1 else 'ies were'} not on the list. "
+                  "Use the numbers or names above.")
+            continue
+        return selected
+    return []
 
 
 def _section(title: str) -> None:
@@ -63,6 +105,17 @@ def _section(title: str) -> None:
     print(f"\n  {_rule()}")
     print(f"  {bold(title)}")
     print(f"  {_rule()}")
+
+
+# The one-click template puts the secret access key in the stack's Outputs,
+# where it stays readable after the paste. Until the template is republished
+# without it, every place that sends someone to Outputs says so.
+_CFN_OUTPUTS_NOTE = (
+    "The secret key stays visible in the stack's Outputs to anyone with "
+    "cloudformation:DescribeStacks in this account. To close that, create a new "
+    "access key for the stack's IAM user in IAM, delete the one shown in Outputs, "
+    "and run `nable setup aws` with the new key. Deleting the stack revokes the key."
+)
 
 
 def _ok(msg: str) -> None:
@@ -305,6 +358,8 @@ def setup_aws() -> None:
         if role_arns:
             vault.store("AWS_ROLE_ARNS", role_arns)
         _ok("AWS credentials stored in vault")
+        if _method == "oneclick":
+            _warn(_CFN_OUTPUTS_NOTE)
 
     # Test connection + Cost Explorer permissions
     try:
@@ -757,11 +812,20 @@ def setup_aws_account() -> None:
             c = candidates[0]
             extra = f" ({c['alias']})" if c["alias"] else ""
             _ok(f"Found working credentials: {c['label']} -> account {c['account_id']}{extra}")
-            ans = _prompt("  Connect this account? [Y/n]  (or 'm' to enter manually)", default="y").lower()
+            ans = _prompt("  Connect this account? [Y/n]  (or 'm' to enter manually)", default="y",
+                          on_eof="\x04").lower()
+            if ans == "\x04":
+                # Input closed (piped, or Ctrl-D/Ctrl-C). No answer is not a yes:
+                # connecting an account is a decision the person has to make.
+                _emit_step("ambient_declined")
+                _DECLINED[0] = True
+                print("  No answer, so not connecting. Run `nable setup aws` in a terminal to connect.")
+                return
             if ans in ("y", "yes", ""):
                 chosen = c
             elif ans != "m":
                 _emit_step("ambient_declined")
+                _DECLINED[0] = True
                 print("  Skipped.")
                 return
         else:
@@ -1082,6 +1146,8 @@ def _print_one_click_key_offer(region: str = "us-east-1") -> None:
             "  auditable template; your keys stay in your account):\n"
         )
         print(f"     {quick_create_url(region=region)}\n")
+        _warn(_CFN_OUTPUTS_NOTE)
+        print()
 
 
 def _setup_aws_manual(taken: set) -> None:
@@ -1679,8 +1745,8 @@ def setup_saas_api_key(
     provider_name: str,
     env_vars: list[tuple[str, str, bool]],
     note: str | None = None,
-) -> None:
-    """Generic wizard for API-key SaaS providers.
+) -> bool:
+    """Generic wizard for API-key SaaS providers. Returns True if anything was stored.
 
     note: printed up front. Use it for the providers that report usage but not
     dollars unless you supply a contract rate (or that have no billing API at
@@ -1722,6 +1788,7 @@ def setup_saas_api_key(
             })
         except Exception:
             pass
+    return stored_any
 
 
 def setup_sso() -> None:
@@ -1839,20 +1906,20 @@ def setup_slack_bot() -> None:
     # setup, not on the first @mention. Cost queries, anomalies and one-way
     # alerts are free; the two-way @nable bot is Team-only (trial passes).
     try:
-        from .license import check_license
+        from .license import check_license, checkout_url, plan_label, plan_name
         st = check_license()
         if st.is_team:
             if getattr(st, "mode", "") == "trial" and st.days_remaining > 0:
-                _ok(f"Team trial active ({st.days_remaining} day"
-                    f"{'s' if st.days_remaining != 1 else ''} left). The @nable bot is unlocked.")
+                _ok(f"Trial active ({st.days_remaining} day"
+                    f"{'s' if st.days_remaining != 1 else ''} left). The @nable bot is unlocked "
+                    "for the trial.")
             else:
-                _ok("Pro plan active. The @nable bot is unlocked.")
+                _ok(f"{plan_name(st.mode)} plan active. The @nable bot is unlocked.")
         else:
-            _warn("The conversational @nable bot is a nable Team feature "
-                  "($1,000/mo flat, unlimited seats), with a 7-day free trial.")
+            _warn(f"The conversational @nable bot is a nable {plan_label('team')} feature.")
             print("    Cost queries, anomalies and one-way alerts are free. The two-way bot is not.")
-            print("    Start a trial or activate a key:  finops setup license")
-            print("    Plans:  https://getnable.com/#pricing")
+            print(f"    Team checkout:  {checkout_url('team')}")
+            print("    Then sign in:   finops login")
         print()
     except Exception:
         pass
@@ -1930,10 +1997,38 @@ def setup_slack_bot() -> None:
         print('    Install it before running finops-slack:  pip install "finops-mcp[slack]"')
 
 
+def _offer_test_post(where: str, send) -> bool:
+    """Offer one test message to the destination the user just entered.
+
+    Setup used to finish with "Slack configured" having sent nothing, so a
+    mistyped webhook or a bot not in the channel stayed invisible until the day
+    someone wondered where the alerts were. The post is the user's choice, to
+    the webhook or channel they just gave. `send` returns (ok, detail)."""
+    ans = _prompt(f"  Send a test message to {where} now? [Y/n]", default="y").strip().lower()
+    if ans not in ("", "y", "yes"):
+        print("  No test message was sent. Nothing has been posted yet.")
+        return False
+    try:
+        ok, detail = send()
+    except Exception as e:  # network, DNS, TLS
+        ok, detail = False, str(e)
+    if ok:
+        _ok(f"Test message posted to {where}.")
+        return True
+    _warn(f"The test message was not accepted ({detail}). Check it and run this again.")
+    return False
+
+
+def _print_delivery_note() -> None:
+    from .license import DELIVERY_NOTE
+    print(f"  {DELIVERY_NOTE}\n")
+
+
 def setup_slack() -> None:
-    _section("Slack: Cost Alerts and Daily Digest")
+    _section("Slack: cost alerts and reports, sent when you ask")
+    _print_delivery_note()
     print("  Choose method:")
-    print("  1) Incoming Webhook (simpler)")
+    print("  1) Incoming Webhook (simpler; posts to the one channel it was created for)")
     print("  2) Bot Token (richer, supports buttons)")
     print("  3) Conversational bot (two-way: questions, RCA, draft PRs and tickets)")
     choice = _prompt("  Choice", default="1")
@@ -1942,28 +2037,36 @@ def setup_slack() -> None:
     if choice == "3":
         setup_slack_bot()
         return
+    import httpx
+    text = "nable test message: this channel will get the cost alerts and reports you send from nable."
     if choice == "1":
-        url = _prompt("  Webhook URL (from Slack App → Incoming Webhooks)", secret=True)
+        url = _prompt("  Webhook URL (from Slack App → Incoming Webhooks)", secret=True).strip()
+        if not url:
+            _warn("No webhook entered. Run 'finops setup slack' to try again.")
+            return
         vault.store("SLACK_WEBHOOK_URL", url)
+
+        def _send():
+            r = httpx.post(url, json={"text": text}, timeout=10)
+            return r.status_code == 200, f"HTTP {r.status_code}"
+        posted = _offer_test_post("the Slack webhook", _send)
     else:
-        token = _prompt("  Bot Token (xoxb-...)", secret=True)
+        token = _prompt("  Bot Token (xoxb-...)", secret=True).strip()
         channel = _prompt("  Channel (e.g. #finops-alerts)", default="#finops-alerts")
+        if not token:
+            _warn("No bot token entered. Run 'finops setup slack' to try again.")
+            return
         vault.store("SLACK_BOT_TOKEN", token)
         vault.store("SLACK_CHANNEL", channel)
-    while True:
-        digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-        try:
-            parts = digest_time.split(":")
-            hour_int = int(parts[0].strip())
-            minute_int = int(parts[1].strip()) if len(parts) > 1 else 0
-            if 0 <= hour_int <= 23 and 0 <= minute_int <= 59:
-                hour, minute = str(hour_int), str(minute_int)
-                break
-            _warn(f"Invalid time '{digest_time}'. Hour must be 0-23 and minute 0-59.")
-        except (ValueError, IndexError):
-            _warn(f"Invalid time '{digest_time}'. Use HH:MM format, e.g. 09:00.")
-    vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
-    _ok("Slack configured")
+
+        def _send():
+            r = httpx.post("https://slack.com/api/chat.postMessage",
+                           headers={"Authorization": f"Bearer {token}"},
+                           json={"channel": channel, "text": text}, timeout=10)
+            body = r.json() if r.status_code == 200 else {}
+            return bool(body.get("ok")), body.get("error") or f"HTTP {r.status_code}"
+        posted = _offer_test_post(channel, _send)
+    _ok("Slack saved" + ("." if posted else ". No message has been sent yet."))
 
 
 def setup_n8n() -> None:
@@ -2024,25 +2127,25 @@ def setup_n8n() -> None:
 
 
 def setup_teams() -> None:
-    _section("Microsoft Teams: Cost Alerts and Daily Digest")
+    _section("Microsoft Teams: cost alerts and reports, sent when you ask")
+    _print_delivery_note()
     from .security.vault import Vault
     vault = Vault.default()
-    url = _prompt("  Incoming Webhook URL (from Teams channel → Connectors)", secret=True)
+    url = _prompt("  Incoming Webhook URL (from Teams channel → Connectors)", secret=True).strip()
+    if not url:
+        _warn("No webhook entered. Run 'finops setup teams' to try again.")
+        return
     vault.store("TEAMS_WEBHOOK_URL", url)
-    while True:
-        digest_time = _prompt("  Daily digest time (UTC, HH:MM)", default="09:00")
-        try:
-            parts = digest_time.split(":")
-            hour_int = int(parts[0].strip())
-            minute_int = int(parts[1].strip()) if len(parts) > 1 else 0
-            if 0 <= hour_int <= 23 and 0 <= minute_int <= 59:
-                hour, minute = str(hour_int), str(minute_int)
-                break
-            _warn(f"Invalid time '{digest_time}'. Hour must be 0-23 and minute 0-59.")
-        except (ValueError, IndexError):
-            _warn(f"Invalid time '{digest_time}'. Use HH:MM format, e.g. 09:00.")
-    vault.store("FINOPS_DIGEST_CRON", f"{minute} {hour} * * *")
-    _ok("Teams configured")
+
+    def _send():
+        import asyncio
+        from .notifications.teams import send_to_webhook
+        ok = asyncio.run(send_to_webhook(
+            url, "nable test message: this channel will get the cost alerts and reports "
+                 "you send from nable."))
+        return ok, "not accepted, or not an Office webhook URL"
+    posted = _offer_test_post("the Teams webhook", _send)
+    _ok("Teams saved" + ("." if posted else ". No message has been sent yet."))
 
 
 # ── Vault management ──────────────────────────────────────────────────────────
@@ -2280,6 +2383,26 @@ def _run_agents() -> None:
         print()
 
 
+def _guard_cli(parsed) -> None:
+    """_run_guard, ending quietly when its reader goes away.
+
+    `nable guard report | head` closes the pipe after ten lines and the next
+    write raises BrokenPipeError, which used to print a traceback (and a
+    second one from the interpreter's own flush at exit). Output is flushed
+    here so the error surfaces inside the try, and stdout is pointed at
+    /dev/null so the exit flush has nowhere to fail."""
+    try:
+        _run_guard(parsed)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        except (OSError, ValueError, AttributeError):
+            pass
+        raise SystemExit(0) from None
+
+
 def _run_guard(parsed) -> None:
     """`finops guard`: install / manage the seamless agent cost guardrail.
 
@@ -2288,6 +2411,8 @@ def _run_guard(parsed) -> None:
     against the human-authored policy in policy.py before the agent runs them.
     Advisory and propose-only: it asks or denies, it never executes.
     """
+    import json
+
     from . import guard
     from .welcome import _fire_telemetry, amber, bold, cyan, dim, green
 
@@ -2297,8 +2422,20 @@ def _run_guard(parsed) -> None:
     scope_label = "~/.claude/settings.json" if global_scope else ".claude/settings.json (this project)"
 
     if action == "hook":
-        # Machine path: Claude Code invokes this on every Bash tool call.
-        raise SystemExit(guard.run_hook())
+        # Machine path: the agent harness invokes this on every shell command.
+        from .guard_adapters import run_hook
+        raise SystemExit(run_hook(getattr(parsed, "guard_harness", None)))
+
+    # Any agent but Claude Code, or every agent found here: guard_adapters owns
+    # those files.
+    harness = getattr(parsed, "guard_harness", None)
+    everything = getattr(parsed, "guard_all", False)
+    if action in ("install", "uninstall") and (everything or harness not in (None, "claude")):
+        from .guard_adapters import cli
+        code = cli(action, harness=harness, everything=everything, global_scope=global_scope)
+        if code:
+            raise SystemExit(code)
+        return
 
     if action == "install":
         # No license check here on purpose. The guard is free forever (see the
@@ -2312,6 +2449,12 @@ def _run_guard(parsed) -> None:
         # install() overwrites, so we can count how many people the uv-cache-path
         # bug actually reached. There was no guard telemetry at all before this.
         was_broken = bool(guard.broken_hook_command(guard._settings_path(global_scope)))
+        # And was it the unpinned uvx form earlier releases wrote, the one that
+        # pulls the newest PyPI release on every agent tool call?
+        # install() pins it in place; this counts how many it reached.
+        was_unpinned = bool(guard.unpinned_hook_command(guard._settings_path(global_scope)))
+        # Or pinned to another release: install moves the pin to this one.
+        pinned_elsewhere = guard.pinned_elsewhere_hook_command(guard._settings_path(global_scope))
         try:
             path = guard.install(global_scope)
         except OSError as e:
@@ -2327,18 +2470,29 @@ def _run_guard(parsed) -> None:
         # commands, no cost data. Honors NABLE_NO_TELEMETRY like everything else.
         _fire_telemetry("guard_installed", {
             "scope": scope,
-            "outcome": "repaired" if was_broken else ("already" if already else "new"),
+            "outcome": ("repaired" if was_broken else "repinned" if was_unpinned or pinned_elsewhere
+                        else ("already" if already else "new")),
             "hook_form": "uvx" if guard._hook_command() == guard._UVX_HOOK_CMD else "binary",
         })
         print()
-        if already:
+        if was_broken:
+            print(f"  {green('✓')} Guard repaired: the hooked command no longer existed → {path}")
+        elif was_unpinned:
+            print(f"  {green('✓')} Guard pinned to finops-mcp=={guard.__version__} → {path}")
+            print(dim("    It used to fetch the newest PyPI release on every agent command."))
+        elif pinned_elsewhere:
+            print(f"  {green('✓')} Guard re-pinned from "
+                  f"finops-mcp=={guard.hook_release(pinned_elsewhere) or 'another release'} "
+                  f"to finops-mcp=={guard.__version__} → {path}")
+        elif already:
             print(f"  {green('✓')} Guard already installed in {path}")
         else:
             print(f"  {green('✓')} Agent cost guardrail installed → {path}")
         print()
         print(f"  {bold('What it does:')} before your agent runs an infra-mutating command")
         print("  (terraform destroy, kubectl delete, aws ec2 terminate-instances, a")
-        print("  commitment purchase), nable checks it against your policy:")
+        print("  commitment purchase), or makes the same change through a Terraform,")
+        print("  AWS or Kubernetes MCP tool, nable checks it against your policy:")
         print(f"    one-way door      → {cyan('ask')}   you confirm, with the reason shown")
         print(f"    not in allowlist  → {cyan('deny')}  the agent is told why")
         print("    reversible + safe → silent, zero friction")
@@ -2382,7 +2536,7 @@ def _run_guard(parsed) -> None:
         print()
         for cmd in samples:
             print(f"  $ {cmd}")
-            verdict = guard.gate_command(cmd)
+            verdict = guard.gate_command(cmd, harness="cli", record=False)
             if verdict is not None:
                 print(f"    {cyan(verdict['decision'])}   {verdict['reason']}")
             else:
@@ -2395,24 +2549,82 @@ def _run_guard(parsed) -> None:
                 else:
                     print(f"    {green('allow')}  not an infra-mutating command: the guard stays silent")
             print()
-        print("  Wire this into Claude Code so it runs on every agent command:")
-        print(f"    {cyan('nable guard install')}")
+        if any(guard.is_installed(guard._settings_path(g)) for g in (False, True)):
+            print("  The guard is already installed in Claude Code, so it runs on every")
+            print(f"  agent command. {dim('nable guard status')} shows where.")
+        else:
+            print("  Wire this into Claude Code so it runs on every agent command:")
+            print(f"    {cyan('nable guard install')}")
         print()
+        return
+
+    if action == "report":
+        _guard_report(parsed)
+        return
+
+    if action == "doctor":
+        _guard_doctor(parsed)
+        return
+
+    if action == "reconcile":
+        _guard_reconcile(parsed)
+        return
+
+    if action == "export":
+        _guard_export(parsed)
+        return
+
+    if action == "verify-log":
+        from . import guard_ledger
+        result = guard_ledger.check()
+        reanchor = getattr(parsed, "guard_reanchor", False)
+        if result["clean"] or reanchor:
+            guard_ledger.save_anchor(result)
+        if getattr(parsed, "guard_json", False):
+            print(json.dumps(result, indent=2))
+        else:
+            print()
+            if result["clean"]:
+                print(f"  {green('✓')} Decision ledger intact: {result['records']} record(s), "
+                      "every one chained to the last.")
+                print(dim(f"  Head: {result['head']}"))
+                if result["anchor"]:
+                    print(dim(f"  Nothing removed or rewritten since {result['anchor'].get('seen_at')}"
+                              f" ({result['anchor']['records']} record(s) then)."))
+                print(dim("  The anchor this compares against sits beside the ledger, where an"))
+                print(dim("  agent can write it too. Keep the head somewhere else as well (a"))
+                print(dim("  ticket, a commit) and compare it next time."))
+            elif not result["ok"]:
+                print(f"  {amber('✗')} Decision ledger broken at line {result['broken_at']}: "
+                      f"{result['problem']}.")
+            for warning in result["warnings"]:
+                print(f"  {amber('✗')} {warning[0].upper()}{warning[1:]}.")
+            if result["warnings"]:
+                print(dim("  If you rotated or archived the ledger yourself: "
+                          "nable guard verify-log --reanchor"))
+                if reanchor:
+                    print(dim(f"  Re-anchored at {result['records']} record(s)."))
+            print(dim(f"  {result['path']}"))
+            print()
+        if not result["clean"] and not reanchor:
+            raise SystemExit(1)
         return
 
     if action == "check":
         cmd = getattr(parsed, "guard_command", "")
         if not cmd:
-            print("\n  Usage: nable guard check --command \"terraform destroy ...\"\n")
-            return
-        verdict = guard.gate_command(cmd)
+            print("\n  Usage: nable guard check --command \"terraform destroy ...\"\n",
+                  file=sys.stderr)
+            raise SystemExit(2)
+        verdict = guard.gate_command(cmd, harness="cli", record=False)
         print()
         if verdict is None:
             hit = guard.classify_command(cmd)
             if hit:
-                print(f"  {green('allow')}  ({hit[1]}, reversible and in policy) — the guard stays silent")
+                print(f"  {green('allow')}  ({hit[1]}, reversible and in policy): "
+                      "the guard stays silent")
             else:
-                print(f"  {green('allow')}  not an infra-mutating command — the guard stays silent")
+                print(f"  {green('allow')}  not an infra-mutating command: the guard stays silent")
         else:
             print(f"  {cyan(verdict['decision'])}  {verdict['reason']}")
         print()
@@ -2420,7 +2632,10 @@ def _run_guard(parsed) -> None:
 
     # status (default)
     print()
-    stale = False
+    stale: list[bool] = []
+    unpinned: list[bool] = []
+    elsewhere: list[tuple[bool, str]] = []
+    narrow: list[bool] = []
     for scope, is_global in (("project", False), ("global", True)):
         p = guard._settings_path(is_global)
         if guard.is_installed(p):
@@ -2430,25 +2645,379 @@ def _run_guard(parsed) -> None:
             # someone they are guarded at the moment they stopped being.
             broken = guard.broken_hook_command(p)
             if broken:
-                stale = True
+                stale.append(is_global)
                 state = amber("installed, but broken")
+            elif guard.unpinned_hook_command(p):
+                unpinned.append(is_global)
+                state = amber("installed, unpinned")
+            elif guard.pinned_elsewhere_hook_command(p):
+                release = guard.hook_release(guard.pinned_elsewhere_hook_command(p) or "")
+                elsewhere.append((is_global, release or "another release"))
+                state = amber(f"installed, pinned to {release or 'another release'}")
+            elif not guard.hook_surfaces(p)["mcp"]:
+                narrow.append(is_global)
+                state = amber("installed, Bash only")
             else:
                 state = green("installed")
         else:
             state = dim("not installed")
         print(f"  {scope:<8} {state}   {dim(str(p))}")
+    from .guard_adapters import status_lines
+    other_agents = status_lines()
+    if other_agents:
+        print()
+        for line in other_agents:
+            print(line)
     print()
+
+    def _fix(scopes: list[bool]) -> None:
+        # The repair has to name the scope that needs it: a bare
+        # `nable guard install` only ever touches this project's settings.
+        for is_global in scopes:
+            print(f"  {cyan('nable guard install' + (' --global' if is_global else ''))}")
+        print()
+
     if stale:
         print(f"  {amber('The hooked command no longer exists, so the guard is not running.')}")
         print(dim("  Claude Code skips a hook it cannot execute, silently. Re-run:"))
-        print(f"  {cyan('nable guard install')}")
-        print()
+        _fix(stale)
+    if unpinned:
+        print(f"  {amber('The hook fetches the newest finops-mcp from PyPI on every agent command.')}")
+        print(dim("  A security hook should run the release you chose. Pin it in place:"))
+        _fix(unpinned)
+    if elsewhere:
+        runs = ", ".join(sorted({r for _, r in elsewhere}))
+        print(f"  {amber(f'The hook runs finops-mcp {runs}, not this one ({guard.__version__}).')}")
+        print(dim("  Re-pin it to this release in place:"))
+        _fix([is_global for is_global, _ in elsewhere])
+    if narrow:
+        print(f"  {amber('MCP tool calls (Terraform, AWS, Kubernetes servers) are not checked.')}")
+        print(dim("  The hook only sees Bash. Widen it in place:"))
+        _fix(narrow)
     print(dim("  Try:      nable guard try                 (see it judge four commands)"))
+    print(dim("  Coverage: nable guard doctor              (what is and is not guarded here)"))
+    print(dim("  History:  nable guard report              (what it asked, blocked, let through)"))
+    print(dim("            nable guard reconcile           (the ledger against CloudTrail)"))
+    print(dim("            nable guard export --format cef (the verified ledger, for a SIEM)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
-    print(dim("  The hook is Claude Code. Other MCP agents (Cursor, etc.) get the same"))
-    print(dim("  gate as a tool: the agent calls check_action_policy before acting."))
+    print(dim("            nable guard install --all       (Claude Code, Cursor, Codex: each one found)"))
+    print(dim("  In Claude Code the hook sees Bash and MCP tool calls; in Cursor and Codex, shell"))
+    print(dim("  commands. Other MCP agents get the same gate as a tool: the agent calls"))
+    print(dim("  check_action_policy before acting."))
     print()
+
+
+def _guard_doctor(parsed) -> None:
+    """`nable guard doctor`: what is covered on this machine, plainly."""
+    import json
+    import textwrap
+
+    from . import guard
+    from .welcome import amber, bold, cyan, dim, green
+
+    d = guard.doctor()
+    if getattr(parsed, "guard_json", False):
+        print(json.dumps(d, indent=2))
+        return
+    labels = {"claude-code": "Claude Code", "cursor": "Cursor", "codex": "Codex CLI",
+              "copilot": "GitHub Copilot", "gemini": "Gemini CLI", "cline": "Cline"}
+    width = max(len(v) for v in labels.values())
+    print()
+    print(f"  {bold('nable guard doctor')}   finops-mcp {d['version']}")
+    print()
+    for r in d["surfaces"]:
+        name = f"{labels.get(r['harness'], r['harness']):<{width}} {r['scope']:<8}"
+        if not r["installed"]:
+            state = dim("not installed")
+        elif not r.get("runs"):
+            state = amber("installed, but the hooked command no longer exists")
+        elif r["harness"] == "claude-code":
+            sees = " + ".join(s for s, on in (("Bash", r.get("bash")), ("MCP", r.get("mcp"))) if on)
+            pin = {"pinned": "pinned to this release", "other": "pinned to another release",
+                   "unpinned": amber("unpinned"), "binary": "installed binary"}[r["pin"]]
+            state = f"{green('installed')}, sees {sees or 'nothing'}, {pin}"
+        else:
+            state = green("installed")
+            if "mcp" in r:
+                state += ", sees shell" + (" + MCP" if r["mcp"] else "")
+            pin = {"pinned": "pinned to this release", "other": "pinned to another release",
+                   "unpinned": amber("unpinned"), "binary": "installed binary"}.get(r.get("pin"))
+            if pin:
+                state += f", {pin}"
+        print(f"  {name} {state}")
+        print(dim(f"  {'':<{width + 9}} {r['path']}"))
+    print()
+    print(f"  {bold('Covered on this machine')}")
+    for c in d["covered"] or ["nothing yet"]:
+        print(f"    {green('✓') if d['covered'] else amber('✗')} {c}")
+    print(f"  {bold('Not covered')}")
+    for c in d["not_covered"]:
+        print(f"    - {c}")
+    _guard_doctor_budgets(d.get("budgets") or {})
+    led = d["ledger"]
+    print()
+    if led["ok"]:
+        print(f"  Decision ledger: {led['records']} record(s), chain intact")
+    else:
+        print(f"  Decision ledger: {amber('chain broken at line ' + str(led['broken_at']))}")
+    print(dim(f"  {led['path']}"))
+    lost = led.get("unrecorded") or {}
+    if lost.get("count"):
+        print(f"  {amber(str(lost['count']) + ' verdict(s) answered but not recorded')}"
+              f" (ledger locked or not a file), last at {lost['last']}")
+    print()
+    for line in textwrap.wrap(d["seatbelt"], 76):
+        print(f"  {line}")
+    print()
+    print(f"  {bold('Next')}")
+    for fix in d["recommendations"]:
+        print(f"    {cyan('->')} {fix}")
+    print()
+
+
+def _guard_doctor_budgets(b: dict) -> None:
+    """The doctor's cloud budget section: what the guard enforces, and on how
+    fresh a figure."""
+    from .budget.summary import age_words
+    from .welcome import amber, bold, dim
+
+    print()
+    print(f"  {bold('Cloud budgets')} (checked on each priced change)")
+    for row in b.get("enforced") or []:
+        print(f"    {row['name']} ({row['scope']}): ${row['spent'] or 0:,.0f} of "
+              f"${row['limit'] or 0:,.0f} ({row['pct_used'] or 0:.0f}%)")
+    for row in b.get("not_enforced") or []:
+        print(f"    {row['name']} ({row['scope']}): {amber('not enforced')}, needs {row['needs']}")
+    if not (b.get("enforced") or b.get("not_enforced")):
+        print(f"    {dim('none')}")
+    state = b.get("state")
+    if state == "absent":
+        fresh = amber("no spend figure yet (nable budget refresh)")
+    elif state == "stale":
+        old = ("from last month" if b.get("previous_month")
+               else f"{age_words(b.get('age_hours'))} old")
+        fresh = amber(f"spend figure {old}, not used (nable budget refresh)")
+    elif state == "no_data":
+        fresh = amber("no cost data for this period yet, so budgets are not checked "
+                      "(sync cost data, then nable budget refresh)")
+    else:
+        fresh = f"spend figure from {age_words(b.get('age_hours'))} ago"
+        if b.get("spend_through"):
+            fresh += f", cost data through {b['spend_through']}"
+    how = "stops it" if b.get("on_breach") == "deny" else "asks"
+    source = b.get("on_breach_source") or "default"
+    print(dim(f"    {fresh}; a change over budget {how} ({source})"))
+
+
+def _guard_report(parsed) -> None:
+    """`nable guard report`: what the guard saw, stopped and let through."""
+    import json
+
+    from . import guard_ledger
+    from .welcome import amber, bold, cyan, dim
+
+    days = getattr(parsed, "guard_days", 30) or 30
+    session = getattr(parsed, "guard_session", None) or None
+    summary = guard_ledger.summarize(days, session=session)
+    chain = guard_ledger.check()
+    problems = ([f"it breaks at line {chain['broken_at']}: {chain['problem']}"]
+                if not chain["ok"] else []) + chain["warnings"]
+    if getattr(parsed, "guard_json", False):
+        print(json.dumps({**summary, "ledger_problems": problems}, indent=2))
+        return
+    if problems:
+        print()
+        print(f"  {amber('The decision ledger does not verify, so these figures may be incomplete:')}")
+        for p in problems:
+            print(f"    {amber('✗')} {p}")
+        print(dim("  Details: nable guard verify-log"))
+    d = summary["by_decision"]
+    print()
+    scope = f" in session {session}" if session else ""
+    print(f"  {bold('nable guard')}: the last {days:g} days{scope}, "
+          f"{summary['records']} decision(s)")
+    print()
+    if not summary["records"]:
+        print(dim(f"  Nothing recorded for session {session} in that window."
+                  if session else
+                  "  Nothing recorded yet. Verdicts land here as your agent runs infra commands."))
+        print(dim(f"  {summary['path']}"))
+        print()
+        return
+    print(f"    asked a human   {d.get('ask', 0):>6}")
+    print(f"    blocked         {d.get('deny', 0):>6}")
+    print(f"    warned          {d.get('warn', 0):>6}")
+    print(f"    allowed         {d.get('allow', 0):>6}")
+    if d.get("fail_open"):
+        errs = ", ".join(f"{k} x{v}" for k, v in summary["fail_open_errors"].items())
+        print(f"    failed open     {d['fail_open']:>6}   ({errs})")
+    print()
+    print(f"  Escalated or blocked: ~${summary['usd_per_month_escalated_or_blocked']:,.0f}/mo "
+          "at stake (list-price estimates)")
+    if summary["usd_order_ceilings_escalated_or_blocked"]:
+        print(f"  Commitment orders escalated or blocked: up to "
+              f"${summary['usd_order_ceilings_escalated_or_blocked']:,.0f}")
+    print(f"  Let through with a figure (allowed or warned): "
+          f"~${summary['usd_per_month_allowed_with_a_figure']:,.0f}/mo")
+    if summary.get("repeats_not_summed"):
+        print(dim(f"  Cost increases only; {summary['repeats_not_summed']} repeat(s) of the same "
+                  "command within 10 minutes counted once."))
+    if summary["largest"]:
+        print()
+        print(f"  {bold('Largest escalations')}")
+        for r in summary["largest"]:
+            print(f"    {cyan(r['decision']):<5} ~${r['monthly_usd']:,.0f}/mo  {r['command']}")
+            print(dim(f"          {r['ts']}  {r['harness']}  {r['tool']}"))
+    sessions = [(k, v) for k, v in summary["by_session"].items()
+                if v["usd_per_month_escalated_or_blocked"] or v["usd_per_month_allowed_with_a_figure"]]
+    if sessions and not session:
+        print()
+        print(f"  {bold('By agent session')} (priced, largest first)")
+        for sid, v in sessions[:5]:
+            print(f"    {sid[:36]:<36}  let through ~${v['usd_per_month_allowed_with_a_figure']:,.0f}/mo"
+                  f"  escalated or blocked ~${v['usd_per_month_escalated_or_blocked']:,.0f}/mo")
+            print(dim(f"    {'':<36}  {v['records']} decision(s), {v['first']} to {v['last']}"))
+        if len(sessions) > 5:
+            print(dim(f"    and {len(sessions) - 5} more; one session: nable guard report --session ID"))
+    print()
+    print(dim("  By harness: " + ", ".join(f"{k} {v}" for k, v in summary["by_harness"].items())))
+    print(dim("  Check the log was not edited: nable guard verify-log"))
+    print(dim(f"  {summary['path']}"))
+    print()
+
+
+def _guard_reconcile(parsed) -> None:
+    """`nable guard reconcile`: the ledger against CloudTrail."""
+    import json
+    import textwrap
+
+    from .guard_reconcile import EVENTS, ReconcileError, reconcile
+    from .welcome import amber, bold, dim, green
+
+    hours = getattr(parsed, "guard_hours", 24) or 24
+    regions = getattr(parsed, "guard_regions", None) or None
+    as_json = getattr(parsed, "guard_json", False)
+    if not as_json:
+        n = len(regions or [None])
+        print()
+        print(dim(f"  Reading CloudTrail: {len(EVENTS)} event names x {n} region(s), "
+                  "paced at 2 requests a second..."))
+    try:
+        r = reconcile(hours, regions,
+                      tolerance_minutes=getattr(parsed, "guard_tolerance", 5) or 5)
+    except ReconcileError as e:
+        if as_json:
+            print(json.dumps({"error": str(e)}, indent=2))
+        else:
+            print()
+            for line in str(e).splitlines():
+                print(f"  {line}")
+            print()
+        raise SystemExit(1) from None
+    if as_json:
+        print(json.dumps(r, indent=2, default=str))
+        return
+
+    def who(ev: dict) -> str:
+        arn = ev.get("identity_arn") or ev.get("user") or "?"
+        return f"{arn}  via {ev['via']}  ({ev.get('user_agent') or 'no user agent'})"
+
+    def show(title: str, rows: list, *, mark: str) -> None:
+        print()
+        print(f"  {bold(title)} ({len(rows)})")
+        for ev in rows[:20]:
+            failed = f"  (failed: {ev['error_code']})" if ev.get("error_code") else ""
+            print(f"    {mark} {ev['time']}  {ev['region']}  {ev['event']}{failed}")
+            print(dim(f"        {who(ev)}"))
+            if ev.get("resources"):
+                print(dim(f"        {', '.join(ev['resources'][:3])}"))
+            if ev.get("ledger"):
+                led = ev["ledger"]
+                print(dim(f"        guard: {led['decision']} at {led['ts']}  {led.get('command')}"))
+        if len(rows) > 20:
+            print(dim(f"    and {len(rows) - 20} more (--json has them all)"))
+
+    w = r["window"]
+    print()
+    print(f"  {bold('nable guard reconcile')}: {w['start']} to {w['end']}, "
+          f"{', '.join(r['regions'])}")
+    print(dim(f"  {r['events_read']} CloudTrail event(s), {r['ledger_records_in_window']} "
+              f"ledger record(s), {r['lookup_calls']} LookupEvents call(s)"))
+    for region, err in r["region_errors"].items():
+        print(f"  {amber('✗')} {region} not read: {err}")
+    show("Denied by the guard, happened anyway", r["denied_but_happened"], mark=amber("✗"))
+    show("No guard record", r["no_guard_record"], mark=amber("?"))
+    show("Made in the AWS console (no agent hook runs there)", r["console"], mark=amber("?"))
+    show("Seen by the guard, and happened", r["seen_and_happened"], mark=green("✓"))
+    if r["service_initiated"]:
+        show("Done by an AWS service on someone's behalf", r["service_initiated"], mark="-")
+    if r["attempted_but_failed"]:
+        show("Attempted, and refused by AWS (nothing changed)", r["attempted_but_failed"],
+             mark="-")
+    if r["guarded_without_event"]:
+        print()
+        print(f"  {bold('Let through by the guard, no matching event')} "
+              f"({len(r['guarded_without_event'])})")
+        for led in r["guarded_without_event"][:10]:
+            print(dim(f"    {led['ts']}  {led['decision']}  {led.get('command')}"))
+    print()
+    for line in textwrap.wrap(r["matching"], 76):
+        print(dim(f"  {line}"))
+    print()
+
+
+def _guard_export(parsed) -> None:
+    """`nable guard export`: the verified ledger, one record a line, for a SIEM.
+
+    Every record carries `chain` (its line, its own hash, the prev it claims
+    and whether that matches), so the receiver can re-verify the chain and
+    anchor the last hash. A ledger that does not verify (broken chain, or
+    records gone since the last check) is refused unless --force, and then
+    each record says whether its link held."""
+    import json
+
+    from . import __version__, guard_ledger
+
+    def err(msg: str) -> None:
+        print(f"nable guard export: {msg}", file=sys.stderr)
+
+    fmt = getattr(parsed, "guard_format", "jsonl") or "jsonl"
+    try:
+        since = guard_ledger.parse_since(getattr(parsed, "guard_since", None))
+    except ValueError:
+        err("--since takes 24h, 7d, 30m, 2w, or an ISO date or timestamp")
+        raise SystemExit(2) from None
+    check = guard_ledger.check()
+    problems = ([f"the chain breaks at line {check['broken_at']}: {check['problem']}"]
+                if not check["ok"] else []) + check["warnings"]
+    force = getattr(parsed, "guard_force", False)
+    if problems and not force:
+        for p in problems:
+            err(p)
+        err("refusing to export a ledger that does not verify. `nable guard verify-log` "
+            "has the details; --force exports it anyway, each record flagged with "
+            "chain.ok.")
+        raise SystemExit(1)
+    for p in problems:
+        err(f"exporting anyway (--force): {p}")
+    records = guard_ledger.export_records(since)
+    if fmt == "cef":
+        lines = [guard_ledger.to_cef(r, __version__) for r in records]
+    else:
+        lines = [json.dumps(r, sort_keys=True, separators=(",", ":"), default=str)
+                 for r in records]
+    body = "".join(line + "\n" for line in lines)
+    out = getattr(parsed, "guard_out", None)
+    if out:
+        target = Path(out).expanduser()
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(body)
+        err(f"{len(lines)} record(s) written to {target} ({fmt}); "
+            f"chain head {check['head']}")
+    else:
+        sys.stdout.write(body)
 
 
 def _run_credits(parsed) -> None:
@@ -2590,7 +3159,8 @@ def _post_connect_message(provider: str | None) -> str:
     """The 'done, here's what to do' line, tailored to the provider just connected."""
     p = (provider or "").lower()
     if p in _CONNECT_CHANNELS:
-        return f"Done. Restart Claude Desktop, alerts and digests will post to {_CONNECT_CHANNELS[p]}."
+        return (f"Done. Restart Claude Desktop, then ask it to send a report or alert to "
+                f"{_CONNECT_CHANNELS[p]}. Nothing posts on its own from this install.")
     if p == "sso":
         return "Done. Restart Claude Desktop, SSO is wired up for the team dashboard."
     q = _CONNECT_QUESTIONS.get(p, "What's driving my cloud and AI bill?")
@@ -2608,6 +3178,10 @@ def main(args: list[str] | None = None) -> None:
     _bare_invocation = not args
     if args and args[0] == "setup":
         args = args[1:]
+    # `nable help` and `nable help scan` are what people type; both were
+    # "unknown command 'help'".
+    if args and args[0] == "help":
+        args = args[1:2] + ["--help"]
 
     # --help / --version must be side-effect-free: argparse handles them by exiting
     # inside parse_args, so skip the welcome banner and PATH warning (and don't burn
@@ -2678,8 +3252,8 @@ def main(args: list[str] | None = None) -> None:
         _GROUPS = [
             # "get answers" leads: help text is the CLI's homepage, and the
             # commands that produce value outrank the ones that configure it.
-            ("get answers", ["scan", "brief", "ai-budget"]),
-            ("start here", ["welcome", "connect", "doctor", "tools", "serve", "upgrade"]),
+            ("get answers", ["scan", "brief", "why", "ai-budget", "ai-costs", "budget"]),
+            ("start here", ["welcome", "connect", "setup", "doctor", "tools", "serve", "upgrade"]),
             ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
             ("ai / llm providers", ["openai", "anthropic", "openrouter", "litellm",
                                      "modal", "together", "replicate", "cohere", "mistral"]),
@@ -2687,7 +3261,8 @@ def main(args: list[str] | None = None) -> None:
                                        "mongodb", "twilio", "cloudflare", "vercel", "langfuse"]),
             ("alerts & reports", ["slack", "teams", "notion", "n8n"]),
             ("editor & agents", ["claude", "guard", "agents"]),
-            ("account & billing", ["login", "logout", "license", "license-status", "credits"]),
+            ("account & billing", ["login", "logout", "license", "license-status", "whoami",
+                                   "plan", "credits", "uninstall"]),
             ("advanced", ["config", "vault", "profile", "sso", "iam-template", "infra"]),
         ]
 
@@ -2703,6 +3278,12 @@ def main(args: list[str] | None = None) -> None:
                 return super().format_help()
             helps = {c.dest: (c.help or "") for c in sub._choices_actions}
             registered = list(sub.choices.keys())
+            # `setup` is taken off argv before parsing, so it is not a
+            # registered subcommand, but it is a command people run and it
+            # was missing from this list.
+            if "setup" not in registered:
+                registered.append("setup")
+                helps.setdefault("setup", "Pick providers from the full menu and connect them one by one")
             lines = [self.format_usage().rstrip(), "", self.description or "", ""]
             seen: set = set()
             for title, names in self._GROUPS:
@@ -2739,6 +3320,14 @@ def main(args: list[str] | None = None) -> None:
                 sub = self._sub_action()
                 choices = list(sub.choices.keys()) if sub else []
                 close = difflib.get_close_matches(bad, choices, n=3, cutoff=0.6)
+                # Only the near-best matches: "unistall" is 0.94 from
+                # "uninstall" and 0.67 from "mistral", and listing both made
+                # a user trying to uninstall read "did you mean: mistral".
+                if close:
+                    def _r(c):
+                        return difflib.SequenceMatcher(None, bad, c).ratio()
+                    best = _r(close[0])
+                    close = [c for c in close if _r(c) >= best - 0.1]
                 print(f"nable: unknown command '{bad}'", file=_sys.stderr)
                 if close:
                     print(f"Did you mean: {', '.join(close)}?", file=_sys.stderr)
@@ -2773,6 +3362,12 @@ def main(args: list[str] | None = None) -> None:
     _add_brief_parser(sub)
     from .cli_ai_budget import add_parser as _add_ai_budget_parser
     _add_ai_budget_parser(sub)
+    from .cli_ai_costs import add_parser as _add_ai_costs_parser
+    _add_ai_costs_parser(sub)
+    from .cli_why import add_parser as _add_why_parser
+    _add_why_parser(sub)
+    from .budget.cli import add_parser as _add_budget_parser
+    _add_budget_parser(sub)
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -2791,7 +3386,7 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("twilio",       help="Connect Twilio usage records")
     sub.add_parser("cloudflare",   help="Connect Cloudflare billing and subscriptions")
     sub.add_parser("vercel",       help="Connect Vercel invoice API (Enterprise only)")
-    sub.add_parser("slack",        help="Configure Slack anomaly alerts and digest")
+    sub.add_parser("slack",        help="Connect Slack for alerts and reports you send on request")
     sub.add_parser("teams",        help="Configure Microsoft Teams alerts")
     sub.add_parser("notion",       help="Configure Notion cost report publishing")
     sub.add_parser("n8n",          help="Configure n8n workflow automation webhook")
@@ -2825,23 +3420,27 @@ def main(args: list[str] | None = None) -> None:
     login_p = sub.add_parser("login",       help="Sign in by email to activate Pro (no license key to copy)")
     login_p.add_argument("email", nargs="?", default="", help="Account email (optional; prompts if omitted)")
     sub.add_parser("logout",                help="Sign out and remove the stored license from this machine")
+    un_p = sub.add_parser("uninstall",      help="Remove nable from your editors and agent hooks (--purge also deletes its data)")
+    un_p.add_argument("--purge", action="store_true",
+                      help="Also delete nable's data directories (vault, cost history, settings)")
+    un_p.add_argument("--yes", "-y", action="store_true", help="Do not ask; for scripts")
+    un_p.add_argument("--dry-run", action="store_true", help="Show what would change, change nothing")
     sub.add_parser("license-status",        help="Check current license plan and expiry")
+    sub.add_parser("whoami",                help="Same as license-status: your plan, email and expiry")
+    sub.add_parser("plan",                  help="Same as license-status: your plan, email and expiry")
     infra_p = sub.add_parser("infra",       help="Show connector setup overview or provider guide")
     infra_p.add_argument("provider", nargs="?", default="", help="Show setup for a specific provider")
 
     serve_p = sub.add_parser(
         "serve",
-        help="Start a local web dashboard your whole team can view in a browser",
+        help="Start the web dashboard (hosted nable only; see --help)",
         description=(
-            "Start the team dashboard. On an always-on host this also runs the "
-            "finance interfaces non-engineers consume:\n"
-            "  - Scheduler (pushed snapshots, anomaly alerts, daily + weekly digests) "
-            "when FINOPS_ENABLE_SCHEDULER=1.\n"
-            "  - Slack bot (two-way cost Q&A) when SLACK_BOT_TOKEN and SLACK_APP_TOKEN "
-            "are both set.\n"
-            "Both stay off on a plain laptop run. The dashboard requires a password by "
-            "default (auto-generated and printed once; set FINOPS_DASHBOARD_PASSWORD to "
-            "pin one, or =off to disable). See DEPLOY.md."
+            "Start the team web dashboard. The dashboard, the scheduler that pushes "
+            "digests on a timer and the two-way Slack bot are part of hosted nable, "
+            "not the open-source package: here this command says so and exits. The "
+            "open-source product is the MCP server in your editor; it sends reports "
+            "and alerts to Slack or email when you ask (send_report_now, "
+            "send_digest_now)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -2862,12 +3461,50 @@ def main(args: list[str] | None = None) -> None:
     sub.add_parser("tools",        help="Show example questions you can ask nable in Claude")
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
-    guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check", "try"],
+    guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
+                                                  "try", "report", "verify-log", "doctor",
+                                                  "reconcile", "export"],
                          nargs="?", default="status")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
     guard_p.add_argument("--command", dest="guard_command", default="",
                          help="With 'check': a shell command to classify against your policy")
+    guard_p.add_argument("--harness", dest="guard_harness",
+                         choices=["claude", "cursor", "codex", "copilot", "gemini", "cline"],
+                         default=None,
+                         help="With 'install'/'uninstall': the agent to wire (default claude). "
+                              "With 'hook': the payload format (detected when omitted)")
+    guard_p.add_argument("--all", dest="guard_all", action="store_true",
+                         help="With 'install'/'uninstall': every supported agent found on this machine")
+    guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
+                         help="With 'report': how many days of the decision ledger to summarise")
+    guard_p.add_argument("--json", dest="guard_json", action="store_true",
+                         help="With 'report', 'verify-log', 'doctor' or 'reconcile': "
+                              "print JSON")
+    guard_p.add_argument("--hours", dest="guard_hours", type=float, default=24,
+                         help="With 'reconcile': how many hours of CloudTrail to read (max 2160)")
+    guard_p.add_argument("--region", dest="guard_regions", action="append", metavar="R",
+                         help="With 'reconcile': a region to read (repeatable; default: "
+                              "your configured region)")
+    guard_p.add_argument("--tolerance-minutes", dest="guard_tolerance", type=float, default=5,
+                         help="With 'reconcile': how long after a verdict an event may "
+                              "still match it (default 5)")
+    guard_p.add_argument("--since", dest="guard_since", default=None, metavar="WHEN",
+                         help="With 'export': only records since then (24h, 7d, or an ISO "
+                              "date or timestamp)")
+    guard_p.add_argument("--format", dest="guard_format", choices=["jsonl", "cef"],
+                         default="jsonl", help="With 'export': JSON lines (default) or CEF")
+    guard_p.add_argument("--out", dest="guard_out", default=None, metavar="PATH",
+                         help="With 'export': write here (created 0600) instead of stdout")
+    guard_p.add_argument("--force", dest="guard_force", action="store_true",
+                         help="With 'export': export a ledger that does not verify, each "
+                              "record flagged")
+    guard_p.add_argument("--session", dest="guard_session", default=None, metavar="ID",
+                         help="With 'report': only this agent session (the hook payload's "
+                              "session id, as report lists them)")
+    guard_p.add_argument("--reanchor", dest="guard_reanchor", action="store_true",
+                         help="With 'verify-log': accept the ledger as it is now (after you "
+                              "rotated or archived it) as the new anchor")
 
     iam_p = sub.add_parser("iam-template", help="Print the least-privilege IAM policy / CloudFormation nable needs")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
@@ -2880,30 +3517,50 @@ def main(args: list[str] | None = None) -> None:
     profile_p.add_argument("profile_action", choices=["list", "create", "use", "current"], nargs="?", default="list")
     profile_p.add_argument("profile_name", nargs="?", default="")
 
-    parsed = parser.parse_args(args)
+    parsed, _extras = parser.parse_known_args(args)
+    if _extras:
+        # A bad flag on a subcommand (`nable scan --jsn`) used to print the
+        # top-level usage, which lists commands, not the flag that was wrong.
+        # Answer with that subcommand's usage and the flag it probably meant.
+        import difflib
+        _sub = next((a for a in parser._actions if isinstance(a, argparse._SubParsersAction)), None)
+        _target = _sub.choices.get(parsed.cmd) if (_sub and parsed.cmd) else None
+        _target = _target or parser
+        _opts = [o for a in _target._actions for o in a.option_strings]
+        _hints = []
+        for _x in _extras:
+            _close = difflib.get_close_matches(_x.split("=", 1)[0], _opts, n=1, cutoff=0.6)
+            if _close:
+                _hints.append(f"{_x} (did you mean {_close[0]}?)")
+            else:
+                _hints.append(_x)
+        _target.error(f"unrecognized arguments: {' '.join(_hints)}")
     # Ensure optional attrs exist for all subparsers (only `vault` defines `action`/`key`)
     if not hasattr(parsed, "action"):
         parsed.action = None
     if not hasattr(parsed, "key"):
         parsed.key = ""
 
-    # The guard hook is a machine protocol: Claude Code parses this process's
-    # stdout as JSON on every Bash call, so it must run before any banner.
+    # The guard hook is a machine protocol: the agent harness parses this
+    # process's stdout as JSON on every shell call, so it must run before any
+    # banner. guard_adapters answers every other agent's payload and hands
+    # Claude Code payloads to guard.run_hook unchanged.
     if parsed.cmd == "guard" and getattr(parsed, "guard_action", "") == "hook":
-        from .guard import run_hook
-        raise SystemExit(run_hook())
+        from .guard_adapters import run_hook
+        raise SystemExit(run_hook(getattr(parsed, "guard_harness", None)))
 
     # Answer commands own their whole output: no setup banner ahead of `scan`,
     # its branded first line must be the first thing on screen (and in --json
     # mode stdout must stay a single parseable document). `guard` is tool
     # output too: a policy verdict prefixed with a setup banner reads as a bug
     # on camera and in scripts (the `guard hook` machine path already bails
-    # out above, before any output).
+    # out above, before any output). `why` opens with its own headline and
+    # its Cost Explorer disclosure, the same way `scan --spend` does.
     #
     # stderr, not stdout: every other command's stdout may be a machine
     # document too (`brief --json`, `ai-budget --json`), and a banner line
     # ahead of it made that output unparseable. On a terminal it looks the same.
-    if parsed.cmd not in ("scan", "guard"):
+    if parsed.cmd not in ("scan", "guard", "why", "budget"):
         print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
@@ -2931,9 +3588,11 @@ def main(args: list[str] | None = None) -> None:
         "snowflake": lambda: setup_saas_api_key("Snowflake", [
             ("SNOWFLAKE_ACCOUNT", "Account identifier (e.g. xy12345.us-east-1)", False),
             ("SNOWFLAKE_USER", "Username", False),
-            ("SNOWFLAKE_PASSWORD", "Password", True),
+            ("SNOWFLAKE_PASSWORD", "Password (leave blank to use a key)", True),
+            ("SNOWFLAKE_PRIVATE_KEY_PATH", "Private key file path (key-pair auth; blank if pasting the key)", False),
+            ("SNOWFLAKE_PRIVATE_KEY", "Private key PEM body (key-pair auth; blank if using the path)", True),
             ("SNOWFLAKE_WAREHOUSE", "Warehouse name (e.g. COMPUTE_WH)", False),
-            ("SNOWFLAKE_ROLE", "Role (default: ACCOUNTADMIN)", False),
+            ("SNOWFLAKE_ROLE", "Role with IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE (blank: your default role)", False),
             # Required for dollar figures: without it nable reports credits and
             # asks for the rate rather than showing unpriced credits as $0.
             ("SNOWFLAKE_CREDIT_PRICE", "Credit price USD (your contract rate; needed for $ figures)", False),
@@ -3006,11 +3665,13 @@ def main(args: list[str] | None = None) -> None:
         "databricks": lambda: setup_saas_api_key("Databricks", [
             ("DATABRICKS_HOST", "Workspace URL (e.g. https://adb-1234567890.1.azuredatabricks.net)", False),
             ("DATABRICKS_TOKEN", "Personal Access Token or Service Principal token", True),
+            ("DATABRICKS_WAREHOUSE_ID", "SQL warehouse id (optional; with it nable reads system.billing.usage, metered DBUs)", False),
             ("DATABRICKS_ACCOUNT_ID", "Account ID for billing API (optional, leave blank for single-workspace)", False),
             ("DATABRICKS_ACCOUNT_TOKEN", "Account-level token (optional, defaults to DATABRICKS_TOKEN)", True),
             ("DATABRICKS_DBU_PRICE", "DBU price in USD (optional, default 0.40, use your contract rate)", False),
         ]),
     }
+    stored_something = False  # did a provider step store a credential
 
     if parsed.cmd == "config":
         _handle_config_cmd(parsed)
@@ -3053,6 +3714,8 @@ def main(args: list[str] | None = None) -> None:
             "  'finops setup aws'. The stack is read-only and auditable.\n"
         )
         print(f"  {quick_create_url()}\n")
+        _warn(_CFN_OUTPUTS_NOTE)
+        print()
         return
     elif parsed.cmd == "aws" and getattr(parsed, "check_scope", False):
         from .security.iam_setup import check_credential_scope
@@ -3088,15 +3751,17 @@ def main(args: list[str] | None = None) -> None:
         _run_aws_cur_setup()
         return
     elif parsed.cmd == "license":
-        _run_license_setup(getattr(parsed, "key", ""))
-        return
+        raise SystemExit(_run_license_setup(getattr(parsed, "key", "")))
     elif parsed.cmd == "login":
-        _run_login(getattr(parsed, "email", ""))
-        return
+        raise SystemExit(_run_login(getattr(parsed, "email", "")))
     elif parsed.cmd == "logout":
         _run_logout()
         return
-    elif parsed.cmd == "license-status":
+    elif parsed.cmd == "uninstall":
+        raise SystemExit(_run_uninstall(getattr(parsed, "purge", False),
+                                        getattr(parsed, "yes", False),
+                                        getattr(parsed, "dry_run", False)))
+    elif parsed.cmd in ("license-status", "whoami", "plan"):
         _run_license_status()
         return
     elif parsed.cmd == "serve":
@@ -3135,14 +3800,23 @@ def main(args: list[str] | None = None) -> None:
         )
         return
     elif parsed.cmd == "scan":
-        from .cli_scan import run as _scan_run
-        raise SystemExit(_scan_run(parsed))
+        from .cli_scan import main as _scan_main
+        raise SystemExit(_scan_main(parsed))
     elif parsed.cmd == "brief":
         from .cli_brief import run as _brief_run
         raise SystemExit(_brief_run(parsed))
     elif parsed.cmd == "ai-budget":
         from .cli_ai_budget import run as _ab_run
         raise SystemExit(_ab_run(parsed))
+    elif parsed.cmd == "ai-costs":
+        from .cli_ai_costs import run as _ac_run
+        raise SystemExit(_ac_run(parsed))
+    elif parsed.cmd == "why":
+        from .cli_why import run as _why_run
+        raise SystemExit(_why_run(parsed))
+    elif parsed.cmd == "budget":
+        from .budget.cli import run as _budget_run
+        raise SystemExit(_budget_run(parsed))
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))
@@ -3166,7 +3840,7 @@ def main(args: list[str] | None = None) -> None:
         _run_agents()
         return
     elif parsed.cmd == "guard":
-        _run_guard(parsed)
+        _guard_cli(parsed)
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main
@@ -3189,7 +3863,15 @@ def main(args: list[str] | None = None) -> None:
             setup_aws_account()
         return
     elif parsed.cmd in dispatch:
-        dispatch[parsed.cmd]()
+        _result = dispatch[parsed.cmd]()
+        stored_something = _result is True
+        if _result is False:
+            # "No OpenAI credentials entered. Nothing stored." was followed by
+            # "Done. Restart Claude Desktop, then ask ...". Nothing was done.
+            from .welcome import _cli
+            print(f"\n  Nothing was connected, so there is nothing to restart. Run "
+                  f"{_cli('setup ' + parsed.cmd)} again when you have the key.\n")
+            return
     else:
         # Bare `finops` / `uvx nable`: launch the guided welcome flow (auto-wire
         # the editor, ambient-credential scan, value moment, never dead-ends), so
@@ -3206,31 +3888,30 @@ def main(args: list[str] | None = None) -> None:
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")
-        raw = _prompt("\n  Enter numbers (comma-separated), 'all', or press Enter for aws only", default="1")
-        if raw.lower() == "all":
-            selected = providers
-        else:
-            indices = [int(x.strip()) - 1 for x in raw.split(",") if x.strip().isdigit()]
-            selected = [providers[i] for i in indices if 0 <= i < len(providers)]
+        selected = _select_providers(providers)
+        if not selected:
+            # Typing `aws` here used to configure nothing and then print the
+            # "done" close as if it had worked.
+            print("  Nothing selected, so nothing was configured.")
+            print("  Run `nable setup` again, or connect one directly: `nable setup aws`.")
+            return
+        stored: list[bool | None] = []
         for p in selected:
             try:
-                dispatch[p]()
+                stored.append(dispatch[p]())
             except KeyboardInterrupt:
                 print("\n  Skipped.")
+                stored.append(False)
+        if stored and all(r is False for r in stored):
+            print("\n  Nothing was connected, so there is nothing to restart. Run "
+                  "this again when you have the keys.\n")
+            return
+        stored_something = any(r is True for r in stored)
 
     # Always offer to configure Claude Desktop at the end of setup
     _configure_claude_desktop()
 
-    from .welcome import _cli
-    print("\n  " + _post_connect_message(parsed.cmd))
-    print()
-    print("  Want a visual dashboard?")
-    print(f"    {_cli('serve')}")
-    print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
-    print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
-    print()
-    print(f"  To add more providers: {_cli('setup')}")
-    print("  Full docs: https://getnable.com/docs\n")
+    _print_setup_footer(parsed.cmd, stored_something=stored_something)
     _offer_email_signup()
 
     # Fire setup_completed event
@@ -3241,6 +3922,36 @@ def main(args: list[str] | None = None) -> None:
         })
     except Exception:
         pass
+
+
+def _dashboard_installed() -> bool:
+    """The web dashboard left the open package; only offer `serve` where it exists."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("finops.server_web") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _print_setup_footer(cmd: "str | None", stored_something: bool = False) -> None:
+    """stored_something: a provider step reported storing a credential. AWS
+    being declined says nothing about the rest of the menu, so "Nothing was
+    connected" needs both."""
+    from .welcome import _cli
+    if _DECLINED[0] and not stored_something:
+        # Nothing was connected; "Done. Restart Claude Desktop" would say otherwise.
+        print("\n  Nothing was connected this time.")
+    else:
+        print("\n  " + _post_connect_message(cmd))
+    print()
+    if _dashboard_installed():
+        print("  Want a visual dashboard?")
+        print(f"    {_cli('serve')}")
+        print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
+        print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
+        print()
+    print(f"  To add more providers: {_cli('setup')}")
+    print("  Full docs: https://getnable.com/docs\n")
 
 
 # ── Post-setup email capture ──────────────────────────────────────────────────
@@ -3297,67 +4008,78 @@ def _offer_email_signup() -> None:
         sentinel.write_text(f"{email}\n")
     except Exception:
         # Don't block setup if the request fails, but don't write the sentinel
-        # so the user is re-prompted next time (their email was never recorded)
-        _ok("Got it. We'll follow up soon.")
+        # so the user is re-prompted next time (their email was never recorded).
+        # This used to print "Got it. We'll follow up soon.", for an email
+        # nobody received.
+        _warn("Could not reach getnable.com, so your email was not sent. "
+              "You will be asked again next time.")
 
     print()
 
 
 # ── Claude Desktop auto-configuration ─────────────────────────────────────────
 
-def _run_license_setup(key: str = "") -> None:
+def _run_license_setup(key: str = "") -> int:
     """
     Activate a Pro license key.
     Called by: finops setup license FINOPS-2-xxx
                 finops setup license   (interactive, prompts for key)
+    Returns the exit code: 0 when the key is stored, 1 when none was entered.
+    An invalid key raises SystemExit(1).
     """
-    from .license import validate_key, _UPGRADE_URL, _CHECKOUT_URL
+    from .license import (
+        PRO_FEATURE_COPY, TEAM_FEATURE_COPY, _UPGRADE_URL, checkout_url,
+        locked_features, plan_label, plan_name, validate_key,
+    )
     from .security.vault import Vault
 
-    print("\n  nable Pro license activation\n")
+    print("\n  nable license activation\n")
 
     # If key not passed as arg, prompt
     if not key:
-        print(f"  Subscribe at: {_CHECKOUT_URL}")
+        print(f"  Subscribe to {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}")
         print("  After checkout your license key is shown on the confirmation page")
         print("  and emailed to you. It starts with FINOPS-2-\n")
         key = _prompt("  Paste your license key").strip()
 
     if not key:
         _warn("No key entered. Run 'finops setup license FINOPS-2-...' to activate.")
-        return
+        return 1
 
     # Validate before storing
     status = validate_key(key)
 
     if status.mode == "invalid":
         _err(f"Invalid key: {status.message}")
-        print(f"\n  Subscribe at: {_CHECKOUT_URL}\n")
-        return
+        print(f"\n  Subscribe to {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}\n")
+        # Non-zero, so a script activating a key can tell it did not take.
+        raise SystemExit(1)
 
-    if status.mode not in ("pro", "trial"):
-        _warn(f"Key validated but returned unexpected plan: {status.mode}")
-
-    # Store in vault AND write to env file for Claude Desktop
+    # The vault is the one copy; the server reads it there. An older key an
+    # earlier release copied into an editor config would outrank it, so clear it.
     vault = Vault.default()
     vault.store("FINOPS_LICENSE_KEY", key)
+    _strip_license_from_editor_configs()
 
-    # Also try to write directly into the Claude Desktop config
-    _inject_license_into_claude_config(key)
-
-    print(f"\n  ✓  Pro plan active, {status.email or 'license validated'}")
+    name = plan_name(status.mode)
+    print(f"\n  ✓  {name} plan active, {status.email or 'license validated'}")
     print("  ✓  Key stored in vault.")
-    print(f"  ✓  Plan: {status.mode.upper()}")
+    print(f"  ✓  Plan: {plan_label(status.mode)}")
     if status.issued:
         print(f"  ✓  Issued: {status.issued}")
+    if status.expires:
+        print(f"  ✓  Valid through: {status.expires}")
     print()
-    print("  Restart Claude Desktop to activate Team features:")
-    print("    • Ticket auto-creation (Jira, Linear, GitHub Issues)")
-    print("    • Scheduled email reports")
-    print("    • Commitment purchase recommendations")
-    print("    • Org-wide multi-account rollup")
-    print("    • Business metrics and unit economics")
-    print()
+    unlocked = [PRO_FEATURE_COPY[f] for f in locked_features()]
+    if status.is_team:
+        unlocked += list(TEAM_FEATURE_COPY.values())
+    if unlocked:
+        print(f"  Restart Claude Desktop to turn on {name}:")
+        for item in unlocked:
+            print(f"    • {item}")
+        print()
 
     try:
         from . import telemetry as _tel
@@ -3367,6 +4089,7 @@ def _run_license_setup(key: str = "") -> None:
         })
     except Exception:
         pass
+    return 0
 
 
 def _run_license_status() -> None:
@@ -3375,43 +4098,54 @@ def _run_license_status() -> None:
     Called by: finops setup license-status
                finops license-status
     """
-    from .license import check_license, _UPGRADE_URL
+    from .license import (
+        _TRIAL_DAYS, _UPGRADE_URL, check_license, checkout_url, fmt_day, plan_label,
+        trial_last_day, trial_line,
+    )
 
     status = check_license()
 
     print("\n  nable license status\n")
 
-    mode_display = {
-        "pro":     "\033[32mTeam (Pro)\033[0m",
-        "trial":   "\033[33mTrial\033[0m",
-        "free":    "\033[90mFree\033[0m",
-        "invalid": "\033[31mInvalid\033[0m",
-    }.get(status.mode, status.mode)
+    color = {"pro": "32", "team": "32", "enterprise": "32", "trial": "33",
+             "free": "90", "invalid": "31"}.get(status.mode)
+    label = "Invalid" if status.mode == "invalid" else plan_label(status.mode)
+    mode_display = f"\033[{color}m{label}\033[0m" if color else label
 
     print(f"  Plan:    {mode_display}")
     if status.email:
         print(f"  Email:   {status.email}")
-    if status.issued:
+    if status.issued and status.mode not in ("trial", "free"):
         print(f"  Issued:  {status.issued}")
-    if status.days_remaining >= 0:
-        print(f"  Trial:   {status.days_remaining} day(s) remaining")
-    print(f"  Message: {status.message}")
+    if status.expires:
+        print(f"  Expires: {status.expires}")
+    if status.mode == "trial":
+        last = trial_last_day(status)
+        n = status.days_remaining
+        through = f", through {fmt_day(last)}" if last else ""
+        print(f"  Trial:   {n} day{'s' if n != 1 else ''} left of {_TRIAL_DAYS}{through}. "
+              "All Pro features unlocked.")
+    else:
+        line = trial_line(status)
+        if line:
+            print(f"  Trial:   {line}")
+        print(f"  Message: {status.message}")
 
-    if status.mode == "free":
-        print(f"\n  Upgrade at: {_UPGRADE_URL}")
-        print("  Then run:   finops setup license FINOPS-2-...\n")
-    elif status.mode == "trial":
-        print(f"\n  Upgrade before trial ends: {_UPGRADE_URL}\n")
+    if status.mode in ("free", "trial", "invalid"):
+        print(f"\n  {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}")
+        print("  Then run:   finops login\n")
     else:
         print()
 
 
-def _run_login(email: str = "") -> None:
+def _run_login(email: str = "") -> int:
     """
     Activate Pro by email, with no license key to copy or remember. Sends an
     8-digit code to your inbox, verifies it, and stores the license locally so
     the server picks it up automatically.
     Called by: finops login [email]
+    Returns the exit code: 0 when a paid license is stored, 1 otherwise.
     """
     import json
     import urllib.request
@@ -3426,7 +4160,7 @@ def _run_login(email: str = "") -> None:
         email = _prompt("  Email you used at checkout").strip().lower()
     if "@" not in email or "." not in email:
         _err("That does not look like an email address.")
-        return
+        return 1
 
     def _post(path: str, payload: dict) -> dict:
         req = urllib.request.Request(
@@ -3453,17 +4187,17 @@ def _run_login(email: str = "") -> None:
             _err("Too many requests. Wait a few minutes, then try again.")
         else:
             _err(msg or f"Could not send the code ({e.code}).")
-        return
+        return 1
     except Exception as e:  # genuine network / DNS / timeout
         _err(f"Could not reach getnable.com. Check your connection and try again. ({e})")
-        return
+        return 1
     print(f"  ✓  Sent an 8-digit code to {email}. It expires in 10 minutes.\n")
 
     # 2) verify the code -> the server returns the license for this email
     code = _prompt("  Enter the code").strip()
     if not code:
         _warn("No code entered. Run 'finops login' again when it arrives.")
-        return
+        return 1
     try:
         data = _post("/api/account/verify-code", {"email": email, "code": code})
     except urllib.error.HTTPError as e:
@@ -3476,31 +4210,36 @@ def _run_login(email: str = "") -> None:
             _err("Too many attempts. Wait a few minutes, then try again.")
         else:
             _err(msg or f"Sign-in failed ({e.code}).")
-        return
+        return 1
     except Exception as e:
         _err(f"Could not verify the code: {e}")
-        return
+        return 1
 
     plan = (data or {}).get("plan", "free")
     key = (data or {}).get("license_key") or ""
 
     if not key or plan == "free":
         _warn(f"No active subscription found for {email}.")
-        print(f"\n  Get Pro at: {_UPGRADE_URL}")
+        from .license import checkout_url, plan_label
+        print(f"\n  Get {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}")
         print("  Subscribed with a different email? Run 'finops login' with that one.\n")
-        return
+        return 1
 
     status = store_license(key)
     if status.mode == "invalid":
         _err(f"The license we received did not validate: {status.message}")
-        return
-    _inject_license_into_claude_config(key)
+        return 1
+    _strip_license_from_editor_configs()
 
+    from .license import plan_label, plan_name
     print(f"\n  ✓  Signed in as {status.email or email}")
-    print(f"  ✓  Plan: {status.mode.upper()}")
+    print(f"  ✓  Plan: {plan_label(status.mode)}")
+    if status.expires:
+        print(f"  ✓  Valid through: {status.expires}")
     print("  ✓  License stored on this machine. Nothing to copy or remember.")
     print()
-    print("  Restart Claude Desktop (or your MCP client) to pick up Pro.")
+    print(f"  Restart Claude Desktop (or your MCP client) to pick up {plan_name(status.mode)}.")
     print()
 
     try:
@@ -3508,57 +4247,316 @@ def _run_login(email: str = "") -> None:
         _tel._send_event(_tel._get_install_id(), "login_activated", {"plan": status.mode})
     except Exception:
         pass
+    return 0
 
 
 def _run_logout() -> None:
-    """Remove the stored license from this machine. Called by: finops logout"""
+    """Remove the stored license from this machine: the vault copy, and any copy
+    an earlier release wrote into an editor's MCP config. Called by: finops logout"""
     from .license import clear_license
-    clear_license()
-    print("\n  ✓  Signed out. Pro features are off on this machine.")
+    result = clear_license()
+    cleaned = _strip_license_from_editor_configs()
+    if result == "removed":
+        print("\n  ✓  Signed out. The license is removed from this machine's vault.")
+    elif result == "none":
+        print("\n  ✓  Signed out. No license was stored in this machine's vault.")
+    else:
+        print()
+        _warn("Could not open or change this machine's vault, so a stored license "
+              "may still be there. Run `nable doctor` to see why, then "
+              "`nable logout` again.")
+    for client, path in cleaned:
+        print(f"  ✓  Removed the license key from {client}: {path}")
+    if cleaned:
+        print("  Restart those editors so their nable server drops the key.")
+    if os.environ.get("FINOPS_LICENSE_KEY", "").strip():
+        _warn("FINOPS_LICENSE_KEY is still set in this shell's environment, and it "
+              "outranks the vault. Unset it (and remove it from your shell profile) "
+              "to finish signing out.")
     print("  Sign back in any time with: finops login\n")
 
 
-def _inject_license_into_claude_config(key: str) -> None:
-    """
-    Try to write FINOPS_LICENSE_KEY directly into claude_desktop_config.json
-    so the user doesn't have to manually edit it.
-    """
+# ── Editor configs nable writes ───────────────────────────────────────────────
+# The license key lives in the local vault and the server reads it from there.
+# It used to be copied in plaintext into claude_desktop_config.json as
+# env.FINOPS_LICENSE_KEY, where an env key outranks the vault, so `nable
+# logout` left Claude Desktop on Pro and the key sat in a file people paste into
+# bug reports. Nothing writes it into an editor config any more, and logout and
+# uninstall clean up every copy an earlier release wrote.
+
+def _claude_desktop_config_paths() -> "list[Path]":
+    appdata = os.environ.get("APPDATA", "")
+    paths = [
+        Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+        Path.home() / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json",
+        Path.home() / ".config" / "Claude" / "claude_desktop_config.json",
+        Path.home() / ".config" / "claude-desktop" / "claude_desktop_config.json",
+    ]
+    if appdata:
+        paths.insert(1, Path(appdata) / "Claude" / "claude_desktop_config.json")
+    seen: list = []
+    for p in paths:
+        if p not in seen:
+            seen.append(p)
+    return seen
+
+
+def _editor_config_paths() -> "list[tuple[str, Path]]":
+    """Every MCP config nable writes or tells the user to write: Claude Desktop,
+    Cursor, and Claude Code's user config (`claude mcp add -s user`)."""
+    out = [("Claude Desktop", p) for p in _claude_desktop_config_paths()]
+    out.append(("Cursor", Path.home() / ".cursor" / "mcp.json"))
+    out.append(("Claude Code", Path.home() / ".claude.json"))
+    return out
+
+
+def _is_nable_server(name: str, entry: object) -> bool:
+    n = (name or "").lower()
+    if n in ("nable", "finops") or "finops" in n or n.startswith("nable"):
+        return True
+    if isinstance(entry, dict):
+        cmd = " ".join(str(x) for x in [entry.get("command", "")] + list(entry.get("args") or []))
+        return "finops-mcp" in cmd
+    return False
+
+
+def _server_maps(doc: dict) -> "list[dict]":
+    """The mcpServers maps in a config: the top level, plus Claude Code's
+    per-project ones in ~/.claude.json."""
+    maps = []
+    top = doc.get("mcpServers")
+    if isinstance(top, dict):
+        maps.append(top)
+    projects = doc.get("projects")
+    if isinstance(projects, dict):
+        for proj in projects.values():
+            if isinstance(proj, dict) and isinstance(proj.get("mcpServers"), dict):
+                maps.append(proj["mcpServers"])
+    return maps
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Replace a config in one step: a crash leaves the old file, never half a
+    new one. Keeps the file's mode and writes through a symlink, not over it."""
     import json
-    import platform
-
-    if platform.system() == "Darwin":
-        config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
-    elif platform.system() == "Windows":
-        config_path = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
-    else:
-        config_path = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
-
+    import stat
+    import tempfile
+    target = path.resolve() if path.is_symlink() else path
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o600
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
     try:
-        if not config_path.exists():
-            return
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, indent=2) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
-        config = json.loads(config_path.read_text())
-        servers = config.get("mcpServers", {})
 
-        updated = False
-        for server_name, server_cfg in servers.items():
-            if "finops" in server_name.lower() or "nable" in server_name.lower():
-                env = server_cfg.setdefault("env", {})
-                env["FINOPS_LICENSE_KEY"] = key
-                updated = True
+def _edit_editor_configs(edit) -> "list[tuple[str, Path]]":
+    """Apply edit(servers_map) -> bool to every nable-written config that exists
+    and parses. Writes only a file that changed; leaves an unparseable one as it
+    is. Returns (client, path) for each file changed."""
+    import json
+    changed = []
+    for client, path in _editor_config_paths():
+        try:
+            if not path.is_file():
+                continue
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        hit = False
+        for servers in _server_maps(doc):
+            hit = bool(edit(servers)) or hit
+        if hit:
+            try:
+                _atomic_write_json(path, doc)
+                changed.append((client, path))
+            except OSError as e:
+                _warn(f"Could not update {path}: {e.strerror or e}")
+    return changed
 
-        if updated:
-            config_path.write_text(json.dumps(config, indent=2))
-            config_path.chmod(0o600)
-            print("  ✓  Written to Claude Desktop config automatically.")
+
+def _strip_license_from_editor_configs() -> "list[tuple[str, Path]]":
+    """Remove FINOPS_LICENSE_KEY from nable's entries in the editor configs."""
+    def _edit(servers: dict) -> bool:
+        hit = False
+        for name, entry in servers.items():
+            if not (_is_nable_server(name, entry) and isinstance(entry, dict)):
+                continue
+            env = entry.get("env")
+            if isinstance(env, dict) and "FINOPS_LICENSE_KEY" in env:
+                del env["FINOPS_LICENSE_KEY"]
+                if not env:
+                    entry.pop("env", None)
+                hit = True
+        return hit
+    return _edit_editor_configs(_edit)
+
+
+def _is_nable_entry(name: str, entry: object) -> bool:
+    """Strict match for removal: the names nable registers under, or an entry
+    that launches the finops-mcp package. Never a lookalike name alone."""
+    if (name or "").lower() in ("nable", "finops"):
+        return True
+    if isinstance(entry, dict):
+        cmd = " ".join(str(x) for x in [entry.get("command", "")] + list(entry.get("args") or []))
+        return "finops-mcp" in cmd
+    return False
+
+
+def _nable_entries_in_editor_configs() -> "list[tuple[str, Path, str]]":
+    """(client, path, server name) for every nable MCP entry nable wrote. Read-only."""
+    import json
+    found = []
+    for client, path in _editor_config_paths():
+        try:
+            if not path.is_file():
+                continue
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for servers in _server_maps(doc):
+            for name, entry in servers.items():
+                if _is_nable_entry(name, entry):
+                    found.append((client, path, name))
+    return found
+
+
+def _state_dirs() -> "list[Path]":
+    """The directories nable keeps state in: the vault and database, the trial
+    clock and install id, CLI sentinels, and the nable data dir."""
+    home = Path.home()
+    dirs = [home / ".finops", home / ".finops-mcp", home / ".config" / "finops", home / ".nable"]
+    data = os.environ.get("FINOPS_DATA_DIR", "").strip()
+    if data:
+        p = Path(data).expanduser()
+        if p not in dirs:
+            dirs.append(p)
+    return dirs
+
+
+def _dir_size(p: Path) -> int:
+    total = 0
+    try:
+        for f in p.rglob("*"):
+            try:
+                if f.is_file() and not f.is_symlink():
+                    total += f.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return total
+
+
+def _run_uninstall(purge: bool = False, yes: bool = False, dry_run: bool = False,
+                   prompt=None) -> int:
+    """`nable uninstall`: take nable out of every editor config and agent hook
+    it wrote, then list (or with --purge delete) the directories it keeps.
+
+    Default: shows what it will change and asks. --yes skips the questions.
+    --dry-run only shows. The package itself is removed with whatever installed
+    it; this is the part a package manager cannot see."""
+    import shutil
+    from . import guard_adapters as ga
+
+    ask = prompt or _prompt
+
+    def _confirm(q: str) -> bool:
+        if yes:
+            return True
+        try:
+            return ask(f"  {q} [y/N]", default="n").strip().lower() in ("y", "yes")
+        except (KeyboardInterrupt, EOFError):
+            return False
+
+    print("\n  nable uninstall" + ("  (dry run: nothing is changed)" if dry_run else "") + "\n")
+
+    entries = _nable_entries_in_editor_configs()
+    hooks = []
+    for h in ga.HARNESSES:
+        for is_global in (True, False):
+            if ga.state(h, is_global) != "absent":
+                hooks.append((h, is_global, ga.hooks_path(h, is_global)))
+
+    if entries:
+        print("  MCP server entries:")
+        for client, path, name in entries:
+            print(f"    - {client}: \"{name}\" in {path}")
+    else:
+        print("  MCP server entries: none found")
+    if hooks:
+        print("  Guard hooks:")
+        for h, is_global, path in hooks:
+            print(f"    - {ga.LABELS[h]} ({'global' if is_global else 'this project'}): {path}")
+    else:
+        print("  Guard hooks: none found (global, and this project)")
+    print()
+
+    failed = 0
+    if (entries or hooks) and not dry_run and _confirm("Remove these?"):
+        changed = _edit_editor_configs(
+            lambda servers: [servers.pop(n) for n in
+                             [n for n, e in list(servers.items()) if _is_nable_entry(n, e)]])
+        for client, path in changed:
+            _ok(f"Removed nable from {client}: {path}")
+        for h, is_global, path in hooks:
+            try:
+                removed, _ = ga.uninstall(h, is_global)
+                if removed:
+                    _ok(f"Removed the guard hook from {path}")
+            except SystemExit as e:      # a refusal: the file was left as found
+                failed += 1
+                _warn(f"{path}: {str(e.code).strip()}")
+            except OSError as e:
+                failed += 1
+                _warn(f"Could not write {path}: {e.strerror or e}")
+        if changed:
+            print("  Restart those editors so they stop launching nable.")
+    elif (entries or hooks) and not dry_run:
+        print("  Kept: nothing was removed.")
+    print("  Guard hooks in other projects: run `nable guard uninstall --all` inside each.\n")
+
+    present = [d for d in _state_dirs() if d.exists()]
+    if present:
+        print("  nable's data on this machine (vault, cost history, trial clock, settings):")
+        for d in present:
+            print(f"    - {d}  ({_dir_size(d) / 1024:,.0f} KB)")
+        if not purge:
+            print("  Kept. Delete them with:  nable uninstall --purge")
+        elif dry_run:
+            print("  --purge would delete them.")
+        elif _confirm("Delete these directories? This removes your stored credentials "
+                      "and local cost history and cannot be undone."):
+            for d in present:
+                try:
+                    shutil.rmtree(d)
+                    _ok(f"Deleted {d}")
+                except OSError as e:
+                    failed += 1
+                    _warn(f"Could not delete {d}: {e.strerror or e}")
         else:
-            print("  →  Add to your Claude Desktop config manually:")
-            print(f'       "FINOPS_LICENSE_KEY": "{key}"')
-            _warn("This is your license key. Keep it private: not in screen-shares or public gists.")
-    except Exception:
-        print("  →  Add to your Claude Desktop config manually:")
-        print(f'       "FINOPS_LICENSE_KEY": "{key}"')
-        _warn("This is your license key. Keep it private: not in screen-shares or public gists.")
+            print("  Kept: the directories were not deleted.")
+    else:
+        print("  No nable data directories found.")
+    print("  The OS keychain may also hold nable items (\"nable-trial\", the vault key);")
+    print("  remove them in your keychain app if you want them gone.")
+
+    print("\n  Last, remove the package with whatever installed it:")
+    print("    uv tool uninstall finops-mcp   |   pipx uninstall finops-mcp   |   pip uninstall finops-mcp\n")
+    return 1 if failed else 0
 
 
 def _inject_aws_into_claude_config(access_key: str, secret_key: str, region: str) -> None:
@@ -3820,6 +4818,38 @@ def _upgrade_running_cli(current: str, target: str) -> bool:
     return True
 
 
+# The longest `nable upgrade` waits on PyPI. httpx's timeout is per phase, so on
+# a blackholed network a 10 s timeout sat ~10 s before saying anything.
+_PYPI_WAIT_S = 4.0
+
+
+def _latest_pypi_version() -> "str | None":
+    """Latest finops-mcp on PyPI, or None when PyPI does not answer within
+    _PYPI_WAIT_S. The request runs on a daemon thread so the wait is a hard cap."""
+    import threading
+    box: dict = {}
+
+    def _get():
+        try:
+            import httpx
+            r = httpx.get("https://pypi.org/pypi/finops-mcp/json", timeout=_PYPI_WAIT_S)
+            r.raise_for_status()
+            box["v"] = r.json()["info"]["version"]
+        except Exception as e:
+            box["e"] = e
+    t = threading.Thread(target=_get, daemon=True)
+    t.start()
+    t.join(_PYPI_WAIT_S)
+    return box.get("v")
+
+
+def _version_tuple(v: str) -> tuple:
+    try:
+        return tuple(int(x) for x in v.strip().split("."))
+    except (ValueError, AttributeError):
+        return ()
+
+
 def _run_upgrade(target: str = "") -> None:
     """Upgrade nable, deliberately, in two places.
 
@@ -3836,19 +4866,26 @@ def _run_upgrade(target: str = "") -> None:
     _section("Upgrade nable")
     current = _installed_version() or "unknown"
 
+    explicit = bool(target)
     if not target:
-        try:
-            import httpx
-            r = httpx.get("https://pypi.org/pypi/finops-mcp/json", timeout=10)
-            r.raise_for_status()
-            target = r.json()["info"]["version"]
-        except Exception as e:
-            _err(f"Could not reach PyPI to find the latest version ({e}).")
-            print("  Pass one explicitly:  finops upgrade 0.8.57")
+        target = _latest_pypi_version() or ""
+        if not target:
+            _err(f"Could not reach PyPI within {_PYPI_WAIT_S:.0f}s to find the latest version.")
+            print(f"  You are on {current}. When you are online, run this again, or pass a")
+            print("  version newer than that explicitly:  finops upgrade <version>")
             return
 
     print(f"  Installed: {current}")
-    print(f"  Latest:    {target}\n")
+    print(f"  {'Target' if explicit else 'Latest'}:    {target}\n")
+
+    cur_t, tgt_t = _version_tuple(current), _version_tuple(target)
+    if not explicit and cur_t and tgt_t and tgt_t < cur_t:
+        # A source or pre-release install can be ahead of PyPI. "Upgrading" to
+        # latest would be a downgrade, and this command never does one unasked.
+        _ok(f"You are on {current}, newer than PyPI's latest ({target}). Nothing to do.")
+        return
+    if explicit and cur_t and tgt_t and tgt_t < cur_t:
+        _warn(f"{target} is older than the installed {current}: this is a downgrade, as asked.")
 
     # 1. The CLI you are typing right now.
     _upgrade_running_cli(current, target)
@@ -3926,14 +4963,43 @@ def _build_mcp_server_entry() -> "tuple[dict, str]":
     else:
         mcp_entry = {"command": finops_bin}
         display_cmd = finops_bin
+    # No license key in the entry: the server reads it from the vault.
+    return mcp_entry, display_cmd
+
+
+def _config_license_can_go(value: object) -> bool:
+    """A license key an earlier release wrote into an editor config's env block.
+    True when that copy can be dropped: the vault already holds a key, the copy
+    is not a usable key, or it was just moved into the vault. False when the
+    vault could not take it, so the caller keeps it in the config instead of
+    silently dropping a paying user to free."""
+    value = value.strip() if isinstance(value, str) else ""
+    if not value:
+        return True
     try:
         from .security.vault import Vault
-        _val = Vault.default().get("FINOPS_LICENSE_KEY")
-        if _val:
-            mcp_entry["env"] = {"FINOPS_LICENSE_KEY": _val}
+        vault = Vault.default()
     except Exception:
-        pass
-    return mcp_entry, display_cmd
+        vault = None
+    if vault is not None:
+        try:
+            if (vault.get("FINOPS_LICENSE_KEY") or "").strip():
+                return True
+        except Exception:
+            pass
+    from .license import validate_key
+    if validate_key(value).mode == "invalid":
+        return True
+    try:
+        if vault is None:
+            raise RuntimeError("vault unavailable")
+        vault.store("FINOPS_LICENSE_KEY", value)
+    except Exception:
+        _warn("Could not store the license key from the editor config in the vault, "
+              "so it stays in the config. Run `nable license <key>` to store it.")
+        return False
+    _ok("Moved the license key from the editor config into the vault.")
+    return True
 
 
 def _merge_write_mcpservers(config_path: Path, mcp_entry: dict) -> bool:
@@ -3954,6 +5020,14 @@ def _merge_write_mcpservers(config_path: Path, mcp_entry: dict) -> bool:
     entry = dict(mcp_entry)
     if isinstance(existing, dict) and existing.get("env"):
         entry["env"] = {**existing["env"], **entry.get("env", {})}
+    if isinstance(entry.get("env"), dict):
+        # A key an earlier release wrote here would outrank the vault, so it
+        # goes, but only once the vault holds a license.
+        if ("FINOPS_LICENSE_KEY" in entry["env"]
+                and _config_license_can_go(entry["env"]["FINOPS_LICENSE_KEY"])):
+            entry["env"].pop("FINOPS_LICENSE_KEY")
+        if not entry["env"]:
+            entry.pop("env")
     servers.pop("finops", None)
     servers["nable"] = entry
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4137,23 +5211,14 @@ def _configure_claude_desktop_inner() -> bool:
 
     config.setdefault("mcpServers", {})
 
-    # Pull non-secret config from the vault into the env block.
-    # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are intentionally excluded:
-    # the MCP server loads them from the vault at startup via load_vault_to_env(),
-    # so they never need to appear in plaintext in claude_desktop_config.json.
-    vault_env: dict[str, str] = {}
-    try:
-        from .security.vault import Vault
-        _v = Vault.default()
-        for _k in ("FINOPS_LICENSE_KEY",):
-            _val = _v.get(_k)
-            if _val:
-                vault_env[_k] = _val
-    except Exception:
-        pass
-
-    if vault_env:
-        mcp_entry["env"] = {**vault_env, **mcp_entry.get("env", {})}
+    # Nothing secret goes into the env block. The MCP server loads credentials
+    # and the license key from the vault at startup (load_vault_to_env and
+    # license.check_license), so none of them needs to sit in plaintext in
+    # claude_desktop_config.json. A license key there outranked the vault and
+    # survived `nable logout`, so an entry still carrying one is rewritten.
+    stale_key = "FINOPS_LICENSE_KEY" in ((config["mcpServers"].get("nable")
+                                          or config["mcpServers"].get("finops") or {})
+                                         .get("env") or {})
 
     # Standardize on "nable" (the product name). Read either key so we can
     # migrate a legacy "finops" entry without leaving both registered.
@@ -4164,7 +5229,7 @@ def _configure_claude_desktop_inner() -> bool:
     # Only short-circuit when the entry is ALREADY under the new "nable" key. If it
     # exists only under the legacy "finops" key, fall through to the migration below
     # (pop "finops", register "nable") even when the command is otherwise identical.
-    if existing_base == new_base and not vault_env and "nable" in config["mcpServers"]:
+    if existing_base == new_base and not stale_key and "nable" in config["mcpServers"]:
         _ok(f"Claude Desktop already configured: {display_cmd}")
         return True
 
@@ -4176,8 +5241,8 @@ def _configure_claude_desktop_inner() -> bool:
     _notes = []
     if uvx_bin:
         _notes.append("uvx mode: works on corporate machines without PATH changes")
-    if vault_env:
-        _notes.append(f"including {len(vault_env)} credential(s) from vault")
+    if stale_key:
+        _notes.append("moves a license key an earlier release wrote here into the vault")
     if existing:
         _notes.append("updates existing entry")
     for _note in _notes:
@@ -4196,9 +5261,14 @@ def _configure_claude_desktop_inner() -> bool:
         _print_manual_config(mcp_entry)
         return False
 
-    # Preserve any env keys already in the existing entry that we're not overwriting
+    # Preserve any env keys already in the existing entry that we're not
+    # overwriting, except a license key an earlier release wrote there, which
+    # goes only once the vault holds a license.
     if existing.get("env"):
         merged_env = {**existing["env"], **mcp_entry.get("env", {})}
+        if ("FINOPS_LICENSE_KEY" in merged_env
+                and _config_license_can_go(merged_env["FINOPS_LICENSE_KEY"])):
+            merged_env.pop("FINOPS_LICENSE_KEY")
         if merged_env:
             mcp_entry["env"] = merged_env
 

@@ -76,7 +76,7 @@ async def _snapshot_all() -> dict:
     from ..connectors.saas.datadog import DatadogConnector
     from ..connectors.saas.mongodb_atlas import MongoDBAtlasConnector
     from ..connectors.saas.twilio import TwilioConnector
-    from ..storage.snapshots import store_snapshot, store_zero_for_stopped_series
+    from ..storage.snapshots import store_snapshots, store_zero_for_stopped_series
 
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -155,19 +155,22 @@ async def _snapshot_all() -> dict:
             # covered the same day for free.
             summary = await connector.get_costs(yesterday, today, granularity="DAILY")
             seen: dict[str, set[tuple[str, str, str]]] = {}
+            batch: list[dict] = []
             for entry in summary.entries:
                 if entry.amount > 0:
-                    store_snapshot(
-                        provider=entry.provider,
-                        service=entry.service,
-                        account_id=entry.account_id,
-                        region=entry.region,
-                        snapshot_date=yesterday,
-                        amount_usd=entry.amount,
-                        granularity="DAILY",
-                    )
+                    batch.append({
+                        "provider": entry.provider,
+                        "service": entry.service,
+                        "account_id": entry.account_id,
+                        "region": entry.region,
+                        "snapshot_date": yesterday,
+                        "amount_usd": entry.amount,
+                        "granularity": "DAILY",
+                    })
                     seen.setdefault(entry.provider, set()).add(
                         (entry.service, entry.account_id, entry.region))
+            # One transaction for the whole fetch, not one per entry.
+            store_snapshots(batch)
             # A service that stopped billing gets a $0 row so the detector can
             # see the drop. Only when the fetch returned spend for the day: an
             # empty answer is far more likely late data than every service
@@ -456,10 +459,19 @@ def _run(coro):
 
 
 
-def job_weekly_email_digest() -> None:
-    """Send the standalone weekly email digest (no AI client required)."""
+def job_weekly_email_digest() -> dict:
+    """Send the standalone weekly email digest (no AI client required).
+
+    Returns send_weekly_digest_result's dict. This returned None and dropped
+    the send's False, so send_weekly_digest_now answered "sent" with no SMTP
+    configured at all."""
     try:
-        from ..notifications.email_digest import send_weekly_digest
+        from ..notifications.email_digest import missing_digest_vars, send_weekly_digest_result
+        missing = missing_digest_vars()
+        if missing:
+            # Before any cost read: nothing can be sent, so nothing is fetched.
+            return {"sent": False, "recipient": "", "missing": missing,
+                    "error": "Email is not configured: set " + ", ".join(missing) + "."}
         from ..anomaly.detector import get_active_anomalies
         from ..storage.db import cost_snapshots, get_engine
         from ..recommendations.rightsizing import analyze_rightsizing, rightsizing_summary
@@ -519,15 +531,18 @@ def job_weekly_email_digest() -> None:
         except Exception:
             rec_list = []
 
-        send_weekly_digest(
+        return send_weekly_digest_result(
             total_spend=current_week_total,
             prev_total=prev_week_total,
             top_providers=top_providers,
             anomalies=anomalies,
             recommendations=rec_list,
+            has_data=bool(rows),
         )
-    except Exception:
+    except Exception as e:
         log.exception("Weekly email digest job failed")
+        return {"sent": False, "recipient": "", "missing": [],
+                "error": f"The digest could not be built: {type(e).__name__}: {e}"}
 
 
 async def _check_credits_and_alert() -> dict | None:
@@ -760,6 +775,18 @@ async def run_anomaly_check_now() -> list[dict]:
 
 async def run_digest_now() -> bool:
     return await _send_daily_digest()
+
+
+def has_snapshot_on(d: date) -> bool:
+    """True when any cost snapshot exists for day d. The daily digest reports
+    yesterday; with no snapshot for it, it would post "$0" as a finding."""
+    from ..storage.db import cost_snapshots, get_engine
+    from sqlalchemy import func, select
+    with get_engine().connect() as conn:
+        return bool(conn.execute(
+            select(func.count()).select_from(cost_snapshots)
+            .where(cost_snapshots.c.snapshot_date == d.isoformat())
+        ).scalar())
 
 
 async def run_weekly_insight_now() -> bool:

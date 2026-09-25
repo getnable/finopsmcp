@@ -9,6 +9,11 @@ So every entry carries a grade:
 
   scoped   The provider has a billing-specific permission and nable uses exactly
            it. A leaked credential reads billing and nothing else.
+  inventory
+           Read-only, but wider than billing: the credential lists and describes
+           resources and reads their metrics. It can change nothing. It reads
+           resource names, sizes and settings, and on AWS those settings include
+           Lambda and ECS environment variables, which can hold secrets.
   role     No per-key scope, but you can put the key behind a limited role or
            user. Tight in the end, though it is your role assignment doing the
            work, not the key itself.
@@ -29,12 +34,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 SCOPED = "scoped"
+INVENTORY = "inventory"
 ROLE = "role"
 ACCOUNT = "account"
 
-GRADE_ORDER = (ACCOUNT, ROLE, SCOPED)
+GRADE_ORDER = (ACCOUNT, INVENTORY, ROLE, SCOPED)
 GRADE_LABEL = {
     SCOPED: "Billing-only scope. A leaked key reads billing and nothing else.",
+    INVENTORY: ("Read-only inventory scope. A leaked key can list and describe resources "
+                "and read their metrics, and change nothing. Describing a resource can "
+                "return its environment variables, so keep secrets out of them."),
     ROLE: "No per-key scope. Put the key behind a limited role or user.",
     ACCOUNT: "No narrower option exists. The key is as powerful as the account.",
 }
@@ -45,7 +54,7 @@ class Scope:
     provider: str                          # display name
     credential: str                        # what you create
     permission: str                        # the exact scope, role or grant to pick
-    grade: str                             # SCOPED | ROLE | ACCOUNT
+    grade: str                             # SCOPED | INVENTORY | ROLE | ACCOUNT
     calls: tuple[str, ...]                 # every endpoint nable hits with it
     mint_url: str | None = None
     note: str = ""                         # what the scope does and does not allow
@@ -61,12 +70,19 @@ CONNECTOR_SCOPES: dict[str, Scope] = {
         provider="AWS",
         credential="IAM role or user",
         permission="The policy printed by `nable scan --dry-run --json`",
-        grade=SCOPED,
-        calls=("Describe/List/Get only, per scan_manifest.py",
+        grade=INVENTORY,
+        calls=("Describe/List/Get only: every call is listed by `nable scan --dry-run`",
                "ce:GetCostAndUsage, only on `--spend`, billed at $0.01/request"),
         mint_url="https://console.aws.amazon.com/iam/",
-        note="Every action in the policy is a read. Cost Explorer is not in the "
-             "default set, so the default scan cannot spend your money.",
+        note="Every action in the policy is a read, but it is not billing-only: "
+             "finding waste means listing volumes, instances, buckets, load "
+             "balancers and their metrics. It reads no object contents and no "
+             "log events, but lambda:ListFunctions, "
+             "lambda:GetFunctionConfiguration and ecs:DescribeTaskDefinition "
+             "return environment variables, so any secret stored in one is "
+             "readable with this key. Keep secrets in Secrets Manager or SSM "
+             "Parameter Store, not in environment variables. Cost Explorer is "
+             "not in the default set, so the default scan cannot spend your money.",
         env=("AWS_ACCESS_KEY_ID", "AWS_PROFILE"),
     ),
     "azure": Scope(
@@ -187,16 +203,25 @@ CONNECTOR_SCOPES: dict[str, Scope] = {
     "databricks": Scope(
         provider="Databricks",
         credential="Account-level token or service principal",
-        permission="Account admin",
+        permission="USE CATALOG system, USE SCHEMA system.billing, SELECT on "
+                   "system.billing.usage and system.billing.list_prices, CAN USE on "
+                   "one SQL warehouse (with DATABRICKS_WAREHOUSE_ID); otherwise Account admin",
         grade=ACCOUNT,
-        calls=("GET /api/2.0/accounts/{id}/usage/download",),
+        calls=("POST /api/2.0/sql/statements (system.billing.usage, list_prices)",
+               "GET /api/2.0/sql/statements/{id}",
+               "GET /api/2.0/accounts/{id}/usage/download (fallback, account admin)",
+               "GET /api/2.0/clusters/list (fallback, uptime estimate)"),
         mint_url="https://docs.databricks.com/en/dev-tools/auth/pat.html",
-        note="The billable-usage download API is account-admin only. There is no "
-             "narrower role that can call it.",
-        gap="system.billing.usage can be read with three grants (USE CATALOG "
-            "system, USE SCHEMA system.billing, SELECT on the table) instead of "
-            "account admin. nable does not query it over SQL yet.",
-        env=("DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_ACCOUNT_ID"),
+        note="With DATABRICKS_WAREHOUSE_ID nable reads metered usage from "
+             "system.billing.usage over the Statement Execution API: four grants "
+             "on the system catalog and CAN USE on that warehouse, no admin. Without "
+             "it, the billable-usage download needs an account-admin token "
+             "(DATABRICKS_ACCOUNT_TOKEN), and without that the uptime estimate is "
+             "labeled as one.",
+        gap="The SQL path should become the default once a warehouse can be "
+            "discovered rather than typed.",
+        env=("DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_WAREHOUSE_ID",
+             "DATABRICKS_ACCOUNT_ID", "DATABRICKS_ACCOUNT_TOKEN"),
     ),
     "vercel": Scope(
         provider="Vercel",

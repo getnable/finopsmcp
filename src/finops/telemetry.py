@@ -56,6 +56,19 @@ _OPT_OUT_ENV  = "NABLE_NO_TELEMETRY"   # hard override, always wins
 _OPT_IN_ENV   = "NABLE_TELEMETRY"      # opt-in: nothing is sent without it
 
 
+def _opt_in_env() -> "bool | None":
+    """NABLE_TELEMETRY read strictly: True for 1/true/yes/on, False for
+    0/false/no/off, None when unset or unrecognised. Only a clear yes opts in;
+    it used to be "anything not in a short off list", so off, OFF or False
+    switched telemetry on."""
+    raw = os.environ.get(_OPT_IN_ENV, "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
 # ─── Consent, asked once, out loud ───────────────────────────────────────────
 #
 # Telemetry became opt-in on 2026-08-08 (0.8.210) and the trade was deliberate:
@@ -122,8 +135,8 @@ def _can_ask() -> bool:
         return False                       # asked once already. Once means once.
     if os.environ.get(_OPT_OUT_ENV, "").strip() not in ("", "0", "false", "no"):
         return False                       # they already said no, louder
-    if os.environ.get(_OPT_IN_ENV, "").strip() not in ("", "0", "false", "no"):
-        return False                       # they already said yes
+    if _opt_in_env() is not None:
+        return False                       # they already answered, yes or no
     if os.environ.get("FINOPS_AIRGAP", "").strip() not in ("", "0", "false", "no"):
         return False
     if is_ci():
@@ -199,11 +212,25 @@ def arm_consent_prompt() -> None:
 
 # ─── Install ID ──────────────────────────────────────────────────────────────
 
+_SESSION_ID: str | None = None
+
+
 def _get_install_id() -> str:
     """
     Stable anonymous ID for this install. Stored in ~/.config/finops/.install_id.
     Generated once as a random UUID — completely disconnected from the user's identity.
+
+    Written only while telemetry is on. Most call sites build the id as an
+    argument before _send_event checks consent, so the file used to appear on
+    the first command of a user who never agreed to anything. With telemetry
+    off this returns a process-only id that never touches disk (and is never
+    sent, because _send_event drops the event).
     """
+    global _SESSION_ID
+    if _is_opted_out():
+        if _SESSION_ID is None:
+            _SESSION_ID = str(uuid.uuid4())
+        return _SESSION_ID
     try:
         _ID_FILE.parent.mkdir(parents=True, exist_ok=True)
         if _ID_FILE.exists():
@@ -264,9 +291,11 @@ def _is_opted_out() -> bool:
     for _var in (_OPT_OUT_ENV, "DO_NOT_TRACK"):
         if env_flag_set(_var):
             return True
-    _in = os.environ.get(_OPT_IN_ENV, "").strip()
-    if _in not in ("", "0", "false", "no"):
-        return False        # explicit env opt-in still works, unchanged
+    _in = _opt_in_env()
+    if _in is True:
+        return False        # explicit env opt-in still works
+    if _in is False:
+        return True         # an explicit no in the env is a no, whatever was stored
     # Otherwise: the answer the user gave when asked, once, in words. None means
     # never asked, which stays OFF. The env var is no longer the only way in,
     # because requiring one is what took the signal to zero.
@@ -322,12 +351,26 @@ def record_tool_call(tool_name: str) -> None:
         "plan": _session.get("plan", "free"),
         "date": date.today().isoformat(),
     }
-    t = threading.Thread(
-        target=_send_event,
-        args=(install_id, "tool_called", props),
-        daemon=True,
-    )
-    t.start()
+    send_event_background(install_id, "tool_called", props)
+
+
+def in_background(fn, *args, **kwargs) -> None:
+    """Run a telemetry send on a daemon thread and return immediately.
+
+    _send_event is a synchronous httpx.post with a 5s timeout. Called from the
+    MCP server's event loop it held that loop for the whole round trip, and on a
+    network that drops PostHog traffic silently that is the full 5s per call,
+    during which the server answers nothing. Anything that sends from an async
+    context goes through here (or send_event_background) instead.
+    """
+    threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True).start()
+
+
+def send_event_background(install_id: str, event: str, properties: dict) -> None:
+    """_send_event, fire-and-forget. Same opt-out rules; no thread when off."""
+    if _is_opted_out():
+        return
+    in_background(_send_event, install_id, event, properties)
 
 
 def set_plan(plan: str) -> None:
@@ -479,6 +522,12 @@ def _send_event(install_id: str, event: str, properties: dict) -> None:
     verification and drops every event. That silent loss skews active-install
     counts downward for exactly the macOS-on-python.org segment. httpx avoids it;
     urllib is only a fallback when httpx is not installed.
+
+    The POST runs on a daemon thread and the caller waits at most _SEND_WAIT_S.
+    Several CLI paths call this synchronously so the event lands before exit,
+    and on a network that drops packets a 5 s httpx attempt followed by a 4 s
+    urllib retry of the same host added ~9.6 s to every command. A reachable
+    host answers well inside the wait; an unreachable one costs about a second.
     """
     if _is_opted_out():
         return
@@ -497,12 +546,29 @@ def _send_event(install_id: str, event: str, properties: dict) -> None:
         "timestamp": date.today().isoformat(),
     }
     try:
-        import httpx
-        httpx.post(f"{_POSTHOG_HOST}/capture/", json=body, timeout=5)
-        return
+        t = threading.Thread(target=_post_event, args=(body,), daemon=True)
+        t.start()
+        t.join(timeout=_SEND_WAIT_S)
     except Exception:
-        pass
+        pass  # Never let telemetry break the tool
+
+
+# How long a caller of _send_event waits for the POST. The send carries on in
+# the background for the rest of the process; this only bounds the wait.
+_SEND_WAIT_S = 1.0
+
+
+def _post_event(body: dict) -> None:
+    """One POST. urllib only when httpx is not installed: retrying a host
+    httpx could not reach over urllib doubled the wait and never succeeded."""
     try:
+        import httpx
+    except ImportError:
+        httpx = None
+    try:
+        if httpx is not None:
+            httpx.post(f"{_POSTHOG_HOST}/capture/", json=body, timeout=5)
+            return
         import urllib.request
         req = urllib.request.Request(
             f"{_POSTHOG_HOST}/capture/",

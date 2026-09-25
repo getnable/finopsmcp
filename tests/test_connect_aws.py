@@ -103,14 +103,30 @@ def test_connect_aws_already_connected_is_idempotent():
 
 def test_cost_tool_injects_connect_hint_when_unconnected(monkeypatch):
     monkeypatch.setenv("FINOPS_DEMO", "1")
+    monkeypatch.setenv("FINOPS_DEMO_FORCE", "1")
+    monkeypatch.setattr("finops.demo_data.DEMO_MODE", True)
     monkeypatch.setattr(server, "_unconnected_hint_fired", False)
     with patch("finops.demo_data._real_provider_connected", return_value=False), \
-         patch("finops.server._telemetry._send_event") as ev:
+         patch("finops.server._telemetry.send_event_background") as ev:
         out = _run(server.get_cost_summary())
     assert "connect_aws" in out["_connect_hint"]["actions"]
     assert out["_connect_hint"]["sample_data"] is True
+    assert "sample data (demo mode)" in out["_connect_hint"]["message"]
     # The wall is recorded once so the funnel can see "used a tool, never connected".
     assert any(c.args[1] == "unconnected_cost_tool" for c in ev.call_args_list)
+
+
+def test_unconnected_hint_outside_demo_names_the_real_path_to_sample_data(monkeypatch):
+    """Outside demo the hint said "nable can only show sample data", and nothing
+    in chat could turn sample data on. It now says nothing is connected and
+    names the real ways to see the sample: the FINOPS_DEMO=1 server setting or
+    `nable scan --demo`."""
+    monkeypatch.setattr("finops.demo_data.is_demo", lambda: False)
+    hint = server._connect_hint()
+    assert hint["sample_data"] is False
+    assert "can only show sample data" not in hint["message"]
+    assert "FINOPS_DEMO=1" in hint["message"] and "nable scan --demo" in hint["message"]
+    assert "connect_aws" in hint["actions"]
 
 
 def test_cost_tool_no_hint_when_connected(monkeypatch):

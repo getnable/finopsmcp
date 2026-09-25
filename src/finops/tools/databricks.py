@@ -9,6 +9,29 @@ from __future__ import annotations
 from .. import server as _srv
 
 
+def _provenance(summary) -> dict:
+    """source / is_estimate / note for a Databricks CostSummary, read off the
+    rows rather than asserted, so the note cannot drift from the connector."""
+    entries = getattr(summary, "entries", None) or []
+    sources = sorted({str(e.metadata.get("cost_source", "")) for e in entries if e.metadata.get("cost_source")})
+    estimated = any(e.metadata.get("is_estimate") for e in entries)
+    reasons = sorted({str(e.metadata.get("estimate_reason", "")) for e in entries if e.metadata.get("estimate_reason")})
+    out = {"source": ", ".join(sources) or "none", "is_estimate": bool(estimated) if entries else None}
+    if not entries:
+        out["note"] = "No rows for the period."
+    elif estimated:
+        out["note"] = "Estimate. " + (reasons[0] if reasons else "") + (
+            " Set DATABRICKS_WAREHOUSE_ID to read metered usage from system.billing.usage."
+            if "system.billing.usage" not in sources else "")
+    elif "system.billing.usage" in sources:
+        out["note"] = ("Metered usage from system.billing.usage at published list "
+                       "prices, before contract discounts.")
+    else:
+        out["note"] = ("Billable usage from the account download at the contract "
+                       "rate Databricks reports.")
+    return out
+
+
 @_srv.mcp.tool()
 async def get_databricks_costs(
     start_date: str | None = None,
@@ -20,8 +43,11 @@ async def get_databricks_costs(
     Reports total estimated spend, cost by service type (All-Purpose Compute,
     Jobs, SQL Warehouses, Delta Live Tables) and per-cluster cost.
 
-    Uses the Databricks Billable Usage Download API when DATABRICKS_ACCOUNT_ID
-    is set; otherwise estimates from cluster uptime + job run history.
+    Reads system.billing.usage when DATABRICKS_WAREHOUSE_ID names a SQL
+    warehouse (metered DBUs at list price). Otherwise the account-level
+    usage download when DATABRICKS_ACCOUNT_ID is set, otherwise an estimate
+    from cluster uptime and job run history. The response says which, in
+    `source` and `is_estimate`.
 
     Args:
         start_date: ISO date string (YYYY-MM-DD). Defaults to 30 days ago.
@@ -60,7 +86,7 @@ async def get_databricks_costs(
         "total_usd": _srv._fmt_usd(summary.total_usd),
         "by_service": {k: _srv._fmt_usd(v) for k, v in svc_rows[:50]},
         "by_workspace": {k: _srv._fmt_usd(v) for k, v in ws_rows[:50]},
-        "note": "Costs are estimates based on DBU rates. Set DATABRICKS_ACCOUNT_ID for exact billing data.",
+        **_provenance(summary),
     }
     if len(svc_rows) > 50:
         result["by_service_truncated"] = f"Showing top 50 of {len(svc_rows)} services by spend; total_usd covers all of them."

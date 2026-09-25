@@ -10,14 +10,17 @@ the subtraction themselves to tell which one they are looking at. Every claim we
 make is supposed to carry a dollar figure, and this one, the one that wakes people
 up, did not.
 
-This is pure arithmetic over fields the anomaly already has. No provider API call,
-no LLM. That matters: this runs inside the scheduler for every alerted anomaly, so
-anything with a per-call cost does not belong here.
+By default this is pure arithmetic over fields the anomaly already has. No
+provider API call, no LLM. That matters: this runs inside the scheduler for every
+alerted anomaly, so anything with a per-call cost does not belong on that path.
 
-What it deliberately does NOT do is claim to know WHY. Naming the resource behind
-the spike needs a per-service drill-down (another Cost Explorer call, per
-provider), which is worth doing but is not free and is not this. Instead the alert
-says exactly which question to ask next.
+What it does NOT do by default is claim to know WHY. Naming the resource behind
+the spike needs a per-service drill-down (billed Cost Explorer requests, plus
+CloudTrail), so the scheduler never runs it. Instead the alert says exactly which
+question to ask next. A caller that has been asked for the cause passes
+drill_down=True, and enrich() adds the answer from anomaly/root_cause.py: the
+usage types and resources behind the delta, and the change that likely or
+provably started it.
 """
 from __future__ import annotations
 
@@ -72,16 +75,69 @@ def _next_step(service: str, provider: str) -> str:
     """One concrete question, not a menu. The complaint about budget alerts is
     that they tell you a threshold moved and leave you to figure out the rest."""
     scope = f'"{service}"' + (f" on {provider.upper()}" if provider else "")
-    return (
+    step = (
         f"Ask nable: what changed in {scope} over the last 7 days, broken down by "
         f"usage type and resource?"
     )
+    if provider == "aws":
+        step += (" (get_anomalies with root_cause=True, or `nable why`, names the "
+                 "resource and the change behind it.)")
+    return step
 
 
-def enrich(anomaly: dict[str, Any]) -> dict[str, Any]:
-    """Return the anomaly with impact fields merged in. Never raises: an alert
-    that fails to enrich must still be delivered."""
+def root_cause(anomaly: dict[str, Any], *, session: Any = None) -> dict[str, Any] | None:
+    """The drill-down for one AWS spike: its day against the week before.
+    None for anything else. Billed: see anomaly/drilldown.py."""
+    if (anomaly.get("provider") or "").lower() != "aws" or anomaly.get("direction") == "drop":
+        return None
+    from datetime import date
+
+    from .drilldown import windows_for_day
+    from .root_cause import explain
+
     try:
-        return {**anomaly, **impact(anomaly)}
+        day = date.fromisoformat(str(anomaly.get("snapshot_date"))[:10])
+    except ValueError:
+        return None
+    current, baseline = windows_for_day(day)
+    return explain(str(anomaly.get("service") or ""), current, baseline, session=session,
+                   account_id=linked_account(anomaly))
+
+
+def linked_account(anomaly: dict[str, Any]) -> str | None:
+    """The LINKED_ACCOUNT to filter the drill-down on, or None.
+
+    A snapshot-derived anomaly's account_id is the account the connector's
+    credentials are in, not a linked account the spend was billed to. On an
+    organization's payer that is the payer itself, and filtering on it hides
+    every member account's spend, which is where a spike usually is. So only
+    an anomaly that names a linked account explicitly (linked_account_id,
+    different from the account it was read in) is filtered; otherwise the
+    drill-down reads everything these credentials see: a wider answer beats
+    one that hides the spike."""
+    linked = str(anomaly.get("linked_account_id") or "")
+    if not (linked.isdigit() and len(linked) == 12):
+        return None
+    return None if linked == str(anomaly.get("account_id") or "") else linked
+
+
+def enrich(anomaly: dict[str, Any], *, drill_down: bool = False,
+           session: Any = None) -> dict[str, Any]:
+    """Return the anomaly with impact fields merged in. Never raises: an alert
+    that fails to enrich must still be delivered.
+
+    drill_down=True also adds `root_cause` (root_cause() above) for an AWS
+    spike. Off by default: it makes billed Cost Explorer requests, and the
+    scheduler calls this for every alerted anomaly."""
+    try:
+        out = {**anomaly, **impact(anomaly)}
     except Exception:  # pragma: no cover - defensive
         return anomaly
+    if drill_down:
+        try:
+            found = root_cause(anomaly, session=session)
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - explain() does not raise
+            found = {"error": str(exc)}
+        if found is not None:
+            out["root_cause"] = found
+    return out

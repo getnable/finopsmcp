@@ -1,7 +1,8 @@
 """
 Bedrock model routing recommender.
 
-Bedrock Sonnet costs ~20x more than Haiku per token. Many workloads
+Bedrock Sonnet 4.x costs 3x what Haiku 4.5 does per token ($3/$15 against
+$1/$5 per 1M input/output, llm_prices), Opus 4.5 and later 5x. Many workloads
 that use Sonnet (classification, extraction, short-context lookups)
 work equally well on Haiku. This scanner identifies those workloads
 and estimates the savings from routing them to cheaper models.
@@ -20,35 +21,33 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from ..llm_prices import MODEL_PRICES, canonical_model, price_for
 from .envelope import INFERRED, Finding
 
 log = logging.getLogger(__name__)
 
-# Per 1M tokens pricing (input, output) as of 2026
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "claude-sonnet-4-5":    (3.00,  15.00),
-    "claude-sonnet-4-6":    (3.00,  15.00),
-    "claude-haiku-3-5":     (0.80,   4.00),
-    "claude-haiku-3":       (0.25,   1.25),
-    "claude-opus-4":        (15.00, 75.00),
-    # Also accept anthropic.* prefixes
-    "anthropic.claude-sonnet-4-5": (3.00,  15.00),
-    "anthropic.claude-sonnet-4-6": (3.00,  15.00),
-    "anthropic.claude-haiku-3-5":  (0.80,   4.00),
-    "anthropic.claude-haiku-3":    (0.25,   1.25),
-    "anthropic.claude-opus-4":     (15.00, 75.00),
-}
+# Per-token prices come from llm_prices, the one table. This module kept its own
+# until it drifted: its family fallback priced Haiku 4.5 as Claude 3 Haiku (a
+# quarter of the real rate) and every Opus from 4.5 on as Opus 4 (three times
+# it), and it knew no Claude 5 model at all.
 
 # Routing thresholds: invocations below these avg token counts
 # are likely short tasks (classification, extraction, lookup).
 _ROUTING_MAX_AVG_INPUT_TOKENS = 500
 _ROUTING_MAX_AVG_OUTPUT_TOKENS = 200
 
-# Models that are routing targets (cheaper alternatives)
-_ROUTING_TARGETS = ["claude-haiku-3-5", "claude-haiku-3"]
+# The routing target (the cheaper alternative): the current Haiku. Haiku 3.5
+# is retired on the Claude API, so routing new work to it is not advice.
+_ROUTING_TARGET = "claude-haiku-4-5"
 
-# Models eligible to route FROM (expensive)
-_ROUTING_SOURCES = ["claude-sonnet-4-5", "claude-sonnet-4-6", "claude-opus-4"]
+
+def _is_routing_source(model_id: str) -> bool:
+    """A priced Sonnet or Opus: the tiers worth routing short calls away from.
+    An unpriced model is never a source, since there is no rate to size the
+    saving against."""
+    price = price_for(model_id)
+    return (price is not None and price.provider == "anthropic"
+            and ("sonnet" in price.model or "opus" in price.model))
 
 
 def _make_ce(role_arn: str | None = None):
@@ -99,33 +98,16 @@ def _parse_model_from_usage_type(usage_type: str) -> str:
 
 
 def _normalize_model_id(raw: str) -> str:
-    """Map a raw model string to a canonical MODEL_PRICING key.
+    """The llm_prices id for a raw model string, or `raw` itself when that table
+    has no confirmed price for it.
 
-    Handles both CE/Bedrock model ids ("anthropic.claude-3-5-sonnet-20241022")
-    and Cost Explorer SKU display names ("Claude Sonnet 4.5"), where the version
-    is written with spaces and dots instead of dashes.
+    Handles CE/Bedrock model ids ("anthropic.claude-sonnet-4-5-20250929-v1:0")
+    and Cost Explorer SKU display names ("Claude Sonnet 4.5"). There is no
+    family fallback: a model the table does not know stays itself and is
+    reported unpriced, rather than borrowing the nearest sibling's rate.
     """
-    lower = raw.lower()
-    # Collapse spaces and dots to dashes so a SKU display name like
-    # "Claude Sonnet 4.5" compares the same as "claude-sonnet-4-5".
-    canon = lower.replace(" ", "-").replace(".", "-")
-    for key in MODEL_PRICING:
-        if key in lower or key in canon:
-            return key
-    # Fall back to family + version matching for CE usage types that carry a
-    # date suffix and for SKU display names with no embedded model id.
-    if "sonnet" in canon:
-        if "4-5" in canon or "3-5" in canon:
-            return "claude-sonnet-4-5"
-        if "4-6" in canon or "claude-3-sonnet" in canon:
-            return "claude-sonnet-4-6"
-    if "haiku" in canon:
-        if "3-5" in canon:
-            return "claude-haiku-3-5"
-        return "claude-haiku-3"
-    if "opus" in canon:
-        return "claude-opus-4"
-    return raw
+    canon = canonical_model(raw)
+    return canon if canon in MODEL_PRICES else raw
 
 
 def _discover_bedrock_services(ce, start: str, end: str) -> list[str]:
@@ -209,9 +191,42 @@ def _get_bedrock_ce_costs(ce, start: str, end: str) -> dict[str, dict[str, float
     return model_costs
 
 
-def _get_cw_metrics(cw, model_id: str, start_dt: datetime, end_dt: datetime, period_seconds: int) -> dict[str, float]:
+def _bedrock_model_dimensions(cw) -> dict[str, list[str]] | None:
+    """{canonical model: [ModelId values]} for every model AWS/Bedrock publishes
+    Invocations under. None when the listing fails.
+
+    CloudWatch keys Bedrock metrics by the Bedrock model id
+    ("anthropic.claude-sonnet-4-5-20250929-v1:0", or "us.anthropic..." through
+    a cross-region inference profile), never by the canonical id this module
+    prices with ("claude-sonnet-4-5"). Asked by the canonical id, every read
+    came back empty, invocations read as zero, and routing never fired on a
+    real account. One model can publish under several ids (on-demand plus a
+    profile per geography), so all of them are summed. list_metrics is a
+    standard request inside CloudWatch's free tier.
     """
-    Fetch CloudWatch metrics for a Bedrock model.
+    out: dict[str, list[str]] = {}
+    try:
+        pages = cw.get_paginator("list_metrics").paginate(
+            Namespace="AWS/Bedrock", MetricName="Invocations")
+        for page in pages:
+            for metric in page.get("Metrics", []):
+                for dim in metric.get("Dimensions", []):
+                    raw = dim.get("Value")
+                    if dim.get("Name") == "ModelId" and raw:
+                        ids = out.setdefault(canonical_model(raw), [])
+                        if raw not in ids:
+                            ids.append(raw)
+    except Exception as exc:
+        log.debug("CW list_metrics for AWS/Bedrock failed: %s", exc)
+        return None
+    return out
+
+
+def _get_cw_metrics(cw, model_id: str | list[str], start_dt: datetime, end_dt: datetime,
+                    period_seconds: int) -> dict[str, float]:
+    """
+    Fetch CloudWatch metrics for a Bedrock model, summed over every ModelId
+    dimension value it publishes under (see _bedrock_model_dimensions).
 
     Returns {invocation_count, input_tokens, output_tokens}.
     """
@@ -220,9 +235,7 @@ def _get_cw_metrics(cw, model_id: str, start_dt: datetime, end_dt: datetime, per
         "input_tokens": 0.0,
         "output_tokens": 0.0,
     }
-
-    # CloudWatch Bedrock metric dimension key
-    dimension = [{"Name": "ModelId", "Value": model_id}]
+    model_ids = [model_id] if isinstance(model_id, str) else list(model_id)
     namespace = "AWS/Bedrock"
 
     metric_map = {
@@ -232,31 +245,30 @@ def _get_cw_metrics(cw, model_id: str, start_dt: datetime, end_dt: datetime, per
     }
 
     for key, metric_name in metric_map.items():
-        try:
-            resp = cw.get_metric_statistics(
-                Namespace=namespace,
-                MetricName=metric_name,
-                Dimensions=dimension,
-                StartTime=start_dt,
-                EndTime=end_dt,
-                Period=period_seconds,
-                Statistics=["Sum"],
-            )
-            total = sum(dp.get("Sum", 0.0) for dp in resp.get("Datapoints", []))
-            metrics[key] = total
-        except Exception as exc:
-            log.debug("CW metric %s failed for model %s: %s", metric_name, model_id, exc)
+        for raw_id in model_ids:
+            try:
+                resp = cw.get_metric_statistics(
+                    Namespace=namespace,
+                    MetricName=metric_name,
+                    Dimensions=[{"Name": "ModelId", "Value": raw_id}],
+                    StartTime=start_dt,
+                    EndTime=end_dt,
+                    Period=period_seconds,
+                    Statistics=["Sum"],
+                )
+                metrics[key] += sum(dp.get("Sum", 0.0) for dp in resp.get("Datapoints", []))
+            except Exception as exc:
+                log.debug("CW metric %s failed for model %s: %s", metric_name, raw_id, exc)
 
     return metrics
 
 
 def _cost_per_invocation(model_id: str, avg_input_tokens: float, avg_output_tokens: float) -> float:
     """Calculate cost per invocation given average token counts."""
-    pricing = MODEL_PRICING.get(model_id)
-    if not pricing:
+    price = price_for(model_id)
+    if price is None:
         return 0.0
-    input_price, output_price = pricing
-    return (avg_input_tokens * input_price + avg_output_tokens * output_price) / 1_000_000
+    return price.cost(input_tokens=avg_input_tokens, output_tokens=avg_output_tokens)
 
 
 def recommend_bedrock_model_routing(
@@ -288,11 +300,15 @@ def recommend_bedrock_model_routing(
     routing_opportunities: list[dict] = []
     total_monthly_savings = 0.0
 
+    published = _bedrock_model_dimensions(cw)
+
     for model_id, cost_data in model_ce_costs.items():
         monthly_cost = cost_data["total_cost"] * (30 / days)
 
-        # Get CloudWatch metrics for this model
-        cw_metrics = _get_cw_metrics(cw, model_id, start_dt, end_dt, period_seconds)
+        # CloudWatch metrics under every ModelId this model publishes as. If the
+        # listing failed, asking by the id itself is the only guess left.
+        ids = published.get(canonical_model(model_id), []) if published is not None else [model_id]
+        cw_metrics = _get_cw_metrics(cw, ids, start_dt, end_dt, period_seconds)
         invocation_count = cw_metrics["invocation_count"]
         input_tokens = cw_metrics["input_tokens"]
         output_tokens = cw_metrics["output_tokens"]
@@ -310,7 +326,7 @@ def recommend_bedrock_model_routing(
 
         # Check if this is a routing source model
         canonical = _normalize_model_id(model_id)
-        if canonical not in _ROUTING_SOURCES:
+        if not _is_routing_source(canonical):
             continue
 
         # Routing signal: short inputs + short outputs = likely classification/extraction
@@ -334,8 +350,7 @@ def recommend_bedrock_model_routing(
             continue
 
         if is_short_task or is_batch_task:
-            # Pick cheapest routing target
-            target_model = "claude-haiku-3-5"
+            target_model = _ROUTING_TARGET
 
             current_cost_per_call = _cost_per_invocation(canonical, avg_input, avg_output)
             target_cost_per_call = _cost_per_invocation(target_model, avg_input, avg_output)
@@ -385,7 +400,8 @@ def recommend_bedrock_model_routing(
     if routing_opportunities:
         implementation_note = (
             "To implement model routing: check the task type before calling Bedrock. "
-            "For classification or extraction, set model_id to 'anthropic.claude-haiku-3-5-20241022-v1:0'. "
+            "For classification or extraction, set model_id to a Claude Haiku 4.5 inference "
+            "profile such as 'us.anthropic.claude-haiku-4-5-20251001-v1:0'. "
             "Keep 'anthropic.claude-sonnet-...' for multi-step reasoning, long-form generation, "
             "or any task with more than 1k input tokens. "
             "A simple approach: wrap your Bedrock call with a router function that checks "

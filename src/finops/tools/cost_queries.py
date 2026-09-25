@@ -36,13 +36,31 @@ async def get_cost_summary(
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
-        return get_demo_response("get_cost_summary") or {}
+        return get_demo_response("get_cost_summary", {
+            "provider": provider, "category": category,
+            "start_date": start_date, "end_date": end_date}) or {}
 
     sd, ed = _srv._default_dates()
     if start_date:
         sd = _srv.date.fromisoformat(start_date)
     if end_date:
         ed = _srv.date.fromisoformat(end_date)
+
+    # An LLM provider's spend lives on the LLM cost path, not in the cloud
+    # connector registry. get_cost_summary(provider="anthropic") used to find no
+    # connector by that name and answer "No cloud accounts connected ... call
+    # connect_aws" to someone whose Anthropic key was set.
+    if provider and not account and provider.strip().lower() in _LLM_COST_PROVIDERS:
+        key = provider.strip().lower()
+        llm = await _srv.get_llm_cost_by_model(days=max(1, (ed - sd).days), provider=key)
+        if isinstance(llm, dict):
+            llm = {**llm, "source_tool": "get_llm_cost_by_model",
+                   "note": (f"{key} spend comes from the LLM cost path. For every AI "
+                            "provider at once, call get_llm_costs.")}
+            if ed != _srv.date.today():
+                llm["period_note"] = ("LLM spend is read for the last "
+                                      f"{max(1, (ed - sd).days)} days ending today.")
+        return llm
 
     # Multi-account: swap in an account-specific AWS connector when requested
     if account:
@@ -51,7 +69,9 @@ async def get_cost_summary(
         acct_cfg, acct_err = resolve_named_account(account)
         if acct_err:
             return acct_err
-        session = get_boto3_session(acct_cfg)
+        # A role_arn account means a synchronous sts:AssumeRole here, on
+        # botocore's 60s default timeouts; keep it off the event loop.
+        session = await _srv.asyncio.to_thread(get_boto3_session, acct_cfg)
         acct_connector = _AWSConnector(session=session)
         pool = {"aws": acct_connector}
         targets = {"aws": acct_connector} if await acct_connector.is_configured() else {}
@@ -117,6 +137,7 @@ async def get_cost_summary(
     # reachable without paying for 130 tool definitions on every message.
     from ..tool_surface import drilldown_for
     result["next_tools"] = drilldown_for(k for k, _ in _ranked_services[:8])
+    result.update(_no_rows_flags(by_provider))
     if _failed:
         # Some read, some did not. The total is real but incomplete, and nothing
         # downstream may present it as the whole bill.
@@ -153,8 +174,8 @@ async def get_cost_summary(
     # Only fires for free users with real spend data (not $0 accounts)
     if grand_total > 10:
         nudge = _srv._team_nudge(
-            "To get automatic Slack alerts when spend spikes and auto-create tickets "
-            "for waste findings, upgrade to Pro:"
+            "To open Jira, Linear, or GitHub tickets for waste findings, upgrade to "
+            "Pro:"
         , context="cost_summary")
         if nudge:
             result["_tip"] = nudge
@@ -208,7 +229,8 @@ async def get_costs_by_service(
         acct_cfg, acct_err = resolve_named_account(account)
         if acct_err:
             return acct_err
-        session = get_boto3_session(acct_cfg)
+        # sts:AssumeRole for role_arn accounts; off the loop (see get_cost_summary).
+        session = await _srv.asyncio.to_thread(get_boto3_session, acct_cfg)
         acct_connector = _AWSConnector(session=session)
         targets = {"aws": acct_connector} if await acct_connector.is_configured() else {}
     elif provider:
@@ -380,6 +402,7 @@ async def get_cost_trends(
         "by_provider": by_provider,
         "note": "For full time-series granularity, configure BigQuery exports (GCP) or Cost and Usage Reports (AWS).",
     }
+    result.update(_no_rows_flags(by_provider))
     if failed:
         result.update(_partial(ok, failed))
     return result
@@ -427,7 +450,8 @@ async def get_cost_summary_all_accounts(
 
     for acct in accounts:
         try:
-            session = get_boto3_session(acct)
+            # sts:AssumeRole per role_arn account; off the loop (see get_cost_summary).
+            session = await _srv.asyncio.to_thread(get_boto3_session, acct)
             # Identity is what keeps this loop from serving account #1's spend
             # for every account: one connector per account, one cache entry each.
             connector = AWSConnector(
@@ -486,7 +510,26 @@ async def get_saas_spend_summary(
         end_date: ISO date (YYYY-MM-DD). Defaults to today.
 
     """
-    return await _srv.get_cost_summary(category="saas", start_date=start_date, end_date=end_date)
+    if not await _srv._active(_srv.SAAS_CONNECTORS):
+        # A Snowflake question used to get get_cost_summary's cloud answer:
+        # "call connect_aws", plus a hint that nable "can only show sample data".
+        return {
+            "error": "no_saas_connected",
+            "message": (
+                "No SaaS or data platform is connected, so no SaaS spend was read. "
+                "Connect one from your terminal (the key is entered there, never in "
+                "the chat): `finops setup snowflake`, `finops setup databricks`, "
+                "`finops setup datadog`, or `finops setup` for the full list. Then "
+                "restart your editor and ask again."),
+            "note": f"No SaaS cost data was read. {_NOT_ZERO}",
+        }
+    result = await _srv.get_cost_summary(
+        category="saas", start_date=start_date, end_date=end_date)
+    if isinstance(result, dict):
+        # get_cost_summary tags its answer as sample data when no CLOUD account
+        # is connected. SaaS spend read from Snowflake or Datadog is real data.
+        result.pop("_connect_hint", None)
+    return result
 
 
 @_srv.mcp.tool()
@@ -552,7 +595,7 @@ async def get_total_spend_all_sources(
 
 
 @_srv.mcp.tool()
-async def get_cost_history(
+def get_cost_history(
     provider: str,
     service: str,
     account_id: str,
@@ -599,7 +642,7 @@ async def get_cost_history(
 
 
 @_srv.mcp.tool()
-async def get_effective_rate_profile() -> dict:
+def get_effective_rate_profile() -> dict:
     """
     Auto-detect the account's effective private rates by comparing actual
     billed amounts against public on-demand prices.
@@ -684,7 +727,8 @@ async def get_workload_costs(
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        report = connector.analyze_cluster(context)
+        # analyze_cluster lists nodes, pods and metrics from the Kubernetes API.
+        report = await _srv.asyncio.to_thread(connector.analyze_cluster, context)
         result = connector.get_workload_breakdown(
             report,
             namespace=namespace,
@@ -708,7 +752,7 @@ async def get_workload_costs(
 
 
 @_srv.mcp.tool()
-async def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dict:
+def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dict:
     """
     Show the highest-spending AWS accounts in the organization.
     Requires a Pro plan (org_reports).
@@ -732,7 +776,7 @@ async def get_top_spending_accounts(limit: int = 10, days_back: int = 30) -> dic
 
 
 @_srv.mcp.tool()
-async def get_storage_info() -> dict:
+def get_storage_info() -> dict:
     """
     Show the current storage backend (SQLite local or Postgres shared).
     Helps teams understand whether they're in single-engineer or shared mode.
@@ -824,13 +868,15 @@ async def benchmark_costs(
 
 
 @_srv.mcp.tool()
-async def estimate_terraform_cost(
+def estimate_terraform_cost(
     plan_json: str | None = None,
     plan_file: str | None = None,
     tf_dir: str | None = None,
 ) -> dict:
     """
     Estimate the monthly AWS cost change from a Terraform plan BEFORE applying it.
+    Changes nothing. It is not marked read-only only because tf_dir runs
+    `terraform plan` there, which executes that directory's provider plugins.
 
     Provide one of:
       - plan_json: raw JSON string from `terraform show -json plan.tfplan`
@@ -883,7 +929,7 @@ async def estimate_terraform_cost(
 
 
 @_srv.mcp.tool()
-async def estimate_change_cost(
+def estimate_change_cost(
     terraform_plan_json: str | None = None,
     terraform_plan_file: str | None = None,
     tf_dir: str | None = None,
@@ -895,8 +941,9 @@ async def estimate_change_cost(
 
     Agent-native. Call this BEFORE applying an infrastructure change to get a machine
     verdict (ok / warn / over_budget / no_budget) plus the monthly and annual cost
-    delta and the budget headroom. Read-only: it estimates and checks, it never applies
-    anything.
+    delta and the budget headroom. It estimates and checks, it never applies anything.
+    Changes nothing. It is not marked read-only only because tf_dir runs
+    `terraform plan` there, which executes that directory's provider plugins.
 
     Describe the change one of these ways:
       - terraform_plan_json / terraform_plan_file / tf_dir : a Terraform plan
@@ -972,6 +1019,7 @@ async def estimate_change_cost(
     # 2. Budget to check against (first active, or by name). Best-effort: no DB / no
     #    budgets configured falls through to a "no_budget" verdict, never an error.
     budget_for_eval = None
+    budget_unread = None
     alert_pct = 80.0
     try:
         from ..budget.enforcer import list_budgets, check_budget
@@ -983,16 +1031,27 @@ async def estimate_change_cost(
         if chosen:
             alert_pct = float(chosen.get("alert_at_pct", 80.0) or 80.0)
             status = check_budget(chosen)
-            budget_for_eval = {
-                "name": status.get("name", chosen.get("name", "")),
-                "limit_usd": status.get("limit", chosen.get("limit_usd", 0)),
-                "run_rate_usd": status.get("run_rate_monthly", 0.0),
-            }
+            if status.get("status") == "no_data":
+                # No cost rows this period: a $0 run-rate is nothing read,
+                # not room in the budget.
+                budget_unread = status.get("name", chosen.get("name", ""))
+            else:
+                budget_for_eval = {
+                    "name": status.get("name", chosen.get("name", "")),
+                    "limit_usd": status.get("limit", chosen.get("limit_usd", 0)),
+                    "run_rate_usd": status.get("run_rate_monthly", 0.0),
+                }
     except Exception:
         budget_for_eval = None
 
     # 3. Verdict.
     result = evaluate_preflight(delta, budget=budget_for_eval, alert_pct=alert_pct)
+    if budget_unread:
+        note = (f"Not checked against the '{budget_unread}' budget: it has no cost data "
+                "for this period yet, and that is not $0 spent.")
+        for said in ("No budget configured to check it against.", "No budget configured."):
+            result["reason"] = result["reason"].replace(said, note)
+        result["budget_not_checked"] = budget_unread
     result["change_kind"] = change_kind
     if breakdown:
         result["breakdown"] = breakdown
@@ -1001,7 +1060,7 @@ async def estimate_change_cost(
 
 
 @_srv.mcp.tool()
-async def set_business_metrics(
+def set_business_metrics(
     arr_usd: float | None = None,
     mrr_usd: float | None = None,
     mau: int | None = None,
@@ -1194,6 +1253,10 @@ async def get_unit_economics(period_days: int = 30) -> dict:
 
     active = await _srv._active()
     total_cost, by_provider, by_service = await _srv._gather_costs(active, start, end)
+    # Unit economics over a cost nobody read is "$0.00 per customer" and "0% of
+    # MRR (healthy)": refuse instead, and say what was not read.
+    if (unread := _unread_costs(active, by_provider)) is not None:
+        return unread
 
     econ = compute_unit_economics(total_cost, metrics)
 
@@ -1221,6 +1284,10 @@ async def get_unit_economics(period_days: int = 30) -> dict:
             "mean for the business in plain English."
         ),
     }
+    _failed = {n: p.get("error") for n, p in by_provider.items()
+               if isinstance(p, dict) and p.get("error")}
+    if _failed:
+        out.update(_partial([n for n in by_provider if n not in _failed], _failed))
     if metrics.get("_source") in ("stripe", "stored+stripe"):
         out["metrics_source"] = (
             f"MRR and paying customers pulled live from Stripe "
@@ -1278,8 +1345,13 @@ async def explain_cost_change(
     prev_start = prev_end - _srv.timedelta(days=compare_days)
 
     active = await _srv._active()
-    cost_now, _, by_service_now = await _srv._gather_costs(active, period_start, period_end)
-    cost_before, _, by_service_before = await _srv._gather_costs(active, prev_start, prev_end)
+    cost_now, prov_now, by_service_now = await _srv._gather_costs(active, period_start, period_end)
+    if (unread := _unread_costs(active, prov_now)) is not None:
+        # "Costs went down $0.00 (unknown %)" was the answer when nothing was read.
+        return unread
+    cost_before, prov_before, by_service_before = await _srv._gather_costs(
+        active, prev_start, prev_end)
+    prior_unread = _unread_costs(active, prov_before)
 
     # Use latest metrics for "now" and the oldest available for "before"
     metrics_now = latest[0]
@@ -1314,6 +1386,15 @@ async def explain_cost_change(
     deltas.sort(key=lambda d: -abs(d["change_usd"]))
     top_drivers = deltas[:5]
     explanation["cost_drivers"] = top_drivers
+
+    if prior_unread is not None:
+        # The current period was read; the one before it was not, so there is
+        # no real change to report, only this period's spend.
+        explanation["comparison_unavailable"] = True
+        explanation["comparison_note"] = (
+            f"The previous period ({prev_start} to {prev_end}) could not be read: "
+            f"{prior_unread.get('message', '')} The change against it is not a real "
+            "comparison.")
 
     if not enough_history:
         explanation["history_note"] = (
@@ -1619,7 +1700,7 @@ async def slice_costs(
 
 
 @_srv.mcp.tool()
-async def list_active_services(
+def list_active_services(
     provider: str = "",
     start_date: str = "",
     end_date: str = "",
@@ -1683,7 +1764,7 @@ async def list_active_services(
 
 
 @_srv.mcp.tool()
-async def get_service_cost(
+def get_service_cost(
     service_name: str,
     provider: str = "",
     start_date: str = "",
@@ -1888,6 +1969,7 @@ async def run_full_cost_audit(
 async def explain_recent_cost_drivers(
     days: int = 30,
     top_n: int = 10,
+    root_cause: bool = False,
 ) -> dict:
     """
     Explain what drove cost changes across all connected providers in the last N days.
@@ -1906,14 +1988,25 @@ async def explain_recent_cost_drivers(
     Args:
         days:  Comparison window length in days (default 30)
         top_n: Number of top drivers to return (default 10)
+        root_cause: For the top 3 AWS services that increased, also find the
+            usage types and resources behind each increase and the change
+            that started it (CloudTrail: who, when, via console/cli/terraform,
+            and the guard's verdict), labelled "confirmed (resource id match)"
+            or "likely", plus what could not be read. Off by default: it makes
+            billed Cost Explorer requests (about $0.01 each, 2 or more per
+            service) and the answer says how many. Set it when the user asks
+            which resource or whose change drove an increase, or after a first
+            call showed an AWS service rising and they want to know why.
     Examples:
         - "Why did costs go up this week?"
         - "What drove spend recently?"
+        - "Which instances made EC2 go up, and who launched them?" (root_cause=True)
 
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
-        return get_demo_response("explain_recent_cost_drivers") or {}
+        return get_demo_response("explain_recent_cost_drivers",
+                                 {"days": days, "top_n": top_n}) or {}
     try:
         today = _srv.date.today()
         period_end = today
@@ -1970,6 +2063,21 @@ async def explain_recent_cost_drivers(
                          "zero spend or of a cost decrease."),
             }
 
+        # Read, and nothing came back. "Costs increased by $0 (+N/A%)" was the
+        # answer when Cost Explorer returned no rows for either window.
+        rows_now, rows_prev = _no_rows_flags(prov_now), _no_rows_flags(prov_prev)
+        if rows_now.get("no_cost_rows"):
+            return {
+                "error": "no_cost_data",
+                "message": rows_now["no_rows_note"],
+                "note": ("No provider returned cost rows for the current window, so "
+                         "there is nothing to compare. This is not a finding of zero "
+                         "spend or of a cost change."),
+                "next_step": ("Check that Cost Explorer (or the provider's billing "
+                              "export) has data for this period, then ask again."),
+            }
+        no_prior_rows = bool(rows_prev.get("no_cost_rows"))
+
         # Build per-provider + per-service breakdown
         drivers: list[dict] = []
         all_keys: set = set(cost_now.keys()) | set(cost_prev.keys())
@@ -2015,11 +2123,31 @@ async def explain_recent_cost_drivers(
             "summary": (
                 f"Costs {'increased' if net_change >= 0 else 'decreased'} by "
                 f"${abs(net_change):,.0f} "
-                f"({'+' if net_change >= 0 else ''}{round(net_pct, 1) if net_pct is not None else 'N/A'}%) "
-                f"vs the prior {days}-day period. "
+                + (f"({'+' if net_change >= 0 else ''}{round(net_pct, 1)}%) "
+                   if net_pct is not None else "")
+                + f"vs the prior {days}-day period. "
                 f"{len(increases)} services had cost increases, {len(decreases)} had decreases."
             ),
         }
+        if no_prior_rows:
+            # Every service "increased" by its whole spend against a window that
+            # returned nothing. That is not a change; report this period only.
+            result.update({
+                "comparison_unavailable": True,
+                "net_change_usd": None,
+                "net_change_pct": None,
+                "top_increases": [],
+                "top_decreases": [],
+                "all_drivers": [],
+                "current_by_service": {k: round(v, 2) for k, v in sorted(
+                    cost_now.items(), key=lambda x: -x[1])[:top_n]},
+                "no_rows_note": rows_prev["no_rows_note"],
+                "summary": (
+                    f"Costs this {days}-day period: ${total_now:,.0f}. The prior "
+                    f"{days}-day period returned no cost rows, so there is no "
+                    "change to compare against."
+                ),
+            })
         if failed:
             # Same contract get_cost_summary uses, so a reader who has seen one
             # of these knows what the other means.
@@ -2040,14 +2168,48 @@ async def explain_recent_cost_drivers(
                 f"PARTIAL: {', '.join(sorted(failed))} could not be read. "
                 + result["summary"]
             )
+        if root_cause:
+            result["root_cause"] = await _drivers_root_cause(
+                active, prov_now, [] if no_prior_rows else increases, days, today)
         return result
     except Exception as exc:
         _srv.log.error("explain_recent_cost_drivers failed: %s", exc)
         return {"error": str(exc)}
 
 
+_ROOT_CAUSE_SERVICES = 3
+
+
+async def _drivers_root_cause(active: dict, prov_now: dict, increases: list[dict],
+                              days: int, today) -> dict:
+    """The drill-down for the top AWS services that increased. Billed Cost
+    Explorer requests: counted and said in the answer."""
+    import asyncio
+
+    from ..anomaly.drilldown import windows_for_period
+    from ..anomaly.root_cause import combine, explain
+
+    aws = (prov_now or {}).get("aws") or {}
+    if "aws" not in active or aws.get("error"):
+        return {"lines": [], "note": ("Root cause reads AWS only (Cost Explorer and "
+                                      "CloudTrail), and AWS is not connected or was not "
+                                      "read for this period.")}
+    aws_services = set(aws.get("by_service") or {})
+    services = [d["key"] for d in sorted(increases, key=lambda d: -d["delta"])
+                if d["key"] in aws_services][:_ROOT_CAUSE_SERVICES]
+    if not services:
+        return {"lines": [], "note": "No AWS service increased over this period."}
+    # None lets explain() build the default session inside the worker thread:
+    # resolving credentials can block, and this runs on the event loop.
+    session = getattr(active.get("aws"), "_session", None)
+    current, baseline = windows_for_period(days, today)
+    results = [await asyncio.to_thread(explain, svc, current, baseline, session=session)
+               for svc in services]
+    return combine(results)
+
+
 @_srv.mcp.tool()
-async def get_nable_roi(
+def get_nable_roi(
     period_days: int = 90,
 ) -> dict:
     """
@@ -2076,11 +2238,13 @@ async def get_nable_roi(
         from sqlalchemy import select
         from datetime import datetime, timedelta, timezone
 
-        _SOLO_MONTHLY_USD = 0.0
+        from ..license import PLANS, plan_name, pro_pitch
 
         lic = _srv.get_status()
-        plan = lic.plan
-        monthly_cost = _srv._PRO_MONTHLY_USD if plan in ("pro", "enterprise") else _SOLO_MONTHLY_USD
+        # LicenseStatus carries the plan as `mode`. This read `lic.plan`, which
+        # does not exist, so every real call returned an AttributeError.
+        plan = getattr(lic, "mode", "free")
+        monthly_cost = float(PLANS.get(plan, {}).get("monthly_usd") or 0.0)
         period_cost = monthly_cost * (period_days / 30)
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=period_days)
@@ -2127,7 +2291,7 @@ async def get_nable_roi(
             hero,
             "",
             f"**Tool cost:** ${period_cost:,.0f} over {period_days} days "
-            f"(${monthly_cost:.0f}/mo · {plan} plan)",
+            f"(${monthly_cost:,.0f}/mo · {plan_name(plan)} plan)",
             "",
             "### Savings pipeline",
             f"- Found (predicted): ${found_total:,.0f}/mo in opportunities ({len(rows)} recommendations)",
@@ -2136,13 +2300,21 @@ async def get_nable_roi(
             "",
         ]
 
-        if monthly_cost == 0:
+        if monthly_cost == 0 and PLANS.get(plan, {}).get("monthly_usd") is None:
+            # A contract price nable does not know: no made-up ROI figure.
             lines += [
                 "### ROI",
-                f"**Solo plan is free.** You're getting ${found_total:,.0f}/mo in recommendations at zero cost.",
+                f"The {plan_name(plan)} plan is priced by contract, so compare the "
+                f"verified ${verified_total:,.0f}/mo above against it.",
+            ]
+        elif monthly_cost == 0:
+            lines += [
+                "### ROI",
+                f"**The {plan_name(plan)} plan costs nothing.** You're getting "
+                f"${found_total:,.0f}/mo in recommendations at zero cost.",
                 f"Annualized opportunity: ${found_annualized:,.0f}.",
                 "",
-                "Upgrade to Pro ($25/mo) to unlock auto-remediation and verified savings tracking.",
+                pro_pitch(),
                 f"At ${verified_total:,.0f}/mo verified savings, payback is "
                 f"{'less than 1 week' if verified_total > 0 else 'immediate once first savings are verified'}.",
             ]
@@ -2214,6 +2386,74 @@ def _no_cost_data(failed: dict, noun: str = "provider") -> dict:
         f"failed_{noun}s": failed,
         "note": (f"No {noun} returned cost data, so nable has no total to "
                  "report. This is not a finding of zero spend."),
+    }
+
+
+_NOT_ZERO = "This is not a finding of zero spend."
+
+# Providers whose spend get_all_llm_costs reads (connectors/llm_costs.py).
+_LLM_COST_PROVIDERS = frozenset({
+    "openai", "anthropic", "bedrock", "vertex", "openrouter", "litellm",
+})
+
+
+def _unread_costs(targets: dict, by_provider: dict) -> dict | None:
+    """The refusal for a cost total nothing stands behind, or None.
+
+    Three ways to have read nothing: no provider connected, every provider
+    failed, or every provider answered with no cost rows. Each of them summed
+    to $0.00 and was reported as if it were the bill.
+    """
+    if not targets:
+        return {
+            "error": "no_cost_data",
+            "message": (
+                "No cost provider is connected, so no cost data was read. Connect "
+                "one right here in the chat: call connect_aws, connect_gcp or "
+                "connect_azure."),
+            "note": f"No cost data was read. {_NOT_ZERO}",
+        }
+    failed = {n: p.get("error") for n, p in by_provider.items()
+              if isinstance(p, dict) and p.get("error")}
+    ok = [n for n in by_provider if n not in failed]
+    if failed and not ok:
+        return _no_cost_data(failed)
+    empty = [n for n in ok if by_provider[n].get("no_rows")]
+    if ok and len(empty) == len(ok):
+        out: dict = {
+            "error": "no_cost_data",
+            "message": " ".join(by_provider[n].get("no_rows_note", "") for n in empty).strip(),
+            "providers_with_no_rows": empty,
+            "note": f"Every provider was read but returned no cost rows. {_NOT_ZERO}",
+        }
+        if failed:
+            out["failed_providers"] = failed
+        return out
+    return None
+
+
+def _no_rows_flags(by_provider: dict) -> dict:
+    """Keys that tell "no rows returned" apart from "read, and zero".
+
+    A provider that answered with no rows sums to $0.00 exactly like one whose
+    bill really was $0.00. The second carries its own note (AWS flags a real
+    zero-spend account); the first gets this.
+    """
+    ok = [n for n, p in by_provider.items() if isinstance(p, dict) and not p.get("error")]
+    empty = [n for n in ok if by_provider[n].get("no_rows")]
+    if not empty:
+        return {}
+    notes = " ".join(by_provider[n].get("no_rows_note", "") for n in empty).strip()
+    if len(empty) == len(ok):
+        return {
+            "no_cost_rows": True,
+            "grand_total_formatted": "unknown (no cost rows returned)",
+            "no_rows_note": f"{notes} {_NOT_ZERO}",
+        }
+    return {
+        "providers_with_no_rows": empty,
+        "no_rows_note": (f"{notes} The total covers the other providers only; "
+                         f"for {', '.join(empty)} it is not a finding of zero spend."),
     }
 
 

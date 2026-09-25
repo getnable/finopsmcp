@@ -7,13 +7,14 @@ import-order coupling exists."""
 from __future__ import annotations
 
 from .. import server as _srv
+from ..license import checkout_url as _checkout_url, plan_label as _plan_label
 
 
 @_srv.mcp.tool()
 async def send_digest_now() -> dict:
     """
-    Manually trigger a cost digest to Slack and/or Teams right now.
-    Normally this sends automatically at 09:00 UTC daily.
+    Send a cost digest to Slack and/or Teams right now. This install sends
+    digests only when asked; sending them on a schedule is nable Cloud.
 
     Examples:
         - "Send the daily cost digest to Slack"
@@ -24,16 +25,30 @@ async def send_digest_now() -> dict:
     if err := _srv.require_role("analyst"):
         return err
 
-    from ..scheduler.jobs import run_digest_now
+    from ..notifications import slack, teams
+    if not slack.is_configured() and not teams.is_configured():
+        return {"sent": False,
+                "message": "No notification channels configured. Run 'uvx nable slack' or "
+                           "'uvx nable teams' in a terminal."}
+    from ..scheduler.jobs import has_snapshot_on, run_digest_now
+    yesterday = _srv.date.today() - _srv.timedelta(days=1)
+    if not has_snapshot_on(yesterday):
+        # The digest reports yesterday from local snapshots; with none it would
+        # post "$0" as if that were the bill.
+        return {"sent": False,
+                "message": (f"No cost data for {yesterday.isoformat()} yet, so no digest was "
+                            "posted. Take a cost snapshot (take_snapshot_now), then ask again.")}
     sent = await run_digest_now()
     return {
         "sent": sent,
-        "message": "Digest sent." if sent else "No notification channels configured. Run 'uvx nable slack' or 'uvx nable teams' in a terminal.",
+        "message": "Digest sent." if sent else (
+            "Slack or Teams did not accept the digest. Check the webhook or token with "
+            "'uvx nable slack' or 'uvx nable teams'."),
     }
 
 
 @_srv.mcp.tool()
-async def check_notification_config() -> dict:
+def check_notification_config() -> dict:
     """
     Check which notification channels (Slack, Teams) are configured and active,
     returning each channel's status and what is missing when one is not set up.
@@ -47,7 +62,7 @@ async def check_notification_config() -> dict:
     """
     from ..notifications import slack, teams
 
-    return {
+    result = {
         "slack": {
             "configured": slack.is_configured(),
             "method": "webhook" if _srv.os.environ.get("SLACK_WEBHOOK_URL") else "bot_token" if _srv.os.environ.get("SLACK_BOT_TOKEN") else "none",
@@ -56,12 +71,21 @@ async def check_notification_config() -> dict:
         "teams": {
             "configured": teams.is_configured(),
         },
-        "schedule": {
+    }
+    if _scheduler_installed():
+        result["delivery"] = "scheduled"
+        result["schedule"] = {
             "snapshot": _srv.os.environ.get("FINOPS_SNAPSHOT_CRON", "0 1 * * * (01:00 UTC)"),
             "anomaly_check": _srv.os.environ.get("FINOPS_ANOMALY_CRON", "0 2 * * * (02:00 UTC)"),
             "daily_digest": _srv.os.environ.get("FINOPS_DIGEST_CRON", "0 9 * * * (09:00 UTC)"),
-        },
-    }
+        }
+    else:
+        # A schedule block here read as "digests go out at 09:00" on an install
+        # that runs nothing on a timer.
+        from ..license import DELIVERY_NOTE
+        result["delivery"] = "on_request"
+        result["note"] = DELIVERY_NOTE
+    return result
 
 
 @_srv.mcp.tool()
@@ -173,6 +197,10 @@ async def export_cost_report(
         from ..open_file import open_local_file
         open_local_file(output["html"])
 
+    from ..reporting.exporter import cost_data_unread
+    cost_sections = {k: collected[k] for k in ("cost_summary", "services") if k in collected}
+    not_read = {k: why for k, v in cost_sections.items() if (why := cost_data_unread(v))}
+
     result = {
         "title": title,
         "period": f"{period_start} to {period_end}",
@@ -184,6 +212,15 @@ async def export_cost_report(
             + (f"CSVs: {output.get('csv_dir', '')}." if "csv_dir" in output else "")
         ),
     }
+    if cost_sections:
+        result["cost_data_read"] = len(not_read) < len(cost_sections)
+    if not_read:
+        result["sections_not_read"] = not_read
+        if not result.get("cost_data_read", True):
+            result["message"] = (
+                "No cost data was read, so the report carries no spend figures. "
+                f"{next(iter(not_read.values()))} This is not a finding of zero spend. "
+                + result["message"])
     if "html" in output:
         result["tip"] = "Open the HTML file in your browser, then use File → Print → Save as PDF to create a PDF."
 
@@ -191,7 +228,7 @@ async def export_cost_report(
 
 
 @_srv.mcp.tool()
-async def fetch_invoice_emails() -> dict:
+def fetch_invoice_emails() -> dict:
     """
     Fetch unread invoice emails from the configured IMAP mailbox, extract
     amounts, and store them as cost entries. Solves the billing API gap for
@@ -387,7 +424,7 @@ async def push_weekly_insight() -> dict:
 
 
 @_srv.mcp.tool()
-async def send_weekly_digest_now() -> dict:
+def send_weekly_digest_now() -> dict:
     """
     Immediately send the weekly email digest to the configured recipient.
     Includes spend summary, anomalies, and top rightsizing recommendations.
@@ -404,19 +441,33 @@ async def send_weekly_digest_now() -> dict:
 
     try:
         from ..scheduler.jobs import job_weekly_email_digest
-        job_weekly_email_digest()
-        to = _srv.os.environ.get("FINOPS_DIGEST_TO", "")
-        return {
-            "sent": True,
-            "recipient": to or "configured address",
-            "note": "Check FINOPS_DIGEST_TO / FINOPS_SMTP_* env vars if not received.",
-        }
+        result = job_weekly_email_digest() or {}
     except Exception as e:
-        return {"error": str(e)}
+        return {"sent": False, "error": str(e)}
+    if result.get("sent"):
+        return {"sent": True, "recipient": result.get("recipient", ""),
+                "message": f"Weekly digest emailed to {result.get('recipient', '')}."}
+    out = {"sent": False, "error": result.get("error") or "The digest was not sent."}
+    if result.get("missing"):
+        out["missing"] = result["missing"]
+        out["note"] = ("Set these in the environment nable runs in (the MCP server's env "
+                       "block, or your shell for the CLI), then ask again.")
+    return out
+
+
+def _scheduler_installed() -> bool:
+    """True when a scheduler that runs report subscriptions is installed. The
+    cron lives in the hosted package and arrives as finops.scheduler.cron; an
+    open install has none."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("finops.scheduler.cron") is not None
+    except (ImportError, ValueError):
+        return False
 
 
 @_srv.mcp.tool()
-async def subscribe_to_report(
+def subscribe_to_report(
     name: str,
     sections: list[str],
     frequency: str = "weekly",
@@ -428,8 +479,13 @@ async def subscribe_to_report(
     cron: str = "",
 ) -> dict:
     """
-    Create a scheduled report subscription. Reports are delivered automatically
-    to Slack channels and/or email addresses on the configured schedule.
+    Create a scheduled report subscription for Slack channels and/or email.
+
+    Only a host running the scheduler (nable Cloud) sends it on the schedule. An
+    open install runs nothing on a timer: the subscription is saved and sent
+    when asked with send_report_now. The response's `delivery` field says which
+    applies; never tell the user a report will arrive on its own when it says
+    "on_request".
 
     Args:
         name: Report name (e.g. "Platform Team Weekly")
@@ -466,7 +522,7 @@ async def subscribe_to_report(
         email_note = None
         if email_addresses and _srv.require_pro("scheduled_email_digests") is not None:
             email_note = (
-                f"This is a Team feature ($25/mo). Upgrade at {_srv._UPGRADE_URL} to unlock email delivery. "
+                f"Email delivery is a {_plan_label('pro')} feature. Upgrade at {_checkout_url('pro')} to unlock it. "
                 f"The subscription will be created with Slack delivery only."
             )
             email_addresses = []  # clear emails on free tier
@@ -487,12 +543,28 @@ async def subscribe_to_report(
             lookback_days=lookback_days,
             cron=cron or None,
         )
-        result = {
-            "created": True,
-            "subscription": sub,
-            "message": f"Report '{name}' scheduled (cron: {sub['cron']}). Slack delivery is active.",
-            "note": "Reports check every 5 minutes, or trigger manually with send_report_now.",
-        }
+        if _scheduler_installed():
+            result = {
+                "created": True,
+                "subscription": sub,
+                "delivery": "scheduled",
+                "message": f"Report '{name}' scheduled (cron: {sub['cron']}).",
+                "note": "Reports check every 5 minutes, or trigger manually with send_report_now.",
+            }
+        else:
+            # The cron moved to the hosted layer in 0.8.211. Saying "delivery is
+            # active" here meant a weekly report that never arrived, with nothing
+            # anywhere telling the user why.
+            result = {
+                "created": True,
+                "subscription": sub,
+                "delivery": "on_request",
+                "message": (f"Report '{name}' saved (id {sub['id']}). This install runs "
+                            "nothing on a timer, so it will not send on its own."),
+                "note": (f"Send it any time with send_report_now(subscription_id={sub['id']}). "
+                         f"nable Cloud sends it on this schedule ({sub['cron']}): "
+                         "https://getnable.com"),
+            }
         if email_note:
             result["pro_required"] = email_note
         return result
@@ -501,7 +573,7 @@ async def subscribe_to_report(
 
 
 @_srv.mcp.tool()
-async def list_report_subscriptions() -> dict:
+def list_report_subscriptions() -> dict:
     """
     List all active report subscriptions, their names, schedules, sections, and delivery channels.
 
@@ -513,7 +585,9 @@ async def list_report_subscriptions() -> dict:
     try:
         from ..notifications.reports import list_subscriptions
         subs = list_subscriptions()
-        return {
+        # "on_request" on an open install: nothing sends these on the cron shown.
+        delivery = "scheduled" if _scheduler_installed() else "on_request"
+        out = {
             "count": len(subs),
             "subscriptions": [
                 {
@@ -526,10 +600,15 @@ async def list_report_subscriptions() -> dict:
                     "filters": s["filters"],
                     "lookback_days": s.get("lookback_days", 7),
                     "last_sent_at": str(s.get("last_sent_at") or "never"),
+                    "delivery": delivery,
                 }
                 for s in subs
             ],
         }
+        if delivery == "on_request" and subs:
+            from ..license import DELIVERY_NOTE
+            out["note"] = (DELIVERY_NOTE + " Send one with send_report_now(subscription_id=...).")
+        return out
     except Exception as e:
         return {"error": str(e)}
 
@@ -560,7 +639,7 @@ async def send_report_now(subscription_id: int) -> dict:
 
 
 @_srv.mcp.tool()
-async def cancel_report_subscription(subscription_id: int) -> dict:
+def cancel_report_subscription(subscription_id: int) -> dict:
     """
     Cancel (deactivate) a scheduled report subscription.
 
@@ -787,7 +866,10 @@ async def push_to_n8n(
     try:
         from ..analyzers.optimizer import run_deep_audit
         t0 = time.monotonic()
-        report = run_deep_audit(regions=regions)
+        # The full multi-region AWS sweep, all synchronous boto3. It ran on the
+        # event loop, which for its whole duration (often minutes) left the
+        # server unable to answer anything else.
+        report = await _srv.asyncio.to_thread(run_deep_audit, regions=regions)
         duration = time.monotonic() - t0
 
         findings = report.get("findings", [])

@@ -8,6 +8,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-4db8d4)](LICENSE)
 [![MCP Toplist](https://mcptoplist.com/badge/io.github.getnable%2Ffinops-mcp.svg)](https://mcptoplist.com/server/io.github.getnable%2Ffinops-mcp)
 
+**nable is an open-source, local-first FinOps MCP server for cloud and AI cost.** It covers AWS, Azure, GCP, Kubernetes, and 15+ AI and SaaS providers, and runs from your terminal or inside Claude, Cursor, and VS Code.
+
 You do not need to be a cloud-cost expert. nable does three things:
 
 - **Shows what you spend** across AWS, Azure, GCP, Kubernetes, and 15+ AI and SaaS providers, in one place.
@@ -48,6 +50,40 @@ Reads only free cloud APIs, so scanning never adds to your bill. `uvx nable scan
 - "How much are we spending on OpenAI and Anthropic?"
 - "Which instances should we downsize?"
 - "Open a Jira ticket for any waste over $200/mo"
+
+## How nable compares
+
+|  | nable | AWS Cost Explorer | Vantage / CloudHealth | Infracost |
+|---|---|---|---|---|
+| Open source | Yes (Apache-2.0) | No | No | Yes |
+| Where your data lives | Your machine | AWS | Vendor SaaS | Your machine / CI |
+| Clouds covered | AWS, Azure, GCP, Kubernetes | AWS only | Multi-cloud | IaC, any cloud |
+| AI and GPU spend | Yes (OpenAI, Anthropic, Bedrock, GPUs) | Bedrock only | Vantage: yes; CloudHealth: token dashboard | No |
+| Runs in Claude / Cursor / VS Code | Yes (local MCP) | Billing MCP server (read-only) | Vantage: hosted MCP; CloudHealth: no | Yes (MCP, editor extensions) |
+| Checks an agent's command for cost and policy before it runs | Yes (guard hook) | No | No | No |
+| Fixes waste | Opens a pull request, you approve | No | Vantage: in-product agent; no PR to your IaC | AutoFix PRs before deploy, not on running waste |
+| Answers | What you spend and waste now | AWS spend | Multi-cloud spend | Cost of an IaC change before deploy |
+| Price | Free (local) | Free tier, then per request | Paid SaaS | Free (OSS), paid cloud |
+
+Infracost prices an infrastructure change before you deploy it; nable finds and fixes waste in what you are already running. Fuller breakdowns: [nable vs Vantage](https://getnable.com/nable-vs-vantage), [vs CloudHealth](https://getnable.com/nable-vs-cloudhealth), [vs Kubecost](https://getnable.com/nable-vs-kubecost).
+
+## Agent guard
+
+`nable guard install` adds a hook to Claude Code (and `--all` to Cursor and Codex) that checks each infrastructure command or MCP call before it runs: a one-way door (destroy, terminate, a commitment) asks you first, and a launch is priced at list price so a $191k/mo `run-instances` asks instead of passing. It also watches the pattern across calls: a velocity cap on the monthly run-rate let through per hour (`FINOPS_POLICY_VELOCITY_CAP_USD`, default four times the $500/mo per-action threshold) and loop detection for the same creation repeated (three identical `create-stack` in ten minutes asks). Every verdict goes to a local hash-chained ledger.
+
+**Stops tied to the budget.** A priced change is also checked against the cloud budgets you set (the `set_budget` tool or a `budget.yml`): when month-to-date spend plus the change's cost for the rest of the month would take a budget over its limit, the guard asks, naming the budget, the spend so far, the change's monthly figure and the projected overage. `on_budget_breach: deny` in `nable.policy.yaml` (in nable's data directory, `~/.finops` by default, or at `FINOPS_POLICY_FILE`) makes that a hard stop; `FINOPS_GUARD_STOP_ON_BUDGET=1` or `=0` overrides it for one session or CI run. Total, provider and service budgets apply from the command itself; team and account budgets apply when `FINOPS_GUARD_TEAM` or `FINOPS_GUARD_ACCOUNT` names them where the agent runs. The hook reads a small spend summary rather than the database: every budget check writes it, `nable budget refresh` is the one to schedule, and a figure older than 48 hours (`FINOPS_GUARD_BUDGET_MAX_AGE_HOURS`) or from last month is not used, which the verdict on a priced change says. `nable guard doctor` lists the budgets the guard enforces, the ones it cannot place a change in, and the age of its figure.
+
+```bash
+nable guard report --session <id>     # what it asked, blocked and let through, in dollars
+nable guard reconcile --hours 24      # CloudTrail's creates and destroys against the ledger
+nable guard export --format cef       # the verified ledger, for a SIEM
+nable budget refresh                  # recompute budgets and the guard's spend figure
+nable budget ci-gate --fail-on-breach --json   # a pipeline step that fails on a breached budget
+```
+
+`ci-gate` reports and exits 0 unless `--fail-on-breach` is passed; with it, a breached budget (spend at or past its critical percentage) exits 1 and a check that cannot run exits 2. `--budget-file budget.yml` syncs the file first.
+
+`reconcile` needs `cloudtrail:LookupEvents` (free, read-only) and matches by kind and time, since the ledger holds no resource ids. The guard is a seatbelt, not a security boundary: `nable guard doctor` lists what it does not see.
 
 ## Setup
 
@@ -122,20 +158,111 @@ Add one line to your agent's system prompt (Claude Code, Cursor, or any MCP clie
 The gate returns `allow` / `warn` / `block` / `escalate` against your policy, the
 monthly and annual dollar impact, and a spot alternative when the change is compute.
 One-way doors (delete, terminate, buy a commitment) and over-budget changes always
-escalate to a human.
+escalate to a human, and over-budget changes are blocked outright when the policy
+sets `on_budget_breach: deny`.
 
 **And a budget for the agent itself.** Run `nable ai-budget` once, it asks whether
 you are on a flat plan or a metered API and what you pay, then remembers. On a flat
 plan it tracks how much subsidized compute you pull for your fixed fee and warns
 before you run low; on metered it gates on a dollar spend cap. `check_ai_budget` does
 the same for the agent mid-task. It reads your Claude Code usage locally, nothing
-uploaded. Add to your system prompt:
+uploaded. Every response is priced at its own model's list rate, cache writes and
+reads included, and the report splits cost by model and by session. A per-task cap
+(`nable ai-budget --session-cap 40`, or "this task may spend at most $40" to the
+agent) is measured against one Claude Code session, subagents included, and
+`check_ai_budget` returns the headroom left under it. Add to your system prompt:
 
 > Before starting a large task, call `check_ai_budget`. If it returns `warn` or
 > `over`, tell me where I stand before continuing.
 
 It reports your real usage and burn rate against your budget, not a fabricated
 percentage of a plan's hidden rate limit.
+
+</details>
+
+<details>
+<summary><b>Guard hook</b> for Claude Code, Cursor, Codex, Copilot, Gemini CLI, and Cline, and managed deployment</summary>
+
+`nable guard install` puts the same check in front of the agent's shell commands
+as a hook, so it runs whether or not the agent remembers to call the gate:
+
+```bash
+nable guard install --all --global      # every supported agent found on this machine
+nable guard install --harness gemini    # one agent, this project only
+nable guard doctor                      # what is covered here, and what is not
+```
+
+| Agent | Where the hook goes | What it sees | When the policy wants a human |
+|---|---|---|---|
+| Claude Code | `.claude/settings.json` | shell commands, MCP tools | asks |
+| Cursor | `.cursor/hooks.json` | shell commands, MCP tools | asks |
+| Codex CLI | `.codex/hooks.json` | shell commands, MCP tools | denies, with the reason |
+| GitHub Copilot | `.github/hooks/nable-guard.json` | shell commands | asks in Copilot CLI; denies, with the reason, in the cloud agent |
+| Gemini CLI | `.gemini/settings.json` | shell commands | denies, with the reason |
+| Cline (macOS, Linux) | `.clinerules/hooks/PreToolUse` | shell commands | stops the task, with the reason |
+
+`--global` writes the user-level file instead (`~/.claude/settings.json`,
+`~/.cursor/hooks.json`, `$CODEX_HOME/hooks.json`, `~/.copilot/hooks/`,
+`~/.gemini/settings.json`, `~/Documents/Cline/Hooks/`). A hook the user
+installed is one the user can remove.
+
+**Managed deployment.** To make the hook a policy a user cannot remove, deploy
+it through the agent's admin settings. Replace `<version>` with the release you
+tested (`nable --version`), and make sure `uvx` is on the users' PATH, or use
+the absolute path of an installed `finops` binary instead of the `uvx` form.
+
+Claude Code reads `managed-settings.json` from
+`/Library/Application Support/ClaudeCode/` (macOS), `/etc/claude-code/`
+(Linux and WSL) or `C:\Program Files\ClaudeCode\` (Windows), or a drop-in file
+in `managed-settings.d/` next to it. User, project and local settings add their
+hooks beside a managed one but cannot remove it, and a user's `disableAllHooks`
+cannot turn it off:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|mcp__.*)$",
+        "hooks": [
+          {"type": "command", "command": "uvx --from finops-mcp==<version> finops guard hook", "timeout": 30}
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex reads `/etc/codex/requirements.toml` (`%ProgramData%\OpenAI\Codex\requirements.toml`
+on Windows). A hook there is managed: always on, trusted without the
+"Hooks need review" step, and not something a user can disable:
+
+```toml
+[[hooks.PreToolUse]]
+matcher = "^(Bash|mcp__.*)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "uvx --from finops-mcp==<version> finops guard hook"
+timeout = 30
+```
+
+Both also have a switch that runs only the managed hooks and ignores every
+user, project and plugin hook: `"allowManagedHooksOnly": true` in Claude Code's
+managed settings, `allow_managed_hooks_only = true` at the top level of Codex's
+`requirements.toml`. Set it only if no one's own hooks should run. Copilot CLI
+has the same idea in policy hook files, `/etc/github-copilot/policy.d/*.json`
+(root-owned, not group or world writable), in the format of
+`.github/hooks/nable-guard.json`.
+
+Sources: [Claude Code managed settings](https://code.claude.com/docs/en/managed-settings),
+[`allowManagedHooksOnly`](https://code.claude.com/docs/en/settings-reference#allowmanagedhooksonly),
+Codex `codex-rs/config/src/config_requirements.rs` and `codex-rs/hooks/src/engine/discovery.rs`
+in [openai/codex](https://github.com/openai/codex),
+[Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference#policy-hooks).
+
+The guard is a seatbelt, not a security boundary: give agents read-only cloud
+credentials and keep write access behind a human.
 
 </details>
 
@@ -174,7 +301,9 @@ az role assignment create --assignee <client-id> --role 'Monitoring Reader' --sc
 <details>
 <summary><b>FAQ</b> — free vs paid, providers, how it compares to Cost Explorer / Vantage</summary>
 
-**Is nable free?** Yes. The terminal scan, every cost query, anomaly detection, all waste and rightsizing findings, and every connector are free forever. The agent team, ticket auto-creation, scheduled digests, and commitment recommendations are Pro.
+**What is a FinOps MCP server?** An MCP (Model Context Protocol) server that answers cloud-cost questions from inside an AI editor. nable runs locally as one, so you can ask Claude, Cursor, or VS Code about your AWS, Azure, GCP, and AI spend and it reads your real cost data on your machine to answer.
+
+**Is nable free?** Yes. The terminal scan, every cost query, anomaly detection, all waste and rightsizing findings, and every connector are free forever. Every install starts with a 7-day trial of Pro features. Pro ($25/mo) adds ticket creation (Jira, Linear, GitHub Issues), email reports and digests sent on request, and the org-wide rollup across accounts. Team ($1,000/mo flat, unlimited seats) adds the conversational Slack bot and chat remediation. Forecasts, commitment recommendations, remediation PRs, and the Ledger are free today while their pricing is decided. Reports and alerts on a schedule, sent without anyone asking, are nable Cloud; this install sends them when you ask.
 
 **Does my billing data leave my machine?** No. nable is local-first and read-only by default. It reads your cost data on your machine and never uploads it, and you can confirm the no-egress behavior in the source.
 

@@ -551,6 +551,8 @@ pending_actions = Table(
 Index("ix_cs_date_provider",  cost_snapshots.c.snapshot_date, cost_snapshots.c.provider)
 Index("ix_cs_date_service",   cost_snapshots.c.snapshot_date, cost_snapshots.c.service)
 Index("ix_cs_provider",       cost_snapshots.c.provider)
+# latest_captured_at reads the newest row; without this it sorted the whole table
+Index("ix_cs_captured_at",    cost_snapshots.c.captured_at)
 
 # attributed_costs: team budget checks and team cost queries
 Index("ix_ac_date_team",      attributed_costs.c.snapshot_date, attributed_costs.c.team)
@@ -607,6 +609,9 @@ Index("ix_keys_active",       api_keys.c.is_active)
 
 # report_subscriptions: scheduler filters by is_active
 Index("ix_rsub_active",       report_subscriptions.c.is_active)
+
+# kubernetes_costs: cost trends filter by a date range, optionally one cluster
+Index("ix_k8s_date_cluster",  kubernetes_costs.c.snapshot_date, kubernetes_costs.c.cluster)
 
 # cost_trends: trend queries filter by provider + service
 Index("ix_trends_prov_svc",   cost_trends.c.provider, cost_trends.c.service)
@@ -790,6 +795,12 @@ def _add_column_ddl(engine: Engine, table: str, column: str) -> str:
     return ddl
 
 
+# Indexes declared above that existing databases also need. Only non-unique
+# ones belong here: a unique index can fail on rows already stored, and needs a
+# dedupe step of its own like ux_anom_dedup.
+_LATE_INDEXES = ("ix_cs_captured_at", "ix_k8s_date_cluster")
+
+
 def _run_sqlite_migrations(engine: Engine) -> None:
     """Apply additive schema migrations. Runs for SQLite AND PostgreSQL.
 
@@ -897,6 +908,25 @@ def _run_sqlite_migrations(engine: Engine) -> None:
             conn.rollback()  # same reason as above
             log.warning("anomaly dedup index migration skipped: %s", exc)
 
+        # Plain indexes added after their table first shipped, for the same
+        # reason as the dedup index above: create_all builds indexes only for
+        # tables it creates. Looked up by name through the inspector and built
+        # from the model, so the DDL is right for either backend and a second
+        # run finds the index and does nothing.
+        for _name in _LATE_INDEXES:
+            _idx = next(ix for t in metadata.tables.values()
+                        for ix in t.indexes if ix.name == _name)
+            try:
+                if _name not in {
+                    ix["name"] for ix in inspect(engine).get_indexes(_idx.table.name)
+                }:
+                    _idx.create(conn)
+                    conn.commit()
+                    log.info("Migration: index %s created", _name)
+            except Exception as exc:
+                conn.rollback()  # same reason as above
+                log.warning("index %s migration skipped: %s", _name, exc)
+
         for _tbl, _col in (("budgets", "block_at_pct"),):
             try:
                 # Inspector, not PRAGMA: same reason as above. This orphan-column
@@ -916,56 +946,35 @@ def archive_old_snapshots(days_to_keep: int = 365) -> int:
     """Move cost_snapshots older than days_to_keep to cost_snapshots_archive.
 
     Returns the number of rows archived.
+
+    The move happens inside the database, INSERT ... SELECT and then DELETE in
+    one transaction. It used to fetchall() every old row into Python and insert
+    them back, so archiving a year of history held all of it in memory at once.
+
+    The two counts must agree or nothing moves. On PostgreSQL each statement
+    sees rows committed before it began, so an old-dated row another writer
+    commits between the copy and the delete would be deleted without having
+    been copied. Rolling back on a mismatch leaves both tables as they were.
     """
     engine = get_engine()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days_to_keep)).strftime("%Y-%m-%d")
+    names = ["provider", "service", "account_id", "region", "snapshot_date",
+             "amount_usd", "granularity", "captured_at", "category"]
+    old = cost_snapshots.c.snapshot_date < cutoff
 
     with engine.begin() as conn:
-        # Select rows to archive
-        old_rows = conn.execute(
-            select(
-                cost_snapshots.c.provider,
-                cost_snapshots.c.service,
-                cost_snapshots.c.account_id,
-                cost_snapshots.c.region,
-                cost_snapshots.c.snapshot_date,
-                cost_snapshots.c.amount_usd,
-                cost_snapshots.c.granularity,
-                cost_snapshots.c.captured_at,
-                cost_snapshots.c.category,
-            ).where(cost_snapshots.c.snapshot_date < cutoff)
-        ).fetchall()
+        copied = conn.execute(
+            cost_snapshots_archive.insert().from_select(
+                names, select(*[cost_snapshots.c[n] for n in names]).where(old))
+        ).rowcount
+        deleted = conn.execute(delete(cost_snapshots).where(old)).rowcount
+        if copied != deleted:
+            raise RuntimeError(
+                f"archive copied {copied} snapshot rows but would delete {deleted}; "
+                "rolled back, nothing was moved")
 
-        if not old_rows:
-            return 0
-
-        # Insert into archive
-        conn.execute(
-            cost_snapshots_archive.insert(),
-            [
-                {
-                    "provider": r.provider,
-                    "service": r.service,
-                    "account_id": r.account_id,
-                    "region": r.region,
-                    "snapshot_date": r.snapshot_date,
-                    "amount_usd": r.amount_usd,
-                    "granularity": r.granularity,
-                    "captured_at": r.captured_at,
-                    "category": r.category,
-                }
-                for r in old_rows
-            ],
-        )
-
-        # Delete from source
-        conn.execute(
-            delete(cost_snapshots).where(cost_snapshots.c.snapshot_date < cutoff)
-        )
-
-    count = len(old_rows)
-    log.info("Archived %d cost snapshots older than %s", count, cutoff)
-    return count
+    log.info("Archived %d cost snapshots older than %s", copied, cutoff)
+    return copied
 
 
 def _display_db_url(database_url: str) -> str:

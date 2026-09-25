@@ -2,6 +2,106 @@
 
 All notable changes to finops-mcp (nable).
 
+## 0.8.217
+
+Found by running 30 personas through the real CLI, MCP server and guard
+hook, and fixed.
+
+- **The guard prices what agents create, not only what they destroy.**
+  Blocking a destroy is becoming a harness feature; pricing a launch is not.
+  An hourly cap on approved priced changes (on by default at 4x the
+  per-action threshold; `FINOPS_POLICY_VELOCITY_CAP_USD=0` turns it off),
+  retry-loop detection for identical creations, RDS, spot, fleet, instance
+  type and class changes priced, and saved Terraform plans read before
+  apply (an unreadable plan now asks instead of passing).
+- **The guard runs in six agents.** Claude Code, Cursor, Codex CLI, GitHub
+  Copilot (CLI and cloud agent), Gemini CLI and Cline, each from its own
+  documented hook contract, with MCP tool calls gated in Claude Code,
+  Cursor and Codex. `nable guard install --all` finds each one present.
+  Managed deployment for Claude Code and Codex is in the README.
+- **A record you can check.** Every verdict goes to a hash-chained ledger
+  with the session id. `nable guard report`, `verify-log`, `export`
+  (jsonl or CEF) and `reconcile` (against CloudTrail: what happened with
+  no guard record, and what was denied but happened anyway).
+- **Red-team fixes.** A padded command no longer times the hook out, a
+  held ledger lock no longer stalls verdicts, secrets in commands are
+  redacted, 41 evasions that used to pass now ask, and quoted text in
+  commit messages or grep no longer does.
+- **AI budgets across agents.** Codex CLI usage counts (read locally),
+  Cursor too with an Admin API key, cost split by agent. An agent changing
+  its own budget is asked about. A guarded shell command with no budget set
+  no longer reads a month of transcripts (5.6 s to 0.1 s on 141 MB).
+- **Nothing read is not clean.** Rightsizing, cost summaries, board
+  summaries, reports, digests and AI provider costs say what was not read
+  instead of $0 or "all clean". `nable scan --json` lists every finding,
+  unknown regions are rejected, and "nice" means nothing was found and
+  nothing failed.
+- **Permissions you can verify.** The scan's IAM policy is derived from,
+  and tested against, the calls it makes; one manifest generates the
+  dry-run policy, `nable iam-template` and the one-click key.
+- **One plan table.** Every surface names the same plans and prices, Pro
+  activation links the Pro checkout, and nothing promises scheduled
+  delivery an open install does not do. New `nable uninstall`.
+- **Demo mode is a real preview.** 47 sample-backed tools instead of 198,
+  every answer labelled, one consistent dataset, and connect works from
+  inside demo.
+- **AI cost by project, team, customer.** `get_ai_cost_attribution` and
+  `nable ai-costs --by project|workspace|api_key|team|user|tag`, from OpenAI
+  projects and keys, Anthropic workspaces, LiteLLM teams, keys, users and
+  tags, and Langfuse tags, users and sessions. OpenAI costs now read billed
+  dollars (the old query used a grouping the endpoint rejects).
+- **Why it spiked.** `nable why` and `root_cause=True` on the anomaly and
+  cost-driver tools name the resources behind a rise and the CloudTrail
+  change that started them, with who made it and whether the guard allowed
+  it. A change is named as the cause only when resource, region and time
+  line up.
+- **Hard stop on budget left.** The guard weighs a priced change against
+  the cloud budget remaining; `on_budget_breach: deny` makes it a block.
+  `nable budget ci-gate --fail-on-breach` fails a pipeline step.
+- New: DynamoDB provisioned-capacity check, and prices checked against the
+  AWS Price List (EC2, RDS per engine, EBS, load balancers, NAT).
+- **Fixed in a pre-release code review.**
+  - Guard: quote masking, same-line aliases, line continuations and
+    backslash escapes can no longer hide a destroy; masking scans in linear
+    time, so a padded command cannot outlast the hook timeout; an MCP shell
+    tool can no longer run a destroy that does not start the command; a
+    budget ask no longer downgrades a policy deny; compound commands are
+    priced part by part; changing a budget from the agent asks; Cursor and
+    Codex no longer block every command when uvx is offline.
+  - Ledger and reconcile: JSON, YAML and header secrets are redacted; a
+    ledger that cannot be written is recorded as such; console actions and
+    failed calls are no longer matched to agent records.
+  - Money: RDS is priced by engine everywhere, idle EC2 by instance price,
+    Gateway Load Balancers read from their own metrics, snapshots as an
+    upper bound, and no finding collapses across regions. A refused OpenAI
+    key is unread, not $0; gpt-5 and gpt-4.1 are priced.
+  - Budgets: with no cost data for the period the CI gate says it cannot
+    check (exit 2) and the guard says the budget went unchecked.
+  - Setup: re-running setup moves a license key into the vault instead of
+    dropping it, and `NABLE_TELEMETRY=off` is respected.
+
+## 0.8.216
+
+- **Attribution `priority` now means what the docs say.** Lower number wins,
+  first matching rule per field. It used to be the highest number, so a tag
+  collision could name a team after a cost-centre code. This changes
+  attribution for anyone whose rules collide on a field. An empty result now
+  says which configured tag keys AWS is not carrying (cost allocation tags
+  must be activated in Billing, and activation is not retroactive).
+  New `docs/COST-ATTRIBUTION.md`.
+- **Less billed Cost Explorer.** Connecting an account reads history from the
+  CUR when one is configured instead of paging Cost Explorer for 90 days, the
+  nightly AI monitor no longer calls it for Bedrock, and a failed CUR read
+  skips AWS for the night rather than falling back to Cost Explorer.
+- **AI/GPU cost categories from the CUR.** Spend is bucketed into ai, compute,
+  data, storage, network and other from the ingested export, never Cost
+  Explorer.
+- An account with under about 7 days of history gets "not enough history
+  yet" from anomaly checks instead of "no active anomalies", and fetched
+  invoices are stored (every one used to fail silently).
+- The published contact address is chandan@nable.sh, and PR-comment
+  handling refuses an all-dots owner or repo name.
+
 ## 0.8.215
 
 - `nable connect` can see AWS. On a machine whose only credential was

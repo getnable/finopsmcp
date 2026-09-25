@@ -66,7 +66,8 @@ def brief_dir() -> Path:
 
 # ── gathering ─────────────────────────────────────────────────────────────────
 
-def _gather_aws(gaps: list[str], scanned: dict) -> list[dict]:
+def _gather_aws(gaps: list[str], scanned: dict,
+                regions: list[str] | None = None) -> list[dict]:
     """The free, read-only resource audit. No Cost Explorer."""
     try:
         from ..analyzers.optimizer import run_deep_audit
@@ -75,7 +76,7 @@ def _gather_aws(gaps: list[str], scanned: dict) -> list[dict]:
         return []
 
     try:
-        report = run_deep_audit()
+        report = run_deep_audit(regions=regions) if regions else run_deep_audit()
     except Exception as exc:
         # Never the message: it can carry account ids and ARNs, and this string
         # reaches Slack and email.
@@ -106,10 +107,11 @@ def _gather_aws(gaps: list[str], scanned: dict) -> list[dict]:
     return list(report.get("findings") or [])
 
 
-def gather_findings(gaps: list[str], scanned: dict) -> list[dict]:
+def gather_findings(gaps: list[str], scanned: dict,
+                    regions: list[str] | None = None) -> list[dict]:
     """Everything the overnight run looks at. One provider today; the shape is
     ready for more, and a provider that fails lands in `gaps`."""
-    return _gather_aws(gaps, scanned)
+    return _gather_aws(gaps, scanned, regions)
 
 
 # ── persistence ───────────────────────────────────────────────────────────────
@@ -251,6 +253,8 @@ def run_overnight(
     limit: int = 10,
     today: date | None = None,
     now: datetime | None = None,
+    regions: list[str] | None = None,
+    trigger: str = "scheduled",
 ) -> dict[str, Any]:
     """Scan, review, rank, draft, save, deliver. Returns the brief plus what
     happened, so a caller (or a test) can assert on delivery without reading
@@ -261,10 +265,10 @@ def run_overnight(
     """
     gaps: list[str] = []
     scanned: dict[str, Any] = {}
-    raw = findings if findings is not None else gather_findings(gaps, scanned)
+    raw = findings if findings is not None else gather_findings(gaps, scanned, regions)
 
     brief = build_brief(raw, today=today, use_llm=use_llm, gaps=gaps,
-                        scanned=scanned, limit=limit, now=now)
+                        scanned=scanned, limit=limit, now=now, trigger=trigger)
 
     path = str(persist(brief, on=today)) if do_persist else None
     delivered = deliver(brief, to=deliver_to)

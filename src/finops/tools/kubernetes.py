@@ -10,7 +10,7 @@ from .. import server as _srv
 
 
 @_srv.mcp.tool()
-async def create_kubernetes_waste_tickets(
+def create_kubernetes_waste_tickets(
     min_monthly_waste: float = 50.0,
 ) -> dict:
     """
@@ -106,7 +106,7 @@ async def create_kubernetes_waste_tickets(
 
 
 @_srv.mcp.tool()
-async def list_kubernetes_contexts() -> dict:
+def list_kubernetes_contexts() -> dict:
     """
     List all Kubernetes contexts available in the local kubeconfig, and show
     which one is currently active. Use this to discover what to pass as the
@@ -133,6 +133,17 @@ async def list_kubernetes_contexts() -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+
+def _opencost_fallback_reason() -> str:
+    """Why the built-in list-price allocator is answering instead of OpenCost."""
+    try:
+        from ..connectors import opencost as _oc
+        return _oc.fallback_reason()
+    except Exception:  # noqa: BLE001
+        return ("List-price estimate. For real rates including GPU, network, and "
+                "storage, run OpenCost and set NABLE_OPENCOST_URL.")
 
 
 @_srv.mcp.tool()
@@ -192,7 +203,8 @@ async def get_kubernetes_costs(
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        report = connector.analyze_cluster(context)
+        # analyze_cluster lists nodes, pods and metrics from the Kubernetes API.
+        report = await _srv.asyncio.to_thread(connector.analyze_cluster, context)
 
         # Persist to DB for trend analysis
         try:
@@ -214,8 +226,10 @@ async def get_kubernetes_costs(
             # Run OpenCost (set NABLE_OPENCOST_URL) for real, GPU-aware numbers.
             "source": "nable-estimate",
             "is_estimate": True,
-            "estimate_note": ("List-price estimate. For real rates including GPU, "
-                              "network, and storage, run OpenCost and set NABLE_OPENCOST_URL."),
+            # Names the configured OpenCost URL when there is one and it did
+            # not answer. "Go set up OpenCost" is the wrong advice for the
+            # customer who already runs it.
+            "estimate_note": _opencost_fallback_reason(),
             "node_count": report.node_count,
             "pod_count": report.pod_count,
             "total_monthly_cost_usd": report.total_monthly_cost,
@@ -424,20 +438,26 @@ async def get_helm_release_costs(
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        k8s_client = connector._load_client(context)
+        # Everything from loading the kubeconfig to attributing costs talks to
+        # the Kubernetes API (nodes, pods, metrics, then every Helm release
+        # secret), so it runs as one unit on a worker thread, not on the loop.
+        def _collect():
+            k8s_client = connector._load_client(context)
 
-        # Get workload costs first
-        report = connector.analyze_cluster(context)
-        workloads = report.workloads
-        if namespace:
-            workloads = [w for w in workloads if w.namespace == namespace]
+            # Get workload costs first
+            report = connector.analyze_cluster(context)
+            workloads = report.workloads
+            if namespace:
+                workloads = [w for w in workloads if w.namespace == namespace]
 
-        # Discover Helm releases and attribute costs
-        releases = discover_helm_releases(k8s_client)
-        if namespace:
-            releases = [r for r in releases if r.namespace == namespace]
+            # Discover Helm releases and attribute costs
+            releases = discover_helm_releases(k8s_client)
+            if namespace:
+                releases = [r for r in releases if r.namespace == namespace]
 
-        releases, unmanaged_cost = attribute_costs_to_releases(releases, workloads, k8s_client)
+            return attribute_costs_to_releases(releases, workloads, k8s_client)
+
+        releases, unmanaged_cost = await _srv.asyncio.to_thread(_collect)
 
         # Cost by chart (across all releases of same chart)
         by_chart: dict[str, float] = {}
@@ -529,7 +549,7 @@ async def get_helm_release_costs(
 
 
 @_srv.mcp.tool()
-async def estimate_helm_diff_cost(
+def estimate_helm_diff_cost(
     diff_text: str,
     release_name: str = "unknown",
     current_replicas: int = 1,
@@ -627,7 +647,8 @@ async def get_cluster_efficiency(context: str | None = None) -> dict:
         if not await connector.is_configured():
             return {"error": "No kubeconfig found. Set KUBECONFIG or ensure ~/.kube/config exists."}
 
-        report = connector.analyze_cluster(context)
+        # analyze_cluster lists nodes, pods and metrics from the Kubernetes API.
+        report = await _srv.asyncio.to_thread(connector.analyze_cluster, context)
         result = connector.compute_efficiency_score(report)
 
         # Human-readable headline
@@ -654,7 +675,7 @@ async def get_cluster_efficiency(context: str | None = None) -> dict:
 
 
 @_srv.mcp.tool()
-async def get_kubernetes_cost_trends(
+def get_kubernetes_cost_trends(
     days: int = 30,
     cluster: str | None = None,
     namespace: str | None = None,
@@ -862,7 +883,7 @@ async def get_kubernetes_cost_trends(
 
 
 @_srv.mcp.tool()
-async def compare_kubernetes_clusters() -> dict:
+def compare_kubernetes_clusters() -> dict:
     """
     Compare costs and efficiency across all configured Kubernetes clusters.
     Useful for multi-cluster setups (prod vs staging, region vs region).

@@ -215,15 +215,41 @@ def test_findings_ranked_and_floored(capsys):
 
 
 def test_proud_low_waste_state(capsys):
-    tiny = _report(findings=[{
-        "waste_type": "tiny", "description": "a $4 thing",
-        "region": "us-east-1", "estimated_monthly_savings": 4.0,
-    }])
-    code, _, _ = _run(_args(), _session(), report=tiny)
+    clean = _report(findings=[])
+    code, _, _ = _run(_args(), _session(), report=clean)
     out = capsys.readouterr().out
     assert code == cli_scan.EXIT_OK
     assert "no material waste found, nice" in out
     assert "recoverable" not in out  # never an apologetic near-zero headline
+
+
+def test_findings_below_the_floor_are_counted_not_called_clean(capsys):
+    """A $20/mo account had $4.61/mo of findings and was told "no material
+    waste found, nice". Small is not none."""
+    tiny = _report(findings=[
+        {"waste_type": "tiny", "description": "a $4 thing",
+         "region": "us-east-1", "estimated_monthly_savings": 4.0},
+        {"waste_type": "unassociated_elastic_ip", "region": "us-east-1",
+         "estimated_monthly_savings": 0.61},
+    ])
+    code, _, _ = _run(_args(), _session(), report=tiny)
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK
+    assert "nice" not in out
+    assert "2 small findings, $4.61/mo total" in out
+    assert "--json" in out
+
+
+def test_never_nice_when_a_check_could_not_run(capsys):
+    rep = _report(findings=[])
+    rep["checks_run"] = ["ebs", "eips"]
+    rep["checks_failed"] = [{"check": "lambda", "region": "us-east-1",
+                             "error_code": "AccessDenied"}]
+    _run(_args(), _session(), report=rep)
+    out = capsys.readouterr().out
+    assert "nice" not in out
+    assert "no waste found in what could be read" in out
+    assert "could not run and were not counted: lambda" in out
 
 
 def test_spend_flag_shows_headline_discloses_cost_and_weights_regions(capsys):
@@ -328,7 +354,7 @@ def test_spend_flag_ce_denied_degrades_and_still_scans(capsys):
     code, _, engine = _run(_args(spend=True), session)
     out = capsys.readouterr().out
     assert code == cli_scan.EXIT_OK
-    assert "spend summary unavailable" in out and "iam-template" in out
+    assert "spend summary unavailable" in out and "--dry-run --spend --json" in out
     assert "recoverable" in out           # recoverable-led headline instead
     assert engine.called                  # the scan still ran
 
@@ -444,6 +470,21 @@ def test_demo_needs_no_aws(capsys):
     assert code == cli_scan.EXIT_OK
 
 
+def test_env_demo_is_decided_the_way_the_server_decides_it(capsys, monkeypatch):
+    """`nable scan` read FINOPS_DEMO == "1" itself while the server used
+    is_demo(), so FINOPS_DEMO_MODE, a managed instance or a connected account
+    meant one thing to the scan and another to the server."""
+    import finops.demo_data as dd
+    monkeypatch.setattr(dd, "is_demo", lambda: True)
+    with (
+        patch.object(cli_scan, "_emit"),
+        patch("boto3.Session", side_effect=AssertionError("must not touch AWS")),
+    ):
+        code = cli_scan.run(_args())
+    assert code == cli_scan.EXIT_OK
+    assert "(demo data)" in capsys.readouterr().out
+
+
 # ── no AWS credentials, other providers "connected" ─────────────────────────────
 
 def _only_accounts_yaml(tmp_path, monkeypatch):
@@ -479,7 +520,10 @@ def test_accounts_yaml_without_credentials_is_not_a_clean_scan(tmp_path, monkeyp
     code, events, _ = _run(_args(json=True), _session(creds=False))
     cap = capsys.readouterr()
     assert code == cli_scan.EXIT_NO_CREDS, cap.out
-    assert cap.out == "", "a failed scan printed a result document"
+    # No result document; the one thing on stdout is the error document.
+    assert json.loads(cap.out) == {"error": {
+        "class": "no-creds", "exit_code": cli_scan.EXIT_NO_CREDS,
+        "message": "no AWS credentials found, and no other connected provider answered"}}
     assert [p["error_class"] for e, p in events if e == "cli_scan_failed"] == ["no-creds"]
 
 
@@ -644,3 +688,136 @@ def test_a_broken_import_names_the_versions_to_the_user(monkeypatch, capsys):
     text = capsys.readouterr().out
     assert "found: boto3 " in text
     assert "uvx --python 3.12 nable scan" in text
+
+
+# ── what a first real scan prints ─────────────────────────────────────────────
+#
+# Real findings carry `detail`, not `description`, so the list printed the
+# internal key once per resource (`unattached_ebs_volume, us-east-1` four times)
+# and the lines shown never summed to the headline.
+
+def _real_findings():
+    vol = {"waste_type": "unattached_ebs_volume", "resource_type": "EBS Volume",
+           "detail": "500 GB gp3 volume is unattached"}
+    return [
+        {**vol, "region": "us-east-1", "estimated_monthly_savings": 40.0},
+        {**vol, "region": "us-west-2", "estimated_monthly_savings": 71.25},
+        {"waste_type": "idle_nat_gateway", "region": "us-east-1",
+         "estimated_monthly_savings": 32.85},
+        {"waste_type": "unassociated_elastic_ip", "region": "us-east-1",
+         "estimated_monthly_savings": 3.65},
+        {"waste_type": "gp2_should_migrate_to_gp3", "region": "us-east-1",
+         "estimated_monthly_savings": 0.16},
+    ]
+
+
+def test_real_findings_group_by_kind_and_reconcile(capsys):
+    code, _, _ = _run(_args(), _session(), report=_report(findings=_real_findings()))
+    out = capsys.readouterr().out
+    assert code == cli_scan.EXIT_OK
+    assert "unattached_ebs_volume" not in out and "idle_nat_gateway" not in out
+    assert "$111/mo  2 unattached EBS volumes, 2 regions" in out
+    assert "$32.85/mo  1 idle NAT gateway, us-east-1" in out
+    # The two sub-floor findings are not dropped from the arithmetic.
+    assert "$3.81/mo  2 more findings" in out
+    assert "nable scan --json" in out
+
+
+def test_group_keeps_a_single_findings_own_description():
+    rows = cli_scan._group_findings([
+        {"waste_type": "idle_nat_gateway", "description": "4 NAT gateways with no traffic",
+         "region": "us-east-1", "estimated_monthly_savings": 131.4},
+    ])
+    assert rows == [{"description": "4 NAT gateways with no traffic", "region": "us-east-1",
+                     "monthly": 131.4, "n": 1}]
+
+
+def test_unknown_waste_type_reads_as_words():
+    rows = cli_scan._group_findings([
+        {"waste_type": "brand_new_check", "estimated_monthly_savings": 30.0},
+        {"waste_type": "brand_new_check", "estimated_monthly_savings": 30.0},
+    ])
+    assert rows[0]["description"] == "2 brand new check" and rows[0]["region"] == ""
+
+
+@pytest.mark.parametrize("given,want", [
+    (["us-east-1,us-west-2"], ["us-east-1", "us-west-2"]),
+    (["US-EAST-1", "eu-west-1, us-east-1"], ["us-east-1", "eu-west-1"]),
+    (["us-east-1", "us-west-2"], ["us-east-1", "us-west-2"]),
+    (None, []),
+])
+def test_regions_flag_accepts_how_people_type_a_list(given, want):
+    assert cli_scan._split_regions(given) == want
+
+
+def test_comma_separated_regions_scan_instead_of_failing(capsys):
+    _, _, engine = _run(_args(regions=["us-east-1,eu-west-1"]), _session())
+    out = capsys.readouterr().out
+    assert "not valid region" not in out
+    assert engine.call_args.kwargs["regions"] == ["us-east-1", "eu-west-1"]
+
+
+def test_a_region_name_gets_a_fix_line(capsys):
+    code, _, _ = _run(_args(regions=["virginia"]), _session())
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "not valid region name(s): virginia" in out
+    assert "fix: region codes" in out
+
+
+# ── an error nobody anticipated ───────────────────────────────────────────────
+
+def _run_with_engine_error(args, exc):
+    events: list[tuple[str, dict]] = []
+    with (
+        patch.object(cli_scan, "_emit", side_effect=lambda e, p, wait: events.append((e, p))),
+        patch("boto3.Session", return_value=_session()),
+        patch("finops.analyzers.optimizer._discover_regions", return_value=["us-east-1"]),
+        patch("finops.analyzers.optimizer.run_deep_audit", side_effect=exc),
+    ):
+        code = cli_scan.main(args)
+    return code, events
+
+
+def test_unexpected_error_is_reported_not_stack_traced(capsys):
+    """An exception no branch anticipated used to escape as a traceback and
+    leave cli_scan_started with no terminal event, uncountable as a failure."""
+    code, events = _run_with_engine_error(_args(), KeyError("/Users/someone/secret"))
+    out = capsys.readouterr()
+    assert code == 1
+    assert "Traceback" not in out.out + out.err
+    assert "unexpected error (KeyError)" in out.out
+    assert "nable scan --debug" in out.out and "issues/new" in out.out
+    assert [e for e, _ in events] == ["cli_scan_started", "cli_scan_failed"]
+    props = events[-1][1]
+    assert props["error_class"] == "crash" and props["exc_type"] == "KeyError"
+    # Where it failed, relative to the package: no home directory, no message.
+    assert props["crash_site"].startswith("cli_scan.py:") or "/" in props["crash_site"]
+    assert "secret" not in json.dumps(props) and "/Users" not in json.dumps(props)
+
+
+def test_a_crash_with_workers_still_running_exits_like_ctrl_c(capsys, monkeypatch):
+    """The crash branch returned _fail() directly, so a crash that left region
+    workers blocked in boto3 hung at interpreter shutdown. It goes through
+    _finish like the Ctrl-C branch."""
+    finished = []
+    monkeypatch.setattr(cli_scan, "_threads_lingering", lambda: True)
+    monkeypatch.setattr(cli_scan, "_finish",
+                        lambda code, lingering: finished.append((code, lingering)) or code)
+    code, _ = _run_with_engine_error(_args(), KeyError("boom"))
+    assert code == 1
+    assert finished == [(1, True)]
+
+
+def test_debug_still_shows_the_trace():
+    with pytest.raises(KeyError):
+        _run_with_engine_error(_args(debug=True), KeyError("boom"))
+
+
+def test_the_cli_runs_the_scan_through_the_guard():
+    import inspect
+
+    from finops import setup_wizard
+    src = inspect.getsource(setup_wizard)
+    assert "from .cli_scan import main as _scan_main" in src
+    assert "from .cli_scan import run as _scan_run" not in src

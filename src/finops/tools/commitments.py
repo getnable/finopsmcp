@@ -7,10 +7,11 @@ import-order coupling exists."""
 from __future__ import annotations
 
 from .. import server as _srv
+from ..license import checkout_url, plan_label
 
 
 @_srv.mcp.tool()
-async def get_commitment_analysis() -> dict:
+def get_commitment_analysis() -> dict:
     """
     Analyze Reserved Instance and Savings Plan coverage, utilization, and waste.
     Coverage %, utilization, and waste figures are free.
@@ -84,7 +85,8 @@ async def get_commitment_analysis() -> dict:
                 r for r in result.get("recommendations", []) if r.get("type") == "warning"
             ]
             result["recommendations_note"] = (
-                f"This is a Team feature ($25/mo). Upgrade at {_srv._UPGRADE_URL} to unlock purchase recommendations with ROI projections."
+                f"Purchase recommendations with ROI projections are a {plan_label('pro')} feature. "
+                f"Upgrade at {checkout_url('pro')} to unlock them."
             )
         return result
     except Exception as e:
@@ -92,7 +94,7 @@ async def get_commitment_analysis() -> dict:
 
 
 @_srv.mcp.tool()
-async def get_commitment_coverage_by_tag(
+def get_commitment_coverage_by_tag(
     tag_key: str,
     tag_value: str,
     tag_coverage_pct: float = 100.0,
@@ -191,7 +193,7 @@ async def get_commitment_coverage_by_tag(
 
 
 @_srv.mcp.tool()
-async def get_ri_waste_detail(
+def get_ri_waste_detail(
     start_date: str | None = None,
     end_date: str | None = None,
     min_waste_usd: float = 10.0,
@@ -244,7 +246,7 @@ async def get_ri_waste_detail(
 
 
 @_srv.mcp.tool()
-async def get_savings_plan_showback(
+def get_savings_plan_showback(
     tag_key: str = "team",
     start_date: str | None = None,
     end_date: str | None = None,
@@ -455,7 +457,7 @@ async def scan_graviton_migration_opportunities(
 
 
 @_srv.mcp.tool()
-async def recommend_spot_adoption(
+def recommend_spot_adoption(
     regions: list[str] | None = None,
 ) -> str:
     """
@@ -478,8 +480,17 @@ async def recommend_spot_adoption(
 
         candidates = _scan(regions=regions)
 
+        unread = list(getattr(candidates, "cpu_unread_instances", None) or [])
+        unread_note = (
+            f"CPU history could not be read for {len(unread)} instance(s), so they "
+            f"were not assessed: {', '.join(unread[:10])}"
+            f"{' and more' if len(unread) > 10 else ''}."
+        ) if unread else ""
+
         if not candidates:
             scanned = ", ".join(regions) if regions else "all regions"
+            if unread:
+                return f"No spot adoption candidates assessed in: {scanned}.\n{unread_note}"
             return (
                 f"No spot adoption candidates found in: {scanned}.\n"
                 "All running instances are already on spot, or no on-demand "
@@ -513,6 +524,9 @@ async def recommend_spot_adoption(
                 f"| ${c['monthly_savings']:,.2f} "
                 f"| {c['savings_pct']:.1f}% |"
             )
+
+        if unread_note:
+            lines += ["", unread_note]
 
         lines += [
             "",
@@ -560,7 +574,8 @@ async def recommend_database_savings_plans() -> dict:
         if aws is None or not await aws.is_configured():
             return {"error": "AWS is not connected. Call connect_aws right here in the chat (it detects credentials already on this machine), or run 'uvx nable' in a terminal."}
 
-        result = _recommend()
+        # Synchronous Cost Explorer reads; off the event loop.
+        result = await _srv.asyncio.to_thread(_recommend)
         if result is None:
             return {"error": "Could not retrieve RDS spend data. Check AWS credentials."}
         return result

@@ -99,6 +99,30 @@ def test_a_partial_result_is_not_cached(monkeypatch):
     assert "failed_providers" not in out
 
 
+def test_a_refused_openai_key_is_listed_not_merged_as_a_cached_zero(monkeypatch):
+    """OpenAI refusing the key on the usage API is source="error", not "none".
+    It used to fall past the unread check and merge as a clean, cached $0."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-standard")
+    monkeypatch.delenv("OPENAI_ADMIN_KEY", raising=False)
+
+    def _refuse(url, params=None, headers=None, timeout=None):
+        request = httpx.Request("GET", url)
+        return httpx.Response(401, request=request, json={"error": "no"})
+
+    monkeypatch.setattr(httpx, "get", _refuse)
+    out = _run()
+    assert out["total_usd"] == 40.0
+    assert "openai" not in out["by_provider"] and "openai" not in out["sources"]
+    assert out["failed_providers"]["openai"].startswith("credential_invalid")
+    assert "Admin key" in out["failed_providers"]["openai"]
+    assert out["partial"] is True
+
+    # Not cached: the key fixed a minute later is read at once.
+    monkeypatch.setattr(openai_usage, "get_costs", lambda s, e: _ok(10.0, "gpt-4o"))
+    again = _run()
+    assert again["by_provider"]["openai"] == 10.0 and "failed_providers" not in again
+
+
 def test_connecting_a_provider_is_not_masked_by_the_cache(monkeypatch, _providers):
     _providers["openai"] = False
     monkeypatch.setattr(openai_usage, "get_costs", lambda s, e: _ok(10.0, "gpt-4o"))

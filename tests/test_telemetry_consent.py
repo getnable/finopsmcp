@@ -179,6 +179,37 @@ def test_the_env_opt_in_still_works_untouched(monkeypatch):
     assert tel._stored_consent() is None, "the env var must not need a file"
 
 
+@pytest.mark.parametrize("value", ["off", "OFF", "False", "false", "NO", "no", "0", " Off "])
+def test_a_falsy_opt_in_value_is_a_no_not_a_yes(monkeypatch, value):
+    """NABLE_TELEMETRY=off used to turn telemetry ON: anything outside a short
+    lowercase off list counted as opt-in. A clear no is a no, beats a stored
+    yes, and is never asked about again."""
+    monkeypatch.setattr(tel, "_POSTHOG_KEY", "phc_test")
+    tel._store_consent(True)
+    monkeypatch.setenv("NABLE_TELEMETRY", value)
+    assert tel._is_opted_out() is True
+    tel._CONSENT_FILE.unlink()
+    _tty(monkeypatch)
+    monkeypatch.setattr(builtins, "input", lambda *_a: pytest.fail(f"prompted with {value!r}"))
+    assert tel.prompt_for_consent() is None
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "Yes", "on", " ON "])
+def test_a_truthy_opt_in_value_turns_it_on(monkeypatch, value):
+    monkeypatch.setattr(tel, "_POSTHOG_KEY", "phc_test")
+    monkeypatch.setenv("NABLE_TELEMETRY", value)
+    assert tel._is_opted_out() is False
+
+
+@pytest.mark.parametrize("value", ["maybe", "2", "enabled"])
+def test_an_unrecognised_opt_in_value_falls_through_to_the_stored_answer(monkeypatch, value):
+    monkeypatch.setattr(tel, "_POSTHOG_KEY", "phc_test")
+    monkeypatch.setenv("NABLE_TELEMETRY", value)
+    assert tel._is_opted_out() is True, "never asked stays off"
+    tel._store_consent(True)
+    assert tel._is_opted_out() is False
+
+
 def test_the_prompt_names_what_is_and_is_not_collected(monkeypatch, capsys):
     """Consent that does not say what it covers is not consent.
 
@@ -248,3 +279,23 @@ def test_arming_registers_exactly_one_atexit_hook(monkeypatch):
     tel.arm_consent_prompt()
     tel.arm_consent_prompt()
     assert len(registered) == 1, f"{len(registered)} hooks registered"
+
+
+# ── The install id is telemetry state: none on disk while telemetry is off ────
+
+def test_install_id_is_not_written_while_telemetry_is_off():
+    """Every CLI command asks for the id (most call sites build it as an
+    argument before _send_event checks consent), so the file used to appear on
+    the very first command of a user who never agreed to anything."""
+    first = tel._get_install_id()
+    assert not tel._ID_FILE.exists(), "an install id was persisted with telemetry off"
+    assert len(first) == 36
+    assert tel._get_install_id() == first, "one process should keep one id"
+
+
+def test_install_id_is_written_once_telemetry_is_on(monkeypatch):
+    monkeypatch.setenv("NABLE_TELEMETRY", "1")
+    monkeypatch.setattr(tel, "is_ci", lambda: False)
+    ident = tel._get_install_id()
+    assert tel._ID_FILE.exists()
+    assert tel._ID_FILE.read_text().strip() == ident

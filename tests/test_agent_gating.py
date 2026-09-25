@@ -177,3 +177,15 @@ def test_agent_team_pro_reports_setup_state(pro, monkeypatch):
         assert any("guard install" in s or "budget" in s for s in guard["setup"])
     ledger = r["agents"][2]
     assert ledger["learning"] is not None and "state" in ledger["learning"]
+
+
+def test_pro_gate_links_to_the_pro_checkout_not_team(monkeypatch):
+    """require_pro quoted the $25 Pro trial but returned the $1,000 Team link."""
+    from finops import license as L
+    monkeypatch.setattr(L, "_is_ungated_now", lambda f: False)
+    monkeypatch.setattr(L, "get_status", lambda: L.LicenseStatus(
+        mode="free", email="", issued="", message=""))
+    monkeypatch.setattr("finops.demo_data.is_demo", lambda: False)
+    r = L.require_pro("ticket_creation")
+    assert r is not None
+    assert r["upgrade_url"] == L._PRO_CHECKOUT_URL

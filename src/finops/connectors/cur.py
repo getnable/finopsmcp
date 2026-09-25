@@ -179,7 +179,16 @@ def _athena_query(sql: str, timeout_secs: int = 30) -> list[dict]:
 
     execution_id = start_resp["QueryExecutionId"]
     log.debug("Athena query submitted: %s", execution_id)
+    return wait_for_query_rows(athena, execution_id, timeout_secs)
 
+
+def wait_for_query_rows(athena: Any, execution_id: str, timeout_secs: int = 30) -> list[dict]:
+    """Wait for a started Athena query and return every result row as a dict.
+
+    Shared with anything else that runs its own Athena query (the rate
+    detector does), so the deadline, the stop on timeout and the pagination
+    are written once. Raises CURQueryError on failure or timeout.
+    """
     # Poll with exponential backoff. The deadline is wall-clock: counting only
     # the sleeps ignored the time each status call took, so a slow API let the
     # loop run several times longer than timeout_secs.
@@ -362,6 +371,80 @@ LIMIT {limit}
         "period":           f"{start_date} to {end_date}",
         "source":           "cur_athena",
     }
+
+
+def get_resource_daily_costs(
+    start_date: date,
+    end_date: date,
+    usage_types: list[str],
+    account_id: str | None = None,
+    limit: int = 5000,
+) -> dict[str, Any]:
+    """Per-resource, per-day cost for the given usage types, from the CUR.
+
+    The drill-down behind a cost spike (anomaly/drilldown.py) asks this once
+    per service, for the usage types Cost Explorer already ranked, so the
+    filter is on line_item_usage_type (which the CUR and Cost Explorer spell
+    the same way) rather than on a service name (which they do not).
+
+    Args:
+        start_date: Inclusive first day.
+        end_date: Inclusive last day.
+        usage_types: The line_item_usage_type values to read. Empty reads nothing.
+        account_id: Optional 12-digit usage account filter.
+        limit: Row cap on the Athena result.
+
+    Returns:
+        {"rows": [{"resource_id", "usage_type", "region", "day", "cost"}, ...],
+         "truncated": bool, "source": "cur_athena"}, or {"error": ...}.
+    """
+    if not is_configured():
+        return _error("CUR not configured. Set CUR_S3_BUCKET, CUR_ATHENA_DATABASE, "
+                      "CUR_ATHENA_TABLE, CUR_ATHENA_RESULTS_BUCKET.")
+    if not usage_types:
+        return {"rows": [], "truncated": False, "source": "cur_athena"}
+
+    from ..slice.cur_engine import _safe_literal
+
+    try:
+        wanted = ", ".join(_safe_literal(u) for u in usage_types)
+        account = (f"\n  AND line_item_usage_account_id = {_safe_literal(account_id)}"
+                   if account_id else "")
+    except ValueError as exc:
+        return _error(str(exc))
+
+    sql = f"""
+SELECT
+    line_item_resource_id,
+    line_item_usage_type,
+    product_region,
+    date_format(line_item_usage_start_date, '%Y-%m-%d') AS usage_day,
+    SUM(line_item_unblended_cost) AS unblended_cost
+FROM {_db()}.{_table()}
+WHERE {_period_filter(start_date, end_date)}
+  AND line_item_line_item_type IN ('Usage', 'DiscountedUsage', 'SavingsPlanCoveredUsage')
+  AND line_item_resource_id IS NOT NULL
+  AND line_item_resource_id != ''
+  AND line_item_usage_type IN ({wanted}){account}
+GROUP BY 1, 2, 3, 4
+ORDER BY unblended_cost DESC
+LIMIT {int(limit)}
+""".strip()
+
+    try:
+        raw = _athena_query(sql)
+    except CURQueryError as exc:
+        log.warning("CUR get_resource_daily_costs failed: %s", exc)
+        return _error(str(exc))
+
+    rows = [{
+        "resource_id": r.get("line_item_resource_id", ""),
+        "usage_type": r.get("line_item_usage_type", ""),
+        "region": r.get("product_region", ""),
+        "day": r.get("usage_day", ""),
+        "cost": _float(r.get("unblended_cost")),
+    } for r in raw]
+    return {"rows": rows, "truncated": len(rows) >= limit, "source": "cur_athena"}
 
 
 def get_ri_waste(

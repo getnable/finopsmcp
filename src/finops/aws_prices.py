@@ -28,6 +28,8 @@ is told is an estimate.
 """
 from __future__ import annotations
 
+import math
+
 # AWS's own convention for a "month" in pricing examples: 365 * 24 / 12. Using
 # 720 (30 days) instead understates every monthly figure by 1.4%, which is
 # invisible per resource and material across a fleet.
@@ -41,6 +43,23 @@ HOURS_PER_MONTH = 730.0
 ALB_HOURLY = 0.0225
 NLB_HOURLY = 0.0225
 CLB_HOURLY = 0.025
+GWLB_HOURLY = 0.0125
+
+# Terraform's aws_lb covers all three v2 types through load_balancer_type, and
+# defaults to "application" when the attribute is absent.
+LB_HOURLY_BY_TYPE = {"application": ALB_HOURLY, "network": NLB_HOURLY, "gateway": GWLB_HOURLY}
+
+
+def lb_hourly(load_balancer_type: str | None) -> float:
+    """Hourly base charge for an aws_lb of this type. Unknown types price as ALB."""
+    return LB_HOURLY_BY_TYPE.get((load_balancer_type or "application").lower(), ALB_HOURLY)
+
+
+# NAT gateway: an hourly charge while it exists plus a per-GB charge on every
+# byte it processes. The hourly part is the floor; the per-GB part is usually
+# larger for a gateway carrying real egress.
+NAT_GATEWAY_HOURLY = 0.045
+NAT_GATEWAY_PER_GB = 0.045
 
 # ── what reading the bill costs the customer ─────────────────────────────────
 #
@@ -67,9 +86,11 @@ S3_LIST_PER_1000 = 0.005
 S3_GET_PER_1000 = 0.0004
 
 # CloudWatch GetMetricData, per METRIC requested (not per request: one call can
-# carry 500). The first million API requests a month are free, which no other
-# billing-data source offers, and it is why AWS/Billing EstimatedCharges is the
-# only "what has today cost so far" figure that does not put a meter on asking.
+# carry 500), with NO free tier. The free tier below covers the standard API
+# requests (GetMetricStatistics, ListMetrics and the like), not GetMetricData.
+# AWS Price List, AmazonCloudWatch offer file, us-east-1, checked 2026-09-24:
+# CW:GMD-Metrics is $0.01 per 1,000 metrics; CW:Requests is 1,000,000 free a
+# month (global), then $0.01 per 1,000.
 CLOUDWATCH_PER_1000_METRICS = 0.01
 CLOUDWATCH_FREE_REQUESTS_PER_MONTH = 1_000_000
 
@@ -88,3 +109,245 @@ S3_EGRESS_PER_GB = 0.09
 ALB_PER_MONTH = round(ALB_HOURLY * HOURS_PER_MONTH, 2)   # 16.43
 NLB_PER_MONTH = round(NLB_HOURLY * HOURS_PER_MONTH, 2)   # 16.43
 CLB_PER_MONTH = round(CLB_HOURLY * HOURS_PER_MONTH, 2)   # 18.25
+NAT_GATEWAY_PER_MONTH = round(NAT_GATEWAY_HOURLY * HOURS_PER_MONTH, 2)   # 32.85
+
+# Every public IPv4 address, attached or not, since February 2024.
+PUBLIC_IPV4_HOURLY = 0.005
+PUBLIC_IPV4_PER_MONTH = round(PUBLIC_IPV4_HOURLY * HOURS_PER_MONTH, 2)   # 3.65
+
+# ── EBS ──────────────────────────────────────────────────────────────────────
+#
+# AWS Price List, AmazonEC2 offer, us-east-1, version 20260924165117. Five
+# tables used to carry these, all with sc1 at $0.025 (the list rate is $0.015),
+# and the unattached-volume finding priced every volume at the gp2 rate: a
+# 500 GB gp3 volume read $50/mo against $40, and a 50 GB io1 volume with 1,000
+# provisioned IOPS read $5/mo against $71.25, because IOPS were never counted.
+EBS_PER_GB_MONTH: dict[str, float] = {
+    "gp2": 0.10, "gp3": 0.08, "io1": 0.125, "io2": 0.125,
+    "st1": 0.045, "sc1": 0.015, "standard": 0.05,
+}
+EBS_SNAPSHOT_PER_GB_MONTH = 0.05
+# gp3 includes 3,000 IOPS and 125 MiB/s; provisioning above that is billed.
+EBS_GP3_FREE_IOPS = 3000
+EBS_GP3_PER_IOPS_MONTH = 0.005
+EBS_GP3_FREE_MIBPS = 125
+EBS_GP3_PER_MIBPS_MONTH = 0.04
+# io1 is flat per provisioned IOPS; io2 is tiered at 32,000 and 64,000.
+EBS_IO1_PER_IOPS_MONTH = 0.065
+EBS_IO2_IOPS_TIERS: tuple[tuple[float, float], ...] = (
+    (32000, 0.065), (64000, 0.0455), (float("inf"), 0.03185),
+)
+
+
+def as_number(value: object, default: float | None = 0.0) -> float | None:
+    """A float from whatever an IaC parser handed over, or `default` (0.0).
+
+    The PR-comment parser passes attribute values through as raw text, so a
+    Terraform reference (var.data_iops) or a value with a trailing comment
+    (3000 # burst) reaches the price functions as a string. float() on that
+    raised, and one unreadable attribute cost the whole PR comment. An
+    unreadable quantity is priced as nothing provisioned, which for IOPS and
+    throughput is the free baseline. A caller that needs to tell "not a
+    number" from zero passes default=None.
+    """
+    if value is None or isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        number = float(value)
+    else:
+        text = str(value).split("#", 1)[0].split("//", 1)[0].strip().strip("\"'").strip()
+        try:
+            number = float(text)
+        except ValueError:
+            return default
+    return number if math.isfinite(number) else default
+
+
+def ebs_volume_monthly(vol_type: str | None, size_gb: float,
+                       iops: float | None = None, throughput: float | None = None) -> float:
+    """List-price monthly cost of one EBS volume: storage plus any billed IOPS
+    and throughput. Unknown types price as gp2, the most common legacy default.
+    A size, IOPS or throughput that is not a number counts as 0."""
+    vt = str(vol_type or "gp2").strip().lower()
+    total = as_number(size_gb) * EBS_PER_GB_MONTH.get(vt, EBS_PER_GB_MONTH["gp2"])
+    iops = as_number(iops)
+    if vt == "gp3":
+        total += max(0.0, iops - EBS_GP3_FREE_IOPS) * EBS_GP3_PER_IOPS_MONTH
+        total += max(0.0, as_number(throughput) - EBS_GP3_FREE_MIBPS) * EBS_GP3_PER_MIBPS_MONTH
+    elif vt == "io1":
+        total += iops * EBS_IO1_PER_IOPS_MONTH
+    elif vt == "io2":
+        floor = 0.0
+        for ceiling, rate in EBS_IO2_IOPS_TIERS:
+            if iops <= floor:
+                break
+            total += (min(iops, ceiling) - floor) * rate
+            floor = ceiling
+    return total
+
+# ── EC2 and RDS instances ────────────────────────────────────────────────────
+#
+# The same failure at fleet scale. These rates used to live in about fourteen
+# tables: five identical hourly EC2 copies (rightsizing, nonprod_scheduler,
+# spot_adoption, graviton_prices, terraform_estimate) plus a sixth that had
+# drifted on r7g, two RDS copies that disagreed on every Graviton class, and two
+# monthly tables typed in by hand that were not 730x the hourly rates they came
+# from. Which figure a customer saw for one db.r6g.large depended on whether
+# they asked for a rightsizing finding or a Terraform estimate.
+#
+# Hourly on-demand list, us-east-1, Linux, shared tenancy, no RI or Savings
+# Plan. Checked entry by entry against the public AWS Price List (AmazonEC2
+# and AmazonRDS us-east-1 offer files, version 20260924211011). That check
+# found the P4/P5 rows still at pre-cut prices (p5.48xlarge 98.32, now 55.04),
+# i4i ten percent low and the Graviton RDS classes wrong; p5e.48xlarge has no
+# us-east-1 on-demand listing and is left out rather than guessed. Monthly
+# is never typed in; EC2_MONTHLY and RDS_MONTHLY below are derived. A new type
+# goes here, not in the module that first needs it:
+# tests/test_instance_price_tables.py fails on an instance-keyed price dict
+# anywhere else.
+#
+# Within a family AWS charges every size the same rate per vCPU, so a large is
+# exactly twice a medium and half an xlarge. GPU and accelerator families are
+# the exception (GPU count does not scale with vCPU). The same test holds every
+# other family to it, which is how a mistyped size gets noticed.
+EC2_HOURLY: dict[str, float] = {
+    # Burstable
+    "t3.nano": 0.0052, "t3.micro": 0.0104, "t3.small": 0.0208,
+    "t3.medium": 0.0416, "t3.large": 0.0832, "t3.xlarge": 0.1664,
+    "t3.2xlarge": 0.3328,
+    "t3a.nano": 0.0047, "t3a.micro": 0.0094, "t3a.small": 0.0188,
+    "t3a.medium": 0.0376, "t3a.large": 0.0752, "t3a.xlarge": 0.1504,
+    "t3a.2xlarge": 0.3008,
+    "t4g.nano": 0.0042, "t4g.micro": 0.0084, "t4g.small": 0.0168,
+    "t4g.medium": 0.0336, "t4g.large": 0.0672, "t4g.xlarge": 0.1344,
+    "t4g.2xlarge": 0.2688,
+    # General purpose
+    "m5.large": 0.096, "m5.xlarge": 0.192, "m5.2xlarge": 0.384,
+    "m5.4xlarge": 0.768, "m5.8xlarge": 1.536, "m5.12xlarge": 2.304,
+    "m5.16xlarge": 3.072, "m5.24xlarge": 4.608,
+    "m5a.large": 0.086, "m5a.xlarge": 0.172, "m5a.2xlarge": 0.344,
+    "m5a.4xlarge": 0.688,
+    "m6i.large": 0.096, "m6i.xlarge": 0.192, "m6i.2xlarge": 0.384,
+    "m6i.4xlarge": 0.768, "m6i.8xlarge": 1.536, "m6i.12xlarge": 2.304,
+    "m6a.large": 0.0864, "m6a.xlarge": 0.1728, "m6a.2xlarge": 0.3456,
+    "m6a.4xlarge": 0.6912,
+    "m6g.large": 0.077, "m6g.xlarge": 0.154, "m6g.2xlarge": 0.308,
+    "m6g.4xlarge": 0.616, "m6g.8xlarge": 1.232, "m6g.12xlarge": 1.848,
+    "m7i.large": 0.1008, "m7i.xlarge": 0.2016, "m7i.2xlarge": 0.4032,
+    "m7i.4xlarge": 0.8064,
+    "m7g.medium": 0.0408, "m7g.large": 0.0816, "m7g.xlarge": 0.1632,
+    "m7g.2xlarge": 0.3264, "m7g.4xlarge": 0.6528, "m7g.8xlarge": 1.3056,
+    "m7g.12xlarge": 1.9584, "m7g.16xlarge": 2.6112,
+    # Compute optimised
+    "c5.large": 0.085, "c5.xlarge": 0.17, "c5.2xlarge": 0.34,
+    "c5.4xlarge": 0.68, "c5.9xlarge": 1.53, "c5.18xlarge": 3.06,
+    "c6i.large": 0.085, "c6i.xlarge": 0.17, "c6i.2xlarge": 0.34,
+    "c6i.4xlarge": 0.68, "c6i.8xlarge": 1.36,
+    "c6a.large": 0.0765, "c6a.xlarge": 0.153, "c6a.2xlarge": 0.306,
+    "c6a.4xlarge": 0.612,
+    "c6g.large": 0.068, "c6g.xlarge": 0.136, "c6g.2xlarge": 0.272,
+    "c7g.medium": 0.0363, "c7g.large": 0.0725, "c7g.xlarge": 0.145,
+    "c7g.2xlarge": 0.29, "c7g.4xlarge": 0.58, "c7g.8xlarge": 1.16,
+    "c7g.12xlarge": 1.74, "c7g.16xlarge": 2.32,
+    "c7i.large": 0.08925, "c7i.xlarge": 0.1785, "c7i.2xlarge": 0.357,
+    # Memory optimised
+    "r5.large": 0.126, "r5.xlarge": 0.252, "r5.2xlarge": 0.504,
+    "r5.4xlarge": 1.008, "r5.8xlarge": 2.016, "r5.12xlarge": 3.024,
+    "r5.16xlarge": 4.032,
+    "r6i.large": 0.126, "r6i.xlarge": 0.252, "r6i.2xlarge": 0.504,
+    "r6i.4xlarge": 1.008, "r6i.8xlarge": 2.016,
+    "r6g.large": 0.1008, "r6g.xlarge": 0.2016, "r6g.2xlarge": 0.4032,
+    "r7g.medium": 0.0536, "r7g.large": 0.1071, "r7g.xlarge": 0.2142,
+    "r7g.2xlarge": 0.4284, "r7g.4xlarge": 0.8568, "r7g.8xlarge": 1.7136,
+    "r7g.12xlarge": 2.5704, "r7g.16xlarge": 3.4272,
+    "x1e.xlarge": 0.834, "x1e.2xlarge": 1.668, "x1e.4xlarge": 3.336,
+    "x2idn.16xlarge": 6.669,
+    # GPU. List price, not a discounted or Spot rate.
+    "p3.2xlarge": 3.06, "p3.8xlarge": 12.24, "p3.16xlarge": 24.48,
+    "p4d.24xlarge": 21.957642, "p4de.24xlarge": 27.44705,
+    "p5.48xlarge": 55.04, "p5en.48xlarge": 63.296,
+    "g4dn.xlarge": 0.526, "g4dn.2xlarge": 0.752,
+    "g4dn.4xlarge": 1.204, "g4dn.8xlarge": 2.176, "g4dn.12xlarge": 3.912,
+    "g4dn.16xlarge": 4.352, "g4dn.metal": 7.824,
+    "g5.xlarge": 1.006, "g5.2xlarge": 1.212, "g5.4xlarge": 1.624,
+    "g5.8xlarge": 2.448, "g5.12xlarge": 5.672, "g5.16xlarge": 4.096,
+    "g5.24xlarge": 8.144, "g5.48xlarge": 16.288,
+    "g6.xlarge": 0.8048, "g6.2xlarge": 0.9776, "g6.4xlarge": 1.3232,
+    "g6.8xlarge": 2.0144, "g6.12xlarge": 4.6016, "g6.16xlarge": 3.3968,
+    "g6.24xlarge": 6.6752, "g6.48xlarge": 13.3504,
+    "g6e.xlarge": 1.861, "g6e.2xlarge": 2.24208, "g6e.4xlarge": 3.00424,
+    "g6e.8xlarge": 4.52856, "g6e.12xlarge": 10.49264, "g6e.16xlarge": 7.57719,
+    "g6e.24xlarge": 15.06559, "g6e.48xlarge": 30.13118,
+    # Trainium / Inferentia accelerators
+    "trn1.2xlarge": 1.34375, "trn1.32xlarge": 21.50, "trn1n.32xlarge": 24.78,
+    "inf1.xlarge": 0.228, "inf1.2xlarge": 0.362, "inf1.6xlarge": 1.180,
+    "inf1.24xlarge": 4.721,
+    "inf2.xlarge": 0.7582, "inf2.8xlarge": 1.96786, "inf2.24xlarge": 6.49063,
+    "inf2.48xlarge": 12.98127,
+    # Storage optimised
+    "i3.large": 0.156, "i3.xlarge": 0.312, "i3.2xlarge": 0.624,
+    "i3.4xlarge": 1.248, "i3.8xlarge": 2.496,
+    "i4i.large": 0.172, "i4i.xlarge": 0.343, "i4i.2xlarge": 0.686,
+}
+
+# RDS, single-AZ, MySQL / MariaDB (the two are priced identically). Multi-AZ
+# is twice this, applied by the caller, which is the one that knows whether the
+# instance is Multi-AZ. Callers that do not know the engine use this table;
+# PostgreSQL has its own rates below (rds_hourly picks between them).
+RDS_HOURLY: dict[str, float] = {
+    "db.t3.micro": 0.017, "db.t3.small": 0.034, "db.t3.medium": 0.068,
+    "db.t3.large": 0.136, "db.t3.xlarge": 0.272, "db.t3.2xlarge": 0.544,
+    "db.t4g.micro": 0.016, "db.t4g.small": 0.032, "db.t4g.medium": 0.065,
+    "db.t4g.large": 0.129,
+    "db.m5.large": 0.171, "db.m5.xlarge": 0.342, "db.m5.2xlarge": 0.684,
+    "db.m5.4xlarge": 1.368, "db.m5.8xlarge": 2.736, "db.m5.12xlarge": 4.104,
+    "db.m6i.large": 0.171, "db.m6i.xlarge": 0.342, "db.m6i.2xlarge": 0.684,
+    "db.m6g.large": 0.152, "db.m6g.xlarge": 0.304, "db.m6g.2xlarge": 0.608,
+    "db.r5.large": 0.24, "db.r5.xlarge": 0.48, "db.r5.2xlarge": 0.96,
+    "db.r5.4xlarge": 1.92, "db.r5.8xlarge": 3.84,
+    "db.r6i.large": 0.24, "db.r6i.xlarge": 0.48, "db.r6i.2xlarge": 0.96,
+    "db.r6g.large": 0.215, "db.r6g.xlarge": 0.43, "db.r6g.2xlarge": 0.859,
+    "db.r7g.large": 0.239, "db.r7g.xlarge": 0.478, "db.r7g.2xlarge": 0.956,
+}
+
+# RDS for PostgreSQL, single-AZ. Not the MySQL table: from the AWS Price List
+# (AmazonRDS offer, version 20260924211011, us-east-1, OnDemand, Single-AZ,
+# Database Engine "PostgreSQL"), PostgreSQL runs 4-7% above MySQL/MariaDB on
+# the t3, m5, m6i, m6g, r5, r6i and r6g classes, and the same on t4g and r7g.
+# The same offer's MySQL and MariaDB rates match RDS_HOURLY exactly.
+RDS_HOURLY_POSTGRES: dict[str, float] = {
+    "db.t3.micro": 0.018, "db.t3.small": 0.036, "db.t3.medium": 0.072,
+    "db.t3.large": 0.145, "db.t3.xlarge": 0.29, "db.t3.2xlarge": 0.579,
+    "db.t4g.micro": 0.016, "db.t4g.small": 0.032, "db.t4g.medium": 0.065,
+    "db.t4g.large": 0.129,
+    "db.m5.large": 0.178, "db.m5.xlarge": 0.356, "db.m5.2xlarge": 0.712,
+    "db.m5.4xlarge": 1.424, "db.m5.8xlarge": 2.848, "db.m5.12xlarge": 4.272,
+    "db.m6i.large": 0.178, "db.m6i.xlarge": 0.356, "db.m6i.2xlarge": 0.712,
+    "db.m6g.large": 0.159, "db.m6g.xlarge": 0.318, "db.m6g.2xlarge": 0.636,
+    "db.r5.large": 0.25, "db.r5.xlarge": 0.5, "db.r5.2xlarge": 1.0,
+    "db.r5.4xlarge": 2.0, "db.r5.8xlarge": 4.0,
+    "db.r6i.large": 0.25, "db.r6i.xlarge": 0.5, "db.r6i.2xlarge": 1.0,
+    "db.r6g.large": 0.225, "db.r6g.xlarge": 0.45, "db.r6g.2xlarge": 0.899,
+    "db.r7g.large": 0.239, "db.r7g.xlarge": 0.478, "db.r7g.2xlarge": 0.956,
+}
+
+_RDS_BY_ENGINE: dict[str, dict[str, float]] = {
+    "mysql": RDS_HOURLY, "mariadb": RDS_HOURLY, "postgres": RDS_HOURLY_POSTGRES,
+}
+
+
+def rds_hourly(instance_class: str, engine: str) -> float | None:
+    """The single-AZ hourly rate for a class on an engine (mysql, mariadb or
+    postgres), or None for a class or engine the tables do not hold: Aurora,
+    SQL Server, Oracle and Db2 bill at other rates, and get no figure rather
+    than a MySQL one."""
+    return _RDS_BY_ENGINE.get(engine.lower(), {}).get(instance_class)
+
+
+# Rounded to cents at definition, for the reason given above ALB_PER_MONTH.
+EC2_MONTHLY: dict[str, float] = {
+    t: round(h * HOURS_PER_MONTH, 2) for t, h in EC2_HOURLY.items()
+}
+RDS_MONTHLY: dict[str, float] = {
+    t: round(h * HOURS_PER_MONTH, 2) for t, h in RDS_HOURLY.items()
+}

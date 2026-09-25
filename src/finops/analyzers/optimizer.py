@@ -22,6 +22,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ _ALL_CHECKS = frozenset([
     "load_balancer", # idle ALBs, NLBs, Classic ELBs
     "ecr",           # old untagged ECR images
     "ecs",           # ECS Fargate over-provisioned CPU
+    "dynamodb",      # DynamoDB provisioned capacity well above use
 ])
 
 _DEFAULT_REGIONS = ["us-east-1"]
@@ -75,15 +77,26 @@ def _get_boto3_session(role_arn: str | None = None):
     return boto3.Session()
 
 
+class _Regions(list):
+    """Region names, plus the error code when they are a fallback because
+    ec2:DescribeRegions failed. A list subclass so callers and test doubles
+    that expect a plain list keep working; the CLI reads `error_code` to say
+    that only the fallback was scanned instead of implying it saw them all."""
+
+    error_code: str | None = None
+
+
 def _discover_regions(session) -> list[str]:
     """List all opted-in EC2 regions for this account."""
     try:
         ec2 = session.client("ec2", region_name="us-east-1")
         resp = ec2.describe_regions(Filters=[{"Name": "opt-in-status", "Values": ["opt-in-not-required", "opted-in"]}])
-        return [r["RegionName"] for r in resp.get("Regions", [])]
+        return _Regions(r["RegionName"] for r in resp.get("Regions", []))
     except Exception as exc:
         log.warning("Could not discover regions: %s — defaulting to us-east-1", exc)
-        return _DEFAULT_REGIONS
+        out = _Regions(_DEFAULT_REGIONS)
+        out.error_code = _error_code(exc)
+        return out
 
 
 # ── Per-region audit runner ───────────────────────────────────────────────────
@@ -108,12 +121,8 @@ def _error_code(exc: Exception) -> str:
     """The AWS error code (AccessDenied, Throttling...) or the exception type.
     Never the message: it carries ARNs and account ids, and this reaches the
     brief, Slack, and `nable scan --json`."""
-    resp = getattr(exc, "response", None)
-    if isinstance(resp, dict):
-        code = (resp.get("Error") or {}).get("Code")
-        if code:
-            return str(code)
-    return type(exc).__name__
+    from .waste import error_code
+    return error_code(exc)
 
 
 def _audit_region(
@@ -140,6 +149,7 @@ def _audit_region(
         check_idle_load_balancers,
         check_ecr_old_images,
         check_ecs_task_rightsizing,
+        check_dynamodb_provisioned,
     )
 
     findings = _RegionFindings()
@@ -151,7 +161,7 @@ def _audit_region(
     ec2_client = _client("ec2") if checks & {"ebs", "snapshots", "eips", "nat", "ec2"} else None
     cw_client = _client("cloudwatch") if checks & {
         "nat", "s3", "lambda", "ec2", "cloudwatch",
-        "rds_rightsizing", "rds_idle", "load_balancer", "ecs",
+        "rds_rightsizing", "rds_idle", "load_balancer", "ecs", "dynamodb",
     } else None
     rds_client = _client("rds") if checks & {"rds", "rds_rightsizing", "rds_idle"} else None
     lambda_client = _client("lambda") if "lambda" in checks else None
@@ -162,6 +172,7 @@ def _audit_region(
     elb_client = _client("elb") if "load_balancer" in checks else None
     ecr_client = _client("ecr") if "ecr" in checks else None
     ecs_client = _client("ecs") if "ecs" in checks else None
+    dynamodb_client = _client("dynamodb") if "dynamodb" in checks else None
 
     def _run(name: str, fn, *args):
         try:
@@ -170,6 +181,15 @@ def _audit_region(
                 finding.setdefault("region", region)
             findings.extend(result)
             findings.checks_completed.add(name)
+            # A read inside the check that failed (the AMI list behind the
+            # snapshot filter, a cluster's services, a metric). The check ran,
+            # but not over everything, so it is recorded as a partial failure:
+            # the report is partial and the CLI says which check and why.
+            for pf in getattr(result, "partial_failures", None) or ():
+                findings.checks_failed.append(
+                    {"check": name, "region": region, "error_code": pf["error_code"],
+                     "partial": True, "call": pf["call"], "count": pf["count"],
+                     "unit": pf["unit"], "effect": pf.get("effect", "")})
         except Exception as exc:
             log.warning("Check '%s' failed in %s: %s", name, region, exc)
             findings.checks_failed.append(
@@ -203,9 +223,12 @@ def _audit_region(
         _run("cloudwatch", check_cloudwatch_logs, logs_client, region)
 
     if "s3" in checks and s3_client and cw_client:
-        # S3 is global — only run from us-east-1 to avoid duplicate findings
+        # S3 is global, so only run from us-east-1 to avoid duplicate findings.
+        # Its storage metrics are not: each bucket's live in its own region.
         if region == "us-east-1":
-            _run("s3", check_s3_storage_class, s3_client, cw_client, region)
+            _run("s3", partial(check_s3_storage_class, cw_client_for_region=lambda r:
+                               session.client("cloudwatch", region_name=r)),
+                 s3_client, cw_client, region)
 
     if "s3_multipart" in checks and s3_client:
         if region == "us-east-1":
@@ -219,6 +242,9 @@ def _audit_region(
 
     if "ecs" in checks and ecs_client and cw_client:
         _run("ecs", check_ecs_task_rightsizing, ecs_client, cw_client, region)
+
+    if "dynamodb" in checks and dynamodb_client and cw_client:
+        _run("dynamodb", check_dynamodb_provisioned, dynamodb_client, cw_client, region)
 
     if "lambda" in checks and lambda_client and cw_client:
         _run("lambda", check_lambda_memory, lambda_client, cw_client, region)
@@ -497,19 +523,26 @@ def _dedup_findings(findings: list[dict]) -> list[dict]:
     Deduplicate findings so a resource is never counted twice.
 
     Two levels:
-      1. Exact dup: same (resource_id, waste_type) -> keep higher savings.
-      2. Same-resource cross-source dup: when one resource is flagged by both a
-         heuristic and Compute Optimizer for the same intent (e.g. idle_ec2_low_cpu
+      1. Exact dup: same (region, resource_id, waste_type) -> keep higher savings.
+      2. Same-resource cross-source dup: when one resource (one id in one
+         region) is flagged by both a heuristic and Compute Optimizer for the
+         same intent (e.g. idle_ec2_low_cpu
          AND compute_optimizer_overprovisioned_ec2), collapse to ONE finding,
          preferring the Compute Optimizer source (it weighs CPU + memory + network
          + disk), else the higher-savings one. Without this the audit total was
          inflated by double-counting the same instance.
     """
-    # Level 1: exact (resource_id, waste_type)
+    # Level 1: exact (region, resource_id, waste_type). The region is part of
+    # the key because a resource id is only unique inside its region: a
+    # DynamoDB table or an RDS instance called "orders" in us-east-1 and one in
+    # eu-west-1 are two resources, and keying on the name alone dropped the
+    # cheaper one from the total. The separator keeps ("ab", "c") and ("a",
+    # "bc") apart.
     by_exact: dict[str, dict] = {}
     for finding in findings:
         key = hashlib.sha256(
-            f"{finding.get('resource_id','')}{finding.get('waste_type','')}".encode()
+            f"{finding.get('region') or ''}|{finding.get('resource_id','')}|"
+            f"{finding.get('waste_type','')}".encode()
         ).hexdigest()[:16]
         existing = by_exact.get(key)
         if existing is None or _savings_or_zero(finding) > _savings_or_zero(existing):
@@ -523,7 +556,7 @@ def _dedup_findings(findings: list[dict]) -> list[dict]:
         if family is None:
             result.append(finding)
             continue
-        fam_key = f"{finding.get('resource_id','')}|{family}"
+        fam_key = f"{finding.get('region') or ''}|{finding.get('resource_id','')}|{family}"
         current = family_winner.get(fam_key)
         if current is None:
             family_winner[fam_key] = finding
@@ -551,6 +584,7 @@ def run_deep_audit(
     max_workers: int = 8,
     progress_callback: Callable[[str, int, int, int], None] | None = None,
     deadline_seconds: float | None = None,
+    session=None,
 ) -> dict:
     """
     Run a full deep AWS waste audit and return a structured report.
@@ -575,6 +609,9 @@ def run_deep_audit(
                 calls cannot be interrupted; their threads finish in the
                 background and their results are discarded. None (default)
                 means no deadline, exactly the prior behavior.
+        session: Optional boto3 Session to scan with. The CLI passes the one
+                it built from `--profile`, so the audit reads the account the
+                identity check read, not whatever keys the environment holds.
 
     Returns:
         {
@@ -600,7 +637,8 @@ def run_deep_audit(
             role_arn = role_arns_env.split(",")[0].strip() or None
 
     try:
-        session = _get_boto3_session(role_arn)
+        if session is None:
+            session = _get_boto3_session(role_arn)
     except Exception as exc:
         # error_type alongside the message: the message carries a path or an
         # account id so it can never be sent anywhere, and formatting the
@@ -731,13 +769,16 @@ def run_deep_audit(
     # one fact that matters. A check stays in checks_run only if it completed
     # somewhere; one that failed everywhere never looked at anything, and
     # counting it as run is how "0 findings" read as "clean".
-    _grouped: dict[tuple[str, str], list[str]] = {}
+    _grouped: dict[tuple[str, str, str], list[str]] = {}
     for f in checks_failed:
-        _grouped.setdefault((f["check"], f["error_code"]), []).append(f["region"])
-    for (check, code), where in sorted(_grouped.items()):
+        _grouped.setdefault((f["check"], f["error_code"], f.get("call", "")),
+                            []).append(f["region"])
+    for (check, code, call), where in sorted(_grouped.items()):
+        regions_where = sorted(set(where))
+        how = f"could not fully run ({call}: {code})" if call else f"could not run ({code})"
         errors.append(
-            f"Check '{check}' could not run ({code}) in {len(where)} region(s): "
-            f"{', '.join(sorted(where)[:5])}{' ...' if len(where) > 5 else ''}"
+            f"Check '{check}' {how} in {len(regions_where)} region(s): "
+            f"{', '.join(regions_where[:5])}{' ...' if len(regions_where) > 5 else ''}"
         )
     failed_everywhere = {f["check"] for f in checks_failed} - checks_completed
     checks_run = sorted(active_checks - failed_everywhere)

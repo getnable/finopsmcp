@@ -28,12 +28,19 @@ Output contract (the design doc is the source of truth):
 
 Exit codes (pinned contract; argparse owns 2 for usage errors):
     0  success, including partial WITH results (banner shown)
+    1  an unexpected error (prints how to report it) or a bad --regions value
     3  credentials expired (prints the exact refresh command)
     4  permission denied everywhere (prints the IAM actions needed)
-    5  partial with no usable results
+    5  partial with no usable results: nothing finished, or most checks could
+       not run, so the findings cannot stand in for the account
     6  no credentials found, or AWS rejected the ones it found
     7  local AWS config does not resolve (unknown profile, unparseable config,
        no region). Distinct from 6: the machine HAS a setup, it just is wrong.
+    130  cancelled with Ctrl-C
+
+With --json, every failure also prints one document on stdout,
+{"error": {"class", "exit_code", "message"}}, so a script reading stdout gets
+an answer instead of nothing.
 
 Failure states never stack-trace; every one ends with a docs link. Telemetry
 events (cli_scan_started / _completed / _failed) carry only event name, error
@@ -78,6 +85,19 @@ EXIT_NO_CREDS = 6
 # Local AWS config is wrong (missing profile, unparseable config, no region).
 # Distinct from no-creds: the machine HAS a setup, it just does not resolve.
 EXIT_CONFIG = 7
+EXIT_CANCELLED = 130  # the shell convention for SIGINT
+
+# Set by run() for the duration of a --json scan, so every failure path also
+# answers on stdout. Module-level for the same reason as the staleness state:
+# every exit path needs it.
+_json_mode = False
+
+# Where the credentials came from, in words, and the fix when AWS rejects them.
+# Env-var keys win over every profile in botocore's chain, so a scan run with
+# AWS_ACCESS_KEY_ID exported is not "profile default", whatever AWS_PROFILE says.
+_ENV_KEYS_LABEL = "credentials from AWS_ACCESS_KEY_ID in your environment"
+_ENV_KEYS_FIX = ("  fix: replace AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY with a working key, "
+                 "or unset them (and AWS_SESSION_TOKEN) to use your AWS profiles")
 
 
 # ── tiny ANSI layer (self-contained: importing wizard helpers would be a cycle) ──
@@ -146,9 +166,18 @@ def _staleness_line(timeout: float = 0.4) -> str | None:
 
 
 def _fail(out, code: int, lines: list[str], error_class: str, t0: float,
-          exc: Exception | None = None, props: dict | None = None) -> int:
+          exc: Exception | None = None, props: dict | None = None,
+          json_error: bool = True, docs_line: bool = True) -> int:
     for line in lines:
         print(line, file=out)
+    if _json_mode and json_error:
+        # --json promises stdout is one parseable document. A failure used to
+        # print nothing there at all, so a script saw empty output and a code.
+        # The class is one of our fixed names; the message is the human line.
+        print(json.dumps({"error": {
+            "class": error_class, "exit_code": code,
+            "message": lines[0].strip() if lines else error_class,
+        }}), file=sys.stdout)
 
     # Staleness FIRST among the follow-ups, because on an old build it is very
     # often the actual answer and the message above is not. Measured 2026-08-14:
@@ -167,7 +196,8 @@ def _fail(out, code: int, lines: list[str], error_class: str, t0: float,
         print(file=out)
         print(_bold("  " + stale), file=out)
 
-    print(_dim(DOCS_LINE), file=out)
+    if docs_line:
+        print(_dim(DOCS_LINE), file=out)
     # version + exception CLASS NAME only (never the message: messages carry
     # paths and account details). Without these, a month of real failures was
     # one opaque "other" bucket nobody could diagnose remotely. `site` is the
@@ -207,6 +237,27 @@ def _finish(code: int, lingering: bool) -> int:
         sys.stderr.flush()
         os._exit(code)
     return code
+
+
+def _threads_lingering() -> bool:
+    """True when a non-daemon worker thread is still alive, which would make a
+    normal return wait at interpreter shutdown."""
+    main = threading.main_thread()
+    return any(t is not main and not t.daemon and t.is_alive()
+               for t in threading.enumerate())
+
+
+def _split_regions(values: list[str] | None) -> list[str]:
+    """--regions as people type it. The flag took space-separated values only,
+    so `--regions us-east-1,us-west-2` (how the AWS CLI and most tools spell a
+    list) failed as one invalid region, and `US-EAST-1` failed on case.
+    Repeating the flag adds to the list (argparse action="extend")."""
+    out: list[str] = []
+    for v in values or []:
+        for r in re.split(r"[,\s]+", v.strip().lower()):
+            if r and r not in out:
+                out.append(r)
+    return out
 
 
 def _classify_boto_error(exc: Exception) -> str:
@@ -295,6 +346,16 @@ def _spend_window(today) -> tuple[str, str, str]:
     return first_of_month.isoformat(), today.isoformat(), "month-to-date"
 
 
+def _region_catalog(session) -> dict[str, str]:
+    """Every region AWS knows, with its opt-in status for this account, from
+    ec2:DescribeRegions (AllRegions=True). Raises when the call fails; the
+    caller decides what that means."""
+    ec2 = session.client("ec2", region_name="us-east-1")
+    resp = ec2.describe_regions(AllRegions=True)
+    return {r["RegionName"]: r.get("OptInStatus", "opt-in-not-required")
+            for r in resp.get("Regions", [])}
+
+
 def _spend_snapshot(session) -> dict | None:
     """Month-to-date total + by-service + by-region from CE. None if denied."""
     from datetime import date
@@ -329,6 +390,10 @@ def _spend_snapshot(session) -> dict | None:
         "total": total,
         "services": services[:3],
         "regions": dict(regions),
+        # No groups at all is "Cost Explorer had nothing for this window",
+        # which is not a $0 bill. New accounts, and CE in its first 24 hours,
+        # answer exactly this way.
+        "has_data": bool(services),
     }
 
 
@@ -371,10 +436,22 @@ def _pick_regions(spend: dict | None, session) -> list[str]:
 def _demo_payload() -> tuple[dict, dict]:
     from . import demo_data
 
-    cs = demo_data.cost_summary()
+    # AWS month to date, like the live scan, summed from the same sample the MCP
+    # tools answer from. On the 1st there is no day of this month yet, so it
+    # covers the month that just closed, as the live scan does.
+    from datetime import date, timedelta
+
+    today = date.today()
+    if today.day == 1:
+        start, covers = (today - timedelta(days=1)).replace(day=1), "last month"
+    else:
+        start, covers = today.replace(day=1), "this month"
+    cs = demo_data.cost_summary({"provider": "aws", "start_date": start.isoformat(),
+                                 "end_date": today.isoformat()})
     services = sorted(cs["by_service"].items(), key=lambda kv: kv[1], reverse=True)
     spend = {
-        "period": cs["period"],
+        "period": f"{cs['period']['start']} to {cs['period']['end']}",
+        "covers": covers,
         "total": cs["total_usd"],
         "services": services[:3],
         "regions": {},
@@ -448,7 +525,128 @@ def _render_extra(out, b) -> None:
         print(f"      {_dim(b.note)}", file=out)
 
 
-def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=None):
+# One line per kind of waste, the way `--demo` reads, instead of one line per
+# resource. A real finding carries `detail` (a sentence about one resource) and
+# no `description`, so a first real scan printed the internal key,
+# `unattached_ebs_volume, us-east-1`, once per volume, and the five lines it had
+# room for did not add up to the headline above them.
+_WASTE_LABELS: dict[str, tuple[str, str]] = {
+    "unattached_ebs_volume": ("unattached EBS volume", "unattached EBS volumes"),
+    "unattached_ebs": ("unattached EBS volume", "unattached EBS volumes"),
+    "gp2_should_migrate_to_gp3": ("gp2 volume cheaper as gp3", "gp2 volumes cheaper as gp3"),
+    "old_snapshots": ("old EBS snapshot", "old EBS snapshots"),
+    "old_unmanaged_snapshot": ("old EBS snapshot", "old EBS snapshots"),
+    "idle_nat_gateway": ("idle NAT gateway", "idle NAT gateways"),
+    "idle_load_balancer": ("idle load balancer", "idle load balancers"),
+    "unassociated_elastic_ip": ("unused Elastic IP", "unused Elastic IPs"),
+    "idle_ec2_low_cpu": ("idle EC2 instance", "idle EC2 instances"),
+    "oversized_ec2": ("oversized EC2 instance", "oversized EC2 instances"),
+    "compute_optimizer_overprovisioned_ec2": ("oversized EC2 instance", "oversized EC2 instances"),
+    "idle_rds": ("idle RDS instance", "idle RDS instances"),
+    "rds_idle_no_connections": ("idle RDS instance", "idle RDS instances"),
+    "rds_overprovisioned": ("oversized RDS instance", "oversized RDS instances"),
+    "compute_optimizer_overprovisioned_rds": ("oversized RDS instance", "oversized RDS instances"),
+    "excessive_rds_backup_retention": ("RDS instance keeping extra backups",
+                                       "RDS instances keeping extra backups"),
+    "lambda_zero_invocations": ("Lambda function never invoked", "Lambda functions never invoked"),
+    "lambda_memory_overprovisioned": ("Lambda function with unused memory",
+                                      "Lambda functions with unused memory"),
+    "compute_optimizer_overprovisioned_lambda": ("Lambda function with unused memory",
+                                                 "Lambda functions with unused memory"),
+    "ecs_overprovisioned_cpu": ("ECS service with unused CPU", "ECS services with unused CPU"),
+    "dynamodb_overprovisioned_capacity": ("DynamoDB table with unused capacity",
+                                          "DynamoDB tables with unused capacity"),
+    "ecr_old_untagged_images": ("ECR repo with old untagged images",
+                                "ECR repos with old untagged images"),
+    "s3_suboptimal_storage_class": ("S3 bucket in a costlier storage class",
+                                    "S3 buckets in a costlier storage class"),
+    "s3_incomplete_multipart_uploads": ("S3 bucket holding abandoned uploads",
+                                        "S3 buckets holding abandoned uploads"),
+    "log_group_infinite_retention": ("log group kept forever", "log groups kept forever"),
+    "cloudtrail_data_events_enabled": ("CloudTrail trail logging data events",
+                                       "CloudTrail trails logging data events"),
+    "duplicate_cloudtrail_management_events": ("duplicate CloudTrail trail",
+                                               "duplicate CloudTrail trails"),
+    "cloudtrail_stopped_but_s3_bucket_costs_persist": ("stopped trail still storing logs",
+                                                       "stopped trails still storing logs"),
+    "data_transfer_cost": ("data transfer line", "data transfer lines"),
+}
+
+
+def _group_findings(findings: list[dict]) -> list[dict]:
+    """Findings summed by waste_type, largest first. A group of one keeps the
+    finding's own description when it has one (the demo's do)."""
+    groups: dict[str, dict] = {}
+    for f in findings:
+        wt = f.get("waste_type") or "finding"
+        g = groups.setdefault(wt, {"n": 0, "monthly": 0.0, "regions": set(),
+                                   "description": f.get("description")})
+        g["n"] += 1
+        g["monthly"] += float(f.get("estimated_monthly_savings") or 0)
+        if f.get("region"):
+            g["regions"].add(f["region"])
+    rows = []
+    for wt, g in groups.items():
+        if g["n"] == 1 and g["description"]:
+            desc = g["description"]
+        else:
+            one, many = _WASTE_LABELS.get(wt, (wt.replace("_", " "), wt.replace("_", " ")))
+            desc = f"{g['n']} {one if g['n'] == 1 else many}"
+        regions = sorted(g["regions"])
+        where = regions[0] if len(regions) == 1 else (f"{len(regions)} regions" if regions else "")
+        rows.append({"description": desc, "region": where, "monthly": g["monthly"], "n": g["n"]})
+    rows.sort(key=lambda r: -r["monthly"])
+    return rows
+
+
+_DENIED_CODES = ("AccessDenied", "AccessDeniedException", "UnauthorizedOperation")
+
+
+def _failed_check_lines(report: dict) -> list[str]:
+    """What could not be read, in two kinds: checks that never ran anywhere,
+    and checks that ran but left something unread (one region denied, the AMI
+    list behind the snapshot filter, a NAT gateway's traffic metric). Both
+    mean the findings above can be missing something, so both are said."""
+    failed = report.get("checks_failed") or []
+    if not failed:
+        return []
+    ran = set(report.get("checks_run") or ())
+    not_run = sorted({f.get("check", "?") for f in failed
+                      if not f.get("partial")} - ran)
+    partly: dict[str, list[str]] = {}
+    for f in failed:
+        check = f.get("check", "?")
+        if check in not_run:
+            continue
+        code = f.get("error_code", "")
+        if f.get("partial"):
+            n, unit = f.get("count", 0), f.get("unit", "resources")
+            if n == 1 and unit.endswith("s"):
+                unit = unit[:-1]
+            what = f"{n} {unit} unread, {code}"
+        else:
+            what = f"{code} in {f.get('region', '?')}"
+        bits = partly.setdefault(check, [])
+        if what not in bits:
+            bits.append(what)
+    lines = []
+    hint = ""
+    if any(f.get("error_code") in _DENIED_CODES for f in failed):
+        hint = " (`nable scan --dry-run --json` prints the policy)"
+    if not_run:
+        lines.append(f"{len(not_run)} check(s) could not run and were not counted: "
+                     f"{', '.join(not_run)}{hint}")
+        hint = ""
+    if partly:
+        detail = "; ".join(f"{c} ({', '.join(b[:3])}{', ...' if len(b) > 3 else ''})"
+                           for c, b in sorted(partly.items()))
+        lines.append(f"{len(partly)} check(s) could not fully run and may be missing "
+                     f"findings: {detail}{hint}")
+    return lines
+
+
+def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=None,
+            spend_requested: bool = False, spend_note: str | None = None):
     extra_blocks = extra_blocks or []
     demo_tag = _dim(" (demo data)") if demo else ""
     print("─" * 60, file=out)
@@ -481,29 +679,55 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
                 print(
                     _dim(
                         "spend summary unavailable (missing ce:GetCostAndUsage; "
-                        "run `nable iam-template` to fix)"
+                        "`nable scan --dry-run --spend --json` prints the policy with it)"
                     ),
                     file=out,
                 )
+            elif spend is not None and not spend.get("has_data", True):
+                print(_dim(f"Cost Explorer returned no data for this period "
+                           f"({spend.get('period', '')})"), file=out)
+            elif spend_note:
+                print(_dim(spend_note), file=out)
             if recoverable >= _FINDING_FLOOR_USD:
                 print(_green(_bold(f"{_usd(recoverable)}/mo recoverable")) + demo_tag, file=out)
 
-        findings = [
-            f
-            for f in report.get("findings", [])
-            if float(f.get("estimated_monthly_savings") or 0) >= _FINDING_FLOOR_USD
-        ][:_MAX_FINDINGS_SHOWN]
+        findings = report.get("findings") or []
+        groups = _group_findings(findings)
+        shown = [g for g in groups if g["monthly"] >= _FINDING_FLOOR_USD][:_MAX_FINDINGS_SHOWN]
+        incomplete = bool(report.get("checks_failed") or report.get("regions_timed_out")
+                          or report.get("regions_unlisted"))
 
         if recoverable < _FINDING_FLOOR_USD:
-            # The proud state: a clean account is a result, not an apology.
-            print(_green("no material waste found, nice") + demo_tag, file=out)
+            if findings:
+                # Below the line this summary shows, but not nothing: a $20/mo
+                # account with $4.61/mo of findings used to read "no material
+                # waste found, nice" and hide all of them.
+                n = len(findings)
+                print(f"{n} small finding{'s' if n != 1 else ''}, {_usd(recoverable)}/mo total"
+                      + demo_tag + _dim(" · `nable scan --json` lists every one"), file=out)
+            elif incomplete:
+                # Nothing found is only a verdict on what was read.
+                print("no waste found in what could be read" + demo_tag, file=out)
+            else:
+                # The proud state: a clean account is a result, not an apology.
+                print(_green("no material waste found, nice") + demo_tag, file=out)
         else:
-            for f in findings:
-                monthly = float(f.get("estimated_monthly_savings") or 0)
-                desc = f.get("description") or f.get("waste_type", "finding")
-                region = f.get("region", "")
-                print(f"  {_usd(monthly) + '/mo':>12}  {desc}" + (f", {region}" if region else ""), file=out)
+            for g in shown:
+                region = g["region"]
+                print(f"  {_usd(g['monthly']) + '/mo':>12}  {g['description']}"
+                      + (f", {region}" if region else ""), file=out)
+            rest_n = sum(g["n"] for g in groups) - sum(g["n"] for g in shown)
+            rest_usd = sum(g["monthly"] for g in groups) - sum(g["monthly"] for g in shown)
+            if rest_n > 0:
+                # Without this the lines above never sum to the headline.
+                print(_dim(f"  {_usd(rest_usd) + '/mo':>12}  {rest_n} more finding"
+                           f"{'s' if rest_n != 1 else ''} · `nable scan --json` lists every one"),
+                      file=out)
 
+        if report.get("regions_unlisted"):
+            print(_dim(f"could not list this account's regions (ec2:DescribeRegions: "
+                       f"{report['regions_unlisted']}); scanned "
+                       f"{', '.join(report.get('regions_scanned') or [])} only"), file=out)
         timed_out = report.get("regions_timed_out") or []
         if timed_out:
             done = len(report.get("regions_scanned") or [])
@@ -512,15 +736,10 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
                      f"(reached the {_SCAN_DEADLINE_S}s time limit; skipped: {', '.join(timed_out)})"),
                 file=out,
             )
-        failed = sorted({f.get("check", "?") for f in report.get("checks_failed") or []})
-        if failed:
+        for line in _failed_check_lines(report):
             # Without this line "no material waste found" reads as a verdict on
             # checks that never ran.
-            print(
-                _dim(f"{len(failed)} check(s) could not run and were not counted: "
-                     f"{', '.join(failed)} (`nable scan --dry-run --json` prints the policy)"),
-                file=out,
-            )
+            print(_dim(line), file=out)
 
     # ── extra providers (AI / GCP / Azure), the cross-provider frame ──
     for b in extra_blocks:
@@ -558,7 +777,7 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
             file=out,
         )
 
-    if _has_aws and not (spend and spend.get("total")):
+    if _has_aws and not spend_requested and not (spend and spend.get("total")):
         print(_dim("run `nable scan --spend` for the spend breakdown (uses Cost Explorer, ~$0.02)"), file=out)
 
     # A scan that worked still deserves to know it is running an old build, but
@@ -574,15 +793,20 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
     print(_dim(DOCS_LINE), file=out)
 
 
-def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra_blocks=None):
+def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra_blocks=None,
+                  credentials: str = "profile"):
     extra_blocks = extra_blocks or []
     report = report or {}
     recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+    findings = report.get("findings") or []
+    spend_has_data = bool(spend) and spend.get("has_data", True)
     return {
         "schema_version": 1,
         "command": "scan",
         "demo": demo,
-        "profile": profile,
+        # None when the keys came from the environment: they belong to no profile.
+        "profile": profile if credentials == "profile" else None,
+        "credentials": credentials,
         "account_id": account_id,
         "spend": (
             {
@@ -590,7 +814,10 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
                 # On the 1st this is last month's closed total, not month-to-date;
                 # `covers` says which, so a consumer never has to guess.
                 "covers": spend.get("covers", "month-to-date"),
-                "month_to_date_usd": round(spend["total"], 2),
+                # null, not 0, when Cost Explorer returned nothing: no data is
+                # not a $0 bill.
+                "has_data": spend_has_data,
+                "month_to_date_usd": round(spend["total"], 2) if spend_has_data else None,
                 "top_services": [
                     {"service": name, "usd": round(v, 2)} for name, v in spend["services"]
                 ],
@@ -607,16 +834,25 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
                 else None
             ),
         },
-        "findings": report.get("findings", [])[:_MAX_FINDINGS_SHOWN * 4],
+        # Every finding. This was capped at 20 while the text output promised
+        # `nable scan --json` "lists every one", and the listed ones then did
+        # not add up to recoverable.monthly_usd.
+        "total_findings": len(findings),
+        "unpriced_findings": sum(
+            1 for f in findings if f.get("estimated_monthly_savings") is None),
+        "findings": findings,
         "scan": {
             "regions_scanned": report.get("regions_scanned", []),
             "regions_timed_out": report.get("regions_timed_out", []),
+            "regions_unlisted": report.get("regions_unlisted"),
             "errors": report.get("errors", []),
+            "checks_run": report.get("checks_run"),
             "checks_failed": report.get("checks_failed", []),
             "duration_s": round(duration_s, 1),
             # A check that could not read is as partial as a region that timed
             # out: the findings list is missing whatever it would have found.
-            "partial": bool(report.get("regions_timed_out") or report.get("checks_failed")),
+            "partial": bool(report.get("regions_timed_out") or report.get("checks_failed")
+                            or report.get("regions_unlisted")),
         },
         "providers": [
             {
@@ -634,9 +870,60 @@ def _json_payload(spend, report, *, demo, profile, account_id, duration_s, extra
 
 # ── the command ────────────────────────────────────────────────────────────────
 
-def run(args) -> int:
+def _crash_site(exc: BaseException) -> str:
+    """Where inside nable an unexpected exception was raised, as
+    `analyzers/optimizer.py:612`. Relative to the package, so it carries no
+    home directory or username, and with the version it pins the statement."""
+    tb = exc.__traceback__
+    site = ""
+    while tb is not None:
+        fname = tb.tb_frame.f_code.co_filename.replace("\\", "/")
+        if "/finops/" in fname:
+            site = f"{fname.rsplit('/finops/', 1)[1]}:{tb.tb_lineno}"
+        tb = tb.tb_next
+    return site
+
+
+def main(args) -> int:
+    """`nable scan` as the CLI runs it. run() gives every failure it anticipates
+    its own exit code and fix line; this is for the ones it does not. Without it
+    an unexpected exception reached the user as a Python traceback, which the
+    module promises never happens, and the run sent cli_scan_started with no
+    terminal event, so it could not be counted as a failure at all."""
     t0 = time.time()
+    try:
+        return run(args, t0)
+    except KeyboardInterrupt:
+        # Ctrl-C used to print a KeyboardInterrupt traceback and then sit for
+        # 6 to 9 seconds while interpreter shutdown joined region workers still
+        # blocked in boto3 calls. The pools are already cancelled on the way
+        # out (their finally blocks); anything still running is abandoned.
+        as_json = bool(getattr(args, "json", False))
+        print("\nscan cancelled", file=sys.stderr if as_json else sys.stdout)
+        if as_json:
+            print(json.dumps({"error": {"class": "cancelled", "exit_code": EXIT_CANCELLED,
+                                        "message": "scan cancelled"}}))
+        return _finish(EXIT_CANCELLED, _threads_lingering())
+    except Exception as exc:
+        if getattr(args, "debug", False):
+            raise
+        out = sys.stderr if getattr(args, "json", False) else sys.stdout
+        # A crash mid-scan can leave region workers blocked in boto3, so exit
+        # the way the Ctrl-C path does rather than wait on them at shutdown.
+        return _finish(_fail(out, 1, [
+            f"nable scan stopped on an unexpected error ({type(exc).__name__})",
+            "  this is most likely a bug in nable rather than your AWS setup",
+            "  `nable scan --debug` prints the full trace; please include it in a report:",
+            "  https://github.com/getnable/finopsmcp/issues/new",
+        ], "crash", t0, exc=exc, props={"crash_site": _crash_site(exc)}),
+            _threads_lingering())
+
+
+def run(args, t0: float | None = None) -> int:
+    global _json_mode
+    t0 = time.time() if t0 is None else t0
     as_json = bool(getattr(args, "json", False))
+    _json_mode = as_json
 
     # --dry-run answers "what will this touch?" before anything is touched, and
     # returns before credentials are read, before any client is built, and before
@@ -656,10 +943,22 @@ def run(args) -> int:
             print(render_dry_run(want))
         return EXIT_OK
 
-    demo = bool(getattr(args, "demo", False)) or os.getenv("FINOPS_DEMO") == "1"
+    # The env side of demo is decided the way the MCP server decides it, so
+    # FINOPS_DEMO means the same thing to `nable scan` as to the server.
+    from .demo_data import is_demo
+    demo = bool(getattr(args, "demo", False)) or is_demo()
     want_spend = bool(getattr(args, "spend", False))
-    profile = getattr(args, "profile", None) or os.getenv("AWS_PROFILE") or "default"
-    if getattr(args, "profile", None):
+    # Where the profile name came from, read BEFORE --profile is exported:
+    # the missing-profile message used to read AWS_PROFILE back after setting
+    # it, and told people who typed --profile that their environment set it.
+    flag_profile = getattr(args, "profile", None)
+    env_profile = os.environ.get("AWS_PROFILE") or os.environ.get("AWS_DEFAULT_PROFILE")
+    profile = flag_profile or env_profile or "default"
+    # Env-var keys outrank any profile botocore could pick, unless a profile
+    # is passed to the session itself, which --profile now does.
+    env_keys = bool(os.environ.get("AWS_ACCESS_KEY_ID")) and not flag_profile and not demo
+    cred_label = _ENV_KEYS_LABEL if env_keys else f"profile {profile}"
+    if flag_profile:
         os.environ["AWS_PROFILE"] = args.profile
     import logging
     if getattr(args, "debug", False):
@@ -676,7 +975,7 @@ def run(args) -> int:
     out = sys.stderr if as_json else sys.stdout
 
     # First print: no network, within 2s of process start.
-    print(f"{_bold('nable scan')} {_dim('· profile ' + profile)}", file=out)
+    print(f"{_bold('nable scan')} {_dim('· ' + cred_label)}", file=out)
     # version here too: without it, started and failed cannot be joined per
     # release, so "is the new build better" is unanswerable. 119 starts in
     # 14 days carried no version while every failure did.
@@ -847,7 +1146,9 @@ def run(args) -> int:
         return _finish(EXIT_OK, abandoned)
 
     try:
-        session = boto3.Session()
+        # --profile goes to the session itself: only then does botocore let it
+        # outrank keys exported in the environment.
+        session = boto3.Session(profile_name=flag_profile) if flag_profile else boto3.Session()
         if session.get_credentials() is None:
             return _fail(out, EXIT_NO_CREDS, [
                 "no AWS credentials found on this machine",
@@ -868,6 +1169,8 @@ def run(args) -> int:
         if klass == "expired":
             return _fail(out, EXIT_EXPIRED, [
                 "your AWS session has expired",
+                ("  fix: refresh AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN "
+                 "in your environment, or unset them to use your AWS profiles") if env_keys else
                 f"  fix: `aws sso login --profile {profile}`  (or refresh your temporary credentials)",
             ], "expired", t0, exc=exc)
         if klass == "no-creds":
@@ -887,14 +1190,16 @@ def run(args) -> int:
             # the user's shell (normal for anyone with more than one account) and
             # does not resolve. This used to print a raw botocore string with no
             # fix line at all, which is why people retried and left.
-            env_profile = os.environ.get("AWS_PROFILE") or os.environ.get("AWS_DEFAULT_PROFILE")
             found = _available_profiles()
             lines = [f"AWS profile {profile!r} is not configured on this machine"]
-            if env_profile == profile:
+            if flag_profile:
+                lines.append(f"  you asked for it with --profile {flag_profile}")
+            elif env_profile == profile:
                 lines.append(f"  AWS_PROFILE={env_profile} is set in your environment")
             if found:
                 lines.append(f"  profiles nable can see: {', '.join(found)}")
-                lines.append(f"  fix: `nable scan --profile {found[0]}`, or unset AWS_PROFILE")
+                lines.append(f"  fix: `nable scan --profile {found[0]}`"
+                             + ("" if flag_profile else ", or unset AWS_PROFILE"))
             else:
                 lines.append("  nable cannot see any configured profiles")
                 lines.append("  fix: `aws configure sso` (company SSO) or `aws configure` (access key)")
@@ -911,6 +1216,13 @@ def run(args) -> int:
                 "  fix: `export AWS_DEFAULT_REGION=us-east-1` (or set `region` in ~/.aws/config)",
             ], "no-region", t0, exc=exc)
         if klass == "bad-creds":
+            if env_keys:
+                return _fail(out, EXIT_NO_CREDS, [
+                    "AWS rejected these credentials",
+                    (f"  {_ENV_KEYS_LABEL}: the access key is unknown, revoked, "
+                     "or the secret does not match"),
+                    _ENV_KEYS_FIX,
+                ], "bad-creds", t0, exc=exc)
             return _fail(out, EXIT_NO_CREDS, [
                 "AWS rejected these credentials",
                 f"  profile {profile!r}: the access key is unknown, revoked, or the secret does not match",
@@ -942,11 +1254,20 @@ def run(args) -> int:
     # flag is the consent, so no interactive prompt (would break --json/CI).
     spend = None
     ce_denied = False
+    spend_note = None
     if want_spend:
-        print(
-            _dim("spend breakdown: 2 Cost Explorer calls, about $0.02 on your AWS bill"),
-            file=out,
-        )
+        if "llm" in _extra_fams:
+            # The AI block reads Bedrock spend through Cost Explorer too under
+            # --spend: one call to find the Bedrock services, one for their
+            # detail. Saying "2 calls" while making 4 is the one place a
+            # disclosure must not round down.
+            print(_dim("spend breakdown: 2 Cost Explorer calls, plus up to 2 for Bedrock "
+                       "AI spend, about $0.02 to $0.04 on your AWS bill"), file=out)
+        else:
+            print(
+                _dim("spend breakdown: 2 Cost Explorer calls, about $0.02 on your AWS bill"),
+                file=out,
+            )
         try:
             spend = _spend_snapshot(session)
         except Exception as exc:
@@ -957,17 +1278,50 @@ def run(args) -> int:
                     "your AWS session expired mid-run",
                     f"  fix: `aws sso login --profile {profile}`, then rerun",
                 ], "expired", t0, exc=exc)
-            # any other CE hiccup: proceed without the spend headline
+            else:
+                # Any other Cost Explorer failure: carry on without the spend
+                # headline, but say so rather than printing nothing.
+                from .analyzers.waste import error_code
+                spend_note = (f"Cost Explorer could not be read ({error_code(exc)}); "
+                              "no spend breakdown this run")
 
-    override = getattr(args, "regions", None)
+    override = _split_regions(getattr(args, "regions", None))
+    regions_unlisted = None
     if override:
         bad = [r for r in override if not _REGION_RE.match(r)]
         if bad:
-            return _fail(out, 1, [f"not valid region name(s): {', '.join(bad)}"],
-                         "bad-region-arg", t0, props={"n_bad": len(bad)})
+            return _fail(out, 1, [
+                f"not valid region name(s): {', '.join(bad)}",
+                "  fix: region codes, not names, e.g. `nable scan --regions us-east-1 eu-west-1`",
+            ], "bad-region-arg", t0, props={"n_bad": len(bad)})
+        # Shaped like a region is not a region: `eu-west-9` passed the pattern,
+        # 14 of 16 checks then failed on an endpoint that does not exist, and
+        # the scan still printed "nice" and exited 0. Ask AWS which exist.
+        try:
+            catalog = _region_catalog(session)
+        except Exception as exc:  # noqa: BLE001 - unvalidated, and the line below says so
+            from .analyzers.waste import error_code
+            catalog = None
+            print(_dim(f"could not check region names (ec2:DescribeRegions: "
+                       f"{error_code(exc)}); scanning them as given"), file=out)
+        if catalog:
+            unknown = [r for r in override if r not in catalog]
+            disabled = [r for r in override if catalog.get(r) == "not-opted-in"]
+            if unknown or disabled:
+                enabled = sorted(r for r, s in catalog.items() if s != "not-opted-in")
+                lines = []
+                if unknown:
+                    lines.append(f"not an AWS region: {', '.join(unknown)}")
+                if disabled:
+                    lines.append(f"not enabled for this account: {', '.join(disabled)} "
+                                 "(an opt-in region)")
+                lines.append(f"  regions this account can scan: {', '.join(enabled)}")
+                return _fail(out, 1, lines, "bad-region-arg", t0,
+                             props={"n_bad": len(unknown) + len(disabled)})
         regions = override
     else:
         regions = _pick_regions(spend, session)
+        regions_unlisted = getattr(regions, "error_code", None)
     if not regions:
         return _fail(out, EXIT_DENIED, [
             "could not determine any scannable region",
@@ -987,10 +1341,15 @@ def run(args) -> int:
 
     report = run_deep_audit(
         account_id=account_id,
-        regions=regions,
+        regions=list(regions),
         progress_callback=_progress,
         deadline_seconds=_SCAN_DEADLINE_S,
+        # Only for --profile: without it the audit keeps its own session, which
+        # honours AWS_ROLE_ARNS exactly as before.
+        session=session if flag_profile else None,
     )
+    if regions_unlisted and isinstance(report, dict) and not report.get("error"):
+        report["regions_unlisted"] = regions_unlisted
 
     if report.get("error"):
         # Send the TYPE, never the message: the message interpolates the
@@ -1045,7 +1404,8 @@ def run(args) -> int:
             "  fix: `nable scan --dry-run --json` prints the exact least-privilege",
             "       policy for the calls this scan makes, ready to paste",
         ], "permission" if denied else "all-checks-failed", t0,
-            props={"n_failed": len(checks_failed)})
+            props={"n_failed": len(checks_failed)},
+            json_error=False)  # the result document above already says it
         return _finish(code, lingering)
 
     if not has_results:
@@ -1087,18 +1447,35 @@ def run(args) -> int:
         extra_blocks, extra_abandoned = gather_extra_providers(_fams, spend=want_spend)
     lingering = lingering or extra_abandoned
 
-    _render(out, spend, report, demo=False, ce_denied=ce_denied, extra_blocks=extra_blocks)
+    _render(out, spend, report, demo=False, ce_denied=ce_denied, extra_blocks=extra_blocks,
+            spend_requested=want_spend, spend_note=spend_note)
     if as_json:
         print(json.dumps(_json_payload(
             spend, report, demo=False, profile=profile, account_id=account_id,
             duration_s=time.time() - t0, extra_blocks=extra_blocks,
+            credentials="environment" if env_keys else "profile",
         ), indent=2))
+
+    # Most checks could not run: a nonexistent region, or a policy missing most
+    # of the scan. What little came back cannot stand in for the account, so
+    # this is partial with no usable result, not a success with a banner.
+    ran = set(report.get("checks_run") or ())
+    not_run = {f.get("check") for f in checks_failed if not f.get("partial")} - ran
+    if not_run and len(not_run) > len(ran):
+        code = _fail(out, EXIT_PARTIAL_EMPTY, [
+            (f"{len(not_run)} of {len(not_run) + len(ran)} checks could not run; "
+             "these results do not cover the account"),
+            ("  fix: `nable scan --dry-run --json` prints the policy a scan needs, "
+             "and `--regions` takes regions this account has enabled"),
+        ], "most-checks-failed", t0, props={"n_failed": len(not_run)}, json_error=False,
+            docs_line=False)
+        return _finish(code, lingering)
 
     _emit("cli_scan_completed", {
         "demo": False,
         "spend": want_spend,
         "duration_s": round(time.time() - t0, 1),
-        "partial": bool(report.get("regions_timed_out")),
+        "partial": bool(report.get("regions_timed_out") or checks_failed),
         "ce_denied": ce_denied,
     }, wait=True)
     return _finish(EXIT_OK, lingering)
@@ -1121,6 +1498,7 @@ def add_parser(sub) -> None:
     p.add_argument("--debug", action="store_true", help="full tracebacks and per-check timing")
     p.add_argument("--profile", help="AWS profile to use (default: $AWS_PROFILE or 'default')")
     p.add_argument(
-        "--regions", nargs="+", metavar="REGION",
-        help="scan exactly these regions instead of the auto-discovered set",
+        "--regions", nargs="+", action="extend", metavar="REGION",
+        help="scan exactly these regions instead of the auto-discovered set "
+             "(space or comma separated; repeat the flag to add more)",
     )
