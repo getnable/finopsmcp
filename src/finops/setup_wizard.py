@@ -1679,8 +1679,8 @@ def setup_saas_api_key(
     provider_name: str,
     env_vars: list[tuple[str, str, bool]],
     note: str | None = None,
-) -> None:
-    """Generic wizard for API-key SaaS providers.
+) -> bool:
+    """Generic wizard for API-key SaaS providers. Returns True if anything was stored.
 
     note: printed up front. Use it for the providers that report usage but not
     dollars unless you supply a contract rate (or that have no billing API at
@@ -1722,6 +1722,7 @@ def setup_saas_api_key(
             })
         except Exception:
             pass
+    return stored_any
 
 
 def setup_sso() -> None:
@@ -3396,7 +3397,13 @@ def main(args: list[str] | None = None) -> None:
             setup_aws_account()
         return
     elif parsed.cmd in dispatch:
-        dispatch[parsed.cmd]()
+        if dispatch[parsed.cmd]() is False:
+            # "No OpenAI credentials entered. Nothing stored." was followed by
+            # "Done. Restart Claude Desktop, then ask ...". Nothing was done.
+            from .welcome import _cli
+            print(f"\n  Nothing was connected, so there is nothing to restart. Run "
+                  f"{_cli('setup ' + parsed.cmd)} again when you have the key.\n")
+            return
     else:
         # Bare `finops` / `uvx nable`: launch the guided welcome flow (auto-wire
         # the editor, ambient-credential scan, value moment, never dead-ends), so
@@ -3419,11 +3426,17 @@ def main(args: list[str] | None = None) -> None:
         else:
             indices = [int(x.strip()) - 1 for x in raw.split(",") if x.strip().isdigit()]
             selected = [providers[i] for i in indices if 0 <= i < len(providers)]
+        stored: list[bool | None] = []
         for p in selected:
             try:
-                dispatch[p]()
+                stored.append(dispatch[p]())
             except KeyboardInterrupt:
                 print("\n  Skipped.")
+                stored.append(False)
+        if stored and all(r is False for r in stored):
+            print("\n  Nothing was connected, so there is nothing to restart. Run "
+                  "this again when you have the keys.\n")
+            return
 
     # Always offer to configure Claude Desktop at the end of setup
     _configure_claude_desktop()

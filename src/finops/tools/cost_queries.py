@@ -44,6 +44,22 @@ async def get_cost_summary(
     if end_date:
         ed = _srv.date.fromisoformat(end_date)
 
+    # An LLM provider's spend lives on the LLM cost path, not in the cloud
+    # connector registry. get_cost_summary(provider="anthropic") used to find no
+    # connector by that name and answer "No cloud accounts connected ... call
+    # connect_aws" to someone whose Anthropic key was set.
+    if provider and not account and provider.strip().lower() in _LLM_COST_PROVIDERS:
+        key = provider.strip().lower()
+        llm = await _srv.get_llm_cost_by_model(days=max(1, (ed - sd).days), provider=key)
+        if isinstance(llm, dict):
+            llm = {**llm, "source_tool": "get_llm_cost_by_model",
+                   "note": (f"{key} spend comes from the LLM cost path. For every AI "
+                            "provider at once, call get_llm_costs.")}
+            if ed != _srv.date.today():
+                llm["period_note"] = ("LLM spend is read for the last "
+                                      f"{max(1, (ed - sd).days)} days ending today.")
+        return llm
+
     # Multi-account: swap in an account-specific AWS connector when requested
     if account:
         from ..accounts import get_boto3_session, resolve_named_account
@@ -2301,6 +2317,11 @@ def _no_cost_data(failed: dict, noun: str = "provider") -> dict:
 
 
 _NOT_ZERO = "This is not a finding of zero spend."
+
+# Providers whose spend get_all_llm_costs reads (connectors/llm_costs.py).
+_LLM_COST_PROVIDERS = frozenset({
+    "openai", "anthropic", "bedrock", "vertex", "openrouter", "litellm",
+})
 
 
 def _unread_costs(targets: dict, by_provider: dict) -> dict | None:

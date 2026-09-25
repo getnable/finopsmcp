@@ -472,3 +472,121 @@ def test_list_connected_providers_does_not_call_env_presence_connected(monkeypat
     assert out["snowflake"]["configured"] is True
     assert out["snowflake"]["status"] == "configured (not yet verified)"
     assert "check_connector_health" in out["_note"]
+
+
+# ── 7. AI spend: LLM providers are first-class, not "connect_aws" ─────────────
+
+def test_cost_summary_for_an_llm_provider_reads_the_llm_path(monkeypatch):
+    server = _cost_env(monkeypatch, {})
+    seen = {}
+
+    async def _by_model(days=30, provider=None):
+        seen.update(days=days, provider=provider)
+        return {"provider": provider, "total_usd": 12.5, "by_model": {"claude-x": 12.5},
+                "period": {"start": "2026-08-26", "end": "2026-09-25"}}
+
+    monkeypatch.setattr(server, "get_llm_cost_by_model", _by_model)
+    out = asyncio.run(server.get_cost_summary(provider="anthropic"))
+
+    assert "connect_aws" not in str(out), out
+    assert seen["provider"] == "anthropic"
+    assert out["total_usd"] == 12.5
+    assert out["source_tool"] == "get_llm_cost_by_model"
+
+
+def test_connector_health_includes_the_llm_connectors(monkeypatch):
+    import finops.server as server
+    from finops.connectors.saas import anthropic_usage, openai_usage
+
+    monkeypatch.delenv("FINOPS_DEMO", raising=False)
+    monkeypatch.setattr(server, "_ALL_CONNECTORS", {})
+
+    async def _yes():
+        return True
+
+    async def _no():
+        return False
+
+    monkeypatch.setattr(openai_usage, "is_configured", _yes)
+    monkeypatch.setattr(openai_usage, "get_costs",
+                        lambda s, e: {"source": "costs_api", "total_usd": 1.0, "by_model": {}})
+    monkeypatch.setattr(anthropic_usage, "is_configured", _no)
+    out = asyncio.run(server.check_connector_health())
+
+    by_name = {c["name"]: c for c in out["connectors"]}
+    assert by_name["openai"]["healthy"] is True
+    assert by_name["anthropic"]["configured"] is False
+    assert "finops setup anthropic" in by_name["anthropic"]["fix"]
+
+
+def test_connector_health_reports_an_unreadable_llm_key_as_broken(monkeypatch):
+    import finops.server as server
+    from finops.connectors.saas import openai_usage
+
+    monkeypatch.delenv("FINOPS_DEMO", raising=False)
+    monkeypatch.setattr(server, "_ALL_CONNECTORS", {})
+
+    async def _yes():
+        return True
+
+    monkeypatch.setattr(openai_usage, "is_configured", _yes)
+    monkeypatch.setattr(openai_usage, "get_costs",
+                        lambda s, e: {"source": "none", "reason": "api_error: 401",
+                                      "total_usd": 0.0})
+    out = asyncio.run(server.check_connector_health())
+
+    broken = {b["name"]: b for b in out["broken"]}
+    assert "openai" in broken, out
+    assert "401" in broken["openai"]["error"]
+
+
+def _welcome_text(monkeypatch, capsys):
+    from finops import welcome
+
+    monkeypatch.setattr(welcome, "_is_first_run", lambda: True)
+    monkeypatch.setattr(welcome, "_is_interactive_install", lambda: True)
+    monkeypatch.setattr(welcome, "_mark_welcomed", lambda: None)
+    monkeypatch.setattr(welcome, "_fire_telemetry", lambda *a, **k: None)
+    monkeypatch.setattr(welcome, "_agent_usage_teaser", lambda: None)
+    welcome.show_welcome()
+    return capsys.readouterr().out
+
+
+def test_welcome_does_not_list_sources_as_connected(monkeypatch, capsys):
+    out = _welcome_text(monkeypatch, capsys)
+    assert "Connected sources" not in out
+    assert "Supported sources" in out
+
+
+def test_welcome_telemetry_copy_matches_opt_in(monkeypatch, capsys):
+    out = _welcome_text(monkeypatch, capsys)
+    assert "sends anonymous usage pings" not in out
+    assert "Opt out: NABLE_NO_TELEMETRY" not in out
+    assert "off unless" in out
+    assert "NABLE_TELEMETRY=1" in out
+
+
+def test_llm_connect_with_no_key_entered_does_not_say_done(monkeypatch, capsys, tmp_path):
+    from finops import setup_wizard
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(setup_wizard, "_prompt", lambda *a, **k: "")
+    monkeypatch.setattr(setup_wizard, "_configure_claude_desktop", lambda: False)
+    monkeypatch.setattr("finops.welcome.show_welcome", lambda: None)
+    try:
+        setup_wizard.main(["setup", "openai"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+
+    assert "Nothing stored" in out
+    assert "Done." not in out, out
+    assert "finops setup openai" in out or "setup openai" in out
+
+
+def test_setup_saas_api_key_reports_whether_it_stored_anything(monkeypatch, tmp_path):
+    from finops import setup_wizard
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(setup_wizard, "_prompt", lambda *a, **k: "")
+    assert setup_wizard.setup_saas_api_key("OpenAI", [("OPENAI_API_KEY", "k", True)]) is False
