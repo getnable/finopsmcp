@@ -263,8 +263,10 @@ EC2_HOURLY: dict[str, float] = {
     "i4i.large": 0.172, "i4i.xlarge": 0.343, "i4i.2xlarge": 0.686,
 }
 
-# RDS, single-AZ, MySQL / PostgreSQL / MariaDB. Multi-AZ is twice this, applied
-# by the caller, which is the one that knows whether the instance is Multi-AZ.
+# RDS, single-AZ, MySQL / MariaDB (the two are priced identically). Multi-AZ
+# is twice this, applied by the caller, which is the one that knows whether the
+# instance is Multi-AZ. Callers that do not know the engine use this table;
+# PostgreSQL has its own rates below (rds_hourly picks between them).
 RDS_HOURLY: dict[str, float] = {
     "db.t3.micro": 0.017, "db.t3.small": 0.034, "db.t3.medium": 0.068,
     "db.t3.large": 0.136, "db.t3.xlarge": 0.272, "db.t3.2xlarge": 0.544,
@@ -280,6 +282,40 @@ RDS_HOURLY: dict[str, float] = {
     "db.r6g.large": 0.215, "db.r6g.xlarge": 0.43, "db.r6g.2xlarge": 0.859,
     "db.r7g.large": 0.239, "db.r7g.xlarge": 0.478, "db.r7g.2xlarge": 0.956,
 }
+
+# RDS for PostgreSQL, single-AZ. Not the MySQL table: from the AWS Price List
+# (AmazonRDS offer, version 20260924211011, us-east-1, OnDemand, Single-AZ,
+# Database Engine "PostgreSQL"), PostgreSQL runs 4-7% above MySQL/MariaDB on
+# the t3, m5, m6i, m6g, r5, r6i and r6g classes, and the same on t4g and r7g.
+# The same offer's MySQL and MariaDB rates match RDS_HOURLY exactly.
+RDS_HOURLY_POSTGRES: dict[str, float] = {
+    "db.t3.micro": 0.018, "db.t3.small": 0.036, "db.t3.medium": 0.072,
+    "db.t3.large": 0.145, "db.t3.xlarge": 0.29, "db.t3.2xlarge": 0.579,
+    "db.t4g.micro": 0.016, "db.t4g.small": 0.032, "db.t4g.medium": 0.065,
+    "db.t4g.large": 0.129,
+    "db.m5.large": 0.178, "db.m5.xlarge": 0.356, "db.m5.2xlarge": 0.712,
+    "db.m5.4xlarge": 1.424, "db.m5.8xlarge": 2.848, "db.m5.12xlarge": 4.272,
+    "db.m6i.large": 0.178, "db.m6i.xlarge": 0.356, "db.m6i.2xlarge": 0.712,
+    "db.m6g.large": 0.159, "db.m6g.xlarge": 0.318, "db.m6g.2xlarge": 0.636,
+    "db.r5.large": 0.25, "db.r5.xlarge": 0.5, "db.r5.2xlarge": 1.0,
+    "db.r5.4xlarge": 2.0, "db.r5.8xlarge": 4.0,
+    "db.r6i.large": 0.25, "db.r6i.xlarge": 0.5, "db.r6i.2xlarge": 1.0,
+    "db.r6g.large": 0.225, "db.r6g.xlarge": 0.45, "db.r6g.2xlarge": 0.899,
+    "db.r7g.large": 0.239, "db.r7g.xlarge": 0.478, "db.r7g.2xlarge": 0.956,
+}
+
+_RDS_BY_ENGINE: dict[str, dict[str, float]] = {
+    "mysql": RDS_HOURLY, "mariadb": RDS_HOURLY, "postgres": RDS_HOURLY_POSTGRES,
+}
+
+
+def rds_hourly(instance_class: str, engine: str) -> float | None:
+    """The single-AZ hourly rate for a class on an engine (mysql, mariadb or
+    postgres), or None for a class or engine the tables do not hold: Aurora,
+    SQL Server, Oracle and Db2 bill at other rates, and get no figure rather
+    than a MySQL one."""
+    return _RDS_BY_ENGINE.get(engine.lower(), {}).get(instance_class)
+
 
 # Rounded to cents at definition, for the reason given above ALB_PER_MONTH.
 EC2_MONTHLY: dict[str, float] = {

@@ -385,6 +385,7 @@ _INSTANCE_KEY = re.compile(
 _ALLOWED = {
     ("aws_prices.py", "EC2_HOURLY"): "the source of truth",
     ("aws_prices.py", "RDS_HOURLY"): "the source of truth",
+    ("aws_prices.py", "RDS_HOURLY_POSTGRES"): "the source of truth for RDS for PostgreSQL",
     ("connectors/aws_services/documentdb.py", "_INSTANCE_HOURLY_USD"):
         "DocumentDB, a different service whose db.r6g.* rates are not RDS's",
     ("connectors/databricks.py", "_NODE_DBU_MAP"):

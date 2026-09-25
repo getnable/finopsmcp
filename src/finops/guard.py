@@ -334,7 +334,7 @@ def _normalize(command: str) -> str:
     Classification and pricing must read the SAME form: when only the
     classifier stripped AWS global options, `aws --region us-east-1 ec2
     run-instances --instance-type p4d.24xlarge --count 8` classified as a
-    launch, found no price, and passed silently at ~$191k/mo."""
+    launch, found no price, and passed silently at six figures a month."""
     cmd = _mask_quoted_data(command)
     cmd = cmd.replace('"', "").replace("'", "")
     cmd = " ".join(cmd.split())  # normalize whitespace
@@ -525,7 +525,8 @@ def _strict() -> bool:
 
 # ── Command cost estimation ────────────────────────────────────────────────────
 # The gap this closes: `aws ec2 run-instances --instance-type p4d.24xlarge
-# --count 8` (~$191k/mo) classified as a reversible in-policy mutation and the
+# --count 8` (six figures a month at list) classified as a reversible
+# in-policy mutation and the
 # guard stayed silent, while policy.py's dollar threshold sat unreachable
 # because nothing on the shell path ever computed a dollar figure. Reversible
 # is not the same as cheap.
@@ -568,9 +569,10 @@ _GCE_CREATE_RE = _Rule(r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b(?!
 _AZ_VM_CREATE_RE = _Rule(r"\baz\s+(?:\S+\s+)*vm\s+create\b")
 _SHELL_BREAKS = ("&&", "||", ";", "|")
 
-# The engines _RDS_HOURLY's rates are for. Aurora bills per cluster instance
-# at other rates and SQL Server, Oracle and Db2 carry licence-included rates
-# the table does not hold: those get no figure, not a MySQL price.
+# The engines aws_prices.rds_hourly has rates for. Aurora bills per cluster
+# instance at other rates and SQL Server, Oracle and Db2 carry
+# licence-included rates the tables do not hold: those get no figure, not a
+# MySQL price.
 _RDS_TABLE_ENGINES = ("mysql", "postgres", "mariadb")
 
 
@@ -696,8 +698,8 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
     engine = (_flag(cmd, "engine") or "").lower()
     if not cls or engine not in _RDS_TABLE_ENGINES:
         return None
-    from .aws_prices import RDS_HOURLY
-    hourly = RDS_HOURLY.get(cls)
+    from .aws_prices import rds_hourly
+    hourly = rds_hourly(cls, engine)
     if not hourly:
         return None
     # Multi-AZ runs a standby of the same class: twice the instance hours,
@@ -720,18 +722,23 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
 def _price_rds_class_change(cmd: str, **_: Any) -> dict[str, Any] | None:
     """modify-db-instance to a new class: the new class's full rate. Neither
     the engine nor the current class is in the command, so the figure is the
-    MySQL/MariaDB rate for the new class, nothing subtracted, and the basis
-    says both."""
+    higher of the MySQL/MariaDB and PostgreSQL rates for the new class (the
+    ceiling a human is authorising), nothing subtracted, and the basis says
+    both."""
     cls = _flag(cmd, "db-instance-class")
     if not cls:
         return None
-    from .aws_prices import RDS_HOURLY
-    hourly = RDS_HOURLY.get(cls)
+    from .aws_prices import rds_hourly
+    rates = {"PostgreSQL": rds_hourly(cls, "postgres") or 0.0,
+             "MySQL/MariaDB": rds_hourly(cls, "mysql") or 0.0}
+    engine, hourly = max(rates.items(), key=lambda kv: kv[1])
     if not hourly:
         return None
+    if len(set(rates.values())) == 1:
+        engine = "MySQL, MariaDB and PostgreSQL alike"
     multi_az = _has_flag(cmd, "multi-az")
     monthly = hourly * (2 if multi_az else 1) * _hours_per_month()
-    basis = (f"{_ON_DEMAND_BASIS} for MySQL/MariaDB (the engine is not in the command), "
+    basis = (f"{_ON_DEMAND_BASIS}, the {engine} rate (the engine is not in the command), "
              "instance hours only, before subtracting the current class")
     return {
         "monthly_usd": round(monthly, 2),
@@ -1284,7 +1291,7 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         #
         # Priceable commands additionally go through the policy's dollar
         # threshold: reversible does not mean cheap, and launching 8x
-        # p4d.24xlarge is a ~$191k/mo decision whichever door it is. The
+        # p4d.24xlarge is a six-figure monthly decision whichever door it is. The
         # estimate rides the same evaluate_action_gate as everything else, so
         # the user's FINOPS_POLICY_MAX_AUTO_USD and learned adjustments apply.
         est = estimate_command_monthly_cost(command, cwd=cwd)
@@ -1419,7 +1426,7 @@ def _one_way_sentence(command: str, action_type: str, *, cwd: str | None) -> tup
 
 # What the guard let run without a human. An ask is not counted: the hook exits
 # before the human answers, so the ledger cannot tell an approved ask from a
-# declined one, and counting a declined $191k ask would put every launch for
+# declined one, and counting a declined six-figure ask would put every launch for
 # the next hour behind a prompt about money that was never spent.
 _LET_THROUGH = ("allow", "warn")
 _HISTORY_LISTED = 5

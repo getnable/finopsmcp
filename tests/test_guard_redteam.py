@@ -203,11 +203,17 @@ def test_their_cheap_neighbours_are_not(cmd):
     assert g.classify_command(cmd) is None, cmd
 
 
+def _rds_ceiling(cls: str) -> float:
+    """The engine is not in a modify command: the higher engine rate."""
+    from finops.aws_prices import rds_hourly
+    return max(rds_hourly(cls, "mysql"), rds_hourly(cls, "postgres"))
+
+
 def test_an_rds_class_change_prices_the_new_class():
     est = g.estimate_command_monthly_cost(
         "aws rds modify-db-instance --db-instance-identifier db "
         "--db-instance-class db.r5.2xlarge --apply-immediately")
-    assert est["monthly_usd"] == _monthly(RDS_HOURLY["db.r5.2xlarge"])
+    assert est["monthly_usd"] == _monthly(_rds_ceiling("db.r5.2xlarge"))
     assert "db.r5.2xlarge" in est["line"] and "current class" in est["basis"]
 
 
@@ -215,7 +221,7 @@ def test_an_rds_class_change_to_multi_az_prices_the_standby():
     est = g.estimate_command_monthly_cost(
         "aws rds modify-db-instance --db-instance-identifier db "
         "--db-instance-class db.r5.2xlarge --multi-az")
-    assert est["monthly_usd"] == _monthly(RDS_HOURLY["db.r5.2xlarge"], 2)
+    assert est["monthly_usd"] == _monthly(_rds_ceiling("db.r5.2xlarge"), 2)
 
 
 @pytest.mark.parametrize("flag", ["--instance-type p4d.24xlarge",
@@ -528,3 +534,73 @@ def test_the_policy_reason_is_plain_too():
     r = evaluate_action_gate("terminate_instance")
     assert r["gate"] == "escalate" and r["door"] == "one_way"
     assert "one-way door" not in r["reason"] and "cannot be undone" in r["reason"]
+
+
+# ── 8. PostgreSQL has its own RDS rates ───────────────────────────────────────
+
+def test_postgres_is_priced_from_its_own_rates():
+    """The AWS Price List (AmazonRDS offer 20260924211011, us-east-1, Single-AZ
+    on-demand) prices PostgreSQL 4-7% above MySQL/MariaDB on most classes."""
+    from finops.aws_prices import RDS_HOURLY_POSTGRES, rds_hourly
+    assert RDS_HOURLY_POSTGRES["db.r5.large"] == 0.25 and RDS_HOURLY["db.r5.large"] == 0.24
+    assert rds_hourly("db.r5.large", "postgres") == 0.25
+    assert rds_hourly("db.r5.large", "mysql") == rds_hourly("db.r5.large", "mariadb") == 0.24
+    assert rds_hourly("db.r5.large", "aurora-postgresql") is None
+    est = g.estimate_command_monthly_cost(
+        "aws rds create-db-instance --db-instance-identifier d --engine postgres "
+        "--db-instance-class db.m5.large")
+    assert est["monthly_usd"] == _monthly(0.178)
+
+
+def test_every_class_has_a_postgres_rate():
+    from finops.aws_prices import RDS_HOURLY_POSTGRES
+    assert set(RDS_HOURLY_POSTGRES) == set(RDS_HOURLY)
+    assert all(RDS_HOURLY_POSTGRES[c] >= RDS_HOURLY[c] for c in RDS_HOURLY)
+
+
+def test_a_class_change_with_no_engine_prices_the_higher_rate():
+    est = g.estimate_command_monthly_cost(
+        "aws rds modify-db-instance --db-instance-identifier d --db-instance-class db.r5.large")
+    assert est["monthly_usd"] == _monthly(0.25)
+    assert "PostgreSQL" in est["basis"] and "engine is not in the command" in est["basis"]
+
+
+def test_no_stale_dollar_figures_in_the_guard_source():
+    import inspect
+    src = inspect.getsource(g)
+    assert "191k" not in src, "the 8x p4d figure moved; derive it or leave it out"
+
+
+# ── the CLI around the guard ──────────────────────────────────────────────────
+
+def _cli(capsys, *argv):
+    import finops.setup_wizard as sw
+    code = 0
+    try:
+        sw.main(list(argv))
+    except SystemExit as e:
+        code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
+    return code, capsys.readouterr()
+
+
+def test_guard_check_without_a_command_is_a_usage_error(capsys):
+    code, out = _cli(capsys, "guard", "check")
+    assert code == 2
+    assert "Usage: nable guard check --command" in out.out + out.err
+
+
+@pytest.mark.parametrize("cmd", ["aws s3 ls", "terraform apply"])
+def test_guard_check_allow_lines_have_no_em_dash(capsys, cmd):
+    code, out = _cli(capsys, "guard", "check", "--command", cmd)
+    assert code == 0 and "allow" in out.out
+    assert "\u2014" not in out.out
+
+
+def test_guard_try_does_not_say_install_when_installed(capsys, monkeypatch, tmp_path):
+    settings = tmp_path / "settings.json"
+    monkeypatch.setattr(g, "_settings_path", lambda global_scope: settings)
+    monkeypatch.setattr("shutil.which", lambda n, *a, **k: "/usr/bin/uvx" if n == "uvx" else None)
+    g.install()
+    _, out = _cli(capsys, "guard", "try")
+    assert "nable guard install" not in out.out
+    assert "already" in out.out and "installed" in out.out

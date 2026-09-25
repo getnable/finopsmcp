@@ -54,8 +54,9 @@ RDS = "aws rds create-db-instance --db-instance-identifier orders --engine postg
 
 
 def test_rds_is_priced_from_the_rds_table():
+    # PostgreSQL's own rate, not MySQL's 0.24 (aws_prices.RDS_HOURLY_POSTGRES)
     est = g.estimate_command_monthly_cost(f"{RDS} --db-instance-class db.r5.large")
-    assert est["monthly_usd"] == pytest.approx(0.24 * 730)
+    assert est["monthly_usd"] == pytest.approx(0.25 * 730)
     assert "list price" in est["basis"] and "storage" in est["basis"], \
         "the basis must say storage is not in the figure"
 
@@ -73,7 +74,7 @@ def test_multi_az_doubles_the_instance_hours():
 def test_an_expensive_database_asks_with_the_number():
     v = g.gate_command(f"{RDS} --db-instance-class db.r5.4xlarge --multi-az")
     assert v and v["decision"] == "ask"
-    assert "$2,803" in v["reason"]
+    assert "$2,920" in v["reason"]          # PostgreSQL: $2.00/hr x2 x 730
     assert v["estimate"]["basis"] in v["reason"]
 
 

@@ -2447,8 +2447,12 @@ def _run_guard(parsed) -> None:
                 else:
                     print(f"    {green('allow')}  not an infra-mutating command: the guard stays silent")
             print()
-        print("  Wire this into Claude Code so it runs on every agent command:")
-        print(f"    {cyan('nable guard install')}")
+        if any(guard.is_installed(guard._settings_path(g)) for g in (False, True)):
+            print("  The guard is already installed in Claude Code, so it runs on every")
+            print(f"  agent command. {dim('nable guard status')} shows where.")
+        else:
+            print("  Wire this into Claude Code so it runs on every agent command:")
+            print(f"    {cyan('nable guard install')}")
         print()
         return
 
@@ -2507,16 +2511,18 @@ def _run_guard(parsed) -> None:
     if action == "check":
         cmd = getattr(parsed, "guard_command", "")
         if not cmd:
-            print("\n  Usage: nable guard check --command \"terraform destroy ...\"\n")
-            return
+            print("\n  Usage: nable guard check --command \"terraform destroy ...\"\n",
+                  file=sys.stderr)
+            raise SystemExit(2)
         verdict = guard.gate_command(cmd, harness="cli", record=False)
         print()
         if verdict is None:
             hit = guard.classify_command(cmd)
             if hit:
-                print(f"  {green('allow')}  ({hit[1]}, reversible and in policy) — the guard stays silent")
+                print(f"  {green('allow')}  ({hit[1]}, reversible and in policy): "
+                      "the guard stays silent")
             else:
-                print(f"  {green('allow')}  not an infra-mutating command — the guard stays silent")
+                print(f"  {green('allow')}  not an infra-mutating command: the guard stays silent")
         else:
             print(f"  {cyan(verdict['decision'])}  {verdict['reason']}")
         print()
