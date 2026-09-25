@@ -11,8 +11,9 @@ So every entry carries a grade:
            it. A leaked credential reads billing and nothing else.
   inventory
            Read-only, but wider than billing: the credential lists and describes
-           resources and reads their metrics. It can change nothing, and it
-           reads resource names, sizes and settings, not the data inside them.
+           resources and reads their metrics. It can change nothing. It reads
+           resource names, sizes and settings, and on AWS those settings include
+           Lambda and ECS environment variables, which can hold secrets.
   role     No per-key scope, but you can put the key behind a limited role or
            user. Tight in the end, though it is your role assignment doing the
            work, not the key itself.
@@ -41,7 +42,8 @@ GRADE_ORDER = (ACCOUNT, INVENTORY, ROLE, SCOPED)
 GRADE_LABEL = {
     SCOPED: "Billing-only scope. A leaked key reads billing and nothing else.",
     INVENTORY: ("Read-only inventory scope. A leaked key can list and describe resources "
-                "and read their metrics, and change nothing."),
+                "and read their metrics, and change nothing. Describing a resource can "
+                "return its environment variables, so keep secrets out of them."),
     ROLE: "No per-key scope. Put the key behind a limited role or user.",
     ACCOUNT: "No narrower option exists. The key is as powerful as the account.",
 }
@@ -75,8 +77,12 @@ CONNECTOR_SCOPES: dict[str, Scope] = {
         note="Every action in the policy is a read, but it is not billing-only: "
              "finding waste means listing volumes, instances, buckets, load "
              "balancers and their metrics. It reads no object contents and no "
-             "log events. Cost Explorer is not in the default set, so the "
-             "default scan cannot spend your money.",
+             "log events, but lambda:ListFunctions, "
+             "lambda:GetFunctionConfiguration and ecs:DescribeTaskDefinition "
+             "return environment variables, so any secret stored in one is "
+             "readable with this key. Keep secrets in Secrets Manager or SSM "
+             "Parameter Store, not in environment variables. Cost Explorer is "
+             "not in the default set, so the default scan cannot spend your money.",
         env=("AWS_ACCESS_KEY_ID", "AWS_PROFILE"),
     ),
     "azure": Scope(

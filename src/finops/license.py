@@ -565,8 +565,13 @@ def validate_key(key: str) -> LicenseStatus:
     if not key:
         # No key — give a 7-day pro trial, then drop to free forever
         trial_start   = _get_or_create_trial_start()
+        if trial_start > date.today():
+            # A start in the future (clock moved back, or a copied store) would
+            # grant more than the trial length. Treat it as starting today.
+            trial_start = date.today()
+            _file_set(trial_start)
         days_used     = (date.today() - trial_start).days
-        days_remaining = max(0, _TRIAL_DAYS - days_used)
+        days_remaining = min(_TRIAL_DAYS, max(0, _TRIAL_DAYS - days_used))
 
         if days_remaining > 0:
             return LicenseStatus(
@@ -717,18 +722,22 @@ def store_license(key: str) -> LicenseStatus:
     return status
 
 
-def clear_license() -> None:
+def clear_license() -> str:
     """Remove the locally stored license (used by `finops logout`, which also
     removes copies earlier releases wrote into editor MCP configs). An explicit
     FINOPS_LICENSE_KEY in the process environment is left untouched; logout
-    warns about it."""
+    warns about it.
+
+    Returns what happened, so logout can say it: "removed", "none" (the vault
+    held no license) or "failed" (the vault could not be opened or changed)."""
     global _status
     try:
         from .security.vault import Vault
-        Vault.default().delete("FINOPS_LICENSE_KEY")
+        result = "removed" if Vault.default().delete("FINOPS_LICENSE_KEY") else "none"
     except Exception:
-        pass
+        result = "failed"
     _status = None
+    return result
 
 
 def check_license() -> LicenseStatus:

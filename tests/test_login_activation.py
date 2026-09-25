@@ -7,6 +7,8 @@ guarantee that an invalid key is never persisted.
 """
 import importlib
 
+import pytest
+
 # Throwaway test keypair (same one used by test_license_v2): the public half is
 # injected into the reloaded module so validation uses the test key, not the
 # bundled production key.
@@ -108,4 +110,20 @@ def test_run_login_rejects_a_bad_email_without_touching_the_network(monkeypatch)
     # An obviously invalid email must short-circuit before any HTTP call.
     from finops import setup_wizard
 
-    setup_wizard._run_login("notanemail")  # no "@" -> early return, no exception
+    assert setup_wizard._run_login("notanemail") == 1  # no "@" -> early return, no exception
+
+
+def test_nable_login_exits_nonzero_when_sign_in_fails(monkeypatch):
+    """Every failure used to return None, so `nable login` exited 0 and a
+    script could not tell it had not signed in."""
+    import urllib.request
+
+    from finops import setup_wizard
+
+    def _unreachable(*a, **k):
+        raise OSError("network is down")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _unreachable)
+    with pytest.raises(SystemExit) as e:
+        setup_wizard.main(["login", "buyer@example.com"])
+    assert e.value.code == 1

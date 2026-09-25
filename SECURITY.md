@@ -13,8 +13,10 @@ answer yes to the one-time question the CLI asks after a command, or set
 `NABLE_TELEMETRY=1`. `NABLE_NO_TELEMETRY=1`, `DO_NOT_TRACK=1` and
 `FINOPS_AIRGAP=1` keep it off even if something else opts in, and CI runners
 never send. `nable doctor` shows the current state. Until telemetry is on,
-nothing is written for it either: the random install id file
-(`~/.config/finops/.install_id`) is created only once you opt in. An opted-in
+the only thing written for it is your answer to that question
+(`~/.config/finops/.telemetry`, `yes` or `no`), so it is asked once. The random
+install id file (`~/.config/finops/.install_id`) is created only once you opt
+in. An opted-in
 event goes to PostHog (`us.i.posthog.com`, IP dropped server-side) and carries
 only:
 
@@ -40,6 +42,14 @@ welcome or the MCP server starts (at most once per process, 2 second cap). It
 sends nothing about you beyond what any HTTPS request carries. Turn it off with
 `FINOPS_NO_UPDATE_CHECK=1` or `NABLE_NO_UPDATE_CHECK=1`; `NABLE_NO_TELEMETRY=1`,
 `DO_NOT_TRACK=1` and `FINOPS_AIRGAP=1` also disable it.
+
+**Sign-in and the setup email, both only when you ask.** `nable login` POSTs
+your email to `https://getnable.com/api/account/send-code`, then the email and
+the code you type to `https://getnable.com/api/account/verify-code`, which
+returns your license key. After `nable setup`, an optional prompt offers the
+quickstart guide by email; only if you type an address is it POSTed to
+`https://getnable.com/api/subscribe`. That prompt is skipped under
+`FINOPS_AIRGAP=1`.
 
 **LLM calls you turn on.** The optional recommendation critic
 (`NABLE_CRITIC_LLM=1` together with `ANTHROPIC_API_KEY`) sends a

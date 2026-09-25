@@ -628,8 +628,8 @@ def _check_license() -> dict:
                 "warnings": []}
     # free
     return {"name": "License", "ok": None,
-            "detail": ("Free tier. To activate a paid key, set FINOPS_LICENSE_KEY in your "
-                       "nable MCP config env block (then fully restart your editor)."),
+            "detail": ("Free tier. To activate a paid plan, run `nable login` or "
+                       "`nable license <key>` (then fully restart your editor)."),
             "warnings": []}
 
 

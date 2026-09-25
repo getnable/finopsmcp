@@ -908,12 +908,15 @@ def main(args) -> int:
         if getattr(args, "debug", False):
             raise
         out = sys.stderr if getattr(args, "json", False) else sys.stdout
-        return _fail(out, 1, [
+        # A crash mid-scan can leave region workers blocked in boto3, so exit
+        # the way the Ctrl-C path does rather than wait on them at shutdown.
+        return _finish(_fail(out, 1, [
             f"nable scan stopped on an unexpected error ({type(exc).__name__})",
             "  this is most likely a bug in nable rather than your AWS setup",
             "  `nable scan --debug` prints the full trace; please include it in a report:",
             "  https://github.com/getnable/finopsmcp/issues/new",
-        ], "crash", t0, exc=exc, props={"crash_site": _crash_site(exc)})
+        ], "crash", t0, exc=exc, props={"crash_site": _crash_site(exc)}),
+            _threads_lingering())
 
 
 def run(args, t0: float | None = None) -> int:
@@ -940,7 +943,10 @@ def run(args, t0: float | None = None) -> int:
             print(render_dry_run(want))
         return EXIT_OK
 
-    demo = bool(getattr(args, "demo", False)) or os.getenv("FINOPS_DEMO") == "1"
+    # The env side of demo is decided the way the MCP server decides it, so
+    # FINOPS_DEMO means the same thing to `nable scan` as to the server.
+    from .demo_data import is_demo
+    demo = bool(getattr(args, "demo", False)) or is_demo()
     want_spend = bool(getattr(args, "spend", False))
     # Where the profile name came from, read BEFORE --profile is exported:
     # the missing-profile message used to read AWS_PROFILE back after setting

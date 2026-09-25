@@ -33,7 +33,7 @@ class _FakeVault:
         return self.data.get(k)
 
     def delete(self, k):
-        self.data.pop(k, None)
+        return self.data.pop(k, None) is not None
 
     def list_keys(self):
         return list(self.data)
@@ -144,3 +144,109 @@ def test_after_logout_the_plan_is_not_paid(home):
     _configs(home, key)
     W._run_logout()
     assert L.check_license().mode in ("trial", "free")
+
+
+# ── Re-running setup must not drop a paying user to free ─────────────────────
+# The rewrite stripped a key an earlier release wrote into the config, saying
+# "the vault holds it", without checking. For someone whose only copy was the
+# config, the next restart was the free tier.
+
+class _BrokenVault(_FakeVault):
+    def store(self, k, v):
+        raise OSError("vault is read-only")
+
+
+def _use_vault(monkeypatch, vault):
+    from finops.security import vault as vault_mod
+    monkeypatch.setattr(vault_mod.Vault, "default", classmethod(lambda cls: vault))
+
+
+def _cursor_with_key(home, key):
+    return _write(home / ".cursor" / "mcp.json",
+                  {"mcpServers": {"nable": {"command": "old",
+                                            "env": {"FINOPS_LICENSE_KEY": key, "X": "1"}}}})
+
+
+def test_merge_write_moves_a_config_only_key_into_the_vault(home, capsys):
+    from finops.security.vault import Vault
+    key = L.generate_key("buyer@example.com", plan="pro")
+    p = _cursor_with_key(home, key)
+    assert W._merge_write_mcpservers(p, {"command": "new"})
+    assert Vault.default().get("FINOPS_LICENSE_KEY") == key
+    assert key not in p.read_text()
+    assert "into the vault" in capsys.readouterr().out
+    assert L.check_license().mode == "pro"
+
+
+def test_merge_write_keeps_the_key_when_the_vault_cannot_take_it(home, monkeypatch):
+    key = L.generate_key("buyer@example.com", plan="pro")
+    _use_vault(monkeypatch, _BrokenVault())
+    p = _cursor_with_key(home, key)
+    assert W._merge_write_mcpservers(p, {"command": "new"})
+    env = json.loads(p.read_text())["mcpServers"]["nable"]["env"]
+    assert env["FINOPS_LICENSE_KEY"] == key and env["X"] == "1"
+
+
+def test_merge_write_drops_the_copy_when_the_vault_already_has_a_key(home):
+    from finops.security.vault import Vault
+    Vault.default().store("FINOPS_LICENSE_KEY", "FINOPS-2-vault-copy")
+    key = L.generate_key("buyer@example.com", plan="pro")
+    p = _cursor_with_key(home, key)
+    W._merge_write_mcpservers(p, {"command": "new"})
+    assert key not in p.read_text()
+    assert Vault.default().get("FINOPS_LICENSE_KEY") == "FINOPS-2-vault-copy"
+
+
+def _desktop_with_key(home, key):
+    return _write(_desktop(home), {"mcpServers": {"nable": {
+        "command": "old", "env": {"FINOPS_LICENSE_KEY": key, "AWS_REGION": "us-east-1"}}}})
+
+
+def test_claude_desktop_setup_moves_a_config_only_key_into_the_vault(home, monkeypatch):
+    from finops.security.vault import Vault
+    monkeypatch.setattr(W, "_prompt", lambda *a, **k: "y")
+    key = L.generate_key("buyer@example.com", plan="pro")
+    p = _desktop_with_key(home, key)
+    assert W._configure_claude_desktop_inner()
+    assert Vault.default().get("FINOPS_LICENSE_KEY") == key
+    env = json.loads(p.read_text())["mcpServers"]["nable"]["env"]
+    assert env == {"AWS_REGION": "us-east-1"}
+
+
+def test_claude_desktop_setup_keeps_the_key_when_the_vault_cannot_take_it(home, monkeypatch):
+    monkeypatch.setattr(W, "_prompt", lambda *a, **k: "y")
+    _use_vault(monkeypatch, _BrokenVault())
+    key = L.generate_key("buyer@example.com", plan="pro")
+    p = _desktop_with_key(home, key)
+    W._configure_claude_desktop_inner()
+    env = json.loads(p.read_text())["mcpServers"]["nable"]["env"]
+    assert env["FINOPS_LICENSE_KEY"] == key
+
+
+# ── Logout says what actually happened ───────────────────────────────────────
+
+def test_logout_says_it_removed_a_stored_license(home, capsys):
+    from finops.security.vault import Vault
+    Vault.default().store("FINOPS_LICENSE_KEY", "FINOPS-2-stored")
+    W._run_logout()
+    assert "The license is removed from this machine's vault" in capsys.readouterr().out
+
+
+def test_logout_with_nothing_stored_does_not_claim_a_removal(home, capsys):
+    W._run_logout()
+    out = capsys.readouterr().out
+    assert "No license was stored" in out
+    assert "is removed from" not in out
+
+
+def test_logout_says_when_the_vault_could_not_be_changed(home, monkeypatch, capsys):
+    from finops.security import vault as vault_mod
+
+    def _no_vault(cls):
+        raise OSError("keyring locked")
+
+    monkeypatch.setattr(vault_mod.Vault, "default", classmethod(_no_vault))
+    W._run_logout()
+    out = capsys.readouterr().out
+    assert "Could not open or change this machine's vault" in out
+    assert "is removed from" not in out
