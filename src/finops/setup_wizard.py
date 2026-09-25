@@ -2798,6 +2798,9 @@ def _guard_doctor_budgets(b: dict) -> None:
         old = ("from last month" if b.get("previous_month")
                else f"{age_words(b.get('age_hours'))} old")
         fresh = amber(f"spend figure {old}, not used (nable budget refresh)")
+    elif state == "no_data":
+        fresh = amber("no cost data for this period yet, so budgets are not checked "
+                      "(sync cost data, then nable budget refresh)")
     else:
         fresh = f"spend figure from {age_words(b.get('age_hours'))} ago"
         if b.get("spend_through"):
