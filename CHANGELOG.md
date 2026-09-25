@@ -45,6 +45,19 @@ hook, and fixed.
 - **Demo mode is a real preview.** 47 sample-backed tools instead of 198,
   every answer labelled, one consistent dataset, and connect works from
   inside demo.
+- **AI cost by project, team, customer.** `get_ai_cost_attribution` and
+  `nable ai-costs --by project|workspace|api_key|team|user|tag`, from OpenAI
+  projects and keys, Anthropic workspaces, LiteLLM teams, keys, users and
+  tags, and Langfuse tags, users and sessions. OpenAI costs now read billed
+  dollars (the old query used a grouping the endpoint rejects).
+- **Why it spiked.** `nable why` and `root_cause=True` on the anomaly and
+  cost-driver tools name the resources behind a rise and the CloudTrail
+  change that started them, with who made it and whether the guard allowed
+  it. A change is named as the cause only when resource, region and time
+  line up.
+- **Hard stop on budget left.** The guard weighs a priced change against
+  the cloud budget remaining; `on_budget_breach: deny` makes it a block.
+  `nable budget ci-gate --fail-on-breach` fails a pipeline step.
 - New: DynamoDB provisioned-capacity check, and prices checked against the
   AWS Price List (EC2, RDS per engine, EBS, load balancers, NAT).
 
