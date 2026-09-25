@@ -124,6 +124,17 @@ GUARD_RECONCILE_ACTIONS: list[tuple[str, str]] = [
     ("cloudtrail.lookup_events", "cloudtrail:LookupEvents"),
 ]
 
+# Only for `nable why` and the tools' root_cause=True (anomaly/drilldown.py):
+# the usage types and resources behind a cost change. Billed at $0.01 a
+# request, like SPEND_ACTIONS, and not in the scan policy.
+# GetCostAndUsageWithResources also needs the account to opt in to
+# resource-level data in Cost Explorer preferences. The CloudTrail half of the
+# answer needs GUARD_RECONCILE_ACTIONS.
+WHY_ACTIONS: list[tuple[str, str]] = [
+    ("ce.get_cost_and_usage", "ce:GetCostAndUsage"),
+    ("ce.get_cost_and_usage_with_resources", "ce:GetCostAndUsageWithResources"),
+]
+
 # A verb that changes anything. The manifest is a promise that none appear, and
 # the test enforces it, so a mutating call cannot be added here quietly.
 _MUTATING = ("create", "delete", "put", "update", "modify", "terminate",

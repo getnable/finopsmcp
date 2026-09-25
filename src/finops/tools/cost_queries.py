@@ -1957,6 +1957,7 @@ async def run_full_cost_audit(
 async def explain_recent_cost_drivers(
     days: int = 30,
     top_n: int = 10,
+    root_cause: bool = False,
 ) -> dict:
     """
     Explain what drove cost changes across all connected providers in the last N days.
@@ -1975,9 +1976,19 @@ async def explain_recent_cost_drivers(
     Args:
         days:  Comparison window length in days (default 30)
         top_n: Number of top drivers to return (default 10)
+        root_cause: For the top 3 AWS services that increased, also find the
+            usage types and resources behind each increase and the change
+            that started it (CloudTrail: who, when, via console/cli/terraform,
+            and the guard's verdict), labelled "confirmed (resource id match)"
+            or "likely", plus what could not be read. Off by default: it makes
+            billed Cost Explorer requests (about $0.01 each, 2 or more per
+            service) and the answer says how many. Set it when the user asks
+            which resource or whose change drove an increase, or after a first
+            call showed an AWS service rising and they want to know why.
     Examples:
         - "Why did costs go up this week?"
         - "What drove spend recently?"
+        - "Which instances made EC2 go up, and who launched them?" (root_cause=True)
 
     """
     from ..demo_data import is_demo, get_demo_response
@@ -2145,10 +2156,44 @@ async def explain_recent_cost_drivers(
                 f"PARTIAL: {', '.join(sorted(failed))} could not be read. "
                 + result["summary"]
             )
+        if root_cause:
+            result["root_cause"] = await _drivers_root_cause(
+                active, prov_now, [] if no_prior_rows else increases, days, today)
         return result
     except Exception as exc:
         _srv.log.error("explain_recent_cost_drivers failed: %s", exc)
         return {"error": str(exc)}
+
+
+_ROOT_CAUSE_SERVICES = 3
+
+
+async def _drivers_root_cause(active: dict, prov_now: dict, increases: list[dict],
+                              days: int, today) -> dict:
+    """The drill-down for the top AWS services that increased. Billed Cost
+    Explorer requests: counted and said in the answer."""
+    import asyncio
+
+    from ..anomaly.drilldown import windows_for_period
+    from ..anomaly.root_cause import combine, explain
+
+    aws = (prov_now or {}).get("aws") or {}
+    if "aws" not in active or aws.get("error"):
+        return {"lines": [], "note": ("Root cause reads AWS only (Cost Explorer and "
+                                      "CloudTrail), and AWS is not connected or was not "
+                                      "read for this period.")}
+    aws_services = set(aws.get("by_service") or {})
+    services = [d["key"] for d in sorted(increases, key=lambda d: -d["delta"])
+                if d["key"] in aws_services][:_ROOT_CAUSE_SERVICES]
+    if not services:
+        return {"lines": [], "note": "No AWS service increased over this period."}
+    # None lets explain() build the default session inside the worker thread:
+    # resolving credentials can block, and this runs on the event loop.
+    session = getattr(active.get("aws"), "_session", None)
+    current, baseline = windows_for_period(days, today)
+    results = [await asyncio.to_thread(explain, svc, current, baseline, session=session)
+               for svc in services]
+    return combine(results)
 
 
 @_srv.mcp.tool()
