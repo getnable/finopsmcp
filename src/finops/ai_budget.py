@@ -394,7 +394,7 @@ def _file_responses(path: Path, st: os.stat_result,
 
 
 class _TallyEntry:
-    __slots__ = ("size", "mtime_ns", "ino", "offset", "lines", "tail", "responses")
+    __slots__ = ("ino", "lines", "mtime_ns", "offset", "responses", "size", "tail")
 
     def __init__(self, data: dict[str, Any]):
         self.size = int(data["size"])
@@ -656,12 +656,12 @@ def _source_notes(sources: dict[str, Any]) -> list[str]:
     if not isinstance(cursor, dict):
         return []
     if cursor.get("not_read"):
-        return [f"Cursor usage was not read ({cursor['not_read']}), so it is not in "
-                f"these figures."]
+        return [(f"Cursor usage was not read ({cursor['not_read']}), so it is not in "
+                 f"these figures.")]
     if cursor.get("truncated"):
-        return ["The Cursor figure is a lower bound: the Admin API had more usage events "
-                f"than the {harness_usage._CURSOR_MAX_PAGES * harness_usage._CURSOR_PAGE:,} "
-                "a read takes."]
+        cap = harness_usage._CURSOR_MAX_PAGES * harness_usage._CURSOR_PAGE
+        return [(f"The Cursor figure is a lower bound: the Admin API had more usage "
+                 f"events than the {cap:,} a read takes.")]
     return []
 
 

@@ -2,8 +2,8 @@
 Anthropic API cost and usage connector.
 
 Tracks spend across Claude models via:
-  1. Anthropic Cost API — /v1/organizations/cost_report (actual USD)
-  2. Messages Usage API — /v1/organizations/usage_report/messages (token counts
+  1. Anthropic Cost API: /v1/organizations/cost_report (actual USD)
+  2. Messages Usage API: /v1/organizations/usage_report/messages (token counts
      per model), which enriches the Cost API result with tokens, and when the
      Cost API cannot be read is priced per model from finops.llm_prices
      (source="estimated")
@@ -14,8 +14,8 @@ Every one of these is an Admin API endpoint: they need ANTHROPIC_ADMIN_KEY
 (sk-ant-admin...), and the Admin key names the organization.
 
 Env vars:
-  ANTHROPIC_API_KEY          — standard key (cannot read cost or usage reports)
-  ANTHROPIC_ADMIN_KEY        — org-level Admin key (needed for cost and usage)
+  ANTHROPIC_API_KEY          standard key (cannot read cost or usage reports)
+  ANTHROPIC_ADMIN_KEY        org-level Admin key (needed for cost and usage)
 """
 from __future__ import annotations
 
