@@ -30,6 +30,18 @@ def _c(s: str, color: str) -> str:
     return s if not sys.stdout.isatty() else f"{color}{s}{_RST}"
 
 
+def _days(raw: str) -> int:
+    """argparse type for --days: a whole number of days, at least 1."""
+    import argparse
+    try:
+        n = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a whole number of days: {raw!r}") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1 day, got {n}")
+    return n
+
+
 def add_parser(sub) -> None:
     p = sub.add_parser(
         "ai-costs",
@@ -43,7 +55,7 @@ def add_parser(sub) -> None:
                         "agent read request or trace tags")
     p.add_argument("--provider", choices=("openai", "anthropic", "litellm", "langfuse"),
                    help="ask only this provider")
-    p.add_argument("--days", type=int, default=30, metavar="N",
+    p.add_argument("--days", type=_days, default=30, metavar="N",
                    help="lookback window in days (default 30)")
     p.add_argument("--json", action="store_true", help="machine-readable output on stdout")
     p.set_defaults(cmd="ai-costs")
@@ -56,7 +68,9 @@ def _usd(v: float) -> str:
 def render(result: dict, days: int) -> str:
     """The human table for a get_ai_cost_attribution() result."""
     dim = result.get("dimension", "")
-    lines = [_c(f"AI cost by {dim.replace('_', ' ')}, last {days} days "
+    days = result.get("days") or days     # the days the period really covers
+    lines = [_c(f"AI cost by {dim.replace('_', ' ')}, last {days} "
+                f"day{'' if days == 1 else 's'} "
                 f"({result.get('period', '')})", _BOLD), ""]
     if result.get("dimension_note"):
         lines += [_c(result["dimension_note"], _DIM), ""]
@@ -106,7 +120,10 @@ def render(result: dict, days: int) -> str:
 def run(args) -> int:
     from .connectors import ai_attribution
 
-    days = max(1, int(getattr(args, "days", 30) or 30))
+    raw = getattr(args, "days", None)
+    # --days is checked by argparse; a caller that builds args itself gets 0
+    # or less clamped to one day, not silently widened to 30.
+    days = 30 if raw is None else max(1, int(raw))
     result = ai_attribution.get_ai_cost_attribution(
         getattr(args, "by", "project"), provider=getattr(args, "provider", None), days=days)
 

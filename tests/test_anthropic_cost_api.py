@@ -132,6 +132,7 @@ def test_get_costs_prefers_cost_api_when_admin_key_present(monkeypatch):
         "by_model": {"claude-opus-4-6": 42.0}, "by_model_tokens": {}, "daily": []})
     # get_costs also reads by_workspace from the Cost API; keep this test offline.
     monkeypatch.setattr(a, "_fetch_by_workspace", lambda *a_: {})
+    monkeypatch.setattr(a, "_fetch_usage_report", lambda *a_: {})
 
     out = a.get_costs(date(2026, 6, 1), date(2026, 6, 2))
     assert out["source"] == "cost_api"
@@ -189,16 +190,126 @@ def test_kpi_uses_cache_path_when_tokens_present():
     assert "grade" in report["cache_hit_rate"]   # real cache analysis ran
 
 
-def test_get_costs_cost_api_no_org_id_then_kpi_is_honest(monkeypatch):
-    # GAP 4 end to end: the exact promoted config (admin key, no org id) yields a
-    # token-less cost_api result, which must produce an honest KPI, not an F.
-    env = {"ANTHROPIC_ADMIN_KEY": "sk-ant-admin-x"}  # deliberately no ORGANIZATION_ID
+def _routed(cost=None, usage=None, fail=None):
+    """A fake httpx.get answering the cost report, the usage report and the
+    workspace list by path; `fail` maps a path to the exception to raise."""
+    calls = []
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append((url, dict(params or {})))
+        for path, exc in (fail or {}).items():
+            if path in url:
+                raise exc
+        if "cost_report" in url:
+            return _FakeResp(cost or {"data": [], "has_more": False})
+        if "usage_report/messages" in url:
+            return _FakeResp(usage or {"data": [], "has_more": False})
+        return _FakeResp({"data": [], "has_more": False})
+    return fake_get, calls
+
+
+def _admin_env(monkeypatch, env=None):
+    env = {"ANTHROPIC_ADMIN_KEY": "sk-ant-admin-x"} if env is None else env
     monkeypatch.setattr("finops.security.env.get_env",
                         lambda k, default=None: env.get(k, default))
+
+
+_USAGE = {"data": [{
+    "starting_at": "2026-06-01T00:00:00Z", "ending_at": "2026-06-02T00:00:00Z",
+    "results": [
+        {"model": "claude-sonnet-4-6", "uncached_input_tokens": 1_000_000,
+         "output_tokens": 100_000, "cache_read_input_tokens": 2_000_000,
+         "cache_creation": {"ephemeral_5m_input_tokens": 1_000_000,
+                            "ephemeral_1h_input_tokens": 500_000},
+         "server_tool_use": {"web_search_requests": 0}},
+        {"model": "claude-3-opus-20240229", "uncached_input_tokens": 10,
+         "output_tokens": 5, "cache_read_input_tokens": 0, "cache_creation": {}},
+    ]}], "has_more": False}
+
+
+def test_get_costs_reads_tokens_from_the_messages_usage_report(monkeypatch):
+    """The token enrichment used a nonexistent /v1/organizations/{org}/usage
+    endpoint behind ANTHROPIC_ORGANIZATION_ID. It is the usage report,
+    grouped by model, and the Admin key alone names the organization."""
+    _admin_env(monkeypatch)
+    cost = {"data": [{"starting_at": "2026-06-01T00:00:00Z",
+                      "results": [{"amount": "1000", "model": "claude-sonnet-4-6"}]}],
+            "has_more": False}
+    fake_get, calls = _routed(cost=cost, usage=_USAGE)
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    out = a.get_costs(date(2026, 6, 1), date(2026, 6, 1))
+    assert out["source"] == "cost_api" and out["total_usd"] == 10.0
+    tok = out["by_model_tokens"]["claude-sonnet-4-6"]
+    assert (tok["input_tokens"], tok["output_tokens"], tok["cache_read_input_tokens"],
+            tok["cache_creation_input_tokens"]) == (1_000_000, 100_000, 2_000_000, 1_500_000)
+    usage_calls = [p for u, p in calls if u.endswith("/v1/organizations/usage_report/messages")]
+    assert usage_calls and usage_calls[0]["group_by[]"] == ["model"]
+    assert usage_calls[0]["ending_at"] == "2026-06-02T00:00:00Z"
+    assert not [u for u, _ in calls if "/v1/usage" in u or "/organizations/org" in u]
+
+
+def test_without_the_cost_api_the_usage_report_is_an_estimate(monkeypatch):
+    """Priced per model at list price by _usage_row_cost and labelled
+    estimated: it is never billed dollars."""
+    _admin_env(monkeypatch)
+    fake_get, _ = _routed(usage=_USAGE, fail={"cost_report": httpx.HTTPError("down")})
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    out = a.get_costs(date(2026, 6, 1), date(2026, 6, 1))
+    assert out["source"] == "estimated"
+    row = _USAGE["data"][0]["results"][0]
+    assert out["total_usd"] == round(a._usage_row_cost(row), 4)
+    # $3 in + $1.50 out + 2M reads at $0.30 + 1M 5m writes at $3.75 + 0.5M 1h at $6
+    assert out["total_usd"] == round(3 + 1.5 + 0.6 + 3.75 + 3.0, 4)
+    assert out["daily"] == [{"date": "2026-06-01", "total_usd": out["total_usd"],
+                             "by_model": {"claude-sonnet-4-6": out["total_usd"]}}]
+    assert "claude-3-opus-20240229" in out["unpriced_models"]
+
+
+def test_a_standard_key_alone_is_unread_not_zero(monkeypatch):
+    _admin_env(monkeypatch, {"ANTHROPIC_API_KEY": "sk-ant-api-x"})
+
+    def no_call(*a_, **k_):
+        raise AssertionError("a standard key cannot read either report")
+
+    monkeypatch.setattr(httpx, "get", no_call)
+    out = a.get_costs(date(2026, 6, 1), date(2026, 6, 2))
+    assert (out["source"], out["reason"]) == ("none", "admin_key_required")
+
+
+def test_a_refused_admin_key_is_an_error_not_a_zero(monkeypatch):
+    _admin_env(monkeypatch)
+    request = httpx.Request("GET", "https://api.anthropic.com/x")
+    refused = httpx.HTTPStatusError("401", request=request,
+                                    response=httpx.Response(401, request=request))
+    fake_get, _ = _routed(fail={"cost_report": refused, "usage_report": refused})
+    monkeypatch.setattr(httpx, "get", fake_get)
+    out = a.get_costs(date(2026, 6, 1), date(2026, 6, 2))
+    assert (out["source"], out["reason"]) == ("error", "credential_invalid")
+    assert out["total_usd"] == 0.0
+
+
+def test_workspaces_that_share_a_name_are_not_overwritten(monkeypatch):
+    monkeypatch.setattr(a, "get_cost_attribution", lambda *a_, **k_: {"groups": [
+        {"group": "prod", "id": "wrkspc_1", "cost_usd": 5.0},
+        {"group": "prod", "id": "wrkspc_2", "cost_usd": 3.0},
+        {"group": "dev", "id": "wrkspc_3", "cost_usd": 1.0},
+    ]})
+    out = a._fetch_by_workspace("sk-ant-admin-x", date(2026, 6, 1), date(2026, 6, 2))
+    assert out == {"prod (wrkspc_1)": 5.0, "prod (wrkspc_2)": 3.0, "dev": 1.0}
+    assert sum(out.values()) == 9.0
+
+
+def test_get_costs_cost_api_no_org_id_then_kpi_is_honest(monkeypatch):
+    # GAP 4 end to end: an admin key and a usage report with no rows yields a
+    # token-less cost_api result, which must produce an honest KPI, not an F.
+    _admin_env(monkeypatch)
     payload = {"data": [{"starting_at": "2026-06-01T00:00:00Z",
                          "results": [{"amount": "10000", "model": "claude-opus-4-6"}]}],
                "has_more": False}
-    monkeypatch.setattr(httpx, "get", lambda *a_, **k_: _FakeResp(payload))
+    fake_get, _ = _routed(cost=payload)
+    monkeypatch.setattr(httpx, "get", fake_get)
 
     out = a.get_costs(date(2026, 6, 1), date(2026, 6, 2))
     assert out["source"] == "cost_api"

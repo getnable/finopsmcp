@@ -95,7 +95,8 @@ def get_ai_cost_attribution(
 
     Returns:
       {
-        "dimension": str, "period": str,
+        "dimension": str, "period": str,   # inclusive
+        "days": int,                         # the days in period
         "groups": [{"group", "id", "provider", "source", "cost_usd"}, ...],
         "by_provider": {provider: {"source", "total_usd", "group_count", ...}},
         "total_usd": float | None,   # None when adding providers would double count
@@ -118,10 +119,11 @@ def get_ai_cost_attribution(
     else:
         providers = PROVIDERS
 
+    # [start_date, end_date], both days whole: `days` days, not days + 1.
     if end_date is None:
         end_date = date.today()
     if start_date is None:
-        start_date = end_date - timedelta(days=days)
+        start_date = end_date - timedelta(days=max(1, days) - 1)
 
     answers: dict[str, dict[str, Any]] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(providers)) as pool:
@@ -168,6 +170,7 @@ def get_ai_cost_attribution(
     out: dict[str, Any] = {
         "dimension": dim,
         "period": f"{start_date} to {end_date}",
+        "days": (end_date - start_date).days + 1,
         "groups": groups,
         "by_provider": by_provider,
     }

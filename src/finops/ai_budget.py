@@ -24,6 +24,7 @@ stops the agent; it tells you where you stand so you decide.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import os
 import re
@@ -198,7 +199,7 @@ def _claude_projects_dir() -> Path:
     return (Path(base) if base else Path.home() / ".claude") / "projects"
 
 
-def read_agent_usage(since_epoch: float) -> dict[str, Any]:
+def read_agent_usage(since_epoch: float, *, allow_network: bool = True) -> dict[str, Any]:
     """Tally agent token usage across all local sessions since `since_epoch`.
 
     Every harness the guard hooks: Claude Code transcripts and Codex CLI
@@ -207,15 +208,17 @@ def read_agent_usage(since_epoch: float) -> dict[str, Any]:
     the window so a long history stays cheap. Returns totals, a per-model and
     per-harness split of tokens and of list-price dollars, the models priced at
     the fallback rate, the costliest sessions, and first/last activity.
+
+    allow_network=False (the guard) reads Cursor only from its cache.
     """
     proj = _claude_projects_dir()
     claude = proj.is_dir()
     responses = _responses(proj, since_epoch) if claude else []
-    return _tally(responses + _other_harnesses(since_epoch), source_present=claude,
-                  since_epoch=since_epoch)
+    return _tally(responses + _other_harnesses(since_epoch, allow_network=allow_network),
+                  source_present=claude, since_epoch=since_epoch)
 
 
-def read_session_usage(session_id: str) -> dict[str, Any]:
+def read_session_usage(session_id: str, *, allow_network: bool = True) -> dict[str, Any]:
     """Everything one session has used, from its first response.
 
     A Claude Code session is the sessionId it stamps on every transcript line,
@@ -228,20 +231,24 @@ def read_session_usage(session_id: str) -> dict[str, Any]:
     proj = _claude_projects_dir()
     claude = proj.is_dir()
     responses = _responses(proj, 0, session_id=session_id) if claude else []
-    return _tally(responses + _other_harnesses(0, session_id=session_id),
+    return _tally(responses + _other_harnesses(0, session_id=session_id,
+                                               allow_network=allow_network),
                   source_present=claude)
 
 
-def _other_harnesses(since_epoch: float, session_id: str | None = None) -> list[dict[str, Any]]:
+def _other_harnesses(since_epoch: float, session_id: str | None = None, *,
+                     allow_network: bool = True) -> list[dict[str, Any]]:
     """Codex and Cursor responses. A reader that fails counts nothing rather
-    than taking the Claude Code numbers down with it."""
+    than taking the Claude Code numbers down with it. allow_network=False
+    keeps Cursor to its cache (see harness_usage.cursor_responses)."""
     out: list[dict[str, Any]] = []
     if session_id is None or _SAFE_SESSION_ID.match(session_id):
         with contextlib.suppress(*_READER_ERRORS):
             out.extend(harness_usage.codex_responses(since_epoch, session_id=session_id))
     with contextlib.suppress(*_READER_ERRORS):
         out.extend(harness_usage.cursor_responses(since_epoch, session_id=session_id,
-                                                  month_start=_month_start_epoch()))
+                                                  month_start=_month_start_epoch(),
+                                                  allow_network=allow_network))
     return out
 
 
@@ -280,61 +287,217 @@ def _responses(proj: Path, since_epoch: float,
     because output_tokens grows as the blocks stream. Keyed on the response, the
     last line wins, and it holds the final output count. A line with no message
     id (older logs) is its own response.
+
+    The same response can sit in more than one transcript (a resumed session
+    copies the conversation it resumes), so the key is shared across files and
+    the last file read wins, as it did before each file's parse was cached.
     """
     seen: dict[Any, dict[str, Any]] = {}
-    for path in _transcripts(proj, session_id):
+    paths = _transcripts(proj, session_id)
+    cache = _TallyCache.open()
+    for path in paths:
         try:
-            if path.stat().st_mtime < since_epoch - 1:
-                continue  # whole file is older than the window
+            st = path.stat()
         except OSError:
             continue
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as fh:
-                for lineno, line in enumerate(fh):
-                    if '"usage"' not in line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except ValueError:
-                        continue
-                    ts = _rec_epoch(rec.get("timestamp"))
-                    if ts is None or ts < since_epoch:
-                        continue
-                    msg = rec.get("message") or {}
-                    usage = msg.get("usage") or {}
-                    if not usage:
-                        continue
-                    ti = int(usage.get("input_tokens", 0) or 0)
-                    to = int(usage.get("output_tokens", 0) or 0)
-                    cw = int(usage.get("cache_creation_input_tokens", 0) or 0)
-                    cr = int(usage.get("cache_read_input_tokens", 0) or 0)
-                    if ti == to == cw == cr == 0:
-                        continue
-                    session = str(rec.get("sessionId") or _path_session(path))
-                    if session_id and session != session_id:
-                        continue
-                    # Claude Code writes its main-thread cache with the 1-hour TTL,
-                    # billed at 2x input against 1.25x for the 5-minute one. The
-                    # split is in usage.cache_creation; anything it does not
-                    # account for is priced as a 5-minute write.
-                    split = usage.get("cache_creation")
-                    cw_1h = 0
-                    if isinstance(split, dict):
-                        cw_1h = min(cw, int(split.get("ephemeral_1h_input_tokens", 0) or 0))
-                    key = ((msg.get("id"), rec.get("requestId")) if msg.get("id")
-                           else (str(path), lineno))
-                    seen[key] = {
-                        "ts": ts, "model": str(msg.get("model", "") or "unknown"),
-                        "input": ti, "output": to, "cache_write": cw, "cache_read": cr,
-                        "cache_write_1h": cw_1h,
-                        "fast": usage.get("speed") == "fast",
-                        "us_only": usage.get("inference_geo") == "us",
-                        "session": session, "cwd": rec.get("cwd"),
-                        "harness": harness_usage.HARNESS_CLAUDE,
-                    }
-        except OSError:
-            continue
+        if st.st_mtime < since_epoch - 1:
+            continue  # whole file is older than the window
+        for key, r in _file_responses(path, st, cache).items():
+            if r["ts"] < since_epoch or (session_id and r["session"] != session_id):
+                continue
+            seen[key] = r
+    if cache is not None and not session_id:
+        cache.prune(paths)
     return list(seen.values())
+
+
+def _parse_usage_line(line: bytes, path: Path, lineno: int) -> tuple[Any, dict] | None:
+    """(response key, record) for one transcript line, or None when the line
+    carries no usage. Nothing here depends on the window or the session asked
+    for, so a file's parse can be kept and reused (see _TallyCache)."""
+    if b'"usage"' not in line:
+        return None
+    try:
+        rec = json.loads(line.decode("utf-8", errors="ignore"))
+    except ValueError:
+        return None
+    if not isinstance(rec, dict):
+        return None
+    ts = _rec_epoch(rec.get("timestamp"))
+    if ts is None:
+        return None
+    msg = rec.get("message") or {}
+    usage = msg.get("usage") or {} if isinstance(msg, dict) else {}
+    if not usage or not isinstance(usage, dict):
+        return None
+    ti = int(usage.get("input_tokens", 0) or 0)
+    to = int(usage.get("output_tokens", 0) or 0)
+    cw = int(usage.get("cache_creation_input_tokens", 0) or 0)
+    cr = int(usage.get("cache_read_input_tokens", 0) or 0)
+    if ti == to == cw == cr == 0:
+        return None
+    session = str(rec.get("sessionId") or _path_session(path))
+    # Claude Code writes its main-thread cache with the 1-hour TTL,
+    # billed at 2x input against 1.25x for the 5-minute one. The
+    # split is in usage.cache_creation; anything it does not
+    # account for is priced as a 5-minute write.
+    split = usage.get("cache_creation")
+    cw_1h = 0
+    if isinstance(split, dict):
+        cw_1h = min(cw, int(split.get("ephemeral_1h_input_tokens", 0) or 0))
+    key = ((msg.get("id"), rec.get("requestId")) if msg.get("id")
+           else (str(path), lineno))
+    return key, {
+        "ts": ts, "model": str(msg.get("model", "") or "unknown"),
+        "input": ti, "output": to, "cache_write": cw, "cache_read": cr,
+        "cache_write_1h": cw_1h,
+        "fast": usage.get("speed") == "fast",
+        "us_only": usage.get("inference_geo") == "us",
+        "session": session, "cwd": rec.get("cwd"),
+        "harness": harness_usage.HARNESS_CLAUDE,
+    }
+
+
+def _file_responses(path: Path, st: os.stat_result,
+                    cache: _TallyCache | None) -> dict[Any, dict[str, Any]]:
+    """Every response one transcript holds, key -> its last line's record.
+
+    From the cache when the file is unchanged; when it has only grown (Claude
+    Code appends), from the cached parse plus the new lines; otherwise, or
+    without a cache, read whole."""
+    entry = cache.get(path) if cache is not None else None
+    out: dict[Any, dict[str, Any]] = {}
+    offset = lines = 0
+    if entry is not None:
+        if entry.unchanged(path, st):
+            return entry.responses
+        if entry.grew(path, st):
+            out, offset, lines = dict(entry.responses), entry.offset, entry.lines
+    tail = b""
+    try:
+        with path.open("rb") as fh:
+            fh.seek(offset)
+            for line in fh:
+                if not line.endswith(b"\n"):
+                    break          # a line still being written: read it next time
+                hit = _parse_usage_line(line, path, lines)
+                if hit is not None:
+                    out[hit[0]] = hit[1]
+                lines += 1
+                offset += len(line)
+                tail = line
+    except OSError:
+        return out
+    if cache is not None:
+        cache.put(path, st, out, offset, lines, tail)
+    return out
+
+
+class _TallyEntry:
+    __slots__ = ("ino", "lines", "mtime_ns", "offset", "responses", "size", "tail")
+
+    def __init__(self, data: dict[str, Any]):
+        self.size = int(data["size"])
+        self.mtime_ns = int(data["mtime_ns"])
+        self.ino = int(data["ino"])
+        self.offset = int(data["offset"])
+        self.lines = int(data["lines"])
+        self.tail = bytes.fromhex(data["tail"])
+        self.responses = {_TallyCache.key_in(k): r for k, r in data["responses"]}
+
+    def _tail_in_place(self, path: Path) -> bool:
+        """The last line the cached parse read still sits where it ended. A
+        cheap guard against a file rewritten in place to the same size within
+        the filesystem's timestamp resolution."""
+        if not self.tail:
+            return True
+        try:
+            with path.open("rb") as fh:
+                fh.seek(self.offset - len(self.tail))
+                return fh.read(len(self.tail)) == self.tail
+        except OSError:
+            return False
+
+    def unchanged(self, path: Path, st: os.stat_result) -> bool:
+        return ((st.st_size, st.st_mtime_ns, st.st_ino) == (self.size, self.mtime_ns, self.ino)
+                and self._tail_in_place(path))
+
+    def grew(self, path: Path, st: os.stat_result) -> bool:
+        """The same file with lines appended (Claude Code only appends to a
+        transcript): same inode, larger, and the parse's last line in place."""
+        return (st.st_ino == self.ino and st.st_size > self.offset and bool(self.tail)
+                and self._tail_in_place(path))
+
+
+class _TallyCache:
+    """Each transcript's parsed responses, kept in the data dir so the guard
+    does not re-read a month of transcripts on every tool call (1.6 s on
+    386 MB of them) when a monthly cap is set.
+
+    One file per transcript under ai-budget-tally/, named by a hash of its
+    path and written atomically, so a growing transcript rewrites only its own
+    entry. An entry is used as-is while the transcript's size, mtime and inode
+    are unchanged, and extended from where it stopped when the file has only
+    grown. Keys stay per response, not per-file totals: the same response can
+    be in two transcripts, and _responses dedupes across files."""
+
+    VERSION = 1
+
+    def __init__(self, root: Path):
+        self.root = root
+
+    @classmethod
+    def open(cls) -> _TallyCache | None:
+        try:
+            root = _data_dir() / "ai-budget-tally"
+            root.mkdir(exist_ok=True)
+            return cls(root)
+        except OSError:
+            return None
+
+    @staticmethod
+    def _name(path: Path) -> str:
+        import hashlib
+        return hashlib.sha256(str(path).encode("utf-8", "surrogateescape")).hexdigest()[:40]
+
+    @staticmethod
+    def key_in(k: list) -> Any:
+        return tuple(k)
+
+    def get(self, path: Path) -> _TallyEntry | None:
+        try:
+            data = json.loads((self.root / f"{self._name(path)}.json").read_text())
+            if data.get("v") != self.VERSION or data.get("path") != str(path):
+                return None
+            return _TallyEntry(data)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return None
+
+    def put(self, path: Path, st: os.stat_result, responses: dict[Any, dict[str, Any]],
+            offset: int, lines: int, tail: bytes) -> None:
+        if not tail:
+            entry = self.get(path)
+            # Nothing new was read: keep the line the old parse ended on.
+            tail = entry.tail if entry is not None and entry.offset == offset else b""
+        data = {"v": self.VERSION, "path": str(path), "size": st.st_size,
+                "mtime_ns": st.st_mtime_ns, "ino": st.st_ino, "offset": offset,
+                "lines": lines, "tail": tail[-256:].hex(),
+                "responses": [[list(k), r] for k, r in responses.items()]}
+        try:
+            harness_usage.write_json_atomic(self.root / f"{self._name(path)}.json", data)
+        except (OSError, TypeError, ValueError):
+            pass
+
+    def prune(self, paths: list[Path]) -> None:
+        """Drop the entries of transcripts that are gone."""
+        keep = {f"{self._name(p)}.json" for p in paths}
+        try:
+            for f in self.root.iterdir():
+                if f.suffix == ".json" and f.name not in keep:
+                    with contextlib.suppress(OSError):
+                        f.unlink()
+        except OSError:
+            pass
 
 
 _SESSIONS_LISTED = 20
@@ -349,12 +512,25 @@ def _response_usd(r: dict[str, Any],
     if isinstance(r.get("usd"), (int, float)):
         return float(r["usd"]), True
     price = llm_prices.price_for(r["model"])
-    usd = (price or fallback or _fallback()).cost(
+    rate = price or fallback or _fallback()
+    if price is None and _openai_billed(r):
+        # OpenAI bills no cache-write premium: a write is ordinary input.
+        rate = dataclasses.replace(rate, cache_write_5m=None, cache_write_1h=None)
+    usd = rate.cost(
         input_tokens=r["input"], output_tokens=r["output"],
         cache_write_5m_tokens=r["cache_write"] - r["cache_write_1h"],
         cache_write_1h_tokens=r["cache_write_1h"], cache_read_tokens=r["cache_read"],
         fast=r["fast"], us_only=r["us_only"])
     return usd, price is not None
+
+
+def _openai_billed(r: dict[str, Any]) -> bool:
+    """Whether an unpriced response is an OpenAI model's: by its name, or a
+    Codex response whose model name says nothing either way."""
+    provider = llm_prices.provider_of(r["model"])
+    if provider is not None:
+        return provider == "openai"
+    return r.get("harness") == harness_usage.HARNESS_CODEX
 
 
 def _tally(responses: list[dict[str, Any]], source_present: bool,
@@ -442,6 +618,11 @@ def _tally(responses: list[dict[str, Any]], source_present: bool,
                            or harness_usage.cursor_enabled()),
         "sources": _sources(source_present),
     }
+    notes = _source_notes(out["sources"])
+    if notes:
+        # Said wherever the figure is: a source that was not read or was cut
+        # short makes the total a lower bound, not the whole of it.
+        out["source_notes"] = notes
     if since_epoch is not None:
         skipped = harness_usage.codex_compressed_skipped(since_epoch)
         if skipped:
@@ -451,7 +632,8 @@ def _tally(responses: list[dict[str, Any]], source_present: bool,
         out["unpriced_note"] = (
             f"{', '.join(unpriced)} priced at the fallback ${fb.input:g}/${fb.output:g} "
             f"per 1M in/out, ${fb.cache_write_5m:g}/${fb.cache_write_1h:g} per 1M cache "
-            f"writes (5m/1h) and ${fb.cache_read:g} per 1M cache reads; set "
+            f"writes (5m/1h; an OpenAI model's cache writes at the input rate, as "
+            f"OpenAI bills them) and ${fb.cache_read:g} per 1M cache reads; set "
             f"FINOPS_AI_USD_PER_MTOK_IN/OUT to the rate you pay. The cache rates follow "
             f"the input rate unless FINOPS_AI_USD_PER_MTOK_CACHE_WRITE, "
             f"FINOPS_AI_USD_PER_MTOK_CACHE_WRITE_1H or FINOPS_AI_USD_PER_MTOK_CACHE_READ "
@@ -467,6 +649,20 @@ def _sources(claude: bool) -> dict[str, Any]:
     return {harness_usage.HARNESS_CLAUDE: claude,
             harness_usage.HARNESS_CODEX: harness_usage.codex_present(),
             harness_usage.HARNESS_CURSOR: cursor}
+
+
+def _source_notes(sources: dict[str, Any]) -> list[str]:
+    cursor = sources.get(harness_usage.HARNESS_CURSOR)
+    if not isinstance(cursor, dict):
+        return []
+    if cursor.get("not_read"):
+        return [(f"Cursor usage was not read ({cursor['not_read']}), so it is not in "
+                 f"these figures.")]
+    if cursor.get("truncated"):
+        cap = harness_usage._CURSOR_MAX_PAGES * harness_usage._CURSOR_PAGE
+        return [(f"The Cursor figure is a lower bound: the Admin API had more usage "
+                 f"events than the {cap:,} a read takes.")]
+    return []
 
 
 def _rec_epoch(ts: Any) -> float | None:
@@ -536,11 +732,12 @@ def resolve_session(session_id: str | None = None) -> tuple[str | None, str | No
     return latest[1], "latest_activity"
 
 
-def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, Any] | None:
+def _session_lens(budget: dict[str, Any], session_id: str | None, *,
+                  allow_network: bool = True) -> dict[str, Any] | None:
     sid, source = resolve_session(session_id)
     if not sid:
         return None
-    u = read_session_usage(sid)
+    u = read_session_usage(sid, allow_network=allow_network)
     cap = budget["session_caps"].get(sid) or budget["session_cap"] or 0.0
     usd = u["usd_equivalent"]
     pct = usd / cap if cap > 0 else None
@@ -551,6 +748,7 @@ def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, A
         "cost_by_model": u["cost_by_model"], "unpriced_models": u["unpriced_models"],
         "cost_by_harness": u["cost_by_harness"], "unpriced_usd": u["unpriced_usd"],
         "first_activity": u["first_activity"], "last_activity": u["last_activity"],
+        "source_notes": u.get("source_notes") or [],
         "cap_usd": cap or None,
         "cap_scope": ("this_session" if sid in budget["session_caps"]
                       else "every_session" if cap else None),
@@ -619,8 +817,11 @@ def status(session_id: str | None = None, *, for_gate: bool | None = None) -> di
                 "session": None, "gate_only": True}
     now = time.time()
     empty = _tally([], source_present=False)
+    # The guard never waits on the network: Cursor comes from its cache there.
+    net = not for_gate
     window = empty if for_gate else read_agent_usage(now - _WINDOW_HOURS * 3600)
-    mtd = empty if for_gate and not monthly_cap else read_agent_usage(_month_start_epoch())
+    mtd = (empty if for_gate and not monthly_cap
+           else read_agent_usage(_month_start_epoch(), allow_network=net))
 
     tokens_mtd = mtd["billable_tokens"]        # exact
     est_usd_mtd = mtd["usd_equivalent"]        # ESTIMATE at list price, not a bill
@@ -646,7 +847,8 @@ def status(session_id: str | None = None, *, for_gate: bool | None = None) -> di
 
     # The per-session cap can only make the verdict worse. On a tie the one
     # further past its line is the one to name.
-    session = None if for_gate and not session_cap else _session_lens(budget, session_id)
+    session = (None if for_gate and not session_cap
+               else _session_lens(budget, session_id, allow_network=net))
     if session and session["verdict"] is not None:
         s_rank, m_rank = _RANK[session["verdict"]], _RANK[verdict]
         if basis == "none" or s_rank > m_rank or (
@@ -716,6 +918,8 @@ def _with_fallback_note(line: tuple[str, str], lenses: dict[str, Any]) -> str:
     usd = (lenses.get(lens) or {}).get("unpriced_usd") or 0.0
     if usd > 0:
         text += f" This includes ~${usd:,.2f} priced at a fallback rate (see unpriced_models)."
+    for note in (lenses.get(lens) or {}).get("source_notes") or []:
+        text += f" {note}"
     return text
 
 

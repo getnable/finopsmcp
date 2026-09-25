@@ -2,17 +2,20 @@
 Anthropic API cost and usage connector.
 
 Tracks spend across Claude models via:
-  1. Anthropic Cost API — /v1/organizations/cost_report (actual USD; needs an Admin key)
-  2. Anthropic Usage API (beta) — /v1/organizations/{org}/usage (token counts)
-  3. Estimated from token counts × published prices (fallback), per model from
-     finops.llm_prices
-  4. Cost by workspace (Cost API), API key or user (Messages Usage API), via
+  1. Anthropic Cost API: /v1/organizations/cost_report (actual USD)
+  2. Messages Usage API: /v1/organizations/usage_report/messages (token counts
+     per model), which enriches the Cost API result with tokens, and when the
+     Cost API cannot be read is priced per model from finops.llm_prices
+     (source="estimated")
+  3. Cost by workspace (Cost API), API key or user (Messages Usage API), via
      get_cost_attribution
 
+Every one of these is an Admin API endpoint: they need ANTHROPIC_ADMIN_KEY
+(sk-ant-admin...), and the Admin key names the organization.
+
 Env vars:
-  ANTHROPIC_API_KEY          — standard key
-  ANTHROPIC_ADMIN_KEY        — org-level key (preferred for usage data)
-  ANTHROPIC_ORGANIZATION_ID  — required for org-level usage endpoint
+  ANTHROPIC_API_KEY          standard key (cannot read cost or usage reports)
+  ANTHROPIC_ADMIN_KEY        org-level Admin key (needed for cost and usage)
 """
 from __future__ import annotations
 
@@ -29,15 +32,6 @@ _ANTHROPIC_VERSION = "2023-06-01"
 # Cost API pagination safety cap. 31 daily buckets per page, so 60 pages covers
 # ~5 years; beyond that we fall back rather than report a truncated total.
 _COST_PAGE_CAP = 60
-
-
-def _headers(api_key: str) -> dict[str, str]:
-    return {
-        "x-api-key": api_key,
-        "anthropic-version": _ANTHROPIC_VERSION,
-        "anthropic-beta": "usage-1",
-        "content-type": "application/json",
-    }
 
 
 def _admin_headers(admin_key: str) -> dict[str, str]:
@@ -153,49 +147,41 @@ def get_costs(
     end_date: date,
 ) -> dict[str, Any]:
     """
-    Fetch Anthropic usage costs for the given date range.
-    Falls back to estimated costs if the org-level API is unavailable.
+    Fetch Anthropic usage costs for [start_date, end_date], end_date whole.
 
-    When the Cost API answers (Admin key), also returns ``by_workspace``
-    mapping workspace names to their billed costs, read from the same Cost
-    API grouped by workspace_id.
+    The Cost API's billed dollars when it answers (source="cost_api"), with
+    ``by_model_tokens`` from the Messages Usage API and ``by_workspace``
+    mapping workspace names to their billed costs. When the Cost API cannot
+    be read, the Messages Usage API priced per model at list price
+    (source="estimated"). Both need an Admin key; with only a standard key
+    the result is unread (reason "admin_key_required"), not a $0.
     """
     from ...security.env import get_env
     admin_key = get_env("ANTHROPIC_ADMIN_KEY")
-    api_key   = admin_key or get_env("ANTHROPIC_API_KEY")
-    org_id    = get_env("ANTHROPIC_ORGANIZATION_ID") or None
 
-    if not api_key:
+    if not admin_key and not get_env("ANTHROPIC_API_KEY"):
         return _empty("not_configured")
+    if not admin_key:
+        # A standard key cannot read either report. Not a zero: unread.
+        return _empty("admin_key_required")
 
-    # Prefer the org Cost API: actual billed USD, not estimated. Requires an
-    # Admin key (sk-ant-admin...). When it works, the costs are authoritative.
-    if admin_key:
-        cost = get_cost_report(admin_key, start_date, end_date)
-        if cost.get("source") == "cost_api":
-            # The Cost API reports dollars, not token counts. Best-effort enrich
-            # by_model_tokens from the Usage API so the AI-KPI layer (cache hit
-            # rate, context-window utilisation) still has data; the dollar figures
-            # stay authoritative from the Cost API.
-            if org_id:
-                usage = _fetch_org_usage(admin_key, org_id, start_date, end_date)
-                if usage.get("by_model_tokens"):
-                    cost["by_model_tokens"] = usage["by_model_tokens"]
-            by_workspace = _fetch_by_workspace(admin_key, start_date, end_date)
-            if by_workspace:
-                cost["by_workspace"] = by_workspace
-            return cost
-        # Cost API unavailable (not enterprise, missing permission, network):
-        # fall through to the usage/estimate path below.
-
-    # Org-level usage endpoint (estimated costs)
-    if org_id:
-        result = _fetch_org_usage(api_key, org_id, start_date, end_date)
-        if result.get("source") == "api":
-            return result
-
-    # Fall back to workspace-level token usage
-    return _fetch_workspace_usage(api_key, start_date, end_date)
+    # Prefer the org Cost API: actual billed USD, not estimated.
+    cost = get_cost_report(admin_key, start_date, end_date)
+    if cost.get("source") == "cost_api":
+        # The Cost API reports dollars, not token counts. Best-effort enrich
+        # by_model_tokens from the Usage API so the AI-KPI layer (cache hit
+        # rate, context-window utilisation) still has data; the dollar figures
+        # stay authoritative from the Cost API.
+        usage = _fetch_usage_report(admin_key, start_date, end_date)
+        if usage.get("by_model_tokens"):
+            cost["by_model_tokens"] = usage["by_model_tokens"]
+        by_workspace = _fetch_by_workspace(admin_key, start_date, end_date)
+        if by_workspace:
+            cost["by_workspace"] = by_workspace
+        return cost
+    # Cost API unavailable (missing permission, truncated, network): estimate
+    # from the usage report instead.
+    return _fetch_usage_report(admin_key, start_date, end_date)
 
 
 def get_cost_report(
@@ -286,9 +272,21 @@ def _fetch_by_workspace(
     Billed cost per workspace name, from the Cost API grouped by workspace_id.
     Returns {} when it cannot be read: by_workspace only enriches get_costs(),
     and get_cost_attribution() is where a failed read is reported as one.
+    Two workspaces can share a name (an archived one and its replacement, say),
+    so those are told apart by their id rather than one overwriting the other.
     """
     res = get_cost_attribution("workspace", start_date, end_date, admin_key=admin_key)
-    return {g["group"]: g["cost_usd"] for g in res.get("groups", [])}
+    groups = res.get("groups", [])
+    counts: dict[str, int] = {}
+    for g in groups:
+        counts[g["group"]] = counts.get(g["group"], 0) + 1
+    out: dict[str, float] = {}
+    for g in groups:
+        name = g["group"]
+        if counts[name] > 1 and g.get("id"):
+            name = f"{name} ({g['id']})"
+        out[name] = round(out.get(name, 0.0) + g["cost_usd"], 4)
+    return out
 
 
 # ── Cost attribution: spend by workspace, API key or user ────────────────────
@@ -417,64 +415,54 @@ def get_cost_attribution(
     return out
 
 
-def _fetch_org_usage(
-    api_key: str,
-    org_id: str,
+def _fetch_usage_report(
+    admin_key: str,
     start_date: date,
     end_date: date,
 ) -> dict[str, Any]:
+    """
+    Token usage per model from GET /v1/organizations/usage_report/messages
+    (grouped by model), each row priced at list price by _usage_row_cost:
+    source="estimated", never billed dollars. An unread result, not a $0,
+    when the report cannot be read; source="error" when Anthropic refused the
+    key.
+    """
     try:
         import httpx
     except ImportError:
         return _empty("httpx_missing")
 
     try:
-        resp = httpx.get(
-            f"{_API_BASE}/v1/organizations/{org_id}/usage",
-            params={
-                "start_date": start_date.isoformat(),
-                "end_date":   end_date.isoformat(),
-            },
-            headers=_headers(api_key),
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        buckets = _report_buckets(
+            httpx, "/v1/organizations/usage_report/messages", admin_key,
+            {**_report_window(start_date, end_date), "group_by[]": ["model"], "limit": 31})
+    except _Truncated:
+        log.warning("Anthropic usage report hit the %d-page cap for %s..%s",
+                    _COST_PAGE_CAP, start_date, end_date)
+        return _empty("usage_report_truncated")
     except Exception as e:
-        log.debug("Anthropic org usage API unavailable: %s", e)
-        return _empty("org_api_unavailable")
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status in (401, 403):
+            out = _empty("credential_invalid")
+            out["source"] = "error"
+            out["error"] = (f"Anthropic refused ANTHROPIC_ADMIN_KEY on the usage and cost "
+                            f"reports ({e}).")
+            return out
+        log.debug("Anthropic usage report unavailable: %s", e)
+        return _empty("usage_report_unavailable")
 
-    return _parse_usage(data, source="api")
-
-
-def _fetch_workspace_usage(
-    api_key: str,
-    start_date: date,
-    end_date: date,
-) -> dict[str, Any]:
-    """Workspace-level usage — available to all API keys."""
-    try:
-        import httpx
-    except ImportError:
-        return _empty("httpx_missing")
-
-    try:
-        resp = httpx.get(
-            f"{_API_BASE}/v1/usage",
-            params={
-                "start_date": start_date.isoformat(),
-                "end_date":   end_date.isoformat(),
-            },
-            headers=_headers(api_key),
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        log.debug("Anthropic workspace usage API unavailable: %s", e)
-        return _empty("api_error")
-
-    return _parse_usage(data, source="estimated")
+    rows: list[dict[str, Any]] = []
+    for bucket in buckets:
+        day = (bucket.get("starting_at") or "")[:10]
+        for row in bucket.get("results", []):
+            if not isinstance(row, dict):
+                continue
+            split = row.get("cache_creation") if isinstance(row.get("cache_creation"), dict) else {}
+            rows.append({**row, "date": day,
+                         "cache_creation_input_tokens":
+                             _int(split.get("ephemeral_5m_input_tokens"))
+                             + _int(split.get("ephemeral_1h_input_tokens"))})
+    return _parse_usage({"data": rows}, source="estimated")
 
 
 def _int(value: Any) -> int:
@@ -501,8 +489,9 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
 
     for entry in data.get("data", data.get("usage", [])):
         model      = entry.get("model") or entry.get("model_id") or "unknown"
-        # Fresh (uncached) input. The workspace report names this `input_tokens`;
-        # the org usage report names it `uncached_input_tokens`. Accept either.
+        # Fresh (uncached) input. The Messages Usage API names it
+        # `uncached_input_tokens`; rows already in the by_model_tokens shape
+        # name it `input_tokens`. Accept either.
         input_tok  = _int(entry.get("input_tokens", entry.get("uncached_input_tokens", 0)))
         output_tok = _int(entry.get("output_tokens", 0))
         # Prompt-cache token counts, billed separately by Anthropic. The KPI layer
@@ -520,23 +509,21 @@ def _parse_usage(data: dict, source: str) -> dict[str, Any]:
         # and on a cache-heavy workload they are most of the input bill.
         cost: float | None = float(entry.get("cost_usd", 0.0) or 0.0)
         if cost == 0.0:
-            price = price_for(model)
-            if price is None:
+            split = entry.get("cache_creation")
+            write_1h = (min(cache_creation, _int(split.get("ephemeral_1h_input_tokens", 0)))
+                        if isinstance(split, dict) else 0)
+            cost = _usage_row_cost({
+                "model": model, "uncached_input_tokens": input_tok,
+                "output_tokens": output_tok, "cache_read_input_tokens": cache_read,
+                "cache_creation": {"ephemeral_5m_input_tokens": cache_creation - write_1h,
+                                   "ephemeral_1h_input_tokens": write_1h}})
+            if cost is None:
                 # No confirmed price. Pricing it at $0 made its spend vanish
                 # from the estimate; list it instead. input_tokens here is all
                 # input, cached included, the shape openai_usage reports.
                 u = unpriced.setdefault(model, {"input_tokens": 0, "output_tokens": 0})
                 u["input_tokens"] += input_tok + cache_read + cache_creation
                 u["output_tokens"] += output_tok
-                cost = None
-            else:
-                split = entry.get("cache_creation")
-                write_1h = (min(cache_creation, _int(split.get("ephemeral_1h_input_tokens", 0)))
-                            if isinstance(split, dict) else 0)
-                cost = price.cost(input_tokens=input_tok, output_tokens=output_tok,
-                                  cache_read_tokens=cache_read,
-                                  cache_write_5m_tokens=cache_creation - write_1h,
-                                  cache_write_1h_tokens=write_1h)
         # Sub-keys match what ai_kpis.py reads: input_tokens / output_tokens /
         # cache_read_input_tokens / cache_creation_input_tokens.
         bucket = by_model_tokens.setdefault(model, {

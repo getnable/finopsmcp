@@ -168,6 +168,23 @@ def test_records_count_each_response_once_and_the_token_counts_are_not_added(cod
     assert (u["messages"], u["usd_equivalent"]) == (2, 5.6)
 
 
+def test_a_token_count_before_the_first_record_is_not_counted_as_well(codex):
+    """Codex can write a response's token_count event before its
+    token_usage_record. A file with any record is counted by its records
+    alone, so that earlier event is not a second copy of the response."""
+    now = time.time()
+    r1 = _usage(inp=1_000_000, out=100_000)
+    _rollout(codex, ROOT, [
+        _meta(now - 300, ROOT, session=ROOT),
+        _turn(now - 290, "o3"),
+        _count(now - 280, r1, r1),
+        _record(now - 279, "resp-1", r1),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    # o3: 1M input x $2 + 0.1M output x $8, once.
+    assert (u["messages"], u["usd_equivalent"]) == (1, 2.8)
+
+
 def test_cache_writes_and_reasoning_are_not_counted_twice(codex):
     """Responses API usage: input_tokens includes the cached and cache-write
     tokens, output_tokens includes reasoning (codex-api/src/sse/responses.rs)."""
@@ -228,13 +245,42 @@ def test_a_model_llm_prices_does_not_know_is_reported_unpriced(codex):
     now = time.time()
     _rollout(codex, ROOT, [
         _meta(now - 300, ROOT, session=ROOT),
-        _turn(now - 290, "gpt-5-codex"),
+        _turn(now - 290, "gpt-9-codex"),
         _record(now - 280, "resp-1", _usage(inp=1_000_000, out=0)),
     ])
     u = ab.read_agent_usage(now - 3600)
-    assert u["unpriced_models"] == {"gpt-5-codex": 1_000_000}
-    assert "gpt-5-codex" in u["unpriced_note"]
+    assert u["unpriced_models"] == {"gpt-9-codex": 1_000_000}
+    assert "gpt-9-codex" in u["unpriced_note"]
     assert u["usd_equivalent"] > 0          # at the fallback rate, and said so
+
+
+def test_gpt_5_codex_is_priced_at_its_list_rate(codex):
+    """Codex's default model read as unpriced and was billed at the Sonnet
+    fallback, about twice its list price."""
+    now = time.time()
+    _rollout(codex, ROOT, [
+        _meta(now - 300, ROOT, session=ROOT),
+        _turn(now - 290, "gpt-5-codex"),
+        _record(now - 280, "resp-1", _usage(inp=1_000_000, cached=800_000, out=100_000)),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["unpriced_models"] == {}
+    # 200k fresh at $1.25 + 800k cached at $0.125 + 100k out at $10
+    assert u["cost_by_model"] == {"gpt-5-codex": round(0.25 + 0.1 + 1.0, 2)}
+
+
+def test_an_unpriced_openai_model_pays_no_cache_write_premium(codex):
+    """OpenAI bills a cache write as ordinary input. The fallback's 1.25x write
+    rate is Anthropic's, so an unpriced OpenAI model must not be charged it."""
+    now = time.time()
+    _rollout(codex, ROOT, [
+        _meta(now - 300, ROOT, session=ROOT),
+        _turn(now - 290, "gpt-9-codex"),
+        _record(now - 280, "resp-1", _usage(inp=1_000_000, cache_write=1_000_000)),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    # The fallback input rate ($3, Sonnet 4.6's) on the write, not $3.75.
+    assert u["usd_equivalent"] == 3.0
 
 
 def test_the_model_is_the_one_the_responses_turn_ran(codex):
@@ -410,6 +456,108 @@ def test_a_failed_cursor_read_counts_nothing_and_says_why(monkeypatch):
     assert "unreachable" in u["sources"]["cursor"]["error"]
 
 
+def _no_cursor_network(monkeypatch):
+    def no_network(body):
+        raise AssertionError("the Cursor Admin API was called")
+
+    monkeypatch.setattr(harness_usage, "_cursor_post", no_network)
+
+
+def test_the_guard_never_reads_cursor_from_the_network(monkeypatch):
+    """The guard runs on every tool call. With no cached read it counts no
+    Cursor usage and says so, rather than waiting on the Admin API."""
+    monkeypatch.setenv("CURSOR_ADMIN_API_KEY", "key_test")      # the fixture fails any request
+    ab.set_budget(spend_cap=10)
+    st = ab.status(for_gate=True)
+    cursor = st["month_to_date"]["sources"]["cursor"]
+    assert cursor["not_read"] == harness_usage.CURSOR_NOT_READ_BY_GATE
+    assert "Cursor usage was not read" in st["summary"]
+    assert ab.status(session_id="conv-1", for_gate=True)["verdict"] == ab.BUDGET_OK
+
+
+def test_the_guard_uses_an_old_cursor_read_as_it_is(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(harness_usage, "_cursor_post", lambda body: _cursor_events(now))
+    monkeypatch.setenv("CURSOR_ADMIN_API_KEY", "key_test")
+    ab.read_agent_usage(now - 3600)
+    cache = json.loads(harness_usage._cursor_cache_path().read_text())
+    cache["fetched_at"] -= 2 * harness_usage._CURSOR_TTL          # past the TTL
+    harness_usage.write_json_atomic(harness_usage._cursor_cache_path(), cache)
+    _no_cursor_network(monkeypatch)
+    ab.set_budget(session_cap=10, session_id="conv-1")
+    st = ab.status(session_id="conv-1", for_gate=True)
+    assert st["session"]["usd_equivalent"] == 12.0 and st["verdict"] == ab.BUDGET_OVER
+    assert harness_usage.cursor_status()["stale"] is True
+
+
+def test_a_failed_cursor_read_backs_off_instead_of_retrying_every_call(monkeypatch):
+    now = time.time()
+    calls = []
+
+    def down(body):
+        calls.append(body)
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(harness_usage, "_cursor_post", down)
+    monkeypatch.setenv("CURSOR_ADMIN_API_KEY", "key_test")
+    ab.read_agent_usage(now - 3600)
+    u = ab.read_agent_usage(now - 3600)
+    assert len(calls) == 1
+    cursor = u["sources"]["cursor"]
+    assert "unreachable" in cursor["error"] and "unreachable" in cursor["not_read"]
+    assert cursor["retry_at"] == pytest.approx(now + harness_usage._CURSOR_RETRY_AFTER, abs=5)
+
+    # Once the backoff has passed, the next read tries again, and a good read
+    # clears the failure.
+    cache = json.loads(harness_usage._cursor_cache_path().read_text())
+    cache["failed_at"] -= harness_usage._CURSOR_RETRY_AFTER + 1
+    harness_usage.write_json_atomic(harness_usage._cursor_cache_path(), cache)
+    monkeypatch.setattr(harness_usage, "_cursor_post", lambda body: _cursor_events(now))
+    u = ab.read_agent_usage(now - 3600)
+    assert u["cost_by_harness"] == {"cursor": 12.0}
+    assert "error" not in u["sources"]["cursor"]
+
+
+def test_a_failed_read_keeps_the_last_good_one_during_the_backoff(monkeypatch):
+    now = time.time()
+    monkeypatch.setattr(harness_usage, "_cursor_post", lambda body: _cursor_events(now))
+    monkeypatch.setenv("CURSOR_ADMIN_API_KEY", "key_test")
+    ab.read_agent_usage(now - 3600)
+    cache = json.loads(harness_usage._cursor_cache_path().read_text())
+    cache["fetched_at"] -= 2 * harness_usage._CURSOR_TTL
+    harness_usage.write_json_atomic(harness_usage._cursor_cache_path(), cache)
+    calls = []
+
+    def down(body):
+        calls.append(body)
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(harness_usage, "_cursor_post", down)
+    for _ in range(2):
+        u = ab.read_agent_usage(now - 3600)
+        assert u["cost_by_harness"] == {"cursor": 12.0}
+    assert len(calls) == 1 and u["sources"]["cursor"]["stale"] is True
+
+
+def test_a_cursor_read_cut_short_at_the_page_cap_says_it_is_a_lower_bound(monkeypatch):
+    now = time.time()
+    calls = []
+
+    def endless(body):
+        calls.append(body)
+        page = _cursor_events(now)
+        page["pagination"]["hasNextPage"] = True
+        return page
+
+    monkeypatch.setattr(harness_usage, "_cursor_post", endless)
+    monkeypatch.setenv("CURSOR_ADMIN_API_KEY", "key_test")
+    ab.set_budget(spend_cap=1000)
+    st = ab.status()
+    assert len(calls) == harness_usage._CURSOR_MAX_PAGES
+    assert st["month_to_date"]["sources"]["cursor"]["truncated"] is True
+    assert "Cursor figure is a lower bound" in st["summary"]
+
+
 def _cursor_hook(conversation_id):
     out = io.StringIO()
     payload = {"conversation_id": conversation_id, "generation_id": "gen-1",
@@ -425,6 +573,8 @@ def test_the_cursor_hook_measures_its_conversation_when_usage_is_readable(monkey
     monkeypatch.setattr(harness_usage, "_cursor_post", lambda body: _cursor_events(now))
     monkeypatch.setenv("CURSOR_ADMIN_API_KEY", "key_test")
     ab.set_budget(session_cap=10, session_id="conv-1")
+    ab.status()                      # a read outside the guard fills the cache
+    _no_cursor_network(monkeypatch)  # the guard itself never asks the API
     v = _cursor_hook("conv-1")
     assert v["permission"] == "ask"
     assert "~$12.00 estimated this session" in v["user_message"]

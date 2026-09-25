@@ -736,7 +736,8 @@ async def optimize_ai_spend(days: int = 30) -> dict:
 def recommend_bedrock_model_routing(days: int = 30) -> dict:
     """
     Analyzes Bedrock model usage to find invocations that could route to
-    cheaper models without quality loss. Sonnet costs 20x more than Haiku.
+    cheaper models without quality loss. Sonnet 4.x costs 3x what Haiku 4.5
+    does per token.
     Classification, extraction, and short-context tasks rarely need Sonnet.
 
     Identifies which Lambda functions are using Sonnet for tasks that Haiku

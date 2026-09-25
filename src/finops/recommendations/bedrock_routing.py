@@ -1,7 +1,8 @@
 """
 Bedrock model routing recommender.
 
-Bedrock Sonnet costs ~20x more than Haiku per token. Many workloads
+Bedrock Sonnet 4.x costs 3x what Haiku 4.5 does per token ($3/$15 against
+$1/$5 per 1M input/output, llm_prices), Opus 4.5 and later 5x. Many workloads
 that use Sonnet (classification, extraction, short-context lookups)
 work equally well on Haiku. This scanner identifies those workloads
 and estimates the savings from routing them to cheaper models.
@@ -35,8 +36,9 @@ log = logging.getLogger(__name__)
 _ROUTING_MAX_AVG_INPUT_TOKENS = 500
 _ROUTING_MAX_AVG_OUTPUT_TOKENS = 200
 
-# The routing target (the cheaper alternative)
-_ROUTING_TARGET = "claude-haiku-3-5"
+# The routing target (the cheaper alternative): the current Haiku. Haiku 3.5
+# is retired on the Claude API, so routing new work to it is not advice.
+_ROUTING_TARGET = "claude-haiku-4-5"
 
 
 def _is_routing_source(model_id: str) -> bool:
@@ -398,7 +400,8 @@ def recommend_bedrock_model_routing(
     if routing_opportunities:
         implementation_note = (
             "To implement model routing: check the task type before calling Bedrock. "
-            "For classification or extraction, set model_id to 'anthropic.claude-haiku-3-5-20241022-v1:0'. "
+            "For classification or extraction, set model_id to a Claude Haiku 4.5 inference "
+            "profile such as 'us.anthropic.claude-haiku-4-5-20251001-v1:0'. "
             "Keep 'anthropic.claude-sonnet-...' for multi-step reasoning, long-form generation, "
             "or any task with more than 1k input tokens. "
             "A simple approach: wrap your Bedrock call with a router function that checks "

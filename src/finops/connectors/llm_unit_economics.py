@@ -108,7 +108,7 @@ def get_cost_per_project(
     if "anthropic" in missing_project_data:
         tagging_guide["anthropic"] = (
             "Create Anthropic Workspaces per team (Enterprise plan). "
-            "Set ANTHROPIC_ADMIN_KEY + ANTHROPIC_ORGANIZATION_ID to retrieve workspace costs. "
+            "Set ANTHROPIC_ADMIN_KEY (sk-ant-admin...) to retrieve workspace costs. "
             "On non-enterprise plans, all usage appears under the default workspace."
         )
 
@@ -366,8 +366,10 @@ def attribution_unit_economics(
     across providers or tags), nothing failed or was left out, every source is
     the provider's own dollar figure rather than a partial estimate, and there
     are stored business metrics to divide by. Otherwise None. The period total
-    is scaled to 30 days so it lines up with monthly metrics.
+    is scaled to 30 days so it lines up with monthly metrics, by the days the
+    result actually covers (its own `days`) when it says, else `days`.
     """
+    days = attribution.get("days") or days
     total = attribution.get("total_usd")
     if total is None or attribution.get("partial") or attribution.get("error"):
         return None
