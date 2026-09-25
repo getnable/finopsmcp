@@ -384,10 +384,22 @@ def _pick_regions(spend: dict | None, session) -> list[str]:
 def _demo_payload() -> tuple[dict, dict]:
     from . import demo_data
 
-    cs = demo_data.cost_summary()
+    # AWS month to date, like the live scan, summed from the same sample the MCP
+    # tools answer from. On the 1st there is no day of this month yet, so it
+    # covers the month that just closed, as the live scan does.
+    from datetime import date, timedelta
+
+    today = date.today()
+    if today.day == 1:
+        start, covers = (today - timedelta(days=1)).replace(day=1), "last month"
+    else:
+        start, covers = today.replace(day=1), "this month"
+    cs = demo_data.cost_summary({"provider": "aws", "start_date": start.isoformat(),
+                                 "end_date": today.isoformat()})
     services = sorted(cs["by_service"].items(), key=lambda kv: kv[1], reverse=True)
     spend = {
-        "period": cs["period"],
+        "period": f"{cs['period']['start']} to {cs['period']['end']}",
+        "covers": covers,
         "total": cs["total_usd"],
         "services": services[:3],
         "regions": {},

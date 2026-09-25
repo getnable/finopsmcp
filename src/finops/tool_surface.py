@@ -29,8 +29,9 @@ Rules:
     Detection never touches the network and is cached ~30s.
   - llm is advertised when LLM keys exist OR aws is connected, mirroring the
     capabilities gate: Bedrock token tools work off the AWS account alone.
-  - FINOPS_ALL_TOOLS=1 (the existing escape hatch) and demo mode advertise
-    everything.
+  - FINOPS_ALL_TOOLS=1 (the existing escape hatch) advertises everything.
+  - demo mode advertises the tools that answer from the sample dataset plus the
+    connect/setup tools that lead out of it (demo_data.demo_tool_names).
   - an unmapped tool advertises with a warning (fail open); the completeness
     test in tests/test_tool_surface.py is the real enforcement, so a new tool
     that nobody classifies fails CI instead of silently hiding.
@@ -745,10 +746,13 @@ def advertise(tool_name: str) -> bool:
     if _all_tools_forced():
         return True
     try:
-        from .demo_data import is_demo
+        from .demo_data import demo_tool_names, is_demo
 
         if is_demo():
-            return True  # the demo showcases the whole product
+            # Only what the sample can answer, plus the connect/setup tools that
+            # lead out of demo. Advertising all ~198 tools cost ~48k tokens, and
+            # more than half of them could only say "not in the sample dataset".
+            return tool_name in demo_tool_names()
     except Exception:
         pass
 

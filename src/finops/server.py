@@ -68,7 +68,8 @@ class _SurfacedFastMCP(FastMCP):
     Overrides list_tools (the handler binds self.list_tools at __init__, so the
     subclass override is picked up) and filters through tool_surface.advertise:
     core tools always, provider families only when locally detected as connected,
-    everything under FINOPS_ALL_TOOLS=1 or demo mode. Advertisement-only: the
+    everything under FINOPS_ALL_TOOLS=1, the sample-backed tools in demo mode.
+    Advertisement-only: the
     call path resolves against the full registry, so a hidden tool called by
     name still runs, which keeps the in-chat connect flow intact.
     """
@@ -235,20 +236,40 @@ _unconnected_hint_fired = False
 # tool wrapper surfaces it IN CHAT once per session so the user actually sees it.
 _stale_note: str | None = None
 _stale_note_shown = False
-# Injected into cost-tool responses when nothing is connected. Tells the user the
-# data is sample/empty and hands the model the exact tool to fix it in-client, so
-# they never have to leave the conversation for a terminal wizard.
+# Injected into cost-tool responses when nothing is connected. Tells the user
+# what they are looking at and hands the model the exact tool to fix it in-client,
+# so they never have to leave the conversation for a terminal wizard.
+_CONNECT_HOW = (
+    "To see your own numbers, connect in-chat, no terminal needed: connect_aws or "
+    "connect_gcp detect credentials already on this machine and connect them; "
+    "connect_azure walks through the Cloud Shell one-paste. They only read billing "
+    "data; they never change anything in your cloud."
+)
+# Demo mode: the answer IS sample data, and connecting replaces it.
 _CONNECT_HINT = {
     "sample_data": True,
+    "message": ("This is sample data (demo mode), not your real costs. " + _CONNECT_HOW),
+    "actions": ["connect_aws", "connect_gcp", "connect_azure"],
+}
+# Not demo, nothing connected. This used to say "nable can only show sample data"
+# here too, but nothing in chat could turn sample data on, so it promised a
+# path that did not exist. It now names the real one: demo is a server setting.
+_NO_ACCOUNT_HINT = {
+    "sample_data": False,
     "message": (
-        "No cloud account is connected, so nable can only show sample data, not "
-        "your real costs. To see your own numbers, connect in-chat, no terminal needed: "
-        "connect_aws or connect_gcp detect credentials already on this machine "
-        "and connect them; connect_azure walks through the Cloud Shell one-paste. "
-        "They only read billing data; they never change anything in your cloud."
+        "No cloud account is connected, so there are no costs of yours to show yet. "
+        + _CONNECT_HOW
+        + " To try nable on sample data first, restart the nable MCP server with "
+        "FINOPS_DEMO=1 in its environment (in the editor's MCP config), or run "
+        "`nable scan --demo` in a terminal."
     ),
     "actions": ["connect_aws", "connect_gcp", "connect_azure"],
 }
+
+
+def _connect_hint() -> dict:
+    from .demo_data import is_demo
+    return _CONNECT_HINT if is_demo() else _NO_ACCOUNT_HINT
 
 
 # ── First-contact confirmation (the restart cliff) ─────────────────────────────
@@ -283,11 +304,27 @@ def _maybe_editor_confirmation() -> str | None:
     )
 
 
-def _first_run_onboarding_directive() -> dict:
+def _first_run_onboarding_directive(demo: bool = False) -> dict:
     """The magic moment. Attached once to the user's first successful cost answer
     so the model proactively surfaces real, dollar-quantified waste instead of just
     answering the literal question. The scan it triggers (list_idle_resources) also
-    records findings that the upgrade nudge later cites, closing the value loop."""
+    records findings that the upgrade nudge later cites, closing the value loop.
+
+    In demo mode list_idle_resources has nothing in the sample dataset, so the
+    directive sent the model to a placeholder on the user's first impression.
+    The demo version points at a tool the sample answers and at the way out."""
+    if demo:
+        return {
+            "first_cost_query": True,
+            "directive": (
+                "This is the user's FIRST cost answer from nable, and it is SAMPLE DATA "
+                "(the StreamCo demo environment), not their account. Say so plainly. "
+                "Then proactively run get_savings_summary and lead with the sample's "
+                "open monthly savings in plain dollars, for example 'in this sample, "
+                "nable finds about $X/mo to recover,' and offer connect_aws, connect_gcp "
+                "or connect_azure to run the same checks on their own account."
+            ),
+        }
     return {
         "first_cost_query": True,
         "directive": (
@@ -299,6 +336,40 @@ def _first_run_onboarding_directive() -> dict:
             "moment; show them money they can save, do not just answer the literal question."
         ),
     }
+
+
+def _declared_return(fn) -> type | None:
+    """str, list or dict when that is what `fn` is declared to return, else None.
+
+    FastMCP validates a tool's result against its return annotation, so the
+    annotation is a contract the demo layer has to keep too."""
+    import typing
+
+    try:
+        hint = typing.get_type_hints(fn).get("return")
+    except Exception:
+        hint = getattr(fn, "__annotations__", {}).get("return")
+    if isinstance(hint, str):
+        return {"str": str, "list": list, "dict": dict}.get(hint.split("[", 1)[0].strip())
+    origin = typing.get_origin(hint) or hint
+    return origin if origin in (str, list, dict) else None
+
+
+def _demo_as_declared(fn, value):
+    """A demo answer in the shape `fn` promises.
+
+    The demo layer answers in dicts. 22 tools are declared `-> str` or `-> list`,
+    and for those a dict failed output validation, so a demo user asking for a
+    full audit or a CSV export got a pydantic error instead of the sample."""
+    want = _declared_return(fn)
+    if want is str and not isinstance(value, str):
+        from .demo_data import render_text
+        return render_text(value)
+    if want is list and not isinstance(value, list):
+        return [value]
+    if want is dict and not isinstance(value, dict):
+        return {"result": value, "_demo_mode": True}
+    return value
 
 # ── Extras gating ───────────────────────────────────────────────────────────────
 # Every registered tool's definition is loaded into the model's context by the MCP
@@ -397,14 +468,22 @@ def _instrumented_tool(*dargs, **dkwargs):
             #
             # Per-tool is_demo() branches were the alternative and are how this
             # happened: 60-odd tools, each needing to remember, and four did not.
+            #
+            # The demo answer replaces the tool call, not the rest of this
+            # wrapper: the first-answer directive and the connect hint below
+            # apply to it like to any other answer.
+            _was_demo = False
+            _demo = None
             try:
                 from .demo_data import demo_bridge_result, is_demo
                 if is_demo():
+                    _was_demo = True
                     _demo = demo_bridge_result(fn.__name__, kwargs or {})
                     if _demo is not None:
-                        return _demo
+                        _demo = _demo_as_declared(fn, _demo)
             except Exception as _exc:   # never let the guard break a real call
                 log.debug("demo guard skipped for %s: %s", fn.__name__, _exc)
+                _demo = None
 
             try:
                 # Tools may be sync or async. A sync tool runs on a worker
@@ -419,7 +498,9 @@ def _instrumented_tool(*dargs, **dkwargs):
                 # Only await coroutines/awaitables, otherwise sync tools
                 # (whoami, *_api_key) raise "object dict can't be used in
                 # 'await' expression".
-                if _is_coroutine_tool:
+                if _demo is not None:
+                    result = _demo
+                elif _is_coroutine_tool:
                     result = await fn(*args, **kwargs)
                 else:
                     global _TOOL_LOOP
@@ -436,6 +517,23 @@ def _instrumented_tool(*dargs, **dkwargs):
                 )
                 raise
             _duration = int((_time.monotonic() - _t0) * 1000)
+            # An in-chat connect is the way out of demo. Say which side of the
+            # line the session is on now, so the model never presents the sample
+            # as the user's account or the user's account as the sample.
+            if _was_demo and fn.__name__.startswith("connect_"):
+                try:
+                    from .demo_data import after_connect_in_demo
+                    result = after_connect_in_demo(result)
+                except Exception as _exc:
+                    log.debug("demo connect label skipped: %s", _exc)
+            elif _was_demo:
+                # Every answer given in demo mode carries the sample-data label,
+                # including the tools that serve the sample themselves.
+                try:
+                    from .demo_data import label_demo
+                    result = label_demo(result)
+                except Exception as _exc:
+                    log.debug("demo label skipped: %s", _exc)
             # Determine outcome: check for RBAC-denied results
             _outcome = "success"
             if isinstance(result, dict) and result.get("error", "").startswith("Access denied"):
@@ -472,7 +570,8 @@ def _instrumented_tool(*dargs, **dkwargs):
                     # to proactively surface real waste. Turns "it works" into "it found
                     # money" without slowing this query, and the scan it triggers records
                     # findings the upgrade nudge later cites. Once per session only.
-                    result.setdefault("_onboarding", _first_run_onboarding_directive())
+                    result.setdefault("_onboarding",
+                                      _first_run_onboarding_directive(demo=_is_demo()))
             # First contact after install: confirm the editor wiring worked.
             # Closes the restart cliff (setup ends in "restart and hope"; this
             # is the "it worked"). Once per install, MCP sessions only.
@@ -511,7 +610,7 @@ def _instrumented_tool(*dargs, **dkwargs):
             if fn.__name__ in _COST_QUERY_TOOLS and isinstance(result, dict):
                 from .demo_data import _real_provider_connected as _rpc
                 if not _rpc():
-                    result.setdefault("_connect_hint", _CONNECT_HINT)
+                    result.setdefault("_connect_hint", _connect_hint())
                     global _unconnected_hint_fired
                     if not _unconnected_hint_fired:
                         _unconnected_hint_fired = True

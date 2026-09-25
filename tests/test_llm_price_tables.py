@@ -187,7 +187,6 @@ _ALLOWED = {
         "Gemini and PaLM on Vertex: a provider llm_prices does not cover yet, "
         "and the only copy of those rates",
     ("analytics/ai_kpis.py", "_CONTEXT_WINDOWS"): "context window sizes in tokens, not prices",
-    ("demo_data.py", "by_model"): "the demo account's monthly spend in dollars, not a rate",
 }
 
 
