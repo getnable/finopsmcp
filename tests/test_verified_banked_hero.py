@@ -51,7 +51,7 @@ def _seed(source, status, est=100.0, ver=None, n=1):
 
 
 def _free_plan(monkeypatch):
-    monkeypatch.setattr(server, "get_status", lambda: SimpleNamespace(plan="solo"))
+    monkeypatch.setattr(server, "get_status", lambda: SimpleNamespace(mode="free", plan="solo"))
 
 
 # ── get_nable_roi leads with banked ───────────────────────────────────────────

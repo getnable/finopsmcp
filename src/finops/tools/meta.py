@@ -7,7 +7,7 @@ import-order coupling exists."""
 from __future__ import annotations
 
 from .. import server as _srv
-from ..license import checkout_url, plan_label, plan_name, trial_line
+from ..license import checkout_url, plan_label, plan_name, pro_pitch, trial_line
 
 
 def _month_pair(today):
@@ -164,11 +164,9 @@ async def list_connected_providers() -> dict:
         result["_plan"] = {
             "plan": "free",
             "note": (
-                f"Free tier: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
-                f"PR comments, budgets, K8s analysis, Helm visibility, and all connectors included. "
-                f"Pro plan ($25/mo) adds: Slack anomaly alerts, ticket auto-creation "
-                f"(Jira/Linear/GitHub), email reports, commitment recommendations, "
-                f"and org rollup. Upgrade at {_srv._UPGRADE_URL}."
+                f"Free tier: cost queries, anomaly detection, rightsizing, Slack/Teams alerts "
+                f"on request, PR comments, budgets, K8s analysis, Helm visibility, and all "
+                f"connectors included. {pro_pitch()} Upgrade at {checkout_url('pro')}."
             ),
         }
     elif status.mode in ("pro", "team", "enterprise"):

@@ -833,27 +833,13 @@ def require_pro(feature: str) -> dict | None:
     else:
         why = trial_line(s) or f"Your {_TRIAL_DAYS}-day Pro trial has ended. Free stays on."
 
-    # Build a concise FOMO block showing everything Team unlocks
-    _TEAM_FEATURES = [
-        ("remediation",                "🔧 The fix as a pull request: rightsizing and tag PRs you approve"),
-        ("agent_learning",             "🧠 The Ledger: verified savings + a gate that learns what you approve"),
-        ("ticket_creation",            "🎫 Auto-create Jira / Linear / GitHub Issues from anomalies & rightsizing"),
-        ("scheduled_email_digests",    "📧 Email reports and digests, sent on request"),
-        ("commitment_recommendations", "💰 RI / Savings Plan recommendations with exact $ ROI"),
-        ("org_reports",                "🏢 Org-wide cost rollup across all accounts & OUs"),
-        ("cur_athena_detail",          "🔍 Line-item CUR data — per-resource costs, RI waste, tag breakdown"),
-        ("azure_detail",               "☁️  Azure resource-level cost detail & reservation utilization"),
-        ("business_metrics",           "📈 Unit economics — cost per customer, hosting % of MRR"),
-    ]
-
-    lines = ["⬡  nable Pro — everything in free, plus:\n"]
-    for key, desc in _TEAM_FEATURES:
-        # Don't advertise a feature that is currently on the free hold as a paid
-        # unlock; it would list things the user already has for free.
-        if _is_ungated_now(key):
-            continue
+    # What Pro unlocks today, from the one list: PRO_FEATURES minus the free
+    # hold. This used to be its own list, which also named line-item CUR, Azure
+    # detail and business metrics, none of them gated.
+    lines = [f"⬡  nable {plan_label('pro')}: everything in Free, plus:\n"]
+    for key in locked_features():
         marker = "▶" if key == feature else " "
-        lines.append(f"  {marker} {desc}")
+        lines.append(f"  {marker} {PRO_FEATURE_COPY[key]}")
     lines.append(f"\n  You hit this because '{friendly}' requires Pro. {why}")
     lines.append(f"\n  → {plan_label('pro')}: {_PRO_CHECKOUT_URL}")
     lines.append(f"  → Already subscribed? Sign in:  {_ACTIVATE_CMD}")

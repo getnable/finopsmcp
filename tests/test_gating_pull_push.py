@@ -108,7 +108,7 @@ def test_upsell_does_not_advertise_ungated_features(monkeypatch):
     for banned in ("Budget Guard", "The Ledger", "fix as a pull request",
                    "Savings Plan recommendations"):
         assert banned not in msg, f"upsell leaked ungated feature: {banned}"
-    assert "Auto-create Jira" in msg  # a genuinely gated feature still shows
+    assert "Ticket creation (Jira" in msg  # a genuinely gated feature still shows
 
 
 def test_regating_ai_features_restores_the_gate(monkeypatch):

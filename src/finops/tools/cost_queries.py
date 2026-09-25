@@ -2081,11 +2081,13 @@ def get_nable_roi(
         from sqlalchemy import select
         from datetime import datetime, timedelta, timezone
 
-        _SOLO_MONTHLY_USD = 0.0
+        from ..license import PLANS, plan_name, pro_pitch
 
         lic = _srv.get_status()
-        plan = lic.plan
-        monthly_cost = _srv._PRO_MONTHLY_USD if plan in ("pro", "enterprise") else _SOLO_MONTHLY_USD
+        # LicenseStatus carries the plan as `mode`. This read `lic.plan`, which
+        # does not exist, so every real call returned an AttributeError.
+        plan = getattr(lic, "mode", "free")
+        monthly_cost = float(PLANS.get(plan, {}).get("monthly_usd") or 0.0)
         period_cost = monthly_cost * (period_days / 30)
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=period_days)
@@ -2132,7 +2134,7 @@ def get_nable_roi(
             hero,
             "",
             f"**Tool cost:** ${period_cost:,.0f} over {period_days} days "
-            f"(${monthly_cost:.0f}/mo · {plan} plan)",
+            f"(${monthly_cost:,.0f}/mo · {plan_name(plan)} plan)",
             "",
             "### Savings pipeline",
             f"- Found (predicted): ${found_total:,.0f}/mo in opportunities ({len(rows)} recommendations)",
@@ -2141,13 +2143,21 @@ def get_nable_roi(
             "",
         ]
 
-        if monthly_cost == 0:
+        if monthly_cost == 0 and PLANS.get(plan, {}).get("monthly_usd") is None:
+            # A contract price nable does not know: no made-up ROI figure.
             lines += [
                 "### ROI",
-                f"**Solo plan is free.** You're getting ${found_total:,.0f}/mo in recommendations at zero cost.",
+                f"The {plan_name(plan)} plan is priced by contract, so compare the "
+                f"verified ${verified_total:,.0f}/mo above against it.",
+            ]
+        elif monthly_cost == 0:
+            lines += [
+                "### ROI",
+                f"**The {plan_name(plan)} plan costs nothing.** You're getting "
+                f"${found_total:,.0f}/mo in recommendations at zero cost.",
                 f"Annualized opportunity: ${found_annualized:,.0f}.",
                 "",
-                "Upgrade to Pro ($25/mo) to unlock auto-remediation and verified savings tracking.",
+                pro_pitch(),
                 f"At ${verified_total:,.0f}/mo verified savings, payback is "
                 f"{'less than 1 week' if verified_total > 0 else 'immediate once first savings are verified'}.",
             ]

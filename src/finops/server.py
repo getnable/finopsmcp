@@ -584,7 +584,7 @@ async def connection_status() -> str:
             "no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."
         )
 
-    from .license import checkout_url, plan_label, plan_name, trial_line
+    from .license import checkout_url, plan_label, plan_name, pro_pitch, trial_line
     lic = get_status()
     if lic.mode == "trial":
         plan_line = (
@@ -593,11 +593,9 @@ async def connection_status() -> str:
         )
     elif lic.mode == "free":
         plan_line = (
-            f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts, "
-            f"PR comments, budgets, K8s analysis, and all connectors included. "
-            f"Pro plan ($25/mo) adds: Slack anomaly alerts, ticket auto-creation, "
-            f"email digests, commitment recommendations, and org rollup. "
-            f"Upgrade at {_UPGRADE_URL}."
+            f"Plan: Free: cost queries, anomaly detection, rightsizing, Slack/Teams alerts "
+            f"on request, PR comments, budgets, K8s analysis, and all connectors included. "
+            f"{pro_pitch()} Upgrade at {checkout_url('pro')}."
         )
     elif lic.mode in ("pro", "team", "enterprise"):
         plan_line = f"Plan: {plan_name(lic.mode)}: {lic.email}"
@@ -1403,14 +1401,15 @@ _BANNER_FREE = [
     "✓  PR cost comments",
     "✓  Connector health & savings tracking",
 ]
-_BANNER_PRO = [
-    "   🎫  Ticket auto-creation  (Jira · Linear · GitHub Issues)",
-    "   📧  Email and Slack reports, sent on request",
-    "   💰  RI / Savings Plan recommendations with $ ROI",
-    "   🏢  Org-wide multi-account rollup & OU breakdown",
-    "   🔍  Line-item CUR data, per-resource & RI waste",
-    "   📈  Unit economics, cost per customer, % of MRR",
-]
+
+
+def _banner_pro() -> list[str]:
+    """What Pro unlocks today: PRO_FEATURES minus the temporary free hold. The
+    list this replaced also named line-item CUR, Azure detail and business
+    metrics, none of which is gated, and commitment recommendations, which are
+    free during the hold."""
+    from .license import PRO_FEATURE_COPY, locked_features
+    return [f"   ▸  {PRO_FEATURE_COPY[f]}" for f in locked_features()]
 
 
 def _plan_banner_lines(status) -> list[str]:
@@ -1430,7 +1429,7 @@ def _plan_banner_lines(status) -> list[str]:
         out += [f"\n  {border}", f"  nable {plan_name(mode)}  ·  {status.email}{until}", f"  {border}"]
         out += [f"  {f}" for f in _BANNER_FREE]
         out.append(f"  {'─' * W}")
-        out += [f"  {t.replace('   ', '', 1)}" for t in _BANNER_PRO]
+        out += [f"  {t.replace('   ', '', 1)}" for t in _banner_pro()]
         out.append(f"  {border}\n")
     elif mode == "trial":
         days = status.days_remaining
@@ -1440,7 +1439,7 @@ def _plan_banner_lines(status) -> list[str]:
                 f"  nable {plan_name('trial')}  ·  {days} day{'s' if days != 1 else ''} left{through}",
                 f"  {border}"]
         out += [f"  {f}" for f in _BANNER_FREE]
-        out += [f"  {t.replace('   ', '', 1)}" for t in _BANNER_PRO]
+        out += [f"  {t.replace('   ', '', 1)}" for t in _banner_pro()]
         out.append(f"  {'─' * W}")
         when = f" after {fmt_day(last)}" if last else ""
         out.append(f"  Keep Pro{when}: {plan_label('pro')}")
@@ -1450,9 +1449,11 @@ def _plan_banner_lines(status) -> list[str]:
         out += [f"\n  {border}", "  nable  ·  free tier", f"  {border}"]
         out += [f"  {f}" for f in _BANNER_FREE]
         out.append(f"  {'─' * W}")
-        out.append("  Locked on free tier  ↓")
-        out += [f"  {t}" for t in _BANNER_PRO]
-        out.append(f"  {'─' * W}")
+        locked = _banner_pro()
+        if locked:
+            out.append("  Locked on free tier  ↓")
+            out += [f"  {t}" for t in locked]
+            out.append(f"  {'─' * W}")
         out.append(f"  {plan_label('pro')}  →  {checkout_url('pro')}")
         out.append(f"  {border}\n")
     return out
