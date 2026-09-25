@@ -470,6 +470,21 @@ def test_demo_needs_no_aws(capsys):
     assert code == cli_scan.EXIT_OK
 
 
+def test_env_demo_is_decided_the_way_the_server_decides_it(capsys, monkeypatch):
+    """`nable scan` read FINOPS_DEMO == "1" itself while the server used
+    is_demo(), so FINOPS_DEMO_MODE, a managed instance or a connected account
+    meant one thing to the scan and another to the server."""
+    import finops.demo_data as dd
+    monkeypatch.setattr(dd, "is_demo", lambda: True)
+    with (
+        patch.object(cli_scan, "_emit"),
+        patch("boto3.Session", side_effect=AssertionError("must not touch AWS")),
+    ):
+        code = cli_scan.run(_args())
+    assert code == cli_scan.EXIT_OK
+    assert "(demo data)" in capsys.readouterr().out
+
+
 # ── no AWS credentials, other providers "connected" ─────────────────────────────
 
 def _only_accounts_yaml(tmp_path, monkeypatch):
@@ -779,6 +794,19 @@ def test_unexpected_error_is_reported_not_stack_traced(capsys):
     # Where it failed, relative to the package: no home directory, no message.
     assert props["crash_site"].startswith("cli_scan.py:") or "/" in props["crash_site"]
     assert "secret" not in json.dumps(props) and "/Users" not in json.dumps(props)
+
+
+def test_a_crash_with_workers_still_running_exits_like_ctrl_c(capsys, monkeypatch):
+    """The crash branch returned _fail() directly, so a crash that left region
+    workers blocked in boto3 hung at interpreter shutdown. It goes through
+    _finish like the Ctrl-C branch."""
+    finished = []
+    monkeypatch.setattr(cli_scan, "_threads_lingering", lambda: True)
+    monkeypatch.setattr(cli_scan, "_finish",
+                        lambda code, lingering: finished.append((code, lingering)) or code)
+    code, _ = _run_with_engine_error(_args(), KeyError("boom"))
+    assert code == 1
+    assert finished == [(1, True)]
 
 
 def test_debug_still_shows_the_trace():

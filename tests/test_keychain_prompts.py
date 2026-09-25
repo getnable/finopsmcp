@@ -100,6 +100,19 @@ def test_trial_creation_writes_keychain_exactly_once(kr, trial_file):
     assert kr.touches == touches_before
 
 
+def test_a_trial_start_in_the_future_is_capped_and_rewritten(kr, trial_file):
+    """A stored start after today (clock moved back, or a copied store) used to
+    report more days left than the trial has. Cap it and store today instead."""
+    from datetime import timedelta
+    today = date.today()
+    L._file_set(today + timedelta(days=30))
+    status = L.validate_key("")
+    assert status.mode == "trial"
+    assert status.days_remaining == L._TRIAL_DAYS
+    assert L._file_get() == today
+    assert kr.sets == 0
+
+
 def test_trial_legacy_disguised_entry_migrates(kr, trial_file):
     d = date(2026, 5, 20)
     kr.store[(L._KR_LEGACY_SERVICE, L._KR_LEGACY_USERNAME)] = _signed(d)

@@ -61,6 +61,28 @@ hook, and fixed.
 - New: DynamoDB provisioned-capacity check, and prices checked against the
   AWS Price List (EC2, RDS per engine, EBS, load balancers, NAT).
 
+## 0.8.216
+
+- **Attribution `priority` now means what the docs say.** Lower number wins,
+  first matching rule per field. It used to be the highest number, so a tag
+  collision could name a team after a cost-centre code. This changes
+  attribution for anyone whose rules collide on a field. An empty result now
+  says which configured tag keys AWS is not carrying (cost allocation tags
+  must be activated in Billing, and activation is not retroactive).
+  New `docs/COST-ATTRIBUTION.md`.
+- **Less billed Cost Explorer.** Connecting an account reads history from the
+  CUR when one is configured instead of paging Cost Explorer for 90 days, the
+  nightly AI monitor no longer calls it for Bedrock, and a failed CUR read
+  skips AWS for the night rather than falling back to Cost Explorer.
+- **AI/GPU cost categories from the CUR.** Spend is bucketed into ai, compute,
+  data, storage, network and other from the ingested export, never Cost
+  Explorer.
+- An account with under about 7 days of history gets "not enough history
+  yet" from anomaly checks instead of "no active anomalies", and fetched
+  invoices are stored (every one used to fail silently).
+- The published contact address is chandan@nable.sh, and PR-comment
+  handling refuses an all-dots owner or repo name.
+
 ## 0.8.215
 
 - `nable connect` can see AWS. On a machine whose only credential was

@@ -179,6 +179,35 @@ def test_the_setup_footer_does_not_advertise_a_dashboard_that_is_not_installed(c
         assert "serve" not in out
 
 
+def test_the_footer_does_not_say_nothing_was_connected_when_a_key_was_stored(monkeypatch, capsys):
+    """AWS declined, OpenAI stored: the close said "Nothing was connected this
+    time." It says that only when nothing was stored."""
+    monkeypatch.setattr(W, "_DECLINED", [True])
+    W._print_setup_footer(None, stored_something=True)
+    assert "Nothing was connected" not in capsys.readouterr().out
+    W._print_setup_footer(None, stored_something=False)
+    assert "Nothing was connected this time." in capsys.readouterr().out
+
+
+def test_the_menu_passes_on_that_another_provider_was_stored(monkeypatch, capsys):
+    monkeypatch.setattr(W, "_DECLINED", [False])
+
+    def _declined_aws():
+        W._DECLINED[0] = True
+
+    monkeypatch.setattr(W, "setup_aws_account", _declined_aws)
+    monkeypatch.setattr(W, "setup_saas_api_key", lambda *a, **k: True)
+    monkeypatch.setattr(W, "_wizard_select_persona", lambda: None)
+    monkeypatch.setattr(W, "_select_providers", lambda providers: ["aws", "openai"])
+    monkeypatch.setattr(W, "_configure_claude_desktop", lambda: True)
+    monkeypatch.setattr(W, "_offer_email_signup", lambda: None)
+    seen = []
+    monkeypatch.setattr(W, "_print_setup_footer",
+                        lambda cmd, stored_something=False: seen.append(stored_something))
+    W.main(["setup"])
+    assert seen == [True]
+
+
 def test_check_notification_config_on_an_open_install_says_on_request(monkeypatch):
     from finops.tools import notifications as nt
     monkeypatch.setattr(nt, "_scheduler_installed", lambda: False)

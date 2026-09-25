@@ -107,6 +107,17 @@ def _section(title: str) -> None:
     print(f"  {_rule()}")
 
 
+# The one-click template puts the secret access key in the stack's Outputs,
+# where it stays readable after the paste. Until the template is republished
+# without it, every place that sends someone to Outputs says so.
+_CFN_OUTPUTS_NOTE = (
+    "The secret key stays visible in the stack's Outputs to anyone with "
+    "cloudformation:DescribeStacks in this account. To close that, create a new "
+    "access key for the stack's IAM user in IAM, delete the one shown in Outputs, "
+    "and run `nable setup aws` with the new key. Deleting the stack revokes the key."
+)
+
+
 def _ok(msg: str) -> None:
     from .welcome import green
     print(f"  {green('✓')} {msg}")
@@ -347,6 +358,8 @@ def setup_aws() -> None:
         if role_arns:
             vault.store("AWS_ROLE_ARNS", role_arns)
         _ok("AWS credentials stored in vault")
+        if _method == "oneclick":
+            _warn(_CFN_OUTPUTS_NOTE)
 
     # Test connection + Cost Explorer permissions
     try:
@@ -1133,6 +1146,8 @@ def _print_one_click_key_offer(region: str = "us-east-1") -> None:
             "  auditable template; your keys stay in your account):\n"
         )
         print(f"     {quick_create_url(region=region)}\n")
+        _warn(_CFN_OUTPUTS_NOTE)
+        print()
 
 
 def _setup_aws_manual(taken: set) -> None:
@@ -3649,6 +3664,7 @@ def main(args: list[str] | None = None) -> None:
             ("DATABRICKS_DBU_PRICE", "DBU price in USD (optional, default 0.40, use your contract rate)", False),
         ]),
     }
+    stored_something = False  # did a provider step store a credential
 
     if parsed.cmd == "config":
         _handle_config_cmd(parsed)
@@ -3691,6 +3707,8 @@ def main(args: list[str] | None = None) -> None:
             "  'finops setup aws'. The stack is read-only and auditable.\n"
         )
         print(f"  {quick_create_url()}\n")
+        _warn(_CFN_OUTPUTS_NOTE)
+        print()
         return
     elif parsed.cmd == "aws" and getattr(parsed, "check_scope", False):
         from .security.iam_setup import check_credential_scope
@@ -3726,11 +3744,9 @@ def main(args: list[str] | None = None) -> None:
         _run_aws_cur_setup()
         return
     elif parsed.cmd == "license":
-        _run_license_setup(getattr(parsed, "key", ""))
-        return
+        raise SystemExit(_run_license_setup(getattr(parsed, "key", "")))
     elif parsed.cmd == "login":
-        _run_login(getattr(parsed, "email", ""))
-        return
+        raise SystemExit(_run_login(getattr(parsed, "email", "")))
     elif parsed.cmd == "logout":
         _run_logout()
         return
@@ -3840,7 +3856,9 @@ def main(args: list[str] | None = None) -> None:
             setup_aws_account()
         return
     elif parsed.cmd in dispatch:
-        if dispatch[parsed.cmd]() is False:
+        _result = dispatch[parsed.cmd]()
+        stored_something = _result is True
+        if _result is False:
             # "No OpenAI credentials entered. Nothing stored." was followed by
             # "Done. Restart Claude Desktop, then ask ...". Nothing was done.
             from .welcome import _cli
@@ -3881,11 +3899,12 @@ def main(args: list[str] | None = None) -> None:
             print("\n  Nothing was connected, so there is nothing to restart. Run "
                   "this again when you have the keys.\n")
             return
+        stored_something = any(r is True for r in stored)
 
     # Always offer to configure Claude Desktop at the end of setup
     _configure_claude_desktop()
 
-    _print_setup_footer(parsed.cmd)
+    _print_setup_footer(parsed.cmd, stored_something=stored_something)
     _offer_email_signup()
 
     # Fire setup_completed event
@@ -3907,9 +3926,12 @@ def _dashboard_installed() -> bool:
         return False
 
 
-def _print_setup_footer(cmd: "str | None") -> None:
+def _print_setup_footer(cmd: "str | None", stored_something: bool = False) -> None:
+    """stored_something: a provider step reported storing a credential. AWS
+    being declined says nothing about the rest of the menu, so "Nothing was
+    connected" needs both."""
     from .welcome import _cli
-    if _DECLINED[0]:
+    if _DECLINED[0] and not stored_something:
         # Nothing was connected; "Done. Restart Claude Desktop" would say otherwise.
         print("\n  Nothing was connected this time.")
     else:
@@ -3990,11 +4012,13 @@ def _offer_email_signup() -> None:
 
 # ── Claude Desktop auto-configuration ─────────────────────────────────────────
 
-def _run_license_setup(key: str = "") -> None:
+def _run_license_setup(key: str = "") -> int:
     """
     Activate a Pro license key.
     Called by: finops setup license FINOPS-2-xxx
                 finops setup license   (interactive, prompts for key)
+    Returns the exit code: 0 when the key is stored, 1 when none was entered.
+    An invalid key raises SystemExit(1).
     """
     from .license import (
         PRO_FEATURE_COPY, TEAM_FEATURE_COPY, _UPGRADE_URL, checkout_url,
@@ -4014,7 +4038,7 @@ def _run_license_setup(key: str = "") -> None:
 
     if not key:
         _warn("No key entered. Run 'finops setup license FINOPS-2-...' to activate.")
-        return
+        return 1
 
     # Validate before storing
     status = validate_key(key)
@@ -4058,6 +4082,7 @@ def _run_license_setup(key: str = "") -> None:
         })
     except Exception:
         pass
+    return 0
 
 
 def _run_license_status() -> None:
@@ -4107,12 +4132,13 @@ def _run_license_status() -> None:
         print()
 
 
-def _run_login(email: str = "") -> None:
+def _run_login(email: str = "") -> int:
     """
     Activate Pro by email, with no license key to copy or remember. Sends an
     8-digit code to your inbox, verifies it, and stores the license locally so
     the server picks it up automatically.
     Called by: finops login [email]
+    Returns the exit code: 0 when a paid license is stored, 1 otherwise.
     """
     import json
     import urllib.request
@@ -4127,7 +4153,7 @@ def _run_login(email: str = "") -> None:
         email = _prompt("  Email you used at checkout").strip().lower()
     if "@" not in email or "." not in email:
         _err("That does not look like an email address.")
-        return
+        return 1
 
     def _post(path: str, payload: dict) -> dict:
         req = urllib.request.Request(
@@ -4154,17 +4180,17 @@ def _run_login(email: str = "") -> None:
             _err("Too many requests. Wait a few minutes, then try again.")
         else:
             _err(msg or f"Could not send the code ({e.code}).")
-        return
+        return 1
     except Exception as e:  # genuine network / DNS / timeout
         _err(f"Could not reach getnable.com. Check your connection and try again. ({e})")
-        return
+        return 1
     print(f"  ✓  Sent an 8-digit code to {email}. It expires in 10 minutes.\n")
 
     # 2) verify the code -> the server returns the license for this email
     code = _prompt("  Enter the code").strip()
     if not code:
         _warn("No code entered. Run 'finops login' again when it arrives.")
-        return
+        return 1
     try:
         data = _post("/api/account/verify-code", {"email": email, "code": code})
     except urllib.error.HTTPError as e:
@@ -4177,10 +4203,10 @@ def _run_login(email: str = "") -> None:
             _err("Too many attempts. Wait a few minutes, then try again.")
         else:
             _err(msg or f"Sign-in failed ({e.code}).")
-        return
+        return 1
     except Exception as e:
         _err(f"Could not verify the code: {e}")
-        return
+        return 1
 
     plan = (data or {}).get("plan", "free")
     key = (data or {}).get("license_key") or ""
@@ -4191,12 +4217,12 @@ def _run_login(email: str = "") -> None:
         print(f"\n  Get {plan_label('pro')}: {checkout_url('pro')}")
         print(f"  Team and other plans: {_UPGRADE_URL}")
         print("  Subscribed with a different email? Run 'finops login' with that one.\n")
-        return
+        return 1
 
     status = store_license(key)
     if status.mode == "invalid":
         _err(f"The license we received did not validate: {status.message}")
-        return
+        return 1
     _strip_license_from_editor_configs()
 
     from .license import plan_label, plan_name
@@ -4214,15 +4240,24 @@ def _run_login(email: str = "") -> None:
         _tel._send_event(_tel._get_install_id(), "login_activated", {"plan": status.mode})
     except Exception:
         pass
+    return 0
 
 
 def _run_logout() -> None:
     """Remove the stored license from this machine: the vault copy, and any copy
     an earlier release wrote into an editor's MCP config. Called by: finops logout"""
     from .license import clear_license
-    clear_license()
+    result = clear_license()
     cleaned = _strip_license_from_editor_configs()
-    print("\n  ✓  Signed out. The license is removed from this machine's vault.")
+    if result == "removed":
+        print("\n  ✓  Signed out. The license is removed from this machine's vault.")
+    elif result == "none":
+        print("\n  ✓  Signed out. No license was stored in this machine's vault.")
+    else:
+        print()
+        _warn("Could not open or change this machine's vault, so a stored license "
+              "may still be there. Run `nable doctor` to see why, then "
+              "`nable logout` again.")
     for client, path in cleaned:
         print(f"  ✓  Removed the license key from {client}: {path}")
     if cleaned:
@@ -4925,6 +4960,41 @@ def _build_mcp_server_entry() -> "tuple[dict, str]":
     return mcp_entry, display_cmd
 
 
+def _config_license_can_go(value: object) -> bool:
+    """A license key an earlier release wrote into an editor config's env block.
+    True when that copy can be dropped: the vault already holds a key, the copy
+    is not a usable key, or it was just moved into the vault. False when the
+    vault could not take it, so the caller keeps it in the config instead of
+    silently dropping a paying user to free."""
+    value = value.strip() if isinstance(value, str) else ""
+    if not value:
+        return True
+    try:
+        from .security.vault import Vault
+        vault = Vault.default()
+    except Exception:
+        vault = None
+    if vault is not None:
+        try:
+            if (vault.get("FINOPS_LICENSE_KEY") or "").strip():
+                return True
+        except Exception:
+            pass
+    from .license import validate_key
+    if validate_key(value).mode == "invalid":
+        return True
+    try:
+        if vault is None:
+            raise RuntimeError("vault unavailable")
+        vault.store("FINOPS_LICENSE_KEY", value)
+    except Exception:
+        _warn("Could not store the license key from the editor config in the vault, "
+              "so it stays in the config. Run `nable license <key>` to store it.")
+        return False
+    _ok("Moved the license key from the editor config into the vault.")
+    return True
+
+
 def _merge_write_mcpservers(config_path: Path, mcp_entry: dict) -> bool:
     """Merge nable into a {"mcpServers": {...}} JSON config, preserving other
     servers and migrating a legacy "finops" key. Returns True on write, False if
@@ -4944,8 +5014,11 @@ def _merge_write_mcpservers(config_path: Path, mcp_entry: dict) -> bool:
     if isinstance(existing, dict) and existing.get("env"):
         entry["env"] = {**existing["env"], **entry.get("env", {})}
     if isinstance(entry.get("env"), dict):
-        # A key an earlier release wrote here would outrank the vault.
-        entry["env"].pop("FINOPS_LICENSE_KEY", None)
+        # A key an earlier release wrote here would outrank the vault, so it
+        # goes, but only once the vault holds a license.
+        if ("FINOPS_LICENSE_KEY" in entry["env"]
+                and _config_license_can_go(entry["env"]["FINOPS_LICENSE_KEY"])):
+            entry["env"].pop("FINOPS_LICENSE_KEY")
         if not entry["env"]:
             entry.pop("env")
     servers.pop("finops", None)
@@ -5162,7 +5235,7 @@ def _configure_claude_desktop_inner() -> bool:
     if uvx_bin:
         _notes.append("uvx mode: works on corporate machines without PATH changes")
     if stale_key:
-        _notes.append("removes a license key an earlier release wrote here (the vault holds it)")
+        _notes.append("moves a license key an earlier release wrote here into the vault")
     if existing:
         _notes.append("updates existing entry")
     for _note in _notes:
@@ -5182,10 +5255,13 @@ def _configure_claude_desktop_inner() -> bool:
         return False
 
     # Preserve any env keys already in the existing entry that we're not
-    # overwriting, except a license key an earlier release wrote there.
+    # overwriting, except a license key an earlier release wrote there, which
+    # goes only once the vault holds a license.
     if existing.get("env"):
-        merged_env = {k: v for k, v in {**existing["env"], **mcp_entry.get("env", {})}.items()
-                      if k != "FINOPS_LICENSE_KEY"}
+        merged_env = {**existing["env"], **mcp_entry.get("env", {})}
+        if ("FINOPS_LICENSE_KEY" in merged_env
+                and _config_license_can_go(merged_env["FINOPS_LICENSE_KEY"])):
+            merged_env.pop("FINOPS_LICENSE_KEY")
         if merged_env:
             mcp_entry["env"] = merged_env
 

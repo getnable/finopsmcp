@@ -56,6 +56,19 @@ _OPT_OUT_ENV  = "NABLE_NO_TELEMETRY"   # hard override, always wins
 _OPT_IN_ENV   = "NABLE_TELEMETRY"      # opt-in: nothing is sent without it
 
 
+def _opt_in_env() -> "bool | None":
+    """NABLE_TELEMETRY read strictly: True for 1/true/yes/on, False for
+    0/false/no/off, None when unset or unrecognised. Only a clear yes opts in;
+    it used to be "anything not in a short off list", so off, OFF or False
+    switched telemetry on."""
+    raw = os.environ.get(_OPT_IN_ENV, "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
 # ─── Consent, asked once, out loud ───────────────────────────────────────────
 #
 # Telemetry became opt-in on 2026-08-08 (0.8.210) and the trade was deliberate:
@@ -122,8 +135,8 @@ def _can_ask() -> bool:
         return False                       # asked once already. Once means once.
     if os.environ.get(_OPT_OUT_ENV, "").strip() not in ("", "0", "false", "no"):
         return False                       # they already said no, louder
-    if os.environ.get(_OPT_IN_ENV, "").strip() not in ("", "0", "false", "no"):
-        return False                       # they already said yes
+    if _opt_in_env() is not None:
+        return False                       # they already answered, yes or no
     if os.environ.get("FINOPS_AIRGAP", "").strip() not in ("", "0", "false", "no"):
         return False
     if is_ci():
@@ -278,9 +291,11 @@ def _is_opted_out() -> bool:
     for _var in (_OPT_OUT_ENV, "DO_NOT_TRACK"):
         if env_flag_set(_var):
             return True
-    _in = os.environ.get(_OPT_IN_ENV, "").strip()
-    if _in not in ("", "0", "false", "no"):
-        return False        # explicit env opt-in still works, unchanged
+    _in = _opt_in_env()
+    if _in is True:
+        return False        # explicit env opt-in still works
+    if _in is False:
+        return True         # an explicit no in the env is a no, whatever was stored
     # Otherwise: the answer the user gave when asked, once, in words. None means
     # never asked, which stays OFF. The env var is no longer the only way in,
     # because requiring one is what took the signal to zero.

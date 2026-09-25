@@ -49,7 +49,7 @@ def env(monkeypatch, tmp_path):
 
 def test_pro_activation_prompt_links_the_pro_checkout(env, monkeypatch, capsys):
     monkeypatch.setattr(W, "_prompt", lambda *a, **k: "")
-    W._run_license_setup("")
+    assert W._run_license_setup("") == 1, "no key entered is not a success"
     out = capsys.readouterr().out
     assert L._PRO_CHECKOUT_URL in out
     assert L._CHECKOUT_URL not in out, "the Pro activation screen links the $1,000 Team checkout"
@@ -76,7 +76,7 @@ def test_team_key_says_team_plan_active(env, capsys):
 
 def test_pro_key_says_pro_plan_active(env, capsys):
     key = L.generate_key("buyer@example.com", plan="pro")
-    W._run_license_setup(key)
+    assert W._run_license_setup(key) == 0
     out = capsys.readouterr().out
     assert "Pro plan active" in out
     assert "Team features" not in out
@@ -89,3 +89,12 @@ def test_the_plan_table_is_what_the_screens_read():
     assert L.checkout_url("team") == L._CHECKOUT_URL
     assert L.plan_label("pro") == "Pro ($25/mo)"
     assert L.plan_label("team") == "Team ($1,000/mo flat, unlimited seats)"
+
+
+def test_nable_license_with_no_key_exits_nonzero(env, monkeypatch):
+    """The CLI dispatch turns the return into the exit code, so a script
+    activating a key can tell an empty paste did not take."""
+    monkeypatch.setattr(W, "_prompt", lambda *a, **k: "")
+    with pytest.raises(SystemExit) as e:
+        W.main(["license"])
+    assert e.value.code == 1
