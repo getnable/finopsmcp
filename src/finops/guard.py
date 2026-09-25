@@ -862,17 +862,17 @@ def _planfile_arg(cmd: str, verb_end: int) -> str | None:
     return None
 
 
-_PLAN_CACHE: dict[tuple[str, float], dict[str, Any] | None] = {}
+# A plan file's `show -json` document, or why it could not be read.
+_PLAN_CACHE: dict[tuple[str, float], dict[str, Any] | str] = {}
 
 
-def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any]] | None:
-    """(tool, plan file as written, `show -json` document) for `terraform|tofu
-    apply <planfile>`, or None.
+def _plan_read(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any] | str] | None:
+    """(tool, plan file as written, `show -json` document or the reason it
+    could not be read) for `terraform|tofu apply <planfile>`, or None when
+    there is no plan file to read (a plain apply, a file that is not there).
 
-    Only when the plan file exists and the binary is on PATH; anything else (a
-    plain apply, a missing file, a slow or failing `show`) is None. Read once
-    per plan file per process: both pricing and the destroy check need it,
-    and the hook must not pay for `show` twice."""
+    Read once per plan file per process: pricing, the destroy check and the
+    unreadable check all need it, and the hook must not pay for `show` twice."""
     import shutil
     import subprocess
 
@@ -892,14 +892,18 @@ def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any
         base = base / Path(chdir.group(1)).expanduser()
     plan_path = base / Path(plan).expanduser()
     try:
+        if not plan_path.is_file():
+            return None
         key = (str(plan_path.resolve()), plan_path.stat().st_mtime)
     except OSError:
         return None
     if key not in _PLAN_CACHE:
-        _PLAN_CACHE[key] = None
-        exe = shutil.which((os.environ.get("TERRAFORM_BIN") or "terraform")
-                           if tool == "terraform" else "tofu")
-        if exe and plan_path.is_file():
+        name = (os.environ.get("TERRAFORM_BIN") or "terraform") if tool == "terraform" else "tofu"
+        exe = shutil.which(name)
+        why: dict[str, Any] | str
+        if not exe:
+            why = f"{name} is not on PATH"
+        else:
             # env=child_env(): terraform loads the providers the directory
             # declares, and none of them get nable's decrypted vault (see
             # estimate_from_dir).
@@ -908,13 +912,44 @@ def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any
                 r = subprocess.run([exe, "show", "-json", str(plan_path)], cwd=str(base),
                                    capture_output=True, text=True, check=False,
                                    timeout=_PLAN_SHOW_TIMEOUT_S, env=child_env())
-                if r.returncode == 0:
-                    doc = json.loads(r.stdout)
-                    _PLAN_CACHE[key] = doc if isinstance(doc, dict) else None
-            except (OSError, ValueError, subprocess.SubprocessError):
-                pass
-    doc = _PLAN_CACHE[key]
-    return (tool, plan, doc) if doc is not None else None
+                doc = json.loads(r.stdout) if r.returncode == 0 else None
+                why = (doc if isinstance(doc, dict)
+                       else f"`{tool} show -json` exited {r.returncode}" if r.returncode
+                       else f"`{tool} show -json` did not return a plan")
+            except subprocess.TimeoutExpired:
+                why = f"`{tool} show -json` took longer than {_PLAN_SHOW_TIMEOUT_S:g} s"
+            except ValueError:
+                why = f"`{tool} show -json` did not return a plan"
+            except (OSError, subprocess.SubprocessError) as exc:
+                why = f"{tool} could not run: {type(exc).__name__}"
+        _PLAN_CACHE[key] = why
+    return tool, plan, _PLAN_CACHE[key]
+
+
+def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any]] | None:
+    """(tool, plan file as written, `show -json` document), or None when there
+    is no plan file or it could not be read (see saved_plan_unreadable)."""
+    read = _plan_read(cmd, cwd)
+    if read is None or not isinstance(read[2], dict):
+        return None
+    return read[0], read[1], read[2]
+
+
+def saved_plan_unreadable(command: str, *, cwd: str | None = None) -> str | None:
+    """For `terraform apply <planfile>` whose plan file exists but could not be
+    read: "could not read saved plan X (reason)". None otherwise.
+
+    The plan is the only place a destroy or a GPU fleet applied from a file
+    shows up, so a plan the guard cannot read is a plan nobody has checked:
+    that asks, rather than passing silently because terraform was missing or
+    `show` ran past its time."""
+    try:
+        read = _plan_read(_normalize(command), cwd)
+    except Exception:
+        return None
+    if read is None or isinstance(read[2], dict):
+        return None
+    return f"could not read saved plan {read[1]} ({read[2]})"
 
 
 def saved_plan_destroys(command: str, *, cwd: str | None = None) -> list[str]:
@@ -1237,6 +1272,10 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         destroys = saved_plan_destroys(command, cwd=cwd)
         if destroys:
             door, action_type = "one_way", "delete_resource"
+        else:
+            unreadable = saved_plan_unreadable(command, cwd=cwd)
+            if unreadable:
+                return verdict("ask", f"{unreadable}; review it before applying.")
 
     if action_type == "infra_apply":
         # Reversible mutation. Zero friction by default; strict mode confirms,

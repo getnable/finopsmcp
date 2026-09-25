@@ -383,3 +383,44 @@ def test_the_plan_read_does_not_get_the_vault(fake_tf, monkeypatch):
     (fake_tf["work"] / "plan.out").write_bytes(b"x")
     g.estimate_command_monthly_cost("terraform apply plan.out", cwd=str(fake_tf["work"]))
     assert "env" in seen, "terraform show ran without child_env()"
+
+
+def test_no_binary_asks_to_review_the_plan(fake_tf, monkeypatch):
+    """A plan the guard cannot read is a plan nobody checked: it may hold a
+    destroy or a GPU fleet. That used to pass silently."""
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    monkeypatch.setenv("PATH", str(fake_tf["work"]))       # nothing runnable
+    v = g.gate_command("terraform apply plan.out", cwd=str(fake_tf["work"]), record=False)
+    assert v and v["decision"] == "ask"
+    assert ("could not read saved plan plan.out (terraform is not on PATH); "
+            "review it before applying") in v["reason"]
+
+
+def test_a_slow_show_asks_to_review_the_plan(fake_tf, monkeypatch):
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    monkeypatch.setenv("FAKE_TF_SLEEP", "3")
+    monkeypatch.setattr(g, "_PLAN_SHOW_TIMEOUT_S", 0.3)
+    v = g.gate_command("tofu apply plan.out", cwd=str(fake_tf["work"]), record=False)
+    assert v and v["decision"] == "ask"
+    assert "could not read saved plan plan.out (`tofu show -json` took longer than 0.3 s)" \
+        in v["reason"]
+
+
+def test_a_failing_show_asks_to_review_the_plan(fake_tf):
+    (fake_tf["work"] / "plan.out").write_bytes(b"x")
+    fake_tf["plan_json"].write_text("not json")
+    v = g.gate_command("terraform apply plan.out", cwd=str(fake_tf["work"]), record=False)
+    assert v and v["decision"] == "ask" and "could not read saved plan plan.out" in v["reason"]
+
+
+def test_a_plan_file_named_destroy_is_read_like_any_other(fake_tf):
+    (fake_tf["work"] / "destroy.tfplan").write_bytes(b"x")
+    est = g.estimate_command_monthly_cost("terraform apply destroy.tfplan",
+                                          cwd=str(fake_tf["work"]))
+    assert est and est["plan"] == "destroy.tfplan"
+
+
+@pytest.mark.parametrize("cmd", ["terraform apply", "terraform apply missing.out"])
+def test_no_plan_file_still_means_no_question(fake_tf, monkeypatch, cmd):
+    monkeypatch.setenv("PATH", str(fake_tf["work"]))
+    assert g.gate_command(cmd, cwd=str(fake_tf["work"]), record=False) is None
