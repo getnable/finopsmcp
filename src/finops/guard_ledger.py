@@ -93,7 +93,10 @@ def ledger_path() -> Path:
 
 # ── redaction ─────────────────────────────────────────────────────────────────
 
-_SECRET_WORD = r"(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|AUTH)"
+# PASS and PW catch the short spellings (db_pass=, admin_pw=) and, yes, also
+# `bypass=`: a lost detail in a summary costs nothing, a leaked password does.
+_SECRET_WORD = (r"(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|PASS|PW|CREDENTIAL|AUTH"
+                r"|SIGNATURE)")
 _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     # PEM private keys, whole block (or to the end if the block is cut off).
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
@@ -105,9 +108,30 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     (re.compile(rf"(?<![A-Za-z0-9_])([A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)="
                 r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1=[REDACTED]"),
     # --password x, --master-user-password=x, --api-key x, --auth-token x.
-    (re.compile(r"(?<![A-Za-z0-9-])(--[A-Za-z0-9-]*(?:password|passwd|secret|token|key)"
-                r"[A-Za-z0-9-]*)(=|\s+)"
+    (re.compile(r"(?<![A-Za-z0-9-])(--[A-Za-z0-9-]*(?:password|passwd|pass|pw|secret|token|key"
+                r"|credential|signature)[A-Za-z0-9-]*)(=|\s+)"
                 r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1\2[REDACTED]"),
+    # A signed URL's query: ?sig=... (Azure SAS), X-Amz-Signature=..., and the
+    # like. Names with a secret word in them are already caught above.
+    (re.compile(r"([?&](?:sig|x-amz-signature|x-goog-signature|code)=)[^&\s]+", re.IGNORECASE),
+     r"\1[REDACTED]"),
+    # The attached password of the MySQL clients: mysql -uroot -phunter2.
+    (re.compile(r"(\b(?:mysql|mysqldump|mysqladmin|mysqlsh|mariadb)\b[^|;&]*?(?<!\S)-p)"
+                r"(?=\S)(\"[^\"]*\"|'[^']*'|\S+)"), r"\1[REDACTED]"),
+    # -p <password> on a registry or cloud login: az login -u x -p y,
+    # docker login -p y (the long --password form is caught above).
+    (re.compile(r"(\b(?:az|docker|podman|oras|skopeo|registry)\s+login\b[^|;&]*?(?<!\S)-p)"
+                r"(\s+|=)(\"[^\"]*\"|'[^']*'|\S+)"), r"\1\2[REDACTED]"),
+    # user:password handed to a client: curl -u admin:hunter2, --user a:b.
+    (re.compile(r"((?<!\S)(?:-u|--user|--proxy-user)(?:\s+|=)[^:\s]+:)(\S+)"),
+     r"\1[REDACTED]"),
+    # Tokens with a published prefix, whatever their length or mix.
+    (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{6,}"), "[REDACTED-SLACK-TOKEN]"),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})"),
+     "[REDACTED-GITHUB-TOKEN]"),
+    (re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}"), "[REDACTED-API-KEY]"),
+    (re.compile(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{12,}"), "[REDACTED-API-KEY]"),
+    (re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"), "[REDACTED-API-KEY]"),
     (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"),
      "[REDACTED-AWS-KEY-ID]"),
     (re.compile(r"\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE), r"\1 [REDACTED]"),

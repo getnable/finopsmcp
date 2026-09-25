@@ -167,11 +167,42 @@ SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
      "--set db.password=[REDACTED]"),
     ("PASSWORD=hunter2 terraform apply", "hunter2", "PASSWORD=[REDACTED] terraform apply"),
     ("helm install x --set auth.token=abc123", "abc123", "auth.token=[REDACTED]"),
+    # Red-team finds: each reached the ledger in the clear.
+    ("curl 'https://api.x.io/v1?token=abc123&page=2'", "abc123", "?token=[REDACTED]"),
+    ("terraform apply -var db_pass=hunter2", "hunter2", "-var db_pass=[REDACTED]"),
+    ("terraform apply -var=admin_pw=hunter2", "hunter2", "admin_pw=[REDACTED]"),
+    ("mysql -uroot -phunter2 -h db.internal", "hunter2", "-p[REDACTED] -h db.internal"),
+    ("mysqldump -u root -p'hunter2' app", "hunter2", "-p[REDACTED] app"),
+    ("curl -u admin:hunter2 https://x.io", "hunter2", "-u admin:[REDACTED] https://x.io"),
+    ("az login --service-principal -u app -p Pa55w0rd --tenant t", "Pa55w0rd",
+     "-p [REDACTED] --tenant t"),
+    ("docker login -u me -p hunter2 registry.io", "hunter2", "-p [REDACTED] registry.io"),
+    ("curl -H 'Authorization: xoxb-1234-5678-abcdefgh' https://slack.com", "xoxb-1234",
+     "[REDACTED-SLACK-TOKEN]"),
+    ("curl -d t=xoxp-99-88-77aa https://slack.com", "xoxp-99", "[REDACTED-SLACK-TOKEN]"),
+    ("azcopy copy 'https://a.blob.core.windows.net/c?sv=2020&sig=AbC%2Bdef' .", "AbC%2Bdef",
+     "&sig=[REDACTED]"),
+    ("echo ghp_abcdefghijklmnop1234 | gh auth login", "ghp_abcdef", "[REDACTED-GITHUB-TOKEN]"),
+    ("export OPENAI=sk-proj-abcdefghijklmnop", "sk-proj-abc", "[REDACTED-API-KEY]"),
+    ("aws s3 cp s3://b/k . --expires 1 --pass-phrase x", "--pass-phrase x",
+     "--pass-phrase [REDACTED]"),
 ])
+
 def test_secrets_never_reach_the_ledger(raw, gone, kept):
     out = gl.redact(raw)
     assert gone not in out
     assert kept in out
+
+
+@pytest.mark.parametrize("cmd", [
+    "ssh -p 22 host uptime",
+    "docker run -p 8080:80 nginx",
+    "git push -u origin main",
+    "aws ec2 run-instances --instance-type m5.large --count 2",
+    "kubectl -n prod get pods -o wide",
+])
+def test_ordinary_flags_are_left_alone(cmd):
+    assert gl.redact(cmd) == cmd
 
 
 def test_redaction_keeps_what_an_auditor_needs():
