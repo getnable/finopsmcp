@@ -646,8 +646,14 @@ def _instrumented_tool(*dargs, **dkwargs):
             # connect in-client. Record it once per session so the funnel finally
             # shows the "used a tool, never connected" drop-off.
             if fn.__name__ in _COST_QUERY_TOOLS and isinstance(result, dict):
+                from .categories import _provider_is_ai as _is_llm
                 from .demo_data import _real_provider_connected as _rpc
-                if not _rpc():
+                # An answer read from an AI provider's own billing (a cost
+                # summary for provider="anthropic", say) is real data, not the
+                # "no cloud connected, sample data only" wall.
+                _llm_answer = (_is_llm(str(kwargs.get("provider") or ""))
+                               and "error" not in result)
+                if not _rpc() and not _llm_answer:
                     result.setdefault("_connect_hint", _connect_hint())
                     global _unconnected_hint_fired
                     if not _unconnected_hint_fired:
