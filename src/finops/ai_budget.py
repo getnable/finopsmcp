@@ -199,7 +199,7 @@ def _claude_projects_dir() -> Path:
     return (Path(base) if base else Path.home() / ".claude") / "projects"
 
 
-def read_agent_usage(since_epoch: float) -> dict[str, Any]:
+def read_agent_usage(since_epoch: float, *, allow_network: bool = True) -> dict[str, Any]:
     """Tally agent token usage across all local sessions since `since_epoch`.
 
     Every harness the guard hooks: Claude Code transcripts and Codex CLI
@@ -208,15 +208,17 @@ def read_agent_usage(since_epoch: float) -> dict[str, Any]:
     the window so a long history stays cheap. Returns totals, a per-model and
     per-harness split of tokens and of list-price dollars, the models priced at
     the fallback rate, the costliest sessions, and first/last activity.
+
+    allow_network=False (the guard) reads Cursor only from its cache.
     """
     proj = _claude_projects_dir()
     claude = proj.is_dir()
     responses = _responses(proj, since_epoch) if claude else []
-    return _tally(responses + _other_harnesses(since_epoch), source_present=claude,
-                  since_epoch=since_epoch)
+    return _tally(responses + _other_harnesses(since_epoch, allow_network=allow_network),
+                  source_present=claude, since_epoch=since_epoch)
 
 
-def read_session_usage(session_id: str) -> dict[str, Any]:
+def read_session_usage(session_id: str, *, allow_network: bool = True) -> dict[str, Any]:
     """Everything one session has used, from its first response.
 
     A Claude Code session is the sessionId it stamps on every transcript line,
@@ -229,20 +231,24 @@ def read_session_usage(session_id: str) -> dict[str, Any]:
     proj = _claude_projects_dir()
     claude = proj.is_dir()
     responses = _responses(proj, 0, session_id=session_id) if claude else []
-    return _tally(responses + _other_harnesses(0, session_id=session_id),
+    return _tally(responses + _other_harnesses(0, session_id=session_id,
+                                               allow_network=allow_network),
                   source_present=claude)
 
 
-def _other_harnesses(since_epoch: float, session_id: str | None = None) -> list[dict[str, Any]]:
+def _other_harnesses(since_epoch: float, session_id: str | None = None, *,
+                     allow_network: bool = True) -> list[dict[str, Any]]:
     """Codex and Cursor responses. A reader that fails counts nothing rather
-    than taking the Claude Code numbers down with it."""
+    than taking the Claude Code numbers down with it. allow_network=False
+    keeps Cursor to its cache (see harness_usage.cursor_responses)."""
     out: list[dict[str, Any]] = []
     if session_id is None or _SAFE_SESSION_ID.match(session_id):
         with contextlib.suppress(*_READER_ERRORS):
             out.extend(harness_usage.codex_responses(since_epoch, session_id=session_id))
     with contextlib.suppress(*_READER_ERRORS):
         out.extend(harness_usage.cursor_responses(since_epoch, session_id=session_id,
-                                                  month_start=_month_start_epoch()))
+                                                  month_start=_month_start_epoch(),
+                                                  allow_network=allow_network))
     return out
 
 
@@ -456,6 +462,11 @@ def _tally(responses: list[dict[str, Any]], source_present: bool,
                            or harness_usage.cursor_enabled()),
         "sources": _sources(source_present),
     }
+    notes = _source_notes(out["sources"])
+    if notes:
+        # Said wherever the figure is: a source that was not read or was cut
+        # short makes the total a lower bound, not the whole of it.
+        out["source_notes"] = notes
     if since_epoch is not None:
         skipped = harness_usage.codex_compressed_skipped(since_epoch)
         if skipped:
@@ -482,6 +493,20 @@ def _sources(claude: bool) -> dict[str, Any]:
     return {harness_usage.HARNESS_CLAUDE: claude,
             harness_usage.HARNESS_CODEX: harness_usage.codex_present(),
             harness_usage.HARNESS_CURSOR: cursor}
+
+
+def _source_notes(sources: dict[str, Any]) -> list[str]:
+    cursor = sources.get(harness_usage.HARNESS_CURSOR)
+    if not isinstance(cursor, dict):
+        return []
+    if cursor.get("not_read"):
+        return [f"Cursor usage was not read ({cursor['not_read']}), so it is not in "
+                f"these figures."]
+    if cursor.get("truncated"):
+        return ["The Cursor figure is a lower bound: the Admin API had more usage events "
+                f"than the {harness_usage._CURSOR_MAX_PAGES * harness_usage._CURSOR_PAGE:,} "
+                "a read takes."]
+    return []
 
 
 def _rec_epoch(ts: Any) -> float | None:
@@ -551,11 +576,12 @@ def resolve_session(session_id: str | None = None) -> tuple[str | None, str | No
     return latest[1], "latest_activity"
 
 
-def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, Any] | None:
+def _session_lens(budget: dict[str, Any], session_id: str | None, *,
+                  allow_network: bool = True) -> dict[str, Any] | None:
     sid, source = resolve_session(session_id)
     if not sid:
         return None
-    u = read_session_usage(sid)
+    u = read_session_usage(sid, allow_network=allow_network)
     cap = budget["session_caps"].get(sid) or budget["session_cap"] or 0.0
     usd = u["usd_equivalent"]
     pct = usd / cap if cap > 0 else None
@@ -566,6 +592,7 @@ def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, A
         "cost_by_model": u["cost_by_model"], "unpriced_models": u["unpriced_models"],
         "cost_by_harness": u["cost_by_harness"], "unpriced_usd": u["unpriced_usd"],
         "first_activity": u["first_activity"], "last_activity": u["last_activity"],
+        "source_notes": u.get("source_notes") or [],
         "cap_usd": cap or None,
         "cap_scope": ("this_session" if sid in budget["session_caps"]
                       else "every_session" if cap else None),
@@ -634,8 +661,11 @@ def status(session_id: str | None = None, *, for_gate: bool | None = None) -> di
                 "session": None, "gate_only": True}
     now = time.time()
     empty = _tally([], source_present=False)
+    # The guard never waits on the network: Cursor comes from its cache there.
+    net = not for_gate
     window = empty if for_gate else read_agent_usage(now - _WINDOW_HOURS * 3600)
-    mtd = empty if for_gate and not monthly_cap else read_agent_usage(_month_start_epoch())
+    mtd = (empty if for_gate and not monthly_cap
+           else read_agent_usage(_month_start_epoch(), allow_network=net))
 
     tokens_mtd = mtd["billable_tokens"]        # exact
     est_usd_mtd = mtd["usd_equivalent"]        # ESTIMATE at list price, not a bill
@@ -661,7 +691,8 @@ def status(session_id: str | None = None, *, for_gate: bool | None = None) -> di
 
     # The per-session cap can only make the verdict worse. On a tie the one
     # further past its line is the one to name.
-    session = None if for_gate and not session_cap else _session_lens(budget, session_id)
+    session = (None if for_gate and not session_cap
+               else _session_lens(budget, session_id, allow_network=net))
     if session and session["verdict"] is not None:
         s_rank, m_rank = _RANK[session["verdict"]], _RANK[verdict]
         if basis == "none" or s_rank > m_rank or (
@@ -731,6 +762,8 @@ def _with_fallback_note(line: tuple[str, str], lenses: dict[str, Any]) -> str:
     usd = (lenses.get(lens) or {}).get("unpriced_usd") or 0.0
     if usd > 0:
         text += f" This includes ~${usd:,.2f} priced at a fallback rate (see unpriced_models)."
+    for note in (lenses.get(lens) or {}).get("source_notes") or []:
+        text += f" {note}"
     return text
 
 

@@ -367,10 +367,15 @@ def codex_compressed_skipped(since_epoch: float) -> int:
 # Off unless CURSOR_ADMIN_API_KEY is set: with it unset nothing is requested. It
 # is a team key, so CURSOR_ADMIN_USER_EMAIL narrows it to one person's usage;
 # without that the whole team's usage counts, and status says so. Results are
-# cached for an hour in the data dir, because the guard asks on every tool call.
+# cached for an hour in the data dir. The guard, which asks on every tool call,
+# reads only that cache and never the network (allow_network=False): a fetch
+# there put up to one 5 s timeout per page on a tool call. A failed read is
+# written down too, and the next attempt waits _CURSOR_RETRY_AFTER rather than
+# retrying on every call.
 
 CURSOR_API = "https://api.cursor.com/teams/filtered-usage-events"
 _CURSOR_TTL = 3600
+_CURSOR_RETRY_AFTER = 600
 _CURSOR_PAGE = 1000
 _CURSOR_MAX_PAGES = 20
 _CURSOR_SPAN_MS = 30 * 86400 * 1000
@@ -389,6 +394,23 @@ def _cursor_cache_path() -> Path:
     d = Path(os.getenv("FINOPS_DATA_DIR") or (Path.home() / ".nable"))
     d.mkdir(parents=True, exist_ok=True)
     return d / "cursor-usage.json"
+
+
+def write_json_atomic(path: Path, data: Any) -> None:
+    """Write `data` as JSON to `path`, owner-only, all or nothing: a reader
+    never sees half a file, and a failed write leaves the old one."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _cursor_post(body: dict[str, Any]) -> dict[str, Any]:
@@ -428,8 +450,11 @@ def _cursor_event(ev: Any) -> dict[str, Any] | None:
     return r
 
 
-def _cursor_fetch(start_ms: int, end_ms: int) -> list[dict[str, Any]]:
+def _cursor_fetch(start_ms: int, end_ms: int) -> tuple[list[dict[str, Any]], bool]:
+    """(events, truncated). truncated: some 30-day span still had pages left
+    after _CURSOR_MAX_PAGES, so the events undercount it."""
     events: list[dict[str, Any]] = []
+    truncated = False
     email = cursor_email()
     lo = start_ms
     while lo < end_ms:
@@ -448,22 +473,42 @@ def _cursor_fetch(start_ms: int, end_ms: int) -> list[dict[str, Any]]:
             pag = data.get("pagination")
             if not (isinstance(pag, dict) and pag.get("hasNextPage")):
                 break
+        else:
+            truncated = True
         lo = hi
-    return events
+    return events, truncated
 
 
 _cursor_status: dict[str, Any] = {}
 
+# What cursor_status() says when the guard found no Cursor read to use.
+CURSOR_NOT_READ_BY_GATE = ("the guard reads Cursor usage only from the last Admin API "
+                           "read, and there is none yet; `nable ai-budget` reads it")
+
 
 def cursor_status() -> dict[str, Any]:
-    """How the last Cursor read went: enabled, scope, fetched_at, error."""
+    """How the last Cursor read went: enabled, scope, fetched_at, and when it
+    applies: error, not_read (why no Cursor usage is counted), stale (an old
+    read served without refreshing), retry_at (a failed read's backoff), and
+    truncated (the Admin API had more pages than were read: a lower bound)."""
     return dict(_cursor_status)
 
 
+def _cursor_write(cache: dict[str, Any]) -> None:
+    try:
+        write_json_atomic(_cursor_cache_path(), cache)
+    except OSError:
+        pass
+
+
 def cursor_responses(since_epoch: float, session_id: str | None = None,
-                     month_start: float | None = None) -> list[dict[str, Any]]:
+                     month_start: float | None = None, *,
+                     allow_network: bool = True) -> list[dict[str, Any]]:
     """Cursor responses since `since_epoch` from the Admin API, or none when no
-    key is set. With a session_id, only that conversation's."""
+    key is set. With a session_id, only that conversation's.
+
+    allow_network=False (the guard) reads only the cache: an old read is used
+    as it is, and with none cursor_status() says Cursor was not read."""
     _cursor_status.clear()
     if not cursor_enabled():
         return []
@@ -483,27 +528,46 @@ def cursor_responses(since_epoch: float, session_id: str | None = None,
             cache = {}
     except (OSError, ValueError):
         cache = {}
-    fresh = (cache.get("email") == email
+    usable = cache.get("email") == email and isinstance(cache.get("events"), list)
+    fresh = (usable
              and isinstance(cache.get("start_ms"), int) and cache["start_ms"] <= start_ms
              and isinstance(cache.get("fetched_at"), (int, float))
-             and now - cache["fetched_at"] < _CURSOR_TTL
-             and isinstance(cache.get("events"), list))
+             and now - cache["fetched_at"] < _CURSOR_TTL)
+    failed_at = cache.get("failed_at") if cache.get("email") == email else None
+    backing_off = (isinstance(failed_at, (int, float))
+                   and now - failed_at < _CURSOR_RETRY_AFTER)
     if not fresh:
-        try:
-            events = _cursor_fetch(start_ms, int(now * 1000))
-            cache = {"email": email, "start_ms": start_ms, "fetched_at": now, "events": events}
-            try:
-                fd = os.open(_cursor_cache_path(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                with os.fdopen(fd, "w") as fh:
-                    json.dump(cache, fh)
-            except OSError:
-                pass
-        except Exception as e:  # noqa: BLE001 - network, auth, a changed response: never fatal
-            _cursor_status["error"] = f"{type(e).__name__}: {e}"[:200]
-            if not isinstance(cache.get("events"), list) or cache.get("email") != email:
+        if not allow_network or backing_off:
+            if backing_off:
+                _cursor_status["error"] = str(cache.get("error") or "the last read failed")
+                _cursor_status["retry_at"] = failed_at + _CURSOR_RETRY_AFTER
+            if not usable:
+                _cursor_status["not_read"] = (_cursor_status.get("error")
+                                              or CURSOR_NOT_READ_BY_GATE)
                 return []
-            # Keep what the last good read had; stale beats nothing.
+            _cursor_status["stale"] = True
+        else:
+            try:
+                events, truncated = _cursor_fetch(start_ms, int(now * 1000))
+                cache = {"email": email, "start_ms": start_ms, "fetched_at": now,
+                         "events": events, "truncated": truncated}
+                _cursor_write(cache)
+            except Exception as e:  # noqa: BLE001 - network, auth, a changed response: never fatal
+                err = f"{type(e).__name__}: {e}"[:200]
+                _cursor_status["error"] = err
+                _cursor_status["retry_at"] = now + _CURSOR_RETRY_AFTER
+                # Written down so the next call backs off instead of retrying;
+                # the last good read's events (this scope's only) are kept.
+                kept = cache if cache.get("email") == email else {}
+                _cursor_write({**kept, "email": email, "failed_at": now, "error": err})
+                if not usable:
+                    _cursor_status["not_read"] = err
+                    return []
+                # Keep what the last good read had; stale beats nothing.
+                _cursor_status["stale"] = True
     _cursor_status["fetched_at"] = cache.get("fetched_at")
+    if cache.get("truncated"):
+        _cursor_status["truncated"] = True
     out = [r for r in cache["events"] if isinstance(r, dict)
            and isinstance(r.get("ts"), (int, float)) and r["ts"] >= since_epoch]
     if session_id:
