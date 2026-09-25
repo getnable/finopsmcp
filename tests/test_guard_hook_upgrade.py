@@ -188,3 +188,73 @@ def test_install_reports_and_counts_a_repin(settings, monkeypatch):
     out = _run("install")
     assert f"pinned to finops-mcp=={__version__}" in out
     assert [p["outcome"] for e, p in events if e == "guard_installed"] == ["repinned"]
+
+
+# ── every uvx spelling, not only a leading `uvx --from` ───────────────────────
+#
+# hook_pin read only a leading `uvx --from`, so `uvx finops-mcp ...`, a
+# `--python` before `--from`, an absolute uvx path and `uv tool run` read as a
+# binary path: "installed", never flagged, never re-pinned.
+
+@pytest.mark.parametrize("cmd,pin", [
+    ("uvx finops-mcp guard hook", "unpinned"),
+    ("uvx --python 3.12 --from finops-mcp finops guard hook", "unpinned"),
+    (f"uvx --python 3.12 --from finops-mcp=={__version__} finops guard hook", "pinned"),
+    ("/home/dev/.local/bin/uvx --from finops-mcp finops guard hook", "unpinned"),
+    ("/home/dev/.local/bin/uvx --from finops-mcp==0.0.1 finops guard hook", "other"),
+    ("uv tool run --from finops-mcp finops guard hook", "unpinned"),
+    ("uv tool run --from finops-mcp==0.0.1 finops guard hook", "other"),
+    ("uvx --from finops-mcp==0.0.1 finops guard hook; exit 0", "other"),
+])
+def test_hook_pin_reads_the_uvx_arguments(cmd, pin):
+    assert g.hook_pin(cmd) == pin
+
+
+@pytest.mark.parametrize("cmd", [
+    "uvx finops-mcp guard hook",
+    "uvx --python 3.12 --from finops-mcp finops guard hook",
+    "uv tool run --from finops-mcp finops guard hook",
+])
+def test_install_pins_every_unpinned_spelling(settings, monkeypatch, cmd):
+    _legacy_settings(settings, cmd)
+    _uv_only(monkeypatch)
+    assert g.unpinned_hook_command(settings) == cmd
+    g.install()
+    assert _pre(settings)[1]["hooks"][0]["command"] == PINNED
+
+
+OLD_PIN = "uvx --from finops-mcp==0.0.1 finops guard hook"
+
+
+def test_status_says_when_the_hook_runs_another_release(tmp_path, monkeypatch):
+    proj = tmp_path / "project.json"
+    _legacy_settings(proj, OLD_PIN, matcher=g._HOOK_MATCHER)
+    monkeypatch.setattr(g, "_settings_path",
+                        lambda global_scope: tmp_path / "absent.json" if global_scope else proj)
+    _uv_only(monkeypatch)
+    out = _run("status")
+    assert "installed, pinned to 0.0.1" in out
+    assert f"not this one ({__version__})" in out
+    assert "nable guard install" in out
+
+
+def test_install_says_it_re_pinned_another_release(settings, monkeypatch):
+    events = []
+    monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: events.append((e, p)))
+    _legacy_settings(settings, OLD_PIN, matcher=g._HOOK_MATCHER)
+    _uv_only(monkeypatch)
+    out = _run("install")
+    assert f"re-pinned from finops-mcp==0.0.1 to finops-mcp=={__version__}" in out
+    assert [p["outcome"] for e, p in events if e == "guard_installed"] == ["repinned"]
+    assert _pre(settings)[1]["hooks"][0]["command"] == PINNED
+
+
+def test_doctor_offers_to_re_pin_another_release(settings, monkeypatch):
+    _legacy_settings(settings, OLD_PIN, matcher=g._HOOK_MATCHER)
+    _uv_only(monkeypatch)
+    fixes = [f for f in g.doctor()["recommendations"] if f.startswith("nable guard install")]
+    assert fixes and "instead of another release (0.0.1)" in fixes[0]
+
+
+def test_an_absolute_uvx_path_gets_the_uvx_timeout():
+    assert g._timeout_for("/home/dev/.local/bin/uvx --from finops-mcp finops guard hook") == 30

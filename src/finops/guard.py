@@ -2059,7 +2059,6 @@ def hook_surfaces(path: Path) -> dict[str, bool]:
 # `nable guard install` from a newer release moves the pin forward in place.
 _PYPI_NAME = "finops-mcp"
 _UVX_HOOK_CMD = f"uvx --from {_PYPI_NAME}=={__version__} finops guard hook"
-_UVX_FROM_RE = re.compile(r"^uvx\s+--from[=\s]+['\"]?([^\s'\"]+)")
 
 
 def hook_pin(cmd: str) -> str | None:
@@ -2070,14 +2069,19 @@ def hook_pin(cmd: str) -> str | None:
     "unpinned" the uvx form with no version (resolves latest on every call)
     None       not the uvx form: a binary path is fixed by whatever was
                installed there, so it has no pin to speak of
-    """
-    m = _UVX_FROM_RE.match(cmd.strip())
-    if not m:
-        return None
-    spec = m.group(1)
-    if not re.fullmatch(rf"{re.escape(_PYPI_NAME)}==[A-Za-z0-9.+-]+", spec):
-        return "unpinned"
-    return "pinned" if spec == f"{_PYPI_NAME}=={__version__}" else "other"
+
+    Read from uvx's arguments (guard_adapters.uvx_pin), not its spelling: a
+    leading `uvx --from` was all this used to see, so `uvx finops-mcp ...`,
+    `uvx --python 3.12 --from ...`, an absolute uvx path and `uv tool run`
+    read as a binary path and were never flagged or re-pinned."""
+    from .guard_adapters import uvx_pin
+    return uvx_pin(cmd)
+
+
+def hook_release(cmd: str) -> str | None:
+    """The finops-mcp release a uvx hook command is pinned to, or None."""
+    from .guard_adapters import uvx_release
+    return uvx_release(cmd)
 
 
 def _is_ephemeral(path: str) -> bool:
@@ -2219,7 +2223,7 @@ def _command_runs(cmd: str) -> bool:
 def _timeout_for(cmd: str) -> int:
     # uvx resolves an environment per call; give the cold-cache case room.
     # Timeouts fail open in Claude Code, so a slow first call cannot block.
-    return 30 if cmd.startswith("uvx") else 10
+    return 30 if cmd.startswith("uvx") or hook_pin(cmd) is not None else 10
 
 
 def is_installed(path: Path) -> bool:
@@ -2252,6 +2256,16 @@ def unpinned_hook_command(path: Path) -> str | None:
     binary path."""
     for _entry, h in _read_our_hooks(path):
         if hook_pin(h["command"]) == "unpinned":
+            return h["command"]
+    return None
+
+
+def pinned_elsewhere_hook_command(path: Path) -> str | None:
+    """Our installed hook command, when it is the uvx form pinned to a release
+    other than this one. None when the hook is absent, current, unpinned, or a
+    binary path."""
+    for _entry, h in _read_our_hooks(path):
+        if hook_pin(h["command"]) == "other":
             return h["command"]
     return None
 
@@ -2472,6 +2486,9 @@ def doctor() -> dict[str, Any]:
         if r.get("pin") == "unpinned":
             fix(f"nable guard install{flag}", "pins the hook to this release instead of "
                 "the newest PyPI release on every call")
+        elif r.get("pin") == "other":
+            fix(f"nable guard install{flag}", "pins the hook to this release instead of "
+                f"another release ({hook_release(r['command']) or 'unknown'})")
 
     for name, (label, what) in _ADAPTER_SURFACES.items():
         mine = [r for r in adapter_rows if r["harness"] == name]

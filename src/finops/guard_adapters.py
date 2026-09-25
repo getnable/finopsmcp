@@ -692,20 +692,9 @@ _UVX_VALUE_OPTS = frozenset({
 _PIN_RE = re.compile(rf"{re.escape(guard._PYPI_NAME)}\s*(?:==|@)\s*([A-Za-z0-9.+!_-]+)")
 
 
-def uvx_pin(cmd: Any) -> str | None:
-    """How a uvx hook command pins nable, from its arguments rather than its
-    spelling.
-
-    "pinned"   finops-mcp at exactly this release
-    "other"    finops-mcp pinned to some other release
-    "unpinned" finops-mcp with no version: the newest PyPI release, fetched
-               on every agent tool call
-    None       not a uvx command for finops-mcp (a binary path has no pin)
-
-    guard.hook_pin reads only a leading `uvx --from`. Older releases and
-    hand edits also wrote `uvx finops-mcp ...`, `uvx --python 3.12 --from
-    finops-mcp ...`, `uv tool run ...`, an absolute or quoted uvx path, and the
-    `; exit 0` suffix this module adds, so this parses the argument list."""
+def uvx_spec(cmd: Any) -> str | None:
+    """The finops-mcp requirement a uvx (or `uv tool run`) command runs,
+    `finops-mcp==0.8.1` or a bare `finops-mcp`; None when it is not one."""
     if not isinstance(cmd, str):
         return None
     try:
@@ -744,10 +733,37 @@ def uvx_pin(cmd: Any) -> str | None:
         i += 1
     if not spec or not spec.lower().startswith(guard._PYPI_NAME):
         return None
-    m = _PIN_RE.fullmatch(spec.strip())
-    if not m or m.group(1).lower() == "latest":
+    return spec.strip()
+
+
+def uvx_release(cmd: Any) -> str | None:
+    """The finops-mcp release a uvx hook command is pinned to, or None."""
+    spec = uvx_spec(cmd)
+    m = _PIN_RE.fullmatch(spec) if spec else None
+    return m.group(1) if m and m.group(1).lower() != "latest" else None
+
+
+def uvx_pin(cmd: Any) -> str | None:
+    """How a uvx hook command pins nable, from its arguments rather than its
+    spelling.
+
+    "pinned"   finops-mcp at exactly this release
+    "other"    finops-mcp pinned to some other release
+    "unpinned" finops-mcp with no version: the newest PyPI release, fetched
+               on every agent tool call
+    None       not a uvx command for finops-mcp (a binary path has no pin)
+
+    guard.hook_pin used to read only a leading `uvx --from`. Older releases and
+    hand edits also wrote `uvx finops-mcp ...`, `uvx --python 3.12 --from
+    finops-mcp ...`, `uv tool run ...`, an absolute or quoted uvx path, and the
+    `; exit 0` suffix this module adds, so this parses the argument list.
+    guard.hook_pin is this function now, so both read the same forms."""
+    if uvx_spec(cmd) is None:
+        return None
+    release = uvx_release(cmd)
+    if release is None:
         return "unpinned"
-    return "pinned" if m.group(1) == guard.__version__ else "other"
+    return "pinned" if release == guard.__version__ else "other"
 
 
 def _needs_repin(cmd: Any) -> bool:
@@ -1284,12 +1300,16 @@ def install(harness: str, global_scope: bool = False) -> tuple[str, Path]:
     "new", "already", "repaired". Raises SystemExit when it refuses a file."""
     path = hooks_path(harness, global_scope)
     if harness == "claude":
-        # guard.install repairs a dead entry and re-pins an unpinned uvx one in
-        # place, so read both before it writes to report what it did.
+        # guard.install repairs a dead entry and re-pins an unpinned uvx one, or
+        # one pinned to another release, in place, so read both before it
+        # writes to report what it did.
         already = guard.is_installed(path)
-        fixed = bool(guard.broken_hook_command(path) or guard.unpinned_hook_command(path))
+        broken = bool(guard.broken_hook_command(path))
+        repin = bool(guard.unpinned_hook_command(path)
+                     or guard.pinned_elsewhere_hook_command(path))
         guard.install(global_scope)
-        return ("repaired" if fixed else "already" if already else "new"), path
+        return ("repaired" if broken else "repinned" if repin
+                else "already" if already else "new"), path
     if harness == "cline":
         # Refuse before resolving the command: nothing on Windows would use it,
         # and resolving it there walks PATH for nothing.
