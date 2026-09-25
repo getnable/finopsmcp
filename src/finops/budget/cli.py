@@ -3,6 +3,8 @@
   nable budget [status]   every active budget against month-to-date spend
   nable budget refresh    the same, said as what it also does: rewrites the
                           spend summary the guard hook reads (budget/summary.py)
+  nable budget ci-gate    a pipeline step: reports, and with --fail-on-breach
+                          exits 1 on a breached budget (2 when it cannot check)
 
 Both recompute from the local cost history, so both keep the guard's figure
 current; `refresh` is the one to put on a schedule. Budgets themselves are set
@@ -24,11 +26,18 @@ def add_parser(sub) -> None:
                     "hook checks priced changes against.",
     )
     p.add_argument("budget_action", nargs="?", default="status",
-                   choices=["status", "refresh"],
+                   choices=["status", "refresh", "ci-gate"],
                    help="status (default) = where each budget stands; refresh = the "
-                        "same, run to update the guard's spend figure")
+                        "same, run to update the guard's spend figure; ci-gate = a "
+                        "pipeline step")
     p.add_argument("--json", dest="budget_json", action="store_true",
                    help="Emit machine-readable JSON")
+    p.add_argument("--fail-on-breach", dest="budget_fail", action="store_true",
+                   help="With ci-gate: exit 1 when a budget is breached (spend at or "
+                        "past its critical percentage), 2 when budgets cannot be "
+                        "checked. Without it ci-gate only reports and exits 0.")
+    p.add_argument("--budget-file", dest="budget_file", default=None, metavar="PATH",
+                   help="With ci-gate: sync this budget.yml first")
     p.set_defaults(cmd="budget")
 
 
@@ -71,4 +80,9 @@ def _status(as_json: bool, *, refresh: bool) -> int:
 def run(parsed) -> int:
     action = getattr(parsed, "budget_action", "status") or "status"
     as_json = bool(getattr(parsed, "budget_json", False))
+    if action == "ci-gate":
+        from .enforcer import ci_gate
+        return ci_gate(getattr(parsed, "budget_file", None),
+                       fail_on_breach=bool(getattr(parsed, "budget_fail", False)),
+                       as_json=as_json)
     return _status(as_json, refresh=action == "refresh")
