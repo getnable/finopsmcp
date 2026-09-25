@@ -2452,6 +2452,10 @@ def _run_guard(parsed) -> None:
         _guard_doctor(parsed)
         return
 
+    if action == "reconcile":
+        _guard_reconcile(parsed)
+        return
+
     if action == "verify-log":
         from . import guard_ledger
         result = guard_ledger.check()
@@ -2705,6 +2709,82 @@ def _guard_report(parsed) -> None:
     print(dim("  By harness: " + ", ".join(f"{k} {v}" for k, v in summary["by_harness"].items())))
     print(dim("  Check the log was not edited: nable guard verify-log"))
     print(dim(f"  {summary['path']}"))
+    print()
+
+
+def _guard_reconcile(parsed) -> None:
+    """`nable guard reconcile`: the ledger against CloudTrail."""
+    import json
+    import textwrap
+
+    from .guard_reconcile import EVENTS, ReconcileError, reconcile
+    from .welcome import amber, bold, dim, green
+
+    hours = getattr(parsed, "guard_hours", 24) or 24
+    regions = getattr(parsed, "guard_regions", None) or None
+    as_json = getattr(parsed, "guard_json", False)
+    if not as_json:
+        n = len(regions or [None])
+        print()
+        print(dim(f"  Reading CloudTrail: {len(EVENTS)} event names x {n} region(s), "
+                  "paced at 2 requests a second..."))
+    try:
+        r = reconcile(hours, regions,
+                      tolerance_minutes=getattr(parsed, "guard_tolerance", 5) or 5)
+    except ReconcileError as e:
+        if as_json:
+            print(json.dumps({"error": str(e)}, indent=2))
+        else:
+            print()
+            for line in str(e).splitlines():
+                print(f"  {line}")
+            print()
+        raise SystemExit(1) from None
+    if as_json:
+        print(json.dumps(r, indent=2, default=str))
+        return
+
+    def who(ev: dict) -> str:
+        arn = ev.get("identity_arn") or ev.get("user") or "?"
+        return f"{arn}  via {ev['via']}  ({ev.get('user_agent') or 'no user agent'})"
+
+    def show(title: str, rows: list, *, mark: str) -> None:
+        print()
+        print(f"  {bold(title)} ({len(rows)})")
+        for ev in rows[:20]:
+            failed = f"  (failed: {ev['error_code']})" if ev.get("error_code") else ""
+            print(f"    {mark} {ev['time']}  {ev['region']}  {ev['event']}{failed}")
+            print(dim(f"        {who(ev)}"))
+            if ev.get("resources"):
+                print(dim(f"        {', '.join(ev['resources'][:3])}"))
+            if ev.get("ledger"):
+                led = ev["ledger"]
+                print(dim(f"        guard: {led['decision']} at {led['ts']}  {led.get('command')}"))
+        if len(rows) > 20:
+            print(dim(f"    and {len(rows) - 20} more (--json has them all)"))
+
+    w = r["window"]
+    print()
+    print(f"  {bold('nable guard reconcile')}: {w['start']} to {w['end']}, "
+          f"{', '.join(r['regions'])}")
+    print(dim(f"  {r['events_read']} CloudTrail event(s), {r['ledger_records_in_window']} "
+              f"ledger record(s), {r['lookup_calls']} LookupEvents call(s)"))
+    for region, err in r["region_errors"].items():
+        print(f"  {amber('!')} {region} not read: {err}")
+    show("Denied by the guard, happened anyway", r["denied_but_happened"], mark=amber("✗"))
+    show("No guard record", r["no_guard_record"], mark=amber("?"))
+    show("Seen by the guard, and happened", r["seen_and_happened"], mark=green("✓"))
+    if r["service_initiated"]:
+        show("Done by an AWS service on someone's behalf", r["service_initiated"], mark="-")
+    if r["guarded_without_event"]:
+        print()
+        print(f"  {bold('Let through by the guard, no matching event')} "
+              f"({len(r['guarded_without_event'])})")
+        for led in r["guarded_without_event"][:10]:
+            print(dim(f"    {led['ts']}  {led['decision']}  {led.get('command')}"))
+    print()
+    for line in textwrap.wrap(r["matching"], 76):
+        print(dim(f"  {line}"))
     print()
 
 
@@ -3120,7 +3200,8 @@ def main(args: list[str] | None = None) -> None:
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
     guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
-                                                  "try", "report", "verify-log", "doctor"],
+                                                  "try", "report", "verify-log", "doctor",
+                                                  "reconcile"],
                          nargs="?", default="status")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
@@ -3135,7 +3216,16 @@ def main(args: list[str] | None = None) -> None:
     guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
                          help="With 'report': how many days of the decision ledger to summarise")
     guard_p.add_argument("--json", dest="guard_json", action="store_true",
-                         help="With 'report', 'verify-log' or 'doctor': print JSON")
+                         help="With 'report', 'verify-log', 'doctor' or 'reconcile': "
+                              "print JSON")
+    guard_p.add_argument("--hours", dest="guard_hours", type=float, default=24,
+                         help="With 'reconcile': how many hours of CloudTrail to read (max 2160)")
+    guard_p.add_argument("--region", dest="guard_regions", action="append", metavar="R",
+                         help="With 'reconcile': a region to read (repeatable; default: "
+                              "your configured region)")
+    guard_p.add_argument("--tolerance-minutes", dest="guard_tolerance", type=float, default=5,
+                         help="With 'reconcile': how long after a verdict an event may "
+                              "still match it (default 5)")
     guard_p.add_argument("--session", dest="guard_session", default=None, metavar="ID",
                          help="With 'report': only this agent session (the hook payload's "
                               "session id, as report lists them)")
