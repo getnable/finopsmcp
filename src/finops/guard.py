@@ -1730,21 +1730,22 @@ def uninstall(global_scope: bool = False) -> bool:
     removed = False
     kept = []
     for entry in pre:
-        if not isinstance(entry, dict):
-            kept.append(entry)          # not ours; leave it exactly as found
+        hooks = entry.get("hooks") if isinstance(entry, dict) else None
+        if not isinstance(hooks, list):
+            # Not ours, or not a shape we write ("hooks" a string, missing,
+            # null): someone's data, left exactly as found. Iterating a string
+            # here used to rewrite it as a list of its characters.
+            kept.append(entry)
             continue
-        inner = [h for h in (entry.get("hooks") or [])
-                 if not (isinstance(h, dict)
-                         and _HOOK_MARKER in (h.get("command") or "")
-                         and "finops" in (h.get("command") or ""))]
-        if len(inner) != len(entry.get("hooks") or []):
-            removed = True
-        if inner or not entry.get("hooks"):
+        inner = [h for h in hooks
+                 if not (isinstance(h, dict) and _is_our_command(h.get("command")))]
+        if len(inner) == len(hooks):
+            kept.append(entry)          # nothing of ours in it, untouched
+            continue
+        removed = True
+        if inner:
             entry["hooks"] = inner
-            if inner:
-                kept.append(entry)
-        else:
-            removed = True
+            kept.append(entry)
     if removed:
         settings["hooks"]["PreToolUse"] = kept
         if not kept:
