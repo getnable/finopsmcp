@@ -41,7 +41,8 @@ def _parse_combined_aws_paste(combined: str) -> tuple[str, str] | None:
     return None
 
 
-def _prompt(msg: str, secret: bool = False, default: str = "") -> str:
+def _prompt(msg: str, secret: bool = False, default: str = "",
+            on_eof: str | None = None) -> str:
     # Avoid a doubled default marker. Some callers embed a yes/no hint like
     # "[Y/n]" or "(y/N)" in the message themselves; only append "[default]"
     # when there is not already a choice hint there, so prompts never read
@@ -54,8 +55,44 @@ def _prompt(msg: str, secret: bool = False, default: str = "") -> str:
         val = getpass.getpass(msg) if secret else input(msg)
     except (KeyboardInterrupt, EOFError):
         print()
-        return default
+        # on_eof: what a closed input means, where taking the default would
+        # make a decision the person never made.
+        return default if on_eof is None else on_eof
     return val.strip() or default
+
+
+# Set when the AWS connect step ended with nothing connected (declined, or no
+# answer on a closed input), so the close does not say "Done".
+_DECLINED = [False]
+
+
+def _select_providers(providers: list[str], attempts: int = 3) -> list[str]:
+    """Numbers, names, or 'all'. Anything unrecognised is refused by name and
+    asked again, instead of silently selecting nothing."""
+    for _ in range(attempts):
+        raw = _prompt("\n  Enter numbers or names (comma-separated), 'all', "
+                      "or press Enter for aws only", default="1")
+        if raw.lower() == "all":
+            return list(providers)
+        selected: list[str] = []
+        bad: list[str] = []
+        for tok in (t.strip().lower() for t in raw.replace(" ", ",").split(",")):
+            if not tok:
+                continue
+            if tok.isdigit() and 1 <= int(tok) <= len(providers):
+                pick = providers[int(tok) - 1]
+            elif tok in providers:
+                pick = tok
+            else:
+                bad.append(tok)
+                continue
+            if pick not in selected:
+                selected.append(pick)
+        if bad:
+            print(f"  Not on the list: {', '.join(bad)}. Use the numbers or names above.")
+            continue
+        return selected
+    return []
 
 
 def _section(title: str) -> None:
@@ -757,11 +794,20 @@ def setup_aws_account() -> None:
             c = candidates[0]
             extra = f" ({c['alias']})" if c["alias"] else ""
             _ok(f"Found working credentials: {c['label']} -> account {c['account_id']}{extra}")
-            ans = _prompt("  Connect this account? [Y/n]  (or 'm' to enter manually)", default="y").lower()
+            ans = _prompt("  Connect this account? [Y/n]  (or 'm' to enter manually)", default="y",
+                          on_eof="\x04").lower()
+            if ans == "\x04":
+                # Input closed (piped, or Ctrl-D/Ctrl-C). No answer is not a yes:
+                # connecting an account is a decision the person has to make.
+                _emit_step("ambient_declined")
+                _DECLINED[0] = True
+                print("  No answer, so not connecting. Run `nable setup aws` in a terminal to connect.")
+                return
             if ans in ("y", "yes", ""):
                 chosen = c
             elif ans != "m":
                 _emit_step("ambient_declined")
+                _DECLINED[0] = True
                 print("  Skipped.")
                 return
         else:
@@ -2799,6 +2845,10 @@ def main(args: list[str] | None = None) -> None:
     _bare_invocation = not args
     if args and args[0] == "setup":
         args = args[1:]
+    # `nable help` and `nable help scan` are what people type; both were
+    # "unknown command 'help'".
+    if args and args[0] == "help":
+        args = args[1:2] + ["--help"]
 
     # --help / --version must be side-effect-free: argparse handles them by exiting
     # inside parse_args, so skip the welcome banner and PATH warning (and don't burn
@@ -2870,7 +2920,7 @@ def main(args: list[str] | None = None) -> None:
             # "get answers" leads: help text is the CLI's homepage, and the
             # commands that produce value outrank the ones that configure it.
             ("get answers", ["scan", "brief", "ai-budget"]),
-            ("start here", ["welcome", "connect", "doctor", "tools", "serve", "upgrade"]),
+            ("start here", ["welcome", "connect", "setup", "doctor", "tools", "serve", "upgrade"]),
             ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
             ("ai / llm providers", ["openai", "anthropic", "openrouter", "litellm",
                                      "modal", "together", "replicate", "cohere", "mistral"]),
@@ -2894,6 +2944,12 @@ def main(args: list[str] | None = None) -> None:
                 return super().format_help()
             helps = {c.dest: (c.help or "") for c in sub._choices_actions}
             registered = list(sub.choices.keys())
+            # `setup` is taken off argv before parsing, so it is not a
+            # registered subcommand, but it is a command people run and it
+            # was missing from this list.
+            if "setup" not in registered:
+                registered.append("setup")
+                helps.setdefault("setup", "Pick providers from the full menu and connect them one by one")
             lines = [self.format_usage().rstrip(), "", self.description or "", ""]
             seen: set = set()
             for title, names in self._GROUPS:
@@ -3082,7 +3138,24 @@ def main(args: list[str] | None = None) -> None:
     profile_p.add_argument("profile_action", choices=["list", "create", "use", "current"], nargs="?", default="list")
     profile_p.add_argument("profile_name", nargs="?", default="")
 
-    parsed = parser.parse_args(args)
+    parsed, _extras = parser.parse_known_args(args)
+    if _extras:
+        # A bad flag on a subcommand (`nable scan --jsn`) used to print the
+        # top-level usage, which lists commands, not the flag that was wrong.
+        # Answer with that subcommand's usage and the flag it probably meant.
+        import difflib
+        _sub = next((a for a in parser._actions if isinstance(a, argparse._SubParsersAction)), None)
+        _target = _sub.choices.get(parsed.cmd) if (_sub and parsed.cmd) else None
+        _target = _target or parser
+        _opts = [o for a in _target._actions for o in a.option_strings]
+        _hints = []
+        for _x in _extras:
+            _close = difflib.get_close_matches(_x.split("=", 1)[0], _opts, n=1, cutoff=0.6)
+            if _close:
+                _hints.append(f"{_x} (did you mean {_close[0]}?)")
+            else:
+                _hints.append(_x)
+        _target.error(f"unrecognized arguments: {' '.join(_hints)}")
     # Ensure optional attrs exist for all subparsers (only `vault` defines `action`/`key`)
     if not hasattr(parsed, "action"):
         parsed.action = None
@@ -3413,12 +3486,13 @@ def main(args: list[str] | None = None) -> None:
         print("  Which providers would you like to configure?")
         for i, p in enumerate(providers, 1):
             print(f"  {i:2d}) {p}")
-        raw = _prompt("\n  Enter numbers (comma-separated), 'all', or press Enter for aws only", default="1")
-        if raw.lower() == "all":
-            selected = providers
-        else:
-            indices = [int(x.strip()) - 1 for x in raw.split(",") if x.strip().isdigit()]
-            selected = [providers[i] for i in indices if 0 <= i < len(providers)]
+        selected = _select_providers(providers)
+        if not selected:
+            # Typing `aws` here used to configure nothing and then print the
+            # "done" close as if it had worked.
+            print("  Nothing selected, so nothing was configured.")
+            print("  Run `nable setup` again, or connect one directly: `nable setup aws`.")
+            return
         for p in selected:
             try:
                 dispatch[p]()
@@ -3429,7 +3503,11 @@ def main(args: list[str] | None = None) -> None:
     _configure_claude_desktop()
 
     from .welcome import _cli
-    print("\n  " + _post_connect_message(parsed.cmd))
+    if _DECLINED[0]:
+        # Nothing was connected; "Done. Restart Claude Desktop" would say otherwise.
+        print("\n  Nothing was connected this time.")
+    else:
+        print("\n  " + _post_connect_message(parsed.cmd))
     print()
     print("  Want a visual dashboard?")
     print(f"    {_cli('serve')}")
