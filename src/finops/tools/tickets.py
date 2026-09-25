@@ -203,11 +203,20 @@ async def create_rightsizing_tickets(
 
     try:
         from ..integrations.ticketing import create_rightsizing_ticket
-        from ..recommendations.rightsizing import analyze_rightsizing
+        from ..recommendations.rightsizing import _coverage_note, analyze_rightsizing
 
-        recs = await _srv.asyncio.to_thread(analyze_rightsizing, min_monthly_savings=min_monthly_savings)
+        coverage: dict = {}
+        recs = await _srv.asyncio.to_thread(
+            analyze_rightsizing, min_monthly_savings=min_monthly_savings, coverage=coverage)
         if not recs:
-            return {"message": "No rightsizing recommendations found", "tickets_created": 0}
+            note, evaluated = _coverage_note(coverage, 0, 0)
+            return {
+                "message": ("No rightsizing recommendations found. " if evaluated else "")
+                + note,
+                "evaluated": evaluated,
+                "coverage": coverage,
+                "tickets_created": 0,
+            }
 
         urls = []
         skipped = 0

@@ -130,17 +130,19 @@ async def get_rightsizing_recommendations(
         from ..recommendations.effective_savings import detect_savings_context
         # Offload the blocking CloudWatch/EC2 scan so it does not freeze the MCP
         # event loop (and the editor) for the tens of seconds it can take.
+        coverage: dict = {}
         recs = await _srv.asyncio.to_thread(
             analyze_rightsizing,
             avg_cpu_threshold=avg_cpu_threshold,
             max_cpu_threshold=max_cpu_threshold,
+            coverage=coverage,
         )
         # Price the savings on the customer's real environment: measured effective
         # rate (EDP/private + commitment, from their CUR/Cost Explorer) with
         # commitment coverage as a fallback. Cached (~15 min) and off-thread;
         # degrades to list price with a low-confidence label if no data is reachable.
         savings_ctx = await _srv.asyncio.to_thread(detect_savings_context)
-        result = rightsizing_summary(recs, savings_ctx=savings_ctx)
+        result = rightsizing_summary(recs, savings_ctx=savings_ctx, coverage=coverage)
 
         # Persist recommendations for savings tracking (fire-and-forget)
         try:
