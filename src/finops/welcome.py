@@ -367,11 +367,90 @@ async def _any_llm_configured() -> bool:
         return False
 
 
+_FREE_SCAN_DEADLINE = 20.0  # seconds for the region fan-out of the free fallback
+# Set once a value moment ran against a connected AWS account, so the empty
+# state after it does not send someone who just connected to mint a key.
+_AWS_VALUE_MOMENT_RAN = [False]
+
+
+def _aws_connected() -> bool:
+    """AWS is among the connected providers (no network)."""
+    try:
+        from .tool_surface import connected_families
+        return "aws" in connected_families()
+    except Exception:  # noqa: BLE001 - no answer means not connected
+        return False
+
+
+def _free_waste_scan() -> dict | None:
+    """The same engine `nable scan` runs, on free APIs only, with a short
+    deadline. None when there are no AWS credentials or AWS cannot be reached."""
+    import boto3
+    from botocore.config import Config
+
+    session = boto3.Session()
+    if session.get_credentials() is None:
+        return None
+    # One fast identity read first, so an unreachable or rejected key costs a
+    # few seconds here instead of a stalled region fan-out.
+    sts = session.client("sts", config=Config(connect_timeout=3, read_timeout=5,
+                                              retries={"max_attempts": 1}))
+    account_id = sts.get_caller_identity()["Account"]
+    from .analyzers.optimizer import run_deep_audit
+    from .cli_scan import _pick_regions
+    return run_deep_audit(account_id=account_id, regions=list(_pick_regions(None, session)),
+                          deadline_seconds=_FREE_SCAN_DEADLINE)
+
+
+def _free_scan_value_moment() -> bool:
+    """Fallback when the bill cannot be read (Cost Explorer denied, not enabled,
+    or no data yet): run the free waste scan and show what it found. The
+    least-privilege policy from `nable scan --dry-run` has no Cost Explorer in
+    it, so without this someone who connected exactly as told saw no number at
+    all and was sent to make a second key."""
+    report = _run_capped(_free_waste_scan, _FREE_SCAN_DEADLINE + 15)
+    if not isinstance(report, dict) or report.get("error") or not report.get("checks_run"):
+        return False
+    from .cli_scan import _group_findings
+
+    recoverable = float(report.get("total_estimated_monthly_savings") or 0.0)
+    findings = report.get("findings") or []
+    regions = report.get("regions_scanned") or []
+    _blank()
+    _line(_rule())
+    _blank()
+    _line(green("✓") + bold("  nable scanned your account for waste (free APIs only)"))
+    _blank()
+    _line(f"  {dim('Recoverable')}      {amber('$' + format(recoverable, ',.2f') + '/mo')}  "
+          + dim(f"{len(findings)} finding{'s' if len(findings) != 1 else ''} across "
+                f"{len(regions)} region{'s' if len(regions) != 1 else ''}"))
+    groups = _group_findings(findings)
+    if groups:
+        g = groups[0]
+        _line(f"  {dim('Biggest')}          {g['description']}  "
+              + cyan('$' + format(g['monthly'], ',.2f') + '/mo'))
+    failed = {f.get("check") for f in report.get("checks_failed") or []}
+    if failed or report.get("regions_timed_out"):
+        _line(dim(f"  Partial: {len(failed)} check(s) could not fully run. "
+                  f"`{_cli('scan')}` says which."))
+    _line(dim("  Your spend total needs Cost Explorer (billed $0.01 per request): ")
+          + cyan(_cli("scan --spend")))
+    _blank()
+    return True
+
+
 def _value_moment_body(demo: bool = False) -> bool:
     """Scan and print a real dollar figure. Wrapped by _show_value_moment, which
     owns the demo-env lifecycle."""
+    aws = (not demo) and _aws_connected()
+    _AWS_VALUE_MOMENT_RAN[0] = _AWS_VALUE_MOMENT_RAN[0] or aws
     if not demo:
         _line(dim("  Scanning your account, this takes a few seconds..."))
+        if aws:
+            # The bill comes from Cost Explorer, which AWS bills per request.
+            # Say so before the first call, the way `nable scan --spend` does.
+            _line(dim("  Your AWS bill is read from Cost Explorer: about $0.01 per "
+                      "request on your AWS bill."))
 
     import asyncio
     from . import server  # heavy import, only at the value-moment step
@@ -382,8 +461,11 @@ def _value_moment_body(demo: bool = False) -> bool:
     # wall-clock cap. _run_capped's daemon-thread join returns on time even when a
     # call pins the event loop (a plain asyncio timeout would not fire).
     summary = _run_capped(lambda: asyncio.run(server.get_cost_summary()), _VALUE_MOMENT_TIMEOUT)
-    if not isinstance(summary, dict) or summary.get("error"):
+    if summary is None:
+        # Timed out. The free scan would hit the same stall; do not add to it.
         return False
+    if not isinstance(summary, dict) or summary.get("error"):
+        return _free_scan_value_moment() if aws else False
 
     # Day-one anomalies: seed baselines from history so "any cost spikes?" works
     # today rather than after a week of snapshots. Daemon thread + best-effort:
@@ -406,7 +488,7 @@ def _value_moment_body(demo: bool = False) -> bool:
     total = summary.get("grand_total_usd") or summary.get("total_usd") or 0.0
     by_svc = summary.get("grand_by_service") or summary.get("by_service") or {}
     if total <= 0 or not isinstance(by_svc, dict) or not by_svc:
-        return False
+        return _free_scan_value_moment() if aws else False
     _LAST_TOTAL[0] = float(total)  # anchor for the budget suggestion after this scan
 
     top = sorted(by_svc.items(), key=lambda kv: kv[1], reverse=True)
@@ -710,6 +792,7 @@ def run_welcome_flow(demo: bool = False) -> None:
     Auto-connects Claude, connects a cloud account, then pays off with a real
     cost number. `--demo` runs the whole thing on sample data, no account needed.
     """
+    _AWS_VALUE_MOMENT_RAN[0] = False  # per run: the empty state below reads it
     _print_header()
 
     # Test seam (inert unless set): the budget step is gated on a live-scan total, so
@@ -936,7 +1019,13 @@ def run_welcome_flow(demo: bool = False) -> None:
         _blank()
         _line(bold("No numbers yet, on purpose.") + dim("  nable only ever shows your real spend."))
         _oneclick = _oneclick_aws_url()
-        if _oneclick:
+        if _AWS_VALUE_MOMENT_RAN[0]:
+            # They just connected. Sending them off to mint a second key is a
+            # dead end; the next step is finding out why nothing was read.
+            _line(dim("  AWS is connected, but nothing could be read from it yet."))
+            _line(dim("  ") + cyan(_cli("scan")) + dim("  runs the free waste scan and says what failed; ")
+                  + cyan(_cli("doctor")) + dim("  checks the setup."))
+        elif _oneclick:
             _line(dim("  See yours in two copy-pastes, read-only AWS key, no local creds:"))
             _line(f"    {link(_oneclick)}")
             _line(dim("  Then run  ") + cyan(_cli("welcome")) + dim("  again, or  ") + cyan(_cli("setup aws")) + dim("  if you already have a profile."))
