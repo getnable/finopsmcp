@@ -68,7 +68,8 @@ class _SurfacedFastMCP(FastMCP):
     Overrides list_tools (the handler binds self.list_tools at __init__, so the
     subclass override is picked up) and filters through tool_surface.advertise:
     core tools always, provider families only when locally detected as connected,
-    everything under FINOPS_ALL_TOOLS=1 or demo mode. Advertisement-only: the
+    everything under FINOPS_ALL_TOOLS=1, the sample-backed tools in demo mode.
+    Advertisement-only: the
     call path resolves against the full registry, so a hidden tool called by
     name still runs, which keeps the in-chat connect flow intact.
     """
@@ -283,11 +284,27 @@ def _maybe_editor_confirmation() -> str | None:
     )
 
 
-def _first_run_onboarding_directive() -> dict:
+def _first_run_onboarding_directive(demo: bool = False) -> dict:
     """The magic moment. Attached once to the user's first successful cost answer
     so the model proactively surfaces real, dollar-quantified waste instead of just
     answering the literal question. The scan it triggers (list_idle_resources) also
-    records findings that the upgrade nudge later cites, closing the value loop."""
+    records findings that the upgrade nudge later cites, closing the value loop.
+
+    In demo mode list_idle_resources has nothing in the sample dataset, so the
+    directive sent the model to a placeholder on the user's first impression.
+    The demo version points at a tool the sample answers and at the way out."""
+    if demo:
+        return {
+            "first_cost_query": True,
+            "directive": (
+                "This is the user's FIRST cost answer from nable, and it is SAMPLE DATA "
+                "(the StreamCo demo environment), not their account. Say so plainly. "
+                "Then proactively run get_savings_summary and lead with the sample's "
+                "open monthly savings in plain dollars, for example 'in this sample, "
+                "nable finds about $X/mo to recover,' and offer connect_aws, connect_gcp "
+                "or connect_azure to run the same checks on their own account."
+            ),
+        }
     return {
         "first_cost_query": True,
         "directive": (
@@ -431,9 +448,11 @@ def _instrumented_tool(*dargs, **dkwargs):
             #
             # Per-tool is_demo() branches were the alternative and are how this
             # happened: 60-odd tools, each needing to remember, and four did not.
+            _was_demo = False
             try:
                 from .demo_data import demo_bridge_result, is_demo
                 if is_demo():
+                    _was_demo = True
                     _demo = demo_bridge_result(fn.__name__, kwargs or {})
                     if _demo is not None:
                         return _demo_as_declared(fn, _demo)
@@ -470,6 +489,15 @@ def _instrumented_tool(*dargs, **dkwargs):
                 )
                 raise
             _duration = int((_time.monotonic() - _t0) * 1000)
+            # An in-chat connect is the way out of demo. Say which side of the
+            # line the session is on now, so the model never presents the sample
+            # as the user's account or the user's account as the sample.
+            if _was_demo and fn.__name__.startswith("connect_"):
+                try:
+                    from .demo_data import after_connect_in_demo
+                    result = after_connect_in_demo(result)
+                except Exception as _exc:
+                    log.debug("demo connect label skipped: %s", _exc)
             # Determine outcome: check for RBAC-denied results
             _outcome = "success"
             if isinstance(result, dict) and result.get("error", "").startswith("Access denied"):
@@ -506,7 +534,8 @@ def _instrumented_tool(*dargs, **dkwargs):
                     # to proactively surface real waste. Turns "it works" into "it found
                     # money" without slowing this query, and the scan it triggers records
                     # findings the upgrade nudge later cites. Once per session only.
-                    result.setdefault("_onboarding", _first_run_onboarding_directive())
+                    result.setdefault("_onboarding",
+                                      _first_run_onboarding_directive(demo=_is_demo()))
             # First contact after install: confirm the editor wiring worked.
             # Closes the restart cliff (setup ends in "restart and hope"; this
             # is the "it worked"). Once per install, MCP sessions only.

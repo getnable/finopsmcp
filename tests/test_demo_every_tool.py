@@ -91,3 +91,35 @@ def test_str_tools_answer_with_labelled_text(demo, tool):
 def test_list_tools_answer_with_a_list(demo):
     out = asyncio.run(server.mcp._tool_manager.get_tool("list_api_keys").fn())
     assert isinstance(out, list) and out and out[0].get("_demo_mode") is True
+
+
+# ── the way out of demo runs from chat ─────────────────────────────────────────
+
+def test_connect_runs_in_demo_and_says_it_is_still_sample(demo):
+    """connect_aws used to get the "not in the sample dataset" placeholder, so a
+    demo user could not leave demo from the chat that told them to connect."""
+    out = asyncio.run(server.mcp._tool_manager.get_tool("connect_aws").fn())
+    assert "how_to_connect" in out            # the real tool ran
+    assert out["_demo_mode"] is True
+    assert "sample data" in out["_demo_note"]
+
+
+def test_connect_that_lands_leaves_demo(demo, monkeypatch):
+    from finops import demo_data
+
+    monkeypatch.delenv("FINOPS_DEMO_FORCE", raising=False)
+    monkeypatch.setattr(demo_data, "_real_provider_connected", lambda: True)
+    out = demo_data.after_connect_in_demo({"connected": True})
+    assert out["_demo_mode"] is False
+    assert "not the StreamCo sample" in out["_demo_exit"]
+
+
+def test_first_answer_directive_in_demo_names_a_sample_backed_tool():
+    from finops.demo_data import demo_bridge_result, demo_tool_names
+
+    d = server._first_run_onboarding_directive(demo=True)
+    assert "list_idle_resources" not in d["directive"]
+    assert "SAMPLE DATA" in d["directive"]
+    assert "get_savings_summary" in d["directive"]
+    assert "get_savings_summary" in demo_tool_names()
+    assert "isn't in the sample" not in str(demo_bridge_result("get_savings_summary", {}))

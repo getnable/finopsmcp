@@ -1261,6 +1261,11 @@ _AGENT_SELF_DEMO = set(DEMO_RESPONSES) | {
     "compare_providers", "check_connector_health", "whoami", "what_can_nable_do",
 }
 _AGENT_LOCAL_OK = {"pin_view", "list_pinned_views", "get_pinned_view", "unpin_view"}
+# The way out of demo. These run for real in demo mode, so a user trying the sample
+# can connect their own account from the same chat; server.py labels the result
+# with whether the session has left the sample.
+_DEMO_EXIT_TOOLS = {"connect_aws", "connect_gcp", "connect_azure", "connect_opencost",
+                    "nable_setup_status"}
 
 
 def _demo_total() -> dict[str, Any]:
@@ -1361,12 +1366,30 @@ def _agent_intercepts() -> dict[str, Any]:
     }
 
 
+_demo_tool_names: "frozenset[str] | None" = None
+
+
+def demo_tool_names() -> frozenset[str]:
+    """The tools worth advertising in demo mode: every tool that answers from the
+    sample dataset, plus the connect and setup tools that lead out of it.
+
+    Demo used to advertise all ~198 tools (~48k tokens of definitions) while 107
+    of them could only answer "not in the sample dataset". A model picks from
+    what it is shown, so it kept reaching for tools that had nothing to say."""
+    global _demo_tool_names
+    if _demo_tool_names is None:
+        _demo_tool_names = frozenset(
+            _AGENT_SELF_DEMO | _AGENT_LOCAL_OK | _DEMO_EXIT_TOOLS
+            | {"slice_costs"} | set(_agent_intercepts()))
+    return _demo_tool_names
+
+
 def demo_bridge_result(name: str, args: dict[str, Any] | None) -> dict[str, Any] | None:
     """Demo-safe result for an agent tool call, or None to let the real (already
     demo-safe) tool run. Guarantees no agent tool reaches real credentials in
     demo mode: unknown tools get a placeholder, never a live call."""
     args = args or {}
-    if name in _AGENT_SELF_DEMO or name in _AGENT_LOCAL_OK:
+    if name in _AGENT_SELF_DEMO or name in _AGENT_LOCAL_OK or name in _DEMO_EXIT_TOOLS:
         return None
     if name == "slice_costs":
         return _demo_slice(args)
@@ -1383,7 +1406,38 @@ def demo_bridge_result(name: str, args: dict[str, Any] | None) -> dict[str, Any]
     }
 
 
-DEMO_TEXT_HEADER = "Sample data (demo mode): the StreamCo sample environment, not your account."
+def after_connect_in_demo(result: Any) -> Any:
+    """Label a connect_* result that ran while the session was in demo mode.
+
+    A connect is how a demo user leaves the sample from chat. Whether it worked
+    decides what every later answer is, so the result says it outright: either
+    the sample is gone and answers are now the user's own numbers, or nothing
+    changed and answers are still sample data."""
+    global _real_provider_cache
+    _real_provider_cache = None  # re-detect now, not in 30s
+    if not isinstance(result, dict):
+        return result
+    if not is_demo():
+        result["_demo_mode"] = False
+        result["_demo_exit"] = (
+            "Demo mode is off: a real account is connected, so answers from the next "
+            "call on are the user's own numbers, not the StreamCo sample data. Earlier "
+            "answers in this conversation were sample data; do not mix the two.")
+        return result
+    result["_demo_mode"] = True
+    if result.get("connected") and os.environ.get("FINOPS_DEMO_FORCE", "").lower() in _TRUTHY:
+        result["_demo_note"] = (
+            "Connected, but FINOPS_DEMO_FORCE=1 keeps this session on sample data. "
+            "Restart nable without FINOPS_DEMO_FORCE and FINOPS_DEMO to see real numbers.")
+    else:
+        result["_demo_note"] = (
+            "Still in demo mode: no account is connected yet, so answers remain the "
+            "StreamCo sample data. Follow the steps above; nable switches to the "
+            "user's real numbers as soon as an account is connected.")
+    return result
+
+
+DEMO_TEXT_HEADER ="Sample data (demo mode): the StreamCo sample environment, not your account."
 
 
 def render_text(value: Any) -> str:
