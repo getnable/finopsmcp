@@ -124,3 +124,31 @@ def test_unknown_provider_says_so_instead_of_answering_for_all():
 def test_fixed_window_tools_say_the_window_is_fixed():
     out = _run("get_ai_kpis", days=7)
     assert "fixed 30-day window" in out["sample_window"]
+
+
+# ── slice_costs answers the dimension it was asked, or says it cannot ─────────
+
+@pytest.mark.parametrize("dim", ["Tags[team]", "tag:team", "team", "Tags['team']"])
+def test_slice_by_team_tag_returns_the_team_breakdown(dim):
+    """Dogfood: slice_costs(dimensions=["Tags[team]"]) silently returned a
+    by-provider breakdown."""
+    out = _run("slice_costs", dimensions=[dim])
+    assert out["result"]["dimensions"] == ["team"]
+    teams = {r["team"] for r in out["result"]["rows"]}
+    assert {"streaming-delivery", "untagged"} <= teams
+    aws = _run("get_cost_summary", provider="aws")["grand_total_usd"]
+    assert _close(out["result"]["total"], aws)
+
+
+def test_slice_by_env_tag_covers_every_provider():
+    out = _run("slice_costs", dimensions=["Tags[env]"])
+    assert out["result"]["dimensions"] == ["env"]
+    assert _close(out["result"]["total"], _run("get_cost_summary")["grand_total_usd"], 0.1)
+
+
+@pytest.mark.parametrize("dim", ["Tags[app]", "ChargeCategory", "pricing_unit"])
+def test_slice_by_a_dimension_the_sample_lacks_says_so(dim):
+    out = _run("slice_costs", dimensions=[dim])
+    assert out.get("not_in_sample") is True
+    assert "result" not in out  # no breakdown by something else
+    assert "Tags[team]" in out["available_dimensions"]

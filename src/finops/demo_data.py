@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -1672,6 +1673,35 @@ def _demo_commitment() -> dict[str, Any]:
     }
 
 
+# The dimensions the sample can break spend down by, and the spellings a model
+# uses for each (plain names, FOCUS column names, snake_case).
+_SLICE_DIMS: dict[str, set[str]] = {
+    "provider": {"provider", "providername", "cloud", "publisher", "publishername"},
+    "service": {"service", "product", "servicename", "service_name"},
+    "account": {"account", "subaccount", "subaccountid", "subaccountname", "account_id",
+                "accountid", "linkedaccount", "billingaccount"},
+    "region": {"region", "regionid", "regionname", "location"},
+    "team": {"team", "tag", "tags", "owner", "costcenter", "cost_center"},
+    "env": {"env", "environment", "stage"},
+}
+_TAG_DIM = re.compile(r"^(?:tags?|labels?)\s*[\[.:/]\s*['\"]?([^\]'\"]+)['\"]?\]?$", re.I)
+
+
+def _slice_dimension(raw: Any) -> tuple[str | None, str]:
+    """(sample dimension or None, what the caller asked for). A tag dimension
+    such as Tags[team] or tag:env resolves to its key."""
+    text = str(raw).strip()
+    m = _TAG_DIM.match(text)
+    if m:
+        key = m.group(1).strip().lower()
+        return (key if key in ("team", "env") else None), f"tag '{m.group(1).strip()}'"
+    low = text.lower()
+    for dim, names in _SLICE_DIMS.items():
+        if low in names:
+            return dim, text
+    return None, f"dimension '{text}'"
+
+
 def _demo_slice(args: dict[str, Any]) -> dict[str, Any]:
     """Synthetic 'moldable view' slice from the demo dataset, in the shape the
     web Ask tab renders as a pinnable cost card. Summed over the requested
@@ -1679,7 +1709,18 @@ def _demo_slice(args: dict[str, Any]) -> dict[str, Any]:
     team splits are AWS's (the sample's linked accounts, regions and CUR tags
     are AWS ones), so they add back up to AWS's total for the window."""
     dims = args.get("dimensions") or []
-    dim = (str(dims[0]) if dims else "provider").lower()
+    if isinstance(dims, str):
+        dims = [dims]
+    dim, asked = _slice_dimension(dims[0]) if dims else ("provider", "provider")
+    if dim is None:
+        # Never answer a different question: Tags[team] used to come back as a
+        # by-provider breakdown with nothing saying the dimension was dropped.
+        out = _not_in_sample(f"The {asked}")
+        out["available_dimensions"] = ["provider", "service", "account", "region",
+                                       "Tags[team]", "Tags[env]"]
+        out["note"] += (" slice_costs on the sample can break spend down by provider, "
+                        "service, account, region, Tags[team] (AWS) or Tags[env].")
+        return out
     metric = args.get("metric") or "EffectiveCost"
     provs = _pick_providers(args.get("provider"), None)
     if provs is None:
@@ -1688,17 +1729,21 @@ def _demo_slice(args: dict[str, Any]) -> dict[str, Any]:
     wrows = _window_rows(provs, first, last)
     aws_total = sum(r["amount"] for r in wrows if r["provider"] == "aws")
     scope = _scope(provs)
-    if dim in ("service", "product", "service_name"):
+    if dim == "service":
         key = "service"
         rows = [{"service": r["service"], "metric": r["amount"]} for r in wrows]
-    elif dim in ("team", "tag", "owner", "costcenter", "cost_center"):
+    elif dim == "team":
         key, scope = "team", "AWS (team tag from the CUR)"
         rows = [{"team": k, "metric": v} for k, v in _split(_AWS_TEAM_30D, aws_total).items()]
-    elif dim in ("account", "subaccount", "subaccountid", "account_id", "linkedaccount"):
+    elif dim == "env":
+        key = "env"
+        total = sum(r["amount"] for r in wrows)
+        rows = [{"env": k, "metric": v} for k, v in _split(_ENV_30D, total).items()]
+    elif dim == "account":
         key, scope = "account", "AWS linked accounts"
         rows = [{"account": a["name"], "metric": round(aws_total * a["share"], 2)}
                 for a in _DEMO_ACCOUNTS]
-    elif dim in ("region", "regionid", "location"):
+    elif dim == "region":
         key, scope = "region", "AWS regions"
         rows = [{"region": r["region"], "metric": round(aws_total * r["share"], 2)}
                 for r in _DEMO_REGIONS]
@@ -1712,13 +1757,18 @@ def _demo_slice(args: dict[str, Any]) -> dict[str, Any]:
     limit = args.get("limit")
     if isinstance(limit, int) and limit > 0:
         rows = rows[:limit]
-    return {
+    out = {
         "card": {"title": f"{metric} by {key}", "template": "bar", "metric": metric,
                  "dimensions": [key], "period": _period(first, last)},
         "result": {"rows": rows, "total": total, "record_count": len(rows),
                    "metric": metric, "dimensions": [key], "scope": scope},
         "_demo_mode": True,
     }
+    if len(dims) > 1:
+        out["dimensions_not_applied"] = [str(d) for d in dims[1:]]
+        out["note"] = ("The sample breaks spend down one dimension at a time; only "
+                       f"{key} was applied.")
+    return out
 
 
 def _demo_total(args: dict[str, Any] | None = None,
