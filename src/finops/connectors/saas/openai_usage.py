@@ -6,25 +6,26 @@ Uses the OpenAI Organization API to fetch:
   - Token usage breakdown by model (via /v1/organization/usage/completions)
   - Cost by project, API key or user (get_cost_attribution)
 
-Requires an Admin API key (sk-admin-...) or an org-level key with
-  "Read billing" and "Read usage" scopes.
+Requires an Admin API key (sk-admin-...). Every /v1/organization/* endpoint
+this module calls, costs and usage alike, is an Admin API endpoint: a
+standard project or user key cannot read either.
 
 Env vars:
-  OPENAI_API_KEY:   standard key (limited usage data)
+  OPENAI_API_KEY:   standard key (cannot read the organization cost or usage APIs)
   OPENAI_ADMIN_KEY: admin/org key (full cost + usage breakdown)
   OPENAI_ORG_ID:    optional, scopes to a specific org
 
-A rejected key (401/403) is not a zero, but /v1/organization/costs is
-admin-only, so a standard OPENAI_API_KEY 401s there even when it is
-perfectly valid: OPENAI_ADMIN_KEY is optional by design. So a costs-endpoint
-auth failure is not proof of a bad key. get_costs() always falls through to
-the usage-based estimate on any costs failure, same as before this module
-tried to distinguish bad keys at all. The auth check that actually
-distinguishes a bad key from a real zero (_is_auth_error) lives at that
-fallback endpoint instead, the one any valid key, standard or admin, is
-entitled to reach. A 401/403 there returns a typed _credential_error_result
-(source="error"), so a caller can tell "nothing was spent" from "nable
-cannot see what was spent" apart.
+A rejected key (401/403) is not a zero. get_costs() tries
+/v1/organization/costs first and, on any failure there, falls through to the
+estimate from /v1/organization/usage/completions, so a transient costs
+failure still gets an answer. A 401/403 from the usage endpoint means OpenAI
+refused this key for usage and cost data: either the key is bad, or it is a
+standard key where an Admin key (sk-admin-...) is needed. That returns a
+typed _credential_error_result (source="error") saying so, so a caller can
+tell "nothing was spent" from "nable cannot see what was spent" apart.
+
+Dates are inclusive: [start_date, end_date], end_date read whole, the same
+window anthropic_usage and ai_attribution read.
 """
 from __future__ import annotations
 
@@ -197,17 +198,11 @@ def get_costs(
     if not api_key:
         return _empty_result("not_configured")
 
-    # OpenAI costs API uses unix timestamps
-    import time
-    from datetime import datetime, timezone
-    start_ts = int(datetime(start_date.year, start_date.month, start_date.day,
-                            tzinfo=timezone.utc).timestamp())
-    end_ts   = int(datetime(end_date.year, end_date.month, end_date.day,
-                            tzinfo=timezone.utc).timestamp())
-
+    # OpenAI's organization APIs take unix timestamps, and end_time is
+    # exclusive, so the day after end_date keeps end_date whole.
     params: dict[str, Any] = {
-        "start_time": start_ts,
-        "end_time":   end_ts,
+        "start_time": _unix(start_date),
+        "end_time":   _unix(end_date + timedelta(days=1)),
         "bucket_width": "1d",
         "limit": _COSTS_PAGE_LIMIT,
     }
@@ -222,16 +217,12 @@ def get_costs(
             params, _headers(api_key, org_id),
         )}
     except Exception as e:
-        # /v1/organization/costs is admin-only. A standard OPENAI_API_KEY
-        # (no OPENAI_ADMIN_KEY set, an intended and documented setup) always
-        # 401s here, not because the key is bad, but because a standard key
-        # was never entitled to call this endpoint in the first place. So an
-        # auth failure here is not evidence of a bad key and must not
-        # short-circuit into a credential error. Every failure of this
-        # endpoint, auth or otherwise, falls through to the usage-based
-        # estimate instead. If the key really is bad, _estimate_from_usage
-        # will find out for certain: that endpoint is the one any valid key,
-        # standard or admin, is entitled to reach.
+        # Every failure of this endpoint, auth or otherwise, falls through to
+        # the usage-based estimate. The usage endpoint is an Admin API
+        # endpoint too, so a key refused here is refused there as well, and
+        # _estimate_from_usage is where that becomes a credential error that
+        # names the Admin key. Falling through costs one more request and
+        # keeps a transient costs failure from hiding the estimate.
         log.warning("OpenAI costs API failed: %s, falling back to usage estimate", e)
         return _estimate_from_usage(start_date, end_date, api_key, org_id)
 
@@ -390,17 +381,11 @@ def _fetch_usage_tokens(
     except ImportError:
         return {}
 
-    from datetime import datetime, timezone
-    start_ts = int(datetime(start_date.year, start_date.month, start_date.day,
-                            tzinfo=timezone.utc).timestamp())
-    end_ts   = int(datetime(end_date.year, end_date.month, end_date.day,
-                            tzinfo=timezone.utc).timestamp())
-
     buckets = _get_all_buckets(
         httpx, "https://api.openai.com/v1/organization/usage/completions",
         {
-            "start_time": start_ts,
-            "end_time":   end_ts,
+            "start_time": _unix(start_date),
+            "end_time":   _unix(end_date + timedelta(days=1)),
             "bucket_width": "1d",
             "group_by": ["model"],
             "limit": _USAGE_1D_PAGE_LIMIT,
@@ -423,26 +408,21 @@ def _estimate_from_usage(
 ) -> dict[str, Any]:
     """
     Fallback: fetch token usage and multiply by published prices (llm_prices).
-    Less accurate (doesn't include discounts/credits) but works with standard keys.
+    Less accurate (doesn't include discounts/credits). Needs an Admin key like
+    the costs endpoint does; it is the fallback for a costs call that failed,
+    not a way around the Admin key.
     """
     try:
         import httpx
     except ImportError:
         return _empty_result("httpx_missing")
 
-    import time
-    from datetime import datetime, timezone
-    start_ts = int(datetime(start_date.year, start_date.month, start_date.day,
-                            tzinfo=timezone.utc).timestamp())
-    end_ts   = int(datetime(end_date.year, end_date.month, end_date.day,
-                            tzinfo=timezone.utc).timestamp())
-
     try:
         buckets = _get_all_buckets(
             httpx, "https://api.openai.com/v1/organization/usage/completions",
             {
-                "start_time": start_ts,
-                "end_time":   end_ts,
+                "start_time": _unix(start_date),
+                "end_time":   _unix(end_date + timedelta(days=1)),
                 "bucket_width": "1d",
                 "group_by": ["model"],
                 "limit": _USAGE_1D_PAGE_LIMIT,
@@ -451,11 +431,13 @@ def _estimate_from_usage(
         )
     except Exception as e:
         if _is_auth_error(e):
-            # Unlike the costs endpoint, this one is reachable by a standard
-            # key too, so a 401/403 here is the real signal: OpenAI itself
-            # rejected this credential, standard or admin.
-            log.warning("OpenAI rejected the key on the usage API: %s", e)
-            return _credential_error_result(str(e)[:300])
+            # OpenAI refused this key for usage and cost data: a bad key, or a
+            # standard key where the Admin API needs an Admin key.
+            log.warning("OpenAI refused the key on the usage API: %s", e)
+            return _credential_error_result(
+                "OpenAI refused this key on the organization usage and cost APIs, which "
+                "need an OpenAI Admin key: set OPENAI_ADMIN_KEY (sk-admin-...). A standard "
+                f"project or user key cannot read usage or cost data. ({str(e)[:300]})")
         log.warning("OpenAI usage API also failed: %s", e)
         return _empty_result("api_error")
 
@@ -669,11 +651,12 @@ def _is_auth_error(exc: Exception) -> bool:
 
 
 def _credential_error_result(detail: str) -> dict[str, Any]:
-    """A typed result for a credential OpenAI itself rejected.
+    """A typed result for a credential OpenAI itself refused.
 
     Every other failure in this module falls through to _empty_result or the
     token-estimate fallback, which is right for "we could not tell" but wrong
-    for "the key is bad": both would otherwise report total_usd=0.0 with
+    for "this key cannot read the bill" (a bad key, or a standard key where
+    an Admin key is needed): both would otherwise report total_usd=0.0 with
     source="none", indistinguishable from a genuine zero-spend account.
     source="error" is the one carve-out, so a caller can surface "this
     credential needs attention" instead of a silent $0. No sibling saas

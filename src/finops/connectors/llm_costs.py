@@ -312,8 +312,9 @@ def get_all_llm_costs(
     # serially (the single biggest chunk of query latency). Run them in a
     # thread pool so the slowest provider sets the wall clock, not the sum.
     # A fetcher returns None when its provider is not set up. A configured
-    # provider that could not be read returns its source="none" result (or
-    # raises), and the loop below lists it under failed_providers.
+    # provider that could not be read returns its source="none" or
+    # source="error" result (or raises), and the loop below lists it under
+    # failed_providers.
     def _fetch_openai():
         if configured["openai"]:
             return openai_costs(start_date, end_date)
@@ -613,10 +614,17 @@ def _unread_reason(data: dict[str, Any]) -> str | None:
     """Why a provider result carries no data, or None when it is a real read.
 
     Every provider module returns total_usd 0.0 with source "none" when it
-    could not read the bill (api_error, ce_error, httpx_missing, ...). Merged
-    as-is that is a $0 provider; this is what keeps it out of the total.
+    could not read the bill (api_error, ce_error, httpx_missing, ...), and
+    source "error" when the provider refused the credential (openai_usage's
+    credential_invalid). Merged as-is either is a $0 provider; this is what
+    keeps it out of the total, out of the cache, and in failed_providers.
     """
-    if data.get("source") != "none":
+    source = data.get("source")
+    if source == "error":
+        reason = str(data.get("reason") or "error")
+        detail = data.get("error")
+        return f"{reason}: {detail}" if detail else reason
+    if source != "none":
         return None
     reason = str(data.get("reason") or "unknown")
     return None if reason in _MEASURED_EMPTY else reason

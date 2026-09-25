@@ -110,16 +110,12 @@ def test_get_costs_a_403_is_also_a_credential_error(monkeypatch):
     assert out["reason"] == "credential_invalid"
 
 
-def test_get_costs_standard_key_falls_back_to_usage_after_costs_401(monkeypatch):
-    """The regression this pins: /v1/organization/costs is admin-only, so a
-    standard OPENAI_API_KEY (no OPENAI_ADMIN_KEY set at all) legitimately
-    401s there even though the key is perfectly good, since OPENAI_ADMIN_KEY
-    is optional by design (setup_wizard prompts it as such) and this
-    module's own docs say the usage fallback works with standard keys. A
-    costs-endpoint 401 must not be read as a bad key: get_costs() has to
-    fall through to the usage-based estimate, which a standard key IS
-    entitled to call, and hand back the real data from there rather than a
-    false credential error."""
+def test_get_costs_falls_back_to_usage_after_a_costs_401(monkeypatch):
+    """Any failure of /v1/organization/costs, a 401 included, falls through to
+    the usage-based estimate rather than stopping there: when the usage
+    endpoint answers, its estimate is the result, not a credential error.
+    (Both endpoints are Admin API endpoints; this pins the fall-through, not a
+    claim that a standard key can read usage.)"""
     monkeypatch.setattr("finops.security.env.get_env",
                         _env({"OPENAI_API_KEY": "sk-a-perfectly-good-standard-key"}))  # pragma: allowlist secret
     usage_payload = {"data": [{"start_time": 1717200000, "results": [
@@ -138,17 +134,10 @@ def test_get_costs_standard_key_falls_back_to_usage_after_costs_401(monkeypatch)
 
 
 def test_get_costs_a_bad_key_fails_both_endpoints_and_still_errors(monkeypatch):
-    """This test used to be named '...never_reaches_the_estimate_endpoint'
-    and asserted get_costs() stopped at the very first 401, from the
-    admin-only costs endpoint. That assertion WAS the regression: a
-    perfectly good standard key also 401s that admin-only endpoint (see
-    test_get_costs_standard_key_falls_back_to_usage_after_costs_401), so a
-    costs-endpoint 401 alone is not proof of a bad key and get_costs must
-    not stop there. The real signal is a 401/403 from the usage endpoint,
-    which any valid key, standard or admin, is entitled to reach. This key
-    fails THAT endpoint too, so it is genuinely bad and must still end up as
-    a credential error, just by trying the usage fallback first rather than
-    skipping straight to it."""
+    """A costs-endpoint 401 alone does not end the read: get_costs tries the
+    usage fallback first. A 401/403 there too means OpenAI refused this key for
+    usage and cost data (a bad key, or a standard key where an Admin key is
+    needed), and that is a credential error that names the Admin key."""
     monkeypatch.setattr("finops.security.env.get_env",
                         _env({"OPENAI_ADMIN_KEY": "sk-admin-revoked"}))
     calls = []
@@ -163,6 +152,8 @@ def test_get_costs_a_bad_key_fails_both_endpoints_and_still_errors(monkeypatch):
     assert len(calls) == 2, f"expected the costs call AND the usage fallback, got {calls}"
     assert out["source"] == "error"
     assert out["reason"] == "credential_invalid"
+    # Not "the key is bad": the usage and cost APIs need an Admin key.
+    assert "Admin key" in out["error"] and "sk-admin-" in out["error"]
 
 
 def test_get_costs_a_5xx_still_falls_back_to_the_estimate_as_before(monkeypatch):
@@ -263,3 +254,36 @@ def test_credential_error_result_shape_matches_every_other_result():
     assert out["source"] == "error"
     assert out["reason"] == "credential_invalid"
     assert out["error"] == "OpenAI said no"
+
+
+# ── the window: [start_date, end_date], end_date read whole ─────────────────
+
+def test_get_costs_reads_end_date_whole(monkeypatch):
+    """end_time is exclusive at OpenAI, so it is the day after end_date: the
+    same inclusive window anthropic_usage and get_cost_attribution read."""
+    monkeypatch.setattr("finops.security.env.get_env",
+                        _env({"OPENAI_ADMIN_KEY": "sk-admin-good"}))
+    seen = {}
+
+    def fake_get(url, params=None, **kw):
+        seen.setdefault(url, dict(params or {}))
+        return _FakeResp(200, {"data": []}, url=url)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    oai.get_costs(date(2026, 6, 1), date(2026, 6, 2))
+    day = 86400
+    start = oai._unix(date(2026, 6, 1))
+    for url in (COSTS_URL, USAGE_URL):
+        assert (seen[url]["start_time"], seen[url]["end_time"]) == (start, start + 2 * day)
+
+
+def test_the_usage_estimate_reads_end_date_whole(monkeypatch):
+    seen = {}
+
+    def fake_get(url, params=None, **kw):
+        seen.update(params or {})
+        return _FakeResp(200, {"data": []}, url=url)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    oai._estimate_from_usage(date(2026, 6, 1), date(2026, 6, 1), "sk-admin-good", None)
+    assert seen["end_time"] - seen["start_time"] == 86400
