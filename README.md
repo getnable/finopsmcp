@@ -71,11 +71,17 @@ Infracost prices an infrastructure change before you deploy it; nable finds and 
 
 `nable guard install` adds a hook to Claude Code (and `--all` to Cursor and Codex) that checks each infrastructure command or MCP call before it runs: a one-way door (destroy, terminate, a commitment) asks you first, and a launch is priced at list price so a $191k/mo `run-instances` asks instead of passing. It also watches the pattern across calls: a velocity cap on the monthly run-rate let through per hour (`FINOPS_POLICY_VELOCITY_CAP_USD`, default four times the $500/mo per-action threshold) and loop detection for the same creation repeated (three identical `create-stack` in ten minutes asks). Every verdict goes to a local hash-chained ledger.
 
+**Stops tied to the budget.** A priced change is also checked against the cloud budgets you set (the `set_budget` tool or a `budget.yml`): when month-to-date spend plus the change's cost for the rest of the month would take a budget over its limit, the guard asks, naming the budget, the spend so far, the change's monthly figure and the projected overage. `on_budget_breach: deny` in `nable.policy.yaml` (in nable's data directory, `~/.finops` by default, or at `FINOPS_POLICY_FILE`) makes that a hard stop; `FINOPS_GUARD_STOP_ON_BUDGET=1` or `=0` overrides it for one session or CI run. Total, provider and service budgets apply from the command itself; team and account budgets apply when `FINOPS_GUARD_TEAM` or `FINOPS_GUARD_ACCOUNT` names them where the agent runs. The hook reads a small spend summary rather than the database: every budget check writes it, `nable budget refresh` is the one to schedule, and a figure older than 48 hours (`FINOPS_GUARD_BUDGET_MAX_AGE_HOURS`) or from last month is not used, which the verdict on a priced change says. `nable guard doctor` lists the budgets the guard enforces, the ones it cannot place a change in, and the age of its figure.
+
 ```bash
 nable guard report --session <id>     # what it asked, blocked and let through, in dollars
 nable guard reconcile --hours 24      # CloudTrail's creates and destroys against the ledger
 nable guard export --format cef       # the verified ledger, for a SIEM
+nable budget refresh                  # recompute budgets and the guard's spend figure
+nable budget ci-gate --fail-on-breach --json   # a pipeline step that fails on a breached budget
 ```
+
+`ci-gate` reports and exits 0 unless `--fail-on-breach` is passed; with it, a breached budget (spend at or past its critical percentage) exits 1 and a check that cannot run exits 2. `--budget-file budget.yml` syncs the file first.
 
 `reconcile` needs `cloudtrail:LookupEvents` (free, read-only) and matches by kind and time, since the ledger holds no resource ids. The guard is a seatbelt, not a security boundary: `nable guard doctor` lists what it does not see.
 
@@ -152,7 +158,8 @@ Add one line to your agent's system prompt (Claude Code, Cursor, or any MCP clie
 The gate returns `allow` / `warn` / `block` / `escalate` against your policy, the
 monthly and annual dollar impact, and a spot alternative when the change is compute.
 One-way doors (delete, terminate, buy a commitment) and over-budget changes always
-escalate to a human.
+escalate to a human, and over-budget changes are blocked outright when the policy
+sets `on_budget_breach: deny`.
 
 **And a budget for the agent itself.** Run `nable ai-budget` once, it asks whether
 you are on a flat plan or a metered API and what you pay, then remembers. On a flat

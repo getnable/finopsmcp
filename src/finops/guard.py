@@ -1411,6 +1411,57 @@ def _budget_policy() -> dict[str, Any]:
     return {**pol, "on_budget_breach": "deny" if hard else "ask"}
 
 
+def _on_breach() -> tuple[str, str]:
+    """(what a change over budget gets, which setting says so)."""
+    env = os.getenv("FINOPS_GUARD_STOP_ON_BUDGET", "").strip().lower()
+    if env in ("1", "true", "yes", "0", "false", "no"):
+        return ("deny" if env in ("1", "true", "yes") else "ask"), "FINOPS_GUARD_STOP_ON_BUDGET"
+    from .policy import BUDGET_BREACH_ACTIONS, _policy_file_keys
+    if os.getenv("FINOPS_POLICY_ON_BUDGET_BREACH", "").strip().lower() in BUDGET_BREACH_ACTIONS:
+        source = "FINOPS_POLICY_ON_BUDGET_BREACH"
+    elif "on_budget_breach" in _policy_file_keys():
+        source = "policy file"
+    else:
+        source = "default"
+    return str(load_policy().get("on_budget_breach") or "ask"), source
+
+
+def budget_status() -> dict[str, Any]:
+    """Which cloud budgets the guard checks priced changes against, and how
+    fresh its spend figure is: the doctor's view of budget_lens.
+
+    enforced      budgets in the current period a change can land in: total,
+                  provider and service ones (placed by the command), team and
+                  account ones when FINOPS_GUARD_TEAM / FINOPS_GUARD_ACCOUNT
+                  name them
+    not_enforced  team and account budgets nothing places a change in
+    state         "fresh", "stale" or "absent" (budget.summary.freshness)
+    on_breach     "ask" or "deny", and on_breach_source, the setting behind it
+    """
+    from .budget import summary as _summary
+    doc = _summary.read_summary()
+    fresh = _summary.freshness(doc)
+    on_breach, source = _on_breach()
+    env = {"team": os.getenv("FINOPS_GUARD_TEAM", "").strip(),
+           "account": os.getenv("FINOPS_GUARD_ACCOUNT", "").strip()}
+    enforced: list[dict[str, Any]] = []
+    not_enforced: list[dict[str, Any]] = []
+    for b in _summary.current_budgets(doc) if doc else []:
+        row = {"name": str(b.get("name")), "scope": _budget_scope_words(b),
+               "spent": b.get("spent"), "limit": b.get("limit"), "pct_used": b.get("pct_used")}
+        kind = str(b.get("scope_type") or "total")
+        if kind in env and env[kind].lower() != str(b.get("scope_value") or "").lower():
+            row["needs"] = f"FINOPS_GUARD_{kind.upper()}={b.get('scope_value')}"
+            not_enforced.append(row)
+        else:
+            enforced.append(row)
+    return {"state": fresh["state"], "as_of": fresh["as_of"], "age_hours": fresh["age_hours"],
+            "previous_month": fresh["previous_month"], "spend_through": fresh["spend_through"],
+            "max_age_hours": fresh["max_age_hours"], "enforced": enforced,
+            "not_enforced": not_enforced, "on_breach": on_breach,
+            "on_breach_source": source, "summary_path": str(_summary.summary_path())}
+
+
 def _budget_reason(lens: dict[str, Any], *, hard: bool, why: str, undo: str = "") -> str:
     """The over-budget sentence: the budget, spend so far, the change's figure,
     the projected overage, and how fresh the spend is."""
@@ -2842,6 +2893,29 @@ def doctor() -> dict[str, Any]:
                     "replaced by something that is not a file")
         fix(f"check what holds {ledger['path']} (lsof), then remove {lost['path']}",
             "records the guard could not write")
+    budgets = budget_status()
+    if budgets["state"] == "fresh" and budgets["enforced"]:
+        n = len(budgets["enforced"])
+        covered.append(f"priced changes against {n} cloud budget{'s' if n != 1 else ''} "
+                       f"(spend figure from {_summary_age(budgets)} ago)")
+    if budgets["state"] == "absent":
+        gaps.append("the cloud budget on priced changes: there is no spend figure on this "
+                    "machine yet, so only the per-action threshold and velocity cap apply")
+        fix("nable budget refresh", "computes the spend figure the guard checks budgets "
+            "against; run it daily")
+    elif budgets["state"] == "stale":
+        old = ("from last month" if budgets["previous_month"]
+               else f"{_summary_age(budgets)} old")
+        gaps.append(f"the cloud budget on priced changes: the spend figure is {old}, past "
+                    f"the {budgets['max_age_hours']:g} hours the guard trusts, so budgets "
+                    "are not checked")
+        fix("nable budget refresh", "updates the spend figure; run it daily")
+    elif not budgets["enforced"] and not budgets["not_enforced"]:
+        gaps.append("the cloud budget on priced changes: no cloud budget is set (ask your AI "
+                    "to \"set a monthly budget of $X\", or sync a budget.yml)")
+    for row in budgets["not_enforced"]:
+        gaps.append(f"the '{row['name']}' budget ({row['scope']}): the guard cannot tell "
+                    f"which changes are in it; set {row['needs']} where the agent runs")
     fixes = [f"{cmd}  ({'; '.join(why)})" if why else cmd for cmd, why in todo.items()]
     fixes.append("give agents read-only cloud credentials; keep write access behind a human")
 
@@ -2852,6 +2926,7 @@ def doctor() -> dict[str, Any]:
         "not_covered": gaps,
         "mcp_tools": families,
         "ledger": ledger,
+        "budgets": budgets,
         "recommendations": fixes,
         "seatbelt": SEATBELT,
         "version": __version__,

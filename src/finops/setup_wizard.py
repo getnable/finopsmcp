@@ -2734,6 +2734,7 @@ def _guard_doctor(parsed) -> None:
     print(f"  {bold('Not covered')}")
     for c in d["not_covered"]:
         print(f"    - {c}")
+    _guard_doctor_budgets(d.get("budgets") or {})
     led = d["ledger"]
     print()
     if led["ok"]:
@@ -2753,6 +2754,37 @@ def _guard_doctor(parsed) -> None:
     for fix in d["recommendations"]:
         print(f"    {cyan('->')} {fix}")
     print()
+
+
+def _guard_doctor_budgets(b: dict) -> None:
+    """The doctor's cloud budget section: what the guard enforces, and on how
+    fresh a figure."""
+    from .budget.summary import age_words
+    from .welcome import amber, bold, dim
+
+    print()
+    print(f"  {bold('Cloud budgets')} (checked on each priced change)")
+    for row in b.get("enforced") or []:
+        print(f"    {row['name']} ({row['scope']}): ${row['spent'] or 0:,.0f} of "
+              f"${row['limit'] or 0:,.0f} ({row['pct_used'] or 0:.0f}%)")
+    for row in b.get("not_enforced") or []:
+        print(f"    {row['name']} ({row['scope']}): {amber('not enforced')}, needs {row['needs']}")
+    if not (b.get("enforced") or b.get("not_enforced")):
+        print(f"    {dim('none')}")
+    state = b.get("state")
+    if state == "absent":
+        fresh = amber("no spend figure yet (nable budget refresh)")
+    elif state == "stale":
+        old = ("from last month" if b.get("previous_month")
+               else f"{age_words(b.get('age_hours'))} old")
+        fresh = amber(f"spend figure {old}, not used (nable budget refresh)")
+    else:
+        fresh = f"spend figure from {age_words(b.get('age_hours'))} ago"
+        if b.get("spend_through"):
+            fresh += f", cost data through {b['spend_through']}"
+    how = "stops it" if b.get("on_breach") == "deny" else "asks"
+    source = b.get("on_breach_source") or "default"
+    print(dim(f"    {fresh}; a change over budget {how} ({source})"))
 
 
 def _guard_report(parsed) -> None:
