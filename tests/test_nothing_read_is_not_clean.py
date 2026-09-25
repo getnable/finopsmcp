@@ -400,3 +400,75 @@ def test_forecast_on_a_connected_account_with_no_history_does_not_say_connect(mo
     assert "Connect your AWS account" not in text and "finops setup aws" not in text, text
     assert "no cost history yet" in out["error"].lower()
     assert "take_snapshot_now" in out["hint"] or "explain_recent_cost_drivers" in out["hint"]
+
+
+# ── 6. SaaS guidance: a Snowflake question is not answered with connect_aws ───
+
+def test_saas_summary_with_nothing_connected_points_at_saas_setup(monkeypatch):
+    server = _cost_env(monkeypatch, {})
+    out = asyncio.run(server.get_saas_spend_summary())
+
+    text = str(out)
+    assert "connect_aws" not in text, text
+    assert "sample data" not in text
+    assert "finops setup snowflake" in text
+    assert "finops setup databricks" in text
+    assert "not a finding of zero spend" in text
+
+
+def test_saas_summary_with_real_saas_data_carries_no_sample_data_hint(monkeypatch):
+    import finops.demo_data as demo_data
+
+    class _SaaS(_NoRowsConnector):
+        async def get_costs(self, start, end, granularity="MONTHLY", **kw):
+            from finops.connectors.base import CostEntry
+            e = CostEntry(provider="snowflake", account_id="a", account_name="a",
+                          service="Snowflake Compute", region="", amount=40.0)
+            return CostSummary(provider="snowflake", start_date=start, end_date=end,
+                               total_usd=40.0, by_service={"Snowflake Compute": 40.0},
+                               by_account={"a": 40.0}, by_region={}, entries=[e])
+
+    server = _cost_env(monkeypatch, {"snowflake": _SaaS()})
+    monkeypatch.setattr(demo_data, "_real_provider_connected", lambda: False)
+    out = asyncio.run(server.get_saas_spend_summary())
+
+    assert out["grand_total_usd"] == 40.0
+    assert "_connect_hint" not in out, "real Snowflake spend was labelled sample data"
+
+
+def test_snowflake_extra_hint_gives_the_uvx_form(monkeypatch):
+    import builtins
+    from finops.connectors.saas.snowflake import SnowflakeConnector
+
+    real_import = builtins.__import__
+
+    def _no_snowflake(name, *a, **k):
+        if name.startswith("snowflake"):
+            raise ImportError("no snowflake")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _no_snowflake)
+    try:
+        SnowflakeConnector()._connect()
+    except RuntimeError as e:
+        msg = str(e)
+    assert "pip install 'finops-mcp[snowflake]'" in msg
+    assert "uvx --from 'finops-mcp[snowflake]'" in msg
+
+
+def test_list_connected_providers_does_not_call_env_presence_connected(monkeypatch):
+    import finops.server as server
+
+    class _Configured:
+        async def is_configured(self):
+            return True
+
+    monkeypatch.delenv("FINOPS_DEMO", raising=False)
+    monkeypatch.setitem(server.SAAS_CONNECTORS, "snowflake", _Configured())
+    out = server.list_connected_providers()
+    if asyncio.iscoroutine(out):
+        out = asyncio.run(out)
+
+    assert out["snowflake"]["configured"] is True
+    assert out["snowflake"]["status"] == "configured (not yet verified)"
+    assert "check_connector_health" in out["_note"]

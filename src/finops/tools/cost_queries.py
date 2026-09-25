@@ -492,7 +492,26 @@ async def get_saas_spend_summary(
         end_date: ISO date (YYYY-MM-DD). Defaults to today.
 
     """
-    return await _srv.get_cost_summary(category="saas", start_date=start_date, end_date=end_date)
+    if not await _srv._active(_srv.SAAS_CONNECTORS):
+        # A Snowflake question used to get get_cost_summary's cloud answer:
+        # "call connect_aws", plus a hint that nable "can only show sample data".
+        return {
+            "error": "no_saas_connected",
+            "message": (
+                "No SaaS or data platform is connected, so no SaaS spend was read. "
+                "Connect one from your terminal (the key is entered there, never in "
+                "the chat): `finops setup snowflake`, `finops setup databricks`, "
+                "`finops setup datadog`, or `finops setup` for the full list. Then "
+                "restart your editor and ask again."),
+            "note": f"No SaaS cost data was read. {_NOT_ZERO}",
+        }
+    result = await _srv.get_cost_summary(
+        category="saas", start_date=start_date, end_date=end_date)
+    if isinstance(result, dict):
+        # get_cost_summary tags its answer as sample data when no CLOUD account
+        # is connected. SaaS spend read from Snowflake or Datadog is real data.
+        result.pop("_connect_hint", None)
+    return result
 
 
 @_srv.mcp.tool()

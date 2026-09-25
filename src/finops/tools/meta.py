@@ -102,13 +102,16 @@ async def list_connected_providers() -> dict:
             result["_plan"] = {"plan": status.mode}
         return result
 
+    # is_configured() checks that credentials are present, not that they work.
+    # Calling that "connected" told users a typo'd key was live.
+    _configured = "configured (not yet verified)"
     for category, pool in [("cloud", _srv.CLOUD_CONNECTORS), ("saas", _srv.SAAS_CONNECTORS)]:
         for name, connector in pool.items():
             configured = await connector.is_configured()
             result[name] = {
                 "category": category,
                 "configured": configured,
-                "status": "connected" if configured else _remediation(name),
+                "status": _configured if configured else _remediation(name),
             }
 
     # LLM / AI providers are module-level (not in the class registry above), so
@@ -132,7 +135,7 @@ async def list_connected_providers() -> dict:
         result[name] = {
             "category": "llm",
             "configured": configured,
-            "status": "connected" if configured else _remediation(name),
+            "status": _configured if configured else _remediation(name),
         }
     _llm_sync = {
         "modal": gpu_infra.modal_configured,
@@ -144,9 +147,13 @@ async def list_connected_providers() -> dict:
         result[name] = {
             "category": "llm",
             "configured": configured,
-            "status": "connected (cost via invoice import)" if configured
+            "status": "configured (cost via invoice import)" if configured
                       else _remediation(name),
         }
+    result["_note"] = (
+        "configured means the credentials are present, not that they work. "
+        "Run check_connector_health to verify each one."
+    )
 
     # Surface plan status so Claude can proactively mention upgrade when relevant
     status = _srv.get_status()
