@@ -130,6 +130,8 @@ def test_get_costs_prefers_cost_api_when_admin_key_present(monkeypatch):
     monkeypatch.setattr(a, "get_cost_report", lambda k, s, e: {
         "source": "cost_api", "total_usd": 42.0,
         "by_model": {"claude-opus-4-6": 42.0}, "by_model_tokens": {}, "daily": []})
+    # get_costs also reads by_workspace from the Cost API; keep this test offline.
+    monkeypatch.setattr(a, "_fetch_by_workspace", lambda *a_: {})
 
     out = a.get_costs(date(2026, 6, 1), date(2026, 6, 2))
     assert out["source"] == "cost_api"
