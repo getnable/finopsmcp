@@ -27,6 +27,7 @@ import contextlib
 import json
 import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -542,7 +543,20 @@ _RANK = {BUDGET_OK: 0, BUDGET_WARN: 1, BUDGET_OVER: 2}
 
 # ── Status + gate ────────────────────────────────────────────────────────────
 
-def status(session_id: str | None = None) -> dict[str, Any]:
+def _called_by_guard() -> bool:
+    """Whether status() was called by guard.check_budget_gate.
+
+    The guard runs on every tool call and reads only the verdict, so it should
+    not pay for figures it throws away. guard.py cannot pass for_gate itself
+    yet (it is owned elsewhere), so the caller's module says which it is.
+    """
+    try:
+        return sys._getframe(2).f_globals.get("__name__") == "finops.guard"
+    except ValueError:
+        return False
+
+
+def status(session_id: str | None = None, *, for_gate: bool | None = None) -> dict[str, Any]:
     """Where you stand. Honest by construction: tokens and burn rate are exact
     (read from local logs); dollars are ONLY ever an estimate at list price, never
     your real bill. Two lenses:
@@ -551,12 +565,28 @@ def status(session_id: str | None = None) -> dict[str, Any]:
         much subsidized compute you are pulling for your fixed fee.
     Either can add a per-session cap, which gates this session's own spend; the
     verdict is the worse of the two. `session_id` names the session (see
-    resolve_session for what "this session" means without one)."""
-    now = time.time()
-    window = read_agent_usage(now - _WINDOW_HOURS * 3600)
-    mtd = read_agent_usage(_month_start_epoch())
+    resolve_session for what "this session" means without one).
+
+    for_gate: only the verdict is wanted (the guard, on every tool call), so
+    nothing is read that cannot change it: no transcripts at all when no cap is
+    set, the month only under a monthly cap, the session only under a session
+    cap, never the window. None means "the guard called", detected."""
+    if for_gate is None:
+        for_gate = _called_by_guard()
     budget = get_budget()
     mode = budget["mode"]
+    monthly_cap = (mode == "metered" and budget["spend_cap"] > 0) or budget["monthly_tokens"] > 0
+    session_cap = budget["session_cap"] > 0 or bool(budget["session_caps"])
+    if for_gate and not monthly_cap and not session_cap:
+        # Nothing is capped, so nothing can be over: the verdict needs no reading.
+        return {"verdict": BUDGET_OK, "verdict_basis": "none", "mode": mode,
+                "budget": budget, "pct_of_budget": None, "month_verdict": BUDGET_OK,
+                "month_verdict_basis": "none", "month_pct_of_budget": None,
+                "session": None, "gate_only": True}
+    now = time.time()
+    empty = _tally([], source_present=False)
+    window = empty if for_gate else read_agent_usage(now - _WINDOW_HOURS * 3600)
+    mtd = empty if for_gate and not monthly_cap else read_agent_usage(_month_start_epoch())
 
     tokens_mtd = mtd["billable_tokens"]        # exact
     est_usd_mtd = mtd["usd_equivalent"]        # ESTIMATE at list price, not a bill
@@ -582,7 +612,7 @@ def status(session_id: str | None = None) -> dict[str, Any]:
 
     # The per-session cap can only make the verdict worse. On a tie the one
     # further past its line is the one to name.
-    session = _session_lens(budget, session_id)
+    session = None if for_gate and not session_cap else _session_lens(budget, session_id)
     if session and session["verdict"] is not None:
         s_rank, m_rank = _RANK[session["verdict"]], _RANK[verdict]
         if basis == "none" or s_rank > m_rank or (
@@ -633,6 +663,8 @@ def status(session_id: str | None = None) -> dict[str, Any]:
         # Set when `session` is a guess, not the caller's own session.
         "session_note": (f"{GUESSED_SESSION_NOTE}; pass session_id to name yours"
                          if _guessed(session) else None),
+        # The figures a gate-only status skipped reading are zeros, not usage.
+        "gate_only": for_gate,
     }
 
 
