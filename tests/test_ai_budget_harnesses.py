@@ -429,3 +429,27 @@ def test_the_cursor_hook_measures_its_conversation_when_usage_is_readable(monkey
     assert v["permission"] == "ask"
     assert "~$12.00 estimated this session" in v["user_message"]
     assert _cursor_hook("conv-2") == {"permission": "allow"}
+
+
+def test_without_its_usage_cursor_is_never_judged_by_another_agents_session(tmp_path):
+    """No Admin API key: Cursor's conversation cannot be measured. Guessing the
+    latest session would stop Cursor for what a Claude Code session spent, and
+    call it "this session"."""
+    _claude(tmp_path, time.time() - 60, "sess-claude", 1_000_000)   # $20
+    ab.set_budget(session_cap=5)                                      # every session
+    assert _cursor_hook("conv-1") == {"permission": "allow"}
+
+
+def test_a_codex_payload_without_a_session_id_is_not_given_a_guessed_one(tmp_path):
+    _claude(tmp_path, time.time() - 60, "sess-claude", 1_000_000)   # $20
+    ab.set_budget(session_cap=5)
+    assert _codex_hook("") is None
+
+
+def test_no_session_still_keeps_the_monthly_budget(tmp_path):
+    _claude(tmp_path, time.time() - 60, "sess-claude", 1_000_000)   # $20
+    ab.set_budget(spend_cap=10)
+    v = _cursor_hook("conv-1")
+    assert v["permission"] == "ask" and "estimated this month" in v["user_message"]
+    st = ab.status(session_id=ab.NO_SESSION)
+    assert st["session"] is None and st["verdict_basis"] == "spend"

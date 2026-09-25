@@ -141,19 +141,22 @@ def _respond_cursor(payload: dict) -> dict[str, Any]:
                                               tool="shell"))
 
 
-def _cursor_session(payload: dict) -> str | None:
+def _cursor_session(payload: dict) -> str:
     """The conversation_id, when the budget can measure that conversation.
 
     Cursor's usage is only readable through its Admin API, whose usage events
     carry conversationId (harness_usage). Without a key there is nothing to
-    measure the conversation against.
+    measure the conversation against, and no session at all is passed: the
+    budget gate would otherwise guess the latest transcript, which is some
+    other agent's session, and hold Cursor to that session's cap as "this
+    session". The monthly budget still applies.
     """
-    from . import harness_usage
+    from . import ai_budget, harness_usage
 
     conv = payload.get("conversation_id")
     if isinstance(conv, str) and conv.strip() and harness_usage.cursor_enabled():
         return conv.strip()
-    return None
+    return ai_budget.NO_SESSION
 
 
 def _respond_codex(payload: dict) -> dict[str, Any] | None:
@@ -168,8 +171,11 @@ def _respond_codex(payload: dict) -> dict[str, Any] | None:
     # session_id is the root thread's id (codex-rs core/src/hook_runtime.rs),
     # the same id the session's rollouts carry, so a per-session cap is
     # measured against the Codex session making the call.
+    # A payload without one gets no session rather than a guessed one.
+    from . import ai_budget
+
     sid = payload.get("session_id")
-    sid = sid.strip() if isinstance(sid, str) and sid.strip() else None
+    sid = sid.strip() if isinstance(sid, str) and sid.strip() else ai_budget.NO_SESSION
     return codex_response(guard.gate_command(command, session_id=sid, harness="codex",
                                              cwd=payload.get("cwd"), tool="Bash"))
 

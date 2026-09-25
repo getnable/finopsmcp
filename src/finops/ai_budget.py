@@ -450,6 +450,14 @@ def _month_start_epoch() -> float:
 
 # ── The current session ──────────────────────────────────────────────────────
 
+# Passed as session_id by a caller that knows there is no session it can
+# measure: a Cursor hook without the Admin API that holds Cursor's usage, or a
+# hook payload with no session id. Any other value would be resolved, and the
+# fallback, the latest transcript, may be another agent's session entirely.
+# Not a valid session id (see _SAFE_SESSION_ID), so it can never name one.
+NO_SESSION = "<no-session>"
+
+
 def resolve_session(session_id: str | None = None) -> tuple[str | None, str | None]:
     """(session id, where it came from) for "this session".
 
@@ -458,8 +466,11 @@ def resolve_session(session_id: str | None = None) -> tuple[str | None, str | No
     CODEX_SESSION_ID (Codex CLI sets it for the shell commands it runs), then
     the session whose Claude transcript or Codex rollout was written last,
     which is the one calling when only one agent is running. The source is
-    returned so a guess is never reported as a fact.
+    returned so a guess is never reported as a fact. NO_SESSION resolves to
+    no session at all.
     """
+    if session_id == NO_SESSION:
+        return None, None
     if session_id:
         return str(session_id), "argument"
     env = os.getenv("CLAUDE_CODE_SESSION_ID", "").strip()
