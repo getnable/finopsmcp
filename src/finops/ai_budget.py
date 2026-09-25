@@ -23,6 +23,7 @@ stops the agent; it tells you where you stand so you decide.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -31,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import llm_prices, token_budget
+from . import harness_usage, llm_prices, token_budget
 
 # ── Verdicts (mirror policy.py's vocabulary) ─────────────────────────────────
 BUDGET_OK = "ok"        # comfortably under budget
@@ -173,29 +174,54 @@ def _claude_projects_dir() -> Path:
 
 
 def read_agent_usage(since_epoch: float) -> dict[str, Any]:
-    """Tally Claude Code token usage across all local sessions since `since_epoch`.
+    """Tally agent token usage across all local sessions since `since_epoch`.
 
-    Exact counts, read locally. Skips log files whose mtime predates the window so a
-    long history stays cheap. Returns totals, a per-model split of tokens and of
-    list-price dollars, the models priced at the fallback rate, the costliest
-    sessions, and first/last activity.
+    Every harness the guard hooks: Claude Code transcripts and Codex CLI
+    rollouts, read locally, plus Cursor's Admin API when CURSOR_ADMIN_API_KEY
+    is set (harness_usage). Exact counts. Skips log files whose mtime predates
+    the window so a long history stays cheap. Returns totals, a per-model and
+    per-harness split of tokens and of list-price dollars, the models priced at
+    the fallback rate, the costliest sessions, and first/last activity.
     """
     proj = _claude_projects_dir()
-    if not proj.is_dir():
-        return _tally([], source_present=False)
-    return _tally(_responses(proj, since_epoch), source_present=True)
+    claude = proj.is_dir()
+    responses = _responses(proj, since_epoch) if claude else []
+    return _tally(responses + _other_harnesses(since_epoch), source_present=claude,
+                  since_epoch=since_epoch)
 
 
 def read_session_usage(session_id: str) -> dict[str, Any]:
-    """Everything one Claude Code session has used, from its first response.
+    """Everything one session has used, from its first response.
 
-    A session is the sessionId Claude Code stamps on every transcript line, so
-    the subagents it spawned count toward it: they are part of the same task.
+    A Claude Code session is the sessionId it stamps on every transcript line,
+    and a Codex session is the root thread id its rollouts carry, so in both the
+    subagents it spawned count toward it: they are part of the same task. A
+    Cursor session is a conversation, when its Admin API is connected.
     """
-    proj = _claude_projects_dir()
-    if not proj.is_dir() or not session_id:
+    if not session_id:
         return _tally([], source_present=False)
-    return _tally(_responses(proj, 0, session_id=session_id), source_present=True)
+    proj = _claude_projects_dir()
+    claude = proj.is_dir()
+    responses = _responses(proj, 0, session_id=session_id) if claude else []
+    return _tally(responses + _other_harnesses(0, session_id=session_id),
+                  source_present=claude)
+
+
+def _other_harnesses(since_epoch: float, session_id: str | None = None) -> list[dict[str, Any]]:
+    """Codex and Cursor responses. A reader that fails counts nothing rather
+    than taking the Claude Code numbers down with it."""
+    out: list[dict[str, Any]] = []
+    if session_id is None or _SAFE_SESSION_ID.match(session_id):
+        with contextlib.suppress(*_READER_ERRORS):
+            out.extend(harness_usage.codex_responses(since_epoch, session_id=session_id))
+    with contextlib.suppress(*_READER_ERRORS):
+        out.extend(harness_usage.cursor_responses(since_epoch, session_id=session_id,
+                                                  month_start=_month_start_epoch()))
+    return out
+
+
+# What reading a malformed log can raise. Anything else is a bug worth seeing.
+_READER_ERRORS = (OSError, ValueError, TypeError, KeyError, AttributeError)
 
 
 # Claude Code names a session's transcript <project>/<sessionId>.jsonl and puts its
@@ -279,6 +305,7 @@ def _responses(proj: Path, since_epoch: float,
                         "fast": usage.get("speed") == "fast",
                         "us_only": usage.get("inference_geo") == "us",
                         "session": session, "cwd": rec.get("cwd"),
+                        "harness": harness_usage.HARNESS_CLAUDE,
                     }
         except OSError:
             continue
@@ -289,7 +316,12 @@ _SESSIONS_LISTED = 20
 
 
 def _response_usd(r: dict[str, Any]) -> tuple[float, bool]:
-    """(list-price USD, priced) for one response. Unpriced means the fallback rate."""
+    """(list-price USD, priced) for one response. Unpriced means the fallback rate.
+
+    A record that carries its own `usd` (Cursor reports what each request cost
+    at the model's rate) is taken at that figure."""
+    if isinstance(r.get("usd"), (int, float)):
+        return float(r["usd"]), True
     price = llm_prices.price_for(r["model"])
     usd = (price or _FALLBACK).cost(
         input_tokens=r["input"], output_tokens=r["output"],
@@ -299,11 +331,14 @@ def _response_usd(r: dict[str, Any]) -> tuple[float, bool]:
     return usd, price is not None
 
 
-def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, Any]:
+def _tally(responses: list[dict[str, Any]], source_present: bool,
+           since_epoch: float | None = None) -> dict[str, Any]:
     tin = tout = cwrite = cread = 0
     usd_total = 0.0
     by_model: dict[str, int] = {}
     usd_by_model: dict[str, float] = {}
+    usd_by_harness: dict[str, float] = {}
+    tokens_by_harness: dict[str, int] = {}
     unpriced: dict[str, int] = {}
     sessions: dict[str, dict[str, Any]] = {}
     first_ts: float | None = None
@@ -316,6 +351,9 @@ def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, A
         usd, priced = _response_usd(r)
         usd_total += usd
         usd_by_model[model] = usd_by_model.get(model, 0.0) + usd
+        harness = r.get("harness") or harness_usage.HARNESS_CLAUDE
+        usd_by_harness[harness] = usd_by_harness.get(harness, 0.0) + usd
+        tokens_by_harness[harness] = tokens_by_harness.get(harness, 0) + ti + to + cw
         if not priced:
             unpriced[model] = unpriced.get(model, 0) + ti + to + cw
         ts = r["ts"]
@@ -323,7 +361,8 @@ def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, A
         last_ts = ts if last_ts is None else max(last_ts, ts)
         sess = sessions.setdefault(r["session"], {
             "usd_equivalent": 0.0, "billable_tokens": 0, "messages": 0,
-            "first_activity": ts, "last_activity": ts, "project": None})
+            "first_activity": ts, "last_activity": ts, "project": None,
+            "harness": harness})
         sess["usd_equivalent"] += usd
         sess["billable_tokens"] += ti + to + cw
         sess["messages"] += 1
@@ -359,16 +398,40 @@ def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, A
                                             key=lambda kv: -kv[1]["usd_equivalent"])
                        [:_SESSIONS_LISTED]},
         "session_count": len(sessions),
+        # Which agent the dollars went to. Harnesses are keyed as
+        # harness_usage names them: claude-code, codex, cursor.
+        "cost_by_harness": {h: round(v, 2) for h, v in
+                            sorted(usd_by_harness.items(), key=lambda kv: -kv[1])},
+        "billable_tokens_by_harness": dict(sorted(tokens_by_harness.items(),
+                                                  key=lambda kv: -kv[1])),
         "prices_as_of": llm_prices.AS_OF,
         "first_activity": first_ts, "last_activity": last_ts,
-        "source_present": source_present,
+        # True when any harness's usage source exists on this machine (Claude
+        # Code transcripts, Codex rollouts) or is connected (Cursor).
+        "source_present": (source_present or harness_usage.codex_present()
+                           or harness_usage.cursor_enabled()),
+        "sources": _sources(source_present),
     }
+    if since_epoch is not None:
+        skipped = harness_usage.codex_compressed_skipped(since_epoch)
+        if skipped:
+            out["codex_compressed_rollouts_skipped"] = skipped
     if unpriced:
         out["unpriced_note"] = (
             f"{', '.join(unpriced)} priced at the fallback ${_FALLBACK.input:g}/"
             f"${_FALLBACK.output:g} per 1M in/out; set FINOPS_AI_USD_PER_MTOK_IN/OUT "
             f"to the rate you pay.")
     return out
+
+
+def _sources(claude: bool) -> dict[str, Any]:
+    cursor: Any = False
+    if harness_usage.cursor_enabled():
+        cursor = {"scope": harness_usage.cursor_email() or "team",
+                  **harness_usage.cursor_status()}
+    return {harness_usage.HARNESS_CLAUDE: claude,
+            harness_usage.HARNESS_CODEX: harness_usage.codex_present(),
+            harness_usage.HARNESS_CURSOR: cursor}
 
 
 def _rec_epoch(ts: Any) -> float | None:
@@ -392,17 +455,21 @@ def resolve_session(session_id: str | None = None) -> tuple[str | None, str | No
 
     In order: an id the caller passed (the guard hook has it in its payload),
     CLAUDE_CODE_SESSION_ID (Claude Code sets it for the processes it starts),
-    then the session whose transcript was written last, which is the one calling
-    when only one agent is running. The source is returned so a guess is never
-    reported as a fact.
+    CODEX_SESSION_ID (Codex CLI sets it for the shell commands it runs), then
+    the session whose Claude transcript or Codex rollout was written last,
+    which is the one calling when only one agent is running. The source is
+    returned so a guess is never reported as a fact.
     """
     if session_id:
         return str(session_id), "argument"
     env = os.getenv("CLAUDE_CODE_SESSION_ID", "").strip()
     if env:
         return env, "env"
+    env = os.getenv("CODEX_SESSION_ID", "").strip()
+    if env:
+        return env, "env"
     proj = _claude_projects_dir()
-    latest: tuple[float, Path] | None = None
+    latest: tuple[float, str] | None = None
     try:
         for path in proj.rglob("*.jsonl"):
             try:
@@ -410,12 +477,17 @@ def resolve_session(session_id: str | None = None) -> tuple[str | None, str | No
             except OSError:
                 continue
             if latest is None or mtime > latest[0]:
-                latest = (mtime, path)
+                latest = (mtime, _path_session(path))
     except OSError:
-        return None, None
+        pass
+    codex = None
+    with contextlib.suppress(*_READER_ERRORS):
+        codex = harness_usage.codex_latest_session()
+    if codex and (latest is None or codex[0] > latest[0]):
+        latest = codex
     if latest is None:
         return None, None
-    return _path_session(latest[1]), "latest_activity"
+    return latest[1], "latest_activity"
 
 
 def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, Any] | None:
@@ -431,6 +503,7 @@ def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, A
         "usd_equivalent": usd, "billable_tokens": u["billable_tokens"],
         "messages": u["messages"],
         "cost_by_model": u["cost_by_model"], "unpriced_models": u["unpriced_models"],
+        "cost_by_harness": u["cost_by_harness"],
         "first_activity": u["first_activity"], "last_activity": u["last_activity"],
         "cap_usd": cap or None,
         "cap_scope": ("this_session" if sid in budget["session_caps"]

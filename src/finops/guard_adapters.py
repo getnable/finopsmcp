@@ -136,8 +136,24 @@ def _respond_cursor(payload: dict) -> dict[str, Any]:
     command = payload.get("command")
     if not isinstance(command, str) or not command.strip():
         return dict(_CURSOR_ALLOW)
-    return cursor_response(guard.gate_command(command, harness="cursor",
-                                              cwd=payload.get("cwd"), tool="shell"))
+    return cursor_response(guard.gate_command(command, session_id=_cursor_session(payload),
+                                              harness="cursor", cwd=payload.get("cwd"),
+                                              tool="shell"))
+
+
+def _cursor_session(payload: dict) -> str | None:
+    """The conversation_id, when the budget can measure that conversation.
+
+    Cursor's usage is only readable through its Admin API, whose usage events
+    carry conversationId (harness_usage). Without a key there is nothing to
+    measure the conversation against.
+    """
+    from . import harness_usage
+
+    conv = payload.get("conversation_id")
+    if isinstance(conv, str) and conv.strip() and harness_usage.cursor_enabled():
+        return conv.strip()
+    return None
 
 
 def _respond_codex(payload: dict) -> dict[str, Any] | None:
@@ -149,7 +165,12 @@ def _respond_codex(payload: dict) -> dict[str, Any] | None:
         command = " ".join(str(c) for c in command)
     if not isinstance(command, str) or not command.strip():
         return None
-    return codex_response(guard.gate_command(command, harness="codex",
+    # session_id is the root thread's id (codex-rs core/src/hook_runtime.rs),
+    # the same id the session's rollouts carry, so a per-session cap is
+    # measured against the Codex session making the call.
+    sid = payload.get("session_id")
+    sid = sid.strip() if isinstance(sid, str) and sid.strip() else None
+    return codex_response(guard.gate_command(command, session_id=sid, harness="codex",
                                              cwd=payload.get("cwd"), tool="Bash"))
 
 

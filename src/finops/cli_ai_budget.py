@@ -6,7 +6,8 @@ subscription or metered API, and what you pay), then remembers. After that, bare
 budget, this session against its cap, burn rate, and what each model and each
 session cost. Flags (--plan-cost / --spend-cap / --tokens / --session-cap) skip
 the questions for scripts. Numbers come from finops.ai_budget: real local token usage from Claude
-Code's session logs. Nothing leaves your machine.
+Code's session logs and Codex CLI's rollouts, split by agent. Nothing leaves your machine, except
+that Cursor's usage is read from its Admin API when CURSOR_ADMIN_API_KEY is set.
 """
 from __future__ import annotations
 
@@ -57,8 +58,9 @@ def add_parser(sub) -> None:
         "ai-budget",
         help="Set and check a local budget for your AI coding agent",
         description="A local budget for your coding agent's own spend. First run asks "
-                    "two questions; after that it just reports. Reads Claude Code usage "
-                    "locally, nothing leaves your machine.",
+                    "two questions; after that it just reports. Reads Claude Code and Codex "
+                    "CLI usage locally, nothing leaves your machine (Cursor usage too, "
+                    "from its Admin API, when CURSOR_ADMIN_API_KEY is set).",
     )
     p.add_argument("--plan-cost", type=float, metavar="USD",
                    help="Flat plan: what you pay per month, any number, e.g. --plan-cost 100")
@@ -137,11 +139,13 @@ def run(args) -> int:
         mode, "per-session cap" if (st.get("session") or {}).get("cap_usd") else "no budget set")
     print(_c("nable ai-budget", _BOLD) + _c(f"  ·  {label}", _DIM), file=out)
     if not w["source_present"]:
-        # A dead end otherwise. Claude Code is the only provider readable with no
-        # key, so someone on Cursor, Windsurf, Zed or a plain API sees nothing but
+        # A dead end otherwise. Claude Code and Codex are the only agents readable
+        # with no key, so someone on Cursor, Windsurf, Zed or a plain API sees nothing but
         # zeros here and has no reason to look further. Name the next move.
-        print(_c("  no Claude Code usage found yet (looked in ~/.claude/projects).", _DIM), file=out)
-        print(_c("  Not on Claude Code? Meter the provider you pay:", _DIM), file=out)
+        print(_c("  no Claude Code usage found yet (looked in ~/.claude/projects),", _DIM), file=out)
+        print(_c("  and no Codex CLI usage (looked in ~/.codex/sessions).", _DIM), file=out)
+        print(_c("  On a Cursor team? Set CURSOR_ADMIN_API_KEY to read its usage.", _DIM), file=out)
+        print(_c("  Another agent? Meter the provider you pay:", _DIM), file=out)
         print("  " + _c("nable connect openai", _ACCENT) + _c("   (or anthropic, openrouter,", _DIM), file=out)
         print(_c("                          litellm, modal, together, replicate, cohere, mistral)", _DIM), file=out)
 
@@ -206,6 +210,7 @@ def run(args) -> int:
 
 
 _TOP_SESSIONS = 5
+_HARNESS_LABELS = {"claude-code": "Claude Code", "codex": "Codex CLI", "cursor": "Cursor"}
 
 
 def _breakdown(st: dict, out, month: bool) -> None:
@@ -217,6 +222,13 @@ def _breakdown(st: dict, out, month: bool) -> None:
     total = u["usd_equivalent"] or 0.0
     unpriced = u.get("unpriced_models") or {}
     print(file=out)
+    harnesses = u.get("cost_by_harness") or {}
+    if harnesses:
+        print(_c(f"  by agent, {period}", _DIM), file=out)
+        hwidth = max(len(_HARNESS_LABELS.get(h, h)) for h in harnesses)
+        for h, usd in harnesses.items():
+            share = f"{usd / total * 100:3.0f}%" if total else "  -"
+            print(f"    {_HARNESS_LABELS.get(h, h).ljust(hwidth)}  {_usd(usd)}  {share}", file=out)
     print(_c(f"  by model, {period}", _DIM), file=out)
     width = max(len(m) for m in u["cost_by_model"])
     for model, usd in u["cost_by_model"].items():
@@ -233,11 +245,14 @@ def _breakdown(st: dict, out, month: bool) -> None:
     print(_c(f"  by session, {period}{more}", _DIM), file=out)
     cur = st.get("session") or {}
     this_id = cur.get("id") if cur.get("id_source") != "latest_activity" else None
+    several = len(harnesses) > 1
     for sid, v in shown:
         tag = _c("  (this session)", _ACCENT) if sid == this_id else ""
+        agent = (f"  {_HARNESS_LABELS.get(v.get('harness'), v.get('harness') or '-')}"
+                 if several else "")
         print(f"    {_usd(v['usd_equivalent'])}  {(v.get('project') or '-')[:18].ljust(18)}"
               f"  {sid[:8]}  {_span(v['first_activity'], v['last_activity'])}"
-              f"  {v['messages']} msgs{tag}", file=out)
+              f"  {v['messages']} msgs{agent}{tag}", file=out)
 
 
 def _usd(usd: float) -> str:
