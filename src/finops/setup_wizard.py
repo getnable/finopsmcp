@@ -3023,17 +3023,14 @@ def main(args: list[str] | None = None) -> None:
 
     serve_p = sub.add_parser(
         "serve",
-        help="Start a local web dashboard your whole team can view in a browser",
+        help="Start the web dashboard (hosted nable only; see --help)",
         description=(
-            "Start the team dashboard. On an always-on host this also runs the "
-            "finance interfaces non-engineers consume:\n"
-            "  - Scheduler (pushed snapshots, anomaly alerts, daily + weekly digests) "
-            "when FINOPS_ENABLE_SCHEDULER=1.\n"
-            "  - Slack bot (two-way cost Q&A) when SLACK_BOT_TOKEN and SLACK_APP_TOKEN "
-            "are both set.\n"
-            "Both stay off on a plain laptop run. The dashboard requires a password by "
-            "default (auto-generated and printed once; set FINOPS_DASHBOARD_PASSWORD to "
-            "pin one, or =off to disable). See DEPLOY.md."
+            "Start the team web dashboard. The dashboard, the scheduler that pushes "
+            "digests on a timer and the two-way Slack bot are part of hosted nable, "
+            "not the open-source package: here this command says so and exits. The "
+            "open-source product is the MCP server in your editor; it sends reports "
+            "and alerts to Slack or email when you ask (send_report_now, "
+            "send_digest_now)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -3444,11 +3441,15 @@ def main(args: list[str] | None = None) -> None:
     from .welcome import _cli
     print("\n  " + _post_connect_message(parsed.cmd))
     print()
-    print("  Want a visual dashboard?")
-    print(f"    {_cli('serve')}")
-    print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
-    print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
-    print()
+    import importlib.util as _ilu
+    if _ilu.find_spec("finops.server_web") is not None:
+        # The dashboard ships with hosted nable only; an open install that
+        # followed this hint got "the dashboard has been removed".
+        print("  Want a visual dashboard?")
+        print(f"    {_cli('serve')}")
+        print("    → Serves a web dashboard at http://localhost:8080, add --open to launch your browser")
+        print("    → To let your team or manager view it, add --host 0.0.0.0 (still password-protected)")
+        print()
     print(f"  To add more providers: {_cli('setup')}")
     print("  Full docs: https://getnable.com/docs\n")
     _offer_email_signup()

@@ -590,3 +590,39 @@ def test_setup_saas_api_key_reports_whether_it_stored_anything(monkeypatch, tmp_
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(setup_wizard, "_prompt", lambda *a, **k: "")
     assert setup_wizard.setup_saas_api_key("OpenAI", [("OPENAI_API_KEY", "k", True)]) is False
+
+
+# ── 8. Setup cards and help promise only what the open core does ──────────────
+
+def _card(cid):
+    from finops.setup.cloud_infra import CONNECTOR_REGISTRY
+    return next(c for c in CONNECTOR_REGISTRY if c["id"] == cid)
+
+
+def test_github_card_does_not_promise_what_no_code_reads():
+    unlocks = " ".join(_card("github")["unlocks"])
+    assert "Actions minutes" not in unlocks, "no code reads GitHub Actions billing"
+    assert "Copilot seat" not in unlocks, "no code reads Copilot seats"
+    assert "Copilot seat" in " ".join(_card("github").get("not_yet", []))
+
+
+def test_slack_card_says_what_the_open_core_sends():
+    card = _card("slack")
+    unlocks = " ".join(card["unlocks"])
+    assert "Interactive cost queries" not in unlocks, "the two-way bot is hosted-only"
+    assert "Weekly digest reports" not in unlocks, "the scheduler is hosted-only"
+    assert "when you ask" in unlocks
+    assert "SLACK_APP_TOKEN" not in card["env_vars"], "socket mode is the hosted bot"
+
+
+def test_serve_help_does_not_describe_a_scheduler_or_bot_the_open_core_lacks(capsys):
+    from finops import setup_wizard
+
+    try:
+        setup_wizard.main(["serve", "--help"])
+    except SystemExit:
+        pass
+    out = capsys.readouterr().out
+    assert "FINOPS_ENABLE_SCHEDULER" not in out
+    assert "SLACK_APP_TOKEN" not in out, "describes starting a bot the open core lacks"
+    assert "hosted nable" in out
