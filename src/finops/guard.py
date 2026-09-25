@@ -8,8 +8,8 @@ change through an MCP tool (HashiCorp Terraform, AWS API, Kubernetes servers;
 the table is guard_mcp.py). The agent no longer has to remember to call
 check_action_policy; the harness enforces the check.
 
-Public entry points, for any harness adapter (guard_adapters.py for Cursor and
-Codex, run_hook below for Claude Code):
+Public entry points, for any harness adapter (guard_adapters.py for Cursor,
+Codex, GitHub Copilot, Gemini CLI and Cline; run_hook below for Claude Code):
   gate_command(command, *, harness)                 a shell command
   gate_mcp_call(tool_name, arguments, *, harness)   an MCP tool call
 Both return None (no opinion: stay silent) or a verdict dict whose
@@ -1329,27 +1329,42 @@ SEATBELT = (
 )
 
 # What each harness's hook can see. Claude Code's comes from the matcher we
-# write; Cursor's beforeShellExecution and Codex's PreToolUse-on-Bash see shell
-# commands only (guard_adapters.py), and Codex cannot pause to ask.
+# write. Cursor (beforeShellExecution + beforeMCPExecution) and Codex
+# (PreToolUse on Bash and mcp__*) see shell commands and MCP tool calls once
+# installed by this release; the rest see shell commands only
+# (guard_adapters.py). Codex, Gemini CLI, Cline and the Copilot cloud agent
+# cannot pause to ask.
 _FAMILY_LABELS = {"aws": "AWS", "kubernetes": "Kubernetes", "terraform": "Terraform"}
 _ADAPTER_SURFACES = {"cursor": ("Cursor", "shell commands"),
-                     "codex": ("Codex CLI", "shell commands (an ask becomes a deny)")}
+                     "codex": ("Codex CLI", "shell commands (an ask becomes a deny)"),
+                     "copilot": ("GitHub Copilot",
+                                 "shell commands (an ask becomes a deny in the cloud agent)"),
+                     "gemini": ("Gemini CLI", "shell commands (an ask becomes a deny)"),
+                     "cline": ("Cline", "shell commands (an ask or a deny stops the task)")}
+_ADAPTER_MCP = ("cursor", "codex")      # adapters whose hook can also see MCP calls
 
 
 def _adapter_rows() -> list[dict[str, Any]]:
-    """Cursor and Codex hook state from guard_adapters, [] when this build has
-    no adapters or they cannot answer. Read-only."""
+    """Hook state for every other harness from guard_adapters, [] when this
+    build has no adapters or they cannot answer. Read-only."""
     try:
         from . import guard_adapters as ga  # type: ignore[attr-defined]
         found = set(ga.detected())
+        sees_mcp = getattr(ga, "sees_mcp", None)
+        pin_state = getattr(ga, "pin_state", None)
         rows = []
         for name in _ADAPTER_SURFACES:
             for scope, is_global in (("project", False), ("global", True)):
                 st = ga.state(name, is_global)
-                rows.append({"harness": name, "scope": scope,
-                             "path": str(ga.hooks_path(name, is_global)),
-                             "installed": st != "absent", "runs": st == "installed",
-                             "present": name in found})
+                row = {"harness": name, "scope": scope,
+                       "path": str(ga.hooks_path(name, is_global)),
+                       "installed": st != "absent", "runs": st == "installed",
+                       "present": name in found}
+                if name in _ADAPTER_MCP and sees_mcp is not None and st == "installed":
+                    row["mcp"] = bool(sees_mcp(name, is_global))
+                if pin_state is not None and st == "installed":
+                    row["pin"] = pin_state(name, is_global)
+                rows.append(row)
         return rows
     except Exception:
         return []
@@ -1418,9 +1433,30 @@ def doctor() -> dict[str, Any]:
 
     for name, (label, what) in _ADAPTER_SURFACES.items():
         mine = [r for r in adapter_rows if r["harness"] == name]
+        for r in mine:
+            flag = " --global" if r["scope"] == "global" else ""
+            if r["installed"] and not r["runs"]:
+                # The repair names the broken scope: a bare install would add a
+                # project hook and leave the dead global one where it is.
+                gaps.append(f"{label} ({r['scope']}): the hooked command no longer exists")
+                fix(f"nable guard install --harness {name}{flag}", "repairs the dead hook in place")
+            elif r.get("pin") in ("unpinned", "other"):
+                fix(f"nable guard install --harness {name}{flag}",
+                    "pins the hook to this release instead of "
+                    + ("the newest PyPI release on every call" if r["pin"] == "unpinned"
+                       else "another release"))
         if any(r["runs"] for r in mine):
+            if any(r.get("mcp") for r in mine):
+                what = what.replace("shell commands", "shell commands and MCP tool calls", 1)
             covered.append(f"{label}: {what}")
+            stale = [r for r in mine if r["runs"] and r.get("mcp") is False]
+            if stale and not any(r.get("mcp") for r in mine):
+                gaps.append(f"{label}: MCP tool calls (the hook only sees shell commands)")
+                flag = " --global" if stale[0]["scope"] == "global" else ""
+                fix(f"nable guard install --harness {name}{flag}", "widens the hook to MCP tools")
             continue
+        if any(r["installed"] for r in mine):
+            continue                    # a dead hook: its repair is listed above
         present = any(r["present"] for r in mine) or _harness_present(name)
         if present:
             if adapter_rows:
@@ -1454,7 +1490,14 @@ def doctor() -> dict[str, Any]:
 
 def _harness_present(name: str) -> bool:
     """Is this agent installed here at all? Its user config directory is the
-    signal guard_adapters uses too (CODEX_HOME for Codex)."""
+    signal guard_adapters uses too (CODEX_HOME for Codex, COPILOT_HOME for
+    Copilot, GEMINI_CLI_HOME for Gemini CLI, ~/Documents/Cline for Cline)."""
     if name == "codex":
         return Path(os.getenv("CODEX_HOME") or Path.home() / ".codex").is_dir()
+    if name == "copilot":
+        return Path(os.getenv("COPILOT_HOME") or Path.home() / ".copilot").is_dir()
+    if name == "gemini":
+        return (Path(os.getenv("GEMINI_CLI_HOME") or Path.home()) / ".gemini").is_dir()
+    if name == "cline" and (Path.home() / "Documents" / "Cline").is_dir():
+        return True
     return (Path.home() / f".{name}").is_dir()

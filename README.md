@@ -162,6 +162,92 @@ percentage of a plan's hidden rate limit.
 </details>
 
 <details>
+<summary><b>Guard hook</b> for Claude Code, Cursor, Codex, Copilot, Gemini CLI, and Cline, and managed deployment</summary>
+
+`nable guard install` puts the same check in front of the agent's shell commands
+as a hook, so it runs whether or not the agent remembers to call the gate:
+
+```bash
+nable guard install --all --global      # every supported agent found on this machine
+nable guard install --harness gemini    # one agent, this project only
+nable guard doctor                      # what is covered here, and what is not
+```
+
+| Agent | Where the hook goes | What it sees | When the policy wants a human |
+|---|---|---|---|
+| Claude Code | `.claude/settings.json` | shell commands, MCP tools | asks |
+| Cursor | `.cursor/hooks.json` | shell commands, MCP tools | asks |
+| Codex CLI | `.codex/hooks.json` | shell commands, MCP tools | denies, with the reason |
+| GitHub Copilot | `.github/hooks/nable-guard.json` | shell commands | asks in Copilot CLI; denies, with the reason, in the cloud agent |
+| Gemini CLI | `.gemini/settings.json` | shell commands | denies, with the reason |
+| Cline (macOS, Linux) | `.clinerules/hooks/PreToolUse` | shell commands | stops the task, with the reason |
+
+`--global` writes the user-level file instead (`~/.claude/settings.json`,
+`~/.cursor/hooks.json`, `$CODEX_HOME/hooks.json`, `~/.copilot/hooks/`,
+`~/.gemini/settings.json`, `~/Documents/Cline/Hooks/`). A hook the user
+installed is one the user can remove.
+
+**Managed deployment.** To make the hook a policy a user cannot remove, deploy
+it through the agent's admin settings. Replace `<version>` with the release you
+tested (`nable --version`), and make sure `uvx` is on the users' PATH, or use
+the absolute path of an installed `finops` binary instead of the `uvx` form.
+
+Claude Code reads `managed-settings.json` from
+`/Library/Application Support/ClaudeCode/` (macOS), `/etc/claude-code/`
+(Linux and WSL) or `C:\Program Files\ClaudeCode\` (Windows), or a drop-in file
+in `managed-settings.d/` next to it. User, project and local settings add their
+hooks beside a managed one but cannot remove it, and a user's `disableAllHooks`
+cannot turn it off:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|mcp__.*)$",
+        "hooks": [
+          {"type": "command", "command": "uvx --from finops-mcp==<version> finops guard hook", "timeout": 30}
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex reads `/etc/codex/requirements.toml` (`%ProgramData%\OpenAI\Codex\requirements.toml`
+on Windows). A hook there is managed: always on, trusted without the
+"Hooks need review" step, and not something a user can disable:
+
+```toml
+[[hooks.PreToolUse]]
+matcher = "^(Bash|mcp__.*)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "uvx --from finops-mcp==<version> finops guard hook"
+timeout = 30
+```
+
+Both also have a switch that runs only the managed hooks and ignores every
+user, project and plugin hook: `"allowManagedHooksOnly": true` in Claude Code's
+managed settings, `allow_managed_hooks_only = true` at the top level of Codex's
+`requirements.toml`. Set it only if no one's own hooks should run. Copilot CLI
+has the same idea in policy hook files, `/etc/github-copilot/policy.d/*.json`
+(root-owned, not group or world writable), in the format of
+`.github/hooks/nable-guard.json`.
+
+Sources: [Claude Code managed settings](https://code.claude.com/docs/en/managed-settings),
+[`allowManagedHooksOnly`](https://code.claude.com/docs/en/settings-reference#allowmanagedhooksonly),
+Codex `codex-rs/config/src/config_requirements.rs` and `codex-rs/hooks/src/engine/discovery.rs`
+in [openai/codex](https://github.com/openai/codex),
+[Copilot hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference#policy-hooks).
+
+The guard is a seatbelt, not a security boundary: give agents read-only cloud
+credentials and keep write access behind a human.
+
+</details>
+
+<details>
 <summary><b>Connectors (17)</b> — every provider and what it pulls, plus Azure roles</summary>
 
 | Provider | What it pulls |

@@ -112,7 +112,9 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(proj)
     for var in ("CODEX_HOME", "FINOPS_GUARD_STRICT", "FINOPS_POLICY_ALLOWED_ACTIONS",
-                "FINOPS_GUARD_STOP_ON_BUDGET", "UV_CACHE_DIR"):
+                "FINOPS_GUARD_STOP_ON_BUDGET", "UV_CACHE_DIR", "COPILOT_HOME",
+                "GEMINI_CLI_HOME", "CLINE_DIR", "COPILOT_AGENT_PROMPT",
+                "GITHUB_COPILOT_API_TOKEN"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("finops.welcome._fire_telemetry", lambda e, p: None)
     monkeypatch.setattr(g, "check_budget_gate", lambda *a, **k: None)
@@ -181,7 +183,9 @@ def test_cursor_response_uses_only_documented_keys(monkeypatch):
         assert body["permission"] in ("allow", "ask", "deny")
 
 
-def test_cursor_mcp_calls_are_allowed_without_consulting_the_gate(monkeypatch):
+def test_cursor_mcp_calls_are_never_judged_as_shell_commands(monkeypatch):
+    """An MCP tool nable has no rule for (delete_bucket here) gets the neutral
+    answer; tests/test_guard_harnesses.py covers the ones it translates."""
     monkeypatch.setattr(g, "gate_command", lambda c, *a, **k: pytest.fail("gate consulted for MCP"))
     code, body, _ = _run(CURSOR_MCP)
     assert code == 0 and body == {"permission": "allow"}
@@ -323,7 +327,8 @@ def test_stray_prints_cannot_corrupt_the_verdict(payload, monkeypatch):
 def _cli(args, home, stdin=""):
     env = {**os.environ, "HOME": str(home), "PYTHONPATH": str(SRC),
            "PYTHONDONTWRITEBYTECODE": "1", "NABLE_NO_TELEMETRY": "1"}
-    env.pop("CODEX_HOME", None)
+    for var in ("CODEX_HOME", "COPILOT_HOME", "GEMINI_CLI_HOME", "CLINE_DIR"):
+        env.pop(var, None)
     return subprocess.run([sys.executable, "-m", "finops.entry", *args], input=stdin,
                           capture_output=True, text=True, env=env, timeout=60, check=False)
 
@@ -376,7 +381,9 @@ def test_codex_install_writes_the_documented_shape(monkeypatch):
     doc = json.loads(path.read_text())
     assert set(doc) <= {"hooks", "description"}, "Codex denies unknown top-level keys"
     [group] = doc["hooks"]["PreToolUse"]
-    assert group["matcher"] == "^Bash$"
+    # Shell calls are "Bash"; MCP tools are mcp__<server>__<tool> (codex-rs
+    # core/src/tools/handlers/mcp.rs), which the guard translates when known.
+    assert group["matcher"] == "^(Bash|mcp__.*)$"
     [handler] = group["hooks"]
     assert handler["type"] == "command"
     # Codex runs hooks through a login shell, so the bare uvx form resolves.
@@ -417,6 +424,10 @@ FOREIGN = {
 }
 
 
+# Cursor gets one entry per event (shell commands and MCP calls).
+OUR_ENTRIES = {"cursor": 2, "codex": 1}
+
+
 def _ours(harness, path):
     doc = json.loads(path.read_text())
     cmds = ga._ADAPTERS[harness][2](doc)
@@ -431,7 +442,7 @@ def test_install_is_idempotent_and_does_not_rewrite(harness, monkeypatch):
     for _ in range(3):
         assert ga.install(harness, True)[0] == "already"
     assert path.read_bytes() == first
-    assert len(_ours(harness, path)[0]) == 1
+    assert len(_ours(harness, path)[0]) == OUR_ENTRIES[harness]
 
 
 @pytest.mark.parametrize("harness", ["cursor", "codex"])
@@ -443,7 +454,7 @@ def test_other_hooks_survive_install_and_uninstall(harness, monkeypatch):
 
     ga.install(harness, True)
     ours, theirs, _ = _ours(harness, path)
-    assert len(ours) == 1 and theirs, "a foreign hook went missing on install"
+    assert len(ours) == OUR_ENTRIES[harness] and theirs, "a foreign hook went missing on install"
 
     assert ga.uninstall(harness, True)[0] is True
     assert json.loads(path.read_text()) == FOREIGN[harness], "uninstall did not restore the file"
@@ -520,7 +531,7 @@ def test_null_keys_are_treated_as_absent(harness, body, monkeypatch):
     path.parent.mkdir(parents=True)
     path.write_text(body)
     assert ga.install(harness, True)[0] == "new"
-    assert len(_ours(harness, path)[0]) == 1
+    assert len(_ours(harness, path)[0]) == OUR_ENTRIES[harness]
 
 
 def test_a_versionless_cursor_file_is_not_given_a_version(monkeypatch):
@@ -590,7 +601,7 @@ def test_a_dotfiles_symlink_stays_a_symlink(tmp_path, monkeypatch):
     link.symlink_to(real)
     ga.install("cursor", True)
     assert link.is_symlink(), "replaced the user's symlink with a plain file"
-    assert len(_ours("cursor", real)[0]) == 1
+    assert len(_ours("cursor", real)[0]) == OUR_ENTRIES["cursor"]
 
 
 def test_the_file_mode_is_kept(monkeypatch):
@@ -619,8 +630,8 @@ def test_a_dead_hook_is_repaired_and_a_live_one_left_alone(harness, monkeypatch)
 
     assert ga.install(harness, True)[0] == "repaired"
     assert ga.state(harness, True) == "installed"
-    [cmd], _, _ = _ours(harness, path)
-    assert "/gone/" not in cmd
+    cmds, _, _ = _ours(harness, path)
+    assert len(cmds) == OUR_ENTRIES[harness] and not any("/gone/" in c for c in cmds)
 
     # A live command of ours that differs (a hand-edited wrapper) is kept.
     exe = Path.cwd() / "wrapper-finops"
@@ -631,7 +642,7 @@ def test_a_dead_hook_is_repaired_and_a_live_one_left_alone(harness, monkeypatch)
     entry["command"] = f"{exe} guard hook"
     path.write_text(json.dumps(doc))
     assert ga.install(harness, True)[0] == "already"
-    assert _ours(harness, path)[0] == [f"{exe} guard hook"]
+    assert f"{exe} guard hook" in _ours(harness, path)[0]
 
 
 @pytest.mark.parametrize("harness", ["cursor", "codex"])
