@@ -15,6 +15,7 @@ def get_anomalies(
     severity: str | None = None,
     limit: int = 20,
     account: str | None = None,
+    root_cause: bool = False,
 ) -> dict:
     """
     Return active (unacknowledged) cost anomalies detected from historical baselines.
@@ -24,12 +25,21 @@ def get_anomalies(
         severity: "high", "medium", or "low". None = all severities.
         limit: Max anomalies to return (default 20).
         account: Named AWS account from accounts.yaml to filter results.
+        root_cause: For up to 3 AWS spikes, also find the usage types and
+            resources behind each one and the change that started it (from
+            CloudTrail: who, when, via console/cli/terraform, and the guard's
+            verdict), labelled "confirmed (resource id match)" or "likely".
+            Off by default: it makes billed Cost Explorer requests (about
+            $0.01 each, 2 per spike) and the answer says how many. Set it when
+            the user asks why something spiked, which resource, or who changed
+            it, not for a plain "any anomalies?".
 
     Examples:
         - "Are there any cost anomalies I should know about?"
         - "Show me high-severity cost spikes"
         - "What spiked in AWS this week?"
         - "Any anomalies in the production account?"
+        - "Why did EC2 spike, and who launched it?" (root_cause=True)
 
     Note: Anomalies require at least 7 days of snapshot history. Before then,
           explain_recent_cost_drivers reads cost data directly and shows what moved.
@@ -153,6 +163,8 @@ def get_anomalies(
         )
     if muted_count > 0:
         result["muted_by_policy"] = muted_count
+    if root_cause:
+        result["root_cause"] = _root_causes(formatted)
 
     # Nudge free users toward Slack alerts -- most useful next step after seeing
     # anomalies. Lead with spikes; counting good-news drops as alarm inflates the
@@ -176,6 +188,34 @@ def get_anomalies(
         result["_upgrade"] = nudge
 
     return result
+
+
+_ROOT_CAUSE_MAX = 3
+
+
+def _root_causes(formatted: list[dict]) -> dict:
+    """The drill-down for the first few AWS spikes, attached to each and
+    combined for the answer. Billed Cost Explorer requests: counted and said."""
+    from ..anomaly.impact import root_cause as _one
+    from ..anomaly.root_cause import combine, compact
+
+    spikes = [a for a in formatted
+              if a.get("provider") == "aws" and a.get("direction") == "spike"]
+    results = []
+    for a in spikes[:_ROOT_CAUSE_MAX]:
+        found = _one(a)
+        if found is not None:
+            a["root_cause"] = compact(found)
+            results.append(found)
+    if not results:
+        return {"lines": [], "note": ("Root cause reads AWS spikes only (Cost Explorer and "
+                                      "CloudTrail), and none are in this list.")}
+    block = combine(results)
+    block.pop("services", None)            # each anomaly carries its own
+    if len(spikes) > _ROOT_CAUSE_MAX:
+        block["not_drilled"] = (f"{len(spikes) - _ROOT_CAUSE_MAX} more AWS spike(s) were not "
+                                "drilled into; filter by severity or provider to pick them.")
+    return block
 
 
 @_srv.mcp.tool()

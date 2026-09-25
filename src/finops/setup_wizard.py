@@ -3193,7 +3193,7 @@ def main(args: list[str] | None = None) -> None:
         _GROUPS = [
             # "get answers" leads: help text is the CLI's homepage, and the
             # commands that produce value outrank the ones that configure it.
-            ("get answers", ["scan", "brief", "ai-budget"]),
+            ("get answers", ["scan", "brief", "why", "ai-budget"]),
             ("start here", ["welcome", "connect", "setup", "doctor", "tools", "serve", "upgrade"]),
             ("clouds", ["aws", "aws-cur", "azure", "gcp"]),
             ("ai / llm providers", ["openai", "anthropic", "openrouter", "litellm",
@@ -3303,6 +3303,8 @@ def main(args: list[str] | None = None) -> None:
     _add_brief_parser(sub)
     from .cli_ai_budget import add_parser as _add_ai_budget_parser
     _add_ai_budget_parser(sub)
+    from .cli_why import add_parser as _add_why_parser
+    _add_why_parser(sub)
 
     aws_p = sub.add_parser("aws",          help="Connect AWS (Cost Explorer, CloudWatch)")
     aws_p.add_argument("--org",          action="store_true", help="Auto-discover accounts from AWS Organizations")
@@ -3489,12 +3491,13 @@ def main(args: list[str] | None = None) -> None:
     # mode stdout must stay a single parseable document). `guard` is tool
     # output too: a policy verdict prefixed with a setup banner reads as a bug
     # on camera and in scripts (the `guard hook` machine path already bails
-    # out above, before any output).
+    # out above, before any output). `why` opens with its own headline and
+    # its Cost Explorer disclosure, the same way `scan --spend` does.
     #
     # stderr, not stdout: every other command's stdout may be a machine
     # document too (`brief --json`, `ai-budget --json`), and a banner line
     # ahead of it made that output unparseable. On a terminal it looks the same.
-    if parsed.cmd not in ("scan", "guard"):
+    if parsed.cmd not in ("scan", "guard", "why"):
         print("\n  nable setup: all credentials stay on your machine\n", file=sys.stderr)
 
     dispatch = {
@@ -3741,6 +3744,9 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.cmd == "ai-budget":
         from .cli_ai_budget import run as _ab_run
         raise SystemExit(_ab_run(parsed))
+    elif parsed.cmd == "why":
+        from .cli_why import run as _why_run
+        raise SystemExit(_why_run(parsed))
     elif parsed.cmd == "welcome":
         from .welcome import run_welcome_flow
         run_welcome_flow(demo=getattr(parsed, "demo", False))
