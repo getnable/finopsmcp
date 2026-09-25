@@ -6,6 +6,7 @@ from cost_snapshots / attributed_costs. Supports:
 
   - Total account budget
   - Per-provider budget (aws, azure, gcp, etc.)
+  - Per-account budget (the account_id on cost_snapshots)
   - Per-team budget (via attributed_costs)
   - Per-service budget
 
@@ -54,17 +55,22 @@ log = logging.getLogger(__name__)
 
 def create_budget(
     name: str,
-    scope_type: str,        # "total" | "provider" | "team" | "service"
+    scope_type: str,        # "total" | "provider" | "account" | "team" | "service"
     limit_usd: float,
     scope_value: str = "*",
     period: str = "monthly",
     alert_at_pct: float = 80.0,
     critical_at_pct: float = 100.0,
     created_by: str = "mcp",
+    block_at_pct: float | None = None,
 ) -> dict[str, Any]:
     from ..storage.db import budgets, get_engine
     from sqlalchemy import insert
 
+    # block_at_pct is the set_budget tool's name for critical_at_pct (and the
+    # old configs' one). Refusing it made that tool fail on every call.
+    if block_at_pct is not None:
+        critical_at_pct = float(block_at_pct)
     now = datetime.now(timezone.utc)
     with get_engine().begin() as conn:
         result = conn.execute(insert(budgets).values(
@@ -82,6 +88,7 @@ def create_budget(
         ))
         budget_id = result.inserted_primary_key[0]
 
+    refresh_summary()
     return {
         "id": budget_id,
         "name": name,
@@ -113,6 +120,7 @@ def delete_budget(budget_id: int) -> bool:
         result = conn.execute(
             update(budgets).where(budgets.c.id == budget_id).values(is_active=False)
         )
+    refresh_summary()
     return result.rowcount > 0
 
 
@@ -152,6 +160,12 @@ def _fetch_spend(budget: dict[str, Any], start: str, end: str, conn: Any) -> flo
             cost_snapshots.c.snapshot_date >= start,
             cost_snapshots.c.snapshot_date <= end,
             cost_snapshots.c.provider == scope_value,
+        )
+    elif scope_type == "account":
+        q = select(func.sum(cost_snapshots.c.amount_usd)).where(
+            cost_snapshots.c.snapshot_date >= start,
+            cost_snapshots.c.snapshot_date <= end,
+            cost_snapshots.c.account_id == scope_value,
         )
     elif scope_type == "service":
         q = select(func.sum(cost_snapshots.c.amount_usd)).where(
@@ -224,20 +238,55 @@ def check_budget(budget: dict[str, Any], conn: Any = None) -> dict[str, Any]:
     }
 
 
+def _spend_through(conn: Any) -> str | None:
+    """The newest cost snapshot date up to today: how current the spend is."""
+    from sqlalchemy import func, select
+
+    from ..storage.db import cost_snapshots
+    today = datetime.now().astimezone().date()
+    q = select(func.max(cost_snapshots.c.snapshot_date)).where(
+        cost_snapshots.c.snapshot_date <= today.isoformat())
+    got = conn.execute(q).scalar()
+    return str(got) if got else None
+
+
 def check_all_budgets() -> list[dict[str, Any]]:
-    """Check all active budgets. Returns list sorted by % used descending."""
+    """Check all active budgets. Returns list sorted by % used descending.
+
+    Also writes the figures to the budget summary the guard hook reads
+    (budget/summary.py), so every budget check keeps the guard's spend
+    figure current."""
     from ..storage.db import get_engine
     budget_list = list_budgets(active_only=True)
-    if not budget_list:
-        return []
-    results = []
-    with get_engine().connect() as conn:
-        for b in budget_list:
+    results: list[dict[str, Any]] = []
+    through = None
+    if budget_list:
+        with get_engine().connect() as conn:
+            for b in budget_list:
+                try:
+                    results.append(check_budget(b, conn=conn))
+                except Exception as e:
+                    log.warning("Budget check failed for %s: %s", b.get("name"), e)
             try:
-                results.append(check_budget(b, conn=conn))
-            except Exception as e:
-                log.warning("Budget check failed for %s: %s", b.get("name"), e)
-    return sorted(results, key=lambda x: x["pct_used"], reverse=True)
+                through = _spend_through(conn)
+            except Exception:  # noqa: BLE001 - a missing date must not fail the check
+                through = None
+    results.sort(key=lambda x: x["pct_used"], reverse=True)
+    from .summary import write_summary
+    write_summary(results, spend_through=through)
+    return results
+
+
+def refresh_summary() -> dict[str, Any]:
+    """Recompute every budget and rewrite the guard's summary. Never raises:
+    {"ok": True, "budgets": n, "path": ...} or {"ok": False, "error": ...}."""
+    from .summary import summary_path
+    try:
+        results = check_all_budgets()
+    except Exception as e:  # noqa: BLE001 - callers are budget writes that already succeeded
+        log.warning("Budget summary refresh failed: %s", e)
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "budgets": len(results), "path": str(summary_path())}
 
 
 # ── budget.yml sync ───────────────────────────────────────────────────────────
@@ -326,6 +375,7 @@ def sync_from_yaml(yaml_path: str) -> dict[str, Any]:
                 )
         updated_list = [name for _, name in to_update]
 
+    refresh_summary()
     return {
         "source": str(path),
         "created": created,

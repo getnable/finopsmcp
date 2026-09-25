@@ -176,8 +176,10 @@ def evaluate_action_gate(
     cost_verdict: the preflight verdict ("ok"/"warn"/"over_budget"/"no_budget"), if known.
     signal: optional per-source learning signal; folded in caution-only (see _apply_learning).
 
-    Returns {gate, reason, action_type, door, monthly_delta_usd, [learned]}. nable
-    never executes; this advises a human. Pure, never raises on normal input.
+    Returns {gate, reason, rule, action_type, door, monthly_delta_usd, [learned]}.
+    `rule` names what decided: "one_way", "allowlist", "over_budget", "threshold"
+    or "allowed". nable never executes; this advises a human. Pure, never raises
+    on normal input.
     """
     pol = policy or load_policy()
     delta = float(monthly_delta_usd or 0.0)
@@ -194,6 +196,7 @@ def evaluate_action_gate(
         # The reason is for a human: what the action does, in words, not the
         # policy's own vocabulary (action_type and door carry that).
         out["gate"] = GATE_ESCALATE
+        out["rule"] = "one_way"
         what = _ONE_WAY_WHAT.get(action_type, "This action")
         out["reason"] = (f"{what} cannot be "
                          f"{'cancelled' if action_type == 'purchase_commitment' else 'undone'},"
@@ -201,22 +204,26 @@ def evaluate_action_gate(
     elif action_type not in set(pol.get("allowed_action_types", [])):
         # Not in the human's allowlist -> block.
         out["gate"] = GATE_BLOCK
+        out["rule"] = "allowlist"
         out["reason"] = (f"'{action_type}' is not in your allowlist of permitted actions; "
                          "nable will not propose applying it.")
     elif cost_verdict == "over_budget":
         # Over budget (per the cost preflight) -> escalate.
         out["gate"] = GATE_ESCALATE
+        out["rule"] = "over_budget"
         out["reason"] = ("This change would push you over budget; a human should review it "
                          "before it is applied.")
     elif delta > float(pol.get("max_auto_monthly_usd", 500.0)):
         # Cost increase above the auto threshold -> escalate (savings are always fine).
         cap = float(pol.get("max_auto_monthly_usd", 500.0))
         out["gate"] = GATE_ESCALATE
+        out["rule"] = "threshold"
         out["reason"] = (f"The +${delta:,.0f}/mo impact is over your ${cap:,.0f} auto threshold; "
                          "a human should review it.")
     else:
         # Reversible, allowlisted, within budget and threshold.
         out["gate"] = GATE_ALLOW
+        out["rule"] = "allowed"
         out["reason"] = (f"'{action_type}' is reversible, in your allowlist, and within budget; "
                          "a human can apply it within your policy.")
 

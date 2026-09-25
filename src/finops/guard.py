@@ -22,6 +22,16 @@ Verdict mapping (advisory, propose-only stays intact):
   allow, but priced near the auto threshold
            -> "warn"  runs as normal, with the figure shown alongside
 
+The cloud budget (budget_lens): a priced change that adds cost is also
+checked against the budgets the user set (`set_budget`, budget.yml). When
+month-to-date spend plus the change's cost for the rest of the period is over
+a budget that applies to it, the policy gate gets cost_verdict "over_budget"
+and the answer is "ask", or "deny" when FINOPS_GUARD_STOP_ON_BUDGET says hard
+stop. Spend comes from the summary the budget checks write
+(budget/summary.py), not the database; a summary older than 48 hours (or from
+last month) is not used, and a verdict on a priced change says the budget went
+unchecked.
+
 History (the recent end of the decision ledger, guard_ledger.recent) can
 turn an allow or a warn into an ask, never anything else:
   velocity cap   the priced monthly run-rate the guard let through in a
@@ -1226,6 +1236,205 @@ def _with_budget_note(v: dict[str, Any] | None, note: dict[str, Any] | None
     return {**v, "decision": "warn", "reason": text}
 
 
+# ── The cloud budget lens ──────────────────────────────────────────────────────
+# The per-action threshold asks whether one change is big. The budget asks
+# whether the month can afford it: a $280/mo launch is nothing on the 3rd and
+# the thing that breaks the budget on the 28th. The lens reads the small JSON
+# summary the budget checks write (budget/summary.py), never the database, and
+# only for a priced change that adds cost.
+
+_EC2_SERVICE = "Amazon Elastic Compute Cloud - Compute"
+_RDS_SERVICE = "Amazon Relational Database Service"
+# (provider, billing service) each pricer's command bills to; None where the
+# command does not say (a saved plan can span providers).
+_PRICER_SCOPE: dict[Any, tuple[str | None, str | None]] = {
+    _price_run_instances: ("aws", _EC2_SERVICE),
+    _price_rds: ("aws", _RDS_SERVICE),
+    _price_rds_class_change: ("aws", _RDS_SERVICE),
+    _price_instance_type_change: ("aws", _EC2_SERVICE),
+    _price_spot: ("aws", _EC2_SERVICE),
+    _price_fleet: ("aws", _EC2_SERVICE),
+    _price_nodegroup: ("aws", _EC2_SERVICE),
+    _price_savings_plan: ("aws", None),
+    _price_reserved_instances: ("aws", None),
+    _price_gce: ("gcp", "Compute Engine"),
+    _price_az_vm: ("azure", "Virtual Machines"),
+    _price_planfile: (None, None),
+}
+_BUDGETS_LISTED = 5
+
+
+def _change_scope(command: str) -> dict[str, str]:
+    """What the guard knows about where a change bills: provider and service
+    from the command, team and account from FINOPS_GUARD_TEAM and
+    FINOPS_GUARD_ACCOUNT (a command does not say which team it is for)."""
+    scope: dict[str, str] = {}
+    cmd = _normalize(command)
+    for pattern, pricer in _PRICERS:
+        if pattern.search(cmd):
+            provider, service = _PRICER_SCOPE.get(pricer, (None, None))
+            if provider:
+                scope["provider"] = provider
+            if service:
+                scope["service"] = service
+            break
+    for env, key in (("FINOPS_GUARD_TEAM", "team"), ("FINOPS_GUARD_ACCOUNT", "account")):
+        val = os.getenv(env, "").strip()
+        if val:
+            scope[key] = val
+    return scope
+
+
+def _budget_applies(b: dict[str, Any], scope: dict[str, str]) -> bool:
+    kind = str(b.get("scope_type") or "total")
+    if kind == "total":
+        return True
+    want = str(b.get("scope_value") or "")
+    have = scope.get(kind)
+    return have is not None and have.lower() == want.lower()
+
+
+def _budget_scope_words(b: dict[str, Any]) -> str:
+    kind = str(b.get("scope_type") or "total")
+    return "total" if kind == "total" else f"{kind} {b.get('scope_value')}"
+
+
+def budget_lens(command: str, est: dict[str, Any] | None, *,
+                now: Any = None) -> dict[str, Any] | None:
+    """The change against the budget figures on this machine, or None when the
+    change is not priced or does not add cost.
+
+    A dict with "state":
+      over       spent this period plus the change's cost for the rest of it
+                 is over at least one budget that applies; the one with the
+                 largest overage is named (budget, spent_mtd, limit, ...)
+      within     every budget that applies has room ("checked" names them)
+      no_budget  the figures are current but no budget applies to this change
+      stale      the figures are older than the limit (or from last month)
+      absent     there are no figures on this machine
+    It is also what the ledger records. Never raises: a summary it cannot read
+    is "absent".
+    """
+    if not est:
+        return None
+    monthly = est.get("monthly_usd")
+    one_off = est.get("total_usd") if monthly is None else None
+    if not ((isinstance(monthly, (int, float)) and monthly > 0)
+            or (isinstance(one_off, (int, float)) and one_off > 0)):
+        return None
+    from datetime import date, datetime
+
+    from .budget import summary as _summary
+    doc = _summary.read_summary()
+    fresh = _summary.freshness(doc, now=now)
+    when = {"as_of": fresh["as_of"], "age_hours": fresh["age_hours"]}
+    if fresh["state"] != "fresh":
+        out = {"state": fresh["state"], **when}
+        if fresh["state"] == "stale":
+            out["max_age_hours"] = fresh["max_age_hours"]
+            if fresh["previous_month"]:
+                out["previous_month"] = True
+        return out
+    when["spend_through"] = fresh["spend_through"]
+    today = datetime.now().astimezone().date()
+    scope = _change_scope(command)
+    checked: list[str] = []
+    over: list[dict[str, Any]] = []
+    for b in _summary.current_budgets(doc or {}, today=today):
+        if not _budget_applies(b, scope):
+            continue
+        checked.append(str(b.get("name")))
+        end = date.fromisoformat(str(b["period_end"]))
+        days_left = (end - today).days + 1
+        if monthly is not None:
+            # The change's run-rate for what is left of the period, today
+            # included: it bills from the moment it exists.
+            rest = float(monthly) * days_left * 24 / _hours_per_month()
+        else:
+            rest = float(one_off)
+        spent, limit = float(b["spent"]), float(b["limit"])
+        projected = spent + rest
+        if projected > limit:
+            over.append({
+                "budget": str(b.get("name")),
+                "scope": _budget_scope_words(b),
+                "period": b.get("period") or "monthly",
+                "spent_mtd": round(spent, 2),
+                "limit": round(limit, 2),
+                "change_monthly_usd": round(float(monthly), 2) if monthly is not None else None,
+                "change_one_off_usd": round(float(one_off), 2) if one_off is not None else None,
+                "days_left": days_left,
+                "rest_of_period_usd": round(rest, 2),
+                "projected_usd": round(projected, 2),
+                "projected_overage_usd": round(projected - limit, 2),
+            })
+    if over:
+        over.sort(key=lambda o: o["projected_overage_usd"], reverse=True)
+        return {"state": "over", **over[0], **when,
+                "others_over": [o["budget"] for o in over[1:_BUDGETS_LISTED + 1]]}
+    if checked:
+        return {"state": "within", "checked": checked[:_BUDGETS_LISTED], **when}
+    return {"state": "no_budget", **when}
+
+
+def _budget_hard_stop() -> tuple[bool, str]:
+    """(hard stop?, why) for a change over a cloud budget. Default: ask."""
+    env = os.getenv("FINOPS_GUARD_STOP_ON_BUDGET", "").strip().lower()
+    if env in ("1", "true", "yes"):
+        return True, "FINOPS_GUARD_STOP_ON_BUDGET is on"
+    return False, ""
+
+
+def _budget_reason(lens: dict[str, Any], *, hard: bool, why: str) -> str:
+    """The over-budget sentence: the budget, spend so far, the change's figure,
+    the projected overage, and how fresh the spend is."""
+    so_far = "this week" if lens.get("period") == "weekly" else "month to date"
+    if lens.get("change_monthly_usd") is not None:
+        days = lens["days_left"]
+        change = (f"this change at ~{_usd(lens['change_monthly_usd'])}/mo adds "
+                  f"~{_usd(lens['rest_of_period_usd'])} over the {days} "
+                  f"day{'s' if days != 1 else ''} left")
+    else:
+        change = f"this change adds a one-off ~{_usd(lens['change_one_off_usd'])}"
+    others = lens.get("others_over") or []
+    more = (f" It is over {len(others)} other budget{'s' if len(others) != 1 else ''} "
+            f"too ({', '.join(others)})." if others else "")
+    fresh = f"Spend figure from {_summary_age(lens)} ago"
+    if lens.get("spend_through"):
+        fresh += f", cost data through {lens['spend_through']}"
+    text = (f"This goes over the '{lens['budget']}' budget ({lens['scope']}): "
+            f"{_usd(lens['spent_mtd'])} spent {so_far} of {_usd(lens['limit'])}, and "
+            f"{change}, a projected ~{_usd(lens['projected_usd'])}, "
+            f"~{_usd(lens['projected_overage_usd'])} over.{more} {fresh}.")
+    if hard:
+        return (f"{text} Stopped because {why}; raise the budget, or unset it to "
+                "downgrade this to a confirmation.")
+    return (f"{text} Confirm to proceed, or raise the budget. "
+            "Set FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop.")
+
+
+def _summary_age(lens: dict[str, Any]) -> str:
+    from .budget.summary import age_words
+    return age_words(lens.get("age_hours"))
+
+
+def _budget_skip_note(lens: dict[str, Any] | None) -> str | None:
+    """What a verdict on a priced change says when the budget went unchecked."""
+    if not lens:
+        return None
+    if lens["state"] == "stale" and lens.get("previous_month"):
+        return ("Budget not checked: nable's spend figure is from last month; "
+                "`nable budget refresh` updates it.")
+    if lens["state"] == "stale":
+        return (f"Budget not checked: nable's spend figure is {_summary_age(lens)} old "
+                f"(the guard uses figures up to {lens.get('max_age_hours', 48):g} hours "
+                "old); `nable budget refresh` updates it.")
+    if lens["state"] == "absent":
+        return ("Budget not checked: there is no spend figure on this machine yet; "
+                "`nable budget refresh` computes one.")
+    return None
+
+
 # A priced change allowed by policy but at or above this share of the auto
 # threshold gets a "warn": the same 80% line ai_budget draws for the agent's
 # own spend, applied to what the agent is about to launch.
@@ -1241,9 +1450,16 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
     a guard that cannot read its own ledger must not take a position."""
     v = _policy_verdict(command, hit, context=context, via=via, cwd=cwd)
     try:
-        return _check_history(v, command, via=via, cwd=cwd)
+        v = _check_history(v, command, via=via, cwd=cwd)
     except Exception as exc:
-        return {**v, "_history_error": exc}
+        v = {**v, "_history_error": exc}
+    # A priced change whose budget went unchecked says so, whenever the
+    # verdict says anything at all; a silent allow stays silent (the ledger
+    # still records the skip).
+    note = _budget_skip_note(v.get("budget_check"))
+    if note and v.get("decision") != "allow" and v.get("reason"):
+        v = {**v, "reason": f"{v['reason']} {note}"}
+    return v
 
 
 def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None = None,
@@ -1261,6 +1477,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     door, action_type = hit
     lead = f"{via}. " if via else ""
 
+    lens: dict[str, Any] | None = None
+
     def verdict(decision: str, body: str, *, strict: bool = False,
                 est: dict[str, Any] | None = None) -> dict[str, Any]:
         head = "nable guard (strict)" if strict else "nable guard"
@@ -1269,6 +1487,8 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         if est is not None:
             v["monthly_delta_usd"] = est["monthly_usd"]
             v["estimate"] = est
+        if lens is not None:
+            v["budget_check"] = lens
         return v
 
     def allowed(est: dict[str, Any] | None) -> dict[str, Any]:
@@ -1298,11 +1518,22 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
         # p4d.24xlarge is a six-figure monthly decision whichever door it is. The
         # estimate rides the same evaluate_action_gate as everything else, so
         # the user's FINOPS_POLICY_MAX_AUTO_USD and learned adjustments apply.
+        #
+        # And through the budget: what is left of it this month, not only the
+        # per-action threshold (budget_lens).
         est = estimate_command_monthly_cost(command, cwd=cwd)
+        lens = budget_lens(command, est)
         if est is not None:
+            over = lens is not None and lens["state"] == "over"
             gate = evaluate_action_gate(action_type,
-                                        monthly_delta_usd=est.get("monthly_usd") or 0.0)
+                                        monthly_delta_usd=est.get("monthly_usd") or 0.0,
+                                        cost_verdict="over_budget" if over else None)
             if gate.get("gate") != GATE_ALLOW:
+                if gate.get("rule") == "over_budget" and lens is not None:
+                    hard, why = _budget_hard_stop()
+                    return verdict("deny" if hard else "ask",
+                                   f"{_cost_line(est)}. "
+                                   f"{_budget_reason(lens, hard=hard, why=why)}", est=est)
                 return verdict(
                     "ask" if gate.get("gate") == GATE_ESCALATE else "deny",
                     f"{_cost_line(est)}. "
@@ -1333,13 +1564,29 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     # One-way doors escalate whatever they cost, but the human deciding on a
     # Savings Plan should see the commitment in the same breath as the question.
     est = estimate_command_monthly_cost(command, cwd=cwd)
+    lens = budget_lens(command, est)
+    over = lens is not None and lens["state"] == "over"
     cost = f"{_cost_line(est)}. " if est else ""
     if destroys:
         shown = ", ".join(destroys[:3]) + (f" and {len(destroys) - 3} more" if len(destroys) > 3 else "")
         cost = (f"the saved plan destroys {len(destroys)} "
                 f"resource{'s' if len(destroys) != 1 else ''} ({shown}). ") + cost
     gate = evaluate_action_gate(action_type,
-                                monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0)
+                                monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0,
+                                cost_verdict="over_budget" if over else None)
+    if over and gate.get("gate") != GATE_BLOCK:
+        # A commitment that breaks the budget: the budget sentence travels with
+        # whatever else the gate said, and a hard stop makes it a deny.
+        hard, why = _budget_hard_stop()
+        budget_txt = _budget_reason(lens, hard=hard, why=why)
+        if hard:
+            return verdict("deny", cost + budget_txt, est=est)
+        if door == "one_way" and load_policy().get("escalate_one_way_doors", True):
+            opening, closing = _one_way_sentence(command, action_type, cwd=cwd)
+            closing = closing.replace("; confirm to proceed.", ".")
+            return verdict("ask", ("" if via else f"{opening}. ") + cost + closing + " "
+                           + budget_txt, est=est)
+        return verdict("ask", cost + budget_txt, est=est)
     if gate.get("gate") == GATE_ESCALATE:
         if door == "one_way" and load_policy().get("escalate_one_way_doors", True):
             # Say what the command does and to what, in words: "'delete_resource'
@@ -1673,6 +1920,9 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         action_type, door   the policy.py vocabulary (e.g. delete_resource, one_way)
         monthly_delta_usd   present only when the action was priced
         estimate            the pricing basis behind that figure, when priced
+        budget_check        a priced change that adds cost, against the cloud
+                            budgets (budget_lens): "over", "within",
+                            "no_budget", "stale" or "absent", with the figures
         harness             as passed in
 
     `session_id` is the hook payload's, so a per-session AI budget cap is
@@ -1922,6 +2172,9 @@ def _record(v: dict[str, Any], *, tool: str, command: str,
             **({"loop_key": v["loop_key"],
                 "loop_label": guard_ledger.redact(v.get("loop_label"), limit=200)}
                if v.get("loop_key") else {}),
+            # What the budget lens found for a priced change: the figures
+            # behind an over-budget stop, or why the budget went unchecked.
+            **({"budget_check": v["budget_check"]} if v.get("budget_check") else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             # Known only for a deny: the call never ran. An ask is the human's
