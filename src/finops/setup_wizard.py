@@ -3573,8 +3573,11 @@ def _offer_email_signup() -> None:
         sentinel.write_text(f"{email}\n")
     except Exception:
         # Don't block setup if the request fails, but don't write the sentinel
-        # so the user is re-prompted next time (their email was never recorded)
-        _ok("Got it. We'll follow up soon.")
+        # so the user is re-prompted next time (their email was never recorded).
+        # This used to print "Got it. We'll follow up soon.", for an email
+        # nobody received.
+        _warn("Could not reach getnable.com, so your email was not sent. "
+              "You will be asked again next time.")
 
     print()
 
@@ -4361,6 +4364,38 @@ def _upgrade_running_cli(current: str, target: str) -> bool:
     return True
 
 
+# The longest `nable upgrade` waits on PyPI. httpx's timeout is per phase, so on
+# a blackholed network a 10 s timeout sat ~10 s before saying anything.
+_PYPI_WAIT_S = 4.0
+
+
+def _latest_pypi_version() -> "str | None":
+    """Latest finops-mcp on PyPI, or None when PyPI does not answer within
+    _PYPI_WAIT_S. The request runs on a daemon thread so the wait is a hard cap."""
+    import threading
+    box: dict = {}
+
+    def _get():
+        try:
+            import httpx
+            r = httpx.get("https://pypi.org/pypi/finops-mcp/json", timeout=_PYPI_WAIT_S)
+            r.raise_for_status()
+            box["v"] = r.json()["info"]["version"]
+        except Exception as e:
+            box["e"] = e
+    t = threading.Thread(target=_get, daemon=True)
+    t.start()
+    t.join(_PYPI_WAIT_S)
+    return box.get("v")
+
+
+def _version_tuple(v: str) -> tuple:
+    try:
+        return tuple(int(x) for x in v.strip().split("."))
+    except (ValueError, AttributeError):
+        return ()
+
+
 def _run_upgrade(target: str = "") -> None:
     """Upgrade nable, deliberately, in two places.
 
@@ -4377,19 +4412,26 @@ def _run_upgrade(target: str = "") -> None:
     _section("Upgrade nable")
     current = _installed_version() or "unknown"
 
+    explicit = bool(target)
     if not target:
-        try:
-            import httpx
-            r = httpx.get("https://pypi.org/pypi/finops-mcp/json", timeout=10)
-            r.raise_for_status()
-            target = r.json()["info"]["version"]
-        except Exception as e:
-            _err(f"Could not reach PyPI to find the latest version ({e}).")
-            print("  Pass one explicitly:  finops upgrade 0.8.57")
+        target = _latest_pypi_version() or ""
+        if not target:
+            _err(f"Could not reach PyPI within {_PYPI_WAIT_S:.0f}s to find the latest version.")
+            print(f"  You are on {current}. When you are online, run this again, or pass a")
+            print("  version newer than that explicitly:  finops upgrade <version>")
             return
 
     print(f"  Installed: {current}")
-    print(f"  Latest:    {target}\n")
+    print(f"  {'Target' if explicit else 'Latest'}:    {target}\n")
+
+    cur_t, tgt_t = _version_tuple(current), _version_tuple(target)
+    if not explicit and cur_t and tgt_t and tgt_t < cur_t:
+        # A source or pre-release install can be ahead of PyPI. "Upgrading" to
+        # latest would be a downgrade, and this command never does one unasked.
+        _ok(f"You are on {current}, newer than PyPI's latest ({target}). Nothing to do.")
+        return
+    if explicit and cur_t and tgt_t and tgt_t < cur_t:
+        _warn(f"{target} is older than the installed {current}: this is a downgrade, as asked.")
 
     # 1. The CLI you are typing right now.
     _upgrade_running_cli(current, target)

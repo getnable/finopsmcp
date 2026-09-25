@@ -493,6 +493,12 @@ def _send_event(install_id: str, event: str, properties: dict) -> None:
     verification and drops every event. That silent loss skews active-install
     counts downward for exactly the macOS-on-python.org segment. httpx avoids it;
     urllib is only a fallback when httpx is not installed.
+
+    The POST runs on a daemon thread and the caller waits at most _SEND_WAIT_S.
+    Several CLI paths call this synchronously so the event lands before exit,
+    and on a network that drops packets a 5 s httpx attempt followed by a 4 s
+    urllib retry of the same host added ~9.6 s to every command. A reachable
+    host answers well inside the wait; an unreachable one costs about a second.
     """
     if _is_opted_out():
         return
@@ -511,12 +517,29 @@ def _send_event(install_id: str, event: str, properties: dict) -> None:
         "timestamp": date.today().isoformat(),
     }
     try:
-        import httpx
-        httpx.post(f"{_POSTHOG_HOST}/capture/", json=body, timeout=5)
-        return
+        t = threading.Thread(target=_post_event, args=(body,), daemon=True)
+        t.start()
+        t.join(timeout=_SEND_WAIT_S)
     except Exception:
-        pass
+        pass  # Never let telemetry break the tool
+
+
+# How long a caller of _send_event waits for the POST. The send carries on in
+# the background for the rest of the process; this only bounds the wait.
+_SEND_WAIT_S = 1.0
+
+
+def _post_event(body: dict) -> None:
+    """One POST. urllib only when httpx is not installed: retrying a host
+    httpx could not reach over urllib doubled the wait and never succeeded."""
     try:
+        import httpx
+    except ImportError:
+        httpx = None
+    try:
+        if httpx is not None:
+            httpx.post(f"{_POSTHOG_HOST}/capture/", json=body, timeout=5)
+            return
         import urllib.request
         req = urllib.request.Request(
             f"{_POSTHOG_HOST}/capture/",
