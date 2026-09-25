@@ -533,6 +533,49 @@ def _group_findings(findings: list[dict]) -> list[dict]:
     return rows
 
 
+_DENIED_CODES = ("AccessDenied", "AccessDeniedException", "UnauthorizedOperation")
+
+
+def _failed_check_lines(report: dict) -> list[str]:
+    """What could not be read, in two kinds: checks that never ran anywhere,
+    and checks that ran but left something unread (one region denied, the AMI
+    list behind the snapshot filter, a NAT gateway's traffic metric). Both
+    mean the findings above can be missing something, so both are said."""
+    failed = report.get("checks_failed") or []
+    if not failed:
+        return []
+    ran = set(report.get("checks_run") or ())
+    not_run = sorted({f.get("check", "?") for f in failed
+                      if not f.get("partial")} - ran)
+    partly: dict[str, list[str]] = {}
+    for f in failed:
+        check = f.get("check", "?")
+        if check in not_run:
+            continue
+        code = f.get("error_code", "")
+        if f.get("partial"):
+            what = f"{f.get('count', 0)} {f.get('unit', 'resources')} unread, {code}"
+        else:
+            what = f"{code} in {f.get('region', '?')}"
+        bits = partly.setdefault(check, [])
+        if what not in bits:
+            bits.append(what)
+    lines = []
+    hint = ""
+    if any(f.get("error_code") in _DENIED_CODES for f in failed):
+        hint = " (`nable scan --dry-run --json` prints the policy)"
+    if not_run:
+        lines.append(f"{len(not_run)} check(s) could not run and were not counted: "
+                     f"{', '.join(not_run)}{hint}")
+        hint = ""
+    if partly:
+        detail = "; ".join(f"{c} ({', '.join(b[:3])}{', ...' if len(b) > 3 else ''})"
+                           for c, b in sorted(partly.items()))
+        lines.append(f"{len(partly)} check(s) could not fully run and may be missing "
+                     f"findings: {detail}{hint}")
+    return lines
+
+
 def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=None):
     extra_blocks = extra_blocks or []
     demo_tag = _dim(" (demo data)") if demo else ""
@@ -600,15 +643,10 @@ def _render(out, spend, report, *, demo: bool, ce_denied: bool, extra_blocks=Non
                      f"(reached the {_SCAN_DEADLINE_S}s time limit; skipped: {', '.join(timed_out)})"),
                 file=out,
             )
-        failed = sorted({f.get("check", "?") for f in report.get("checks_failed") or []})
-        if failed:
+        for line in _failed_check_lines(report):
             # Without this line "no material waste found" reads as a verdict on
             # checks that never ran.
-            print(
-                _dim(f"{len(failed)} check(s) could not run and were not counted: "
-                     f"{', '.join(failed)} (`nable scan --dry-run --json` prints the policy)"),
-                file=out,
-            )
+            print(_dim(line), file=out)
 
     # ── extra providers (AI / GCP / Azure), the cross-provider frame ──
     for b in extra_blocks:

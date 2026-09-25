@@ -109,12 +109,8 @@ def _error_code(exc: Exception) -> str:
     """The AWS error code (AccessDenied, Throttling...) or the exception type.
     Never the message: it carries ARNs and account ids, and this reaches the
     brief, Slack, and `nable scan --json`."""
-    resp = getattr(exc, "response", None)
-    if isinstance(resp, dict):
-        code = (resp.get("Error") or {}).get("Code")
-        if code:
-            return str(code)
-    return type(exc).__name__
+    from .waste import error_code
+    return error_code(exc)
 
 
 def _audit_region(
@@ -171,6 +167,15 @@ def _audit_region(
                 finding.setdefault("region", region)
             findings.extend(result)
             findings.checks_completed.add(name)
+            # A read inside the check that failed (the AMI list behind the
+            # snapshot filter, a cluster's services, a metric). The check ran,
+            # but not over everything, so it is recorded as a partial failure:
+            # the report is partial and the CLI says which check and why.
+            for pf in getattr(result, "partial_failures", None) or ():
+                findings.checks_failed.append(
+                    {"check": name, "region": region, "error_code": pf["error_code"],
+                     "partial": True, "call": pf["call"], "count": pf["count"],
+                     "unit": pf["unit"], "effect": pf.get("effect", "")})
         except Exception as exc:
             log.warning("Check '%s' failed in %s: %s", name, region, exc)
             findings.checks_failed.append(
@@ -735,13 +740,16 @@ def run_deep_audit(
     # one fact that matters. A check stays in checks_run only if it completed
     # somewhere; one that failed everywhere never looked at anything, and
     # counting it as run is how "0 findings" read as "clean".
-    _grouped: dict[tuple[str, str], list[str]] = {}
+    _grouped: dict[tuple[str, str, str], list[str]] = {}
     for f in checks_failed:
-        _grouped.setdefault((f["check"], f["error_code"]), []).append(f["region"])
-    for (check, code), where in sorted(_grouped.items()):
+        _grouped.setdefault((f["check"], f["error_code"], f.get("call", "")),
+                            []).append(f["region"])
+    for (check, code, call), where in sorted(_grouped.items()):
+        regions_where = sorted(set(where))
+        how = f"could not fully run ({call}: {code})" if call else f"could not run ({code})"
         errors.append(
-            f"Check '{check}' could not run ({code}) in {len(where)} region(s): "
-            f"{', '.join(sorted(where)[:5])}{' ...' if len(where) > 5 else ''}"
+            f"Check '{check}' {how} in {len(regions_where)} region(s): "
+            f"{', '.join(regions_where[:5])}{' ...' if len(regions_where) > 5 else ''}"
         )
     failed_everywhere = {f["check"] for f in checks_failed} - checks_completed
     checks_run = sorted(active_checks - failed_everywhere)

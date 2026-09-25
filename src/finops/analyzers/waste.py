@@ -79,6 +79,58 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# ── Reads that failed inside a check ──────────────────────────────────────────
+
+def error_code(exc: BaseException | str) -> str:
+    """The AWS error code (AccessDenied, Throttling...) or the exception type.
+    Never the message: it carries ARNs and account ids, and this reaches the
+    brief, Slack, and `nable scan --json`."""
+    if isinstance(exc, str):
+        return exc
+    resp = getattr(exc, "response", None)
+    if isinstance(resp, dict):
+        code = (resp.get("Error") or {}).get("Code")
+        if code:
+            return str(code)
+    return type(exc).__name__
+
+
+class CheckFindings(list):
+    """A check's findings, plus the reads inside it that failed.
+
+    A list subclass so every caller that treats the result as a plain findings
+    list keeps working. A check whose inventory read works but whose follow-up
+    read is denied (the AMI list behind the snapshot filter, a trail's status,
+    one cluster's services) used to swallow that denial and report whatever was
+    left as the whole answer. Each such read lands here instead, and the audit
+    records it as a partial failure of the check, with its error code and how
+    many resources it left unread.
+    """
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.partial_failures: list[dict] = []
+
+    def note_failure(self, call: str, exc: BaseException | str, count: int = 1,
+                     unit: str = "resources", effect: str = "") -> None:
+        code = error_code(exc)
+        for f in self.partial_failures:
+            if f["call"] == call and f["error_code"] == code and f["unit"] == unit:
+                f["count"] += count
+                return
+        self.partial_failures.append({
+            "call": call, "error_code": code, "count": count, "unit": unit,
+            "effect": effect,
+        })
+
+
+def _metric_call() -> str:
+    """The CloudWatch call a metric read went through, for a failure record."""
+    from .cloudwatch import get_metric_data_opted_in
+    return ("cloudwatch.get_metric_data" if get_metric_data_opted_in()
+            else "cloudwatch.get_metric_statistics")
+
+
 # ── EBS volumes ───────────────────────────────────────────────────────────────
 
 def _gp2_to_gp3_savings(size_gb: float) -> float:
@@ -183,7 +235,7 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
     EBS snapshot storage is $0.05/GB-month.
     """
     _SNAPSHOT_STORAGE_PER_GB_MONTH = EBS_SNAPSHOT_PER_GB_MONTH
-    findings: list[dict] = []
+    findings = CheckFindings()
     cutoff = _now_utc() - timedelta(days=older_than_days)
 
     # The audit stamps the account id on every finding it returns; this check
@@ -209,6 +261,7 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
 
     # Gather AMI snapshot IDs so we don't flag snapshots backing AMIs
     ami_snapshot_ids: set[str] = set()
+    ami_read_error: Exception | None = None
     try:
         ami_paginator = ec2_client.get_paginator("describe_images")
         for page in ami_paginator.paginate(Owners=["self"]):
@@ -217,8 +270,14 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
                     snap_id = bdm.get("Ebs", {}).get("SnapshotId")
                     if snap_id:
                         ami_snapshot_ids.add(snap_id)
-    except Exception:
-        pass  # If we can't list AMIs, skip this filter
+    except Exception as exc:
+        # This used to `pass` and carry on with an empty AMI set, which turned
+        # the filter off: every snapshot behind a registered AMI was then
+        # flagged as waste, and deleting one breaks the AMI. Any snapshot can
+        # back an AMI, so without the list none of them can be called orphaned.
+        log.warning("describe_images failed (region=%s): %s", region, exc)
+        ami_read_error = exc
+    unassessed = 0
 
     for page in pages:
         for snap in page.get("Snapshots", []):
@@ -235,6 +294,10 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
 
             if snap_id in ami_snapshot_ids:
                 continue  # Backing an AMI — needed
+
+            if ami_read_error is not None:
+                unassessed += 1
+                continue
 
             size_gb = snap.get("VolumeSize", 0) or 0
             monthly_cost = size_gb * _SNAPSHOT_STORAGE_PER_GB_MONTH
@@ -262,6 +325,10 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
                 "age_days": age_days,
             })
 
+    if ami_read_error is not None:
+        findings.note_failure(
+            "ec2.describe_images", ami_read_error, count=unassessed, unit="snapshots",
+            effect="old snapshots not assessed: the AMI list that protects them could not be read")
     return findings
 
 
@@ -478,7 +545,7 @@ def check_cloudtrail_waste(
     CloudTrail management events: free for first trail, $2/100k events for additional.
     Data events: $0.10/100k events — these add up FAST on busy S3 buckets.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         resp = cloudtrail_client.describe_trails(includeShadowTrails=False)
@@ -534,6 +601,9 @@ def check_cloudtrail_waste(
 
         except Exception as exc:
             log.debug("get_event_selectors failed for %s: %s", trail_name, exc)
+            findings.note_failure(
+                "cloudtrail.get_event_selectors", exc, unit="trails",
+                effect="data events and duplicate trails not checked")
 
         # Get trail status — check if trail is actually logging
         try:
@@ -555,8 +625,11 @@ def check_cloudtrail_waste(
                     "account_id": None,
                     "trail_name": trail_name,
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("get_trail_status failed for %s: %s", trail_name, exc)
+            findings.note_failure(
+                "cloudtrail.get_trail_status", exc, unit="trails",
+                effect="stopped trails not checked")
 
     # Flag duplicate management event trails (more than 1 trail = paying for duplicates)
     if len(management_event_trails) > 1:
@@ -1564,7 +1637,7 @@ def check_s3_incomplete_multipart(
     Incomplete multipart uploads accumulate silently and are billed at STANDARD
     storage rates. A lifecycle rule is the fix.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
 
@@ -1581,6 +1654,7 @@ def check_s3_incomplete_multipart(
         bucket_name = bucket["Name"]
         total_size_bytes = 0
         old_upload_count = 0
+        unsized = 0
 
         try:
             paginator = s3_client.get_paginator("list_multipart_uploads")
@@ -1599,17 +1673,51 @@ def check_s3_incomplete_multipart(
                                 Key=upload.get("Key", ""),
                                 UploadId=upload_id,
                             )
+                            upload_bytes = 0
                             for parts_page in parts_pages:
                                 for part in parts_page.get("Parts", []):
-                                    total_size_bytes += part.get("Size", 0)
-                        except Exception:
-                            pass
+                                    upload_bytes += part.get("Size", 0)
+                            total_size_bytes += upload_bytes
+                        except Exception as exc:
+                            # Not 0 bytes: the size is unknown. Counting it as
+                            # zero priced the upload at $0 and hid the denial.
+                            findings.note_failure(
+                                "s3.list_parts", exc, unit="uploads",
+                                effect="abandoned upload sizes unknown, left unpriced")
+                            unsized += 1
                         old_upload_count += 1
         except Exception as exc:
             log.debug("list_multipart_uploads failed for %s: %s", bucket_name, exc)
+            findings.note_failure(
+                "s3.list_multipart_uploads", exc, unit="buckets",
+                effect="abandoned uploads not checked")
             continue
 
         if old_upload_count == 0:
+            continue
+
+        if unsized:
+            # Part of the size could not be read, so any figure is a floor
+            # dressed up as an estimate. Report the uploads, unpriced.
+            findings.append({
+                "resource_id": f"s3://{bucket_name}",
+                "resource_type": "S3 Bucket",
+                "waste_type": "s3_incomplete_multipart_uploads",
+                "estimated_monthly_savings": None,
+                "unpriced": True,
+                "detail": (
+                    f"Bucket '{bucket_name}' has {old_upload_count} incomplete multipart "
+                    f"upload(s) older than {older_than_days} days. The size of "
+                    f"{unsized} could not be read (s3:ListMultipartUploadParts), so "
+                    f"this is not priced. Add a lifecycle rule: "
+                    f"AbortIncompleteMultipartUpload with DaysAfterInitiation=7."
+                ),
+                "severity": "low",
+                "region": region,
+                "account_id": None,
+                "bucket": bucket_name,
+                "incomplete_upload_count": old_upload_count,
+            })
             continue
 
         size_gb = total_size_bytes / (1024 ** 3)
@@ -1824,7 +1932,7 @@ def check_ecs_task_rightsizing(
 
     Fargate billing: $0.04048/vCPU-hr, $0.004445/GB-hr.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
@@ -1851,14 +1959,22 @@ def check_ecs_task_rightsizing(
             service_arns = []
             for page in service_paginator.paginate(cluster=cluster_arn):
                 service_arns.extend(page.get("serviceArns", []))
-        except Exception:
+        except Exception as exc:
+            # This used to `continue` without a trace, so a denied
+            # ecs:ListServices read as "no oversized services".
+            findings.note_failure(
+                "ecs.list_services", exc, unit="clusters",
+                effect="services in these clusters not checked")
             continue
 
         for i in range(0, len(service_arns), 10):
             batch = service_arns[i:i+10]
             try:
                 resp = ecs_client.describe_services(cluster=cluster_arn, services=batch)
-            except Exception:
+            except Exception as exc:
+                findings.note_failure(
+                    "ecs.describe_services", exc, count=len(batch), unit="services",
+                    effect="services not checked")
                 continue
 
             for svc in resp.get("services", []):
@@ -1873,7 +1989,10 @@ def check_ecs_task_rightsizing(
                     td = td_resp.get("taskDefinition", {})
                     allocated_cpu = int(td.get("cpu", 256))
                     allocated_memory_mb = int(td.get("memory", 512))
-                except Exception:
+                except Exception as exc:
+                    findings.note_failure(
+                        "ecs.describe_task_definition", exc, unit="services",
+                        effect="services not checked")
                     continue
                 services.append((cluster_name, svc, allocated_cpu, allocated_memory_mb))
 
