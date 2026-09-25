@@ -367,3 +367,10 @@ def test_budget_refresh_writes_the_summary_and_says_where(isolated_db, capsys):
     assert out["ok"] and out["budgets"][0]["spent"] == 250.0
     assert out["spend_through"] == _today().isoformat()
     assert bs.read_summary()["budgets"][0]["name"] == "Total"
+
+
+def test_no_cost_data_says_the_budget_was_not_checked():
+    """A summary built from no cost rows is not a $0 month: the verdict note and
+    the doctor both say the budget went unchecked."""
+    note = g._budget_skip_note({"state": "no_data"})
+    assert note and note.startswith("Budget not checked") and "no cost data" in note

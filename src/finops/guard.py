@@ -69,12 +69,14 @@ What happened afterwards (setup_wizard's `nable guard ...`):
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import os
 import re
+import string
 import sys
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePath
+from typing import Any, NamedTuple
 
 from . import __version__
 from .policy import (
@@ -91,9 +93,10 @@ from .policy import (
 # policy.py. Over-matching is tolerable (worst case an unnecessary confirm);
 # missing a one-way door is not, so patterns are deliberately broad.
 
-# The end of a verb or flag: whitespace, the end, or a shell operator right
-# after it (`terraform destroy;echo`), never more word (destroy.tfplan).
-_END = r"(?![^\s;&|)`])"
+# The end of a verb or flag: whitespace, the end, a shell operator or a
+# redirection right after it (`terraform destroy;echo`, `destroy>log`), never
+# more word (destroy.tfplan).
+_END = r"(?![^\s;&|)`<>])"
 
 _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # `destroy` must end the word: a plan file called destroy.tfplan is a
@@ -134,6 +137,10 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # Anchored at a token start, not \b: `-gsutil -gsutil ...` would otherwise
     # give every token a start and every start the whole run to scan.
     (r"(?<![\w-])gsutil\s+(?:-\S+\s+)*+r[mb]\b", "delete_resource"),
+    # gsutil's successor spells it `gcloud storage rm` (-r or not, like gsutil).
+    (rf"\bgcloud\s+(?:\S+\s+)*storage\s+rm{_END}", "delete_resource"),
+    # `aws s3 mv --recursive` out of a bucket empties it as surely as rm does.
+    ("s3-mv-recursive", "delete_resource"),
     # Helm's own aliases for uninstall are del, delete and un; flags such as
     # `-n prod` may come first.
     (rf"\bhelm\s+(?:\S+\s+)*(?:uninstall|delete|del|un){_END}", "delete_resource"),
@@ -250,8 +257,13 @@ def _strip_aws_global_options(cmd: str) -> str:
 # is matched without regard to case; the verb after it is not, because the
 # program itself rejects `terraform DESTROY`.
 _PROGRAMS = ("aws|kubectl|terraform|tofu|terragrunt|helm|pulumi|gcloud|az|cdk|sam|doctl|"
-             "eksctl|gsutil|base64|python3?")
+             "eksctl|gsutil|base64|python3?|nable|finops")
 _PROGRAM_RE = re.compile(rf"(?:{_PROGRAMS})(?![\w.-])")
+# ASCII only. str.lower() changes the length of some text (`İ` lowers to two
+# characters), and a lowered copy whose offsets no longer line up with the
+# command cannot be copied back: `TERRAFORM destroy # İ` kept its capitals and
+# passed. The program names are ASCII, so nothing else needs lowering.
+_ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 
 
 def _lower_programs(cmd: str) -> str:
@@ -259,8 +271,8 @@ def _lower_programs(cmd: str) -> str:
 
     Program names are found in a lowercased copy (one case-sensitive scan,
     much cheaper than an IGNORECASE one) and copied back where they differ."""
-    low = cmd.lower()
-    if low == cmd or len(low) != len(cmd):
+    low = cmd.translate(_ASCII_LOWER)
+    if low == cmd:
         return cmd
     out, last = [], 0
     for m in _PROGRAM_RE.finditer(low):
@@ -293,6 +305,58 @@ def _expand_aliases(cmd: str) -> str:
     return cmd
 
 
+# ── Reading the command the way the shell will ────────────────────────────────
+# Every rule reads a flattened command: escapes and quotes dropped, whitespace
+# collapsed. Dropping them can only over-match, and it is how `t\erraform
+# de\stroy` and `"aws" ec2 terminate-instances` are seen for what they run.
+#
+# Normalizing may only ADD classifications. The command is read three ways
+# (_readings): as written, with same-line aliases expanded, and with the
+# quoted text of data programs blanked, and the most severe reading wins
+# (_worst_reading). `alias terraform=echo; terraform destroy` is a destroy as
+# written even though the expansion says echo; the reader cannot know which
+# alias bash will honour, and asking is the safe side. The one thing that
+# removes a classification is the blanking of a commit message or a search
+# pattern that mentions `terraform destroy`, and only where the shell is
+# certain not to run that text (_quoted_data_args, _only_in_data).
+
+_ESCAPE_RE = re.compile(r"\\(.?)", re.S)
+
+
+def _unfold(command: str) -> str:
+    """Line continuations removed: `terraform destroy\\<newline> -auto-approve`
+    is one command, and so is `kubectl delete\\<newline> ns prod`."""
+    return command.replace("\\\n", "") if "\\\n" in command else command
+
+
+def _flatten(cmd: str) -> str:
+    """Escapes and quotes dropped, whitespace collapsed, program names in
+    lower case.
+
+    Every backslash goes, inside single quotes too: outside them `\\x` runs
+    as `x`, and single-quoted text that another shell reads (`sh -c`) loses
+    its escapes there. Over-matching is the safe side."""
+    if "\\" in cmd:
+        cmd = _ESCAPE_RE.sub(r"\1", cmd)
+    cmd = cmd.replace('"', "").replace("'", "")
+    return _lower_programs(" ".join(cmd.split()))
+
+
+# One left-to-right reading of the shell's quoting: a backslash escape, an
+# ANSI-C `$'...'` string, a single- or double-quoted string, a comment, or an
+# operator. Every alternative either fails on its first character or matches,
+# and an unterminated quote runs to the end instead of failing, so no quote is
+# ever rescanned from a later start: `echo "` followed by 100 KB of `\"` used
+# to rescan the rest of the command from every one of them.
+_SHELL_LEX_RE = re.compile(
+    r"\\."
+    r"|\$'[^'\\]*+(?:\\.[^'\\]*+)*+(?:'|\\?\Z)"
+    r"|'[^']*+(?:'|\Z)"
+    r'|"[^"\\]*+(?:\\.[^"\\]*+)*+(?:"|\\?\Z)'
+    r"|(?<![^\s;&|()])#[^\n]*+"
+    r"|&&|\|\||\|&|[;&|\n()]",
+    re.S)
+
 # Programs whose quoted arguments are data, not commands: a commit message or
 # a search pattern that mentions `terraform destroy` asked the human to
 # confirm a destroy nobody was running, and a guard that cries wolf on every
@@ -303,59 +367,179 @@ _DATA_SEGMENT_RE = re.compile(
     r"\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|command|time|nohup)\s+)*(?:\S*/)?"
     r"(?:(?:echo|printf|grep|egrep|fgrep|rg|ag)(?!\S)"
     r"|git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*?\s+(?:commit|tag)(?!\S))")
-# A quoted string (single, or double with escapes) or a shell operator.
-_QUOTE_OR_OP_RE = re.compile(r"'[^']*+'|\"(?:[^\"\\]++|\\.)*+\"|&&|\|\||[;&|\n]")
-# Data that is then run: `printf "terraform destroy" | sh`, `| xargs ...`,
-# `$(...)`, backticks. Masking is off for the whole command when any of these
-# appears; over-matching is the safe side.
-_RUNS_DATA_RE = re.compile(
-    r"\|\s*(?:sudo\s+)?(?:\S*/)?(?:(?:ba|z|da|k)?sh|xargs|source|eval|\.)(?!\S)|\$\(|`|<\(")
-_MASK_MAX_TOKENS = 20_000
+# Blanking is for commands short enough to check this carefully (and to hand
+# to shlex); a longer one is judged as written.
+_MASK_MAX_CHARS = 16 * 1024
+# Anything that could run quoted text, or that makes the shell's reading less
+# than certain, turns blanking off for the whole command: a shell or an
+# interpreter named anywhere (quoted text can be piped, sourced or passed to
+# it: `| env bash`, `| busybox sh`, `>(sh)`, `echo ... > x.sh; bash x.sh`),
+# `$` and backticks (substitutions, `$'...'`), escaped quotes, process
+# substitution, a PATH change, `.` or a program started by path (`./x.sh`
+# may be a file this command just wrote), and the flags that make a search
+# tool run a command (`rg --pre`, `ag --pager`).
+_NO_MASK_RE = re.compile(
+    r"(?<![\w.-])(?:(?:ba|z|da|k|mk|c|tc|r)?sh|fish|busybox|xargs|parallel|eval|source|exec|"
+    r"env|alias|python[\d.]*|node(?:js)?|deno|bun|perl|ruby|php|lua|tclsh|awk|gawk|mawk|"
+    r"nawk|osascript|pwsh|powershell)(?![\w-])"
+    r"|\\[\"']|[$`]|<\(|>\(|(?<![\w-])PATH=|--pre(?![\w-])|--pager(?![\w-])"
+    r"|(?:^|[;&|\n])\s*(?:[A-Za-z_]\w*=[^\s;&|]*\s+)*[./~]")
+# What a data program's output may be piped into with its quoted text still
+# data: programs that only read and print. Anything else (at, crontab, ssh,
+# `docker run -i`) might run what it is fed.
+_PIPE_SAFE = frozenset({"grep", "egrep", "fgrep", "rg", "ag", "head", "tail", "wc", "sort",
+                        "uniq", "cut", "tr", "less", "more", "cat", "column", "fold", "fmt",
+                        "nl", "rev"})
+_NEXT_WORD_RE = re.compile(r"\s*([^\s;&|<>()]*)")
+# Output redirections that cannot leave a script behind: a file descriptor or
+# /dev/null. `echo "terraform destroy" > x.sh` is data only until x.sh runs.
+_SAFE_REDIRECT_RE = re.compile(r">>?\|?(?:&[\d-]|\s*/dev/(?:null|stderr|stdout)(?![^\s;&|]))")
 
 
-def _mask_quoted_data(command: str) -> str:
-    """`git commit -m "docs: terraform destroy"` -> `git commit -m ""`.
+def _plain_ok(cmd: str, a: int, b: int) -> bool:
+    """cmd[a:b] is unquoted text with no group braces and no redirection
+    into a file."""
+    chunk = cmd[a:b]
+    if "{" in chunk or "}" in chunk:
+        return False
+    i = chunk.find(">")
+    while i >= 0:
+        if not _SAFE_REDIRECT_RE.match(cmd, a + i):
+            return False
+        i = chunk.find(">", i + 1)
+    return True
 
-    Quoted arguments of echo, printf, grep, rg, ag and `git commit|tag` are
-    blanked, one shell segment at a time, so what follows a `;` or `&&` is
-    still judged. Past _MASK_MAX_TOKENS quotes and operators the command is
-    left as it is: bounded work, and over-matching is the safe side."""
-    if ('"' not in command and "'" not in command) or not _DATA_PROGRAM_RE.search(command) \
-            or _RUNS_DATA_RE.search(command):
-        return command
-    out: list[str] = []
-    last = seg_start = 0
+
+def _quoted_data_args(cmd: str) -> list[tuple[int, int]]:
+    """Spans (quotes included) of the quoted arguments of echo, printf, grep,
+    rg, ag and `git commit|tag` that the shell will not run, or [] when that
+    is not certain for the whole command.
+
+    Conservative on purpose: a comment, an escape, a subshell, a redirection
+    into a file, a pipe into anything but a reader, an unterminated quote or
+    anything _NO_MASK_RE names means nothing is blanked and the command is
+    judged as written."""
+    if (len(cmd) > _MASK_MAX_CHARS or ('"' not in cmd and "'" not in cmd)
+            or not _DATA_PROGRAM_RE.search(cmd) or _NO_MASK_RE.search(cmd)):
+        return []
+    spans: list[tuple[int, int]] = []
+    seg_start = last = 0
     data: bool | None = None
-    for n, m in enumerate(_QUOTE_OR_OP_RE.finditer(command)):
-        if n >= _MASK_MAX_TOKENS:
-            return command
+    fed = False                 # this pipeline carries a data program's quoted text
+    for m in _SHELL_LEX_RE.finditer(cmd):
+        start, end = m.span()
+        if not _plain_ok(cmd, last, start):
+            return []
+        last = end
         tok = m.group(0)
-        if tok[0] not in "'\"":
-            seg_start, data = m.end(), None
-            continue
-        if data is None:
-            data = _DATA_SEGMENT_RE.match(command, seg_start, m.start()) is not None
-        if data:
-            out += (command[last:m.start()], '""')
-            last = m.end()
-    return "".join(out) + command[last:] if out else command
+        if tok[0] in "'\"":
+            if len(tok) < 2 or tok[-1] != tok[0]:
+                return []       # unterminated
+            if data is None:
+                data = _DATA_SEGMENT_RE.match(cmd, seg_start, start) is not None
+            if data:
+                spans.append((start, end))
+                fed = True
+        elif tok[0] in "\\#$()":
+            return []           # an escape, a comment, $'...', a subshell
+        elif tok[0] in "&|" and tok not in ("&&", "||") and (
+                cmd[start - 1:start] == ">" or cmd[end:end + 1] == ">"):
+            continue            # part of a redirection: >&2, &>file, >|file
+        elif tok in ("|", "|&"):
+            seg_start, data = end, None
+            if fed and _NEXT_WORD_RE.match(cmd, end).group(1) not in _PIPE_SAFE:
+                return []
+        else:                   # ; & && || newline: the next command in the list
+            seg_start, data, fed = end, None, False
+    if not _plain_ok(cmd, last, len(cmd)):
+        return []
+    return spans
+
+
+class _Readings(NamedTuple):
+    raw: str                    # as written: no alias expanded, nothing blanked
+    expanded: str               # same-line aliases expanded
+    masked: str                 # expanded, with quoted data blanked where that is certain
+    data: tuple[str, ...]       # the quoted texts that were blanked
+    shell: str                  # the command with its line continuations removed
+
+
+@functools.lru_cache(maxsize=64)
+def _readings(command: str) -> _Readings:
+    cmd = _unfold(command)
+    base = _flatten(cmd)
+    raw = _strip_aws_global_options(base)
+    expanded = _strip_aws_global_options(_expand_aliases(base)) if "alias " in base else raw
+    spans = _quoted_data_args(cmd)
+    if not spans:
+        return _Readings(raw, expanded, expanded, (), cmd)
+    out, last = [], 0
+    for a, b in spans:
+        out += (cmd[last:a], '""')
+        last = b
+    # _NO_MASK_RE turns blanking off for any `alias`: nothing to expand here.
+    masked = _strip_aws_global_options(_flatten("".join(out) + cmd[last:]))
+    return _Readings(raw, expanded, masked, tuple(cmd[a + 1:b - 1] for a, b in spans), cmd)
 
 
 def _normalize(command: str) -> str:
-    """The form every classifier and pricer reads.
+    """The form every pricer reads, and the first reading every rule reads.
 
-    Quotes do not change which program runs: `"aws" ec2 terminate-instances`
-    is a terminate. Dropping them can only over-match, which is the safe side.
     Classification and pricing must read the SAME form: when only the
     classifier stripped AWS global options, `aws --region us-east-1 ec2
     run-instances --instance-type p4d.24xlarge --count 8` classified as a
     launch, found no price, and passed silently at six figures a month."""
-    cmd = _mask_quoted_data(command)
-    cmd = cmd.replace('"', "").replace("'", "")
-    cmd = " ".join(cmd.split())  # normalize whitespace
-    cmd = _lower_programs(cmd)
-    cmd = _expand_aliases(cmd)
-    return _strip_aws_global_options(cmd)
+    return _readings(command).masked
+
+
+@functools.lru_cache(maxsize=16)
+def _shell_words(cmd: str) -> frozenset[str] | None:
+    """The words shlex reads in the command (comments dropped, operators
+    split off), or None when it cannot read it."""
+    import shlex
+    lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    try:
+        return frozenset(lex)
+    except ValueError:
+        return None
+
+
+_DOOR_RANK = {"one_way": 2, "two_way": 1}
+
+
+def _rank(hit: tuple[str, str] | None) -> int:
+    return 0 if hit is None else _DOOR_RANK.get(hit[0], 1)
+
+
+def _only_in_data(r: _Readings, hit: Any, judge: Any) -> bool:
+    """Is `hit` all inside one blanked quoted argument? Only when that text
+    gives the same result on its own and shlex agrees it is one word."""
+    if not r.data:
+        return False
+    alone = [t for t in r.data if judge(_strip_aws_global_options(_flatten(t))) == hit]
+    if not alone:
+        return False
+    words = _shell_words(r.shell)
+    return words is not None and any(t in words for t in alone)
+
+
+def _worst_reading(command: str, judge: Any) -> Any:
+    """judge() over every reading of the command: the most severe result.
+
+    A result that only the readings with nothing blanked give stands, unless
+    it is all inside quoted data (_only_in_data)."""
+    r = _readings(command)
+    best = judge(r.masked)
+    seen = {r.masked}
+    for form in (r.expanded, r.raw):
+        if form in seen:
+            continue
+        seen.add(form)
+        hit = judge(form)
+        if _rank(hit) > _rank(best) and not _only_in_data(r, hit, judge):
+            best = hit
+    return best
 
 
 # ── Linear-time matching ──────────────────────────────────────────────────────
@@ -458,6 +642,41 @@ class _TfCliArgsDestroy:
         return None
 
 
+class _S3MoveOutOfBucket:
+    """`aws s3 mv s3://bucket/prefix <dest> --recursive`: every object under the
+    prefix is copied and then deleted from the bucket. An upload (a local
+    source) is not a delete. Checked segment by segment."""
+
+    pattern = "s3-mv-recursive"
+    _mv = re.compile(rf"\baws\s+s3\s+mv{_END}")
+    _recursive = re.compile(rf"(?<!\S)--recursive{_END}")
+    # `aws s3 mv` flags that take no value; any other --flag consumes the next
+    # token, so a flag's value is not read as the source.
+    _BOOLEAN = frozenset({"--recursive", "--dryrun", "--quiet", "--follow-symlinks",
+                          "--no-follow-symlinks", "--no-guess-mime-type", "--only-show-errors",
+                          "--no-progress", "--ignore-glacier-warnings",
+                          "--force-glacier-transfer", "--validate-same-s3-paths"})
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        if self._mv.search(cmd) is None:
+            return None
+        for seg in re.split(r"[|;&]", cmd):
+            mv = self._mv.search(seg)
+            if mv is None or self._recursive.search(seg, mv.end()) is None:
+                continue
+            skip = False
+            for tok in seg[mv.end():].split():
+                if skip:
+                    skip = False
+                elif tok.startswith("-"):
+                    skip = "=" not in tok and tok not in self._BOOLEAN
+                else:
+                    if tok.lower().startswith("s3://"):
+                        return mv
+                    break
+        return None
+
+
 class _PythonBoto3Delete:
     """`python3 -c "import boto3; ...terminate_instances(...)"`: a one-liner
     that deletes through the SDK instead of the CLI. A heuristic, so it only
@@ -483,7 +702,9 @@ class _Base64ToShell:
 
     pattern = "base64-to-shell"
     _decode = re.compile(r"\bbase64 [^;&|]*?(?<!\S)(?:-[A-Za-z]*[dD][A-Za-z]*|--decode)(?!\S)")
-    _to_shell = re.compile(r"\| ?(?:sudo )?(?:\S*/)?(?:sh|bash|zsh|dash|ksh)(?!\S)")
+    # `(?:[^\s/|]*/)*`, not `(?:\S*/)?`: a run of `|||...` made every pipe in
+    # it rescan the rest of the run for a `/`, quadratic in its length.
+    _to_shell = re.compile(r"\| ?(?:sudo )?(?:[^\s/|]*/)*(?:sh|bash|zsh|dash|ksh)(?!\S)")
 
     def search(self, cmd: str) -> re.Match[str] | None:
         decode = self._decode.search(cmd)
@@ -508,7 +729,7 @@ _SPECIAL_RULES = {r.pattern: r for r in (
                   r"\s--(?:desired-capacity|min-size|max-size)(?![^\s=])"),
     _VerbWithFlag("eks-nodegroup-scaling", rf"\baws\s+eks\s+update-nodegroup-config{_END}",
                   r"", r"\s--scaling-config(?![^\s=])"),
-    _TfCliArgsDestroy(), _PythonBoto3Delete(), _Base64ToShell(),
+    _TfCliArgsDestroy(), _S3MoveOutOfBucket(), _PythonBoto3Delete(), _Base64ToShell(),
 )}
 
 
@@ -523,8 +744,12 @@ _TWO_WAY_RULES = _compile(_TWO_WAY_CLASSIFIERS)
 def classify_command(command: str) -> tuple[str, str] | None:
     """Classify a shell command as ("one_way"|"two_way", action_type), or None
     when it is not an infrastructure mutation nable cares about. Linear in the
-    length of the command (see _Rule)."""
-    cmd = _normalize(command)
+    length of the command (see _Rule). Every reading of the command is judged
+    and the most severe wins (_worst_reading)."""
+    return _worst_reading(command, _classify_normalized)
+
+
+def _classify_normalized(cmd: str) -> tuple[str, str] | None:
     for rule, action in _ONE_WAY_RULES:
         if rule.search(cmd):
             return ("one_way", action)
@@ -685,10 +910,16 @@ def _price_spot(cmd: str, **_: Any) -> dict[str, Any] | None:
 def _price_fleet(cmd: str, **_: Any) -> dict[str, Any] | None:
     """create-fleet with its capacity and ONE instance type on the command
     line. A fleet over several types launches whichever mix it can get, so
-    that gets no figure rather than a guessed one."""
+    that gets no figure rather than a guessed one. So does a capacity counted
+    in anything but instances: `TargetCapacityUnitType=vcpu` (or
+    memory-mib) with 384 is 384 vCPUs, not 384 instances, and a
+    WeightedCapacity makes each instance count for its weight."""
     types = set(_STRUCT_TYPE_RE.findall(cmd))
     cap = re.search(r"\bTotalTargetCapacity\s*[=:]\s*(\d+)", cmd)
     if len(types) != 1 or not cap:
+        return None
+    unit = re.search(r"\bTargetCapacityUnitType\s*[=:]\s*([\w-]+)", cmd)
+    if (unit and unit.group(1).lower() != "units") or re.search(r"\bWeightedCapacity\b", cmd):
         return None
     spot = re.search(r"\bDefaultTargetCapacityType\s*[=:]\s*spot\b", cmd)
     return _price_ec2(types.pop(), int(cap.group(1)), lead="fleet of ",
@@ -859,7 +1090,12 @@ def _price_az_vm(cmd: str, **_: Any) -> dict[str, Any] | None:
 
 
 _TF_APPLY_RE = re.compile(r"\b(terraform|tofu)\s+((?:-chdir=\S+\s+)?)apply\b")
-_CD_PREFIX_RE = re.compile(r"^cd\s+(\S+)\s*(?:&&|;)")
+# `cd DIR` or `pushd DIR` as a command of its own, anywhere before the apply:
+# `git pull && cd infra && terraform apply tfplan`, `(cd infra && ...)`,
+# `export X=1 && cd infra && ...`. Only a leading `cd` used to count, and the
+# saved-plan destroy check looked for the plan in the wrong directory.
+_CD_RE = re.compile(
+    r"(?:^|[;&|(])\s*(?:cd|pushd)(?:\s+-[A-Za-z@]+)*(?:\s+([^\s;&|()]+))?(?=\s*(?:$|[;&|()]))")
 # `terraform apply` flags that take their value as the NEXT token, so that
 # token is not mistaken for the plan file.
 _TF_VALUE_FLAGS = ("-var", "-var-file", "-target", "-replace", "-state",
@@ -868,13 +1104,36 @@ _TF_VALUE_FLAGS = ("-var", "-var-file", "-target", "-replace", "-state",
 # with no verdict at all. Reading a plan loads provider schemas, which is
 # usually one to three seconds; past five, no figure beats no guard.
 _PLAN_SHOW_TIMEOUT_S = 5.0
+_ARG_END_RE = re.compile(r"[;&|()<>]")
+
+
+def _cd_target(cmd: str, upto: int, cwd: str | None) -> tuple[Path, str | None]:
+    """Where a command at offset `upto` runs: `cwd` after every `cd` and
+    `pushd` before it, and those moves as written (None when there are none)."""
+    base = Path(cwd or os.getcwd())
+    moves: list[str] = []
+    for m in _CD_RE.finditer(cmd, 0, upto):
+        d = m.group(1)
+        if d is None or d == "~":
+            base, moves = Path.home(), ["~"]
+        elif d != "-":
+            base = base / Path(d).expanduser()
+            moves.append(d)
+    return base, (str(PurePath(*moves)) if moves else None)
 
 
 def _planfile_arg(cmd: str, verb_end: int) -> str | None:
     skip = False
     for tok in cmd[verb_end:].split():
-        if tok in _SHELL_BREAKS:
-            break
+        end = _ARG_END_RE.search(tok)
+        if end is not None:
+            # An operator or a redirection ends the arguments: `tfplan)`,
+            # `tfplan;`, `tfplan>log` name the plan; `2>&1` and `|` do not.
+            head = tok[:end.start()]
+            if head and not skip and not head.startswith("-") and not (
+                    end.group() in "<>" and head.isdigit()):
+                return head
+            return None
         if skip:
             skip = False
         elif tok.startswith("-"):
@@ -888,37 +1147,38 @@ def _planfile_arg(cmd: str, verb_end: int) -> str | None:
 _PLAN_CACHE: dict[tuple[str, float], dict[str, Any] | str] = {}
 
 
-def _plan_read(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any] | str] | None:
+def _plan_read(cmd: str, cwd: str | None, start: int = 0
+               ) -> tuple[str, str, dict[str, Any] | str] | None:
     """(tool, plan file as written, `show -json` document or the reason it
-    could not be read) for `terraform|tofu apply <planfile>`, or None when
-    there is no plan file to read (a plain apply, a file that is not there).
+    could not be read) for the first `terraform|tofu apply <planfile>` at or
+    after `start`, or None when that apply names no plan file.
+
+    A plan file named but not there is a reason too: the guard cannot see
+    what it would apply, so it asks.
 
     Read once per plan file per process: pricing, the destroy check and the
     unreadable check all need it, and the hook must not pay for `show` twice."""
     import shutil
     import subprocess
 
-    m = _TF_APPLY_RE.search(cmd)
+    m = _TF_APPLY_RE.search(cmd, start)
     if not m:
         return None
     tool = m.group(1)
     plan = _planfile_arg(cmd, m.end())
     if not plan:
         return None
-    base = Path(cwd or os.getcwd())
-    cd = _CD_PREFIX_RE.match(cmd)
-    if cd:
-        base = base / Path(cd.group(1)).expanduser()
+    base, _ = _cd_target(cmd, m.start(), cwd)
     chdir = re.search(r"-chdir=(\S+)", m.group(2))
     if chdir:
         base = base / Path(chdir.group(1)).expanduser()
-    plan_path = base / Path(plan).expanduser()
     try:
+        plan_path = base / Path(plan).expanduser()
         if not plan_path.is_file():
-            return None
+            return tool, plan, f"no such file in {base}"
         key = (str(plan_path.resolve()), plan_path.stat().st_mtime)
-    except OSError:
-        return None
+    except (OSError, RuntimeError) as exc:
+        return tool, plan, f"could not open it: {type(exc).__name__}"
     if key not in _PLAN_CACHE:
         name = (os.environ.get("TERRAFORM_BIN") or "terraform") if tool == "terraform" else "tofu"
         exe = shutil.which(name)
@@ -948,25 +1208,26 @@ def _plan_read(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any] | st
     return tool, plan, _PLAN_CACHE[key]
 
 
-def _read_saved_plan(cmd: str, cwd: str | None) -> tuple[str, str, dict[str, Any]] | None:
+def _read_saved_plan(cmd: str, cwd: str | None, start: int = 0
+                     ) -> tuple[str, str, dict[str, Any]] | None:
     """(tool, plan file as written, `show -json` document), or None when there
     is no plan file or it could not be read (see saved_plan_unreadable)."""
-    read = _plan_read(cmd, cwd)
+    read = _plan_read(cmd, cwd, start)
     if read is None or not isinstance(read[2], dict):
         return None
     return read[0], read[1], read[2]
 
 
 def saved_plan_unreadable(command: str, *, cwd: str | None = None) -> str | None:
-    """For `terraform apply <planfile>` whose plan file exists but could not be
+    """For `terraform apply <planfile>` whose plan file could not be found or
     read: "could not read saved plan X (reason)". None otherwise.
 
     The plan is the only place a destroy or a GPU fleet applied from a file
     shows up, so a plan the guard cannot read is a plan nobody has checked:
-    that asks, rather than passing silently because terraform was missing or
-    `show` ran past its time."""
+    that asks, rather than passing silently because terraform was missing,
+    `show` ran past its time or the plan was looked for in the wrong place."""
     try:
-        read = _plan_read(_normalize(command), cwd)
+        read = _plan_read(_segmented(command), cwd)
     except Exception:
         return None
     if read is None or isinstance(read[2], dict):
@@ -983,7 +1244,7 @@ def saved_plan_destroys(command: str, *, cwd: str | None = None) -> list[str]:
     counted: they are routine in ordinary applies, and asking on each one is
     the kind of noise that gets a guard uninstalled."""
     try:
-        read = _read_saved_plan(_normalize(command), cwd)
+        read = _read_saved_plan(_segmented(command), cwd)
         if read is None:
             return []
         out = []
@@ -996,11 +1257,13 @@ def saved_plan_destroys(command: str, *, cwd: str | None = None) -> list[str]:
         return []
 
 
-def _price_planfile(cmd: str, *, cwd: str | None = None, **_: Any) -> dict[str, Any] | None:
+def _price_planfile(cmd: str, *, cwd: str | None = None, whole: str | None = None,
+                    at: int = 0, **_: Any) -> dict[str, Any] | None:
     """`terraform apply plan.out` applies exactly the saved plan, so the plan
     can be priced before it runs, through the same estimator as `nable
-    estimate`."""
-    read = _read_saved_plan(cmd, cwd)
+    estimate`. `whole` and `at` are the full command and where this segment
+    starts in it, so a `cd` earlier in the command is followed."""
+    read = _read_saved_plan(cmd, cwd) if whole is None else _read_saved_plan(whole, cwd, at)
     if read is None:
         return None
     tool, plan, doc = read
@@ -1039,6 +1302,120 @@ _PRICERS: list[tuple[Any, Any]] = [
     (_TF_APPLY_RE, _price_planfile),
 ]
 
+# ── One command at a time ─────────────────────────────────────────────────────
+# `aws ec2 run-instances --instance-type t3.micro && aws ec2 run-instances
+# --instance-type p4d.24xlarge --count 8` is two launches. The pricers used to
+# read the whole line, find the first --instance-type and price the t3.micro;
+# so each shell command is priced on its own and the figures are added up.
+
+# The operators between shell commands in a normalized command.
+_COMMAND_BREAK_RE = re.compile(r"&&|\|\||\|&|[;&|]")
+_QUOTED_OPS = str.maketrans({";": " ", "&": " ", "|": " ", "\n": " "})
+
+
+def _price_rewrite(command: str, split_quoted: bool) -> str:
+    """The command with every unquoted newline made a `;`, so that it still
+    separates commands once whitespace is collapsed; and unless `split_quoted`,
+    the operators inside quotes spaced out, so `--query 'a | b'` stays in its
+    command. Both readings are priced (a `sh -c 'x; y'` wants its `;`)."""
+    def one(m: re.Match[str]) -> str:
+        tok = m.group(0)
+        if tok == "\n":
+            return " ; "
+        if not split_quoted and len(tok) > 1 and tok[0] in "'\"$":
+            return tok.translate(_QUOTED_OPS)
+        return tok
+    command = _unfold(command)
+    if "\n" not in command and "'" not in command and '"' not in command:
+        return command
+    return _SHELL_LEX_RE.sub(one, command)
+
+
+@functools.lru_cache(maxsize=16)
+def _segmented(command: str, split_quoted: bool = False, masked: bool = True) -> str:
+    """The normalized command with the breaks between its shell commands
+    intact (see _price_rewrite). `masked` picks the reading with quoted data
+    blanked (_readings)."""
+    r = _readings(_price_rewrite(command, split_quoted))
+    return r.masked if masked else r.expanded
+
+
+def _commands_in(form: str):
+    """(command, offset) for each shell command in a _segmented form."""
+    pos = 0
+    for m in _COMMAND_BREAK_RE.finditer(form):
+        yield form[pos:m.start()], pos
+        pos = m.end()
+    yield form[pos:], pos
+
+
+def _price_form(form: str, cwd: str | None) -> tuple[list[dict[str, Any]], int]:
+    """(figures, how many changes had none) for each command in `form`: the
+    first pricer whose command it is prices it, and a command it cannot price
+    does not stop the others."""
+    parts: list[dict[str, Any]] = []
+    unpriced = 0
+    for seg, at in _commands_in(form):
+        for pattern, pricer in _PRICERS:
+            if pattern.search(seg):
+                try:
+                    est = pricer(seg, cwd=cwd, whole=form, at=at)
+                except Exception:
+                    est = None         # a pricing bug must not cost the verdict
+                if est is None:
+                    unpriced += 1
+                else:
+                    parts.append(est)
+                break
+    return parts, unpriced
+
+
+def _added_up(parts: list[dict[str, Any]], unpriced: int) -> dict[str, Any] | None:
+    """One estimate for the whole command: a single figure as the pricer
+    gave it, several added up (only what adds cost counts toward the total)."""
+    if not parts:
+        return None
+    est = parts[0]
+    if len(parts) > 1:
+        monthly = [p["monthly_usd"] for p in parts
+                   if isinstance(p.get("monthly_usd"), (int, float)) and p["monthly_usd"] > 0]
+        one_off = [p["total_usd"] for p in parts
+                   if p.get("monthly_usd") is None and isinstance(p.get("total_usd"), (int, float))]
+        if monthly or one_off:
+            total = round(sum(monthly), 2) if monthly else None
+            said = ([f"~${total:,.0f}/mo"] if total is not None else []) + \
+                   ([f"${sum(one_off):,.0f} in one-off orders"] if one_off else [])
+            est = {"monthly_usd": total,
+                   "basis": "; ".join(dict.fromkeys(str(p.get("basis")) for p in parts)),
+                   "parts": parts,
+                   "line": ("; ".join(p["line"] for p in parts)
+                            + f"; {len(parts)} changes in this command, together "
+                            + " plus ".join(said))}
+            if one_off:
+                est["total_usd"] = round(sum(one_off), 2)
+    if unpriced:
+        est = {**est, "unpriced_changes": unpriced,
+               "line": (f"{est['line']} ({unpriced} more change"
+                        f"{'s' if unpriced != 1 else ''} in this command "
+                        f"{'have' if unpriced != 1 else 'has'} no figure)")}
+    return est
+
+
+def _size(est: dict[str, Any]) -> float:
+    return max(float(est.get("monthly_usd") or 0.0), 0.0) + float(est.get("total_usd") or 0.0)
+
+
+def _pricing_forms(command: str):
+    """The _segmented forms to price, in order of preference: with quoted data
+    blanked first, as written only when that finds nothing."""
+    seen: set[str] = set()
+    for masked in (True, False):
+        forms = [f for f in dict.fromkeys(_segmented(command, split, masked)
+                                          for split in (False, True)) if f not in seen]
+        seen.update(forms)
+        if forms:
+            yield forms
+
 
 def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> dict[str, Any] | None:
     """A local, list-price estimate for a shell command, or None.
@@ -1049,18 +1426,27 @@ def estimate_command_monthly_cost(command: str, *, cwd: str | None = None) -> di
     Returns {monthly_usd, basis, line, ...} where `line` is the sentence the
     human reads and `basis` says where the number came from. `monthly_usd` is
     None when the only honest figure is a one-off total (`total_usd`, e.g. a
-    Reserved Instance order ceiling). Anything unpriceable returns None: an
-    unknown type must degrade to the guard's existing behaviour, never to an
-    invented figure.
+    Reserved Instance order ceiling). Each shell command in it is priced on
+    its own and the figures added up ("parts" holds them); a command with no
+    figure is counted in "unpriced_changes" and does not stop the others.
+    Anything unpriceable returns None: an unknown type must degrade to the
+    guard's existing behaviour, never to an invented figure.
     """
-    cmd = _normalize(command)
-    for pattern, pricer in _PRICERS:
-        if pattern.search(cmd):
-            try:
-                return pricer(cmd, cwd=cwd)
-            except Exception:
-                return None            # a pricing bug must not cost the verdict
-    return None
+    try:
+        r = _readings(command)
+        if not any(p.search(f) for f in {r.masked, r.raw, r.expanded} for p, _ in _PRICERS):
+            return None
+        for forms in _pricing_forms(command):
+            best: dict[str, Any] | None = None
+            for form in forms:
+                est = _added_up(*_price_form(form, cwd))
+                if est is not None and (best is None or _size(est) > _size(best)):
+                    best = est
+            if best is not None:
+                return best
+        return None
+    except Exception:
+        return None                    # a pricing bug must not cost the verdict
 
 
 def _cost_line(est: dict[str, Any]) -> str:
@@ -1112,9 +1498,10 @@ def _stop_on_budget() -> bool:
 def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
     """Stop the agent when its own token spend is over the budget the user set.
 
-    This runs BEFORE command classification and applies to every tool call the
-    hook sees, not just infrastructure ones. "Stop the agent because it is
-    spending too much" means stop it, not stop it from touching Terraform.
+    This applies to every tool call the hook sees, not just infrastructure
+    ones. "Stop the agent because it is spending too much" means stop it, not
+    stop it from touching Terraform. The call is still judged on its own, and
+    the more severe of the two verdicts answers (_against_budget).
 
     Which calls that is, exactly: in Claude Code, the Bash tool and every MCP
     tool (the installed matcher is ^(Bash|mcp__.*)$), known to the guard or
@@ -1162,20 +1549,24 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
                 "action_type": "ai_budget",
                 "reason": (f"nable guard: your agent is close to its AI budget. {detail}. "
                            "Nothing is stopped; this note shows at most every "
-                           f"{_BUDGET_NOTE_EVERY_MIN} minutes. Raise it with `{raise_it}`."),
+                           f"{_BUDGET_NOTE_EVERY_MIN} minutes. The budget is yours to "
+                           f"raise, in your own terminal: `{raise_it}`."),
             }
+        # The remedy is addressed to the human: the reason reaches the agent
+        # too, and an agent that runs `nable ai-budget` itself is asked about
+        # it (_self_change).
         hard = _stop_on_budget()
         return {
             "decision": "deny" if hard else "ask",
             "action_type": "ai_budget",
             "reason": (
                 f"nable guard: your agent is over its AI budget. {detail}. "
-                + ("Stopped because FINOPS_GUARD_STOP_ON_BUDGET is on. "
-                   f"Raise it with `{raise_it}`, or unset that variable to "
-                   "downgrade this to a confirmation."
+                + ("Stopped because FINOPS_GUARD_STOP_ON_BUDGET is on. You can raise the "
+                   f"budget in your own terminal with `{raise_it}`, or unset that variable "
+                   "to downgrade this to a confirmation."
                    if hard else
-                   f"Confirm to continue, or raise it with `{raise_it}`. "
-                   "Set FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop.")
+                   "Confirm to continue, or raise the budget in your own terminal with "
+                   f"`{raise_it}`. Set FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop.")
             ),
         }
     except Exception:
@@ -1265,20 +1656,33 @@ _PRICER_SCOPE: dict[Any, tuple[str | None, str | None]] = {
 _BUDGETS_LISTED = 5
 
 
-def _change_scope(command: str) -> dict[str, str]:
+def _change_scope(command: str) -> dict[str, str | tuple[str, ...]]:
     """What the guard knows about where a change bills: provider and service
-    from the command, team and account from FINOPS_GUARD_TEAM and
-    FINOPS_GUARD_ACCOUNT (a command does not say which team it is for)."""
-    scope: dict[str, str] = {}
-    cmd = _normalize(command)
-    for pattern, pricer in _PRICERS:
-        if pattern.search(cmd):
-            provider, service = _PRICER_SCOPE.get(pricer, (None, None))
-            if provider:
-                scope["provider"] = provider
-            if service:
-                scope["service"] = service
+    from each shell command in it (a tuple when they differ), team and
+    account from FINOPS_GUARD_TEAM and FINOPS_GUARD_ACCOUNT (a command does
+    not say which team it is for).
+
+    A budget scoped to one of several services a command bills to is checked
+    against the whole command's figure: more than lands in it, which is the
+    safe side."""
+    scope: dict[str, str | tuple[str, ...]] = {}
+    found: dict[str, dict[str, None]] = {"provider": {}, "service": {}}
+    for forms in _pricing_forms(command):
+        for form in forms:
+            for seg, _at in _commands_in(form):
+                for pattern, pricer in _PRICERS:
+                    if pattern.search(seg):
+                        provider, service = _PRICER_SCOPE.get(pricer, (None, None))
+                        if provider:
+                            found["provider"][provider] = None
+                        if service:
+                            found["service"][service] = None
+                        break
+        if found["provider"] or found["service"]:
             break
+    for key, vals in found.items():
+        if vals:
+            scope[key] = next(iter(vals)) if len(vals) == 1 else tuple(vals)
     for env, key in (("FINOPS_GUARD_TEAM", "team"), ("FINOPS_GUARD_ACCOUNT", "account")):
         val = os.getenv(env, "").strip()
         if val:
@@ -1286,13 +1690,15 @@ def _change_scope(command: str) -> dict[str, str]:
     return scope
 
 
-def _budget_applies(b: dict[str, Any], scope: dict[str, str]) -> bool:
+def _budget_applies(b: dict[str, Any], scope: dict[str, str | tuple[str, ...]]) -> bool:
     kind = str(b.get("scope_type") or "total")
     if kind == "total":
         return True
-    want = str(b.get("scope_value") or "")
+    want = str(b.get("scope_value") or "").lower()
     have = scope.get(kind)
-    return have is not None and have.lower() == want.lower()
+    if have is None:
+        return False
+    return any(h.lower() == want for h in ((have,) if isinstance(have, str) else have))
 
 
 def _budget_scope_words(b: dict[str, Any]) -> str:
@@ -1435,7 +1841,7 @@ def budget_status() -> dict[str, Any]:
                   account ones when FINOPS_GUARD_TEAM / FINOPS_GUARD_ACCOUNT
                   name them
     not_enforced  team and account budgets nothing places a change in
-    state         "fresh", "stale" or "absent" (budget.summary.freshness)
+    state         "fresh", "stale", "no_data" or "absent" (budget.summary.freshness)
     on_breach     "ask" or "deny", and on_breach_source, the setting behind it
     """
     from .budget import summary as _summary
@@ -1446,7 +1852,11 @@ def budget_status() -> dict[str, Any]:
            "account": os.getenv("FINOPS_GUARD_ACCOUNT", "").strip()}
     enforced: list[dict[str, Any]] = []
     not_enforced: list[dict[str, Any]] = []
-    for b in _summary.current_budgets(doc) if doc else []:
+    # With no cost data for the period every budget reads $0, and
+    # current_budgets leaves those rows out; list them anyway so the doctor
+    # names the budgets it cannot check rather than saying none is set.
+    readable_only = fresh["state"] != "no_data"
+    for b in _summary.current_budgets(doc, readable_only=readable_only) if doc else []:
         row = {"name": str(b.get("name")), "scope": _budget_scope_words(b),
                "spent": b.get("spent"), "limit": b.get("limit"), "pct_used": b.get("pct_used")}
         kind = str(b.get("scope_type") or "total")
@@ -1510,6 +1920,9 @@ def _budget_skip_note(lens: dict[str, Any] | None) -> str | None:
     if lens["state"] == "absent":
         return ("Budget not checked: there is no spend figure on this machine yet; "
                 "`nable budget refresh` computes one.")
+    if lens["state"] == "no_data":
+        return ("Budget not checked: nable has no cost data for this budget period yet; "
+                "sync cost data, then `nable budget refresh`.")
     return None
 
 
@@ -1649,7 +2062,7 @@ def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None =
     cost = f"{_cost_line(est)}. " if est else ""
     if destroys:
         shown = ", ".join(destroys[:3]) + (f" and {len(destroys) - 3} more" if len(destroys) > 3 else "")
-        cost = (f"the saved plan destroys {len(destroys)} "
+        cost = (f"The saved plan destroys {len(destroys)} "
                 f"resource{'s' if len(destroys) != 1 else ''} ({shown}). ") + cost
     gate = evaluate_action_gate(action_type,
                                 monthly_delta_usd=(est or {}).get("monthly_usd") or 0.0,
@@ -1698,6 +2111,7 @@ _ONE_WAY_PHRASES: list[tuple[str, str]] = [
     ("helm", "would uninstall a Helm release"),
     ("s3", "would delete stored data"),
     ("gsutil", "would delete stored data"),
+    ("storage\\s+rm", "would delete stored data"),
     ("schedule-key-deletion", "would schedule a KMS key for deletion"),
     ("terraform", "would destroy infrastructure"),
     ("tofu", "would destroy infrastructure"),
@@ -1722,22 +2136,30 @@ _SHOWN_COMMAND_MAX = 100
 def _one_way_sentence(command: str, action_type: str, *, cwd: str | None) -> tuple[str, str]:
     """("This would destroy infrastructure (`terraform destroy` in infra/)",
     "It cannot be undone; confirm to proceed.") for a one-way command."""
-    norm = _normalize(command)
+    r = _readings(command)
+    norm = r.masked
     what = _ACTION_PHRASES.get(action_type)
     if what is None:
         what = "would delete cloud resources"
-        rule = next((r for r, _ in _ONE_WAY_RULES if r.search(norm)), None)
+        # The reading the classifier took it from: blanked, expanded, as written.
+        rule = next((rule for form in (r.masked, r.expanded, r.raw)
+                     for rule, _ in _ONE_WAY_RULES if rule.search(form)), None)
         if rule is not None:
             what = next((phrase for frag, phrase in _ONE_WAY_PHRASES
                          if frag in rule.pattern), what)
+        elif _TF_APPLY_RE.search(norm):
+            what = "would destroy infrastructure"      # a saved plan that deletes
     shown = " ".join(command.split())
     if len(shown) > _SHOWN_COMMAND_MAX:
         shown = shown[:_SHOWN_COMMAND_MAX - 3] + "..."
     where = ""
-    if _DIR_TOOLS_RE.search(norm):
-        cd = _CD_PREFIX_RE.match(norm)
+    tool = _DIR_TOOLS_RE.search(norm)
+    if tool:
+        seg = _segmented(command)
+        at = _DIR_TOOLS_RE.search(seg)
+        _, moved = _cd_target(seg, at.start() if at else len(seg), cwd)
         chdir = re.search(r"-chdir=(\S+)", norm)
-        d = (chdir.group(1) if chdir else cd.group(1) if cd
+        d = (chdir.group(1) if chdir else moved if moved
              else Path(cwd).name if cwd else "")
         where = f" in {d.rstrip('/')}/" if d else ""
     if action_type == "purchase_commitment":
@@ -1837,6 +2259,8 @@ _LOOP_VALUE_MAX = 80
 # the label): an agent that edits the template between runs is iterating, not
 # looping, and asking it to stop would be noise.
 _LOOP_FILE_ARGS = ("template-file", "template-body", "f", "filename", "values", "var-file")
+_LOOP_FILES_MAX = 16
+_LOOP_DIR_ENTRIES_MAX = 256
 
 
 def loop_key(command: str, *, cwd: str | None = None) -> tuple[str, str] | None:
@@ -1873,10 +2297,18 @@ def loop_key(command: str, *, cwd: str | None = None) -> tuple[str, str] | None:
     base = Path(cwd or os.getcwd())
     stamp = [str(base)] if _TF_APPLY_RE.search(cmd) or "terragrunt" in cmd else []
     if stamp:
-        stamp.append(_dir_stamp(base, cmd))
+        stamp.append(_dir_stamp(command, cwd))
+    # Each file once, and at most _LOOP_FILES_MAX of them: `-f <big dir>`
+    # repeated a thousand times used to stat every entry of the directory a
+    # thousand times, seconds of hook time from a 29 KB command.
+    files: dict[str, None] = {}
     for name in _LOOP_FILE_ARGS:
         for val in re.findall(rf"(?<!\S)--?{re.escape(name)}(?:=|\s+)(?!-)(\S+)", cmd):
-            stamp.append(_file_stamp(base, val))
+            files[val] = None
+    for val in list(files)[:_LOOP_FILES_MAX]:
+        stamp.append(_file_stamp(base, val))
+    if len(files) > _LOOP_FILES_MAX:
+        stamp.append(f"+{len(files) - _LOOP_FILES_MAX} more files")
     digest = hashlib.sha256("\0".join([label, *stamp]).encode()).hexdigest()[:16]
     return digest, label
 
@@ -1889,30 +2321,45 @@ def _short(val: str) -> str:
     return "sha256:" + hashlib.sha256(val.encode()).hexdigest()[:12]
 
 
+def _newest_entry(d: Path, suffixes: tuple[str, ...] | None = None) -> int:
+    """The newest modification time among the directory's first
+    _LOOP_DIR_ENTRIES_MAX entries (those with one of `suffixes`, when given),
+    and without `suffixes` the directory's own, which moves when a file is
+    added or removed. A directory of a hundred thousand files is not listed
+    in full inside a hook. With `suffixes` the directory's own time is left
+    out: `terraform apply` writes its state beside the .tf files."""
+    import itertools
+    newest = 0 if suffixes else d.stat().st_mtime_ns
+    with os.scandir(d) as it:
+        for e in itertools.islice(it, _LOOP_DIR_ENTRIES_MAX):
+            with contextlib.suppress(OSError):
+                if (suffixes is None or e.name.endswith(suffixes)) and e.is_file():
+                    newest = max(newest, e.stat().st_mtime_ns)
+    return newest
+
+
 def _file_stamp(base: Path, val: str) -> str:
     raw = val[len("file://"):] if val.startswith("file://") else val
     try:
         p = base / Path(raw).expanduser()
         if p.is_dir():
-            return f"{p}:{max((c.stat().st_mtime_ns for c in p.iterdir() if c.is_file()), default=0)}"
+            return f"{p}:{_newest_entry(p)}"
         return f"{p}:{p.stat().st_mtime_ns}"
     except (OSError, ValueError):
         return val
 
 
-def _dir_stamp(base: Path, cmd: str) -> str:
-    """Newest *.tf / *.tfvars / *.hcl in the directory a Terraform apply runs
-    in (after a leading `cd` or -chdir=)."""
-    cd = _CD_PREFIX_RE.match(cmd)
-    if cd:
-        base = base / Path(cd.group(1)).expanduser()
-    chdir = re.search(r"-chdir=(\S+)", cmd)
+def _dir_stamp(command: str, cwd: str | None) -> str:
+    """Newest *.tf / *.tfvars / *.hcl / *.json in the directory a Terraform
+    apply runs in (after any `cd` before it, and -chdir=)."""
+    seg = _segmented(command)
+    tf = _TF_APPLY_RE.search(seg) or re.search(r"\bterragrunt\s", seg)
+    base, _ = _cd_target(seg, tf.start() if tf else len(seg), cwd)
+    chdir = re.search(r"-chdir=(\S+)", seg)
     if chdir:
         base = base / Path(chdir.group(1)).expanduser()
     try:
-        newest = max((p.stat().st_mtime_ns for p in base.iterdir()
-                      if p.suffix in (".tf", ".tfvars", ".hcl", ".json") and p.is_file()),
-                     default=0)
+        newest = _newest_entry(base, (".tf", ".tfvars", ".hcl", ".json"))
     except OSError:
         newest = 0
     return f"{base}:{newest}"
@@ -2010,30 +2457,40 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
     measured against the session making the call.
     """
     try:
-        # The AI budget stop comes first and is not conditioned on the command:
-        # an agent burning through its budget should be stopped whatever it is
-        # doing.
+        # The AI budget stop is not conditioned on the command: an agent
+        # burning through its budget should be stopped whatever it is doing.
+        # The command is still judged, so that a policy deny or a cloud budget
+        # hard stop is not softened to the budget's ask, and so the ledger
+        # holds what the command was.
         budget_hit = check_budget_gate(session_id)
         note = budget_hit if budget_hit and budget_hit["decision"] == "warn" else None
-        if budget_hit is not None and note is None:
-            v = {**budget_hit, "harness": harness}
-        elif len(command) > MAX_JUDGED_CHARS:
-            v = {**_oversize_verdict(command), "harness": harness}
+        stop = budget_hit if note is None else None
+        v: dict[str, Any] | None
+        if len(command) > MAX_JUDGED_CHARS:
+            v = _oversize_verdict(command)
         else:
-            hit = classify_command(command)
-            if hit is None:
-                # Not an infra command: nothing to record, but a budget note
-                # still shows (unrecorded; it is not a decision about this call).
-                return {**note, "harness": harness} if note else None
-            v = {**_verdict_for(command, hit, cwd=cwd), "harness": harness}
-        history_error = v.pop("_history_error", None)
+            v = _self_change(command)
+            if v is None:
+                hit = classify_command(command)
+                v = _verdict_for(command, hit, cwd=cwd) if hit is not None else None
+        if v is None and stop is None:
+            # Not an infra command: nothing to record, but a budget note
+            # still shows (unrecorded; it is not a decision about this call).
+            return {**note, "harness": harness} if note else None
+        history_error = v.pop("_history_error", None) if v is not None else None
+        answer, recorded = _against_budget(v, stop)
         if record:
             if history_error is not None:
                 _record_fail_open(history_error, harness=harness, tool=tool, command=command,
                                   check="history", session_id=session_id)
-            _record(v, tool=tool, command=command, session_id=session_id)
-        v = _with_budget_note(v, note)
-        return None if v["decision"] == "allow" else v
+            if stop is not None:
+                _record({**stop, "harness": harness}, tool=tool, command=command,
+                        session_id=session_id)
+            if recorded is not None:
+                _record({**recorded, "harness": harness}, tool=tool, command=command,
+                        session_id=session_id)
+        answer = _with_budget_note({**answer, "harness": harness}, note)
+        return None if answer["decision"] == "allow" else answer
     except Exception as exc:
         if record:
             _record_fail_open(exc, harness=harness, tool=tool, command=command,
@@ -2042,6 +2499,42 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
 
 
 _SEVERITY = {"deny": 3, "ask": 2, "warn": 1, "allow": 0}
+
+
+def _with_reason_of(primary: dict[str, Any], other: dict[str, Any]) -> dict[str, Any]:
+    """`primary` with `other`'s reason after its own."""
+    if not other.get("reason"):
+        return {**primary}
+    if not primary.get("reason"):
+        return {**primary, "reason": other["reason"]}
+    return {**primary, "reason": f"{primary['reason']} "
+                                 f"{other['reason'].removeprefix('nable guard: ')}"}
+
+
+def _against_budget(v: dict[str, Any] | None, stop: dict[str, Any] | None
+                    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """(the answer, the verdict on the call as the ledger records it) for the
+    verdict on the call and an AI budget stop, either possibly None.
+
+    The more severe decision answers, and both reasons are given. On a tie
+    the budget's verdict answers, except for an agent changing a budget or
+    the guard itself, which is the change's verdict carrying the budget's
+    reason. The ledger line for the call carries the decision that was
+    answered: an allow the budget turned into an ask was not let through."""
+    if stop is None or v is None:
+        return (v or stop or {}), v
+    if v.get("action_type") in _CHANGE_TYPES:
+        worst = max(v["decision"], stop["decision"], key=_SEVERITY.__getitem__)
+        answer = {**_with_reason_of(v, stop), "decision": worst}
+    elif _SEVERITY[v["decision"]] > _SEVERITY[stop["decision"]]:
+        answer = _with_reason_of(v, stop)
+    else:
+        answer = _with_reason_of(stop, v)
+    recorded = {**v, "decision": answer["decision"]}
+    if answer.get("reason"):
+        recorded["reason"] = answer["reason"]
+    return answer, recorded
+
 
 # The longest command the guard judges. Every check is linear in the command,
 # but linear in ten megabytes still runs past the harness's hook timeout, and a
@@ -2078,15 +2571,16 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     gate_command, with `mcp_tool` added; a batch call returns its most severe
     verdict.
 
-    The AI budget stop comes first and applies to every MCP tool, known or
-    not: an agent over its budget must not keep spending through a tool the
-    guard does not otherwise judge, and a budget stop on one is recorded
-    under the tool's name. Under budget, an unknown MCP tool is judged only on
-    the command lines in its arguments (`{"command": "terraform destroy"}` to
-    a shell server, guard_mcp.scan_arguments); with none it returns None and
-    is not recorded: the guard never asks about a tool it does not
-    understand. One with more command lines than the guard judges, or one
-    nested too deep, is asked about instead of passed. Recording and
+    The AI budget stop applies to every MCP tool, known or not: an agent over
+    its budget must not keep spending through a tool the guard does not
+    otherwise judge, and a budget stop on one is recorded under the tool's
+    name. A known tool is judged as well, and the more severe verdict answers
+    (_against_budget). An unknown MCP tool is judged only on the command
+    lines in its arguments (`{"command": "terraform destroy"}` to a shell
+    server, guard_mcp.scan_arguments); with none, and under budget, it
+    returns None and is not recorded: the guard never asks about a tool it
+    does not understand. One with more command lines than the guard judges,
+    or one nested too deep, is asked about instead of passed. Recording and
     fail-open as gate_command.
     """
     summary = tool_name
@@ -2095,30 +2589,20 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
 
         budget_hit = check_budget_gate(session_id)
         note = budget_hit if budget_hit and budget_hit["decision"] == "warn" else None
-        if note is not None:
-            budget_hit = None
+        stop = budget_hit if note is None else None
         change = _budget_change(tool_name, arguments)
         actions = [] if change is not None else translate(tool_name, arguments)
-        if not actions and budget_hit is None and change is None:
+        if not actions and stop is None and change is None:
             return {**note, "harness": harness, "mcp_tool": tool_name} if note else None
         if actions:
             summary = actions[0].command
 
+        worst: dict[str, Any] | None = None
         if change is not None:
             summary = change.pop("summary")
-            worst: dict[str, Any] | None = change
-            if budget_hit is not None:
-                # Over budget and raising it: the budget's own verdict (a deny
-                # under the hard stop) with both facts in one line.
-                worst = {**change,
-                         "decision": "deny" if budget_hit["decision"] == "deny" else "ask",
-                         "reason": f"{change['reason']} "
-                                   f"{budget_hit['reason'].removeprefix('nable guard: ')}"}
-        elif budget_hit is not None:
-            worst = {**budget_hit}
+            worst = change
         else:
             context = argument_text(arguments)
-            worst = None
             for act in actions:
                 if len(act.command) > MAX_JUDGED_CHARS:
                     worst, summary = _oversize_verdict(act.command), act.command
@@ -2126,26 +2610,33 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                 if act.unchecked:
                     v = _unchecked_verdict(tool_name, act.unchecked)
                 else:
-                    hit = act.hit or classify_command(act.command)
-                    if hit is None:
-                        continue
-                    v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
-                                     via=(f"{tool_name} would {act.summary}" if act.summary
-                                          else f"{tool_name} amounts to `{act.command}`"))
-                    history_error = v.pop("_history_error", None)
-                    if history_error is not None and record:
-                        _record_fail_open(history_error, harness=harness, tool=tool_name,
-                                          command=act.command, check="history",
-                                          session_id=session_id)
+                    v = _self_change(act.command)
+                    if v is None:
+                        hit = act.hit or classify_command(act.command)
+                        if hit is None:
+                            continue
+                        v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
+                                         via=(f"{tool_name} would {act.summary}" if act.summary
+                                              else f"{tool_name} amounts to `{act.command}`"))
+                history_error = v.pop("_history_error", None)
+                if history_error is not None and record:
+                    _record_fail_open(history_error, harness=harness, tool=tool_name,
+                                      command=act.command, check="history",
+                                      session_id=session_id)
                 if worst is None or _SEVERITY[v["decision"]] > _SEVERITY[worst["decision"]]:
                     worst, summary = v, act.command
-            if worst is None:
-                return {**note, "harness": harness, "mcp_tool": tool_name} if note else None
-        worst = {**worst, "harness": harness, "mcp_tool": tool_name}
+        if worst is None and stop is None:
+            return {**note, "harness": harness, "mcp_tool": tool_name} if note else None
+        answer, recorded = _against_budget(worst, stop)
         if record:
-            _record(worst, tool=tool_name, command=summary, session_id=session_id)
-        worst = _with_budget_note(worst, note)
-        return None if worst["decision"] == "allow" else worst
+            if stop is not None:
+                _record({**stop, "harness": harness, "mcp_tool": tool_name}, tool=tool_name,
+                        command=summary, session_id=session_id)
+            if recorded is not None:
+                _record({**recorded, "harness": harness, "mcp_tool": tool_name},
+                        tool=tool_name, command=summary, session_id=session_id)
+        answer = _with_budget_note({**answer, "harness": harness, "mcp_tool": tool_name}, note)
+        return None if answer["decision"] == "allow" else answer
     except Exception as exc:
         if record:
             _record_fail_open(exc, harness=harness, tool=tool_name, command=summary,
@@ -2161,14 +2652,30 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
 _BUDGET_TOOL = "set_ai_budget"
 _BUDGET_CAP_ARGS = ("mode", "plan_cost", "spend_cap", "monthly_tokens", "session_cap",
                     "every_session")
+# The nable MCP tools that change the cloud budgets a priced change is checked
+# against (budget_lens): raising or deleting one lifts the budget stop just as
+# surely. Any call asks.
+_CLOUD_BUDGET_TOOLS = ("set_budget", "delete_budget", "sync_budgets_from_yaml")
+_CHANGE_TYPES = ("ai_budget_change", "budget_change", "guard_change")
+_SHOWN_VALUE_MAX = 80
 
 
 def _budget_change(tool_name: str, arguments: Any) -> dict[str, Any] | None:
     """An ask for a set_ai_budget call (under any server prefix) that changes
-    a cap, or None."""
-    if not (tool_name == _BUDGET_TOOL or tool_name.endswith("__" + _BUDGET_TOOL)):
-        return None
+    a cap, or for any set_budget, delete_budget or sync_budgets_from_yaml
+    call; None otherwise."""
+    name = tool_name.rsplit("__", 1)[-1]
     args = arguments if isinstance(arguments, dict) else {}
+    if name in _CLOUD_BUDGET_TOOLS:
+        shown = ", ".join(f"{k}={str(v)[:_SHOWN_VALUE_MAX]}" for k, v in args.items()
+                          if v is not None)
+        summary = f"{name} {shown}".rstrip()
+        return {"decision": "ask", "action_type": "budget_change", "door": None,
+                "reason": ("nable guard: the agent is changing the cloud budgets the guard "
+                           f"checks changes against ({summary}); a human should confirm."),
+                "summary": summary}
+    if name != _BUDGET_TOOL:
+        return None
     changed = {k: args[k] for k in _BUDGET_CAP_ARGS
                if args.get(k) is not None and args.get(k) is not False}
     if not changed:
@@ -2178,6 +2685,52 @@ def _budget_change(tool_name: str, arguments: Any) -> dict[str, Any] | None:
             "reason": (f"nable guard: the agent is changing its own AI budget ({shown}); "
                        "a human should confirm."),
             "summary": f"{_BUDGET_TOOL} {shown}"}
+
+
+# The same changes made from the shell: `nable ai-budget --spend-cap ...`,
+# `nable budget ci-gate --budget-file ...` (it syncs the file's budgets
+# first), and taking the guard out (`nable guard uninstall`, `nable
+# uninstall`). An agent stopped by a budget could otherwise lift it, or remove
+# the hook, in one command. `budget status` and `refresh` only read.
+_NABLE = r"(?<![\w-])(?:nable|finops)\s"
+_SELF_RULES: dict[str, tuple[Any, str, str]] = {r.pattern: (r, action, what) for r, action, what in (
+    (_VerbWithFlag("ai-budget-change", _NABLE, rf"(?<!\S)ai-budget{_END}",
+                   r"\s--(?:plan-cost|spend-cap|tokens|session-cap|reset)(?![\w-])",
+                   flag_anywhere=True),
+     "ai_budget_change", "changing its own AI budget"),
+    (_VerbWithFlag("cloud-budget-sync", _NABLE, rf"(?<!\S)budget{_END}",
+                   r"\s--budget-file(?![\w-])", flag_anywhere=True),
+     "budget_change", "changing the cloud budgets the guard checks changes against"),
+    (_VerbWithFlag("guard-uninstall", _NABLE, rf"(?<!\S)guard{_END}", rf"\suninstall{_END}"),
+     "guard_change", "removing the guard's own hook"),
+    (_VerbWithFlag("nable-uninstall", _NABLE, rf"(?<!\S)uninstall{_END}", r""),
+     "guard_change", "uninstalling nable, the guard's hook with it"),
+)}
+
+
+def _self_change_normalized(cmd: str) -> tuple[str, str] | None:
+    if "nable" not in cmd and "finops" not in cmd:
+        return None
+    for name, (rule, _action, _what) in _SELF_RULES.items():
+        if rule.search(cmd):
+            return ("self", name)
+    return None
+
+
+def _self_change(command: str) -> dict[str, Any] | None:
+    """An ask for a shell command that changes a budget or removes the guard,
+    or None. Every reading of the command counts (_worst_reading), so a
+    commit message that mentions one does not ask and an alias does not
+    hide one."""
+    hit = _worst_reading(command, _self_change_normalized)
+    if hit is None:
+        return None
+    _rule, action_type, what = _SELF_RULES[hit[1]]
+    shown = " ".join(command.split())
+    if len(shown) > _SHOWN_COMMAND_MAX:
+        shown = shown[:_SHOWN_COMMAND_MAX - 3] + "..."
+    return {"decision": "ask", "action_type": action_type, "door": None,
+            "reason": f"nable guard: the agent is {what} (`{shown}`); a human should confirm."}
 
 
 # ── Decision ledger ───────────────────────────────────────────────────────────
