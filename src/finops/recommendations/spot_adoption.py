@@ -102,14 +102,16 @@ def _batch_get_cpu_variance(
     cw_client: Any,
     instance_ids: list[str],
     days: int,
-) -> dict[str, float]:
+) -> dict[str, float | None]:
     """
     Fetch hourly Average CPUUtilization for many instances, one
     GetMetricStatistics call per instance run concurrently, inside CloudWatch's
     free request tier (GetMetricData only where the host opted in, see
     analyzers.cloudwatch). Returns {instance_id: stddev}. The spread is of the
-    whole series, never of part of one. A series that could not be read, or
-    read empty, counts as no variance, as before.
+    whole series, never of part of one. A series that read empty counts as no
+    variance. A series that could not be read comes back None: zero variance
+    is the "stable load" half of a RECOMMENDED verdict, so a failed read must
+    not supply it.
     """
     if not instance_ids:
         return {}
@@ -125,9 +127,12 @@ def _batch_get_cpu_variance(
         for iid in instance_ids
     ], start, end)
 
-    out: dict[str, float] = {}
+    out: dict[str, float | None] = {}
     for iid in instance_ids:
-        vals = series.get(iid) or []
+        vals = series.get(iid)
+        if vals is None:
+            out[iid] = None
+            continue
         out[iid] = statistics.stdev(vals) if len(vals) >= 2 else 0.0
     return out
 
@@ -189,12 +194,25 @@ def _get_asg_members(autoscaling_client: Any, regions_hint: list[str]) -> set[st
     return members
 
 
+class SpotResults(list):
+    """recommend_spot_adoption's list of per-instance results, plus the ids of
+    the instances skipped because their CPU read failed. A list subclass so
+    every caller that treats the result as a plain list keeps working."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.cpu_unread_instances: list[str] = []
+
+
 def _analyze_region(
     ec2_client: Any,
     cw_client: Any,
     asg_members: set[str],
     region: str,
+    unread: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """Per-instance results for one region. Instances whose CPU series could
+    not be read are left out and their ids appended to `unread`."""
     # Collect all on-demand instances first
     on_demand_instances: list[dict[str, Any]] = []
     try:
@@ -232,9 +250,15 @@ def _analyze_region(
             or ""
         )
 
+        cpu_var = cpu_variance_by_id.get(iid)
+        if cpu_var is None:
+            # The read failed: no evidence the load is stable, so no verdict.
+            if unread is not None:
+                unread.append(iid)
+            continue
+
         in_asg       = iid in asg_members
         is_stateless = _is_stateless(inst)
-        cpu_var      = cpu_variance_by_id.get(iid, 0.0)
         freq         = _get_interruption_freq(itype)
         discount     = _get_spot_discount(itype)
 
@@ -289,7 +313,8 @@ def recommend_spot_adoption(
         except Exception:
             regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
-    all_results: list[dict[str, Any]] = []
+    all_results = SpotResults()
+    unread: list[str] = []
 
     def _one_region(region: str) -> list[dict[str, Any]]:
         try:
@@ -298,7 +323,7 @@ def recommend_spot_adoption(
             asg = boto3.client("autoscaling",  region_name=region)
 
             asg_members = _get_asg_members(asg, [region])
-            return _analyze_region(ec2, cw, asg_members, region)
+            return _analyze_region(ec2, cw, asg_members, region, unread)
         except Exception as exc:
             log.warning("Region %s failed: %s", region, exc)
             return []
@@ -311,6 +336,9 @@ def recommend_spot_adoption(
             all_results.extend(region_results)
 
     all_results.sort(key=lambda r: r["monthly_savings"], reverse=True)
+    all_results.cpu_unread_instances = sorted(unread)
+    if unread:
+        log.warning("Spot adoption: %d instance(s) not assessed, CPU read failed", len(unread))
 
     # Classify the finding by the STRENGTH OF EVIDENCE behind it. We can MEASURE the
     # on-demand instance and its type, but the saving rests on the customer adopting
@@ -350,7 +378,10 @@ def recommend_spot_adoption(
                 "Env tags correctly indicate a stateless or non-prod instance.",
                 f"Spot discount of about {top['savings_pct']:.0f}% holds (public average; "
                 "actual price moves with capacity).",
-            ],
+            ] + ([
+                f"{len(unread)} on-demand instance(s) were not assessed: their CloudWatch "
+                "CPU read failed, so they are not in this list or its total."
+            ] if unread else []),
             rough_monthly=round(rough, 2),
             confirm_steps=[
                 "Confirm the workload is interruption-tolerant: stateless, checkpointed, "
@@ -384,6 +415,7 @@ def recommend_spot_adoption(
                 "monthly_spot_estimate": top["monthly_spot_estimate"],
                 "candidate_count": n,
                 "candidates_sampled": [r["instance_id"] for r in actionable[:8]],
+                "instances_cpu_unread": len(unread),
             },
         )
         top["finding"] = finding.to_dict()

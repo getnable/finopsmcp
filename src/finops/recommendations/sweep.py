@@ -35,11 +35,17 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..aws_prices import PUBLIC_IPV4_PER_MONTH
+
 log = logging.getLogger(__name__)
 
 # How long the whole sweep may take before we return what we have. One stuck
 # region or throttled API must not hang a user's request for minutes.
 DEFAULT_DEADLINE_S = 90
+
+# What the sweep asks cleanup.idle to scan. elastic_ip is left out because the
+# ipv4 scanner reports the same unattached addresses as one aggregate.
+IDLE_RESOURCE_TYPES = ["ebs_volume", "snapshot", "stopped_ec2", "load_balancer"]
 
 
 @dataclass
@@ -106,7 +112,10 @@ def build_specs(aws: Any, regions: list[str] | None) -> list[tuple[str, Any, dic
         ("textract",       _textract,                   dict()),
         ("bedrock",        _bedrock,                    dict()),
         ("commitments",    _commitments,                dict()),
-        ("idle_resources", _idle_resources,             dict(regions=regions)),
+        # Every type but elastic_ip: unattached Elastic IPs are already in the
+        # ipv4 aggregate above, and scanning them here too counted each one
+        # twice in the sweep total.
+        ("idle_resources", _idle_resources,             dict(regions=regions, resource_types=IDLE_RESOURCE_TYPES)),
         ("idle_rds",       _scan_all_regions_rds_idle,  dict(regions=regions)),
     ]
 
@@ -126,8 +135,15 @@ def normalise(name, data) -> list[dict]:
         elif name == "ipv4":
             waste = data.get("total_monthly_waste", 0) or 0
             if waste > 0:
+                # The total covers unattached EIPs AND EIPs held by stopped
+                # instances, so the title counts both: "Release 2" over a
+                # figure for 5 addresses read as $9.13 per IP.
                 n_unattached = len(data.get("unattached_eips", []))
-                out.append({"title": f"Release {n_unattached} unattached Elastic IP(s)", "monthly_savings": waste, "category": "Network", "detail": f"${waste:.2f}/mo, $3.65 per IP"})
+                n_stopped = len(data.get("stopped_instance_eips", []))
+                parts = [f"{n_unattached} unattached"] if n_unattached else []
+                if n_stopped:
+                    parts.append(f"{n_stopped} on stopped instances")
+                out.append({"title": f"Release {n_unattached + n_stopped} idle Elastic IP(s) ({', '.join(parts)})", "monthly_savings": waste, "category": "Network", "detail": f"${waste:.2f}/mo, ${PUBLIC_IPV4_PER_MONTH:.2f} per IP"})
         elif name == "lambda_pc" and isinstance(data, list):
             for r in data:
                 s = r.get("wasted_monthly_cost", 0) or 0

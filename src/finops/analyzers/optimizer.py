@@ -523,19 +523,26 @@ def _dedup_findings(findings: list[dict]) -> list[dict]:
     Deduplicate findings so a resource is never counted twice.
 
     Two levels:
-      1. Exact dup: same (resource_id, waste_type) -> keep higher savings.
-      2. Same-resource cross-source dup: when one resource is flagged by both a
-         heuristic and Compute Optimizer for the same intent (e.g. idle_ec2_low_cpu
+      1. Exact dup: same (region, resource_id, waste_type) -> keep higher savings.
+      2. Same-resource cross-source dup: when one resource (one id in one
+         region) is flagged by both a heuristic and Compute Optimizer for the
+         same intent (e.g. idle_ec2_low_cpu
          AND compute_optimizer_overprovisioned_ec2), collapse to ONE finding,
          preferring the Compute Optimizer source (it weighs CPU + memory + network
          + disk), else the higher-savings one. Without this the audit total was
          inflated by double-counting the same instance.
     """
-    # Level 1: exact (resource_id, waste_type)
+    # Level 1: exact (region, resource_id, waste_type). The region is part of
+    # the key because a resource id is only unique inside its region: a
+    # DynamoDB table or an RDS instance called "orders" in us-east-1 and one in
+    # eu-west-1 are two resources, and keying on the name alone dropped the
+    # cheaper one from the total. The separator keeps ("ab", "c") and ("a",
+    # "bc") apart.
     by_exact: dict[str, dict] = {}
     for finding in findings:
         key = hashlib.sha256(
-            f"{finding.get('resource_id','')}{finding.get('waste_type','')}".encode()
+            f"{finding.get('region') or ''}|{finding.get('resource_id','')}|"
+            f"{finding.get('waste_type','')}".encode()
         ).hexdigest()[:16]
         existing = by_exact.get(key)
         if existing is None or _savings_or_zero(finding) > _savings_or_zero(existing):
@@ -549,7 +556,7 @@ def _dedup_findings(findings: list[dict]) -> list[dict]:
         if family is None:
             result.append(finding)
             continue
-        fam_key = f"{finding.get('resource_id','')}|{family}"
+        fam_key = f"{finding.get('region') or ''}|{finding.get('resource_id','')}|{family}"
         current = family_winner.get(fam_key)
         if current is None:
             family_winner[fam_key] = finding

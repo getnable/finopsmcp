@@ -1,9 +1,17 @@
 """
-Thin Python mirror of vscode-extension/src/prices.ts.
+Python counterpart of vscode-extension/src/prices.ts.
 
 Used by the GitHub App diff analyser and any server-side code that needs
-the same pricing logic as the VS Code extension — without importing the
+the same pricing logic as the VS Code extension, without importing the
 heavier terraform_estimate module.
+
+A counterpart, not an exact mirror. The rates come from aws_prices here and
+are typed into prices.ts there, and the TypeScript tables carry fewer instance
+types; tests/test_instance_price_tables.py pins every rate the TypeScript copy
+does carry (EC2, RDS for MySQL and PostgreSQL, load balancers, EBS per GB and
+the EBS IOPS and throughput rates) to aws_prices. The shapes also differ at the
+edges: for example, for a resource with no instance type or class set,
+prices.ts returns null where this returns a zero-dollar entry.
 """
 from __future__ import annotations
 from typing import Any
@@ -11,6 +19,7 @@ from typing import Any
 from .aws_prices import EC2_HOURLY as _EC2_HOURLY
 from .aws_prices import (
     CLB_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY, ebs_volume_monthly, lb_hourly,
+    rds_hourly,
 )
 from .aws_prices import RDS_HOURLY as _RDS_HOURLY
 from .connectors.terraform_estimate import (
@@ -25,7 +34,8 @@ def price_resource_py(
 ) -> dict[str, Any] | None:
     """
     Return {"monthly": float, "detail": str, "note": str|None} or None.
-    Mirrors priceResource() in prices.ts exactly.
+    Follows priceResource() in prices.ts; see the module docstring for where
+    the two differ.
     """
     def _f(v: str | None, default: float = 0.0) -> float:
         try:
@@ -53,7 +63,15 @@ def price_resource_py(
 
     if t in ("aws_db_instance", "aws_rds_cluster_instance"):
         cls = attrs.get("instance_class", "")
-        h   = _RDS_HOURLY.get(cls, 0.0)
+        # A cluster instance is Aurora, which has no table. Without an engine
+        # the MySQL table is the documented default, as in prices.ts rdsHourly.
+        engine = (attrs.get("engine")
+                  or ("aurora" if t == "aws_rds_cluster_instance" else "")).lower()
+        rate = rds_hourly(cls, engine) if engine else _RDS_HOURLY.get(cls)
+        if rate is None:
+            return {"monthly": 0.0, "detail": f"{cls}{f' on {engine}' if engine else ''}: not priced",
+                    "note": "Aurora, SQL Server, Oracle and Db2 are not in the price table"}
+        h   = rate
         maz = _b(attrs.get("multi_az"))
         if maz: h *= 2
         note = "Multi-AZ doubles cost — wasteful in dev/staging" if maz else None

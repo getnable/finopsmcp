@@ -184,33 +184,59 @@ def _scan_old_snapshots(
     except Exception as e:
         log.warning("Could not list AMIs: %s", e)
 
-    results = []
+    old: list[dict] = []
     paginator = ec2_client.get_paginator("describe_snapshots")
     for page in paginator.paginate(OwnerIds=["self"]):
         for snap in page["Snapshots"]:
-            snap_id = snap["SnapshotId"]
-            if snap_id in ami_snapshot_ids:
+            if snap["SnapshotId"] in ami_snapshot_ids:
                 continue
-            tags = snap.get("Tags", [])
-            start_time = snap["StartTime"]
-            idle_days = _days_since(start_time)
-            if idle_days < min_idle_days:
+            if _days_since(snap["StartTime"]) < min_idle_days:
                 continue
-            size_gb = snap.get("VolumeSize", 0)
+            old.append(snap)
+
+    # VolumeSize is the SOURCE volume's size, the same figure on every snapshot
+    # of that volume, while each snapshot after the first stores only the blocks
+    # changed since the one before. Charging every snapshot the full size billed
+    # a volume with thirty snapshots thirty times over. Only the oldest of each
+    # volume's snapshots is priced, at the full size (an upper bound); the rest
+    # are listed at $0 with unpriced set, so no total counts them as whole copies.
+    from ..analyzers.waste import full_size_snapshot_ids
+    priced_ids = full_size_snapshot_ids(old)
+
+    results = []
+    for snap in old:
+        snap_id = snap["SnapshotId"]
+        tags = snap.get("Tags", [])
+        start_time = snap["StartTime"]
+        idle_days = _days_since(start_time)
+        size_gb = snap.get("VolumeSize", 0)
+        volume_id = snap.get("VolumeId") or ""
+        if snap_id in priced_ids:
             monthly = round(size_gb * _SNAPSHOT_PER_GB_MONTH, 2)
-            results.append(IdleResource(
-                resource_type="snapshot",
-                resource_id=snap_id,
-                region=region,
-                account_id=account_id,
-                name=_tag_name(tags) or snap.get("Description", ""),
-                idle_since=start_time.date().isoformat(),
-                idle_days=idle_days,
-                monthly_cost_usd=monthly,
-                reason=f"{size_gb} GB snapshot, {idle_days} days old, no AMI dependency",
-                protected=_is_protected(tags),
-                metadata={"size_gb": size_gb, "description": snap.get("Description", "")},
-            ))
+            basis = "upper_bound_full_volume_size"
+            reason = (f"{size_gb} GB snapshot, {idle_days} days old, no AMI dependency; "
+                      f"priced at the full volume size, an upper bound")
+        else:
+            monthly = 0.0
+            basis = "incremental_unpriced"
+            reason = (f"incremental snapshot of {volume_id} ({size_gb} GB volume), "
+                      f"{idle_days} days old, no AMI dependency; stores only changed blocks, "
+                      f"not priced")
+        results.append(IdleResource(
+            resource_type="snapshot",
+            resource_id=snap_id,
+            region=region,
+            account_id=account_id,
+            name=_tag_name(tags) or snap.get("Description", ""),
+            idle_since=start_time.date().isoformat(),
+            idle_days=idle_days,
+            monthly_cost_usd=monthly,
+            reason=reason,
+            protected=_is_protected(tags),
+            metadata={"size_gb": size_gb, "description": snap.get("Description", ""),
+                      "volume_id": volume_id, "price_basis": basis,
+                      "unpriced": basis == "incremental_unpriced"},
+        ))
     return results
 
 
@@ -471,6 +497,14 @@ def idle_resources_summary(resources: list[IdleResource]) -> dict[str, Any]:
             "run_full_cost_audit for the full sweep)."
         ),
     }
+    unpriced = sum(1 for r in resources if (r.metadata or {}).get("unpriced"))
+    if unpriced:
+        out["unpriced_count"] = unpriced
+        out["unpriced_note"] = (
+            f"{unpriced} incremental snapshot(s) are listed at $0: each stores only the "
+            f"blocks changed since the snapshot before it, a size EC2 does not report. The "
+            f"oldest snapshot of each volume is priced at the full volume size, an upper "
+            f"bound, so total_monthly_waste_usd is an estimate, not a floor or a ceiling.")
     if omitted:
         out["resources_truncated"] = True
         out["resources_omitted"] = omitted

@@ -202,7 +202,7 @@ def _idle_rds(db_class: str):
     rds = MagicMock()
     rds.get_paginator.return_value.paginate.return_value = [{"DBInstances": [{
         "DBInstanceIdentifier": "db-1", "DBInstanceClass": db_class,
-        "Engine": "postgres", "DBInstanceStatus": "available", "MultiAZ": False,
+        "Engine": "mysql", "DBInstanceStatus": "available", "MultiAZ": False,
     }]}]
     cw = MagicMock()
     now = datetime.now(timezone.utc)
@@ -476,7 +476,10 @@ def _ts_table(name: str) -> dict[str, float]:
 
 
 @pytest.mark.skipif(not _PRICES_TS.exists(), reason="VS Code extension source not present")
-@pytest.mark.parametrize("ts_name,table", [("EC2_HOURLY", EC2_HOURLY), ("RDS_HOURLY", RDS_HOURLY)])
+@pytest.mark.parametrize("ts_name,table", [
+    ("EC2_HOURLY", EC2_HOURLY), ("RDS_HOURLY", RDS_HOURLY),
+    ("RDS_HOURLY_POSTGRES", aws_prices.RDS_HOURLY_POSTGRES),
+])
 def test_vscode_extension_prices_match_aws_prices(ts_name, table):
     # TypeScript cannot import the Python table, so it is the one copy that has
     # to stay a copy. It may carry fewer types; every one it carries must agree.
@@ -585,6 +588,68 @@ def test_every_ebs_table_is_the_shared_one():
     assert estimator._EBS_MONTHLY_PER_GB is aws_prices.EBS_PER_GB_MONTH
     if _PRICES_TS.exists():
         assert _ts_table("EBS_PER_GB") == aws_prices.EBS_PER_GB_MONTH
+
+
+def _ts_const(name: str) -> float:
+    text = _PRICES_TS.read_text(encoding="utf-8")
+    m = re.search(rf"^const {name} = ([0-9.]+);", text, re.MULTILINE)
+    assert m, f"const {name} not found in {_PRICES_TS}"
+    return float(m.group(1))
+
+
+@pytest.mark.skipif(not _PRICES_TS.exists(), reason="VS Code extension source not present")
+def test_vscode_ebs_iops_and_throughput_rates_match_aws_prices():
+    # ebsMonthly carried these as bare literals that no test read, so the
+    # per-GB table was pinned and the IOPS half of the same bill was not.
+    tiers = aws_prices.EBS_IO2_IOPS_TIERS
+    assert {
+        "EBS_GP3_FREE_IOPS": _ts_const("EBS_GP3_FREE_IOPS"),
+        "EBS_GP3_PER_IOPS_MONTH": _ts_const("EBS_GP3_PER_IOPS_MONTH"),
+        "EBS_GP3_FREE_MIBPS": _ts_const("EBS_GP3_FREE_MIBPS"),
+        "EBS_GP3_PER_MIBPS_MONTH": _ts_const("EBS_GP3_PER_MIBPS_MONTH"),
+        "EBS_IO1_PER_IOPS_MONTH": _ts_const("EBS_IO1_PER_IOPS_MONTH"),
+        "io2 tiers": (
+            (_ts_const("EBS_IO2_TIER1_IOPS"), _ts_const("EBS_IO2_TIER1_PER_IOPS_MONTH")),
+            (_ts_const("EBS_IO2_TIER2_IOPS"), _ts_const("EBS_IO2_TIER2_PER_IOPS_MONTH")),
+            (float("inf"), _ts_const("EBS_IO2_TIER3_PER_IOPS_MONTH")),
+        ),
+    } == {
+        "EBS_GP3_FREE_IOPS": aws_prices.EBS_GP3_FREE_IOPS,
+        "EBS_GP3_PER_IOPS_MONTH": aws_prices.EBS_GP3_PER_IOPS_MONTH,
+        "EBS_GP3_FREE_MIBPS": aws_prices.EBS_GP3_FREE_MIBPS,
+        "EBS_GP3_PER_MIBPS_MONTH": aws_prices.EBS_GP3_PER_MIBPS_MONTH,
+        "EBS_IO1_PER_IOPS_MONTH": aws_prices.EBS_IO1_PER_IOPS_MONTH,
+        "io2 tiers": tiers,
+    }
+    # ...and ebsMonthly uses the names, not a second set of literals.
+    body = re.search(r"function ebsMonthly\(.*?\n\}", _PRICES_TS.read_text(encoding="utf-8"),
+                     re.DOTALL).group(0)
+    for literal in ("0.005", "0.04", "0.065", "0.0455", "0.03185", "3000", "125",
+                    "32000", "64000"):
+        assert not re.search(rf"(?<![\w.]){re.escape(literal)}(?![\w.])", body), literal
+
+
+@pytest.mark.skipif(not _PRICES_TS.exists(), reason="VS Code extension source not present")
+def test_vscode_lowercases_the_volume_type_like_python():
+    # aws_prices.ebs_volume_monthly lowercases; prices.ts compared "GP3" to
+    # "gp3" and priced it as an unknown type at the gp2 rate.
+    assert aws_prices.ebs_volume_monthly("GP3", 500) == aws_prices.ebs_volume_monthly("gp3", 500)
+    text = _PRICES_TS.read_text(encoding="utf-8")
+    body = re.search(r"function ebsMonthly\(.*?\n\}", text, re.DOTALL).group(0)
+    assert "toLowerCase()" in body
+    assert 'const volType = (attrs["type"] || "gp2").toLowerCase();' in text
+
+
+@pytest.mark.skipif(not _PRICES_TS.exists(), reason="VS Code extension source not present")
+def test_vscode_prices_rds_by_engine_like_python():
+    # rdsHourly mirrors aws_prices.rds_hourly: MySQL/MariaDB and no engine read
+    # RDS_HOURLY, postgres its own table, anything else is not priced.
+    text = _PRICES_TS.read_text(encoding="utf-8")
+    body = re.search(r"export function rdsHourly\(.*?\n\}", text, re.DOTALL).group(0)
+    assert 'e === "postgres") return RDS_HOURLY_POSTGRES[instanceClass]' in body
+    assert 'e === "" || e === "mysql" || e === "mariadb") return RDS_HOURLY[instanceClass]' in body
+    assert body.rstrip("}").rstrip().endswith("return undefined;")
+    assert "rdsHourly(cls, engine)" in text
 
 
 def test_unattached_volume_priced_by_type_and_not_double_counted():

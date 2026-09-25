@@ -67,14 +67,16 @@ def _monthly_cost_estimate(instance_type: str) -> float:
 def _batch_get_hourly_cpu_max(
     cw_client: Any,
     instance_ids: list[str],
-) -> dict[str, list[float]]:
+) -> dict[str, list[float] | None]:
     """
     Fetch per-hour Maximum CPUUtilization for the last _LOOKBACK_DAYS days for
     many instances, one GetMetricStatistics call per instance run concurrently,
     inside CloudWatch's free request tier (GetMetricData only where the host
     opted in, see analyzers.cloudwatch). Returns {instance_id: [cpu_values]}
-    oldest first. A series that could not be read comes back empty, which the
-    caller counts as "no data".
+    oldest first. A series that read empty comes back [], which the caller
+    counts as "no data". A series that could not be read (throttled, denied)
+    comes back None and the caller skips the instance: a failed read is not a
+    quiet week, and must not become the nights-and-weekends idle assumption.
     """
     if not instance_ids:
         return {}
@@ -89,7 +91,7 @@ def _batch_get_hourly_cpu_max(
         MetricQuery(iid, "AWS/EC2", "CPUUtilization", (("InstanceId", iid),), "Maximum", 3600)
         for iid in instance_ids
     ], start, end)
-    return {iid: series.get(iid) or [] for iid in instance_ids}
+    return {iid: series.get(iid) for iid in instance_ids}
 
 
 def _idle_hours(cpu_samples: list[float]) -> int:
@@ -155,11 +157,13 @@ async def identify_nonprod_resources(
         except Exception:
             regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
-    def _scan_region(region: str) -> tuple[list[dict], int]:
+    def _scan_region(region: str) -> tuple[list[dict], int, int]:
         # Returns (schedulable instances in this region, count whose idle estimate
-        # fell back to the no-CloudWatch worst case, which weakens the evidence).
+        # fell back to the no-CloudWatch worst case, which weakens the evidence,
+        # count skipped because their CPU read failed).
         region_schedulable: list[dict] = []
         region_assumed = 0
+        region_unread = 0
         try:
             ec2 = boto3.client("ec2", region_name=region)
             cw = boto3.client("cloudwatch", region_name=region)
@@ -197,7 +201,7 @@ async def identify_nonprod_resources(
                         })
 
             if not region_instances:
-                return region_schedulable, region_assumed
+                return region_schedulable, region_assumed, region_unread
 
             # One concurrent CloudWatch read for every instance in this region
             instance_ids = [r["instance_id"] for r in region_instances]
@@ -206,7 +210,12 @@ async def identify_nonprod_resources(
             for inst_info in region_instances:
                 iid = inst_info["instance_id"]
                 itype = inst_info["instance_type"]
-                cpu_samples = cpu_by_instance.get(iid, [])
+                cpu_samples = cpu_by_instance.get(iid)
+                if cpu_samples is None:
+                    # The read failed. Assuming the worst-case idle share here
+                    # would recommend stopping a machine nobody looked at.
+                    region_unread += 1
+                    continue
                 total_samples = len(cpu_samples)
                 if total_samples == 0:
                     # No CloudWatch data: assume worst-case 70% idle (nights + weekends)
@@ -244,14 +253,15 @@ async def identify_nonprod_resources(
 
         except Exception as e:
             log.warning("Non-prod scan failed for region %s: %s", region, e)
-        return region_schedulable, region_assumed
+        return region_schedulable, region_assumed, region_unread
 
     # Each region does an EC2 describe plus its CloudWatch reads; run them
     # concurrently so the scan costs the slowest region, not the sum of all regions.
     import asyncio
     per_region = await asyncio.gather(*[asyncio.to_thread(_scan_region, r) for r in regions])
-    schedulable: list[dict] = [inst for sub, _ in per_region for inst in sub]
-    assumed_idle_count = sum(cnt for _, cnt in per_region)
+    schedulable: list[dict] = [inst for sub, _, _ in per_region for inst in sub]
+    assumed_idle_count = sum(cnt for _, cnt, _ in per_region)
+    unread_count = sum(cnt for _, _, cnt in per_region)
 
     schedulable.sort(key=lambda x: x["potential_monthly_savings"], reverse=True)
     total_waste = round(sum(r["potential_monthly_savings"] for r in schedulable), 2)
@@ -276,6 +286,10 @@ async def identify_nonprod_resources(
             _assumptions.append(
                 f"{assumed_idle_count} instance(s) had no CloudWatch CPU data, so idle "
                 "time was assumed at the nights-plus-weekends worst case, not measured.")
+        if unread_count > 0:
+            _assumptions.append(
+                f"{unread_count} non-prod instance(s) were not assessed: their CloudWatch "
+                "CPU read failed, so they are not in this list or its total.")
         finding = Finding(
             source="nonprod_scheduler",
             title="Non-prod instances may be schedulable to business hours",
@@ -316,6 +330,7 @@ async def identify_nonprod_resources(
             metadata={
                 "instances_flagged": len(schedulable),
                 "instances_with_assumed_idle": assumed_idle_count,
+                "instances_cpu_unread": unread_count,
                 "top_instance": top["instance_id"],
                 "top_instance_type": top["instance_type"],
             },
@@ -325,5 +340,8 @@ async def identify_nonprod_resources(
         "schedulable_instances": schedulable,
         "total_monthly_waste": total_waste,
         "total_instances": len(schedulable),
+        # Counted even when nothing was flagged: zero schedulable instances
+        # out of a scan whose reads failed is not a clean result.
+        "instances_cpu_unread": unread_count,
         "finding": finding.to_dict() if finding else None,
     }

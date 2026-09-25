@@ -26,8 +26,14 @@ from typing import Any
 from ..aws_prices import (
     EBS_PER_GB_MONTH,
     EBS_SNAPSHOT_PER_GB_MONTH,
+    EC2_MONTHLY,
+    HOURS_PER_MONTH,
+    NAT_GATEWAY_PER_GB,
+    NAT_GATEWAY_PER_MONTH,
     PUBLIC_IPV4_PER_MONTH,
     ebs_volume_monthly,
+    lb_hourly,
+    rds_hourly,
 )
 from .cloudwatch import (
     MetricQuery,
@@ -41,8 +47,8 @@ log = logging.getLogger(__name__)
 # ── Pricing constants (on-demand approximations) ──────────────────────────────
 
 _EIP_MONTHLY = PUBLIC_IPV4_PER_MONTH  # $0.005/hr for every public IPv4 address
-_NAT_GW_BASE_MONTHLY = 32.85          # NAT GW fixed cost / month ($0.045/hr * 730hr)
-_NAT_GW_DATA_PER_GB = 0.045           # per GB processed
+_NAT_GW_BASE_MONTHLY = NAT_GATEWAY_PER_MONTH   # NAT GW fixed cost / month ($0.045/hr * 730hr)
+_NAT_GW_DATA_PER_GB = NAT_GATEWAY_PER_GB       # per GB processed
 _EBS_GP2_PER_GB_MONTH = EBS_PER_GB_MONTH["gp2"]
 _EBS_GP3_PER_GB_MONTH = EBS_PER_GB_MONTH["gp3"]
 _EBS_GP2_TO_GP3_SAVINGS_PCT = 0.20    # 20% cheaper
@@ -78,6 +84,16 @@ def _get_account_id(sts_client: Any | None) -> str | None:
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _created_after(created: Any, start: datetime) -> bool:
+    """Whether a resource's creation time falls after the lookback start. An
+    absent or unreadable time is not after: the resource is assessed."""
+    if not isinstance(created, datetime):
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return created > start
 
 
 # ── Reads that failed inside a check ──────────────────────────────────────────
@@ -247,11 +263,56 @@ def check_ebs_volumes(ec2_client: Any, region: str = "unknown") -> list[dict]:
 
 # ── EBS snapshots ─────────────────────────────────────────────────────────────
 
+# A snapshot copied from another snapshot, or from another account's, carries
+# this placeholder instead of its source volume, so it shares a chain with
+# nothing and is priced on its own.
+_NO_SOURCE_VOLUME = frozenset({"", "vol-ffffffff"})
+
+
+def full_size_snapshot_ids(snapshots: Any) -> set[str]:
+    """The snapshots to price at their source volume's full size: the oldest
+    of each volume's snapshots, plus every snapshot with no source volume.
+
+    EBS snapshots of one volume form an incremental chain. The first stores
+    the blocks written (at most the volume size); each later one stores only
+    the blocks changed since the one before. EC2's VolumeSize is the source
+    volume's size for every snapshot in the chain, so charging each snapshot
+    that figure multiplies one volume's size by the number of snapshots.
+    """
+    oldest: dict[str, tuple[Any, str]] = {}
+    standalone: set[str] = set()
+    for snap in snapshots:
+        snap_id = snap["SnapshotId"]
+        volume_id = snap.get("VolumeId") or ""
+        if volume_id in _NO_SOURCE_VOLUME:
+            standalone.add(snap_id)
+            continue
+        started = snap.get("StartTime")
+        if started is not None and getattr(started, "tzinfo", None) is None and hasattr(started, "replace"):
+            started = started.replace(tzinfo=timezone.utc)
+        current = oldest.get(volume_id)
+        if current is None or (started is not None and (current[0] is None or started < current[0])):
+            oldest[volume_id] = (started, snap_id)
+    return standalone | {snap_id for _, snap_id in oldest.values()}
+
+
 def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_days: int = 30) -> list[dict]:
     """
     Detect snapshots older than `older_than_days` owned by this account
     that have no associated AMI (orphaned) or no lifecycle policy.
     EBS snapshot storage is $0.05/GB-month.
+
+    Snapshots are incremental, and EC2 reports only the SOURCE volume's size,
+    not what a snapshot stores. Pricing every snapshot at that size charged a
+    volume with thirty daily snapshots thirty times its size. So only the
+    oldest flagged snapshot of each volume is priced, at the full volume size,
+    which is an upper bound on what it stores (price_basis
+    "upper_bound_full_volume_size"). The volume's later snapshots hold only
+    the blocks changed since the one before, a size nothing here can read:
+    they are reported unpriced (None, "unpriced": True, price_basis
+    "incremental_unpriced") and counted, never summed as if they were whole
+    copies. A snapshot with no source volume (a copy, VolumeId vol-ffffffff)
+    has no chain to share and is priced on its own at its full size.
     """
     _SNAPSHOT_STORAGE_PER_GB_MONTH = EBS_SNAPSHOT_PER_GB_MONTH
     findings = CheckFindings()
@@ -298,6 +359,7 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
         ami_read_error = exc
     unassessed = 0
 
+    eligible: list[tuple[dict, datetime]] = []
     for page in pages:
         for snap in page.get("Snapshots", []):
             snap_id = snap["SnapshotId"]
@@ -318,31 +380,58 @@ def check_ebs_snapshots(ec2_client: Any, region: str = "unknown", older_than_day
                 unassessed += 1
                 continue
 
-            size_gb = snap.get("VolumeSize", 0) or 0
-            monthly_cost = size_gb * _SNAPSHOT_STORAGE_PER_GB_MONTH
-            age_days = (_now_utc() - start_time).days
-            description = snap.get("Description", "")
-            name_tag = next(
-                (t["Value"] for t in snap.get("Tags", []) if t["Key"] == "Name"), ""
-            )
+            eligible.append((snap, start_time))
 
-            findings.append({
-                "resource_id": snap_id,
-                "resource_type": "EBS Snapshot",
-                "waste_type": "old_unmanaged_snapshot",
-                "estimated_monthly_savings": round(monthly_cost, 2),
-                "detail": (
-                    f"{size_gb} GB snapshot is {age_days} days old with no AMI association. "
-                    f"Description: '{description or 'none'}'. "
-                    f"Name: {name_tag or 'untagged'}. "
-                    f"Consider a Data Lifecycle Manager policy to auto-expire old snapshots."
-                ),
-                "severity": _severity_from_savings(monthly_cost),
-                "region": region,
-                "account_id": account_id,
-                "size_gb": size_gb,
-                "age_days": age_days,
-            })
+    priced_ids = full_size_snapshot_ids(snap for snap, _ in eligible)
+
+    for snap, start_time in eligible:
+        snap_id = snap["SnapshotId"]
+        size_gb = snap.get("VolumeSize", 0) or 0
+        volume_id = snap.get("VolumeId") or ""
+        age_days = (_now_utc() - start_time).days
+        description = snap.get("Description", "")
+        name_tag = next(
+            (t["Value"] for t in snap.get("Tags", []) if t["Key"] == "Name"), ""
+        )
+
+        if snap_id in priced_ids:
+            monthly_cost = size_gb * _SNAPSHOT_STORAGE_PER_GB_MONTH
+            savings: float | None = round(monthly_cost, 2)
+            severity = _severity_from_savings(monthly_cost)
+            price_basis = "upper_bound_full_volume_size"
+            cost_txt = (f"Priced at the full {size_gb} GB source volume size "
+                        f"(~${monthly_cost:.2f}/mo), an upper bound: a snapshot stores "
+                        f"only the blocks written, and EC2 does not report that size.")
+        else:
+            savings = None
+            severity = "unknown"
+            price_basis = "incremental_unpriced"
+            cost_txt = (f"Not priced: an incremental snapshot of {volume_id}, storing only "
+                        f"the blocks changed since the one before it, a size EC2 does not "
+                        f"report. The oldest old snapshot of {volume_id} carries the "
+                        f"volume's upper-bound figure.")
+
+        findings.append({
+            "resource_id": snap_id,
+            "resource_type": "EBS Snapshot",
+            "waste_type": "old_unmanaged_snapshot",
+            "estimated_monthly_savings": savings,
+            "unpriced": savings is None,
+            "price_basis": price_basis,
+            "detail": (
+                f"Snapshot of a {size_gb} GB volume, {age_days} days old with no AMI "
+                f"association. {cost_txt} "
+                f"Description: '{description or 'none'}'. "
+                f"Name: {name_tag or 'untagged'}. "
+                f"Consider a Data Lifecycle Manager policy to auto-expire old snapshots."
+            ),
+            "severity": severity,
+            "region": region,
+            "account_id": account_id,
+            "size_gb": size_gb,
+            "volume_id": volume_id,
+            "age_days": age_days,
+        })
 
     if ami_read_error is not None:
         findings.note_failure(
@@ -423,7 +512,11 @@ def check_nat_gateways(
     start = now - timedelta(days=lookback_days)
     period_seconds = 86400  # daily
 
-    nats = [nat for page in pages for nat in page.get("NatGateways", [])]
+    # A gateway created inside the window has not had the whole window to carry
+    # traffic, and its average understates a busy one. Skip it, the way
+    # check_idle_ec2 skips an instance launched inside its lookback.
+    nats = [nat for page in pages for nat in page.get("NatGateways", [])
+            if not _created_after(nat.get("CreateTime"), start)]
 
     # BytesOutToDestination (egress through NAT GW), one batched read for all
     failed: dict = {}
@@ -775,6 +868,9 @@ def check_s3_storage_class(
     3. For write-once / read-rarely patterns (very low GETs), recommend STANDARD-IA
        instead ($0.0125/GB-mo, no monitoring fee, retrieval fee applies).
     4. If object count is unavailable, skip rather than give a bad recommendation.
+    5. Access frequency comes from GetRequests, which S3 publishes only for a
+       bucket with request metrics enabled under the filter id "AllRequests".
+       A bucket with no GetRequests datapoints is skipped, never read as idle.
 
     STANDARD:           $0.023/GB-mo
     STANDARD-IA:        $0.0125/GB-mo + $0.01/GB retrieval
@@ -841,15 +937,21 @@ def check_s3_storage_class(
     gets = _read(list(size_gb_by_bucket), "GetRequests", ("FilterId", "AllRequests"), "Sum")
     for bucket_name in size_gb_by_bucket:
         req_datapoints = gets.get(bucket_name)
-        if req_datapoints is None:
-            # S3 request metrics require request metrics to be enabled on the bucket
-            avg_daily_gets = None
-        else:
-            total_gets = sum(req_datapoints)
-            avg_daily_gets = total_gets / lookback_days if lookback_days else 0
+        if not req_datapoints:
+            # None is a read that failed. An EMPTY series is not zero requests:
+            # GetRequests is a request metric, published only for a bucket with
+            # request metrics enabled under a filter, and read here under the
+            # filter id "AllRequests". A bucket without that configuration (or
+            # with it under another id) answers with no datapoints however hot
+            # it is, and counting that as 0 GETs/day recommended STANDARD_IA
+            # for a busy bucket, whose retrieval fees would then exceed the
+            # saving. Either way the access pattern was not read: skip.
+            continue
+        total_gets = sum(req_datapoints)
+        avg_daily_gets = total_gets / lookback_days if lookback_days else 0
 
-        # Only flag confirmed low-access buckets — skip if we can't verify
-        is_low_access = avg_daily_gets is not None and avg_daily_gets < 100
+        # Only flag confirmed low-access buckets
+        is_low_access = avg_daily_gets < 100
         if not is_low_access:
             continue
         daily_gets_by_bucket[bucket_name] = avg_daily_gets
@@ -1072,32 +1174,9 @@ def _next_lambda_memory_size(target_mb: int) -> int:
 
 # ── Idle EC2 instances ────────────────────────────────────────────────────────
 
-# vCPU per instance-size suffix. Used to size idle-EC2 savings. The old parser
-# did int(inst_type.split(".")[1][0]) which threw on "m5.large" (int("l")) and
-# silently fell back to 2 vCPU for everything, making savings noise.
-_SIZE_VCPU: dict[str, int] = {
-    "nano": 1, "micro": 1, "small": 1, "medium": 1, "large": 2,
-    "xlarge": 4, "2xlarge": 8, "3xlarge": 12, "4xlarge": 16, "6xlarge": 24,
-    "8xlarge": 32, "9xlarge": 36, "10xlarge": 40, "12xlarge": 48, "16xlarge": 64,
-    "18xlarge": 72, "24xlarge": 96, "32xlarge": 128, "48xlarge": 192,
-    # 'metal' is intentionally omitted: metal vCPU counts vary widely by family
-    # (mac1.metal=12, z1d.metal=48, i3.metal=72, m5.metal=96). Mapping all of them
-    # to 96 over-estimated idle savings, the exact failure this table was added to
-    # fix. An unknown suffix falls through to the conservative default below.
-}
-
 # Average hourly NetworkOut above which an instance is treated as doing real work
 # (network/disk-bound or warm-standby), so a low CPU reading is NOT "idle".
 _IDLE_NET_BYTES_PER_HR: float = 100 * 1024 ** 2  # ~100 MB/hr
-
-
-def _vcpus_from_type(inst_type: str) -> int:
-    """Best-effort vCPU count from an EC2 instance type (e.g. m5.4xlarge -> 16)."""
-    try:
-        size = inst_type.split(".", 1)[1]
-        return _SIZE_VCPU.get(size, 2)
-    except Exception:
-        return 2
 
 
 def check_idle_ec2(
@@ -1112,11 +1191,12 @@ def check_idle_ec2(
     Goes beyond Compute Optimizer by checking ALL instances (not just those already
     flagged) and using a more aggressive threshold.
 
-    Savings estimate based on rough on-demand pricing (actual savings depend on
-    instance type — we use a conservative $50/mo baseline for a t3.medium equivalent).
+    Savings are the instance type's on-demand list price (aws_prices.EC2_MONTHLY).
+    This used to be vCPUs x $15, which put a p5.48xlarge ($40,179/mo) at $2,880
+    and a t3.nano ($3.80/mo) at $15. A type the table does not hold is reported
+    unpriced (None, "unpriced": True), the way check_rds_idle reports an unknown
+    class, rather than given a per-vCPU guess.
     """
-    _APPROX_MONTHLY_PER_VCPU = 15.0  # very rough: $15/vCPU/month on-demand
-
     findings = CheckFindings()
 
     try:
@@ -1223,24 +1303,32 @@ def check_idle_ec2(
         if avg_net_per_hr > _IDLE_NET_BYTES_PER_HR:
             continue  # network-active: treat as in-use, not idle
 
-        vcpus = _vcpus_from_type(inst_type)
-        monthly_savings = vcpus * _APPROX_MONTHLY_PER_VCPU
+        monthly_savings = EC2_MONTHLY.get(inst_type)
+        if monthly_savings is None:
+            cost_txt = (f"Cost unknown ({inst_type} is not in nable's price table; "
+                        f"check the real rate in Cost Explorer). ")
+            severity = "unknown"
+        else:
+            cost_txt = f"Running cost: ~${monthly_savings:,.2f}/mo on demand. "
+            severity = _severity_from_savings(monthly_savings)
 
         findings.append({
             "resource_id": inst_id,
             "resource_type": "EC2 Instance",
             "waste_type": "idle_ec2_low_cpu",
-            "estimated_monthly_savings": round(monthly_savings, 2),
+            "estimated_monthly_savings": monthly_savings,
+            "unpriced": monthly_savings is None,
             "detail": (
                 f"EC2 instance {inst_id} ({inst_type}) averaged {avg_cpu:.1f}% CPU "
                 f"(peak: {max_cpu:.1f}%) over {lookback_days} days "
                 f"— well below the {cpu_threshold_pct}% idle threshold. "
+                f"{cost_txt}"
                 f"Name: {name_tag or 'untagged'}. "
                 f"Consider stopping, downsizing, or terminating. "
                 f"Check Network/Disk metrics before terminating — "
                 f"some instances are disk/network bound with low CPU."
             ),
-            "severity": _severity_from_savings(monthly_savings),
+            "severity": severity,
             "region": region,
             "account_id": None,
             "instance_type": inst_type,
@@ -1258,8 +1346,11 @@ def check_idle_ec2(
 # On-demand hourly prices per instance class (us-east-1, single-AZ). Used only
 # when Cost Explorer data is unavailable. Single-sourced in aws_prices: this was
 # a local copy that read 0.162 and 0.228 for db.m6g.large and db.r6g.large while
-# the Terraform estimator quoted 0.152 and 0.192 for the same instances.
-from ..aws_prices import RDS_HOURLY as _RDS_HOURLY
+# the Terraform estimator quoted 0.152 and 0.192 for the same instances. The
+# checks below price through aws_prices.rds_hourly(class, engine), which picks
+# the MySQL/MariaDB or PostgreSQL table and returns None for the engines it does
+# not price; the name stays for anything that imports it from here.
+from ..aws_prices import RDS_HOURLY as _RDS_HOURLY  # noqa: E402,F401  (re-exported)
 
 _RDS_DOWNSIZE: dict[str, str] = {
     "db.t3.medium": "db.t3.small",    "db.t3.large": "db.t3.medium",
@@ -1346,10 +1437,15 @@ def check_rds_rightsizing(
         if not recommended_class:
             continue
 
-        current_hourly = _RDS_HOURLY.get(db_class, 0.0)
-        recommended_hourly = _RDS_HOURLY.get(recommended_class, 0.0)
+        # By engine: PostgreSQL runs 4-7% above MySQL, and Aurora, SQL Server,
+        # Oracle and Db2 have no table. A 0.0 default here used to turn an
+        # unknown recommended rate into a saving of the whole current rate.
+        current_hourly = rds_hourly(db_class, engine or "")
+        recommended_hourly = rds_hourly(recommended_class, engine or "")
+        if current_hourly is None or recommended_hourly is None:
+            continue
         factor = 2.0 if multi_az else 1.0
-        monthly_savings = (current_hourly - recommended_hourly) * 730 * factor
+        monthly_savings = (current_hourly - recommended_hourly) * HOURS_PER_MONTH * factor
 
         if monthly_savings <= 0:
             continue
@@ -1440,15 +1536,20 @@ def check_rds_idle(
         # class stays unpriced rather than emitting a made-up $0.10/hr, which
         # on a large instance is off by 100x. A wrong number that looks real
         # is worse than an honest "cost unknown".
-        current_hourly = _RDS_HOURLY.get(db_class)
+        #
+        # The rate is the engine's: an Aurora, SQL Server, Oracle or Db2
+        # instance used to be charged the MySQL rate for its class, far under
+        # a licence-included SQL Server or Oracle rate, and a PostgreSQL one
+        # 4-7% under.
+        current_hourly = rds_hourly(db_class, engine or "")
         if current_hourly is None:
             monthly_cost = None
             savings_val = None
-            cost_txt = (f"cost unknown ({db_class} is not in nable's price table; "
-                        f"check the real rate in Cost Explorer)")
+            cost_txt = (f"cost unknown ({db_class} on {engine or 'an unknown engine'} is not "
+                        f"in nable's price table; check the real rate in Cost Explorer)")
             severity = "unknown"
         else:
-            monthly_cost = current_hourly * 730 * (2 if multi_az else 1)
+            monthly_cost = current_hourly * HOURS_PER_MONTH * (2 if multi_az else 1)
             savings_val = round(monthly_cost, 2)
             cost_txt = f"~${monthly_cost:.0f}/mo"
             severity = _severity_from_savings(monthly_cost)
@@ -1506,7 +1607,19 @@ def scan_all_regions_rds_idle(regions: list[str] | None = None) -> list[dict]:
 # ALB at $5.84/mo against cleanup/idle.py's $16.20 for the same resource. The
 # names are gone rather than corrected, because a corrected copy is still a copy
 # and the next drift would be just as silent as the last one.
-from ..aws_prices import ALB_PER_MONTH, CLB_PER_MONTH, NLB_PER_MONTH
+from ..aws_prices import CLB_PER_MONTH
+
+# ELBv2 type -> (namespace, traffic metric read as a daily Sum, finding label).
+# NewFlowCount counts connections opened, the flow-level analogue of an ALB's
+# RequestCount, so one request_threshold means "fewer than N connections in
+# the window" for every type. A Gateway Load Balancer publishes under
+# AWS/GatewayELB, not AWS/NetworkELB; reading it from the NLB namespace
+# returned nothing and labelled every GWLB an idle NLB.
+_V2_LB_TRAFFIC: dict[str, tuple[str, str, str]] = {
+    "application": ("AWS/ApplicationELB", "RequestCount", "ALB"),
+    "network": ("AWS/NetworkELB", "NewFlowCount", "NLB"),
+    "gateway": ("AWS/GatewayELB", "NewFlowCount", "GWLB"),
+}
 
 
 def check_idle_load_balancers(
@@ -1518,10 +1631,20 @@ def check_idle_load_balancers(
     request_threshold: float = 100.0,
 ) -> list[dict]:
     """
-    Detect ALBs and NLBs with no or near-zero request traffic.
+    Detect ALBs, NLBs, Gateway Load Balancers and Classic ELBs with no or
+    near-zero traffic.
 
-    Load balancers with fewer than request_threshold total requests over
-    lookback_days are flagged as idle. They still incur the hourly LCU base cost.
+    Load balancers with fewer than request_threshold requests (ALB, Classic) or
+    new flows (NLB, GWLB) over lookback_days are flagged as idle. They still
+    incur the hourly base charge. A load balancer created inside the lookback
+    is skipped: it has not had the whole window to carry traffic.
+
+    Each type is read from its own namespace. An ALB publishes RequestCount
+    only while requests arrive, so no datapoints is a quiet ALB. NLB and GWLB
+    flow metrics are different: no datapoints there means the series was not
+    read (a Gateway Load Balancer read from AWS/NetworkELB answers nothing,
+    which used to flag every GWLB as an idle NLB), so the load balancer is
+    skipped rather than called idle.
     """
     findings = CheckFindings()
     listing_errors: list[Exception] = []
@@ -1529,13 +1652,15 @@ def check_idle_load_balancers(
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=lookback_days)
 
-    # ALB and NLB via ELBv2
+    # ALB, NLB and GWLB via ELBv2
     v2_lbs: list[dict] = []
     try:
         paginator = elbv2_client.get_paginator("describe_load_balancers")
         for page in paginator.paginate():
             for lb in page.get("LoadBalancers", []):
                 if lb.get("State", {}).get("Code", "") != "active":
+                    continue
+                if _created_after(lb.get("CreatedTime"), start):
                     continue
                 v2_lbs.append(lb)
     except Exception as exc:
@@ -1547,7 +1672,9 @@ def check_idle_load_balancers(
     try:
         paginator = elb_client.get_paginator("describe_load_balancers")
         for page in paginator.paginate():
-            classic_lbs.extend(page.get("LoadBalancerDescriptions", []))
+            classic_lbs.extend(
+                lb for lb in page.get("LoadBalancerDescriptions", [])
+                if not _created_after(lb.get("CreatedTime"), start))
     except Exception as exc:
         log.warning("Classic ELB describe failed (region=%s): %s", region, exc)
         listing_errors.append(exc)
@@ -1563,14 +1690,14 @@ def check_idle_load_balancers(
 
     queries = []
     for i, lb in enumerate(v2_lbs):
-        application = lb.get("Type", "application") == "application"
+        namespace, metric, _ = _V2_LB_TRAFFIC.get(
+            lb.get("Type", "application"), _V2_LB_TRAFFIC["application"])
+        # Sum of a count, never a sum of daily Averages: ActiveFlowCount's
+        # daily Average added up over 14 days is a number of no unit, which
+        # was compared against a request threshold.
         queries.append(MetricQuery(
-            ("v2", i),
-            "AWS/ApplicationELB" if application else "AWS/NetworkELB",
-            "RequestCount" if application else "ActiveFlowCount",
-            (("LoadBalancer", _v2_dim(lb)),),
-            "Sum" if application else "Average",
-            86400,
+            ("v2", i), namespace, metric,
+            (("LoadBalancer", _v2_dim(lb)),), "Sum", 86400,
         ))
     for i, lb in enumerate(classic_lbs):
         queries.append(MetricQuery(
@@ -1585,6 +1712,7 @@ def check_idle_load_balancers(
         lb_name = lb.get("LoadBalancerName", "")
         lb_arn = lb.get("LoadBalancerArn", "")
         lb_type = lb.get("Type", "application")
+        _, metric, label = _V2_LB_TRAFFIC.get(lb_type, _V2_LB_TRAFFIC["application"])
 
         datapoints = series.get(("v2", i))
         if datapoints is None:
@@ -1592,6 +1720,10 @@ def check_idle_load_balancers(
             continue
 
         if not datapoints:
+            if metric != "RequestCount":
+                # A flow series with nothing in it was not read, not quiet.
+                log.debug("No %s datapoints for LB %s; not assessed", metric, lb_name)
+                continue
             total_requests = 0.0
         else:
             total_requests = sum(datapoints)
@@ -1599,16 +1731,17 @@ def check_idle_load_balancers(
         if total_requests >= request_threshold:
             continue
 
-        monthly_cost = ALB_PER_MONTH if lb_type == "application" else NLB_PER_MONTH
+        monthly_cost = round(lb_hourly(lb_type) * HOURS_PER_MONTH, 2)
+        unit = "requests" if metric == "RequestCount" else "new flows"
 
         findings.append({
             "resource_id": lb_arn,
-            "resource_type": "ALB" if lb_type == "application" else "NLB",
+            "resource_type": label,
             "waste_type": "idle_load_balancer",
-            "estimated_monthly_savings": round(monthly_cost, 2),
+            "estimated_monthly_savings": monthly_cost,
             "detail": (
                 f"Load balancer '{lb_name}' ({lb_type}) had {total_requests:.0f} "
-                f"total requests over {lookback_days} days. "
+                f"total {unit} over {lookback_days} days. "
                 f"Running cost: ~${monthly_cost:.0f}/mo. "
                 f"Check target groups before deleting."
             ),

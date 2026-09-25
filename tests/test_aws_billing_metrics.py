@@ -307,3 +307,27 @@ def test_the_estimate_never_writes_to_the_measured_history():
     assert not leaked, (
         f"the estimate path calls {sorted(leaked)}, so a provisional figure can "
         f"reach the measured history and be summed with it")
+
+
+def test_a_service_whose_read_failed_is_named_not_dropped():
+    """A per-service read that fails is not a $0 service. It used to vanish
+    from by_service exactly like one, so the breakdown looked complete and
+    summed short of the total with nothing to say why."""
+
+    class _OneServiceDenied(FakeCloudWatch):
+        def get_metric_statistics(self, **kw):
+            dims = {d["Name"]: d["Value"] for d in kw["Dimensions"]}
+            if dims.get("ServiceName") == "AmazonRDS":
+                raise RuntimeError("Throttling")
+            return super().get_metric_statistics(**kw)
+
+    cw = _OneServiceDenied(services=["AmazonEC2", "AmazonRDS"])
+    out = bm.latest_estimated_charges(FakeSession(cw))
+
+    assert [s["service"] for s in out["by_service"]] == ["AmazonEC2"]
+    assert out["unread_services"] == ["AmazonRDS"]
+
+
+def test_no_unread_services_key_when_every_read_worked():
+    cw = FakeCloudWatch(services=["AmazonEC2", "AmazonRDS"])
+    assert "unread_services" not in bm.latest_estimated_charges(FakeSession(cw))

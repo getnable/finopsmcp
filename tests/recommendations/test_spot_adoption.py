@@ -188,12 +188,14 @@ def test_batched_cpu_variance_is_the_spread_of_the_whole_series() -> None:
     assert got == {"i-abc123": pytest.approx(statistics.stdev([10.0, 10.0, 90.0, 90.0]))}
 
 
-def test_batched_cpu_variance_is_zero_for_a_series_it_could_not_read() -> None:
+def test_batched_cpu_variance_is_none_for_a_series_it_could_not_read() -> None:
+    # Not 0.0: zero variance is the "stable load" half of a RECOMMENDED
+    # verdict, and a denied read is no evidence of stable load.
     from finops.recommendations.spot_adoption import _batch_get_cpu_variance
 
     cw = MagicMock()
     cw.get_metric_statistics.side_effect = Exception("AccessDenied")
-    assert _batch_get_cpu_variance(cw, ["i-abc123"], days=14) == {"i-abc123": 0.0}
+    assert _batch_get_cpu_variance(cw, ["i-abc123"], days=14) == {"i-abc123": None}
 
 
 def test_batched_cpu_variance_is_zero_for_an_empty_read() -> None:
@@ -410,3 +412,42 @@ def test_recommend_spot_never_calls_get_metric_data() -> None:
     assert len(results) == 3
     cw.get_metric_data.assert_not_called()
     assert cw.get_metric_statistics.call_count == 3
+
+
+def test_an_instance_whose_cpu_read_failed_is_skipped_and_counted() -> None:
+    """A failed CloudWatch read used to become zero variance, the stable-load
+    signal a RECOMMENDED verdict rests on. Now the instance gets no verdict,
+    and the result and the finding say how many were not assessed."""
+    from datetime import datetime, timezone
+
+    readable = _make_instance("i-read", "m5.large", env_tag="staging")
+    denied = _make_instance("i-denied", "m5.large", env_tag="staging")
+
+    def cpu(**kw):
+        if kw["Dimensions"][0]["Value"] == "i-denied":
+            raise Exception("AccessDenied")
+        now = datetime.now(timezone.utc)
+        return {"Datapoints": [{"Timestamp": now, "Average": 5.0}] * 3}
+
+    with patch("finops.recommendations.spot_adoption.boto3") as mock_boto3:
+        ec2, cw, asg = MagicMock(), MagicMock(), MagicMock()
+        mock_boto3.client.side_effect = lambda svc, **kw: {
+            "ec2": ec2, "cloudwatch": cw, "autoscaling": asg,
+        }[svc]
+        ec2.get_paginator.return_value.paginate.return_value = _make_ec2_page(
+            [readable, denied])
+        asg.get_paginator.return_value.paginate.return_value = [{"AutoScalingGroups": [{
+            "AutoScalingGroupName": "web",
+            "Instances": [{"InstanceId": "i-read"}, {"InstanceId": "i-denied"}],
+        }]}]
+        cw.get_metric_statistics.side_effect = cpu
+
+        results = recommend_spot_adoption(regions=["us-east-1"])
+
+    assert [r["instance_id"] for r in results] == ["i-read"]
+    assert results.cpu_unread_instances == ["i-denied"]
+    assert results[0]["recommendation"] in ("RECOMMENDED", "POSSIBLE")
+    finding = results[0]["finding"]
+    assert finding["metadata"]["instances_cpu_unread"] == 1
+    assert any("1 on-demand instance(s) were not assessed" in a
+               for a in finding["assumptions"])
