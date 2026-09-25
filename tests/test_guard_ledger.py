@@ -563,3 +563,24 @@ def test_report_says_repeats_were_counted_once():
         gl.append({"ts": _at(m), "decision": "ask", "command": cmd, "monthly_usd": 10.0})
     assert "1 repeat(s) of the same command within 10 minutes counted once" in \
         _cli("report", guard_days=30, guard_json=False)
+
+
+def test_report_into_a_closed_pipe_exits_quietly():
+    """`nable guard report | head`: the reader leaves early; no traceback."""
+    import subprocess
+    _activity_without_env()
+    env = {**os.environ, "HOME": str(gl.ledger_path().parent), "NABLE_NO_TELEMETRY": "1",
+           "FINOPS_DATA_DIR": str(gl.ledger_path().parent)}
+    env.pop("FINOPS_PROFILE", None)
+    code = "from finops.setup_wizard import main; main(['guard', 'report'])"
+    p = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, env=env)
+    p.stdout.close()                                  # the reader is already gone
+    _, err = p.communicate(timeout=60)
+    assert b"Traceback" not in err and b"BrokenPipe" not in err, err.decode()
+    assert p.returncode == 0
+
+
+def _activity_without_env():
+    for cmd in ("terraform destroy", "aws ec2 run-instances --instance-type t3.micro"):
+        g.gate_command(cmd)

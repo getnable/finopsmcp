@@ -2280,6 +2280,26 @@ def _run_agents() -> None:
         print()
 
 
+def _guard_cli(parsed) -> None:
+    """_run_guard, ending quietly when its reader goes away.
+
+    `nable guard report | head` closes the pipe after ten lines and the next
+    write raises BrokenPipeError, which used to print a traceback (and a
+    second one from the interpreter's own flush at exit). Output is flushed
+    here so the error surfaces inside the try, and stdout is pointed at
+    /dev/null so the exit flush has nowhere to fail."""
+    try:
+        _run_guard(parsed)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        except (OSError, ValueError, AttributeError):
+            pass
+        raise SystemExit(0) from None
+
+
 def _run_guard(parsed) -> None:
     """`finops guard`: install / manage the seamless agent cost guardrail.
 
@@ -3406,7 +3426,7 @@ def main(args: list[str] | None = None) -> None:
         _run_agents()
         return
     elif parsed.cmd == "guard":
-        _run_guard(parsed)
+        _guard_cli(parsed)
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main
