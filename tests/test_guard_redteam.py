@@ -411,3 +411,61 @@ def test_an_unreadable_manifest_still_says_it_is_a_delete():
                         record=False)
     assert v["decision"] == "ask"
     assert "kubectl delete (from a manifest)" in v["reason"]
+
+
+# ── 4. false positives: text that only mentions a destroy ─────────────────────
+
+@pytest.mark.parametrize("cmd", [
+    'git commit -m "docs: explain terraform destroy"',
+    "git commit -am 'never run kubectl delete ns prod'",
+    'git -C repo commit -m "why aws ec2 terminate-instances asks"',
+    'git tag -a v1 -m "after terraform destroy"',
+    'echo "never run aws ec2 terminate-instances"',
+    "printf 'kubectl delete ns x\\n'",
+    'grep -rn "kubectl delete" docs/',
+    "rg 'terraform destroy' docs/",
+    'ag "helm uninstall"',
+    'egrep "aws s3 rb|aws s3 rm" -r scripts',
+    'git commit -m "fix: pulumi destroy" && git push',
+    "terraform plan -destroy -out destroy.tfplan",
+    "terraform plan -destroy -out=destroy.tfplan",
+    "tofu plan -destroy -out destroy",
+    "terraform show destroy.tfplan",
+    "kubectl apply -f delete.yaml --dry-run=client",
+])
+def test_text_that_only_mentions_a_destroy_does_not_classify(cmd):
+    assert g.classify_command(cmd) in (None, APPLY), cmd
+    v = g.gate_command(cmd, record=False)
+    assert v is None or v["action_type"] == "infra_apply", (cmd, v)
+
+
+@pytest.mark.parametrize("cmd,want", [
+    # these ARE commands: the quoted text runs
+    ('bash -c "terraform destroy -auto-approve"', DELETE),
+    ("sh -c 'kubectl delete ns prod'", DELETE),
+    ('eval "terraform destroy"', DELETE),
+    ('printf "terraform destroy" | sh', DELETE),
+    ("echo 'terraform destroy' | bash", DELETE),
+    ('echo "$(terraform destroy -auto-approve)"', DELETE),
+    ('echo "`kubectl delete ns prod`"', DELETE),
+    ('git commit -m "wip" && terraform destroy', DELETE),
+    ('echo "done"; kubectl delete ns prod', DELETE),
+    ('grep -q x f || aws ec2 terminate-instances --instance-ids i-1', TERMINATE),
+    # unquoted text after echo is not masked: over-matching is the safe side
+    ("echo never run aws ec2 terminate-instances", TERMINATE),
+    ("terraform plan -destroy -out destroy.tfplan && terraform apply -destroy", DELETE),
+])
+def test_commands_that_run_the_quoted_text_still_classify(cmd, want):
+    assert g.classify_command(cmd) == want, cmd
+
+
+def test_applying_a_plan_file_named_destroy_goes_to_the_saved_plan_reader():
+    assert g.classify_command("terraform apply destroy.tfplan") == APPLY
+
+
+def test_masking_stays_linear():
+    for fill in ('echo "a"; ', "git commit -m 'x' ", 'grep "', "'", '"\\"'):
+        cmd = "aws ec2 terminate-instances ; " + fill * (MB // len(fill))
+        hit, took = _timed(g.classify_command, cmd)
+        assert took < 1.0, f"{fill!r}: {took:.2f}s"
+        assert hit == TERMINATE

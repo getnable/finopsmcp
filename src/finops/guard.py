@@ -81,13 +81,17 @@ from .policy import (
 # missing a one-way door is not, so patterns are deliberately broad.
 
 _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
-    (r"\bterraform\s+(?:\S+\s+)*destroy\b", "delete_resource"),
-    (r"\btofu\s+(?:\S+\s+)*destroy\b", "delete_resource"),
+    # `destroy(?!\S)`, not `destroy\b`: a plan file called destroy.tfplan is a
+    # file name, and `terraform apply destroy.tfplan` goes to the saved-plan
+    # reader like any other apply. `-out destroy` names a file too.
+    (r"\bterraform\s+(?:\S+\s+)*destroy(?<!-out destroy)(?!\S)", "delete_resource"),
+    (r"\btofu\s+(?:\S+\s+)*destroy(?<!-out destroy)(?!\S)", "delete_resource"),
     # Terragrunt wraps terraform and fans out: `terragrunt run-all destroy` (or
     # `run --all destroy`, or the older `destroy-all`) tears down every module
     # under the directory in one command. It had no pattern at all, so the
     # widest destroy in the toolchain was the one the guard could not see.
-    (r"\bterragrunt\s+(?:\S+\s+)*destroy\b", "delete_resource"),
+    (r"\bterragrunt\s+(?:\S+\s+)*destroy(?<!-out destroy)(?:-all)?(?!\S)",
+     "delete_resource"),
     # destroy hidden behind the apply verb: `terraform apply -destroy` is destroy.
     # Must sit in the one-way list (checked first) or the two-way apply pattern
     # would classify it as a reversible mutation.
@@ -118,7 +122,7 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # Helm's own aliases for uninstall are del, delete and un; flags such as
     # `-n prod` may come first.
     (r"\bhelm\s+(?:\S+\s+)*(?:uninstall|delete|del|un)(?!\S)", "delete_resource"),
-    (r"\bkubectl\s+(?:\S+\s+)*delete\b", "delete_resource"),
+    (r"\bkubectl\s+(?:\S+\s+)*delete(?!\S)", "delete_resource"),
     # `kubectl drain` evicts every pod on the node; `replace --force` deletes
     # the object and creates it again, dropping whatever the old one held.
     (r"\bkubectl\s+(?:\S+\s+)*drain(?!\S)", "delete_resource"),
@@ -274,6 +278,54 @@ def _expand_aliases(cmd: str) -> str:
     return cmd
 
 
+# Programs whose quoted arguments are data, not commands: a commit message or
+# a search pattern that mentions `terraform destroy` asked the human to
+# confirm a destroy nobody was running, and a guard that cries wolf on every
+# docs commit gets uninstalled. `bash -c`, `sh -c` and `eval` are not here:
+# their quoted argument is a command.
+_DATA_PROGRAM_RE = re.compile(r"(?:echo|printf|grep|rg|ag|git)(?![\w.-])")
+_DATA_SEGMENT_RE = re.compile(
+    r"\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|command|time|nohup)\s+)*(?:\S*/)?"
+    r"(?:(?:echo|printf|grep|egrep|fgrep|rg|ag)(?!\S)"
+    r"|git(?:\s+-\S+(?:\s+[^\s-]\S*)?)*?\s+(?:commit|tag)(?!\S))")
+# A quoted string (single, or double with escapes) or a shell operator.
+_QUOTE_OR_OP_RE = re.compile(r"'[^']*+'|\"(?:[^\"\\]++|\\.)*+\"|&&|\|\||[;&|\n]")
+# Data that is then run: `printf "terraform destroy" | sh`, `| xargs ...`,
+# `$(...)`, backticks. Masking is off for the whole command when any of these
+# appears; over-matching is the safe side.
+_RUNS_DATA_RE = re.compile(
+    r"\|\s*(?:sudo\s+)?(?:\S*/)?(?:(?:ba|z|da|k)?sh|xargs|source|eval|\.)(?!\S)|\$\(|`|<\(")
+_MASK_MAX_TOKENS = 20_000
+
+
+def _mask_quoted_data(command: str) -> str:
+    """`git commit -m "docs: terraform destroy"` -> `git commit -m ""`.
+
+    Quoted arguments of echo, printf, grep, rg, ag and `git commit|tag` are
+    blanked, one shell segment at a time, so what follows a `;` or `&&` is
+    still judged. Past _MASK_MAX_TOKENS quotes and operators the command is
+    left as it is: bounded work, and over-matching is the safe side."""
+    if ('"' not in command and "'" not in command) or not _DATA_PROGRAM_RE.search(command) \
+            or _RUNS_DATA_RE.search(command):
+        return command
+    out: list[str] = []
+    last = seg_start = 0
+    data: bool | None = None
+    for n, m in enumerate(_QUOTE_OR_OP_RE.finditer(command)):
+        if n >= _MASK_MAX_TOKENS:
+            return command
+        tok = m.group(0)
+        if tok[0] not in "'\"":
+            seg_start, data = m.end(), None
+            continue
+        if data is None:
+            data = _DATA_SEGMENT_RE.match(command, seg_start, m.start()) is not None
+        if data:
+            out += (command[last:m.start()], '""')
+            last = m.end()
+    return "".join(out) + command[last:] if out else command
+
+
 def _normalize(command: str) -> str:
     """The form every classifier and pricer reads.
 
@@ -283,7 +335,8 @@ def _normalize(command: str) -> str:
     classifier stripped AWS global options, `aws --region us-east-1 ec2
     run-instances --instance-type p4d.24xlarge --count 8` classified as a
     launch, found no price, and passed silently at ~$191k/mo."""
-    cmd = command.replace('"', "").replace("'", "")
+    cmd = _mask_quoted_data(command)
+    cmd = cmd.replace('"', "").replace("'", "")
     cmd = " ".join(cmd.split())  # normalize whitespace
     cmd = _lower_programs(cmd)
     cmd = _expand_aliases(cmd)
