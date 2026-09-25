@@ -129,6 +129,15 @@ def _build_html(
 </html>"""
 
 
+#: What the weekly digest needs before it can send, in the order a user sets them.
+DIGEST_VARS = ("FINOPS_SMTP_HOST", "FINOPS_SMTP_USER", "FINOPS_SMTP_PASSWORD", "FINOPS_DIGEST_TO")
+
+
+def missing_digest_vars() -> list[str]:
+    """The DIGEST_VARS that are unset. Empty means the digest can try to send."""
+    return [v for v in DIGEST_VARS if not _env(v)]
+
+
 def send_weekly_digest(
     total_spend: float,
     prev_total: float,
@@ -137,25 +146,43 @@ def send_weekly_digest(
     recommendations: list[dict],
     period_label: str | None = None,
 ) -> bool:
-    """
-    Send the weekly digest via SMTP. Returns True on success.
+    """Send the weekly digest via SMTP. Returns True on success. Callers that
+    report to a user want send_weekly_digest_result, which says why not."""
+    return bool(send_weekly_digest_result(
+        total_spend, prev_total, top_providers, anomalies, recommendations, period_label,
+    )["sent"])
 
-    Required env vars (set via `finops setup email`):
-      FINOPS_SMTP_HOST, FINOPS_SMTP_PORT, FINOPS_SMTP_USER,
-      FINOPS_SMTP_PASSWORD, FINOPS_DIGEST_TO
+
+def send_weekly_digest_result(
+    total_spend: float,
+    prev_total: float,
+    top_providers: list[dict],
+    anomalies: list[dict],
+    recommendations: list[dict],
+    period_label: str | None = None,
+) -> dict:
     """
+    Send the weekly digest via SMTP and say what happened:
+    {"sent": bool, "recipient": str, "missing": [env vars], "error": str}.
+
+    Required env vars: FINOPS_SMTP_HOST, FINOPS_SMTP_USER, FINOPS_SMTP_PASSWORD,
+    FINOPS_DIGEST_TO (FINOPS_SMTP_PORT and FINOPS_SMTP_FROM are optional).
+    """
+    missing = missing_digest_vars()
+    if missing:
+        return {"sent": False, "recipient": _env("FINOPS_DIGEST_TO"), "missing": missing,
+                "error": "Email is not configured: set " + ", ".join(missing) + "."}
+
     host = _env("FINOPS_SMTP_HOST")
-    if not host:
-        return False
-
-    port = int(_env("FINOPS_SMTP_PORT", "587"))
+    try:
+        port = int(_env("FINOPS_SMTP_PORT", "587"))
+    except ValueError:
+        return {"sent": False, "recipient": _env("FINOPS_DIGEST_TO"), "missing": [],
+                "error": "FINOPS_SMTP_PORT is not a number."}
     user = _env("FINOPS_SMTP_USER")
     password = _env("FINOPS_SMTP_PASSWORD")
     to_addr = _env("FINOPS_DIGEST_TO")
     from_addr = _env("FINOPS_SMTP_FROM", user)
-
-    if not all([host, user, password, to_addr]):
-        return False
 
     if period_label is None:
         end = date.today()
@@ -177,11 +204,13 @@ def send_weekly_digest(
             server.starttls(context=ctx)
             server.login(user, password)
             server.sendmail(from_addr, to_addr, msg.as_string())
-        return True
+        return {"sent": True, "recipient": to_addr, "missing": [], "error": ""}
     except Exception as e:
         import logging
         logging.getLogger(__name__).error("Email digest failed: %s", e)
-        return False
+        return {"sent": False, "recipient": to_addr, "missing": [],
+                "error": f"The SMTP server at {host}:{port} did not take the message: "
+                         f"{type(e).__name__}: {e}"}
 
 
 def send_custom_digest(

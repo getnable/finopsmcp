@@ -414,15 +414,18 @@ def send_weekly_digest_now() -> dict:
 
     try:
         from ..scheduler.jobs import job_weekly_email_digest
-        job_weekly_email_digest()
-        to = _srv.os.environ.get("FINOPS_DIGEST_TO", "")
-        return {
-            "sent": True,
-            "recipient": to or "configured address",
-            "note": "Check FINOPS_DIGEST_TO / FINOPS_SMTP_* env vars if not received.",
-        }
+        result = job_weekly_email_digest() or {}
     except Exception as e:
-        return {"error": str(e)}
+        return {"sent": False, "error": str(e)}
+    if result.get("sent"):
+        return {"sent": True, "recipient": result.get("recipient", ""),
+                "message": f"Weekly digest emailed to {result.get('recipient', '')}."}
+    out = {"sent": False, "error": result.get("error") or "The digest was not sent."}
+    if result.get("missing"):
+        out["missing"] = result["missing"]
+        out["note"] = ("Set these in the environment nable runs in (the MCP server's env "
+                       "block, or your shell for the CLI), then ask again.")
+    return out
 
 
 def _scheduler_installed() -> bool:

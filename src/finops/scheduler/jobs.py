@@ -459,10 +459,19 @@ def _run(coro):
 
 
 
-def job_weekly_email_digest() -> None:
-    """Send the standalone weekly email digest (no AI client required)."""
+def job_weekly_email_digest() -> dict:
+    """Send the standalone weekly email digest (no AI client required).
+
+    Returns send_weekly_digest_result's dict. This returned None and dropped
+    the send's False, so send_weekly_digest_now answered "sent" with no SMTP
+    configured at all."""
     try:
-        from ..notifications.email_digest import send_weekly_digest
+        from ..notifications.email_digest import missing_digest_vars, send_weekly_digest_result
+        missing = missing_digest_vars()
+        if missing:
+            # Before any cost read: nothing can be sent, so nothing is fetched.
+            return {"sent": False, "recipient": "", "missing": missing,
+                    "error": "Email is not configured: set " + ", ".join(missing) + "."}
         from ..anomaly.detector import get_active_anomalies
         from ..storage.db import cost_snapshots, get_engine
         from ..recommendations.rightsizing import analyze_rightsizing, rightsizing_summary
@@ -522,15 +531,17 @@ def job_weekly_email_digest() -> None:
         except Exception:
             rec_list = []
 
-        send_weekly_digest(
+        return send_weekly_digest_result(
             total_spend=current_week_total,
             prev_total=prev_week_total,
             top_providers=top_providers,
             anomalies=anomalies,
             recommendations=rec_list,
         )
-    except Exception:
+    except Exception as e:
         log.exception("Weekly email digest job failed")
+        return {"sent": False, "recipient": "", "missing": [],
+                "error": f"The digest could not be built: {type(e).__name__}: {e}"}
 
 
 async def _check_credits_and_alert() -> dict | None:
