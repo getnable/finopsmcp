@@ -60,7 +60,9 @@ def test_enrich_drills_down_only_when_asked(monkeypatch):
     out = impact.enrich(_anomaly(), drill_down=True)
     assert out["root_cause"]["lines"][0].startswith("EC2 +$100/mo")
     [(service, current, baseline, kw)] = calls
-    assert service == EC2 and kw["account_id"] == "123456789012"
+    # The snapshot's account is the one the data was read in (on a payer, the
+    # payer): filtering on it would hide the member accounts' spend.
+    assert service == EC2 and kw["account_id"] is None
     assert (current.start, current.days) == (date(2026, 9, 21), 1)
     assert (baseline.start, baseline.days) == (date(2026, 9, 14), 7)
 
@@ -79,6 +81,14 @@ def test_a_non_account_id_is_not_used_as_a_filter(monkeypatch):
     monkeypatch.setattr(rc, "explain", _fake_explain(calls))
     impact.enrich(_anomaly(account_id="default"), drill_down=True)
     assert calls[0][3]["account_id"] is None
+
+
+def test_only_an_explicit_other_linked_account_is_a_filter(monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(rc, "explain", _fake_explain(calls))
+    impact.enrich(_anomaly(linked_account_id="210987654321"), drill_down=True)
+    impact.enrich(_anomaly(linked_account_id="123456789012"), drill_down=True)
+    assert [c[3]["account_id"] for c in calls] == ["210987654321", None]
 
 
 def test_the_next_step_points_at_the_drill_down_for_aws():

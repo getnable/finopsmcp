@@ -21,9 +21,15 @@ bill does more harm than one that says it does not know:
   - "likely": everything above lines up but no resource id ties them, because
     the billing data has none or the change names none. When both sides name
     resources and none are shared, the change launched something else and is
-    not attributed.
+    not attributed, unless none of the billed resources it was compared with
+    could have started the rise (they were costing before it, or the billing
+    data has no baseline to tell), or the change is on a group (an Auto
+    Scaling group, a fleet, an ECS service, an EKS node group) whose event
+    names the group rather than what it launched: those are at most "likely".
   - Otherwise the row says no change lines up, and the changes that were
-    found stay listed with the reason each was not attributed.
+    found stay listed with the reason each was not attributed. It says so
+    only when CloudTrail was read in full for the row; a row read in part,
+    or not at all, says that instead.
 
 Every answer says what could not be read: no CUR, resource-level Cost
 Explorer data not enabled or too old, CloudTrail denied, a region not read,
@@ -48,8 +54,15 @@ RULES = (
     "the day the cost rose to the end of that day, and (where both are known) for "
     "the same instance type. 'confirmed (resource id match)' means the change names "
     "a resource the billing data shows costing; 'likely' means the rest lines up but "
-    "no resource id ties them. Where nothing lines up the answer says so."
+    "no resource id ties them (a change to an Auto Scaling group, fleet, ECS service or "
+    "EKS node group is at most 'likely': it names the group, not what it launched). "
+    "Where nothing lines up the answer says so, and only when CloudTrail was read in "
+    "full for that row."
 )
+
+# CloudTrail LookupEvents reads the account the credentials are in, nothing else.
+ACCOUNT_NOTE = ("CloudTrail LookupEvents reads only the account these credentials are in, "
+                "so a change made in another account of the organization is not seen here.")
 
 _SHORT = {
     "Amazon Elastic Compute Cloud - Compute": "EC2",
@@ -116,6 +129,22 @@ def _reason_not_attributed(row: dict[str, Any], ch: dict[str, Any], family: set[
     return None
 
 
+def _could_start_rise(res: dict[str, Any], row_onset: date | None) -> bool:
+    """Whether a billed resource could be what started the row's rise. One
+    that was costing before it (its own onset is more than a day earlier),
+    did not rise at all (an onset read as None), or was already there when
+    data with no baseline begins, could not, so a change naming something
+    else is not ruled out by it. With no onset field at all, it could."""
+    if res.get("no_baseline") and not res.get("new_in_window"):
+        return False
+    if "onset" not in res:
+        return True
+    own = _day(res.get("onset"))
+    if own is None:
+        return False
+    return row_onset is None or own >= row_onset - timedelta(days=1)
+
+
 def attribute(row: dict[str, Any]) -> list[dict[str, Any]]:
     """Mark each of the row's changes with `attribution` (CONFIRMED, LIKELY or
     None, with `not_attributed_because`), and return the attributed ones,
@@ -124,17 +153,21 @@ def attribute(row: dict[str, Any]) -> list[dict[str, Any]]:
     row_onset = _day(row.get("onset"))
     resources = {change_events.tail(r["resource_id"]): r
                  for r in row.get("resources") or [] if r.get("resource_id")}
+    # Only resources that could have started the rise can rule a change out
+    # for naming something else.
+    starters = {rid for rid, r in resources.items() if _could_start_rise(r, row_onset)}
     causes = []
     for ch in row.get("changes") or []:
+        container = ch.get("event") in change_events.CONTAINER_EVENTS
         ids = {change_events.tail(i) for i in ch.get("resource_ids") or []}
-        shared = sorted(ids & set(resources))
+        shared = [] if container else sorted(ids & set(resources))
         # A resource's own onset is the sharper clock when the change names it.
         onset = row_onset
         for rid in shared:
             onset = _day(resources[rid].get("onset")) or onset
             break
         reason = _reason_not_attributed(row, ch, family, onset)
-        if reason is None and resources and ids and not shared:
+        if reason is None and not container and starters and ids and not shared:
             reason = "names other resources than the ones behind the cost"
         if reason:
             ch["attribution"] = None
@@ -145,8 +178,12 @@ def attribute(row: dict[str, Any]) -> list[dict[str, Any]]:
             ch["matched_resources"] = shared
         else:
             ch["attribution"] = LIKELY
-            ch["why_likely"] = ("same kind of change, region and time as the cost rise, but "
-                                "no resource id ties them")
+            ch["why_likely"] = (
+                "a change to a group that launches what is billed (it names the group, "
+                "not the resources), in the same region and time as the cost rise"
+                if container else
+                "same kind of change, region and time as the cost rise, but no resource "
+                "id ties them")
         ch["_rank"] = (ch["attribution"] != CONFIRMED,
                        abs((_when(ch["time"]) - datetime.combine(
                            onset, datetime.min.time(), tzinfo=UTC)).total_seconds()))
@@ -191,11 +228,20 @@ def sentence(service: str, row: dict[str, Any], causes: list[dict[str, Any]]) ->
         text = (f"{head}: {describe(c)} by {who} via {c.get('via') or 'unknown'} "
                 f"({c.get('guard') or 'guard: no record'}) [{c['attribution']}]")
         return text if len(causes) == 1 else text + f" (and {len(causes) - 1} more)"
-    if not row.get("cloudtrail_read"):
+    status = row.get("cloudtrail_status") or (
+        change_events.READ if row.get("cloudtrail_read") else change_events.NOT_READ)
+    if status == change_events.NOT_READ:
         return f"{head}: {where}; CloudTrail for it was not read, so no change is named"
-    if row.get("changes"):
-        return (f"{head}: {where}; {len(row['changes'])} change(s) found nearby, none lines "
-                "up with it")
+    found = len(row.get("changes") or [])
+    if status == change_events.PARTLY_READ:
+        gaps = row.get("cloudtrail_gaps") or []
+        why = f" ({gaps[0]})" if gaps else ""
+        text = f"{head}: {where}; CloudTrail for it was partly read{why}"
+        if found:
+            return text + f", and none of the {found} change(s) found lines up with it"
+        return text + ", so no change is named"
+    if found:
+        return f"{head}: {where}; {found} change(s) found nearby, none lines up with it"
     return f"{head}: {where}; no change event lines up with it"
 
 
@@ -238,10 +284,14 @@ def explain(service: str, current: Window, baseline: Window, *, session: Any = N
         ct = change_events.attach(rows, session, records=records, now=now, max_calls=max_calls,
                                   sleep=sleep, clock=clock)
         not_read += ct["not_read"]
+        not_read.append(ACCOUNT_NOTE)
         out["lookup_calls"] = ct["lookup_calls"]
-        for row in rows:
-            row["cloudtrail_read"] = (
-                change_events.trail_region(row.get("region")) in ct["regions_read"])
+        statuses = ct.get("row_status") or {}
+        for i, row in enumerate(rows):
+            got = statuses.get(i) or {"status": change_events.NOT_READ, "gaps": []}
+            row["cloudtrail_status"] = got["status"]
+            row["cloudtrail_gaps"] = got["gaps"]
+            row["cloudtrail_read"] = got["status"] == change_events.READ
     elif rows:
         not_read.append("CloudTrail was not read for this answer, so no change is named.")
     lines = []

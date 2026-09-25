@@ -99,10 +99,26 @@ def root_cause(anomaly: dict[str, Any], *, session: Any = None) -> dict[str, Any
         day = date.fromisoformat(str(anomaly.get("snapshot_date"))[:10])
     except ValueError:
         return None
-    account = str(anomaly.get("account_id") or "")
     current, baseline = windows_for_day(day)
     return explain(str(anomaly.get("service") or ""), current, baseline, session=session,
-                   account_id=account if account.isdigit() and len(account) == 12 else None)
+                   account_id=linked_account(anomaly))
+
+
+def linked_account(anomaly: dict[str, Any]) -> str | None:
+    """The LINKED_ACCOUNT to filter the drill-down on, or None.
+
+    A snapshot-derived anomaly's account_id is the account the connector's
+    credentials are in, not a linked account the spend was billed to. On an
+    organization's payer that is the payer itself, and filtering on it hides
+    every member account's spend, which is where a spike usually is. So only
+    an anomaly that names a linked account explicitly (linked_account_id,
+    different from the account it was read in) is filtered; otherwise the
+    drill-down reads everything these credentials see: a wider answer beats
+    one that hides the spike."""
+    linked = str(anomaly.get("linked_account_id") or "")
+    if not (linked.isdigit() and len(linked) == 12):
+        return None
+    return None if linked == str(anomaly.get("account_id") or "") else linked
 
 
 def enrich(anomaly: dict[str, Any], *, drill_down: bool = False,

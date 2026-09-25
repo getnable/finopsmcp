@@ -3,7 +3,8 @@
 drilldown.py names the usage type and, where the CUR or resource-level Cost
 Explorer data allows, the resources behind a delta, and the day it started.
 This reads CloudTrail's LookupEvents for the changes that could have started
-it, in a window from 24 hours before that day to 24 hours after it:
+it, in a window from 24 hours before that day to the end of it (the span a
+change can be named in):
 
   - by resource (LookupAttributes ResourceName) for each resource id the
     drill-down found, which is what makes a "confirmed" match possible later;
@@ -26,8 +27,12 @@ and it is not in the connect key by design: event history shows who did what,
 a wider read than the cost data the key is for. When it is denied, the answer
 says so and prints the one-line policy; the cost half of the answer stands.
 
-This module attaches the events it found to each row. Deciding which of them
-explains the delta, and how sure that is, is root_cause.py's job.
+Each row also carries how completely it was read (row_status): "read" only
+when every lookup it needed was answered in full; "partly read" or "not
+read" otherwise, since LookupEvents is per region and paged, and the reading
+is capped. This module attaches the events it found to each row. Deciding
+which of them explains the delta, and how sure that is, is root_cause.py's
+job.
 """
 from __future__ import annotations
 
@@ -109,6 +114,15 @@ _FAMILIES: list[tuple[re.Pattern[str], tuple[tuple[str, str], ...]]] = [
 _REGION_RE = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d+$")
 
 
+# Calls on a group (an Auto Scaling group, a fleet, an ECS service, an EKS
+# node group) that launch the billed resources under ids of their own: the
+# event names the group, never the instances or tasks the bill names, so a
+# resource id cannot confirm one, and not sharing one does not rule it out.
+CONTAINER_EVENTS = frozenset({
+    "SetDesiredCapacity", "UpdateAutoScalingGroup", "CreateAutoScalingGroup", "CreateFleet",
+    "RequestSpotFleet", "CreateService", "UpdateService", "CreateNodegroup",
+    "UpdateNodegroupConfig"})
+
 # Changes that never move a bill: tagging.
 _NO_BILL = re.compile(r"(Tag|Tags|Tagging)$")
 
@@ -129,11 +143,14 @@ def family_events(usage_type: str) -> tuple[tuple[str, str], ...]:
     return ()
 
 
-def window_for(onset: date) -> tuple[datetime, datetime]:
-    """From 24 hours before the onset day to 24 hours after it (UTC, as Cost
-    Explorer's days are)."""
+def window_for(onset: date, until: date | None = None) -> tuple[datetime, datetime]:
+    """From 24 hours before the onset day to the end of it (UTC, as Cost
+    Explorer's days are): the span root_cause.attribute() accepts a change
+    in, so nothing is read that could not be named. `until`, a later onset
+    of one of the row's resources, stretches the end to the end of that day."""
     start = datetime.combine(onset, dtime(0, 0), tzinfo=UTC)
-    return start - WINDOW, start + timedelta(days=1) + WINDOW
+    last = max(onset, until) if until else onset
+    return start - WINDOW, datetime.combine(last, dtime(0, 0), tzinfo=UTC) + timedelta(days=1)
 
 
 def trail_region(region: str | None) -> str:
@@ -197,6 +214,13 @@ def _details(raw: dict[str, Any]) -> dict[str, Any]:
             "resource_ids": sorted({tail(i) for i in ids})}
 
 
+def _day(text: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(text)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
 def _targets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for i, row in enumerate(rows):
@@ -206,9 +230,12 @@ def _targets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             onset = date.fromisoformat(row["onset"])
         except ValueError:
             continue
-        rids = [r["resource_id"] for r in row.get("resources") or [] if r.get("resource_id")]
+        looked = [r for r in row.get("resources") or [] if r.get("resource_id")]
+        looked = looked[:RESOURCES_PER_ROW]
+        later = [d for d in (_day(r.get("onset")) for r in looked) if d and d > onset]
         out.append({"index": i, "region": trail_region(row.get("region")), "onset": onset,
-                    "resource_ids": rids[:RESOURCES_PER_ROW],
+                    "last_onset": max(later) if later else None,
+                    "resource_ids": [r["resource_id"] for r in looked],
                     "events": family_events(row.get("usage_type") or "")})
     return out
 
@@ -224,8 +251,14 @@ def read_changes(session: Any, rows: list[dict[str, Any]], *, now: datetime | No
                  max_calls: int = MAX_CALLS, sleep: Callable[[float], Any] = time.sleep,
                  clock: Callable[[], float] = time.monotonic) -> dict[str, Any]:
     """LookupEvents for each drill-down row with an onset. Returns
-    {"by_row": {row index: [event, ...]}, "calls", "not_read", "regions_read"}.
-    Never raises."""
+    {"by_row": {row index: [event, ...]}, "calls", "not_read", "regions_read",
+    "row_status": {row index: {"status", "gaps"}}}. Never raises.
+
+    A row's status is READ only when every query it needed was answered in
+    full (no page or call cap, no error), inside CloudTrail's history, and
+    for a usage type whose bill-starting calls are known; PARTLY_READ when
+    some of that is missing; NOT_READ when nothing was asked or answered. Only
+    a READ row can say that no change lines up with it."""
     from botocore.config import Config
     from botocore.exceptions import (
         BotoCoreError,
@@ -238,27 +271,38 @@ def read_changes(session: Any, rows: list[dict[str, Any]], *, now: datetime | No
     not_read: list[str] = []
     # (region, key, value, start, end, source or None) -> row indexes
     queries: dict[tuple[str, str, str, datetime, datetime, str | None], set[int]] = {}
+    planned: dict[int, int] = {}
+    gaps: dict[int, list[str]] = {}
     for t in _targets(rows):
-        start, end = window_for(t["onset"])
+        i = t["index"]
+        gaps[i] = []
+        start, end = window_for(t["onset"], until=t["last_onset"])
         end = min(end, now)
         if start >= end:
+            gaps[i].append("its window has not begun")
             continue
         if start < now - timedelta(days=HISTORY_DAYS):
             not_read.append(f"The change on {t['onset'].isoformat()} is older than the "
                             f"{HISTORY_DAYS} days of CloudTrail event history LookupEvents reads.")
+            gaps[i].append(f"older than CloudTrail's {HISTORY_DAYS} days of history")
             continue
-        for rid in t["resource_ids"]:
-            queries.setdefault((t["region"], "ResourceName", tail(rid), start, end, None),
-                               set()).add(t["index"])
-        for name, source in t["events"]:
-            queries.setdefault((t["region"], "EventName", name, start, end, source),
-                               set()).add(t["index"])
+        keys = [(t["region"], "ResourceName", tail(rid), start, end, None)
+                for rid in t["resource_ids"]]
+        keys += [(t["region"], "EventName", name, start, end, source)
+                 for name, source in t["events"]]
+        for key in keys:
+            queries.setdefault(key, set()).add(i)
+        planned[i] = len(dict.fromkeys(keys))
+        if not t["events"]:
+            gaps[i].append("no call is known to start this usage type's bill, so only its "
+                           "resource ids were looked up")
         if not t["resource_ids"] and not t["events"]:
-            not_read.append(f"No change event is known to start {rows[t['index']]['usage_type']}"
+            not_read.append(f"No change event is known to start {rows[i]['usage_type']}"
                             "'s bill, and no resource id was found to look up, so CloudTrail "
                             "was not asked about it.")
 
     by_row: dict[int, dict[str, dict[str, Any]]] = {}
+    answered: dict[int, int] = {}
     calls = 0
     capped = False
     denied: dict[str, str] = {}
@@ -279,6 +323,7 @@ def read_changes(session: Any, rows: list[dict[str, Any]], *, now: datetime | No
             if calls >= max_calls:
                 capped = True
                 break
+            complete = False
             try:
                 pages = 0
                 for resp in gr.lookup(client, pacer, key, value, start, end):
@@ -298,14 +343,17 @@ def read_changes(session: Any, rows: list[dict[str, Any]], *, now: datetime | No
                         eid = ev["event_id"] or f"{region}:{name}:{ev['time']}"
                         for i in idxs:
                             by_row.setdefault(i, {})[eid] = ev
-                    if pages >= MAX_PAGES_PER_QUERY or calls >= max_calls:
-                        if resp.get("NextToken"):
-                            capped = True
+                    if not resp.get("NextToken"):
+                        complete = True
+                    elif pages >= MAX_PAGES_PER_QUERY or calls >= max_calls:
+                        capped = True
                         break
             except (NoCredentialsError, PartialCredentialsError):
                 not_read.append("CloudTrail not read: no AWS credentials were found.")
                 return {"by_row": {}, "calls": calls, "not_read": not_read,
-                        "regions_read": regions_read}
+                        "regions_read": regions_read,
+                        "row_status": _row_status(gaps, planned, {},
+                                                  "no AWS credentials were found")}
             except ClientError as exc:
                 code = gr._client_error_code(exc)
                 if gr.is_denied(code):
@@ -316,6 +364,9 @@ def read_changes(session: Any, rows: list[dict[str, Any]], *, now: datetime | No
             except BotoCoreError as exc:
                 region_errors[region] = f"{type(exc).__name__}: {exc}"
                 break
+            if complete:
+                for i in idxs:
+                    answered[i] = answered.get(i, 0) + 1
         if read_any and region not in denied and region not in region_errors:
             regions_read.append(region)
         if capped:
@@ -327,9 +378,39 @@ def read_changes(session: Any, rows: list[dict[str, Any]], *, now: datetime | No
     if capped:
         not_read.append(f"CloudTrail reading stopped at {calls} LookupEvents calls (paced at "
                         f"2 a second); some rows or pages were not read.")
+    for t in _targets(rows):
+        i = t["index"]
+        if planned.get(i) and answered.get(i, 0) < planned[i]:
+            if t["region"] in denied:
+                gaps[i].append(f"LookupEvents was denied in {t['region']}")
+            elif t["region"] in region_errors:
+                gaps[i].append(f"{t['region']} could not be read")
+            else:
+                gaps[i].append(f"{planned[i] - answered.get(i, 0)} of its {planned[i]} "
+                               "lookups were cut short by the call or page cap")
     return {"by_row": {i: sorted(evs.values(), key=lambda e: e["time"] or "")
                        for i, evs in by_row.items()},
-            "calls": calls, "not_read": not_read, "regions_read": regions_read}
+            "calls": calls, "not_read": not_read, "regions_read": regions_read,
+            "row_status": _row_status(gaps, planned, answered)}
+
+
+READ, PARTLY_READ, NOT_READ = "read", "partly read", "not read"
+
+
+def _row_status(gaps: dict[int, list[str]], planned: dict[int, int],
+                answered: dict[int, int], why: str | None = None) -> dict[int, dict[str, Any]]:
+    out: dict[int, dict[str, Any]] = {}
+    for i, said in gaps.items():
+        said = list(said) + ([why] if why else [])
+        got = answered.get(i, 0)
+        if not got:
+            status = NOT_READ
+        elif said or got < planned.get(i, 0):
+            status = PARTLY_READ
+        else:
+            status = READ
+        out[i] = {"status": status, "gaps": said}
+    return out
 
 
 def _wall_clock() -> datetime:
@@ -429,5 +510,5 @@ def attach(rows: list[dict[str, Any]], session: Any = None, *,
             public["guard_ledger"] = (v or {}).get("ledger")
             row["changes"].append(public)
     return {"lookup_calls": got["calls"], "not_read": got["not_read"],
-            "regions_read": got["regions_read"],
+            "regions_read": got["regions_read"], "row_status": got["row_status"],
             "guard_tolerance_minutes": GUARD_TOLERANCE_MINUTES}
