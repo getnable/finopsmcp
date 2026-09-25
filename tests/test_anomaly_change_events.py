@@ -179,6 +179,31 @@ def test_who_launched_what_via_what_and_the_guards_verdict():
     assert got["regions_read"] == ["us-east-1"]
 
 
+@pytest.mark.parametrize("wall", [datetime(2026, 9, 25, 12, 0, tzinfo=UTC),
+                                  datetime(2027, 9, 25, 12, 0, tzinfo=UTC)])
+def test_the_guard_verdict_is_read_whatever_the_wall_clock_says(monkeypatch, wall):
+    """The ledger is read back from the wall clock, and kept to the span the
+    events can match, so an injected `now` far from today still finds it."""
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return wall if tz else wall.replace(tzinfo=None)
+
+    monkeypatch.setattr(gl, "datetime", _Frozen)
+    monkeypatch.setattr(ce, "_wall_clock", lambda: wall)
+    gl.append({"ts": "2026-09-21T03:10:00+00:00", "decision": "allow",
+               "action_type": "infra_apply", "command": "terraform apply -auto-approve",
+               "session": "s1", "monthly_usd": 128000.0})
+    gl.append({"ts": "2026-09-01T03:10:00+00:00", "decision": "allow",
+               "action_type": "infra_apply", "command": "terraform apply",
+               "session": "old", "monthly_usd": 1.0})
+    when = datetime(2026, 9, 21, 3, 12, tzinfo=UTC)
+    ev = {"event_id": "e1", "event": "RunInstances", "via": "terraform", "_when": when}
+    got = ce.guard_verdicts([ev], now=NOW)
+    assert got["e1"]["bucket"] == "seen_and_happened"
+    assert got["e1"]["ledger"]["session"] == "s1"
+
+
 def test_only_changes_from_the_owning_service_are_kept():
     when = datetime(2026, 9, 21, 3, 0, tzinfo=UTC)
     rows = [_row()]

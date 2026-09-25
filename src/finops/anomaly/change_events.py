@@ -332,6 +332,10 @@ def read_changes(session: Any, rows: list[dict[str, Any]], *, now: datetime | No
             "calls": calls, "not_read": not_read, "regions_read": regions_read}
 
 
+def _wall_clock() -> datetime:
+    return datetime.now(UTC)
+
+
 def guard_verdicts(events: list[dict[str, Any]], records: list[dict[str, Any]] | None = None, *,
                    tolerance_minutes: float = GUARD_TOLERANCE_MINUTES,
                    now: datetime | None = None) -> dict[str, dict[str, Any]]:
@@ -343,10 +347,23 @@ def guard_verdicts(events: list[dict[str, Any]], records: list[dict[str, Any]] |
         return {}
     if records is None:
         from .. import guard_ledger
-        earliest = min(e["_when"] for e in timed)
-        back = (now or datetime.now(UTC)) - earliest + timedelta(
-            minutes=tolerance_minutes + 1)
-        records = guard_ledger.read(max(back.total_seconds(), 60) / 86400)
+        # guard_ledger.read cuts off at the wall clock, not at `now`, so the
+        # window it reads is measured from the wall clock; the records are
+        # then kept to the span the events can match, whatever `now` is.
+        tol = timedelta(minutes=tolerance_minutes)
+        lo = min(e["_when"] for e in timed) - tol - gr.SKEW
+        hi = max(e["_when"] for e in timed) + tol + gr.SKEW
+        back = _wall_clock() - lo
+        records = []
+        for rec in guard_ledger.read(max(back.total_seconds(), 60) / 86400):
+            try:
+                ts = datetime.fromisoformat(rec["ts"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=UTC)
+            if lo <= ts <= hi:
+                records.append(rec)
     evs = [{**e, "kind": gr.EVENTS.get(e["event"], ("create", ""))[0]} for e in timed]
     buckets = gr.match(evs, records, tolerance=timedelta(minutes=tolerance_minutes))
     out: dict[str, dict[str, Any]] = {}
