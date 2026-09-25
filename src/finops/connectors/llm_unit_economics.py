@@ -108,7 +108,7 @@ def get_cost_per_project(
     if "anthropic" in missing_project_data:
         tagging_guide["anthropic"] = (
             "Create Anthropic Workspaces per team (Enterprise plan). "
-            "Set ANTHROPIC_ADMIN_KEY + ANTHROPIC_ORGANIZATION_ID to retrieve workspace costs. "
+            "Set ANTHROPIC_ADMIN_KEY (sk-ant-admin...) to retrieve workspace costs. "
             "On non-enterprise plans, all usage appears under the default workspace."
         )
 
