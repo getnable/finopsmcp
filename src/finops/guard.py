@@ -709,9 +709,17 @@ def _stop_on_budget() -> bool:
 def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
     """Stop the agent when its own token spend is over the budget the user set.
 
-    This runs BEFORE command classification and applies to every tool call, not
-    just infrastructure ones. "Stop the agent because it is spending too much"
-    means stop it, not stop it from touching Terraform.
+    This runs BEFORE command classification and applies to every tool call the
+    hook sees, not just infrastructure ones. "Stop the agent because it is
+    spending too much" means stop it, not stop it from touching Terraform.
+
+    Which calls that is, exactly: in Claude Code, the Bash tool and every MCP
+    tool (the installed matcher is ^(Bash|mcp__.*)$), known to the guard or
+    not; in Cursor and Codex, shell commands. NOT Claude Code's built-in Edit,
+    Write, Read, Glob, Grep, WebFetch, WebSearch or Task tools: widening the
+    matcher to them would add the hook's start-up time to every file edit, so
+    an agent over budget can still edit files until its next shell or MCP
+    call. `nable guard doctor` says the same.
 
     Reads the local Claude Code session logs (ai_budget), so it needs no cloud
     account, no API key and no network. Returns None when no budget is set, when
@@ -1193,20 +1201,24 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     gate_command, with `mcp_tool` added; a batch call returns its most severe
     verdict.
 
-    Unknown MCP tools return None before anything else runs, the AI budget
-    stop included: the guard never asks about a tool it does not understand,
-    and does not record it either. Recording and fail-open as gate_command.
+    The AI budget stop comes first and applies to every MCP tool, known or
+    not: an agent over its budget must not keep spending through a tool the
+    guard does not otherwise judge, and a budget stop on one is recorded
+    under the tool's name. Under budget, an unknown MCP tool returns None and
+    is not recorded: the guard never asks about a tool it does not
+    understand. Recording and fail-open as gate_command.
     """
     summary = tool_name
     try:
         from .guard_mcp import argument_text, translate
 
-        actions = translate(tool_name, arguments)
-        if not actions:
-            return None
-        summary = actions[0].command
-
         budget_hit = check_budget_gate(session_id)
+        actions = translate(tool_name, arguments)
+        if not actions and budget_hit is None:
+            return None
+        if actions:
+            summary = actions[0].command
+
         if budget_hit is not None:
             worst: dict[str, Any] | None = {**budget_hit}
         else:
@@ -1873,7 +1885,11 @@ def doctor() -> dict[str, Any]:
                 gaps.append(f"{label}: on this machine, and this nable has no hook for it")
     gaps.append("commands inside scripts the agent runs (the guard sees `bash deploy.sh`, "
                 "not what is in it)")
-    gaps.append("MCP servers outside the recognised table (the guard stays silent on them)")
+    gaps.append("MCP servers outside the recognised table (the guard stays silent on them "
+                "unless the AI budget stop applies)")
+    gaps.append("the AI budget stop on Claude Code's built-in tools (Edit, Write, Read, "
+                "WebFetch, Task and the like): in Claude Code it covers Bash and MCP "
+                "tool calls only")
 
     ledger = guard_ledger.check()
     if not ledger["ok"]:

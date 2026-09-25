@@ -8,7 +8,9 @@ deployment and the guard was never consulted.
 Invariants under test:
   - known infra tools are judged exactly like the shell command they amount
     to: same doors, same prices, same production-context rule
-  - an unknown MCP tool gets no verdict at all, not even the AI budget stop
+  - an unknown MCP tool gets no verdict of its own, but the AI budget stop
+    applies to it: an agent over budget cannot keep spending through tools
+    the guard does not otherwise judge
   - a known tool NAME with a foreign argument shape passes through, so an
     unrelated server's `create_run` or `delete_resource` is never asked about
   - the table is data, and every name in it is exercised here
@@ -228,14 +230,52 @@ def test_unknown_or_foreign_shaped_tools_get_no_verdict(tool, args):
     assert g.gate_mcp_call(tool, args) is None
 
 
-def test_unknown_mcp_tools_skip_even_the_budget_stop(monkeypatch):
-    """Never ask on a tool the guard does not understand, whatever the budget."""
-    monkeypatch.setattr(ai_budget, "status", lambda: {
+def _over_budget(monkeypatch):
+    monkeypatch.setattr(ai_budget, "status", lambda **_: {
         "verdict": ai_budget.BUDGET_OVER, "verdict_basis": "tokens", "pct_of_budget": 1.5,
         "billable_tokens_mtd": 15, "budget": {"monthly_tokens": 10}})
-    assert g.gate_mcp_call("mcp__github__create_issue", {"title": "x"}) is None
+
+
+def test_the_budget_stop_covers_unknown_mcp_tools_too(monkeypatch):
+    """It used to return before the budget check for any tool guard_mcp did
+    not translate, so an agent over budget kept spending through GitHub,
+    Slack or any other MCP server."""
+    _over_budget(monkeypatch)
+    v = g.gate_mcp_call("mcp__github__create_issue", {"title": "x"})
+    assert v and v["decision"] == "ask" and v["action_type"] == "ai_budget"
+    assert v["mcp_tool"] == "mcp__github__create_issue"
+    monkeypatch.setenv("FINOPS_GUARD_STOP_ON_BUDGET", "1")
+    assert g.gate_mcp_call("mcp__slack__post_message", {"text": "x"})["decision"] == "deny"
     known = g.gate_mcp_call("mcp__kubernetes__kubectl_delete", {"resourceType": "pod", "name": "x"})
     assert known and known["action_type"] == "ai_budget"
+
+
+def test_a_budget_stop_on_an_unknown_tool_is_recorded(monkeypatch):
+    _over_budget(monkeypatch)
+    g.gate_mcp_call("mcp__github__create_issue", {"title": "x"})
+    import finops.guard_ledger as gl
+    [r] = [json.loads(line) for line in gl.ledger_path().read_text().splitlines()]
+    assert (r["decision"], r["action_type"], r["tool"]) == \
+        ("ask", "ai_budget", "mcp__github__create_issue")
+
+
+def test_the_hook_stops_an_unknown_mcp_tool_when_over_budget(monkeypatch):
+    _over_budget(monkeypatch)
+    out = io.StringIO()
+    g.run_hook(io.StringIO(json.dumps({"tool_name": "mcp__github__create_issue",
+                                       "tool_input": {"title": "x"}})), out)
+    assert json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+def test_under_budget_an_unknown_tool_is_still_silent_and_unrecorded():
+    assert g.gate_mcp_call("mcp__github__create_issue", {"title": "x"}) is None
+    import finops.guard_ledger as gl
+    assert not gl.ledger_path().exists()
+
+
+def test_doctor_says_which_tools_the_budget_stop_covers():
+    gaps = " ".join(g.doctor()["not_covered"])
+    assert "AI budget stop on Claude Code's built-in tools (Edit, Write, Read" in gaps
 
 
 @pytest.mark.parametrize("name,expected", [
