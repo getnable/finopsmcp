@@ -1205,10 +1205,14 @@ def _cline_read(path: Path) -> str | None:
         return None
 
 
-def _cline_install(path: Path, cmd: str, stale: tuple[str, ...] = ()) -> str:
+def _refuse_cline_on_windows() -> None:
     if sys.platform == "win32":
         raise SystemExit(f"  Cline hooks on Windows are PowerShell scripts ({_CLINE_FILE}.ps1), "
                          "which nable does not write yet; nothing was changed.")
+
+
+def _cline_install(path: Path, cmd: str, stale: tuple[str, ...] = ()) -> str:
+    _refuse_cline_on_windows()
     text = _cline_read(path)
     if text is None:
         if path.exists():
@@ -1281,6 +1285,10 @@ def install(harness: str, global_scope: bool = False) -> tuple[str, Path]:
         fixed = bool(guard.broken_hook_command(path) or guard.unpinned_hook_command(path))
         guard.install(global_scope)
         return ("repaired" if fixed else "already" if already else "new"), path
+    if harness == "cline":
+        # Refuse before resolving the command: nothing on Windows would use it,
+        # and resolving it there walks PATH for nothing.
+        _refuse_cline_on_windows()
     cmd = hook_command(harness, global_scope)
     if harness == "cline":
         return _cline_install(path, cmd, _stale_forms(harness, global_scope)), path
