@@ -188,9 +188,9 @@ SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
      "--pass-phrase [REDACTED]"),
     # Review finds: the JSON and YAML spellings, headers, and commands that
     # take a secret as a plain positional or --value.
-    ("""aws rds create-db-instance --cli-input-json '{"MasterUserPassword":"Hunter2Secret!"}'""",
+    ("""aws rds create-db-instance --cli-input-json '{"MasterUserPassword":"Hunter2Secret!"}'""",  # pragma: allowlist secret
      "Hunter2Secret", '"MasterUserPassword":[REDACTED]'),
-    ("""terraform apply -var 'db={"password":"x9"}'""", "x9", '"password":[REDACTED]'),
+    ("""terraform apply -var 'db={"password":"x9"}'""", "x9", '"password":[REDACTED]'),  # pragma: allowlist secret
     ('terraform apply -var "client_secret: xyz"', "xyz", "client_secret: [REDACTED]"),
     ('curl -H "X-Api-Key: 3f9a1c0e8b7d6a5f4e3d2c1b0a9f8e7d" https://x',  # pragma: allowlist secret
      "3f9a1c0e", '-H "X-Api-Key: [REDACTED]"'),
