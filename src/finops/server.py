@@ -236,20 +236,40 @@ _unconnected_hint_fired = False
 # tool wrapper surfaces it IN CHAT once per session so the user actually sees it.
 _stale_note: str | None = None
 _stale_note_shown = False
-# Injected into cost-tool responses when nothing is connected. Tells the user the
-# data is sample/empty and hands the model the exact tool to fix it in-client, so
-# they never have to leave the conversation for a terminal wizard.
+# Injected into cost-tool responses when nothing is connected. Tells the user
+# what they are looking at and hands the model the exact tool to fix it in-client,
+# so they never have to leave the conversation for a terminal wizard.
+_CONNECT_HOW = (
+    "To see your own numbers, connect in-chat, no terminal needed: connect_aws or "
+    "connect_gcp detect credentials already on this machine and connect them; "
+    "connect_azure walks through the Cloud Shell one-paste. They only read billing "
+    "data; they never change anything in your cloud."
+)
+# Demo mode: the answer IS sample data, and connecting replaces it.
 _CONNECT_HINT = {
     "sample_data": True,
+    "message": ("This is sample data (demo mode), not your real costs. " + _CONNECT_HOW),
+    "actions": ["connect_aws", "connect_gcp", "connect_azure"],
+}
+# Not demo, nothing connected. This used to say "nable can only show sample data"
+# here too, but nothing in chat could turn sample data on, so it promised a
+# path that did not exist. It now names the real one: demo is a server setting.
+_NO_ACCOUNT_HINT = {
+    "sample_data": False,
     "message": (
-        "No cloud account is connected, so nable can only show sample data, not "
-        "your real costs. To see your own numbers, connect in-chat, no terminal needed: "
-        "connect_aws or connect_gcp detect credentials already on this machine "
-        "and connect them; connect_azure walks through the Cloud Shell one-paste. "
-        "They only read billing data; they never change anything in your cloud."
+        "No cloud account is connected, so there are no costs of yours to show yet. "
+        + _CONNECT_HOW
+        + " To try nable on sample data first, restart the nable MCP server with "
+        "FINOPS_DEMO=1 in its environment (in the editor's MCP config), or run "
+        "`nable scan --demo` in a terminal."
     ),
     "actions": ["connect_aws", "connect_gcp", "connect_azure"],
 }
+
+
+def _connect_hint() -> dict:
+    from .demo_data import is_demo
+    return _CONNECT_HINT if is_demo() else _NO_ACCOUNT_HINT
 
 
 # ── First-contact confirmation (the restart cliff) ─────────────────────────────
@@ -590,7 +610,7 @@ def _instrumented_tool(*dargs, **dkwargs):
             if fn.__name__ in _COST_QUERY_TOOLS and isinstance(result, dict):
                 from .demo_data import _real_provider_connected as _rpc
                 if not _rpc():
-                    result.setdefault("_connect_hint", _CONNECT_HINT)
+                    result.setdefault("_connect_hint", _connect_hint())
                     global _unconnected_hint_fired
                     if not _unconnected_hint_fired:
                         _unconnected_hint_fired = True
