@@ -1570,7 +1570,9 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     The AI budget stop comes first and applies to every MCP tool, known or
     not: an agent over its budget must not keep spending through a tool the
     guard does not otherwise judge, and a budget stop on one is recorded
-    under the tool's name. Under budget, an unknown MCP tool returns None and
+    under the tool's name. Under budget, an unknown MCP tool is judged only on
+    the command lines in its arguments (`{"command": "terraform destroy"}` to
+    a shell server, guard_mcp.command_strings); with none it returns None and
     is not recorded: the guard never asks about a tool it does not
     understand. Recording and fail-open as gate_command.
     """
@@ -2344,7 +2346,8 @@ def doctor() -> dict[str, Any]:
     gaps.append("commands inside scripts the agent runs (the guard sees `bash deploy.sh`, "
                 "not what is in it)")
     gaps.append("MCP servers outside the recognised table (the guard stays silent on them "
-                "unless the AI budget stop applies)")
+                "unless an argument is itself an aws, kubectl, terraform or similar "
+                "command line, or the AI budget stop applies)")
     gaps.append("the AI budget stop on Claude Code's built-in tools (Edit, Write, Read, "
                 "WebFetch, Task and the like): in Claude Code it covers Bash and MCP "
                 "tool calls only")

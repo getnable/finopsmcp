@@ -297,3 +297,117 @@ def test_strict_mode_and_prod_context_reach_them(cmd, monkeypatch):
     assert g.gate_command(f"{cmd} --profile prod", record=False)["decision"] == "ask"
     monkeypatch.setenv("FINOPS_GUARD_STRICT", "1")
     assert g.gate_command(cmd, record=False)["decision"] == "ask"
+
+
+# ── 3. MCP calls that passed silently ─────────────────────────────────────────
+
+import finops.guard_mcp as gm  # noqa: E402
+
+P4D_X8 = _monthly(EC2_HOURLY["p4d.24xlarge"], 8)
+
+
+@pytest.mark.parametrize("params", [
+    {"InstanceType": "p4d.24xlarge", "MinCount": 8, "MaxCount": 8, "ImageId": "ami-1"},
+    {"InstanceType": "p4d.24xlarge", "MinCount": 1, "MaxCount": 8},
+    {"instance_type": "p4d.24xlarge", "max_count": 8},
+])
+def test_use_aws_api_style_parameters_are_priced(params):
+    v = g.gate_mcp_call("mcp__q__use_aws", {"service_name": "ec2",
+                                           "operation_name": "RunInstances",
+                                           "parameters": params, "region": "us-east-1"},
+                        record=False)
+    assert v is not None and v["decision"] == "ask"
+    assert v["monthly_delta_usd"] == P4D_X8
+
+
+def test_use_aws_parameters_are_kebab_case_flags():
+    [act] = gm.translate("mcp__q__use_aws", {
+        "service_name": "ec2", "operation_name": "TerminateInstances",
+        "parameters": {"InstanceIds": ["i-1"], "DryRun": True}})
+    assert act.command == "aws ec2 terminate-instances --instance-ids i-1 --dry-run"
+
+
+@pytest.mark.parametrize("state", [
+    {"InstanceType": "p4d.24xlarge", "ImageId": "ami-1"},
+    '{"InstanceType": "p4d.24xlarge", "ImageId": "ami-1"}',
+])
+def test_a_cloud_control_ec2_instance_is_priced(state):
+    v = g.gate_mcp_call("mcp__ccapi__create_resource",
+                        {"resource_type": "AWS::EC2::Instance", "desired_state": state},
+                        record=False)
+    assert v is not None and v["action_type"] == "infra_apply"
+    assert v["monthly_delta_usd"] == _monthly(EC2_HOURLY["p4d.24xlarge"])
+    assert "AWS::EC2::Instance" in v["reason"] and "Cloud Control" in v["reason"]
+
+
+def test_a_small_cloud_control_instance_stays_silent():
+    assert g.gate_mcp_call("mcp__ccapi__create_resource",
+                           {"resource_type": "AWS::EC2::Instance",
+                            "desired_state": {"InstanceType": "t3.micro"}},
+                           record=False) is None
+
+
+def test_a_cloud_control_database_is_priced():
+    v = g.gate_mcp_call("mcp__ccapi__create_resource", {
+        "resource_type": "AWS::RDS::DBInstance",
+        "desired_state": {"DBInstanceClass": "db.r5.8xlarge", "Engine": "postgres",
+                          "MultiAZ": True}}, record=False)
+    assert v is not None and v["decision"] == "ask"
+    assert v["estimate"]["count"] == 2
+
+
+@pytest.mark.parametrize("tool,args,action", [
+    ("mcp__k8s-mcp__execute_kubectl", {"command": "kubectl delete namespace prod"},
+     "delete_resource"),
+    ("mcp__shell__run_command", {"command": "terraform destroy -auto-approve"},
+     "delete_resource"),
+    ("mcp__desktop-commander__start_process",
+     {"command": "aws ec2 terminate-instances --instance-ids i-1", "timeout_ms": 5000},
+     "terminate_instance"),
+    ("mcp__desktop-commander__start_process", {"command": "helm -n prod uninstall api"},
+     "delete_resource"),
+    ("mcp__shell__run", {"argv": ["pulumi", "destroy", "--yes"]}, "delete_resource"),
+    ("mcp__shell__run", {"command": "cd infra && terraform destroy"}, "delete_resource"),
+    ("mcp__shell__run", {"command": "AWS_PROFILE=prod aws s3 rb s3://b --force"},
+     "delete_resource"),
+    ("mcp__shell__run", {"command": "/usr/local/bin/gcloud projects delete p"},
+     "delete_resource"),
+    ("mcp__aks__call_kubectl", {"args": "delete deployment api -n prod"}, "delete_resource"),
+    ("mcp__shell__run", {"opts": {"cmd": "tofu destroy"}}, "delete_resource"),
+])
+def test_command_strings_in_any_mcp_tool_are_judged(tool, args, action):
+    v = g.gate_mcp_call(tool, args, record=False)
+    assert v is not None and v["decision"] == "ask", (tool, args)
+    assert v["action_type"] == action
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("mcp__github__create_issue", {"title": "docs", "body": "never run terraform destroy"}),
+    ("mcp__shell__run_command", {"command": "ls -la"}),
+    ("mcp__shell__run_command", {"command": "kubectl get pods"}),
+    ("mcp__notes__save", {"text": "aws is great"}),
+    ("mcp__shell__run", {"argv": ["echo", "terraform", "destroy"]}),
+])
+def test_prose_and_reads_in_mcp_arguments_stay_silent(tool, args):
+    assert g.gate_mcp_call(tool, args, record=False) is None
+
+
+def test_a_manifest_delete_says_what_it_deletes():
+    v = g.gate_mcp_call("mcp__kubernetes__kubectl_delete", {
+        "manifest": "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: prod\n"},
+        record=False)
+    assert "delete Namespace prod (from a manifest)" in v["reason"]
+
+
+def test_a_multi_document_manifest_names_each_object():
+    v = g.gate_mcp_call("mcp__kubernetes__kubectl_delete", {
+        "manifest": "kind: Deployment\nmetadata:\n  name: api\n  namespace: shop\n---\n"
+                    "kind: Service\nmetadata:\n  name: api\n"}, record=False)
+    assert "Deployment api in shop" in v["reason"] and "Service api" in v["reason"]
+
+
+def test_an_unreadable_manifest_still_says_it_is_a_delete():
+    v = g.gate_mcp_call("mcp__kubernetes__kubectl_delete", {"manifest": "{{ not yaml"},
+                        record=False)
+    assert v["decision"] == "ask"
+    assert "kubectl delete (from a manifest)" in v["reason"]

@@ -18,9 +18,13 @@ Matching rules, and why:
     (create_run, delete_resource). Those rules also require the argument shape
     only the intended server sends (a workspace_name, an "AWS::" resource
     type), so an unrelated server's tool of the same name passes through.
-  - A tool that matches no rule yields no actions and the guard says nothing.
-    Asking about MCP tools nable does not understand would be friction with no
-    information in it, and friction is how a guard gets uninstalled.
+  - A tool that matches no rule yields no actions and the guard says nothing,
+    with one exception: an argument that is itself a command line for a cloud
+    or IaC CLI (`{"command": "kubectl delete namespace prod"}` to a shell or
+    kubectl server) is judged as that command. Shell-runner servers are
+    exactly how an agent reaches a CLI without the Bash tool. Otherwise,
+    asking about MCP tools nable does not understand would be friction with
+    no information in it, and friction is how a guard gets uninstalled.
   - Read-shaped calls on a recognised tool (plan_only runs, `read`
     operations, a scale with no replica count) also yield nothing.
 
@@ -88,18 +92,25 @@ def _ns(args: dict[str, Any]) -> str:
 
 def _kebab(op: str) -> str:
     """`TerminateInstances` / `terminate_instances` -> `terminate-instances`,
-    the CLI spelling the classifier and price table are written against."""
-    op = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", op.strip())
+    `DBInstanceClass` -> `db-instance-class`: the CLI spelling the classifier
+    and price table are written against."""
+    op = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "-", op.strip())
     return op.replace("_", "-").lower()
 
 
 def _cli_flags(params: Any) -> str:
-    """AWS CLI flags from a use_aws `parameters` object."""
+    """AWS CLI flags from a use_aws `parameters` object.
+
+    Keys may be the CLI's (`instance-type`) or the API's (`InstanceType`,
+    `MaxCount`); both become the CLI flag (`--instance-type`, `--max-count`),
+    because that is what the classifier and the pricer read. Passed verbatim,
+    `{"InstanceType": "p4d.24xlarge", "MaxCount": 8}` was a launch nobody
+    could price."""
     if not isinstance(params, dict):
         return ""
     out = []
     for k, v in params.items():
-        flag = "--" + str(k).lstrip("-")
+        flag = "--" + _kebab(str(k).lstrip("-"))
         if v is True:
             out.append(flag)
         elif v is False or v is None:
@@ -116,19 +127,76 @@ def _cli_flags(params: Any) -> str:
 
 # ── translations ──────────────────────────────────────────────────────────────
 
+# The CLIs whose command lines the guard judges wherever they turn up in an
+# MCP call's arguments.
+CLIS = ("aws", "kubectl", "terraform", "tofu", "terragrunt", "helm", "pulumi", "gcloud",
+        "az", "cdk", "sam", "doctl", "eksctl", "gsutil")
+_CLI_NAMES = "|".join(CLIS)
+# A string that starts with one of them, after what can come first on a
+# command line without changing which program runs: `sudo`, `env`, `npx`,
+# VAR=value assignments, a `cd dir &&`, a path, or a `bash -c` wrapper.
+_CLI_START_RE = re.compile(
+    r"\s*(?:(?:sudo|env|command|exec|nohup|time|npx)\s+(?:-\S+\s+)*"
+    r"|[A-Za-z_]\w*=\S*\s+"
+    r"|cd\s+\S+\s*(?:&&|;)\s*"
+    r"|(?:\S*/)?(?:ba|z|da|k)?sh\s+-\w*c\s+['\"]?)*"
+    rf"(?:\S*/)?(?:{_CLI_NAMES})(?:\s|$)", re.IGNORECASE)
+_CLI_PREFIX_SCAN = 512          # how far in the program name may sit
+_STRINGS_MAX = 64               # argument strings looked at per call
+_ARG_DEPTH = 4
+
+
+def _is_cli_command(s: str) -> bool:
+    return _CLI_START_RE.match(s[:_CLI_PREFIX_SCAN]) is not None
+
+
+def command_strings(args: Any, *, implied: str = "") -> list[str]:
+    """Every argument string that is a command line for one of CLIS: plain
+    strings, and argv lists (`["pulumi", "destroy"]`) joined. `implied` is a
+    CLI the tool's own name says it runs (`call_kubectl`), prefixed onto an
+    `args`/`command` string that leaves it out (`delete deployment api`)."""
+    found: list[str] = []
+    seen = 0
+
+    def walk(v: Any, key: str, depth: int) -> None:
+        nonlocal seen
+        if seen >= _STRINGS_MAX or depth > _ARG_DEPTH:
+            return
+        if isinstance(v, str):
+            seen += 1
+            text = v.strip()
+            if not text:
+                return
+            if _is_cli_command(text):
+                found.append(text)
+            elif implied and key in ("args", "arguments", "command", "cmd"):
+                found.append(f"{implied} {text}")
+        elif isinstance(v, list):
+            if v and all(isinstance(x, str) for x in v) and \
+                    _is_cli_command(" ".join(v[:2]) + " "):
+                seen += 1
+                found.append(" ".join(v))
+                return
+            for x in v:
+                walk(x, key, depth + 1)
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                walk(x, str(k), depth + 1)
+
+    walk(args, "", 0)
+    return found
+
+
 def _aws_cli(args: dict[str, Any]) -> list[McpAction]:
     """call_aws takes one CLI command or a batch of them in `cli_command`. The
     managed AWS MCP Server's schema is not published in a form we could read,
-    so any string argument that is itself an `aws ...` command is taken too:
+    so any string argument that is itself a CLI command is taken too:
     over-reading an argument costs a question, missing a terminate does not."""
     raw = args.get("cli_command")
     cmds = raw if isinstance(raw, list) else [raw]
     found = [c for c in cmds if isinstance(c, str) and c.strip()]
     if not found:
-        for v in args.values():
-            for c in (v if isinstance(v, list) else [v]):
-                if isinstance(c, str) and c.lstrip().startswith("aws "):
-                    found.append(c)
+        found = command_strings(args)
     return [McpAction(c.strip()) for c in found]
 
 
@@ -178,9 +246,55 @@ def _tf_execute(tool: str) -> Callable[[dict[str, Any]], list[McpAction]]:
     return translate
 
 
+_MANIFEST_MAX = 64 * 1024
+
+
+def _manifest_objects(text: str) -> list[tuple[str, str, str]]:
+    """(kind, name, namespace) for each object a manifest names; [] when it
+    cannot be read."""
+    if len(text) > _MANIFEST_MAX:
+        return []
+    try:
+        import yaml
+        docs = list(yaml.safe_load_all(text))
+    except Exception:
+        return []
+    out = []
+    for d in docs:
+        items = d.get("items") if isinstance(d, dict) and d.get("kind") == "List" else [d]
+        for obj in items if isinstance(items, list) else []:
+            meta = obj.get("metadata") if isinstance(obj, dict) else None
+            if not isinstance(meta, dict) or not isinstance(obj.get("kind"), str) \
+                    or not isinstance(meta.get("name"), str):
+                continue
+            ns = meta.get("namespace")
+            out.append((obj["kind"], meta["name"], ns if isinstance(ns, str) else ""))
+    return out
+
+
+def _manifest_delete(args: dict[str, Any]) -> list[McpAction]:
+    """kubectl_delete given a manifest instead of a kind and name: say what
+    the manifest deletes, or at least that it is a delete from a manifest."""
+    src = _s(args, "filename")
+    if src:
+        return [McpAction(_join("kubectl delete -f", src, _ns(args)),
+                          f"delete what {src} describes", ONE_WAY_DELETE)]
+    objs = _manifest_objects(_s(args, "manifest"))
+    if not objs:
+        return [McpAction("kubectl delete", "run kubectl delete (from a manifest)",
+                          ONE_WAY_DELETE)]
+    shown = [_join(kind, name, f"in {ns}" if ns else "") for kind, name, ns in objs[:5]]
+    more = f" and {len(objs) - 5} more" if len(objs) > 5 else ""
+    what = (", ".join(shown[:-1]) + " and " + shown[-1] if len(shown) > 1 else shown[0]) + more
+    cmd = _join("kubectl delete", *(f"{k.lower()}/{n}" for k, n, _ in objs[:5]))
+    return [McpAction(cmd, f"delete {what} (from a manifest)", ONE_WAY_DELETE)]
+
+
 def _k8s_delete(kind_key: str, fixed_kind: str = "") -> Callable[[dict[str, Any]], list[McpAction]]:
     def translate(args: dict[str, Any]) -> list[McpAction]:
         kind = fixed_kind or _s(args, kind_key)
+        if not kind and (_s(args, "manifest") or _s(args, "filename")):
+            return _manifest_delete(args)
         return [McpAction(_join("kubectl delete", kind, _s(args, "name"), _ns(args)))]
     return translate
 
@@ -259,6 +373,30 @@ def _eks_stack(args: dict[str, Any]) -> list[McpAction]:
     return []
 
 
+def _desired_state(args: dict[str, Any]) -> dict[str, Any]:
+    raw = args.get("desired_state")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _ccapi_priced_form(rtype: str, state: dict[str, Any]) -> str:
+    """The CLI command a Cloud Control create amounts to, for the resource
+    types the price tables cover; "" for the rest."""
+    def val(key: str) -> str:
+        return _s(state, key)
+    if rtype == "AWS::EC2::Instance" and val("InstanceType"):
+        return f"aws ec2 run-instances --instance-type {val('InstanceType')} --count 1"
+    if rtype == "AWS::RDS::DBInstance" and val("DBInstanceClass"):
+        return _join("aws rds create-db-instance --db-instance-class", val("DBInstanceClass"),
+                     f"--engine {val('Engine').lower()}" if val("Engine") else "",
+                     "--multi-az" if state.get("MultiAZ") in (True, "true", "True") else "")
+    return ""
+
+
 def _ccapi(verb: str) -> Callable[[dict[str, Any]], list[McpAction]]:
     def translate(args: dict[str, Any]) -> list[McpAction]:
         rtype = _s(args, "resource_type")
@@ -266,7 +404,10 @@ def _ccapi(verb: str) -> Callable[[dict[str, Any]], list[McpAction]]:
             return []                  # not Cloud Control's argument shape: not ours to judge
         target = _join(rtype, _s(args, "identifier"))
         hit = ONE_WAY_DELETE if verb == "delete" else TWO_WAY_APPLY
-        return [McpAction(f"cloudcontrol {verb} {target}",
+        # A create the price tables cover is judged as the CLI launch it
+        # amounts to, so the threshold sees its figure.
+        cmd = (_ccapi_priced_form(rtype, _desired_state(args)) if verb == "create" else "")
+        return [McpAction(cmd or f"cloudcontrol {verb} {target}",
                           f"{verb} {target} through the Cloud Control API", hit)]
     return translate
 
@@ -373,13 +514,27 @@ def split_tool_name(tool_name: str) -> tuple[str, str] | None:
     return None
 
 
+def _implied_cli(tool_name: str) -> str:
+    """The CLI a tool's own name says it runs: `call_kubectl` -> kubectl."""
+    tool = tool_name.rsplit("__", 1)[-1].lower()
+    return next((w for w in re.split(r"[_\-.]+", tool) if w in CLIS), "")
+
+
 def translate(tool_name: str, arguments: Any) -> list[McpAction]:
     """The infrastructure actions an MCP tool call amounts to; [] for anything
     this table does not recognise, including a known name with the wrong
-    argument shape."""
-    split = split_tool_name(tool_name)
-    if split is None or not isinstance(arguments, dict):
+    argument shape. A tool the table does not know still yields the command
+    lines in its arguments (command_strings)."""
+    if not isinstance(arguments, dict) or not isinstance(tool_name, str) \
+            or not tool_name.startswith("mcp__"):
         return []
+    split = split_tool_name(tool_name)
+    if split is None:
+        try:
+            return [McpAction(c) for c in
+                    command_strings(arguments, implied=_implied_cli(tool_name))]
+        except Exception:
+            return []
     rule = _BY_NAME[split[1]]
     if any(k not in arguments for k in rule.requires):
         return []
