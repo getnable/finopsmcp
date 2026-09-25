@@ -46,7 +46,8 @@ async def forecast_costs(
         if not account_id:
             return {
                 "error": "No account_id provided and none could be auto-discovered.",
-                "hint": "Connect AWS with `finops setup aws`, or pass account_id explicitly.",
+                "hint": ("Connect AWS right here in the chat with connect_aws, or pass "
+                         "account_id explicitly."),
             }
         # to_thread: for_account is synchronous and slow, a DB read, possibly a
         # Cost Explorer call, then a Holt-Winters parameter grid search. On the
@@ -59,9 +60,26 @@ async def forecast_costs(
             aws_connector=aws if aws_configured else None,
         )
         if not f._series:
+            if aws_configured:
+                # Connected, just nothing to fit yet. "Connect your AWS account"
+                # sent a connected user back to a setup they had already done.
+                return {
+                    "error": (
+                        f"No cost history yet for account {account_id}"
+                        + (f" ({service})" if service else "")
+                        + ": nable has no daily snapshots for it and Cost Explorer "
+                        "returned no daily spend to fit a forecast to."),
+                    "hint": (
+                        "Forecasting needs at least 14 days of daily spend. Run "
+                        "take_snapshot_now to start recording history, and use "
+                        "explain_recent_cost_drivers or get_cost_summary to see "
+                        "current spend in the meantime."),
+                }
             return {
                 "error": "No historical data found for this account/service.",
-                "hint": "Connect your AWS account with `finops setup aws` to enable forecasting.",
+                "hint": ("AWS is not connected. Connect it right here in the chat: "
+                         "call connect_aws (it detects credentials already on this "
+                         "machine)."),
             }
         return await _srv.asyncio.to_thread(f.predict_dict, horizon_days)
     except Exception as e:

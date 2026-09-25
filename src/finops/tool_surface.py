@@ -401,6 +401,28 @@ TIER3: frozenset[str] = frozenset({
 })
 
 
+# Front doors that belong to one family and open only when that family is
+# connected by its OWN credentials. An AI-spend user with OPENAI_API_KEY set
+# asked "what are we spending on OpenAI" and saw no tool for it: every llm tool
+# was tier 2. They are not in TIER1 because llm is also inferred for every AWS
+# user (Bedrock), and an AWS-only front door has no use for OpenAI's doors.
+LLM_FRONT_DOOR: frozenset[str] = frozenset({
+    "get_llm_costs",
+    "get_llm_cost_by_model",
+})
+
+
+# nable's own staff tools. Never advertised to a customer's model, not under
+# FINOPS_ALL_TOOLS and not in demo mode: only with NABLE_INTERNAL_TOOLS=1.
+INTERNAL_TOOLS: frozenset[str] = frozenset({
+    "send_onboarding_email",
+})
+
+
+def internal_tools_enabled() -> bool:
+    return os.getenv("NABLE_INTERNAL_TOOLS", "").strip().lower() in ("1", "true", "yes")
+
+
 def tier(tool_name: str) -> int:
     """1 = front door, 3 = forensics, 2 = everything in between."""
     if tool_name in TIER1:
@@ -606,7 +628,7 @@ _VAULT_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 
 _CACHE_TTL = 30.0
-_cache: tuple[float, frozenset[str]] | None = None
+_cache: tuple[float, frozenset[str], bool] | None = None
 
 
 def _reset_cache_for_tests() -> None:
@@ -625,6 +647,11 @@ def _kubeconfig_present() -> bool:
 
 def _detect_families() -> frozenset[str]:
     """Which provider families look connected, from local signals only."""
+    return _detect()[0]
+
+
+def _detect() -> tuple[frozenset[str], bool]:
+    """(connected families, whether llm came from LLM credentials of its own)."""
     found: set[str] = set()
 
     for family, keys in _ENV_KEYS.items():
@@ -657,22 +684,34 @@ def _detect_families() -> frozenset[str]:
     if "kubernetes" not in found and _kubeconfig_present():
         found.add("kubernetes")
 
+    llm_keys = "llm" in found
+
     # Bedrock token tools work off the AWS account alone (capabilities.py gate).
     if "aws" in found:
         found.add("llm")
 
-    return frozenset(found)
+    return frozenset(found), llm_keys
+
+
+def _surface_state() -> tuple[frozenset[str], bool]:
+    """Detection, cached ~30s so tools/list stays effectively free."""
+    global _cache
+    now = time.monotonic()
+    if _cache is not None and _cache[0] > now:
+        return _cache[1], _cache[2]
+    families, llm_keys = _detect()
+    _cache = (now + _CACHE_TTL, families, llm_keys)
+    return families, llm_keys
 
 
 def connected_families() -> frozenset[str]:
     """Detected families, cached ~30s so tools/list stays effectively free."""
-    global _cache
-    now = time.monotonic()
-    if _cache is not None and _cache[0] > now:
-        return _cache[1]
-    families = _detect_families()
-    _cache = (now + _CACHE_TTL, families)
-    return families
+    return _surface_state()[0]
+
+
+def llm_keys_connected() -> bool:
+    """An LLM provider is connected by its own key, not only inferred from AWS."""
+    return _surface_state()[1]
 
 
 def _all_tools_forced() -> bool:
@@ -743,6 +782,8 @@ def advertise(tool_name: str) -> bool:
     it is looking for. A tool that fails the tier gate is not gone: the MCP call
     path resolves against the registry, so it runs the moment something names it.
     """
+    if tool_name in INTERNAL_TOOLS:
+        return internal_tools_enabled()
     if _all_tools_forced():
         return True
     try:
@@ -757,7 +798,8 @@ def advertise(tool_name: str) -> bool:
         pass
 
     if tier(tool_name) != 1 and not _flat_surface_forced():
-        return False
+        if not (tool_name in LLM_FRONT_DOOR and llm_keys_connected()):
+            return False
 
     family = _FAMILY_OF.get(tool_name)
     if family is None:

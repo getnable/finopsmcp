@@ -81,7 +81,11 @@ class SnowflakeConnector(BaseConnector):
         except ImportError as e:
             raise RuntimeError(
                 "Snowflake support needs an extra dependency. "
-                "Run: pip install 'finops-mcp[snowflake]'"
+                "Run: pip install 'finops-mcp[snowflake]'. If nable runs through "
+                "uvx, launch it with the extra instead: "
+                "uvx --from 'finops-mcp[snowflake]' finops-mcp (in an MCP config, "
+                "put \"--from\", \"finops-mcp[snowflake]\" before \"finops-mcp\" in "
+                "args)."
             ) from e
         kwargs: dict[str, Any] = dict(account=self._account, user=self._user)
         if self._role:

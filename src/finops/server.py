@@ -139,7 +139,45 @@ class _SurfacedFastMCP(FastMCP):
             # A scoping failure must not silently WIDEN access, so this re-raises
             # rather than falling through to the unscoped arguments.
             raise
+        _reject_dropped_write_arguments(self, name, arguments)
         return await super().call_tool(name, arguments, **kwargs)
+
+
+def _reject_dropped_write_arguments(server, name, arguments) -> None:
+    """Refuse a WRITE tool call that carries arguments the tool does not take.
+
+    FastMCP validates arguments against the signature and ignores extras, so
+    set_business_metrics(mrr=5000) stored nothing and answered saved:true. For a
+    read that is harmless; for a write it reports success for input it threw
+    away. Only write tools are checked, so a model's stray extra on a read keeps
+    working as before.
+    """
+    from .tool_surface import WRITE_TOOLS
+
+    if name not in WRITE_TOOLS or not isinstance(arguments, dict) or not arguments:
+        return
+    try:
+        tool = server._tool_manager.get_tool(name)
+        accepted = set((tool.parameters or {}).get("properties", {})) if tool else None
+    except Exception:
+        return
+    if not accepted:
+        return
+    unknown = sorted(k for k in arguments if k not in accepted)
+    if not unknown:
+        return
+    import difflib
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    hints = []
+    for k in unknown:
+        close = difflib.get_close_matches(k, sorted(accepted), n=1, cutoff=0.5)
+        hints.append(f"{k} (did you mean {close[0]}?)" if close else k)
+    raise ToolError(
+        f"{name} does not take {', '.join(hints)}. Nothing was saved. "
+        f"It accepts: {', '.join(sorted(accepted))}."
+    )
 
 
 # The event loop that dispatches tool calls, recorded by _instrumented_tool before
@@ -1014,6 +1052,12 @@ def _summary_to_dict(summary: CostSummary) -> dict:
             f"Amounts are in {currency}, not USD. nable does not convert currencies; "
             f"the figures and any '$' formatting reflect {currency} values."
         )
+    from .connectors.base import no_rows_message, returned_no_rows
+    if returned_no_rows(summary):
+        # Read, and nothing came back. Distinct from a $0 bill (below): the
+        # caller must not present total_usd as what was spent.
+        d["no_rows"] = True
+        d["no_rows_note"] = no_rows_message(summary.provider)
     if getattr(summary, "_zero_spend_account", False):
         d["note"] = (
             "Cost Explorer is connected and returning data, but this account has $0.00 in "

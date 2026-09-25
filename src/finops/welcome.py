@@ -253,7 +253,9 @@ def show_welcome() -> None:
     _blank()
     _line(_rule())
     _blank()
-    _line(bold("Connected sources:"))
+    # What nable can read, not what this machine has connected: on a first run
+    # nothing is, and a heading of "Connected sources" said otherwise.
+    _line(bold("Supported sources:"))
     for label, items in [
         ("Cloud",    "AWS · Azure · GCP · Kubernetes"),
         ("AI / LLM", "OpenAI · Anthropic · Datadog · Langfuse"),
@@ -273,7 +275,8 @@ def show_welcome() -> None:
     _blank()
     _line(bold("Getting started:") + "  connect your first provider below.")
     _line(dim("   Credentials stay on your machine. nable has no backend, so your data never touches our servers."))
-    _line(dim("   nable sends anonymous usage pings (no cost data). Opt out: NABLE_NO_TELEMETRY=1"))
+    _line(dim("   Usage telemetry is off unless you say yes when asked (or set NABLE_TELEMETRY=1)."))
+    _line(dim("   It never carries cost data, account IDs or credentials."))
     _blank()
 
 
@@ -557,13 +560,13 @@ def _connect_llm_provider() -> bool:
     _blank()
     try:
         if pick == "2":
-            setup_saas_api_key("Anthropic", [
+            stored = setup_saas_api_key("Anthropic", [
                 ("ANTHROPIC_API_KEY", "API Key (sk-ant-...)", True),
                 ("ANTHROPIC_ADMIN_KEY", "Admin Key for org usage data (optional)", True),
                 ("ANTHROPIC_ORGANIZATION_ID", "Organization ID (optional)", False),
             ])
         else:
-            setup_saas_api_key("OpenAI", [
+            stored = setup_saas_api_key("OpenAI", [
                 ("OPENAI_API_KEY", "API Key (sk-...)", True),
                 ("OPENAI_ADMIN_KEY", "Admin/Org Key for billing data (sk-admin-..., optional)", True),
                 ("OPENAI_ORG_ID", "Organization ID (org-..., optional)", False),
@@ -571,6 +574,10 @@ def _connect_llm_provider() -> bool:
     except (KeyboardInterrupt, EOFError):
         return False
     except Exception:
+        return False
+    if not stored:
+        # Nothing was entered. "Key works, but no org billing data came back"
+        # described a key that does not exist.
         return False
     shown = _llm_value_moment()
     if not shown:

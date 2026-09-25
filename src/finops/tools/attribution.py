@@ -658,6 +658,22 @@ def audit_terraform_tags(
 
     try:
         violations = audit_tags(tf_dir, state_path)
+    except FileNotFoundError as exc:
+        # "[Errno 2] No such file or directory: 'terraform'" was the whole answer.
+        tf_bin = _srv.os.environ.get("TERRAFORM_BIN", "terraform")
+        if exc.filename not in (tf_bin, "terraform"):
+            return {"error": str(exc), "tf_dir": tf_dir}
+        return {
+            "error": "terraform_not_installed",
+            "message": (
+                f"The Terraform CLI ({tf_bin}) is not installed or not on PATH, so "
+                "`terraform show -json` could not read the state. Install it from "
+                "https://developer.hashicorp.com/terraform/install, or run without "
+                "it: pass state_path pointing at a .tfstate file (for a remote "
+                "backend, `terraform state pull > state.tfstate` where Terraform "
+                "is installed)."),
+            "tf_dir": tf_dir,
+        }
     except Exception as exc:
         return {"error": str(exc), "tf_dir": tf_dir}
 

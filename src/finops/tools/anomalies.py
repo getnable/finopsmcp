@@ -31,8 +31,8 @@ def get_anomalies(
         - "What spiked in AWS this week?"
         - "Any anomalies in the production account?"
 
-    Note: Anomalies require at least 7 days of snapshot history.
-          Run 'finops snapshot' or wait for the daily job to accumulate data.
+    Note: Anomalies require at least 7 days of snapshot history. Before then,
+          explain_recent_cost_drivers reads cost data directly and shows what moved.
     """
     from ..demo_data import is_demo, get_demo_response
     if is_demo():
@@ -68,24 +68,39 @@ def get_anomalies(
         # stopped days ago nothing recent has been checked. Saying "all clear"
         # in either of those is a false reassurance, so check the history first.
         last = latest_snapshot_date(provider, account_id_filter)
+        # Day one should not end at "wait a week". explain_recent_cost_drivers
+        # reads Cost Explorer directly and compares two windows, which answers
+        # "did anything spike" before the snapshot baseline exists.
+        meanwhile = (
+            " Meanwhile, explain_recent_cost_drivers reads your cost data directly "
+            "and compares the last 7 days with the 7 before, so it can show what "
+            "moved right now."
+        )
+        next_tool = None
         if has_enough_history(provider, account_id_filter):
             message = "No active anomalies."
         elif last is not None and history_is_stale(provider, account_id_filter):
             message = (
                 f"Cost history is stale: the newest snapshot is from {last.isoformat()}, "
                 "so recent spend has not been checked for anomalies. Take a cost "
-                "snapshot (or check the daily job) and ask again."
+                "snapshot (take_snapshot_now) and ask again." + meanwhile
             )
+            next_tool = "explain_recent_cost_drivers"
         else:
             message = (
-                "Not enough history yet to detect anomalies. Anomaly detection "
-                "needs about 7 days of daily snapshots to build a baseline. Run "
-                "daily snapshots or wait for the daily job to accumulate data."
+                "Not enough history yet to detect anomalies, so nothing has been "
+                "checked: this is not an all-clear. Anomaly detection needs about 7 "
+                "days of daily snapshots to build a baseline (take_snapshot_now "
+                "records today's)." + meanwhile
             )
+            next_tool = "explain_recent_cost_drivers"
         empty: dict = {
             "anomalies": [],
             "message": message,
         }
+        if next_tool:
+            empty["next_tool"] = next_tool
+            empty["next_tool_args"] = {"days": 7}
         if account:
             empty["account"] = account
         return empty

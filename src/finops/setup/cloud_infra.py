@@ -864,30 +864,40 @@ CONNECTOR_REGISTRY: list[dict] = [
         "note": "Required for business metrics and unit economics (Pro plan).",
     },
     {
+        # No code reads GitHub Actions billing or Copilot seats. The card used
+        # to promise both; they are listed under not_yet until something does.
         "id": "github",
-        "name": "GitHub Actions",
+        "name": "GitHub",
         "category": "devtools",
         "setup_method": "api_key",
         "setup_time_min": 2,
         "env_vars": ["GITHUB_TOKEN"],
         "unlocks": [
+            "PR cost comments (Terraform and Helm diffs)",
+            "Cost tickets as GitHub Issues, opened when you ask",
+            "AI coding agent contributions by repo (with GITHUB_ORGS)",
+        ],
+        "not_yet": [
             "GitHub Actions minutes cost by repo and workflow",
             "Copilot seat utilization",
-            "PR cost comments (Terraform and Helm diffs)",
         ],
     },
     {
         "id": "slack",
         "name": "Slack",
         "category": "alerting",
-        "setup_method": "oauth_app",
-        "setup_time_min": 5,
-        "env_vars": ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"],
+        "setup_method": "webhook",
+        "setup_time_min": 3,
+        # A webhook URL is enough; a bot token plus channel also works.
+        "env_vars": ["SLACK_WEBHOOK_URL", "SLACK_BOT_TOKEN", "SLACK_CHANNEL"],
+        # The two-way bot and the scheduler moved to the hosted package in
+        # 0.8.211. The open core posts what you ask it to post.
         "unlocks": [
-            "Anomaly alerts delivered to Slack channels",
-            "Weekly digest reports",
-            "Interactive cost queries from Slack",
-            "Budget breach notifications",
+            "Anomaly and budget alerts posted to a channel when you ask",
+            "Cost reports and digests sent when you ask (send_report_now, send_digest_now)",
+        ],
+        "not_yet": [
+            "Scheduled digests and the two-way Slack bot (hosted nable only)",
         ],
     },
 ]

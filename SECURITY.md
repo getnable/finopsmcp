@@ -5,13 +5,48 @@ credentials stay in your OS keyring, cost data caches in a local SQLite
 database, and there is no nable backend that receives either. The security
 architecture is documented at https://getnable.com/security.
 
-Two egress paths are worth naming directly. The AI assistant (the Slack bot
-and the dashboard Ask tab) sends your cost question and its results to
-Anthropic's API to generate an answer when you use it, never to a nable
-server, and `FINOPS_AIRGAP=1` disables it. Anonymous usage telemetry (tool
-names and a random install id, never cost figures, credentials, or account
-identifiers) is on by default and turns off with `NABLE_NO_TELEMETRY=1` or
-`FINOPS_AIRGAP=1`.
+Besides the provider APIs you connect (AWS, GCP, Azure, OpenAI and so on),
+these are the outbound paths, named directly.
+
+**Usage telemetry is off by default (opt-in).** Nothing is sent unless you
+answer yes to the one-time question the CLI asks after a command, or set
+`NABLE_TELEMETRY=1`. `NABLE_NO_TELEMETRY=1`, `DO_NOT_TRACK=1` and
+`FINOPS_AIRGAP=1` keep it off even if something else opts in, and CI runners
+never send. `nable doctor` shows the current state. Until telemetry is on,
+nothing is written for it either: the random install id file
+(`~/.config/finops/.install_id`) is created only once you opt in. An opted-in
+event goes to PostHog (`us.i.posthog.com`, IP dropped server-side) and carries
+only:
+
+- a random install id (a UUID, not derived from you or the machine) and the date;
+- the event name, for example `tool_called` with the tool's name, or a setup
+  step with the provider's name (`aws`, `openai`) and an error class when a
+  connect failed;
+- for `nable scan`, whether it ran on demo data, how many providers it covered,
+  how long it took and, when it failed, the error class, exception type and
+  the source line it failed at;
+- in the periodic heartbeat, your plan (free, trial, pro), how many providers
+  are connected, how many distinct tools were used and a hash of their names;
+- runtime facts: nable version, Python major.minor, OS family, install method
+  (uvx, pipx, venv, docker, system), environment kind, whether a terminal is
+  attached, whether it runs in a container, and the age of the install id.
+
+It never carries cost figures, account IDs, resource names, file paths,
+hostnames, usernames, credentials or your query text.
+
+**Version check.** To tell you when your build is out of date, nable makes one
+GET to `https://pypi.org/pypi/finops-mcp/json` when `nable scan`, the first-run
+welcome or the MCP server starts (at most once per process, 2 second cap). It
+sends nothing about you beyond what any HTTPS request carries. Turn it off with
+`FINOPS_NO_UPDATE_CHECK=1` or `NABLE_NO_UPDATE_CHECK=1`; `NABLE_NO_TELEMETRY=1`,
+`DO_NOT_TRACK=1` and `FINOPS_AIRGAP=1` also disable it.
+
+**LLM calls you turn on.** The optional recommendation critic
+(`NABLE_CRITIC_LLM=1` together with `ANTHROPIC_API_KEY`) sends a
+recommendation's figures to Anthropic's API, using your key, never to a nable
+server. The hosted package's AI assistant (the Slack bot and the dashboard Ask
+tab) does the same with your question and its results; the open-source package
+ships neither.
 
 ## Reporting a vulnerability
 

@@ -199,11 +199,25 @@ def arm_consent_prompt() -> None:
 
 # ─── Install ID ──────────────────────────────────────────────────────────────
 
+_SESSION_ID: str | None = None
+
+
 def _get_install_id() -> str:
     """
     Stable anonymous ID for this install. Stored in ~/.config/finops/.install_id.
     Generated once as a random UUID — completely disconnected from the user's identity.
+
+    Written only while telemetry is on. Most call sites build the id as an
+    argument before _send_event checks consent, so the file used to appear on
+    the first command of a user who never agreed to anything. With telemetry
+    off this returns a process-only id that never touches disk (and is never
+    sent, because _send_event drops the event).
     """
+    global _SESSION_ID
+    if _is_opted_out():
+        if _SESSION_ID is None:
+            _SESSION_ID = str(uuid.uuid4())
+        return _SESSION_ID
     try:
         _ID_FILE.parent.mkdir(parents=True, exist_ok=True)
         if _ID_FILE.exists():

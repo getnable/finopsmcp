@@ -109,13 +109,16 @@ async def list_connected_providers() -> dict:
             result["_plan"] = {"plan": status.mode}
         return result
 
+    # is_configured() checks that credentials are present, not that they work.
+    # Calling that "connected" told users a typo'd key was live.
+    _configured = "configured (not yet verified)"
     for category, pool in [("cloud", _srv.CLOUD_CONNECTORS), ("saas", _srv.SAAS_CONNECTORS)]:
         for name, connector in pool.items():
             configured = await connector.is_configured()
             result[name] = {
                 "category": category,
                 "configured": configured,
-                "status": "connected" if configured else _remediation(name),
+                "status": _configured if configured else _remediation(name),
             }
 
     # LLM / AI providers are module-level (not in the class registry above), so
@@ -139,7 +142,7 @@ async def list_connected_providers() -> dict:
         result[name] = {
             "category": "llm",
             "configured": configured,
-            "status": "connected" if configured else _remediation(name),
+            "status": _configured if configured else _remediation(name),
         }
     _llm_sync = {
         "modal": gpu_infra.modal_configured,
@@ -151,9 +154,13 @@ async def list_connected_providers() -> dict:
         result[name] = {
             "category": "llm",
             "configured": configured,
-            "status": "connected (cost via invoice import)" if configured
+            "status": "configured (cost via invoice import)" if configured
                       else _remediation(name),
         }
+    result["_note"] = (
+        "configured means the credentials are present, not that they work. "
+        "Run check_connector_health to verify each one."
+    )
 
     # Surface plan status so Claude can proactively mention upgrade when relevant
     status = _srv.get_status()
@@ -222,7 +229,7 @@ async def check_connector_health() -> dict:
 
     import asyncio
     import time
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
     from sqlalchemy import select, func, text as sql_text
     from ..storage.db import get_engine, cost_snapshots
 
@@ -293,8 +300,51 @@ async def check_connector_health() -> dict:
                 result["fix"] = f"Re-run setup: finops setup {name}"
         return result
 
+    # LLM providers are module-level readers, not registry connectors, so the
+    # loop above never saw them and an AI-spend user's health check listed
+    # every cloud and none of the keys they had set. Probe each with a one-day
+    # cost read: that is the call the cost tools make, so it fails the same way.
+    from ..connectors.llm_costs import _unread_reason
+    from ..connectors.saas import anthropic_usage, litellm, openai_usage, openrouter
+    _llm_readers = {
+        "openai": openai_usage, "anthropic": anthropic_usage,
+        "openrouter": openrouter, "litellm": litellm,
+    }
+
+    async def _probe_llm(name: str, mod) -> dict:
+        t0 = time.monotonic()
+        result: dict = {"name": name, "configured": False, "healthy": False,
+                        "last_data": "n/a", "response_ms": None, "error": None, "fix": None}
+        try:
+            result["configured"] = bool(await mod.is_configured())
+            if not result["configured"]:
+                result["fix"] = f"Run: finops setup {name}"
+                return result
+            today = datetime.now(timezone.utc).date()
+            data = await asyncio.wait_for(
+                asyncio.to_thread(mod.get_costs, today - timedelta(days=1), today),
+                timeout=10.0)
+            reason = _unread_reason(data or {})
+            if reason is None:
+                result["healthy"] = True
+                result["response_ms"] = int((time.monotonic() - t0) * 1000)
+            else:
+                result["error"] = reason[:200]
+                result["fix"] = (
+                    f"Re-run: finops setup {name}. Cost data needs an admin key "
+                    "(OpenAI sk-admin-..., Anthropic sk-ant-admin-...), not a regular API key."
+                    if name in ("openai", "anthropic") else f"Re-run: finops setup {name}")
+        except asyncio.TimeoutError:
+            result["error"] = "Timeout (>10s), credentials may be valid but API is slow"
+            result["fix"] = "Check network connectivity or API endpoint status"
+        except Exception as e:
+            result["error"] = str(e)[:200]
+            result["fix"] = f"Re-run setup: finops setup {name}"
+        return result
+
     # Run all probes in parallel (don't await serially, would take minutes)
     tasks = [_probe(name, conn) for name, conn in _srv._ALL_CONNECTORS.items()]
+    tasks += [_probe_llm(name, mod) for name, mod in _llm_readers.items()]
     probes = await asyncio.gather(*tasks, return_exceptions=False)
 
     healthy = [p for p in probes if p["healthy"]]
@@ -1036,6 +1086,8 @@ async def check_action_policy(
     budget_name: str = "",
 ) -> dict:
     """Advisory policy gate: should a proposed remediation action proceed?
+    Changes nothing. It is not marked read-only only because tf_dir runs
+    `terraform plan` there, which executes that directory's provider plugins.
 
     The request-path guardrail, advisory. Describe a remediation action you are
     considering (action_type), optionally with the change to cost (a Terraform plan,

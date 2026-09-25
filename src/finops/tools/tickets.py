@@ -33,6 +33,13 @@ def send_onboarding_email(
         - "Send a day 7 nudge to user@company.com"
         - "Send the trial ending email to someone@corp.com with 3 days left"
     """
+    # A nable marketing email, for nable's own staff. A customer's model must
+    # not be able to send it from the customer's SMTP account, so it runs only
+    # with the internal flag set (and tool_surface never advertises it without).
+    from ..tool_surface import internal_tools_enabled
+    if not internal_tools_enabled():
+        return {"error": ("send_onboarding_email is an internal nable tool and is "
+                          "disabled. It sends nable's own onboarding emails.")}
     if err := _srv.require_role("admin"):
         return err
     try:
@@ -203,11 +210,20 @@ async def create_rightsizing_tickets(
 
     try:
         from ..integrations.ticketing import create_rightsizing_ticket
-        from ..recommendations.rightsizing import analyze_rightsizing
+        from ..recommendations.rightsizing import _coverage_note, analyze_rightsizing
 
-        recs = await _srv.asyncio.to_thread(analyze_rightsizing, min_monthly_savings=min_monthly_savings)
+        coverage: dict = {}
+        recs = await _srv.asyncio.to_thread(
+            analyze_rightsizing, min_monthly_savings=min_monthly_savings, coverage=coverage)
         if not recs:
-            return {"message": "No rightsizing recommendations found", "tickets_created": 0}
+            note, evaluated = _coverage_note(coverage, 0, 0)
+            return {
+                "message": ("No rightsizing recommendations found. " if evaluated else "")
+                + note,
+                "evaluated": evaluated,
+                "coverage": coverage,
+                "tickets_created": 0,
+            }
 
         urls = []
         skipped = 0
@@ -357,8 +373,15 @@ async def export_board_summary(period_days: int = 30) -> dict:
 
     econ = await _srv.get_unit_economics(period_days=period_days)
     if econ.get("error"):
+        # No board-ready markdown full of $0.00 when no cost data was read.
+        if econ.get("error") == "no_cost_data":
+            econ = {**econ, "board_summary_written": False}
         return econ
     change = await _srv.explain_cost_change(compare_days=period_days)
+    if isinstance(change, dict) and (
+            change.get("error") or change.get("comparison_unavailable")):
+        # A change against a period that was not read is not a change.
+        change = {}
 
     ue = econ.get("unit_economics", {})
     runway = econ.get("runway", {})
@@ -396,6 +419,8 @@ async def export_board_summary(period_days: int = 30) -> dict:
     lines.append("## Infrastructure & AI Spend")
     lines.append("")
     lines.append(f"- **Total infra + AI cost ({period_days}d):** {econ.get('total_infrastructure_cost', 'n/a')}")
+    if econ.get("partial_warning"):
+        lines.append(f"- **Coverage:** {econ['partial_warning']}")
     if isinstance(change, dict) and change.get("cost_change", {}).get("now"):
         cc = change["cost_change"]
         lines.append(f"- **Spend vs last period:** {cc.get('now')} ({cc.get('pct', 'n/a')})")

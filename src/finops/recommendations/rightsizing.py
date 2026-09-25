@@ -215,7 +215,9 @@ def _fetch_ec2_from_co(co_client: Any, account_id: str) -> list[RightsizingRecom
     return results
 
 
-def _fetch_lambda_from_co(co_client: Any, account_id: str) -> list[RightsizingRecommendation]:
+def _fetch_lambda_from_co(
+    co_client: Any, account_id: str, errors: list[str] | None = None,
+) -> list[RightsizingRecommendation]:
     results = []
     try:
         # This one genuinely has a paginator, so it keeps using it.
@@ -262,11 +264,35 @@ def _fetch_lambda_from_co(co_client: Any, account_id: str) -> list[RightsizingRe
                 ))
     except Exception as e:
         log.debug("Lambda Compute Optimizer recommendations unavailable: %s", e)
+        if errors is not None:
+            errors.append(_error_class(e))
     return results
 
 
-def _analyze_compute_optimizer(account_id: str) -> list[RightsizingRecommendation]:
-    """Fetch EC2 + Lambda rightsizing from Compute Optimizer."""
+_CO_CONSOLE_URL = "https://console.aws.amazon.com/compute-optimizer/"
+
+
+def _error_class(e: BaseException) -> str:
+    """The AWS error code when there is one (AccessDeniedException,
+    OptInRequiredException), else the exception's class name."""
+    resp = getattr(e, "response", None)
+    code = (resp.get("Error") or {}).get("Code") if isinstance(resp, dict) else None
+    return str(code or type(e).__name__)
+
+
+def _analyze_compute_optimizer(
+    account_id: str, coverage: dict | None = None,
+) -> list[RightsizingRecommendation]:
+    """Fetch EC2 + Lambda rightsizing from Compute Optimizer.
+
+    `coverage`, when given, receives a `compute_optimizer` entry saying whether
+    the service was read: ok, not_opted_in, or error with the error class. An
+    empty list alone cannot tell "read, nothing over-provisioned" from "never
+    read", and the summary used to call both "sourced from Compute Optimizer".
+    """
+    co_status: dict[str, Any] = {"status": "error"}
+    if coverage is not None:
+        coverage["compute_optimizer"] = co_status
     try:
         import boto3
         co = boto3.client("compute-optimizer", region_name="us-east-1")
@@ -278,14 +304,38 @@ def _analyze_compute_optimizer(account_id: str) -> list[RightsizingRecommendatio
                 "Enable it at: https://console.aws.amazon.com/compute-optimizer/",
                 status.get("status"),
             )
+            co_status.update({
+                "status": "not_opted_in",
+                "enrollment_status": status.get("status"),
+                "fix": f"Opt in to AWS Compute Optimizer at {_CO_CONSOLE_URL} "
+                       "(findings appear after about 12 hours).",
+            })
             return []
 
         ec2_recs    = _fetch_ec2_from_co(co, account_id)
-        lambda_recs = _fetch_lambda_from_co(co, account_id)
+        lambda_errors: list[str] = []
+        lambda_recs = _fetch_lambda_from_co(co, account_id, errors=lambda_errors)
+        co_status.update({
+            "status": "ok",
+            "findings_returned": len(ec2_recs) + len(lambda_recs),
+        })
+        if lambda_errors:
+            co_status["lambda_error_class"] = lambda_errors[0]
         return ec2_recs + lambda_recs
 
     except Exception as e:
         log.warning("Compute Optimizer unavailable: %s", e)
+        err = _error_class(e)
+        co_status.update({"status": "error", "error_class": err})
+        if err == "OptInRequiredException":
+            co_status["status"] = "not_opted_in"
+            co_status["fix"] = f"Opt in to AWS Compute Optimizer at {_CO_CONSOLE_URL}."
+        elif err in ("AccessDeniedException", "AccessDenied", "UnauthorizedOperation"):
+            co_status["fix"] = (
+                "Grant compute-optimizer:GetEnrollmentStatus, "
+                "compute-optimizer:GetEC2InstanceRecommendations and "
+                "compute-optimizer:GetLambdaFunctionRecommendations to the role nable uses."
+            )
         return []
 
 
@@ -305,7 +355,9 @@ def _get_cloudwatch_cpu(cw_client: Any, instance_id: str, days: int) -> tuple[fl
     )
     dps = resp.get("Datapoints", [])
     if not dps:
-        return 0.0, 0.0
+        # No datapoints is not 0% CPU. Returning 0.0 here made an instance with
+        # no metrics the strongest downsize candidate in the fleet.
+        raise LookupError(f"no CPUUtilization datapoints for {instance_id}")
     avgs = [d["Average"] for d in dps]
     maxs = [d["Maximum"] for d in dps]
     return sum(avgs) / len(avgs), max(maxs)
@@ -349,6 +401,7 @@ def _analyze_cloudwatch_fallback(
     account_id: str,
     avg_cpu_threshold: float,
     max_cpu_threshold: float,
+    coverage: dict | None = None,
 ) -> list[RightsizingRecommendation]:
     """CPU-only EC2 scan when Compute Optimizer is not available.
 
@@ -360,11 +413,22 @@ def _analyze_cloudwatch_fallback(
     import boto3
     from concurrent.futures import ThreadPoolExecutor
 
+    cw_cov: dict[str, Any] = {
+        "regions_scanned": len(regions), "regions_failed": [],
+        "instances_found": 0, "instances_evaluated": 0, "instances_skipped": 0,
+    }
+    if coverage is not None:
+        coverage["cloudwatch_fallback"] = cw_cov
+
     # Phase 1: discover running instances, regions in parallel.
     instances: list[dict] = []
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(regions)))) as pool:
-        for result in pool.map(_safe_list_instances, regions):
+        for region, result in zip(regions, pool.map(_list_instances_or_error, regions)):
+            if isinstance(result, str):
+                cw_cov["regions_failed"].append({"region": region, "error_class": result})
+                continue
             instances.extend(result)
+    cw_cov["instances_found"] = len(instances)
 
     if not instances:
         return []
@@ -374,19 +438,24 @@ def _analyze_cloudwatch_fallback(
     cw_by_region = {r: boto3.client("cloudwatch", region_name=r)
                     for r in {i["region"] for i in instances}}
 
-    def _cpu(inst: dict) -> tuple[dict, float, float]:
+    def _cpu(inst: dict) -> tuple[dict, float | None, float | None]:
         try:
             avg_cpu, max_cpu = _get_cloudwatch_cpu(
                 cw_by_region[inst["region"]], inst["iid"], _LOOKBACK_DAYS)
         except Exception as e:
             log.debug("CPU fetch failed for %s: %s", inst["iid"], e)
-            # Unknown utilization must never be recommended for downsizing.
-            avg_cpu, max_cpu = 100.0, 100.0
+            # Unknown utilization must never be recommended for downsizing,
+            # and must not be counted as evaluated either.
+            return inst, None, None
         return inst, avg_cpu, max_cpu
 
     results: list[RightsizingRecommendation] = []
     with ThreadPoolExecutor(max_workers=10) as pool:
         for inst, avg_cpu, max_cpu in pool.map(_cpu, instances):
+            if avg_cpu is None or max_cpu is None:
+                cw_cov["instances_skipped"] += 1
+                continue
+            cw_cov["instances_evaluated"] += 1
             if avg_cpu >= avg_cpu_threshold or max_cpu >= max_cpu_threshold:
                 continue
             itype = inst["itype"]
@@ -416,12 +485,18 @@ def _analyze_cloudwatch_fallback(
     return results
 
 
-def _safe_list_instances(region: str) -> list[dict]:
+def _list_instances_or_error(region: str) -> list[dict] | str:
+    """A region's instances, or the error class when the region could not be read."""
     try:
         return _list_region_instances(region)
     except Exception as e:
         log.warning("CloudWatch fallback failed for region %s: %s", region, e)
-        return []
+        return _error_class(e)
+
+
+def _safe_list_instances(region: str) -> list[dict]:
+    result = _list_instances_or_error(region)
+    return [] if isinstance(result, str) else result
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -431,6 +506,7 @@ def analyze_rightsizing(
     avg_cpu_threshold: float = _AVG_CPU_THRESHOLD,
     max_cpu_threshold: float = _MAX_CPU_THRESHOLD,
     min_monthly_savings: float = 10.0,
+    coverage: dict | None = None,
 ) -> list[RightsizingRecommendation]:
     """
     Return rightsizing recommendations sorted by monthly savings (descending).
@@ -438,11 +514,19 @@ def analyze_rightsizing(
     Uses AWS Compute Optimizer as the primary source (CPU + memory + network +
     disk, covers EC2 and Lambda). Falls back to a CloudWatch CPU-only scan
     for accounts that haven't opted into Compute Optimizer.
+
+    Pass a dict as `coverage` to learn what was actually read: the Compute
+    Optimizer status (ok / not_opted_in / error with its class) and, for the
+    CloudWatch fallback, how many instances were evaluated and how many were
+    skipped. Hand it to rightsizing_summary so an empty result is not reported
+    as an all-clean one.
     """
     try:
         import boto3
     except ImportError:
         log.error("boto3 not installed")
+        if coverage is not None:
+            coverage["compute_optimizer"] = {"status": "error", "error_class": "ImportError"}
         return []
 
     sts = boto3.client("sts")
@@ -452,7 +536,7 @@ def analyze_rightsizing(
         account_id = "unknown"
 
     # Try Compute Optimizer first
-    recommendations = _analyze_compute_optimizer(account_id)
+    recommendations = _analyze_compute_optimizer(account_id, coverage)
 
     if not recommendations:
         # Fall back to CloudWatch CPU scan
@@ -468,7 +552,7 @@ def analyze_rightsizing(
                 regions = ["us-east-1", "us-west-2", "eu-west-1"]
 
         recommendations = _analyze_cloudwatch_fallback(
-            regions, account_id, avg_cpu_threshold, max_cpu_threshold
+            regions, account_id, avg_cpu_threshold, max_cpu_threshold, coverage
         )
 
     # Filter out noise and sort
@@ -477,10 +561,58 @@ def analyze_rightsizing(
     return recommendations
 
 
+def _coverage_note(coverage: dict | None, co_count: int, cw_count: int) -> tuple[str, bool]:
+    """(what the source note should say, whether anything was evaluated).
+
+    "All recommendations sourced from AWS Compute Optimizer" over zero rows
+    read as an all-clean verdict when Compute Optimizer had not been read at
+    all. The note now says what was read, and says so plainly when nothing was.
+    """
+    if cw_count:
+        return ("Compute Optimizer recommendations include CPU, memory, network, and disk. "
+                "CloudWatch fallback is CPU-only.", True)
+    if co_count:
+        return "All recommendations sourced from AWS Compute Optimizer.", True
+    if coverage is None:
+        return "No rightsizing recommendations were returned.", True
+
+    co = coverage.get("compute_optimizer") or {}
+    cw = coverage.get("cloudwatch_fallback") or {}
+    co_state = co.get("status")
+    evaluated = int(cw.get("instances_evaluated") or 0)
+    parts: list[str] = []
+    if co_state == "ok":
+        parts.append("Compute Optimizer was read and returned no over-provisioned "
+                     "EC2 instances or Lambda functions.")
+    elif co_state == "not_opted_in":
+        parts.append("Compute Optimizer was not read: this account has not opted in.")
+    else:
+        parts.append("Compute Optimizer was not read"
+                     + (f" ({co['error_class']})." if co.get("error_class") else "."))
+    if cw:
+        found = int(cw.get("instances_found") or 0)
+        skipped = int(cw.get("instances_skipped") or 0)
+        failed = cw.get("regions_failed") or []
+        line = (f"CloudWatch fallback evaluated {evaluated} of {found} running EC2 "
+                f"instance{'s' if found != 1 else ''}")
+        if skipped:
+            line += f" ({skipped} skipped: no CPU metrics could be read)"
+        if failed:
+            line += (f"; {len(failed)} of {cw.get('regions_scanned', len(failed))} "
+                     "regions could not be listed")
+        parts.append(line + ".")
+    anything = co_state == "ok" or evaluated > 0
+    if not anything:
+        parts.append("Nothing was evaluated, so this is not a finding that your "
+                     "instances are right-sized.")
+    return " ".join(parts), anything
+
+
 def rightsizing_summary(
     recommendations: list[RightsizingRecommendation],
     savings_ctx: Any = None,
     commitment_ctx: Any = None,
+    coverage: dict | None = None,
 ) -> dict[str, Any]:
     """
     Summarize rightsizing recommendations with a genuine-savings judgment on each.
@@ -491,6 +623,8 @@ def rightsizing_summary(
     (effective_savings.SavingsContext: measured effective rate + commitment
     coverage). `commitment_ctx` is accepted for backward compatibility and wrapped.
     When both are absent, savings stay at list price with a low-confidence label.
+    `coverage` is the dict analyze_rightsizing filled in; with it, an empty
+    result says what was and was not read instead of implying all-clean.
     """
     from .genuine_savings import assess
     from .effective_savings import SavingsContext
@@ -546,6 +680,7 @@ def rightsizing_summary(
     from ..token_budget import fit_to_budget
     kept, omitted = fit_to_budget(rows)
 
+    note, evaluated = _coverage_note(coverage, co_count, cw_count)
     out: dict[str, Any] = {
         "total_instances_flagged": len(recommendations),
         "total_monthly_savings":   round(total_savings, 2),
@@ -557,12 +692,7 @@ def rightsizing_summary(
         "source": {
             "compute_optimizer": co_count,
             "cloudwatch_fallback": cw_count,
-            "note": (
-                "Compute Optimizer recommendations include CPU, memory, network, and disk. "
-                "CloudWatch fallback is CPU-only."
-                if cw_count > 0 else
-                "All recommendations sourced from AWS Compute Optimizer."
-            ),
+            "note": note,
         },
         "savings_by_resource_type": {k: round(v, 2) for k, v in by_type.items()},
         "recommendations": kept,
@@ -593,6 +723,14 @@ def rightsizing_summary(
             "Connect your Cost and Usage Report (CUR) to price them on your real rates."
         )
     out["pricing_basis"] = pricing
+
+    if coverage is not None:
+        out["coverage"] = coverage
+        out["evaluated"] = evaluated
+        if not evaluated:
+            out["status"] = "not_evaluated"
+            fix = (coverage.get("compute_optimizer") or {}).get("fix")
+            out["message"] = note + (f" To fix: {fix}" if fix else "")
 
     if omitted:
         out["recommendations_truncated"] = True

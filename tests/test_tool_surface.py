@@ -128,9 +128,12 @@ def test_databricks_env_reveals_family(monkeypatch):
 
 
 def test_all_tools_flag_advertises_everything(monkeypatch):
+    """Everything a customer can use. nable's internal staff tools (a vendor
+    marketing email) are never advertised to a customer's model."""
     monkeypatch.setenv("FINOPS_ALL_TOOLS", "1")
+    monkeypatch.delenv("NABLE_INTERNAL_TOOLS", raising=False)
     registered = {t.name for t in server.mcp._tool_manager.list_tools()}
-    assert _advertised_names() == registered
+    assert _advertised_names() == registered - tool_surface.INTERNAL_TOOLS
 
 
 def test_demo_mode_advertises_only_what_the_sample_answers(monkeypatch):
@@ -140,10 +143,12 @@ def test_demo_mode_advertises_only_what_the_sample_answers(monkeypatch):
     from finops.demo_data import demo_tool_names
 
     monkeypatch.setattr("finops.demo_data.is_demo", lambda: True)
+    monkeypatch.delenv("NABLE_INTERNAL_TOOLS", raising=False)
     registered = {t.name for t in server.mcp._tool_manager.list_tools()}
     names = _advertised_names()
     assert names == demo_tool_names() & registered
     assert len(names) < len(registered) / 2
+    assert not names & tool_surface.INTERNAL_TOOLS
     # The way out of demo, and the orientation tools, are always there.
     for tool in ("connect_aws", "connect_gcp", "connect_azure", "nable_setup_status",
                  "whoami", "what_can_nable_do", "get_cost_summary", "slice_costs"):

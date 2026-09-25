@@ -18,8 +18,16 @@ from __future__ import annotations
 
 from typing import Any
 
-# Total read-only tools nable ships (matches the plugin marketplace description).
+# Total tools nable ships (matches the plugin marketplace description).
 TOTAL_TOOLS = 160
+
+# Most tools only read. A handful send something (Slack, email, tickets, pull
+# requests); those are gated and act only on request. "160+ read-only tools"
+# was not true of them, so the claim says both halves.
+TOOLS_CLAIM = (
+    f"{TOTAL_TOOLS}+ tools. Most only read your cost data; the few that send "
+    "something (Slack, email, tickets, pull requests) are gated and act only when you ask"
+)
 
 # Surface tokens the renderer reasons over. The MCP tool maps connected provider
 # names onto these.
@@ -268,7 +276,7 @@ CATALOG: list[dict[str, Any]] = [
             ("Export this to CSV", "opens clean in Excel or Sheets"),
             ("Start the team dashboard", "browser dashboard, no Claude required"),
             ("File a Jira ticket for this anomaly", "or Linear or GitHub"),
-            ("Send a weekly digest every Monday", "top drivers by email or Slack"),
+            ("Send the weekly digest now", "top drivers by email or Slack, on request"),
         ],
         "tools": ["export_cost_report_csv", "start_dashboard_server", "create_ticket",
                   "create_anomaly_tickets", "send_weekly_digest_now", "publish_cost_report_to_notion",
@@ -307,16 +315,29 @@ def render_capabilities(
     has_data = has_cloud(connected) or has_llm(connected) or _has(
         connected, "datadog", "snowflake", "databricks")
     if not has_data:
-        return "\n".join([
+        lines = [
             "## What nable can do",
             "",
             "Nothing's connected yet, so there's no cost data to work with. Connect your "
-            "first provider and ask again:",
-            "- `uvx finops-mcp setup aws` (or azure, gcp)",
-            "- Add an `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` to track token spend",
+            "first provider right here in the chat and ask again:",
+            "- Call `connect_aws` or `connect_gcp`: they detect credentials already on "
+            "this machine. `connect_azure` walks through a one-paste setup. They only "
+            "read billing data.",
+            "- For AI token spend, add `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` to the "
+            "environment nable runs in (never paste a key into the chat).",
             "",
-            f"nable ships {TOTAL_TOOLS}+ read-only tools. They light up as you connect.",
-        ])
+            f"nable ships {TOOLS_CLAIM}. They light up as you connect.",
+        ]
+        if detailed:
+            # The server instructions send the model here for the full map
+            # before it concludes nable cannot do something. Returning only the
+            # connect prompt made that answer "nothing" on a fresh install.
+            lines += ["", "### The full map (connect a provider to use these)", ""]
+            for g in CATALOG:
+                lines.append(f"**{g['title']}**: {g['blurb']}")
+                lines.append(f"  <sub>tools: {', '.join(g['tools'])}</sub>")
+            lines.append("")
+        return "\n".join(lines)
 
     shown = [g for g in CATALOG if g["gate"](connected)]
     relevant = sum(g["count"] for g in shown)
@@ -337,7 +358,7 @@ def render_capabilities(
         f"## What nable can do with {stack}",
         "",
         f"You've got **{stack}** connected. That lights up **{relevant}** of nable's "
-        f"{TOTAL_TOOLS}+ read-only tools. Here's the map, grouped by what you'd actually ask:",
+        f"{TOOLS_CLAIM}. Here's the map, grouped by what you'd actually ask:",
         "",
     ]
 
@@ -363,7 +384,8 @@ def render_capabilities(
 
     lines.append("---")
     lines.append("Ask for any of these naturally, nable picks the right tool. "
-                 "Everything is read-only and runs on your machine.")
+                 "Everything runs on your machine. Reading changes nothing; the tools "
+                 "that send (Slack, email, tickets, pull requests) act only when you ask.")
     if plan in ("free",):
         lines.append("")
         lines.append("*Pro plan adds ticket auto-creation, email digests on request, "
