@@ -163,6 +163,9 @@ class _Pacer:
         self.due = now + self.gap
 
 
+_CONSOLE_SIGNIN_HOST = "signin.amazonaws.com"
+
+
 def _via(user_agent: str, identity: dict[str, Any]) -> str:
     """A coarse, human-readable reading of who made the call."""
     ua = (user_agent or "").lower()
@@ -171,7 +174,7 @@ def _via(user_agent: str, identity: dict[str, Any]) -> str:
     # tokens, not substrings: "signin.amazonaws.com" inside some other string
     # says nothing about who made the call.
     tokens = set(ua.replace("/", " ").replace("[", " ").replace("]", " ").split())
-    if ("signin.amazonaws.com" in tokens
+    if (any(t == _CONSOLE_SIGNIN_HOST for t in tokens)
             or any(t.startswith("console.") and t.endswith(".amazonaws.com") for t in tokens)
             or ("aws-internal" in ua and "console" in ua)):
         return "console"
