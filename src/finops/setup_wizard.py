@@ -2303,10 +2303,11 @@ def _run_guard(parsed) -> None:
         from .guard_adapters import run_hook
         raise SystemExit(run_hook(getattr(parsed, "guard_harness", None)))
 
-    # Cursor, Codex, or every agent found here: guard_adapters owns those files.
+    # Any agent but Claude Code, or every agent found here: guard_adapters owns
+    # those files.
     harness = getattr(parsed, "guard_harness", None)
     everything = getattr(parsed, "guard_all", False)
-    if action in ("install", "uninstall") and (everything or harness in ("cursor", "codex")):
+    if action in ("install", "uninstall") and (everything or harness not in (None, "claude")):
         from .guard_adapters import cli
         code = cli(action, harness=harness, everything=everything, global_scope=global_scope)
         if code:
@@ -2550,12 +2551,14 @@ def _guard_doctor(parsed) -> None:
     if getattr(parsed, "guard_json", False):
         print(json.dumps(d, indent=2))
         return
-    labels = {"claude-code": "Claude Code", "cursor": "Cursor", "codex": "Codex CLI"}
+    labels = {"claude-code": "Claude Code", "cursor": "Cursor", "codex": "Codex CLI",
+              "copilot": "GitHub Copilot", "gemini": "Gemini CLI", "cline": "Cline"}
+    width = max(len(v) for v in labels.values())
     print()
     print(f"  {bold('nable guard doctor')}   finops-mcp {d['version']}")
     print()
     for r in d["surfaces"]:
-        name = f"{labels.get(r['harness'], r['harness']):<12} {r['scope']:<8}"
+        name = f"{labels.get(r['harness'], r['harness']):<{width}} {r['scope']:<8}"
         if not r["installed"]:
             state = dim("not installed")
         elif not r.get("runs"):
@@ -2567,8 +2570,14 @@ def _guard_doctor(parsed) -> None:
             state = f"{green('installed')}, sees {sees or 'nothing'}, {pin}"
         else:
             state = green("installed")
+            if "mcp" in r:
+                state += ", sees shell" + (" + MCP" if r["mcp"] else "")
+            pin = {"pinned": "pinned to this release", "other": "pinned to another release",
+                   "unpinned": amber("unpinned"), "binary": "installed binary"}.get(r.get("pin"))
+            if pin:
+                state += f", {pin}"
         print(f"  {name} {state}")
-        print(dim(f"  {'':<21} {r['path']}"))
+        print(dim(f"  {'':<{width + 9}} {r['path']}"))
     print()
     print(f"  {bold('Covered on this machine')}")
     for c in d["covered"] or ["nothing yet"]:
@@ -3060,7 +3069,8 @@ def main(args: list[str] | None = None) -> None:
                          help="Install into ~/.claude/settings.json instead of this project")
     guard_p.add_argument("--command", dest="guard_command", default="",
                          help="With 'check': a shell command to classify against your policy")
-    guard_p.add_argument("--harness", dest="guard_harness", choices=["claude", "cursor", "codex"],
+    guard_p.add_argument("--harness", dest="guard_harness",
+                         choices=["claude", "cursor", "codex", "copilot", "gemini", "cline"],
                          default=None,
                          help="With 'install'/'uninstall': the agent to wire (default claude). "
                               "With 'hook': the payload format (detected when omitted)")
@@ -3091,8 +3101,8 @@ def main(args: list[str] | None = None) -> None:
 
     # The guard hook is a machine protocol: the agent harness parses this
     # process's stdout as JSON on every shell call, so it must run before any
-    # banner. guard_adapters answers Cursor and Codex and hands Claude Code
-    # payloads to guard.run_hook unchanged.
+    # banner. guard_adapters answers every other agent's payload and hands
+    # Claude Code payloads to guard.run_hook unchanged.
     if parsed.cmd == "guard" and getattr(parsed, "guard_action", "") == "hook":
         from .guard_adapters import run_hook
         raise SystemExit(run_hook(getattr(parsed, "guard_harness", None)))
