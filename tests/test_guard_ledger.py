@@ -513,3 +513,53 @@ def test_report_warns_on_a_broken_chain():
     assert "does not verify" in out and "breaks at line" in out
     data = json.loads(_cli("report", guard_days=30, guard_json=True))
     assert data["ledger_problems"]
+
+
+# ── what "at stake" sums ──────────────────────────────────────────────────────
+
+def _at(minutes_ago: float) -> str:
+    from datetime import UTC, datetime, timedelta
+    return (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds")
+
+
+def test_a_destroy_plans_saving_is_not_subtracted_from_what_is_at_stake():
+    gl.append({"ts": _at(30), "decision": "ask", "command": "terraform apply big.plan",
+               "monthly_usd": 5000.0})
+    gl.append({"ts": _at(20), "decision": "ask", "command": "terraform apply destroy.plan",
+               "monthly_usd": -1328.0})
+    gl.append({"ts": _at(10), "decision": "allow", "command": "terraform apply shrink.plan",
+               "monthly_usd": -40.0})
+    s = gl.summarize(30)
+    assert s["usd_per_month_escalated_or_blocked"] == 5000.0
+    assert s["usd_per_month_allowed_with_a_figure"] == 0.0
+    assert [r["monthly_usd"] for r in s["largest"]] == [5000.0]
+
+
+def test_a_retried_command_is_counted_once():
+    cmd = "aws ec2 run-instances --instance-type p4d.24xlarge --count 8"
+    for m in (9, 6, 3):
+        gl.append({"ts": _at(m), "decision": "ask", "command": cmd, "session": "s1",
+                   "monthly_usd": 100_000.0})
+    s = gl.summarize(30)
+    assert s["by_decision"]["ask"] == 3, "every decision is still counted"
+    assert s["usd_per_month_escalated_or_blocked"] == 100_000.0
+    assert s["repeats_not_summed"] == 2 and len(s["largest"]) == 1
+
+
+def test_the_same_command_is_summed_again_from_another_session_or_later():
+    cmd = "aws ec2 run-instances --instance-type p4d.24xlarge"
+    gl.append({"ts": _at(50), "decision": "ask", "command": cmd, "session": "s1",
+               "monthly_usd": 100.0})
+    gl.append({"ts": _at(49), "decision": "ask", "command": cmd, "session": "s2",
+               "monthly_usd": 100.0})
+    gl.append({"ts": _at(20), "decision": "ask", "command": cmd, "session": "s1",
+               "monthly_usd": 100.0})
+    assert gl.summarize(30)["usd_per_month_escalated_or_blocked"] == 300.0
+
+
+def test_report_says_repeats_were_counted_once():
+    cmd = "aws ec2 run-instances --instance-type p4d.24xlarge --count 8"
+    for m in (4, 2):
+        gl.append({"ts": _at(m), "decision": "ask", "command": cmd, "monthly_usd": 10.0})
+    assert "1 repeat(s) of the same command within 10 minutes counted once" in \
+        _cli("report", guard_days=30, guard_json=False)

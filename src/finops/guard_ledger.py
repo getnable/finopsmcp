@@ -489,35 +489,73 @@ def read(days: float | None = None, path: Path | None = None) -> list[dict[str, 
     return out
 
 
+# Two identical commands from the same session this close together are one
+# decision asked twice (an agent retrying after a "no"), not twice the money.
+_REPEAT_WINDOW = timedelta(minutes=10)
+
+
+def _repeats(recs: list[dict[str, Any]]) -> set[int]:
+    """Indexes of records that repeat an identical command, from the same
+    session and with the same kind of verdict, within _REPEAT_WINDOW of the
+    last one. Their dollars are not summed again."""
+    seen: dict[tuple[Any, ...], datetime] = {}
+    out: set[int] = set()
+    for i, r in enumerate(recs):
+        if not r.get("command"):
+            continue
+        bucket = "stake" if r.get("decision") in ("ask", "deny") else r.get("decision")
+        key = (r["command"], r.get("session"), bucket)
+        try:
+            ts = datetime.fromisoformat(r["ts"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        last = seen.get(key)
+        if last is not None and timedelta(0) <= ts - last <= _REPEAT_WINDOW:
+            out.add(i)
+        seen[key] = ts
+    return out
+
+
+def _positive(x: Any) -> float:
+    """A cost increase, or 0: a destroy plan's -$1,328/mo is not money at
+    stake, and summing it would hide the launch next to it."""
+    return float(x) if isinstance(x, (int, float)) and x > 0 else 0.0
+
+
 def summarize(days: float = 30, path: Path | None = None) -> dict[str, Any]:
-    """What `nable guard report` prints: counts, dollars at stake, the biggest."""
+    """What `nable guard report` prints: counts, dollars at stake, the biggest.
+
+    Dollar sums count cost increases only, once per decision: a repeat of the
+    same command from the same session within ten minutes is counted in the
+    decisions but not summed again (repeats_not_summed)."""
     recs = read(days, path)
+    repeats = _repeats(recs)
     by_decision = {d: 0 for d in DECISIONS}
     by_harness: dict[str, int] = {}
     by_action: dict[str, int] = {}
     stake = allowed = committed = 0.0
     errors: dict[str, int] = {}
-    for r in recs:
+    for i, r in enumerate(recs):
         d = r.get("decision")
         by_decision[d] = by_decision.get(d, 0) + 1
         h = r.get("harness") or "unknown"
         by_harness[h] = by_harness.get(h, 0) + 1
         if r.get("action_type"):
             by_action[r["action_type"]] = by_action.get(r["action_type"], 0) + 1
-        usd = r.get("monthly_usd")
-        if isinstance(usd, (int, float)):
-            if d in ("ask", "deny"):
-                stake += usd
-            elif d in ("allow", "warn"):
-                allowed += usd
-        if isinstance(r.get("total_usd"), (int, float)) and d in ("ask", "deny"):
-            committed += r["total_usd"]
         if d == "fail_open":
             e = r.get("error") or "unknown"
             errors[e] = errors.get(e, 0) + 1
-    priced = [r for r in recs if r.get("decision") in ("ask", "deny")
-              and isinstance(r.get("monthly_usd"), (int, float))]
-    top = sorted(priced, key=lambda r: -abs(r["monthly_usd"]))[:5]
+        if i in repeats:
+            continue
+        usd = _positive(r.get("monthly_usd"))
+        if d in ("ask", "deny"):
+            stake += usd
+            committed += _positive(r.get("total_usd"))
+        elif d in ("allow", "warn"):
+            allowed += usd
+    priced = [r for i, r in enumerate(recs) if r.get("decision") in ("ask", "deny")
+              and i not in repeats and _positive(r.get("monthly_usd"))]
+    top = sorted(priced, key=lambda r: -r["monthly_usd"])[:5]
     return {
         "days": days,
         "records": len(recs),
@@ -528,6 +566,7 @@ def summarize(days: float = 30, path: Path | None = None) -> dict[str, Any]:
         "usd_per_month_allowed_with_a_figure": round(allowed, 2),
         "usd_order_ceilings_escalated_or_blocked": round(committed, 2),
         "fail_open_errors": errors,
+        "repeats_not_summed": len(repeats),
         "largest": [{k: r.get(k) for k in ("ts", "harness", "tool", "decision",
                                            "action_type", "monthly_usd", "basis",
                                            "command")} for r in top],

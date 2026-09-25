@@ -2656,6 +2656,9 @@ def _guard_report(parsed) -> None:
               f"${summary['usd_order_ceilings_escalated_or_blocked']:,.0f}")
     print(f"  Let through with a figure (allowed or warned): "
           f"~${summary['usd_per_month_allowed_with_a_figure']:,.0f}/mo")
+    if summary.get("repeats_not_summed"):
+        print(dim(f"  Cost increases only; {summary['repeats_not_summed']} repeat(s) of the same "
+                  "command within 10 minutes counted once."))
     if summary["largest"]:
         print()
         print(f"  {bold('Largest escalations')}")
