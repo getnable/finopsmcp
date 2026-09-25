@@ -357,7 +357,7 @@ def test_a_saved_destroy_plan_is_a_one_way_door(fake_tf):
     v = g.gate_command("terraform apply d.out", cwd=str(fake_tf["work"]))
     assert v and v["decision"] == "ask"
     assert (v["door"], v["action_type"]) == ("one_way", "delete_resource")
-    assert ("the saved plan destroys 2 resources "
+    assert ("The saved plan destroys 2 resources "
             "(aws_db_instance.orders, aws_instance.web)") in v["reason"]
     assert "changes the bill by -$" in v["reason"], "the saving is still shown"
     assert len(fake_tf["calls"].read_text().splitlines()) == 1, \
@@ -421,7 +421,17 @@ def test_a_plan_file_named_destroy_is_read_like_any_other(fake_tf):
     assert est and est["plan"] == "destroy.tfplan"
 
 
-@pytest.mark.parametrize("cmd", ["terraform apply", "terraform apply missing.out"])
+@pytest.mark.parametrize("cmd", ["terraform apply", "terraform apply -auto-approve 2>&1",
+                                 "terraform apply -auto-approve | tee apply.log"])
 def test_no_plan_file_still_means_no_question(fake_tf, monkeypatch, cmd):
     monkeypatch.setenv("PATH", str(fake_tf["work"]))
     assert g.gate_command(cmd, cwd=str(fake_tf["work"]), record=False) is None
+
+
+def test_a_plan_file_that_is_not_there_asks(fake_tf, monkeypatch):
+    """A plan file named but not found is a plan nobody has checked (or one
+    looked for in the wrong directory): it asks rather than passing."""
+    monkeypatch.setenv("PATH", str(fake_tf["work"]))
+    v = g.gate_command("terraform apply missing.out", cwd=str(fake_tf["work"]), record=False)
+    assert v and v["decision"] == "ask"
+    assert "could not read saved plan missing.out (no such file in" in v["reason"]
