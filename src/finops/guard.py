@@ -728,13 +728,17 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
     cap is measured against the session making the call.
     """
     try:
-        from .ai_budget import BUDGET_OVER, status
+        from .ai_budget import BUDGET_OVER, BUDGET_WARN, status
         st = status(session_id=session_id) if session_id else status()
-        if st.get("verdict") != BUDGET_OVER:
+        verdict = st.get("verdict")
+        if verdict not in (BUDGET_OVER, BUDGET_WARN):
+            return None
+        if verdict == BUDGET_WARN and not _budget_note_due(session_id):
             return None
         budget = st.get("budget") or {}
         pct = st.get("pct_of_budget")
-        over = f"{pct * 100:.0f}% of" if isinstance(pct, (int, float)) else "over"
+        over = (f"{pct * 100:.0f}% of" if isinstance(pct, (int, float))
+                else "over" if verdict == BUDGET_OVER else "close to")
         if st.get("verdict_basis") == "session":
             sess = st.get("session") or {}
             detail = (f"~${sess.get('usd_equivalent', 0):,.2f} estimated this session, "
@@ -748,6 +752,15 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
             detail = (f"{st.get('billable_tokens_mtd', 0):,} tokens this month, "
                       f"{over} your {budget.get('monthly_tokens', 0):,} budget")
             raise_it = "nable ai-budget --tokens N"
+        if verdict == BUDGET_WARN:
+            # Close to the line: say so, alongside, without stopping anything.
+            return {
+                "decision": "warn",
+                "action_type": "ai_budget",
+                "reason": (f"nable guard: your agent is close to its AI budget. {detail}. "
+                           "Nothing is stopped; this note shows at most every "
+                           f"{_BUDGET_NOTE_EVERY_MIN} minutes. Raise it with `{raise_it}`."),
+            }
         hard = _stop_on_budget()
         return {
             "decision": "deny" if hard else "ask",
@@ -764,6 +777,61 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
         }
     except Exception:
         return None  # unreadable budget is not a reason to block anyone
+
+
+# How often the "close to your AI budget" note may show in one session. Every
+# tool call would be noise that teaches people to ignore the guard.
+_BUDGET_NOTE_EVERY_MIN = 30
+
+
+def _budget_note_due(session_id: str | None) -> bool:
+    """True at most once per _BUDGET_NOTE_EVERY_MIN per session, remembered
+    in a small file beside the ledger. When the file cannot be read or
+    written the note shows: it never stops anything."""
+    from datetime import UTC, datetime, timedelta
+
+    from . import guard_ledger
+    path = guard_ledger.ledger_path().with_name("guard-budget-note.json")
+    key = session_id or "*"
+    now = datetime.now(UTC)
+    try:
+        seen = json.loads(path.read_text())
+        seen = seen if isinstance(seen, dict) else {}
+    except (OSError, ValueError):
+        seen = {}
+    try:
+        last = datetime.fromisoformat(seen[key])
+        if now - last < timedelta(minutes=_BUDGET_NOTE_EVERY_MIN):
+            return False
+    except (KeyError, TypeError, ValueError):
+        pass
+    cutoff = now - timedelta(days=1)
+    kept = {}
+    for k, v in seen.items():
+        with contextlib.suppress(TypeError, ValueError):
+            if datetime.fromisoformat(v) > cutoff:
+                kept[k] = v
+    kept[key] = now.isoformat(timespec="seconds")
+    with contextlib.suppress(OSError):
+        path.write_text(json.dumps(kept))
+    return True
+
+
+def _with_budget_note(v: dict[str, Any] | None, note: dict[str, Any] | None
+                      ) -> dict[str, Any] | None:
+    """A verdict carrying the budget note: an allow or a warn becomes a warn
+    whose reason includes it. An ask or a deny already stops for a human and
+    is left as it is."""
+    if note is None:
+        return v
+    if v is None:
+        return note
+    if v["decision"] not in ("allow", "warn"):
+        return v
+    text = note["reason"]
+    if v.get("reason"):
+        text = f"{v['reason']} {note['reason'].removeprefix('nable guard: ')}"
+    return {**v, "decision": "warn", "reason": text}
 
 
 # A priced change allowed by policy but at or above this share of the auto
@@ -1148,14 +1216,17 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         # an agent burning through its budget should be stopped whatever it is
         # doing.
         budget_hit = check_budget_gate(session_id)
-        if budget_hit is not None:
+        note = budget_hit if budget_hit and budget_hit["decision"] == "warn" else None
+        if budget_hit is not None and note is None:
             v = {**budget_hit, "harness": harness}
         elif len(command) > MAX_JUDGED_CHARS:
             v = {**_oversize_verdict(command), "harness": harness}
         else:
             hit = classify_command(command)
             if hit is None:
-                return None
+                # Not an infra command: nothing to record, but a budget note
+                # still shows (unrecorded; it is not a decision about this call).
+                return {**note, "harness": harness} if note else None
             v = {**_verdict_for(command, hit, cwd=cwd), "harness": harness}
         history_error = v.pop("_history_error", None)
         if record:
@@ -1163,6 +1234,7 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
                 _record_fail_open(history_error, harness=harness, tool=tool, command=command,
                                   check="history")
             _record(v, tool=tool, command=command)
+        v = _with_budget_note(v, note)
         return None if v["decision"] == "allow" else v
     except Exception as exc:
         if record:
@@ -1213,10 +1285,13 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
         from .guard_mcp import argument_text, translate
 
         budget_hit = check_budget_gate(session_id)
+        note = budget_hit if budget_hit and budget_hit["decision"] == "warn" else None
+        if note is not None:
+            budget_hit = None
         change = _budget_change(tool_name, arguments)
         actions = [] if change is not None else translate(tool_name, arguments)
         if not actions and budget_hit is None and change is None:
-            return None
+            return {**note, "harness": harness, "mcp_tool": tool_name} if note else None
         if actions:
             summary = actions[0].command
 
@@ -1252,10 +1327,11 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
                 if worst is None or _SEVERITY[v["decision"]] > _SEVERITY[worst["decision"]]:
                     worst, summary = v, act.command
             if worst is None:
-                return None
+                return {**note, "harness": harness, "mcp_tool": tool_name} if note else None
         worst = {**worst, "harness": harness, "mcp_tool": tool_name}
         if record:
             _record(worst, tool=tool_name, command=summary)
+        worst = _with_budget_note(worst, note)
         return None if worst["decision"] == "allow" else worst
     except Exception as exc:
         if record:

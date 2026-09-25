@@ -126,9 +126,74 @@ def test_no_budget_configured_is_not_a_reason_to_block(monkeypatch):
     assert guard.gate_command("ls -la") is None
 
 
+def _near(**_):
+    return {"verdict": ai_budget.BUDGET_WARN, "verdict_basis": "spend", "pct_of_budget": 0.86,
+            "est_usd_mtd_list_price": 129.0, "budget": {"spend_cap": 150.0}}
+
+
 def test_warn_state_does_not_stop_anything(monkeypatch):
     monkeypatch.setattr(ai_budget, "status", lambda: {"verdict": ai_budget.BUDGET_WARN})
-    assert guard.gate_command("ls -la") is None
+    v = guard.gate_command("ls -la")
+    assert v["decision"] == "warn", "a note, never an ask or a deny"
+
+
+def test_warn_state_says_so_with_the_figures(monkeypatch):
+    """It used to produce nothing: the first a user heard of the budget was
+    the stop."""
+    monkeypatch.setattr(ai_budget, "status", _near)
+    v = guard.gate_command("ls -la", session_id="s1")
+    assert v["decision"] == "warn" and v["action_type"] == "ai_budget"
+    assert "close to its AI budget" in v["reason"]
+    assert "86% of your $150 cap" in v["reason"] and "`nable ai-budget --spend-cap USD`" in v["reason"]
+
+
+def test_the_warn_note_shows_once_per_session_per_half_hour(monkeypatch):
+    monkeypatch.setattr(ai_budget, "status", _near)
+    assert guard.gate_command("ls -la", session_id="s1") is not None
+    assert guard.gate_command("ls -la", session_id="s1") is None
+    assert guard.gate_command("ls -la", session_id="s2") is not None, "another session hears it"
+
+
+def test_the_warn_note_rides_along_with_an_allowed_infra_command(monkeypatch):
+    monkeypatch.setattr(ai_budget, "status", _near)
+    v = guard.gate_command("aws ec2 run-instances --instance-type t3.micro", session_id="s1")
+    assert v["decision"] == "warn" and "close to its AI budget" in v["reason"]
+    import json
+
+    import finops.guard_ledger as gl
+    [r] = [json.loads(x) for x in gl.ledger_path().read_text().splitlines()]
+    assert r["decision"] == "allow", "the ledger keeps the policy's decision"
+
+
+def test_the_warn_note_never_softens_an_ask(monkeypatch):
+    monkeypatch.setattr(ai_budget, "status", _near)
+    v = guard.gate_command("terraform destroy", session_id="s1")
+    assert v["decision"] == "ask" and "one-way door" in v["reason"]
+
+
+def test_the_claude_hook_shows_the_warn_note_without_a_permission_decision(monkeypatch):
+    import io
+    import json
+    monkeypatch.setattr(ai_budget, "status", _near)
+    for tool, tool_input in (("Bash", {"command": "ls"}),
+                             ("mcp__github__create_issue", {"title": "x"})):
+        out = io.StringIO()
+        payload = {"tool_name": tool, "tool_input": tool_input, "session_id": f"s-{tool}"}
+        guard.run_hook(io.StringIO(json.dumps(payload)), out)
+        body = json.loads(out.getvalue())
+        assert "hookSpecificOutput" not in body
+        assert "close to its AI budget" in body["systemMessage"]
+
+
+def test_a_priced_change_near_the_threshold_shows_a_system_message():
+    import io
+    import json
+    out = io.StringIO()
+    payload = {"tool_name": "Bash",
+               "tool_input": {"command": "aws ec2 run-instances --instance-type c5.4xlarge"}}
+    guard.run_hook(io.StringIO(json.dumps(payload)), out)
+    body = json.loads(out.getvalue())
+    assert "hookSpecificOutput" not in body and "auto threshold" in body["systemMessage"]
 
 
 def test_an_unreadable_budget_never_blocks(monkeypatch):
