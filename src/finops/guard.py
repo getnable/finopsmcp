@@ -731,12 +731,15 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
             sess = st.get("session") or {}
             detail = (f"~${sess.get('usd_equivalent', 0):,.2f} estimated this session, "
                       f"{over} its ${sess.get('cap_usd') or 0:,.2f} session cap")
+            raise_it = "nable ai-budget --session-cap USD"
         elif st.get("verdict_basis") == "spend":
             detail = (f"~${st.get('est_usd_mtd_list_price', 0):,.0f} estimated this month, "
                       f"{over} your ${budget.get('spend_cap', 0):,.0f} cap")
+            raise_it = "nable ai-budget --spend-cap USD"
         else:
             detail = (f"{st.get('billable_tokens_mtd', 0):,} tokens this month, "
                       f"{over} your {budget.get('monthly_tokens', 0):,} budget")
+            raise_it = "nable ai-budget --tokens N"
         hard = _stop_on_budget()
         return {
             "decision": "deny" if hard else "ask",
@@ -744,10 +747,10 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
             "reason": (
                 f"nable guard: your agent is over its AI budget. {detail}. "
                 + ("Stopped because FINOPS_GUARD_STOP_ON_BUDGET is on. "
-                   "Raise it with `nable ai-budget set`, or unset that variable to "
+                   f"Raise it with `{raise_it}`, or unset that variable to "
                    "downgrade this to a confirmation."
                    if hard else
-                   "Confirm to continue, or raise it with `nable ai-budget set`. "
+                   f"Confirm to continue, or raise it with `{raise_it}`. "
                    "Set FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop.")
             ),
         }

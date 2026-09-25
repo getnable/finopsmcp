@@ -18,12 +18,14 @@ cloud account, an API key, or a network.
 """
 from __future__ import annotations
 
+import argparse
 import importlib
 
 import pytest
 
 import finops.ai_budget as ai_budget
 import finops.guard as guard
+from finops.cli_ai_budget import add_parser
 
 
 def _over(basis="tokens"):
@@ -76,11 +78,30 @@ def test_the_reason_carries_the_actual_numbers(monkeypatch):
     monkeypatch.setattr(ai_budget, "status", _over)
     reason = guard.gate_command("ls -la")["reason"]
     assert "14,200,000" in reason and "10,000,000" in reason
-    assert "ai-budget set" in reason
 
     monkeypatch.setattr(ai_budget, "status", lambda: _over("spend"))
     reason = guard.gate_command("ls -la")["reason"]
     assert "$213" in reason and "$150" in reason
+
+
+@pytest.mark.parametrize("basis,remedy", [
+    ("tokens", "`nable ai-budget --tokens N`"),
+    ("spend", "`nable ai-budget --spend-cap USD`"),
+    ("session", "`nable ai-budget --session-cap USD`"),
+])
+@pytest.mark.parametrize("hard", [False, True])
+def test_the_remedy_is_a_command_that_exists(monkeypatch, basis, remedy, hard):
+    """It used to say `nable ai-budget set`, which argparse rejects."""
+    monkeypatch.setattr(ai_budget, "status", lambda: _over(basis))
+    if hard:
+        monkeypatch.setenv("FINOPS_GUARD_STOP_ON_BUDGET", "1")
+    reason = guard.gate_command("ls -la")["reason"]
+    assert remedy in reason and "ai-budget set" not in reason
+    flag = remedy.strip("`").split()[2]
+    value = "5" if flag != "--tokens" else "5000"
+    parser = argparse.ArgumentParser()
+    add_parser(parser.add_subparsers(dest="cmd"))
+    assert parser.parse_args(["ai-budget", flag, value]).cmd == "ai-budget"
 
 
 def test_default_mode_tells_you_how_to_make_it_a_hard_stop(monkeypatch):
