@@ -357,3 +357,46 @@ def test_recent_cost_drivers_with_no_prior_rows_is_not_a_change(monkeypatch):
     assert "N/A%" not in out["summary"], out["summary"]
     assert "no cost rows" in out["summary"]
     assert out.get("comparison_unavailable") is True
+
+
+# ── 4. Day one: no history is not "wait a week" and not "connect AWS" ────────
+
+def test_anomalies_on_day_one_point_at_a_tool_that_reads_cost_explorer(monkeypatch):
+    import finops.server as server
+    from finops.anomaly import detector
+
+    monkeypatch.delenv("FINOPS_DEMO", raising=False)
+    monkeypatch.setattr(detector, "get_active_anomalies", lambda **k: [])
+    monkeypatch.setattr(detector, "has_enough_history", lambda *a: False)
+    monkeypatch.setattr(detector, "latest_snapshot_date", lambda *a: None)
+    out = server.get_anomalies()
+    if asyncio.iscoroutine(out):   # sync tools are offloaded behind a wrapper
+        out = asyncio.run(out)
+
+    assert out["anomalies"] == []
+    assert "explain_recent_cost_drivers" in out["message"]
+    assert out.get("next_tool") == "explain_recent_cost_drivers"
+
+
+def test_forecast_on_a_connected_account_with_no_history_does_not_say_connect(monkeypatch):
+    import finops.server as server
+    from finops.ml import forecasting
+
+    class _Empty:
+        _series: list = []
+
+    monkeypatch.setattr(server, "require_pro", lambda *a, **k: None)
+
+    async def _acct(account_id=None):
+        return "123456789012"
+
+    monkeypatch.setattr(server, "_resolve_account_id", _acct)
+    monkeypatch.setitem(server.CLOUD_CONNECTORS, "aws", _NoRowsConnector())
+    monkeypatch.setattr(forecasting.Forecaster, "for_account",
+                        classmethod(lambda cls, *a, **k: _Empty()))
+    out = asyncio.run(server.forecast_costs())
+
+    text = str(out)
+    assert "Connect your AWS account" not in text and "finops setup aws" not in text, text
+    assert "no cost history yet" in out["error"].lower()
+    assert "take_snapshot_now" in out["hint"] or "explain_recent_cost_drivers" in out["hint"]
