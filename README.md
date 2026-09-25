@@ -67,6 +67,18 @@ Reads only free cloud APIs, so scanning never adds to your bill. `uvx nable scan
 
 Infracost prices an infrastructure change before you deploy it; nable finds and fixes waste in what you are already running. Fuller breakdowns: [nable vs Vantage](https://getnable.com/nable-vs-vantage), [vs CloudHealth](https://getnable.com/nable-vs-cloudhealth), [vs Kubecost](https://getnable.com/nable-vs-kubecost).
 
+## Agent guard
+
+`nable guard install` adds a hook to Claude Code (and `--all` to Cursor and Codex) that checks each infrastructure command or MCP call before it runs: a one-way door (destroy, terminate, a commitment) asks you first, and a launch is priced at list price so a $191k/mo `run-instances` asks instead of passing. It also watches the pattern across calls: a velocity cap on the monthly run-rate let through per hour (`FINOPS_POLICY_VELOCITY_CAP_USD`, default four times the $500/mo per-action threshold) and loop detection for the same creation repeated (three identical `create-stack` in ten minutes asks). Every verdict goes to a local hash-chained ledger.
+
+```bash
+nable guard report --session <id>     # what it asked, blocked and let through, in dollars
+nable guard reconcile --hours 24      # CloudTrail's creates and destroys against the ledger
+nable guard export --format cef       # the verified ledger, for a SIEM
+```
+
+`reconcile` needs `cloudtrail:LookupEvents` (free, read-only) and matches by kind and time, since the ledger holds no resource ids. The guard is a seatbelt, not a security boundary: `nable guard doctor` lists what it does not see.
+
 ## Setup
 
 Requires Python 3.11+. Need `uv`? `curl -LsSf https://astral.sh/uv/install.sh | sh` (or `brew install uv`).

@@ -120,6 +120,22 @@ def test_uninstall_leaves_unrecognized_entries_exactly_as_found(settings):
     assert "a bare string entry" in entries
 
 
+@pytest.mark.parametrize("foreign", [
+    {"matcher": "Edit", "hooks": "echo not-a-list"},
+    {"matcher": "Edit", "hooks": None},
+    {"matcher": "Edit"},
+    {"matcher": "Edit", "hooks": []},
+    {"matcher": "Edit", "hooks": [{"type": "command", "command": 42}]},
+])
+def test_uninstall_never_rewrites_a_foreign_entry(settings, foreign):
+    """A string "hooks" value used to come back as a list of its characters,
+    and an entry with no hooks was dropped, whenever uninstall wrote."""
+    settings.write_text(json.dumps({"hooks": {"PreToolUse": [foreign]}}))
+    g.install()
+    assert g.uninstall() is True
+    assert json.loads(settings.read_text())["hooks"]["PreToolUse"] == [foreign]
+
+
 def test_install_is_idempotent(settings):
     settings.write_text("{}")
     for _ in range(3):

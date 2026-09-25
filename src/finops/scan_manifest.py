@@ -91,6 +91,14 @@ SPEND_ACTIONS: list[tuple[str, str]] = [
     ("ce.get_dimension_values", "ce:GetDimensionValues"),
 ]
 
+# Only for `nable guard reconcile`, which reads CloudTrail's management events
+# to line the guard's ledger up against what happened. Not a scan call, so not
+# in the scan policy; `nable guard reconcile` prints it when it is missing.
+# LookupEvents is free and read-only.
+GUARD_RECONCILE_ACTIONS: list[tuple[str, str]] = [
+    ("cloudtrail.lookup_events", "cloudtrail:LookupEvents"),
+]
+
 # A verb that changes anything. The manifest is a promise that none appear, and
 # the test enforces it, so a mutating call cannot be added here quietly.
 _MUTATING = ("create", "delete", "put", "update", "modify", "terminate",

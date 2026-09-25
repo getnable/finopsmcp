@@ -162,11 +162,47 @@ SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"  # pragma: allowlist secret
      "s3cretPass", "https://me:[REDACTED]@"),
     ("helm install x --set token=Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFCQ0RFRkdI", "Zm9vYmFyYmF6",
      "helm install x"),
+    # The secret word as the whole name, not a suffix of one.
+    ("helm upgrade app ./chart --set db.password=hunter2", "hunter2",
+     "--set db.password=[REDACTED]"),
+    ("PASSWORD=hunter2 terraform apply", "hunter2", "PASSWORD=[REDACTED] terraform apply"),
+    ("helm install x --set auth.token=abc123", "abc123", "auth.token=[REDACTED]"),
+    # Red-team finds: each reached the ledger in the clear.
+    ("curl 'https://api.x.io/v1?token=abc123&page=2'", "abc123", "?token=[REDACTED]"),
+    ("terraform apply -var db_pass=hunter2", "hunter2", "-var db_pass=[REDACTED]"),
+    ("terraform apply -var=admin_pw=hunter2", "hunter2", "admin_pw=[REDACTED]"),
+    ("mysql -uroot -phunter2 -h db.internal", "hunter2", "-p[REDACTED] -h db.internal"),
+    ("mysqldump -u root -p'hunter2' app", "hunter2", "-p[REDACTED] app"),
+    ("curl -u admin:hunter2 https://x.io", "hunter2", "-u admin:[REDACTED] https://x.io"),
+    ("az login --service-principal -u app -p Pa55w0rd --tenant t", "Pa55w0rd",
+     "-p [REDACTED] --tenant t"),
+    ("docker login -u me -p hunter2 registry.io", "hunter2", "-p [REDACTED] registry.io"),
+    ("curl -H 'Authorization: xoxb-1234-5678-abcdefgh' https://slack.com", "xoxb-1234",
+     "[REDACTED-SLACK-TOKEN]"),
+    ("curl -d t=xoxp-99-88-77aa https://slack.com", "xoxp-99", "[REDACTED-SLACK-TOKEN]"),
+    ("azcopy copy 'https://a.blob.core.windows.net/c?sv=2020&sig=AbC%2Bdef' .", "AbC%2Bdef",
+     "&sig=[REDACTED]"),
+    ("echo ghp_abcdefghijklmnop1234 | gh auth login", "ghp_abcdef", "[REDACTED-GITHUB-TOKEN]"),
+    ("export OPENAI=sk-proj-abcdefghijklmnop", "sk-proj-abc", "[REDACTED-API-KEY]"),
+    ("aws s3 cp s3://b/k . --expires 1 --pass-phrase x", "--pass-phrase x",
+     "--pass-phrase [REDACTED]"),
 ])
+
 def test_secrets_never_reach_the_ledger(raw, gone, kept):
     out = gl.redact(raw)
     assert gone not in out
     assert kept in out
+
+
+@pytest.mark.parametrize("cmd", [
+    "ssh -p 22 host uptime",
+    "docker run -p 8080:80 nginx",
+    "git push -u origin main",
+    "aws ec2 run-instances --instance-type m5.large --count 2",
+    "kubectl -n prod get pods -o wide",
+])
+def test_ordinary_flags_are_left_alone(cmd):
+    assert gl.redact(cmd) == cmd
 
 
 def test_redaction_keeps_what_an_auditor_needs():
@@ -374,3 +410,266 @@ def test_verify_log_cli_passes_and_fails():
 def test_verify_log_json():
     _three()
     assert json.loads(_cli("verify-log", guard_json=True))["ok"] is True
+
+
+# ── the anchor: what a chain cannot show ──────────────────────────────────────
+
+def _verify_log(**kw):
+    kw.setdefault("guard_json", False)
+    kw.setdefault("guard_reanchor", False)
+    return _cli("verify-log", **kw)
+
+
+def test_a_first_check_anchors_the_head():
+    _three()
+    _verify_log()
+    a = gl.read_anchor()
+    assert a["records"] == 3 and a["head"] == gl.verify()["head"]
+
+
+def test_new_records_after_the_anchor_are_fine():
+    _three()
+    _verify_log()
+    gl.append({"decision": "ask"})
+    assert "Nothing removed or rewritten since" in _verify_log()
+    assert gl.read_anchor()["records"] == 4, "a clean check moves the anchor forward"
+
+
+@pytest.mark.parametrize("damage,said", [
+    (lambda p: p.write_bytes(b"".join(p.read_bytes().splitlines(keepends=True)[:2])),
+     "had 3 record(s)"),
+    (lambda p: p.write_bytes(b""), "the file is empty or gone"),
+    (lambda p: p.unlink(), "the file is empty or gone"),
+])
+def test_records_cut_from_the_end_are_reported(damage, said):
+    _three()
+    _verify_log()
+    damage(gl.ledger_path())
+    assert gl.verify()["ok"], "the chain alone cannot see this"
+    with pytest.raises(SystemExit) as e:
+        _verify_log()
+    assert e.value.code == 1
+    r = gl.check()
+    assert not r["clean"] and said in r["warnings"][0]
+
+
+def test_an_emptied_ledger_is_not_a_check_mark(capsys):
+    _three()
+    _verify_log()
+    gl.ledger_path().write_bytes(b"")
+    from finops import setup_wizard
+    with pytest.raises(SystemExit):
+        setup_wizard._run_guard(argparse.Namespace(guard_action="verify-log", guard_global=False,
+                                                   guard_json=False, guard_reanchor=False))
+    out = capsys.readouterr().out
+    assert "Decision ledger intact" not in out and "empty or gone" in out
+
+
+def test_a_rewritten_head_is_reported():
+    _three()
+    _verify_log()
+    p = gl.ledger_path()
+    lines = p.read_bytes().splitlines(keepends=True)
+    lines[-1] = lines[-1].replace(b'"allow"', b'"deny"')     # the last line: no chain after it
+    p.write_bytes(b"".join(lines))
+    assert gl.verify()["ok"]
+    r = gl.check()
+    assert not r["clean"] and "record 3 is not the one seen" in r["warnings"][0]
+
+
+def test_the_whole_file_regenerated_is_reported():
+    _three()
+    _verify_log()
+    gl.ledger_path().unlink()
+    for d in ("allow", "allow", "allow", "allow"):
+        gl.append({"decision": d})
+    r = gl.check()
+    assert r["ok"] and not r["clean"] and "rewritten" in r["warnings"][0]
+
+
+def test_reanchor_accepts_a_rotated_ledger():
+    _three()
+    _verify_log()
+    gl.ledger_path().unlink()
+    out = _verify_log(guard_reanchor=True)
+    assert "Re-anchored at 0 record(s)" in out
+    assert gl.check()["clean"]
+
+
+def test_doctor_is_not_ok_when_the_ledger_shrank(monkeypatch):
+    _three()
+    _verify_log()
+    gl.ledger_path().write_bytes(b"")
+    d = g.doctor()
+    assert d["ok"] is False
+    assert any("empty or gone" in fix for fix in d["recommendations"])
+
+
+def test_report_warns_on_a_broken_chain():
+    _three()
+    p = gl.ledger_path()
+    p.write_bytes(p.read_bytes().replace(b'"deny"', b'"allow"'))
+    out = _cli("report", guard_days=30, guard_json=False)
+    assert "does not verify" in out and "breaks at line" in out
+    data = json.loads(_cli("report", guard_days=30, guard_json=True))
+    assert data["ledger_problems"]
+
+
+# ── what "at stake" sums ──────────────────────────────────────────────────────
+
+def _at(minutes_ago: float) -> str:
+    from datetime import UTC, datetime, timedelta
+    return (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds")
+
+
+def test_a_destroy_plans_saving_is_not_subtracted_from_what_is_at_stake():
+    gl.append({"ts": _at(30), "decision": "ask", "command": "terraform apply big.plan",
+               "monthly_usd": 5000.0})
+    gl.append({"ts": _at(20), "decision": "ask", "command": "terraform apply destroy.plan",
+               "monthly_usd": -1328.0})
+    gl.append({"ts": _at(10), "decision": "allow", "command": "terraform apply shrink.plan",
+               "monthly_usd": -40.0})
+    s = gl.summarize(30)
+    assert s["usd_per_month_escalated_or_blocked"] == 5000.0
+    assert s["usd_per_month_allowed_with_a_figure"] == 0.0
+    assert [r["monthly_usd"] for r in s["largest"]] == [5000.0]
+
+
+def test_a_retried_command_is_counted_once():
+    cmd = "aws ec2 run-instances --instance-type p4d.24xlarge --count 8"
+    for m in (9, 6, 3):
+        gl.append({"ts": _at(m), "decision": "ask", "command": cmd, "session": "s1",
+                   "monthly_usd": 100_000.0})
+    s = gl.summarize(30)
+    assert s["by_decision"]["ask"] == 3, "every decision is still counted"
+    assert s["usd_per_month_escalated_or_blocked"] == 100_000.0
+    assert s["repeats_not_summed"] == 2 and len(s["largest"]) == 1
+
+
+def test_the_same_command_is_summed_again_from_another_session_or_later():
+    cmd = "aws ec2 run-instances --instance-type p4d.24xlarge"
+    gl.append({"ts": _at(50), "decision": "ask", "command": cmd, "session": "s1",
+               "monthly_usd": 100.0})
+    gl.append({"ts": _at(49), "decision": "ask", "command": cmd, "session": "s2",
+               "monthly_usd": 100.0})
+    gl.append({"ts": _at(20), "decision": "ask", "command": cmd, "session": "s1",
+               "monthly_usd": 100.0})
+    assert gl.summarize(30)["usd_per_month_escalated_or_blocked"] == 300.0
+
+
+def test_report_says_repeats_were_counted_once():
+    cmd = "aws ec2 run-instances --instance-type p4d.24xlarge --count 8"
+    for m in (4, 2):
+        gl.append({"ts": _at(m), "decision": "ask", "command": cmd, "monthly_usd": 10.0})
+    assert "1 repeat(s) of the same command within 10 minutes counted once" in \
+        _cli("report", guard_days=30, guard_json=False)
+
+
+def test_report_into_a_closed_pipe_exits_quietly():
+    """`nable guard report | head`: the reader leaves early; no traceback."""
+    import subprocess
+    _activity_without_env()
+    env = {**os.environ, "HOME": str(gl.ledger_path().parent), "NABLE_NO_TELEMETRY": "1",
+           "FINOPS_DATA_DIR": str(gl.ledger_path().parent)}
+    env.pop("FINOPS_PROFILE", None)
+    code = "from finops.setup_wizard import main; main(['guard', 'report'])"
+    p = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, env=env)
+    p.stdout.close()                                  # the reader is already gone
+    _, err = p.communicate(timeout=60)
+    assert b"Traceback" not in err and b"BrokenPipe" not in err, err.decode()
+    assert p.returncode == 0
+
+
+def _activity_without_env():
+    for cmd in ("terraform destroy", "aws ec2 run-instances --instance-type t3.micro"):
+        g.gate_command(cmd)
+
+
+# ── per-session ───────────────────────────────────────────────────────────────
+
+def test_the_session_is_recorded():
+    g.gate_command("aws ec2 run-instances --instance-type t3.micro", session_id="sess-a")
+    g.gate_mcp_call("mcp__aws-api__call_aws", {"cli_command": "aws ec2 terminate-instances "
+                                                              "--instance-ids i-1"},
+                    session_id="sess-b")
+    g.gate_command("ls")                                        # not infra: no record
+    g.gate_command("terraform destroy")                          # no session given
+    recs = _records()
+    assert [r.get("session") for r in recs] == ["sess-a", "sess-b", None]
+
+
+def test_the_hook_records_the_payloads_session():
+    payload = {"tool_name": "Bash", "session_id": "0a1b2c3d-4e5f-6789-abcd-ef0123456789",
+               "tool_input": {"command": "terraform destroy"}}
+    g.run_hook(io.StringIO(json.dumps(payload)), io.StringIO())
+    assert _records()[0]["session"] == "0a1b2c3d-4e5f-6789-abcd-ef0123456789"
+
+
+def test_a_session_id_goes_through_the_same_redaction():
+    g.gate_command("terraform destroy", session_id=f"AWS_SECRET_ACCESS_KEY={SECRET}")
+    assert SECRET not in gl.ledger_path().read_text()
+
+
+def test_a_fail_open_keeps_its_session(monkeypatch):
+    monkeypatch.setattr(g, "classify_command", lambda c: 1 / 0)
+    g.gate_command("terraform destroy", session_id="sess-z")
+    assert _records()[0]["session"] == "sess-z"
+
+
+def _sessions(monkeypatch):
+    g.gate_command("aws ec2 run-instances --instance-type p4d.24xlarge --count 8",
+                   session_id="big")                                                # ask
+    g.gate_command("aws ec2 run-instances --instance-type t3.micro", session_id="small")
+    g.gate_command("aws ec2 run-instances --instance-type t3.large", session_id="small")
+
+
+def test_summary_has_per_session_priced_totals(monkeypatch):
+    _sessions(monkeypatch)
+    s = gl.summarize(30)
+    assert list(s["by_session"]) == ["big", "small"], "largest first"
+    assert s["by_session"]["big"]["usd_per_month_escalated_or_blocked"] == \
+        pytest.approx(P4D_X8_MONTHLY, rel=1e-3)
+    assert s["by_session"]["small"]["usd_per_month_allowed_with_a_figure"] == \
+        pytest.approx((0.0104 + 0.0832) * 730, rel=1e-3)
+    assert s["by_session"]["small"]["records"] == 2
+
+
+def test_summary_for_one_session(monkeypatch):
+    _sessions(monkeypatch)
+    s = gl.summarize(30, session="small")
+    assert s["records"] == 2 and s["session"] == "small"
+    assert s["usd_per_month_escalated_or_blocked"] == 0
+    assert list(s["by_session"]) == ["small"]
+
+
+def test_report_cli_shows_sessions_and_filters_by_one(monkeypatch):
+    _sessions(monkeypatch)
+    out = _cli("report", guard_days=30, guard_json=False)
+    assert "By agent session" in out and "big" in out and "small" in out
+    one = _cli("report", guard_days=30, guard_json=False, guard_session="small")
+    assert "in session small, 2 decision(s)" in one
+    assert "p4d.24xlarge" not in one
+    data = json.loads(_cli("report", guard_days=30, guard_json=True, guard_session="big"))
+    assert data["records"] == 1 and data["session"] == "big"
+
+
+def test_report_for_an_unknown_session_says_so():
+    g.gate_command("terraform destroy", session_id="a")
+    out = _cli("report", guard_days=30, guard_json=False, guard_session="nope")
+    assert "Nothing recorded for session nope" in out
+
+
+def test_report_session_flag_parses():
+    from finops import setup_wizard
+    seen = {}
+    real = setup_wizard._run_guard
+
+    def spy(parsed):
+        seen["session"] = parsed.guard_session
+    setup_wizard._run_guard = spy
+    try:
+        setup_wizard.main(["guard", "report", "--session", "abc"])
+    finally:
+        setup_wizard._run_guard = real
+    assert seen["session"] == "abc"

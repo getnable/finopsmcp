@@ -2281,6 +2281,26 @@ def _run_agents() -> None:
         print()
 
 
+def _guard_cli(parsed) -> None:
+    """_run_guard, ending quietly when its reader goes away.
+
+    `nable guard report | head` closes the pipe after ten lines and the next
+    write raises BrokenPipeError, which used to print a traceback (and a
+    second one from the interpreter's own flush at exit). Output is flushed
+    here so the error surfaces inside the try, and stdout is pointed at
+    /dev/null so the exit flush has nowhere to fail."""
+    try:
+        _run_guard(parsed)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        except (OSError, ValueError, AttributeError):
+            pass
+        raise SystemExit(0) from None
+
+
 def _run_guard(parsed) -> None:
     """`finops guard`: install / manage the seamless agent cost guardrail.
 
@@ -2434,25 +2454,47 @@ def _run_guard(parsed) -> None:
         _guard_doctor(parsed)
         return
 
+    if action == "reconcile":
+        _guard_reconcile(parsed)
+        return
+
+    if action == "export":
+        _guard_export(parsed)
+        return
+
     if action == "verify-log":
         from . import guard_ledger
-        result = guard_ledger.verify()
+        result = guard_ledger.check()
+        reanchor = getattr(parsed, "guard_reanchor", False)
+        if result["clean"] or reanchor:
+            guard_ledger.save_anchor(result)
         if getattr(parsed, "guard_json", False):
             print(json.dumps(result, indent=2))
         else:
             print()
-            if result["ok"]:
+            if result["clean"]:
                 print(f"  {green('✓')} Decision ledger intact: {result['records']} record(s), "
                       "every one chained to the last.")
                 print(dim(f"  Head: {result['head']}"))
-                print(dim("  A chain cannot show its tail being cut off. Keep the head somewhere"))
-                print(dim("  else (a ticket, a commit) and compare it next time."))
-            else:
+                if result["anchor"]:
+                    print(dim(f"  Nothing removed or rewritten since {result['anchor'].get('seen_at')}"
+                              f" ({result['anchor']['records']} record(s) then)."))
+                print(dim("  The anchor this compares against sits beside the ledger, where an"))
+                print(dim("  agent can write it too. Keep the head somewhere else as well (a"))
+                print(dim("  ticket, a commit) and compare it next time."))
+            elif not result["ok"]:
                 print(f"  {amber('✗')} Decision ledger broken at line {result['broken_at']}: "
                       f"{result['problem']}.")
+            for warning in result["warnings"]:
+                print(f"  {amber('✗')} {warning[0].upper()}{warning[1:]}.")
+            if result["warnings"]:
+                print(dim("  If you rotated or archived the ledger yourself: "
+                          "nable guard verify-log --reanchor"))
+                if reanchor:
+                    print(dim(f"  Re-anchored at {result['records']} record(s)."))
             print(dim(f"  {result['path']}"))
             print()
-        if not result["ok"]:
+        if not result["clean"] and not reanchor:
             raise SystemExit(1)
         return
 
@@ -2531,6 +2573,8 @@ def _run_guard(parsed) -> None:
     print(dim("  Try:      nable guard try                 (see it judge four commands)"))
     print(dim("  Coverage: nable guard doctor              (what is and is not guarded here)"))
     print(dim("  History:  nable guard report              (what it asked, blocked, let through)"))
+    print(dim("            nable guard reconcile           (the ledger against CloudTrail)"))
+    print(dim("            nable guard export --format cef (the verified ledger, for a SIEM)"))
     print(dim("  Install:  nable guard install            (this project)"))
     print(dim("            nable guard install --global    (all projects)"))
     print(dim("            nable guard install --all       (Claude Code, Cursor, Codex: each one found)"))
@@ -2593,6 +2637,10 @@ def _guard_doctor(parsed) -> None:
     else:
         print(f"  Decision ledger: {amber('chain broken at line ' + str(led['broken_at']))}")
     print(dim(f"  {led['path']}"))
+    lost = led.get("unrecorded") or {}
+    if lost.get("count"):
+        print(f"  {amber(str(lost['count']) + ' verdict(s) answered but not recorded')}"
+              f" (ledger locked or not a file), last at {lost['last']}")
     print()
     for line in textwrap.wrap(d["seatbelt"], 76):
         print(f"  {line}")
@@ -2608,19 +2656,33 @@ def _guard_report(parsed) -> None:
     import json
 
     from . import guard_ledger
-    from .welcome import bold, cyan, dim
+    from .welcome import amber, bold, cyan, dim
 
     days = getattr(parsed, "guard_days", 30) or 30
-    summary = guard_ledger.summarize(days)
+    session = getattr(parsed, "guard_session", None) or None
+    summary = guard_ledger.summarize(days, session=session)
+    chain = guard_ledger.check()
+    problems = ([f"it breaks at line {chain['broken_at']}: {chain['problem']}"]
+                if not chain["ok"] else []) + chain["warnings"]
     if getattr(parsed, "guard_json", False):
-        print(json.dumps(summary, indent=2))
+        print(json.dumps({**summary, "ledger_problems": problems}, indent=2))
         return
+    if problems:
+        print()
+        print(f"  {amber('The decision ledger does not verify, so these figures may be incomplete:')}")
+        for p in problems:
+            print(f"    {amber('✗')} {p}")
+        print(dim("  Details: nable guard verify-log"))
     d = summary["by_decision"]
     print()
-    print(f"  {bold('nable guard')}: the last {days:g} days, {summary['records']} decision(s)")
+    scope = f" in session {session}" if session else ""
+    print(f"  {bold('nable guard')}: the last {days:g} days{scope}, "
+          f"{summary['records']} decision(s)")
     print()
     if not summary["records"]:
-        print(dim("  Nothing recorded yet. Verdicts land here as your agent runs infra commands."))
+        print(dim(f"  Nothing recorded for session {session} in that window."
+                  if session else
+                  "  Nothing recorded yet. Verdicts land here as your agent runs infra commands."))
         print(dim(f"  {summary['path']}"))
         print()
         return
@@ -2639,17 +2701,160 @@ def _guard_report(parsed) -> None:
               f"${summary['usd_order_ceilings_escalated_or_blocked']:,.0f}")
     print(f"  Let through with a figure (allowed or warned): "
           f"~${summary['usd_per_month_allowed_with_a_figure']:,.0f}/mo")
+    if summary.get("repeats_not_summed"):
+        print(dim(f"  Cost increases only; {summary['repeats_not_summed']} repeat(s) of the same "
+                  "command within 10 minutes counted once."))
     if summary["largest"]:
         print()
         print(f"  {bold('Largest escalations')}")
         for r in summary["largest"]:
             print(f"    {cyan(r['decision']):<5} ~${r['monthly_usd']:,.0f}/mo  {r['command']}")
             print(dim(f"          {r['ts']}  {r['harness']}  {r['tool']}"))
+    sessions = [(k, v) for k, v in summary["by_session"].items()
+                if v["usd_per_month_escalated_or_blocked"] or v["usd_per_month_allowed_with_a_figure"]]
+    if sessions and not session:
+        print()
+        print(f"  {bold('By agent session')} (priced, largest first)")
+        for sid, v in sessions[:5]:
+            print(f"    {sid[:36]:<36}  let through ~${v['usd_per_month_allowed_with_a_figure']:,.0f}/mo"
+                  f"  escalated or blocked ~${v['usd_per_month_escalated_or_blocked']:,.0f}/mo")
+            print(dim(f"    {'':<36}  {v['records']} decision(s), {v['first']} to {v['last']}"))
+        if len(sessions) > 5:
+            print(dim(f"    and {len(sessions) - 5} more; one session: nable guard report --session ID"))
     print()
     print(dim("  By harness: " + ", ".join(f"{k} {v}" for k, v in summary["by_harness"].items())))
     print(dim("  Check the log was not edited: nable guard verify-log"))
     print(dim(f"  {summary['path']}"))
     print()
+
+
+def _guard_reconcile(parsed) -> None:
+    """`nable guard reconcile`: the ledger against CloudTrail."""
+    import json
+    import textwrap
+
+    from .guard_reconcile import EVENTS, ReconcileError, reconcile
+    from .welcome import amber, bold, dim, green
+
+    hours = getattr(parsed, "guard_hours", 24) or 24
+    regions = getattr(parsed, "guard_regions", None) or None
+    as_json = getattr(parsed, "guard_json", False)
+    if not as_json:
+        n = len(regions or [None])
+        print()
+        print(dim(f"  Reading CloudTrail: {len(EVENTS)} event names x {n} region(s), "
+                  "paced at 2 requests a second..."))
+    try:
+        r = reconcile(hours, regions,
+                      tolerance_minutes=getattr(parsed, "guard_tolerance", 5) or 5)
+    except ReconcileError as e:
+        if as_json:
+            print(json.dumps({"error": str(e)}, indent=2))
+        else:
+            print()
+            for line in str(e).splitlines():
+                print(f"  {line}")
+            print()
+        raise SystemExit(1) from None
+    if as_json:
+        print(json.dumps(r, indent=2, default=str))
+        return
+
+    def who(ev: dict) -> str:
+        arn = ev.get("identity_arn") or ev.get("user") or "?"
+        return f"{arn}  via {ev['via']}  ({ev.get('user_agent') or 'no user agent'})"
+
+    def show(title: str, rows: list, *, mark: str) -> None:
+        print()
+        print(f"  {bold(title)} ({len(rows)})")
+        for ev in rows[:20]:
+            failed = f"  (failed: {ev['error_code']})" if ev.get("error_code") else ""
+            print(f"    {mark} {ev['time']}  {ev['region']}  {ev['event']}{failed}")
+            print(dim(f"        {who(ev)}"))
+            if ev.get("resources"):
+                print(dim(f"        {', '.join(ev['resources'][:3])}"))
+            if ev.get("ledger"):
+                led = ev["ledger"]
+                print(dim(f"        guard: {led['decision']} at {led['ts']}  {led.get('command')}"))
+        if len(rows) > 20:
+            print(dim(f"    and {len(rows) - 20} more (--json has them all)"))
+
+    w = r["window"]
+    print()
+    print(f"  {bold('nable guard reconcile')}: {w['start']} to {w['end']}, "
+          f"{', '.join(r['regions'])}")
+    print(dim(f"  {r['events_read']} CloudTrail event(s), {r['ledger_records_in_window']} "
+              f"ledger record(s), {r['lookup_calls']} LookupEvents call(s)"))
+    for region, err in r["region_errors"].items():
+        print(f"  {amber('✗')} {region} not read: {err}")
+    show("Denied by the guard, happened anyway", r["denied_but_happened"], mark=amber("✗"))
+    show("No guard record", r["no_guard_record"], mark=amber("?"))
+    show("Seen by the guard, and happened", r["seen_and_happened"], mark=green("✓"))
+    if r["service_initiated"]:
+        show("Done by an AWS service on someone's behalf", r["service_initiated"], mark="-")
+    if r["guarded_without_event"]:
+        print()
+        print(f"  {bold('Let through by the guard, no matching event')} "
+              f"({len(r['guarded_without_event'])})")
+        for led in r["guarded_without_event"][:10]:
+            print(dim(f"    {led['ts']}  {led['decision']}  {led.get('command')}"))
+    print()
+    for line in textwrap.wrap(r["matching"], 76):
+        print(dim(f"  {line}"))
+    print()
+
+
+def _guard_export(parsed) -> None:
+    """`nable guard export`: the verified ledger, one record a line, for a SIEM.
+
+    Every record carries `chain` (its line, its own hash, the prev it claims
+    and whether that matches), so the receiver can re-verify the chain and
+    anchor the last hash. A ledger that does not verify (broken chain, or
+    records gone since the last check) is refused unless --force, and then
+    each record says whether its link held."""
+    import json
+
+    from . import __version__, guard_ledger
+
+    def err(msg: str) -> None:
+        print(f"nable guard export: {msg}", file=sys.stderr)
+
+    fmt = getattr(parsed, "guard_format", "jsonl") or "jsonl"
+    try:
+        since = guard_ledger.parse_since(getattr(parsed, "guard_since", None))
+    except ValueError:
+        err("--since takes 24h, 7d, 30m, 2w, or an ISO date or timestamp")
+        raise SystemExit(2) from None
+    check = guard_ledger.check()
+    problems = ([f"the chain breaks at line {check['broken_at']}: {check['problem']}"]
+                if not check["ok"] else []) + check["warnings"]
+    force = getattr(parsed, "guard_force", False)
+    if problems and not force:
+        for p in problems:
+            err(p)
+        err("refusing to export a ledger that does not verify. `nable guard verify-log` "
+            "has the details; --force exports it anyway, each record flagged with "
+            "chain.ok.")
+        raise SystemExit(1)
+    for p in problems:
+        err(f"exporting anyway (--force): {p}")
+    records = guard_ledger.export_records(since)
+    if fmt == "cef":
+        lines = [guard_ledger.to_cef(r, __version__) for r in records]
+    else:
+        lines = [json.dumps(r, sort_keys=True, separators=(",", ":"), default=str)
+                 for r in records]
+    body = "".join(line + "\n" for line in lines)
+    out = getattr(parsed, "guard_out", None)
+    if out:
+        target = Path(out).expanduser()
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(body)
+        err(f"{len(lines)} record(s) written to {target} ({fmt}); "
+            f"chain head {check['head']}")
+    else:
+        sys.stdout.write(body)
 
 
 def _run_credits(parsed) -> None:
@@ -3061,7 +3266,8 @@ def main(args: list[str] | None = None) -> None:
 
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
     guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
-                                                  "try", "report", "verify-log", "doctor"],
+                                                  "try", "report", "verify-log", "doctor",
+                                                  "reconcile", "export"],
                          nargs="?", default="status")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
@@ -3077,7 +3283,32 @@ def main(args: list[str] | None = None) -> None:
     guard_p.add_argument("--days", dest="guard_days", type=float, default=30,
                          help="With 'report': how many days of the decision ledger to summarise")
     guard_p.add_argument("--json", dest="guard_json", action="store_true",
-                         help="With 'report', 'verify-log' or 'doctor': print JSON")
+                         help="With 'report', 'verify-log', 'doctor' or 'reconcile': "
+                              "print JSON")
+    guard_p.add_argument("--hours", dest="guard_hours", type=float, default=24,
+                         help="With 'reconcile': how many hours of CloudTrail to read (max 2160)")
+    guard_p.add_argument("--region", dest="guard_regions", action="append", metavar="R",
+                         help="With 'reconcile': a region to read (repeatable; default: "
+                              "your configured region)")
+    guard_p.add_argument("--tolerance-minutes", dest="guard_tolerance", type=float, default=5,
+                         help="With 'reconcile': how long after a verdict an event may "
+                              "still match it (default 5)")
+    guard_p.add_argument("--since", dest="guard_since", default=None, metavar="WHEN",
+                         help="With 'export': only records since then (24h, 7d, or an ISO "
+                              "date or timestamp)")
+    guard_p.add_argument("--format", dest="guard_format", choices=["jsonl", "cef"],
+                         default="jsonl", help="With 'export': JSON lines (default) or CEF")
+    guard_p.add_argument("--out", dest="guard_out", default=None, metavar="PATH",
+                         help="With 'export': write here (created 0600) instead of stdout")
+    guard_p.add_argument("--force", dest="guard_force", action="store_true",
+                         help="With 'export': export a ledger that does not verify, each "
+                              "record flagged")
+    guard_p.add_argument("--session", dest="guard_session", default=None, metavar="ID",
+                         help="With 'report': only this agent session (the hook payload's "
+                              "session id, as report lists them)")
+    guard_p.add_argument("--reanchor", dest="guard_reanchor", action="store_true",
+                         help="With 'verify-log': accept the ledger as it is now (after you "
+                              "rotated or archived it) as the new anchor")
 
     iam_p = sub.add_parser("iam-template", help="Print the least-privilege IAM policy / CloudFormation nable needs")
     iam_p.add_argument("action", choices=["terraform", "cloudformation"], nargs="?", default="cloudformation")
@@ -3381,7 +3612,7 @@ def main(args: list[str] | None = None) -> None:
         _run_agents()
         return
     elif parsed.cmd == "guard":
-        _run_guard(parsed)
+        _guard_cli(parsed)
         return
     elif parsed.cmd == "doctor":
         from .doctor import main as _doctor_main

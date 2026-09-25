@@ -8,7 +8,9 @@ deployment and the guard was never consulted.
 Invariants under test:
   - known infra tools are judged exactly like the shell command they amount
     to: same doors, same prices, same production-context rule
-  - an unknown MCP tool gets no verdict at all, not even the AI budget stop
+  - an unknown MCP tool gets no verdict of its own, but the AI budget stop
+    applies to it: an agent over budget cannot keep spending through tools
+    the guard does not otherwise judge
   - a known tool NAME with a foreign argument shape passes through, so an
     unrelated server's `create_run` or `delete_resource` is never asked about
   - the table is data, and every name in it is exercised here
@@ -228,14 +230,52 @@ def test_unknown_or_foreign_shaped_tools_get_no_verdict(tool, args):
     assert g.gate_mcp_call(tool, args) is None
 
 
-def test_unknown_mcp_tools_skip_even_the_budget_stop(monkeypatch):
-    """Never ask on a tool the guard does not understand, whatever the budget."""
-    monkeypatch.setattr(ai_budget, "status", lambda: {
+def _over_budget(monkeypatch):
+    monkeypatch.setattr(ai_budget, "status", lambda **_: {
         "verdict": ai_budget.BUDGET_OVER, "verdict_basis": "tokens", "pct_of_budget": 1.5,
         "billable_tokens_mtd": 15, "budget": {"monthly_tokens": 10}})
-    assert g.gate_mcp_call("mcp__github__create_issue", {"title": "x"}) is None
+
+
+def test_the_budget_stop_covers_unknown_mcp_tools_too(monkeypatch):
+    """It used to return before the budget check for any tool guard_mcp did
+    not translate, so an agent over budget kept spending through GitHub,
+    Slack or any other MCP server."""
+    _over_budget(monkeypatch)
+    v = g.gate_mcp_call("mcp__github__create_issue", {"title": "x"})
+    assert v and v["decision"] == "ask" and v["action_type"] == "ai_budget"
+    assert v["mcp_tool"] == "mcp__github__create_issue"
+    monkeypatch.setenv("FINOPS_GUARD_STOP_ON_BUDGET", "1")
+    assert g.gate_mcp_call("mcp__slack__post_message", {"text": "x"})["decision"] == "deny"
     known = g.gate_mcp_call("mcp__kubernetes__kubectl_delete", {"resourceType": "pod", "name": "x"})
     assert known and known["action_type"] == "ai_budget"
+
+
+def test_a_budget_stop_on_an_unknown_tool_is_recorded(monkeypatch):
+    _over_budget(monkeypatch)
+    g.gate_mcp_call("mcp__github__create_issue", {"title": "x"})
+    import finops.guard_ledger as gl
+    [r] = [json.loads(line) for line in gl.ledger_path().read_text().splitlines()]
+    assert (r["decision"], r["action_type"], r["tool"]) == \
+        ("ask", "ai_budget", "mcp__github__create_issue")
+
+
+def test_the_hook_stops_an_unknown_mcp_tool_when_over_budget(monkeypatch):
+    _over_budget(monkeypatch)
+    out = io.StringIO()
+    g.run_hook(io.StringIO(json.dumps({"tool_name": "mcp__github__create_issue",
+                                       "tool_input": {"title": "x"}})), out)
+    assert json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+def test_under_budget_an_unknown_tool_is_still_silent_and_unrecorded():
+    assert g.gate_mcp_call("mcp__github__create_issue", {"title": "x"}) is None
+    import finops.guard_ledger as gl
+    assert not gl.ledger_path().exists()
+
+
+def test_doctor_says_which_tools_the_budget_stop_covers():
+    gaps = " ".join(g.doctor()["not_covered"])
+    assert "AI budget stop on Claude Code's built-in tools (Edit, Write, Read" in gaps
 
 
 @pytest.mark.parametrize("name,expected", [
@@ -372,3 +412,45 @@ def test_a_hand_written_matcher_is_left_alone(settings):
     g.install()
     assert settings.read_text() == body
     assert g.hook_surfaces(settings) == {"bash": True, "mcp": False}
+
+
+# ── an agent changing its own budget ──────────────────────────────────────────
+
+@pytest.mark.parametrize("tool", ["mcp__nable__set_ai_budget", "mcp__finops-mcp__set_ai_budget",
+                                  "mcp__plugin_x_nable__set_ai_budget"])
+@pytest.mark.parametrize("args", [{"spend_cap": 5000}, {"session_cap": 0},
+                                  {"monthly_tokens": 10**9}, {"mode": "plan", "plan_cost": 20},
+                                  {"session_cap": 40, "every_session": True}])
+def test_an_agent_raising_its_own_budget_is_asked_about(tool, args):
+    v = g.gate_mcp_call(tool, args)
+    assert v and v["decision"] == "ask" and v["action_type"] == "ai_budget_change"
+    assert "the agent is changing its own AI budget" in v["reason"]
+    assert "a human should confirm" in v["reason"]
+
+
+def test_the_budget_change_is_recorded():
+    g.gate_mcp_call("mcp__nable__set_ai_budget", {"spend_cap": 5000})
+    import finops.guard_ledger as gl
+    [r] = [json.loads(line) for line in gl.ledger_path().read_text().splitlines()]
+    assert (r["decision"], r["action_type"]) == ("ask", "ai_budget_change")
+    assert r["command"] == "set_ai_budget spend_cap=5000"
+
+
+@pytest.mark.parametrize("args", [{}, {"plan_label": "Max"}, None, {"spend_cap": None}])
+def test_a_budget_call_that_changes_no_cap_is_left_alone(args):
+    assert g.gate_mcp_call("mcp__nable__set_ai_budget", args) is None
+
+
+def test_an_agent_over_budget_cannot_lift_the_hard_stop(monkeypatch):
+    _over_budget(monkeypatch)
+    monkeypatch.setenv("FINOPS_GUARD_STOP_ON_BUDGET", "1")
+    v = g.gate_mcp_call("mcp__nable__set_ai_budget", {"monthly_tokens": 10**12})
+    assert v["decision"] == "deny" and v["action_type"] == "ai_budget_change"
+    assert "changing its own AI budget" in v["reason"] and "over its AI budget" in v["reason"]
+
+
+def test_the_hook_asks_before_the_budget_changes():
+    out = io.StringIO()
+    g.run_hook(io.StringIO(json.dumps({"tool_name": "mcp__nable__set_ai_budget",
+                                       "tool_input": {"spend_cap": 99999}})), out)
+    assert json.loads(out.getvalue())["hookSpecificOutput"]["permissionDecision"] == "ask"

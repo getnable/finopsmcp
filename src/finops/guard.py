@@ -22,12 +22,38 @@ Verdict mapping (advisory, propose-only stays intact):
   allow, but priced near the auto threshold
            -> "warn"  runs as normal, with the figure shown alongside
 
+History (the recent end of the decision ledger, guard_ledger.recent) can
+turn an allow or a warn into an ask, never anything else:
+  velocity cap   the priced monthly run-rate the guard let through in a
+                 rolling window (60 min; 4x the per-action threshold unless
+                 FINOPS_POLICY_VELOCITY_CAP_USD says otherwise), plus this
+                 action, is over the cap
+  loop detection the same creation (same verb, instance type, count,
+                 template; local inputs unchanged) let through N-1 times in
+                 M minutes already (3 in 10 by default): "this looks like a
+                 retry loop"
+
 The hook never executes anything itself and it fails open: any internal error
-exits 0 so a guard bug can never break the user's agent.
+exits 0 so a guard bug can never break the user's agent. It answers before
+it records (answer_first), waits at most 200 ms on the ledger's lock, and
+asks rather than judges a command over 256 KB, so neither the ledger file
+nor a padded command can run it past the harness timeout.
 
 Strict mode (FINOPS_GUARD_STRICT=1) additionally asks on reversible
 mutations (terraform apply, helm upgrade, kubectl apply/scale,
 aws ec2 run-instances) with a nudge to cost the change first.
+
+What happened afterwards (setup_wizard's `nable guard ...`):
+  report [--session ID]   what it asked, blocked and let through, in dollars,
+                          overall and per agent session
+  verify-log              the hash chain, plus an anchor that notices records
+                          cut from the end
+  reconcile [--hours N] [--region R ...]
+                          CloudTrail's creates, destroys and commitments
+                          against the ledger (guard_reconcile.py)
+  export [--since ...] [--format jsonl|cef]
+                          the verified ledger for a SIEM, each record with its
+                          chain hash
 """
 from __future__ import annotations
 
@@ -40,7 +66,14 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .policy import GATE_ALLOW, GATE_BLOCK, GATE_ESCALATE, evaluate_action_gate, load_policy
+from .policy import (
+    GATE_ALLOW,
+    GATE_BLOCK,
+    GATE_ESCALATE,
+    evaluate_action_gate,
+    load_policy,
+    velocity_cap,
+)
 
 # ── Command classification ─────────────────────────────────────────────────────
 # Ordered: first match wins. Maps shell commands to the policy action types in
@@ -58,18 +91,19 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # destroy hidden behind the apply verb: `terraform apply -destroy` is destroy.
     # Must sit in the one-way list (checked first) or the two-way apply pattern
     # would classify it as a reversible mutation.
-    (r"\b(?:terraform|tofu|terragrunt)\s+(?:\S+\s+)*apply\b[^|;&]*\s-destroy\b",
-     "delete_resource"),
+    ("apply-with-destroy-flag", "delete_resource"),
     # The same flag passed through terraform's own env hook:
     # `TF_CLI_ARGS_apply=-destroy terraform apply` is a destroy the apply
     # pattern below would otherwise wave through as a reversible mutation.
-    (r"\bTF_CLI_ARGS(?:_\w+)?=\S*-destroy\b", "delete_resource"),
+    ("tf-cli-args-destroy", "delete_resource"),
     (r"\bpulumi\s+(?:\S+\s+)*destroy\b", "delete_resource"),
     (r"\beksctl\s+delete\b", "delete_resource"),
     # bucket/object wipes: `aws s3 rb` removes a bucket, `aws s3 rm --recursive`
     # empties one; gsutil is the GCP equivalent. Data deletion is a one-way door.
     (r"\baws\s+s3\s+r[mb]\b", "delete_resource"),
-    (r"\bgsutil\s+(?:-\S+\s+)*r[mb]\b", "delete_resource"),
+    # Anchored at a token start, not \b: `-gsutil -gsutil ...` would otherwise
+    # give every token a start and every start the whole run to scan.
+    (r"(?<![\w-])gsutil\s+(?:-\S+\s+)*+r[mb]\b", "delete_resource"),
     (r"\bhelm\s+(?:uninstall|delete)\b", "delete_resource"),
     (r"\bkubectl\s+(?:\S+\s+)*delete\b", "delete_resource"),
     (r"\baws\s+ec2\s+terminate-instances\b", "terminate_instance"),
@@ -92,6 +126,10 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bhelm\s+(?:install|upgrade)\b", "infra_apply"),
     (r"\bkubectl\s+(?:apply|scale)\b", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),
+    # CloudFormation creates whatever the template holds, and an agent that
+    # re-runs create-stack under a new name each time makes a new copy each
+    # time. Unpriced: the template is not read here.
+    (r"\baws\s+cloudformation\s+(?:create-stack|update-stack|deploy)\b", "infra_apply"),
     # Launches the pricers below can put a figure on. Unclassified, they could
     # never reach the policy's dollar threshold however large they were.
     (r"\baws\s+rds\s+create-db-instance\b", "infra_apply"),
@@ -156,15 +194,103 @@ def _normalize(command: str) -> str:
     return _strip_aws_global_options(cmd)
 
 
+# ── Linear-time matching ──────────────────────────────────────────────────────
+# The command is whatever the agent sends, and a hook that runs past the
+# harness's timeout fails open: `terraform destroy # AAAA...` padded to 100 KB
+# used to take the hook 18 s, and the destroy ran. So no pattern may cost more
+# than linear time in the command, however it is padded.
+#
+# The costly shape is "program, any tokens, verb" (`terraform (?:\S+\s+)*
+# destroy`) searched from every occurrence of the program: each failed start
+# rescans the rest of the command. But any token the pattern could reach from
+# a later occurrence it can also reach from the first one (the later program
+# name is itself just a token to skip), so only the first start needs trying.
+# And from there, "any tokens, then the verb" is "the verb at any token start
+# after the program": one forward scan, no backtracking through the tokens.
+_ANY_TOKENS = r"(?:\S+\s+)*"
+
+
+class _Rule:
+    """A compiled classifier pattern with search() linear in the command.
+
+    For a pattern HEAD + _ANY_TOKENS + TAIL, search() returns the TAIL match
+    (its end() is where the whole pattern would end), or None."""
+
+    def __init__(self, pattern: str) -> None:
+        self.pattern = pattern
+        head, sep, tail = pattern.partition(_ANY_TOKENS)
+        if sep:
+            self.head: re.Pattern[str] | None = re.compile(head)
+            self.tail = re.compile(r"(?<!\S)" + tail)
+        else:
+            self.head, self.tail = None, re.compile(pattern)
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        if self.head is None:
+            return self.tail.search(cmd)
+        m = self.head.search(cmd)
+        return self.tail.search(cmd, m.end()) if m else None
+
+
+class _ApplyWithDestroyFlag:
+    """`terraform|tofu|terragrunt ... apply ... -destroy` in one shell segment:
+    destroy hidden behind the apply verb. Checked segment by segment, so each
+    character is looked at a bounded number of times."""
+
+    pattern = "apply-with-destroy-flag"
+    _tool = re.compile(r"\b(?:terraform|tofu|terragrunt)\s")
+    _apply = re.compile(r"(?<!\S)apply\b")
+    _flag = re.compile(r"\s-destroy\b")
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        for seg in re.split(r"[|;&]", cmd):
+            tool = self._tool.search(seg)
+            if tool is None:
+                continue
+            apply = self._apply.search(seg, tool.end())
+            if apply is not None:
+                flag = self._flag.search(seg, apply.end())
+                if flag is not None:
+                    return flag
+        return None
+
+
+class _TfCliArgsDestroy:
+    """`TF_CLI_ARGS[_cmd]=...-destroy`: the flag passed through terraform's
+    env hook. One scan per assignment token, never one per character."""
+
+    pattern = "tf-cli-args-destroy"
+    _assign = re.compile(r"\bTF_CLI_ARGS(?:_\w+)?=\S*")
+    _flag = re.compile(r"-destroy\b")
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        for m in self._assign.finditer(cmd):
+            if self._flag.search(m.group(0)):
+                return m
+        return None
+
+
+_SPECIAL_RULES = {r.pattern: r for r in (_ApplyWithDestroyFlag(), _TfCliArgsDestroy())}
+
+
+def _compile(table: list[tuple[str, str]]) -> list[tuple[Any, str]]:
+    return [(_SPECIAL_RULES.get(p) or _Rule(p), a) for p, a in table]
+
+
+_ONE_WAY_RULES = _compile(_ONE_WAY_CLASSIFIERS)
+_TWO_WAY_RULES = _compile(_TWO_WAY_CLASSIFIERS)
+
+
 def classify_command(command: str) -> tuple[str, str] | None:
     """Classify a shell command as ("one_way"|"two_way", action_type), or None
-    when it is not an infrastructure mutation nable cares about."""
+    when it is not an infrastructure mutation nable cares about. Linear in the
+    length of the command (see _Rule)."""
     cmd = _normalize(command)
-    for pattern, action in _ONE_WAY_CLASSIFIERS:
-        if re.search(pattern, cmd):
+    for rule, action in _ONE_WAY_RULES:
+        if rule.search(cmd):
             return ("one_way", action)
-    for pattern, action in _TWO_WAY_CLASSIFIERS:
-        if re.search(pattern, cmd):
+    for rule, action in _TWO_WAY_RULES:
+        if rule.search(cmd):
             return ("two_way", action)
     return None
 
@@ -202,9 +328,9 @@ _SAVINGS_PLAN_RE = re.compile(r"\baws\s+savingsplans\s+create-savings-plan\b")
 _RESERVED_RE = re.compile(r"\baws\s+ec2\s+purchase-reserved-instances-offering\b")
 # JSON ({"Amount": 1200, ...}, quotes already stripped) and shorthand
 # (Amount=1200,CurrencyCode=USD) spell the same thing.
-_LIMIT_AMOUNT_RE = re.compile(r"--limit-price[=\s]+\S*?Amount\W{1,3}([\d.]+)")
-_GCE_CREATE_RE = re.compile(r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b(?!-)")
-_AZ_VM_CREATE_RE = re.compile(r"\baz\s+(?:\S+\s+)*vm\s+create\b")
+_LIMIT_AMOUNT_RE = re.compile(r"--limit-price[=\s]+\S{0,200}?Amount\W{1,3}([\d.]+)")
+_GCE_CREATE_RE = _Rule(r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b(?!-)")
+_AZ_VM_CREATE_RE = _Rule(r"\baz\s+(?:\S+\s+)*vm\s+create\b")
 _SHELL_BREAKS = ("&&", "||", ";", "|")
 
 # The engines _RDS_HOURLY's rates are for. Aurora bills per cluster instance
@@ -515,7 +641,7 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, **_: Any) -> dict[str, 
     }
 
 
-_PRICERS: list[tuple[re.Pattern[str], Any]] = [
+_PRICERS: list[tuple[Any, Any]] = [
     (_RUN_INSTANCES_RE, _price_run_instances),
     (_RDS_CREATE_RE, _price_rds),
     (_SAVINGS_PLAN_RE, _price_savings_plan),
@@ -598,9 +724,17 @@ def _stop_on_budget() -> bool:
 def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
     """Stop the agent when its own token spend is over the budget the user set.
 
-    This runs BEFORE command classification and applies to every tool call, not
-    just infrastructure ones. "Stop the agent because it is spending too much"
-    means stop it, not stop it from touching Terraform.
+    This runs BEFORE command classification and applies to every tool call the
+    hook sees, not just infrastructure ones. "Stop the agent because it is
+    spending too much" means stop it, not stop it from touching Terraform.
+
+    Which calls that is, exactly: in Claude Code, the Bash tool and every MCP
+    tool (the installed matcher is ^(Bash|mcp__.*)$), known to the guard or
+    not; in Cursor and Codex, shell commands. NOT Claude Code's built-in Edit,
+    Write, Read, Glob, Grep, WebFetch, WebSearch or Task tools: widening the
+    matcher to them would add the hook's start-up time to every file edit, so
+    an agent over budget can still edit files until its next shell or MCP
+    call. `nable guard doctor` says the same.
 
     Reads the local Claude Code session logs (ai_budget), so it needs no cloud
     account, no API key and no network. Returns None when no budget is set, when
@@ -609,23 +743,39 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
     cap is measured against the session making the call.
     """
     try:
-        from .ai_budget import BUDGET_OVER, status
+        from .ai_budget import BUDGET_OVER, BUDGET_WARN, status
         st = status(session_id=session_id) if session_id else status()
-        if st.get("verdict") != BUDGET_OVER:
+        verdict = st.get("verdict")
+        if verdict not in (BUDGET_OVER, BUDGET_WARN):
+            return None
+        if verdict == BUDGET_WARN and not _budget_note_due(session_id):
             return None
         budget = st.get("budget") or {}
         pct = st.get("pct_of_budget")
-        over = f"{pct * 100:.0f}% of" if isinstance(pct, (int, float)) else "over"
+        over = (f"{pct * 100:.0f}% of" if isinstance(pct, (int, float))
+                else "over" if verdict == BUDGET_OVER else "close to")
         if st.get("verdict_basis") == "session":
             sess = st.get("session") or {}
             detail = (f"~${sess.get('usd_equivalent', 0):,.2f} estimated this session, "
                       f"{over} its ${sess.get('cap_usd') or 0:,.2f} session cap")
+            raise_it = "nable ai-budget --session-cap USD"
         elif st.get("verdict_basis") == "spend":
             detail = (f"~${st.get('est_usd_mtd_list_price', 0):,.0f} estimated this month, "
                       f"{over} your ${budget.get('spend_cap', 0):,.0f} cap")
+            raise_it = "nable ai-budget --spend-cap USD"
         else:
             detail = (f"{st.get('billable_tokens_mtd', 0):,} tokens this month, "
                       f"{over} your {budget.get('monthly_tokens', 0):,} budget")
+            raise_it = "nable ai-budget --tokens N"
+        if verdict == BUDGET_WARN:
+            # Close to the line: say so, alongside, without stopping anything.
+            return {
+                "decision": "warn",
+                "action_type": "ai_budget",
+                "reason": (f"nable guard: your agent is close to its AI budget. {detail}. "
+                           "Nothing is stopped; this note shows at most every "
+                           f"{_BUDGET_NOTE_EVERY_MIN} minutes. Raise it with `{raise_it}`."),
+            }
         hard = _stop_on_budget()
         return {
             "decision": "deny" if hard else "ask",
@@ -633,15 +783,70 @@ def check_budget_gate(session_id: str | None = None) -> dict[str, Any] | None:
             "reason": (
                 f"nable guard: your agent is over its AI budget. {detail}. "
                 + ("Stopped because FINOPS_GUARD_STOP_ON_BUDGET is on. "
-                   "Raise it with `nable ai-budget set`, or unset that variable to "
+                   f"Raise it with `{raise_it}`, or unset that variable to "
                    "downgrade this to a confirmation."
                    if hard else
-                   "Confirm to continue, or raise it with `nable ai-budget set`. "
+                   f"Confirm to continue, or raise it with `{raise_it}`. "
                    "Set FINOPS_GUARD_STOP_ON_BUDGET=1 to make this a hard stop.")
             ),
         }
     except Exception:
         return None  # unreadable budget is not a reason to block anyone
+
+
+# How often the "close to your AI budget" note may show in one session. Every
+# tool call would be noise that teaches people to ignore the guard.
+_BUDGET_NOTE_EVERY_MIN = 30
+
+
+def _budget_note_due(session_id: str | None) -> bool:
+    """True at most once per _BUDGET_NOTE_EVERY_MIN per session, remembered
+    in a small file beside the ledger. When the file cannot be read or
+    written the note shows: it never stops anything."""
+    from datetime import UTC, datetime, timedelta
+
+    from . import guard_ledger
+    path = guard_ledger.ledger_path().with_name("guard-budget-note.json")
+    key = session_id or "*"
+    now = datetime.now(UTC)
+    try:
+        seen = json.loads(path.read_text())
+        seen = seen if isinstance(seen, dict) else {}
+    except (OSError, ValueError):
+        seen = {}
+    try:
+        last = datetime.fromisoformat(seen[key])
+        if now - last < timedelta(minutes=_BUDGET_NOTE_EVERY_MIN):
+            return False
+    except (KeyError, TypeError, ValueError):
+        pass
+    cutoff = now - timedelta(days=1)
+    kept = {}
+    for k, v in seen.items():
+        with contextlib.suppress(TypeError, ValueError):
+            if datetime.fromisoformat(v) > cutoff:
+                kept[k] = v
+    kept[key] = now.isoformat(timespec="seconds")
+    with contextlib.suppress(OSError):
+        path.write_text(json.dumps(kept))
+    return True
+
+
+def _with_budget_note(v: dict[str, Any] | None, note: dict[str, Any] | None
+                      ) -> dict[str, Any] | None:
+    """A verdict carrying the budget note: an allow or a warn becomes a warn
+    whose reason includes it. An ask or a deny already stops for a human and
+    is left as it is."""
+    if note is None:
+        return v
+    if v is None:
+        return note
+    if v["decision"] not in ("allow", "warn"):
+        return v
+    text = note["reason"]
+    if v.get("reason"):
+        text = f"{v['reason']} {note['reason'].removeprefix('nable guard: ')}"
+    return {**v, "decision": "warn", "reason": text}
 
 
 # A priced change allowed by policy but at or above this share of the auto
@@ -652,6 +857,20 @@ _WARN_AT = 0.80
 
 def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = None,
                  via: str = "", cwd: str | None = None) -> dict[str, Any]:
+    """The policy verdict, then what the ledger's recent history adds to it.
+
+    A history check that fails leaves the policy verdict standing and puts the
+    exception under "_history_error" for the caller to record as a fail-open:
+    a guard that cannot read its own ledger must not take a position."""
+    v = _policy_verdict(command, hit, context=context, via=via, cwd=cwd)
+    try:
+        return _check_history(v, command, via=via, cwd=cwd)
+    except Exception as exc:
+        return {**v, "_history_error": exc}
+
+
+def _policy_verdict(command: str, hit: tuple[str, str], *, context: str | None = None,
+                    via: str = "", cwd: str | None = None) -> dict[str, Any]:
     """The policy verdict for one already-classified action. Always a dict:
     "allow" is a verdict too (the ledger records it, with its figure), and the
     public entry points turn it into None for their callers.
@@ -750,6 +969,230 @@ def _verdict_for(command: str, hit: tuple[str, str], *, context: str | None = No
     return allowed(est)
 
 
+# ── History: what the guard already let through ────────────────────────────────
+# One verdict sees one command. An agent that launches ten $400/mo instances in
+# an hour passes ten verdicts that are each correct and a total nobody agreed
+# to. These checks read the recent end of the decision ledger (guard_ledger
+# .recent: a bounded read from the end of the file, no database) and can only
+# tighten: an allow or a warn may become an ask, nothing else changes.
+
+# What the guard let run without a human. An ask is not counted: the hook exits
+# before the human answers, so the ledger cannot tell an approved ask from a
+# declined one, and counting a declined $191k ask would put every launch for
+# the next hour behind a prompt about money that was never spent.
+_LET_THROUGH = ("allow", "warn")
+_HISTORY_LISTED = 5
+
+
+def _check_history(v: dict[str, Any], command: str, *, via: str = "",
+                   cwd: str | None = None) -> dict[str, Any]:
+    """`v` upgraded to an ask when recent history says so, else `v` unchanged
+    apart from its loop key. May raise; _verdict_for turns that into a
+    fail-open."""
+    if v.get("action_type") == "infra_apply":
+        key = loop_key(command, cwd=cwd)
+        if key is not None:
+            v = {**v, "loop_key": key[0], "loop_label": key[1]}
+    if v.get("decision") not in _LET_THROUGH:
+        return v
+    pol = load_policy()
+    new = (v.get("estimate") or {}).get("monthly_usd")
+    cap = velocity_cap(pol)
+    vel_window = float(pol.get("velocity_window_minutes") or 0.0)
+    velocity_on = isinstance(new, (int, float)) and new > 0 and cap > 0 and vel_window > 0
+    loops = int(pol.get("loop_repeat_count") or 0)
+    loop_window = float(pol.get("loop_window_minutes") or 0.0)
+    loop_on = "loop_key" in v and loops > 1 and loop_window > 0
+    if not (velocity_on or loop_on):
+        return v
+    from . import guard_ledger
+    recent = guard_ledger.recent(max(vel_window if velocity_on else 0.0,
+                                     loop_window if loop_on else 0.0))
+    found: list[tuple[str, str]] = []
+    if loop_on:
+        why = _loop_reason(v, recent, repeats=loops, window=loop_window)
+        if why:
+            found.append(("loop", why))
+    if velocity_on:
+        since = _minutes_ago(vel_window)
+        why = _velocity_reason(v, [r for r in recent if str(r.get("ts", "")) >= since],
+                               new=float(new), cap=cap, window=vel_window)
+        if why:
+            found.append(("velocity", why))
+    if not found:
+        return v
+    lead = f"{via}. " if via else ""
+    return {**v, "decision": "ask",
+            "reason": f"nable guard: {lead}" + " Also: ".join(why for _, why in found),
+            "history": "+".join(name for name, _ in found)}
+
+
+def _minutes_ago(minutes: float) -> str:
+    """An ISO timestamp the ledger's `ts` strings compare against directly."""
+    from datetime import UTC, datetime, timedelta
+    return (datetime.now(UTC) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+
+
+# Loop detection keys. A retry loop is the same creation run again and again,
+# so the key is the verb plus the arguments that decide WHAT gets created:
+# the instance type and count, the template, the database class. Names are
+# left out where each duplicate gets a fresh one (a stack called app-2, a
+# database called db-3): that is the shape of an agent re-creating what it
+# already made. Anything else classified as a creation is keyed on its whole
+# normalised command.
+_LOOP_ARGS: list[tuple[Any, tuple[str, ...]]] = [
+    (_RUN_INSTANCES_RE, ("instance-type", "count", "image-id", "launch-template")),
+    (re.compile(r"\baws\s+cloudformation\s+(?:create-stack|update-stack|deploy)\b"),
+     ("template-file", "template-url", "template-body")),
+    (_RDS_CREATE_RE, ("db-instance-class", "engine")),
+    (_GCE_CREATE_RE, ("machine-type",)),
+    (_AZ_VM_CREATE_RE, ("size", "count")),
+]
+_LOOP_FALLBACK_ARG = {"aws cloudformation": "stack-name"}
+# Flags that change how a command runs, not what it creates.
+_LOOP_NOISE_RE = re.compile(r"\s(?:-auto-approve|--auto-approve|-input=false|--yes|-y|"
+                            r"--no-cli-pager|--no-color|-no-color)(?=\s|$)")
+_LOOP_VALUE_MAX = 80
+# Local files a creation reads. Their modification times go into the key (not
+# the label): an agent that edits the template between runs is iterating, not
+# looping, and asking it to stop would be noise.
+_LOOP_FILE_ARGS = ("template-file", "template-body", "f", "filename", "values", "var-file")
+
+
+def loop_key(command: str, *, cwd: str | None = None) -> tuple[str, str] | None:
+    """(key, label) for a creating command, or None when there is nothing to key.
+
+    The label is what the human reads ("aws ec2 run-instances --instance-type
+    m5.2xlarge --count 8"); the key is a short hash of the label plus the
+    modification times of the local files the command reads, so two runs match
+    only when neither the command nor its inputs changed."""
+    import hashlib
+
+    cmd = _normalize(command)
+    label = None
+    for pattern, args in _LOOP_ARGS:
+        m = pattern.search(cmd)
+        if not m:
+            continue
+        parts = [m.group(0)]
+        for name in args:
+            val = _flag(cmd, name)
+            if val is not None:
+                parts.append(f"--{name} {_short(val)}")
+        if len(parts) == 1:
+            for prefix, name in _LOOP_FALLBACK_ARG.items():
+                val = _flag(cmd, name)
+                if m.group(0).startswith(prefix) and val is not None:
+                    parts.append(f"--{name} {_short(val)}")
+        label = " ".join(parts)
+        break
+    if label is None:
+        label = _LOOP_NOISE_RE.sub("", f" {cmd}").strip()
+        if not label:
+            return None
+    base = Path(cwd or os.getcwd())
+    stamp = [str(base)] if _TF_APPLY_RE.search(cmd) or "terragrunt" in cmd else []
+    if stamp:
+        stamp.append(_dir_stamp(base, cmd))
+    for name in _LOOP_FILE_ARGS:
+        for val in re.findall(rf"(?<!\S)--?{re.escape(name)}(?:=|\s+)(?!-)(\S+)", cmd):
+            stamp.append(_file_stamp(base, val))
+    digest = hashlib.sha256("\0".join([label, *stamp]).encode()).hexdigest()[:16]
+    return digest, label
+
+
+def _short(val: str) -> str:
+    """A flag value fit for a label: an inline template body becomes a hash."""
+    if len(val) <= _LOOP_VALUE_MAX:
+        return val
+    import hashlib
+    return "sha256:" + hashlib.sha256(val.encode()).hexdigest()[:12]
+
+
+def _file_stamp(base: Path, val: str) -> str:
+    raw = val[len("file://"):] if val.startswith("file://") else val
+    try:
+        p = base / Path(raw).expanduser()
+        if p.is_dir():
+            return f"{p}:{max((c.stat().st_mtime_ns for c in p.iterdir() if c.is_file()), default=0)}"
+        return f"{p}:{p.stat().st_mtime_ns}"
+    except (OSError, ValueError):
+        return val
+
+
+def _dir_stamp(base: Path, cmd: str) -> str:
+    """Newest *.tf / *.tfvars / *.hcl in the directory a Terraform apply runs
+    in (after a leading `cd` or -chdir=)."""
+    cd = _CD_PREFIX_RE.match(cmd)
+    if cd:
+        base = base / Path(cd.group(1)).expanduser()
+    chdir = re.search(r"-chdir=(\S+)", cmd)
+    if chdir:
+        base = base / Path(chdir.group(1)).expanduser()
+    try:
+        newest = max((p.stat().st_mtime_ns for p in base.iterdir()
+                      if p.suffix in (".tf", ".tfvars", ".hcl", ".json") and p.is_file()),
+                     default=0)
+    except OSError:
+        newest = 0
+    return f"{base}:{newest}"
+
+
+def _loop_reason(v: dict[str, Any], recent: list[dict[str, Any]], *, repeats: int,
+                 window: float) -> str | None:
+    """Loop detection: this creation, identical to ones let through in the
+    window often enough to look like an agent retrying the same thing."""
+    from datetime import datetime
+
+    since = _minutes_ago(window)
+    same = [r for r in recent
+            if r.get("loop_key") == v["loop_key"] and r.get("decision") in _LET_THROUGH
+            and str(r.get("ts", "")) >= since]
+    if len(same) + 1 < repeats:
+        return None
+    first = datetime.fromisoformat(same[0]["ts"])
+    span = max(1, -(-int((datetime.now(first.tzinfo) - first).total_seconds()) // 60))
+    times = ", ".join(str(r.get("ts", ""))[11:16] for r in same[-_HISTORY_LISTED:])
+    return (f"this looks like a retry loop: {len(same) + 1} identical `{v['loop_label']}` in "
+            f"{span} minute{'s' if span != 1 else ''} (the guard let the earlier ones "
+            f"through at {times} UTC). Each run can create another copy. Confirm to run "
+            "it again, or check what the earlier runs left behind first.")
+
+
+def _usd(x: float) -> str:
+    return f"${x:,.0f}"
+
+
+def _listed(recs: list[dict[str, Any]]) -> str:
+    shown = []
+    for r in recs[-_HISTORY_LISTED:]:
+        cmd = str(r.get("command") or r.get("action_type") or "?")
+        cmd = cmd if len(cmd) <= 70 else cmd[:67] + "..."
+        shown.append(f"~{_usd(r['monthly_usd'])}/mo `{cmd}` at {str(r.get('ts', ''))[11:16]} UTC")
+    more = len(recs) - len(shown)
+    return "; ".join(shown) + (f"; and {more} earlier" if more > 0 else "")
+
+
+def _velocity_reason(v: dict[str, Any], recent: list[dict[str, Any]], *, new: float,
+                     cap: float, window: float) -> str | None:
+    """The velocity cap: priced monthly run-rate let through in the window,
+    plus this action, over the cap."""
+    counted = [r for r in recent
+               if r.get("decision") in _LET_THROUGH
+               and isinstance(r.get("monthly_usd"), (int, float)) and r["monthly_usd"] > 0]
+    total = sum(r["monthly_usd"] for r in counted)
+    if total + new <= cap:
+        return None
+    n = len(counted)
+    est = v.get("estimate") or {}
+    head = (f"{_cost_line(est)}. On top of ~{_usd(total)}/mo already let through in the "
+            f"last {window:g} minutes ({n} action{'s' if n != 1 else ''}: {_listed(counted)}), "
+            f"that is ~{_usd(total + new)}/mo in {window:g} minutes"
+            if counted else f"{_cost_line(est)}, on its own")
+    return (f"{head}, over your {_usd(cap)}/mo velocity cap per {window:g} minutes. "
+            "Confirm to proceed, or raise FINOPS_POLICY_VELOCITY_CAP_USD.")
+
+
 def gate_command(command: str, session_id: str | None = None, *, harness: str = "claude-code",
                  cwd: str | None = None, tool: str = "shell",
                  record: bool = True) -> dict[str, Any] | None:
@@ -788,23 +1231,50 @@ def gate_command(command: str, session_id: str | None = None, *, harness: str = 
         # an agent burning through its budget should be stopped whatever it is
         # doing.
         budget_hit = check_budget_gate(session_id)
-        if budget_hit is not None:
+        note = budget_hit if budget_hit and budget_hit["decision"] == "warn" else None
+        if budget_hit is not None and note is None:
             v = {**budget_hit, "harness": harness}
+        elif len(command) > MAX_JUDGED_CHARS:
+            v = {**_oversize_verdict(command), "harness": harness}
         else:
             hit = classify_command(command)
             if hit is None:
-                return None
+                # Not an infra command: nothing to record, but a budget note
+                # still shows (unrecorded; it is not a decision about this call).
+                return {**note, "harness": harness} if note else None
             v = {**_verdict_for(command, hit, cwd=cwd), "harness": harness}
+        history_error = v.pop("_history_error", None)
         if record:
-            _record(v, tool=tool, command=command)
+            if history_error is not None:
+                _record_fail_open(history_error, harness=harness, tool=tool, command=command,
+                                  check="history", session_id=session_id)
+            _record(v, tool=tool, command=command, session_id=session_id)
+        v = _with_budget_note(v, note)
         return None if v["decision"] == "allow" else v
     except Exception as exc:
         if record:
-            _record_fail_open(exc, harness=harness, tool=tool, command=command)
+            _record_fail_open(exc, harness=harness, tool=tool, command=command,
+                              session_id=session_id)
         return None
 
 
 _SEVERITY = {"deny": 3, "ask": 2, "warn": 1, "allow": 0}
+
+# The longest command the guard judges. Every check is linear in the command,
+# but linear in ten megabytes still runs past the harness's hook timeout, and a
+# timed-out hook fails open: padding a destroy with a long comment was a way to
+# switch the guard off. A model's single tool call is far shorter than this, so
+# a command this long is either generated by something else or built to be
+# long, and a human should look at it.
+MAX_JUDGED_CHARS = 256 * 1024
+
+
+def _oversize_verdict(command: str) -> dict[str, Any]:
+    return {"decision": "ask", "action_type": "oversize_command", "door": None,
+            "reason": (f"nable guard: this command is {len(command) / 1024:,.0f} KB, longer "
+                       f"than the {MAX_JUDGED_CHARS // 1024} KB the guard can check before "
+                       "its hook times out. A human should read it before it runs.")}
+
 
 
 def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
@@ -819,44 +1289,99 @@ def gate_mcp_call(tool_name: str, arguments: dict[str, Any] | None, *,
     gate_command, with `mcp_tool` added; a batch call returns its most severe
     verdict.
 
-    Unknown MCP tools return None before anything else runs, the AI budget
-    stop included: the guard never asks about a tool it does not understand,
-    and does not record it either. Recording and fail-open as gate_command.
+    The AI budget stop comes first and applies to every MCP tool, known or
+    not: an agent over its budget must not keep spending through a tool the
+    guard does not otherwise judge, and a budget stop on one is recorded
+    under the tool's name. Under budget, an unknown MCP tool returns None and
+    is not recorded: the guard never asks about a tool it does not
+    understand. Recording and fail-open as gate_command.
     """
     summary = tool_name
     try:
         from .guard_mcp import argument_text, translate
 
-        actions = translate(tool_name, arguments)
-        if not actions:
-            return None
-        summary = actions[0].command
-
         budget_hit = check_budget_gate(session_id)
-        if budget_hit is not None:
-            worst: dict[str, Any] | None = {**budget_hit}
+        note = budget_hit if budget_hit and budget_hit["decision"] == "warn" else None
+        if note is not None:
+            budget_hit = None
+        change = _budget_change(tool_name, arguments)
+        actions = [] if change is not None else translate(tool_name, arguments)
+        if not actions and budget_hit is None and change is None:
+            return {**note, "harness": harness, "mcp_tool": tool_name} if note else None
+        if actions:
+            summary = actions[0].command
+
+        if change is not None:
+            summary = change.pop("summary")
+            worst: dict[str, Any] | None = change
+            if budget_hit is not None:
+                # Over budget and raising it: the budget's own verdict (a deny
+                # under the hard stop) with both facts in one line.
+                worst = {**change,
+                         "decision": "deny" if budget_hit["decision"] == "deny" else "ask",
+                         "reason": f"{change['reason']} "
+                                   f"{budget_hit['reason'].removeprefix('nable guard: ')}"}
+        elif budget_hit is not None:
+            worst = {**budget_hit}
         else:
             context = argument_text(arguments)
             worst = None
             for act in actions:
+                if len(act.command) > MAX_JUDGED_CHARS:
+                    worst, summary = _oversize_verdict(act.command), act.command
+                    break
                 hit = act.hit or classify_command(act.command)
                 if hit is None:
                     continue
                 v = _verdict_for(act.command, hit, context=f"{act.command} {context}",
                                  via=(f"{tool_name} would {act.summary}" if act.summary
                                       else f"{tool_name} amounts to `{act.command}`"))
+                history_error = v.pop("_history_error", None)
+                if history_error is not None and record:
+                    _record_fail_open(history_error, harness=harness, tool=tool_name,
+                                      command=act.command, check="history",
+                                      session_id=session_id)
                 if worst is None or _SEVERITY[v["decision"]] > _SEVERITY[worst["decision"]]:
                     worst, summary = v, act.command
             if worst is None:
-                return None
+                return {**note, "harness": harness, "mcp_tool": tool_name} if note else None
         worst = {**worst, "harness": harness, "mcp_tool": tool_name}
         if record:
-            _record(worst, tool=tool_name, command=summary)
+            _record(worst, tool=tool_name, command=summary, session_id=session_id)
+        worst = _with_budget_note(worst, note)
         return None if worst["decision"] == "allow" else worst
     except Exception as exc:
         if record:
-            _record_fail_open(exc, harness=harness, tool=tool_name, command=summary)
+            _record_fail_open(exc, harness=harness, tool=tool_name, command=summary,
+                              session_id=session_id)
         return None
+
+
+# The nable MCP tool that sets the agent's own AI budget. An agent stopped by
+# the budget could call it to raise its own cap: no prompt, no record. Any
+# argument that sets or clears a cap, or switches the lens, is treated as a
+# possible raise, since telling a raise from a cut needs the current budget
+# and the hook should not have to read it. Reversible, and a human decides.
+_BUDGET_TOOL = "set_ai_budget"
+_BUDGET_CAP_ARGS = ("mode", "plan_cost", "spend_cap", "monthly_tokens", "session_cap",
+                    "every_session")
+
+
+def _budget_change(tool_name: str, arguments: Any) -> dict[str, Any] | None:
+    """An ask for a set_ai_budget call (under any server prefix) that changes
+    a cap, or None."""
+    if not (tool_name == _BUDGET_TOOL or tool_name.endswith("__" + _BUDGET_TOOL)):
+        return None
+    args = arguments if isinstance(arguments, dict) else {}
+    changed = {k: args[k] for k in _BUDGET_CAP_ARGS
+               if args.get(k) is not None and args.get(k) is not False}
+    if not changed:
+        return None
+    shown = ", ".join(f"{k}={v}" for k, v in changed.items())
+    return {"decision": "ask", "action_type": "ai_budget_change", "door": None,
+            "reason": (f"nable guard: the agent is changing its own AI budget ({shown}); "
+                       "a human should confirm."),
+            "summary": f"{_BUDGET_TOOL} {shown}"}
 
 
 # ── Decision ledger ───────────────────────────────────────────────────────────
@@ -872,14 +1397,61 @@ def _policy_version() -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:12]
 
 
-def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
+# Ledger writes held back while a hook answers (see answer_first).
+_PENDING: list[dict[str, Any]] | None = None
+
+
+@contextlib.contextmanager
+def answer_first():
+    """Hold ledger writes until the block exits.
+
+    A hook's job is the verdict; the ledger line is the receipt. Inside this
+    block the verdict is computed and written to the harness first, and the
+    ledger is written after, so a slow or locked ledger file can delay a
+    receipt but never the answer. Nested use is a no-op: the outermost block
+    writes."""
+    global _PENDING
+    if _PENDING is not None:
+        yield
+        return
+    _PENDING = []
+    try:
+        yield
+    finally:
+        pending, _PENDING = _PENDING, None
+        with contextlib.suppress(Exception):
+            from . import guard_ledger
+            for entry in pending:
+                guard_ledger.append(entry)
+
+
+def _append(entry: dict[str, Any]) -> None:
+    from . import guard_ledger
+    if _PENDING is not None:
+        _PENDING.append(entry)
+    else:
+        guard_ledger.append(entry)
+
+
+def _session_field(session_id: Any) -> dict[str, Any]:
+    """The agent session a record belongs to, redacted like everything else
+    (a session id is not a secret, but the ledger never trusts a string)."""
+    from . import guard_ledger
+    if not session_id or not isinstance(session_id, str):
+        return {}
+    return {"session": guard_ledger.redact(session_id, limit=128)}
+
+
+def _record(v: dict[str, Any], *, tool: str, command: str,
+            session_id: str | None = None) -> None:
     """Append one verdict to the ledger. Cheap, and never raises: a ledger
     problem is a missing line, never a lost verdict."""
     with contextlib.suppress(Exception):
         from . import guard_ledger
         est = v.get("estimate") or {}
-        guard_ledger.append({
+        _append({
             "harness": v.get("harness"),
+            **_session_field(session_id),
             "tool": tool,
             "command": guard_ledger.redact(command),
             "door": v.get("door"),
@@ -889,6 +1461,13 @@ def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
             "total_usd": est.get("total_usd"),
             "basis": est.get("basis"),
             "reason": guard_ledger.redact(v.get("reason"), limit=600) if v.get("reason") else None,
+            # Which history check turned this into an ask, when one did.
+            **({"history": v["history"]} if v.get("history") else {}),
+            # What loop detection matches on: a hash of the creation and its
+            # inputs, and the human form of it (redacted like the command).
+            **({"loop_key": v["loop_key"],
+                "loop_label": guard_ledger.redact(v.get("loop_label"), limit=200)}
+               if v.get("loop_key") else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             # Known only for a deny: the call never ran. An ask is the human's
@@ -898,16 +1477,23 @@ def _record(v: dict[str, Any], *, tool: str, command: str) -> None:
         })
 
 
-def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: Any) -> None:
-    """A guard error let a call through unexamined; that is a verdict too."""
+def _record_fail_open(exc: BaseException, *, harness: str, tool: Any, command: Any,
+                      check: str | None = None, session_id: Any = None) -> None:
+    """A guard error let a call through unexamined; that is a verdict too.
+
+    `check` names the part that failed when the rest of the verdict stood (a
+    history check that could not read the ledger): the call was judged on
+    policy alone, and the verdict itself is recorded next to this line."""
     with contextlib.suppress(Exception):
         from . import guard_ledger
-        guard_ledger.append({
+        _append({
             "harness": harness,
+            **_session_field(session_id),
             "tool": tool if isinstance(tool, str) else None,
             "command": guard_ledger.redact(command) if command else None,
             "decision": "fail_open",
             "error": type(exc).__name__,
+            **({"check": check} if check else {}),
             "policy_version": _policy_version(),
             "nable_version": __version__,
             "outcome": None,
@@ -923,8 +1509,11 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
     with no output. Fails open by design: any error or unknown payload exits 0
     with no output so the guard can never break the user's agent.
     """
-    stdin = stdin or sys.stdin
-    stdout = stdout or sys.stdout
+    with answer_first():
+        return _run_hook(stdin or sys.stdin, stdout or sys.stdout)
+
+
+def _run_hook(stdin: Any, stdout: Any) -> int:
     tool: Any = None
     try:
         payload = json.load(stdin)
@@ -948,6 +1537,7 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
             # No permissionDecision: the call goes through the normal
             # permission flow untouched, with the figure shown alongside.
             json.dump({"systemMessage": verdict["reason"]}, stdout)
+            _flush(stdout)
             return 0
         json.dump({
             "hookSpecificOutput": {
@@ -956,12 +1546,19 @@ def run_hook(stdin: Any = None, stdout: Any = None) -> int:
                 "permissionDecisionReason": verdict["reason"],
             }
         }, stdout)
+        _flush(stdout)
         return 0
     except Exception as exc:
         # Still exit 0 with nothing on stdout: availability beats judgement.
         # But a fail-open is exactly what an audit should be able to count.
         _record_fail_open(exc, harness="claude-code", tool=tool, command=None)
         return 0
+
+
+def _flush(stdout: Any) -> None:
+    """The verdict leaves the process before the ledger is written."""
+    with contextlib.suppress(Exception):
+        stdout.flush()
 
 
 # ── Installer ──────────────────────────────────────────────────────────────────
@@ -1292,21 +1889,22 @@ def uninstall(global_scope: bool = False) -> bool:
     removed = False
     kept = []
     for entry in pre:
-        if not isinstance(entry, dict):
-            kept.append(entry)          # not ours; leave it exactly as found
+        hooks = entry.get("hooks") if isinstance(entry, dict) else None
+        if not isinstance(hooks, list):
+            # Not ours, or not a shape we write ("hooks" a string, missing,
+            # null): someone's data, left exactly as found. Iterating a string
+            # here used to rewrite it as a list of its characters.
+            kept.append(entry)
             continue
-        inner = [h for h in (entry.get("hooks") or [])
-                 if not (isinstance(h, dict)
-                         and _HOOK_MARKER in (h.get("command") or "")
-                         and "finops" in (h.get("command") or ""))]
-        if len(inner) != len(entry.get("hooks") or []):
-            removed = True
-        if inner or not entry.get("hooks"):
+        inner = [h for h in hooks
+                 if not (isinstance(h, dict) and _is_our_command(h.get("command")))]
+        if len(inner) == len(hooks):
+            kept.append(entry)          # nothing of ours in it, untouched
+            continue
+        removed = True
+        if inner:
             entry["hooks"] = inner
-            if inner:
-                kept.append(entry)
-        else:
-            removed = True
+            kept.append(entry)
     if removed:
         settings["hooks"]["PreToolUse"] = kept
         if not kept:
@@ -1372,7 +1970,8 @@ def _adapter_rows() -> list[dict[str, Any]]:
 
 def doctor() -> dict[str, Any]:
     """Which surfaces the guard actually covers on this machine, and what it
-    does not. Read-only: it inspects settings files and the ledger, runs
+    does not. Read-only apart from the ledger anchor (guard_ledger.check),
+    which a clean check moves forward: it inspects settings files and the ledger, runs
     nothing, and calls no cloud API."""
     from . import guard_ledger
     from .guard_mcp import MCP_RULES
@@ -1466,17 +2065,33 @@ def doctor() -> dict[str, Any]:
                 gaps.append(f"{label}: on this machine, and this nable has no hook for it")
     gaps.append("commands inside scripts the agent runs (the guard sees `bash deploy.sh`, "
                 "not what is in it)")
-    gaps.append("MCP servers outside the recognised table (the guard stays silent on them)")
+    gaps.append("MCP servers outside the recognised table (the guard stays silent on them "
+                "unless the AI budget stop applies)")
+    gaps.append("the AI budget stop on Claude Code's built-in tools (Edit, Write, Read, "
+                "WebFetch, Task and the like): in Claude Code it covers Bash and MCP "
+                "tool calls only")
 
-    ledger = guard_ledger.verify()
+    ledger = guard_ledger.check()
     if not ledger["ok"]:
         fix("nable guard verify-log", f"the decision ledger breaks at line "
             f"{ledger.get('broken_at')}: a record was edited, removed, reordered or torn")
+    for warning in ledger["warnings"]:
+        fix("nable guard verify-log", warning)
+    if ledger["clean"]:
+        guard_ledger.save_anchor(ledger)
+    lost = guard_ledger.unrecorded()
+    ledger["unrecorded"] = lost
+    if lost["count"]:
+        gaps.append(f"{lost['count']} verdict(s) answered but not recorded, last at "
+                    f"{lost['last']}: the ledger file was locked by another process or "
+                    "replaced by something that is not a file")
+        fix(f"check what holds {ledger['path']} (lsof), then remove {lost['path']}",
+            "records the guard could not write")
     fixes = [f"{cmd}  ({'; '.join(why)})" if why else cmd for cmd, why in todo.items()]
     fixes.append("give agents read-only cloud credentials; keep write access behind a human")
 
     return {
-        "ok": bool(live) and ledger["ok"],
+        "ok": bool(live) and ledger["clean"],
         "surfaces": rows,
         "covered": covered,
         "not_covered": gaps,
