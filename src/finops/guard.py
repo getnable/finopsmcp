@@ -96,26 +96,57 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # `TF_CLI_ARGS_apply=-destroy terraform apply` is a destroy the apply
     # pattern below would otherwise wave through as a reversible mutation.
     ("tf-cli-args-destroy", "delete_resource"),
-    (r"\bpulumi\s+(?:\S+\s+)*destroy\b", "delete_resource"),
+    # A workspace delete drops the workspace's state: whatever it managed is
+    # orphaned, still running and still billed, with nothing left to destroy it.
+    (r"\b(?:terraform|tofu)\s+(?:\S+\s+)*workspace\s+delete(?!\S)", "delete_resource"),
+    # `pulumi down` is pulumi's own alias for destroy.
+    (r"\bpulumi\s+(?:\S+\s+)*(?:destroy|down)(?!\S)", "delete_resource"),
+    # The rest of the IaC toolchain: AWS CDK (also as `npx cdk`), SAM, doctl.
+    (r"\bcdk\s+(?:\S+\s+)*destroy(?!\S)", "delete_resource"),
+    (r"\bsam\s+(?:\S+\s+)*delete(?!\S)", "delete_resource"),
+    (r"\bdoctl\s+(?:\S+\s+)*(?:delete|rm)(?!\S)", "delete_resource"),
     (r"\beksctl\s+delete\b", "delete_resource"),
     # bucket/object wipes: `aws s3 rb` removes a bucket, `aws s3 rm --recursive`
     # empties one; gsutil is the GCP equivalent. Data deletion is a one-way door.
     (r"\baws\s+s3\s+r[mb]\b", "delete_resource"),
+    # `aws s3 sync --delete` removes whatever the source does not have: synced
+    # from an empty directory, it empties the bucket.
+    ("s3-sync-delete", "delete_resource"),
     # Anchored at a token start, not \b: `-gsutil -gsutil ...` would otherwise
     # give every token a start and every start the whole run to scan.
     (r"(?<![\w-])gsutil\s+(?:-\S+\s+)*+r[mb]\b", "delete_resource"),
-    (r"\bhelm\s+(?:uninstall|delete)\b", "delete_resource"),
+    # Helm's own aliases for uninstall are del, delete and un; flags such as
+    # `-n prod` may come first.
+    (r"\bhelm\s+(?:\S+\s+)*(?:uninstall|delete|del|un)(?!\S)", "delete_resource"),
     (r"\bkubectl\s+(?:\S+\s+)*delete\b", "delete_resource"),
+    # `kubectl drain` evicts every pod on the node; `replace --force` deletes
+    # the object and creates it again, dropping whatever the old one held.
+    (r"\bkubectl\s+(?:\S+\s+)*drain(?!\S)", "delete_resource"),
+    ("kubectl-replace-force", "delete_resource"),
     (r"\baws\s+ec2\s+terminate-instances\b", "terminate_instance"),
+    ("spot-fleet-terminate", "terminate_instance"),
     (r"\baws\s+ec2\s+release-address\b", "release_ip"),
     (r"\baws\s+ec2\s+delete-snapshot\b", "snapshot_delete"),
     (r"\baws\s+(?:savingsplans\s+create-savings-plan|"
      r"ec2\s+purchase-reserved-instances-offering|"
      r"ec2\s+purchase-host-reservation|"
      r"rds\s+purchase-reserved-db-instances-offering)", "purchase_commitment"),
-    (r"\baws\s+\S+\s+delete-[a-z0-9-]+", "delete_resource"),
+    # delete-*, and the batch forms (ecr batch-delete-image, dynamodb
+    # batch-delete-item) that delete many at once.
+    (r"\baws\s+\S+\s+(?:batch-)?delete-[a-z0-9-]+", "delete_resource"),
+    # Deletes AWS does not spell delete-*: a KMS key scheduled for deletion
+    # takes every byte encrypted under it along, an AMI deregistered cannot be
+    # launched again, a closed account is gone with everything in it.
+    (r"\baws\s+kms\s+schedule-key-deletion\b", "delete_resource"),
+    (r"\baws\s+\S+\s+deregister-[a-z0-9-]+", "delete_resource"),
+    (r"\baws\s+organizations\s+close-account\b", "delete_resource"),
     (r"\bgcloud\s+(?:\S+\s+)*delete\b", "delete_resource"),
     (r"\baz\s+(?:\S+\s+)*delete\b", "delete_resource"),
+    # Heuristics. These cannot see what will actually run, so they only ever
+    # ask: a Python one-liner that imports boto3 and calls a delete or a
+    # terminate, and a base64 payload decoded straight into a shell.
+    ("python-boto3-delete", "delete_resource"),
+    ("base64-to-shell", "delete_resource"),
 ]
 
 _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
@@ -123,8 +154,8 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bterraform\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\btofu\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\bterragrunt\s+(?:\S+\s+)*apply\b", "infra_apply"),
-    (r"\bhelm\s+(?:install|upgrade)\b", "infra_apply"),
-    (r"\bkubectl\s+(?:apply|scale)\b", "infra_apply"),
+    (r"\bhelm\s+(?:\S+\s+)*(?:install|upgrade)(?!\S)", "infra_apply"),
+    (r"\bkubectl\s+(?:\S+\s+)*(?:apply|scale)(?!\S)", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),
     # CloudFormation creates whatever the template holds, and an agent that
     # re-runs create-stack under a new name each time makes a new copy each
@@ -138,18 +169,18 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
 ]
 
 
-# AWS global options sit between `aws` and the service name, so
-# `aws --profile prod ec2 terminate-instances` does not match a pattern anchored
-# on `aws\s+ec2`. Every aws entry in the tables above was anchored that way,
-# while the gcloud, az and kubectl entries already allowed intervening tokens.
-# The result: adding --profile, --region, --output, --no-cli-pager or an
-# --endpoint-url to a terminate, a bucket wipe or a commitment purchase made it
+# AWS global options may sit anywhere in an aws command: between `aws` and the
+# service name (`aws --profile prod ec2 terminate-instances`) or after it
+# (`aws ec2 --region us-west-2 terminate-instances`). The aws entries in the
+# tables above are anchored on `aws\s+ec2\s+terminate-instances`, so either
+# placement used to make a terminate, a bucket wipe or a commitment purchase
 # invisible to the guard, and the hook stayed silent on a one-way door. A
 # profile flag is not an exotic input; it is what anyone with more than one
 # account types by default.
 #
-# Rather than widen eight patterns (and every future one) this strips the global
-# options first, so the tables stay readable and a new aws rule cannot forget.
+# Rather than widen every pattern (and every future one) this strips the global
+# options from each aws command first, so the tables stay readable and a new
+# aws rule cannot forget.
 #
 # Matched from an explicit list rather than "any token": `(?:\S+\s+)*` would also
 # swallow a service name, so `aws s3 ls` could be read as a later verb's
@@ -164,20 +195,71 @@ _AWS_GLOBAL_BOOLEAN = (
     "debug|no-verify-ssl|no-paginate|no-sign-request|no-cli-pager|"
     "cli-auto-prompt|no-cli-auto-prompt"
 )
-_AWS_GLOBAL_OPTS_RE = re.compile(
-    r"\b(aws)\s+(?:"
-    rf"(?:--(?:{_AWS_GLOBAL_WITH_VALUE})(?:=\S+|\s+\S+))"
-    rf"|(?:--(?:{_AWS_GLOBAL_BOOLEAN}))"
-    r")(?:\s+(?:"
-    rf"(?:--(?:{_AWS_GLOBAL_WITH_VALUE})(?:=\S+|\s+\S+))"
-    rf"|(?:--(?:{_AWS_GLOBAL_BOOLEAN}))"
-    r"))*\s+"
+_AWS_GLOBAL_OPT_RE = re.compile(
+    rf" --(?:{_AWS_GLOBAL_WITH_VALUE})(?:=\S*| \S+)(?= |$)"
+    rf"| --(?:{_AWS_GLOBAL_BOOLEAN})(?= |$)"
 )
+# One aws command: from `aws` to the end of its shell segment.
+_AWS_SEGMENT_RE = re.compile(r"\baws [^;&|]*")
 
 
 def _strip_aws_global_options(cmd: str) -> str:
-    """`aws --profile p --region r ec2 terminate-instances` -> `aws ec2 terminate-instances`."""
-    return _AWS_GLOBAL_OPTS_RE.sub(r"\1 ", cmd)
+    """`aws --profile p ec2 --region r terminate-instances` -> `aws ec2 terminate-instances`.
+
+    Expects whitespace already collapsed to single spaces (see _normalize).
+    Each aws segment is scanned once, so this stays linear however many
+    there are."""
+    if "--" not in cmd:
+        return cmd
+    return _AWS_SEGMENT_RE.sub(lambda m: _AWS_GLOBAL_OPT_RE.sub("", m.group(0)), cmd)
+
+
+# The programs the tables above name. A case-insensitive filesystem (macOS's
+# default, Windows) runs `TERRAFORM destroy` as terraform, so the program name
+# is matched without regard to case; the verb after it is not, because the
+# program itself rejects `terraform DESTROY`.
+_PROGRAMS = ("aws|kubectl|terraform|tofu|terragrunt|helm|pulumi|gcloud|az|cdk|sam|doctl|"
+             "eksctl|gsutil|base64|python3?")
+_PROGRAM_RE = re.compile(rf"(?:{_PROGRAMS})(?![\w.-])")
+
+
+def _lower_programs(cmd: str) -> str:
+    """`TERRAFORM destroy` -> `terraform destroy`; every other word as written.
+
+    Program names are found in a lowercased copy (one case-sensitive scan,
+    much cheaper than an IGNORECASE one) and copied back where they differ."""
+    low = cmd.lower()
+    if low == cmd or len(low) != len(cmd):
+        return cmd
+    out, last = [], 0
+    for m in _PROGRAM_RE.finditer(low):
+        a, b = m.span()
+        if (a == 0 or not (low[a - 1].isalnum() or low[a - 1] in "_.-")) and cmd[a:b] != low[a:b]:
+            out += (cmd[last:a], low[a:b])
+            last = b
+    return "".join(out) + cmd[last:] if out else cmd
+
+# `alias tf=terraform; tf destroy`: an alias defined on the same line is
+# expanded where it is used later on that line. Only the first few aliases are
+# expanded, so a command made of ten thousand of them stays linear.
+_ALIAS_RE = re.compile(r"alias(?<![\w-]alias) ([\w.-]+)=([^\s;&|]+)")
+_ALIAS_MAX = 4
+
+
+def _expand_aliases(cmd: str) -> str:
+    if "alias " not in cmd:
+        return cmd
+    pos = 0
+    for _ in range(_ALIAS_MAX):
+        m = _ALIAS_RE.search(cmd, pos)
+        if m is None:
+            break
+        name, value = m.group(1), m.group(2)
+        esc = re.escape(name)
+        use = re.compile(rf"{esc}(?<![\w/.=-]{esc})(?![\w.=-])")
+        cmd = cmd[:m.end()] + use.sub(lambda _m, v=value: v, cmd[m.end():])
+        pos = m.end()
+    return cmd
 
 
 def _normalize(command: str) -> str:
@@ -191,6 +273,8 @@ def _normalize(command: str) -> str:
     launch, found no price, and passed silently at ~$191k/mo."""
     cmd = command.replace('"', "").replace("'", "")
     cmd = " ".join(cmd.split())  # normalize whitespace
+    cmd = _lower_programs(cmd)
+    cmd = _expand_aliases(cmd)
     return _strip_aws_global_options(cmd)
 
 
@@ -209,6 +293,25 @@ def _normalize(command: str) -> str:
 # after the program": one forward scan, no backtracking through the tokens.
 _ANY_TOKENS = r"(?:\S+\s+)*"
 
+# Linear is not the whole budget: every rule scans the command once, and a
+# pattern that opens with an assertion (`\bterraform`, `(?<!\S)destroy`) makes
+# Python's re try every position in turn, about ten times slower than a
+# pattern that opens with its literal word and can skip ahead to it. So the
+# leading assertion is moved behind the word: `\bterraform` is compiled as
+# `terraform(?<=\bterraform)`, which matches exactly the same text.
+_LEADING_ASSERTION_RE = re.compile(
+    r"(\\b|\(\?<!\\S\)|\(\?<!\[[^\]]+\]\))([A-Za-z0-9_]+)(?![*+?{])")
+
+
+def _fast(pattern: str) -> re.Pattern[str]:
+    m = _LEADING_ASSERTION_RE.match(pattern)
+    if m:
+        guard, word = m.groups()
+        behind = (f"(?<=\\b{word})" if guard == "\\b"
+                  else f"{guard[:-1]}{word})")      # (?<!X) -> (?<!Xword)
+        pattern = f"{word}{behind}{pattern[m.end():]}"
+    return re.compile(pattern)
+
 
 class _Rule:
     """A compiled classifier pattern with search() linear in the command.
@@ -220,10 +323,10 @@ class _Rule:
         self.pattern = pattern
         head, sep, tail = pattern.partition(_ANY_TOKENS)
         if sep:
-            self.head: re.Pattern[str] | None = re.compile(head)
-            self.tail = re.compile(r"(?<!\S)" + tail)
+            self.head: re.Pattern[str] | None = _fast(head)
+            self.tail = _fast(r"(?<!\S)" + tail)
         else:
-            self.head, self.tail = None, re.compile(pattern)
+            self.head, self.tail = None, _fast(pattern)
 
     def search(self, cmd: str) -> re.Match[str] | None:
         if self.head is None:
@@ -232,24 +335,29 @@ class _Rule:
         return self.tail.search(cmd, m.end()) if m else None
 
 
-class _ApplyWithDestroyFlag:
-    """`terraform|tofu|terragrunt ... apply ... -destroy` in one shell segment:
-    destroy hidden behind the apply verb. Checked segment by segment, so each
-    character is looked at a bounded number of times."""
+class _VerbWithFlag:
+    """PROGRAM ... VERB ... FLAG within one shell segment, e.g. `terraform
+    apply -destroy` (destroy hidden behind the apply verb) or `aws s3 sync
+    --delete`. Checked segment by segment, so each character is looked at a
+    bounded number of times."""
 
-    pattern = "apply-with-destroy-flag"
-    _tool = re.compile(r"\b(?:terraform|tofu|terragrunt)\s")
-    _apply = re.compile(r"(?<!\S)apply\b")
-    _flag = re.compile(r"\s-destroy\b")
+    def __init__(self, pattern: str, tool: str, verb: str, flag: str,
+                 flag_anywhere: bool = False) -> None:
+        self.pattern = pattern
+        self._tool = _fast(tool)
+        self._verb = _fast(verb)
+        self._flag = _fast(flag)
+        # The flag may also sit between the program and the verb.
+        self._flag_anywhere = flag_anywhere
 
     def search(self, cmd: str) -> re.Match[str] | None:
         for seg in re.split(r"[|;&]", cmd):
             tool = self._tool.search(seg)
             if tool is None:
                 continue
-            apply = self._apply.search(seg, tool.end())
-            if apply is not None:
-                flag = self._flag.search(seg, apply.end())
+            verb = self._verb.search(seg, tool.end())
+            if verb is not None:
+                flag = self._flag.search(seg, tool.end() if self._flag_anywhere else verb.end())
                 if flag is not None:
                     return flag
         return None
@@ -261,7 +369,7 @@ class _TfCliArgsDestroy:
 
     pattern = "tf-cli-args-destroy"
     _assign = re.compile(r"\bTF_CLI_ARGS(?:_\w+)?=\S*")
-    _flag = re.compile(r"-destroy\b")
+    _flag = re.compile(r"--?destroy\b")
 
     def search(self, cmd: str) -> re.Match[str] | None:
         for m in self._assign.finditer(cmd):
@@ -270,7 +378,49 @@ class _TfCliArgsDestroy:
         return None
 
 
-_SPECIAL_RULES = {r.pattern: r for r in (_ApplyWithDestroyFlag(), _TfCliArgsDestroy())}
+class _PythonBoto3Delete:
+    """`python3 -c "import boto3; ...terminate_instances(...)"`: a one-liner
+    that deletes through the SDK instead of the CLI. A heuristic, so it only
+    ever asks. The code is not one shell segment (it has its own `;`), so the
+    rest of the command after the first `python -c` is what is searched: any
+    later `python -c` is inside that rest already."""
+
+    pattern = "python-boto3-delete"
+    _python = re.compile(r"(?<![\w.-])python(?:3(?:\.\d+)?)?(?: -\S+)*? -c ")
+    _boto3 = re.compile(r"\bboto3\b")
+    _delete = re.compile(r"\b(?:delete|terminate)_\w+|\.(?:delete|terminate)\(")
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        py = self._python.search(cmd)
+        if py is None or self._boto3.search(cmd, py.end()) is None:
+            return None
+        return self._delete.search(cmd, py.end())
+
+
+class _Base64ToShell:
+    """`... | base64 -d | sh`: a script decoded straight into a shell, so the
+    guard never sees the command. A heuristic, so it only ever asks."""
+
+    pattern = "base64-to-shell"
+    _decode = re.compile(r"\bbase64 [^;&|]*?(?<!\S)(?:-[A-Za-z]*[dD][A-Za-z]*|--decode)(?!\S)")
+    _to_shell = re.compile(r"\| ?(?:sudo )?(?:\S*/)?(?:sh|bash|zsh|dash|ksh)(?!\S)")
+
+    def search(self, cmd: str) -> re.Match[str] | None:
+        decode = self._decode.search(cmd)
+        return self._to_shell.search(cmd, decode.end()) if decode else None
+
+
+_SPECIAL_RULES = {r.pattern: r for r in (
+    _VerbWithFlag("apply-with-destroy-flag", r"\b(?:terraform|tofu|terragrunt)\s",
+                  r"(?<!\S)apply(?!\S)", r"\s--?destroy(?:=(?i:1|t|true))?(?!\S)",
+                  flag_anywhere=True),
+    _VerbWithFlag("s3-sync-delete", r"\baws\s+s3\s+sync(?!\S)", r"", r"\s--delete(?!\S)"),
+    _VerbWithFlag("kubectl-replace-force", r"\bkubectl\s", r"(?<!\S)replace(?!\S)",
+                  r"\s--force(?:=true)?(?!\S)", flag_anywhere=True),
+    _VerbWithFlag("spot-fleet-terminate", r"\baws\s+ec2\s+cancel-spot-fleet-requests(?!\S)",
+                  r"", r"\s--terminate-instances(?!\S)"),
+    _TfCliArgsDestroy(), _PythonBoto3Delete(), _Base64ToShell(),
+)}
 
 
 def _compile(table: list[tuple[str, str]]) -> list[tuple[Any, str]]:
