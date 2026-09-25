@@ -604,3 +604,19 @@ def test_guard_try_does_not_say_install_when_installed(capsys, monkeypatch, tmp_
     _, out = _cli(capsys, "guard", "try")
     assert "nable guard install" not in out.out
     assert "already" in out.out and "installed" in out.out
+
+
+@pytest.mark.parametrize("cmd,want", [
+    ('CMD="terraform destroy"; $CMD -auto-approve', DELETE),
+    ("terraform destroy;echo done", DELETE),
+    ("(terraform destroy)", DELETE),
+    ("x=`terraform destroy`", DELETE),
+    ("kubectl delete ns x&&echo ok", DELETE),
+    ("helm uninstall api|tee log", DELETE),
+    ("pulumi down;", DELETE),
+    ("kubectl apply -f x.yaml;echo", APPLY),
+])
+def test_a_verb_followed_directly_by_a_shell_operator_still_classifies(cmd, want):
+    """The verb must end the word (destroy.tfplan is a file), but a `;`, `&`,
+    `|`, `)` or backtick right after it ends the word too."""
+    assert g.classify_command(cmd) == want, cmd

@@ -80,17 +80,21 @@ from .policy import (
 # policy.py. Over-matching is tolerable (worst case an unnecessary confirm);
 # missing a one-way door is not, so patterns are deliberately broad.
 
+# The end of a verb or flag: whitespace, the end, or a shell operator right
+# after it (`terraform destroy;echo`), never more word (destroy.tfplan).
+_END = r"(?![^\s;&|)`])"
+
 _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
-    # `destroy(?!\S)`, not `destroy\b`: a plan file called destroy.tfplan is a
+    # `destroy` must end the word: a plan file called destroy.tfplan is a
     # file name, and `terraform apply destroy.tfplan` goes to the saved-plan
     # reader like any other apply. `-out destroy` names a file too.
-    (r"\bterraform\s+(?:\S+\s+)*destroy(?<!-out destroy)(?!\S)", "delete_resource"),
-    (r"\btofu\s+(?:\S+\s+)*destroy(?<!-out destroy)(?!\S)", "delete_resource"),
+    (rf"\bterraform\s+(?:\S+\s+)*destroy(?<!-out destroy){_END}", "delete_resource"),
+    (rf"\btofu\s+(?:\S+\s+)*destroy(?<!-out destroy){_END}", "delete_resource"),
     # Terragrunt wraps terraform and fans out: `terragrunt run-all destroy` (or
     # `run --all destroy`, or the older `destroy-all`) tears down every module
     # under the directory in one command. It had no pattern at all, so the
     # widest destroy in the toolchain was the one the guard could not see.
-    (r"\bterragrunt\s+(?:\S+\s+)*destroy(?<!-out destroy)(?:-all)?(?!\S)",
+    (rf"\bterragrunt\s+(?:\S+\s+)*destroy(?<!-out destroy)(?:-all)?{_END}",
      "delete_resource"),
     # destroy hidden behind the apply verb: `terraform apply -destroy` is destroy.
     # Must sit in the one-way list (checked first) or the two-way apply pattern
@@ -102,13 +106,13 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     ("tf-cli-args-destroy", "delete_resource"),
     # A workspace delete drops the workspace's state: whatever it managed is
     # orphaned, still running and still billed, with nothing left to destroy it.
-    (r"\b(?:terraform|tofu)\s+(?:\S+\s+)*workspace\s+delete(?!\S)", "delete_resource"),
+    (rf"\b(?:terraform|tofu)\s+(?:\S+\s+)*workspace\s+delete{_END}", "delete_resource"),
     # `pulumi down` is pulumi's own alias for destroy.
-    (r"\bpulumi\s+(?:\S+\s+)*(?:destroy|down)(?!\S)", "delete_resource"),
+    (rf"\bpulumi\s+(?:\S+\s+)*(?:destroy|down){_END}", "delete_resource"),
     # The rest of the IaC toolchain: AWS CDK (also as `npx cdk`), SAM, doctl.
-    (r"\bcdk\s+(?:\S+\s+)*destroy(?!\S)", "delete_resource"),
-    (r"\bsam\s+(?:\S+\s+)*delete(?!\S)", "delete_resource"),
-    (r"\bdoctl\s+(?:\S+\s+)*(?:delete|rm)(?!\S)", "delete_resource"),
+    (rf"\bcdk\s+(?:\S+\s+)*destroy{_END}", "delete_resource"),
+    (rf"\bsam\s+(?:\S+\s+)*delete{_END}", "delete_resource"),
+    (rf"\bdoctl\s+(?:\S+\s+)*(?:delete|rm){_END}", "delete_resource"),
     (r"\beksctl\s+delete\b", "delete_resource"),
     # bucket/object wipes: `aws s3 rb` removes a bucket, `aws s3 rm --recursive`
     # empties one; gsutil is the GCP equivalent. Data deletion is a one-way door.
@@ -121,11 +125,11 @@ _ONE_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"(?<![\w-])gsutil\s+(?:-\S+\s+)*+r[mb]\b", "delete_resource"),
     # Helm's own aliases for uninstall are del, delete and un; flags such as
     # `-n prod` may come first.
-    (r"\bhelm\s+(?:\S+\s+)*(?:uninstall|delete|del|un)(?!\S)", "delete_resource"),
-    (r"\bkubectl\s+(?:\S+\s+)*delete(?!\S)", "delete_resource"),
+    (rf"\bhelm\s+(?:\S+\s+)*(?:uninstall|delete|del|un){_END}", "delete_resource"),
+    (rf"\bkubectl\s+(?:\S+\s+)*delete{_END}", "delete_resource"),
     # `kubectl drain` evicts every pod on the node; `replace --force` deletes
     # the object and creates it again, dropping whatever the old one held.
-    (r"\bkubectl\s+(?:\S+\s+)*drain(?!\S)", "delete_resource"),
+    (rf"\bkubectl\s+(?:\S+\s+)*drain{_END}", "delete_resource"),
     ("kubectl-replace-force", "delete_resource"),
     (r"\baws\s+ec2\s+terminate-instances\b", "terminate_instance"),
     ("spot-fleet-terminate", "terminate_instance"),
@@ -158,8 +162,8 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     (r"\bterraform\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\btofu\s+(?:\S+\s+)*apply\b", "infra_apply"),
     (r"\bterragrunt\s+(?:\S+\s+)*apply\b", "infra_apply"),
-    (r"\bhelm\s+(?:\S+\s+)*(?:install|upgrade)(?!\S)", "infra_apply"),
-    (r"\bkubectl\s+(?:\S+\s+)*(?:apply|scale)(?!\S)", "infra_apply"),
+    (rf"\bhelm\s+(?:\S+\s+)*(?:install|upgrade){_END}", "infra_apply"),
+    (rf"\bkubectl\s+(?:\S+\s+)*(?:apply|scale){_END}", "infra_apply"),
     (r"\baws\s+ec2\s+run-instances\b", "infra_apply"),
     # CloudFormation creates whatever the template holds, and an agent that
     # re-runs create-stack under a new name each time makes a new copy each
@@ -173,12 +177,12 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # db.r6g.16xlarge or a desired capacity of 100 is a bill like any launch.
     ("rds-class-change", "infra_apply"),
     ("ec2-type-change", "infra_apply"),
-    (r"\baws\s+ec2\s+(?:request-spot-instances|request-spot-fleet|create-fleet)(?!\S)",
+    (rf"\baws\s+ec2\s+(?:request-spot-instances|request-spot-fleet|create-fleet){_END}",
      "infra_apply"),
-    (r"\baws\s+autoscaling\s+(?:set-desired-capacity|create-auto-scaling-group)(?!\S)",
+    (rf"\baws\s+autoscaling\s+(?:set-desired-capacity|create-auto-scaling-group){_END}",
      "infra_apply"),
     ("asg-capacity-change", "infra_apply"),
-    (r"\baws\s+eks\s+create-nodegroup(?!\S)", "infra_apply"),
+    (rf"\baws\s+eks\s+create-nodegroup{_END}", "infra_apply"),
     ("eks-nodegroup-scaling", "infra_apply"),
     (r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b", "infra_apply"),
     (r"\baz\s+(?:\S+\s+)*vm\s+create\b", "infra_apply"),
@@ -477,21 +481,21 @@ class _Base64ToShell:
 
 _SPECIAL_RULES = {r.pattern: r for r in (
     _VerbWithFlag("apply-with-destroy-flag", r"\b(?:terraform|tofu|terragrunt)\s",
-                  r"(?<!\S)apply(?!\S)", r"\s--?destroy(?:=(?i:1|t|true))?(?!\S)",
+                  rf"(?<!\S)apply{_END}", rf"\s--?destroy(?:=(?i:1|t|true))?{_END}",
                   flag_anywhere=True),
-    _VerbWithFlag("s3-sync-delete", r"\baws\s+s3\s+sync(?!\S)", r"", r"\s--delete(?!\S)"),
-    _VerbWithFlag("kubectl-replace-force", r"\bkubectl\s", r"(?<!\S)replace(?!\S)",
-                  r"\s--force(?:=true)?(?!\S)", flag_anywhere=True),
-    _VerbWithFlag("spot-fleet-terminate", r"\baws\s+ec2\s+cancel-spot-fleet-requests(?!\S)",
-                  r"", r"\s--terminate-instances(?!\S)"),
-    _VerbWithFlag("rds-class-change", r"\baws\s+rds\s+modify-db-instance(?!\S)", r"",
+    _VerbWithFlag("s3-sync-delete", rf"\baws\s+s3\s+sync{_END}", r"", rf"\s--delete{_END}"),
+    _VerbWithFlag("kubectl-replace-force", r"\bkubectl\s", rf"(?<!\S)replace{_END}",
+                  rf"\s--force(?:=true)?{_END}", flag_anywhere=True),
+    _VerbWithFlag("spot-fleet-terminate", rf"\baws\s+ec2\s+cancel-spot-fleet-requests{_END}",
+                  r"", rf"\s--terminate-instances{_END}"),
+    _VerbWithFlag("rds-class-change", rf"\baws\s+rds\s+modify-db-instance{_END}", r"",
                   r"\s--(?:db-instance-class|multi-az)(?![^\s=])"),
-    _VerbWithFlag("ec2-type-change", r"\baws\s+ec2\s+modify-instance-attribute(?!\S)", r"",
-                  r"\s--instance-type(?![^\s=])|\s--attribute[\s=]instanceType(?!\S)"),
+    _VerbWithFlag("ec2-type-change", rf"\baws\s+ec2\s+modify-instance-attribute{_END}", r"",
+                  rf"\s--instance-type(?![^\s=])|\s--attribute[\s=]instanceType{_END}"),
     _VerbWithFlag("asg-capacity-change",
-                  r"\baws\s+autoscaling\s+update-auto-scaling-group(?!\S)", r"",
+                  rf"\baws\s+autoscaling\s+update-auto-scaling-group{_END}", r"",
                   r"\s--(?:desired-capacity|min-size|max-size)(?![^\s=])"),
-    _VerbWithFlag("eks-nodegroup-scaling", r"\baws\s+eks\s+update-nodegroup-config(?!\S)",
+    _VerbWithFlag("eks-nodegroup-scaling", rf"\baws\s+eks\s+update-nodegroup-config{_END}",
                   r"", r"\s--scaling-config(?![^\s=])"),
     _TfCliArgsDestroy(), _PythonBoto3Delete(), _Base64ToShell(),
 )}
