@@ -43,6 +43,12 @@ def add_parser(sub) -> None:
 
 def _line(b: dict[str, Any]) -> str:
     scope = "total" if b.get("scope_type") == "total" else f"{b['scope_type']} {b['scope_value']}"
+    if b.get("status") == "no_data":
+        return (f"  [no data] {b['name']} ({scope}): no cost data from {b['period_start']} "
+                f"to {b['period_end']}, so spend against ${b['limit']:,.0f} cannot be "
+                "checked (not $0 spent)")
+    if b.get("status") == "error":
+        return f"  [error] {b['name']} ({scope}): could not be checked: {b.get('error')}"
     return (f"  [{b['status']}] {b['name']} ({scope}): ${b['spent']:,.0f} of "
             f"${b['limit']:,.0f} ({b['pct_used']:.0f}%), {b['period_start']} to {b['period_end']}")
 

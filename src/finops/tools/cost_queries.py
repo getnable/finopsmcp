@@ -1019,6 +1019,7 @@ def estimate_change_cost(
     # 2. Budget to check against (first active, or by name). Best-effort: no DB / no
     #    budgets configured falls through to a "no_budget" verdict, never an error.
     budget_for_eval = None
+    budget_unread = None
     alert_pct = 80.0
     try:
         from ..budget.enforcer import list_budgets, check_budget
@@ -1030,16 +1031,27 @@ def estimate_change_cost(
         if chosen:
             alert_pct = float(chosen.get("alert_at_pct", 80.0) or 80.0)
             status = check_budget(chosen)
-            budget_for_eval = {
-                "name": status.get("name", chosen.get("name", "")),
-                "limit_usd": status.get("limit", chosen.get("limit_usd", 0)),
-                "run_rate_usd": status.get("run_rate_monthly", 0.0),
-            }
+            if status.get("status") == "no_data":
+                # No cost rows this period: a $0 run-rate is nothing read,
+                # not room in the budget.
+                budget_unread = status.get("name", chosen.get("name", ""))
+            else:
+                budget_for_eval = {
+                    "name": status.get("name", chosen.get("name", "")),
+                    "limit_usd": status.get("limit", chosen.get("limit_usd", 0)),
+                    "run_rate_usd": status.get("run_rate_monthly", 0.0),
+                }
     except Exception:
         budget_for_eval = None
 
     # 3. Verdict.
     result = evaluate_preflight(delta, budget=budget_for_eval, alert_pct=alert_pct)
+    if budget_unread:
+        note = (f"Not checked against the '{budget_unread}' budget: it has no cost data "
+                "for this period yet, and that is not $0 spent.")
+        for said in ("No budget configured to check it against.", "No budget configured."):
+            result["reason"] = result["reason"].replace(said, note)
+        result["budget_not_checked"] = budget_unread
     result["change_kind"] = change_kind
     if breakdown:
         result["breakdown"] = breakdown

@@ -26,8 +26,10 @@ def set_budget(
     Args:
         name: Budget name (e.g. "Platform Team Monthly")
         limit_usd: Spending limit in USD
-        scope_type: What to watch, "total", "provider", "team", "service"
-        scope_value: The specific value (e.g. "aws", "platform", "EC2")
+        scope_type: What to watch, "total", "provider", "account", "team", "service"
+        scope_value: The specific value (e.g. "aws", "platform", or a service as
+                     Cost Explorer names it, "Amazon Elastic Compute Cloud - Compute";
+                     a short name such as "ec2" is resolved to that name)
                      Use "*" for total account budget
         period: "monthly" or "weekly"
         alert_at_pct: Send warning alert at this % of limit (default 80)
@@ -81,22 +83,31 @@ def check_budget_status(budget_name: str = "") -> dict:
         exceeded = [r for r in results if r["status"] == "exceeded"]
         warnings  = [r for r in results if r["status"] == "warning"]
         ok_budgets = [r for r in results if r["status"] == "ok"]
+        unchecked = [r for r in results if r["status"] in ("no_data", "error")]
 
+        alert = (
+            f"🔴 {len(exceeded)} budget(s) exceeded. Immediate action required."
+            if exceeded else
+            f"🟡 {len(warnings)} budget(s) approaching limit."
+            if warnings else
+            "✅ All budgets on track."
+            if not unchecked else ""
+        )
+        if unchecked:
+            names = ", ".join(str(r["name"]) for r in unchecked)
+            alert = (f"{alert} " if alert else "") + (
+                f"{len(unchecked)} budget(s) cannot be checked ({names}): no cost data "
+                "for the period, or the check failed. That is not $0 spent.")
         return {
             "summary": {
                 "total_budgets": len(results),
                 "exceeded": len(exceeded),
                 "warnings": len(warnings),
                 "on_track": len(ok_budgets),
+                "cannot_check": len(unchecked),
             },
             "budgets": results,
-            "alert": (
-                f"🔴 {len(exceeded)} budget(s) exceeded. Immediate action required."
-                if exceeded else
-                f"🟡 {len(warnings)} budget(s) approaching limit."
-                if warnings else
-                "✅ All budgets on track."
-            ),
+            "alert": alert,
         }
     except Exception as e:
         return {"error": str(e)}
