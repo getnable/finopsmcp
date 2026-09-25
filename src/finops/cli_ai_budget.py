@@ -53,6 +53,29 @@ def _num(raw: str) -> float:
         return 0.0
 
 
+def _count(raw: str) -> int:
+    """argparse type for --tokens: '60m', '500k', '1,500,000', the shorthand
+    the setup questions take. An error, not 0, for anything else."""
+    import argparse
+
+    s = raw.strip().lower().replace(",", "").replace("_", "").replace(" ", "")
+    mult = 1.0
+    if s and s[-1] in "kmb":
+        mult = {"k": 1e3, "m": 1e6, "b": 1e9}[s[-1]]
+        s = s[:-1]
+    try:
+        return int(float(s) * mult)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"not a token count: {raw!r} (e.g. 60m, 500k, 1500000)") from None
+
+
+# What a script with no budget is told, in place of "run nable ai-budget": it
+# just did, and without a terminal there are no questions to answer.
+_SET_WITH_FLAGS = ("Set one with --plan-cost USD (flat plan) or --spend-cap USD (metered "
+                   "API); --tokens N and --session-cap USD work with either.")
+
+
 def add_parser(sub) -> None:
     p = sub.add_parser(
         "ai-budget",
@@ -66,8 +89,9 @@ def add_parser(sub) -> None:
                    help="Flat plan: what you pay per month, any number, e.g. --plan-cost 100")
     p.add_argument("--spend-cap", type=float, metavar="USD",
                    help="Metered API: monthly dollar cap, e.g. --spend-cap 2500")
-    p.add_argument("--tokens", type=int, metavar="N",
-                   help="Usage cap: warn before N billable tokens/month (either mode)")
+    p.add_argument("--tokens", type=_count, metavar="N",
+                   help="Usage cap: warn before N billable tokens/month (either mode), "
+                        "e.g. --tokens 60m")
     p.add_argument("--session-cap", type=float, metavar="USD",
                    help="Per-task cap: what one agent session may spend at list price, "
                         "e.g. --session-cap 40 (0 clears)")
@@ -150,8 +174,9 @@ def run(args) -> int:
                          f"is the one that counts. Pass the other alone to switch.")
 
     # First run, nothing set, a real terminal: ask instead of making them read flags.
+    terminal = sys.stdin.isatty() and out.isatty()
     if (not gave_flags and not getattr(args, "json", False)
-            and not ab.get_budget()["mode"] and sys.stdin.isatty() and out.isatty()):
+            and not ab.get_budget()["mode"] and terminal):
         _interactive_setup(ab, out)
 
     st = ab.status()
@@ -221,7 +246,9 @@ def run(args) -> int:
                          f"{_c(m_verdict.upper() if on_tokens else 'tracking', m_color if on_tokens else _DIM)}"
                          f" ({st['billable_tokens_mtd']/b['monthly_tokens']*100:.0f}%)")
     if not mode:
-        row("budget", _c("not set · run `nable ai-budget` to set one", _DIM))
+        row("budget", _c("not set · run `nable ai-budget` to set one" if terminal else
+                         "not set · pass --plan-cost USD (flat plan) or --spend-cap USD "
+                         "(metered API)", _DIM))
     sess = st.get("session")
     if sess and (sess["messages"] or sess["cap_usd"]):
         # "latest session" when the id is a guess from transcript times rather
@@ -245,7 +272,9 @@ def run(args) -> int:
     _breakdown(st, out, month=getattr(args, "month", False))
 
     print(file=out)
-    print("  " + _c(st["summary"], vcolor), file=out)
+    summary = st["summary"] if terminal else st["summary"].replace(ab.SET_BUDGET_HINT,
+                                                                   _SET_WITH_FLAGS)
+    print("  " + _c(summary, vcolor), file=out)
     print(_c("  local · exact token counts · dollars are list-price estimates at each "
              "model's rate, not your bill", _DIM), file=out)
     return 0

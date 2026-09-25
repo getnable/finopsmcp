@@ -704,6 +704,11 @@ def status(session_id: str | None = None, *, for_gate: bool | None = None) -> di
     }
 
 
+# How the summary tells someone with no budget to set one. The CLI swaps it for
+# the flags when it is not talking to a terminal (see cli_ai_budget).
+SET_BUDGET_HINT = "Run `nable ai-budget` to set a budget."
+
+
 def _with_fallback_note(line: tuple[str, str], lenses: dict[str, Any]) -> str:
     """The summary, plus how much of the dollars it quotes rest on a fallback
     rate, whenever any do. The lens is the one the line is about."""
@@ -758,7 +763,7 @@ def _month_summary(tag, basis, mode, tokens_mtd, est_usd, budget, subsidy, windo
                 f"recorded yet this month."), "month"
     return (f"{window['billable_tokens']:,} tokens in the last {_WINDOW_HOURS:g}h "
             f"(~${window['usd_equivalent']:,.0f} at list price). "
-            f"Run `nable ai-budget` to set a budget."), "window"
+            f"{SET_BUDGET_HINT}"), "window"
 
 
 def check(estimated_next_tokens: int = 0, session_id: str | None = None) -> dict[str, Any]:

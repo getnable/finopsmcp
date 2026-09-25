@@ -437,3 +437,36 @@ def test_set_budget_rejects_a_negative_cap(claude):
 
     out = asyncio.run(srv.set_ai_budget(session_cap=-1, every_session=True))
     assert "error" in out and "negative" in out["error"]
+
+
+def _parse(*argv):
+    import argparse
+
+    from finops import cli_ai_budget as cli
+
+    parser = argparse.ArgumentParser()
+    cli.add_parser(parser.add_subparsers())
+    return parser.parse_args(["ai-budget", *argv])
+
+
+@pytest.mark.parametrize("raw,tokens", [("60m", 60_000_000), ("60k", 60_000),
+                                        ("1,500,000", 1_500_000), ("2.5M", 2_500_000),
+                                        ("0", 0)])
+def test_tokens_takes_the_shorthand_the_setup_questions_take(raw, tokens):
+    assert _parse("--tokens", raw).tokens == tokens
+
+
+def test_tokens_rejects_what_is_not_a_number(capsys):
+    with pytest.raises(SystemExit):
+        _parse("--tokens", "lots")
+    assert "--tokens" in capsys.readouterr().err
+
+
+def test_a_script_with_no_budget_is_told_the_flags(claude, capsys):
+    """Not a terminal, so no questions are asked, and "run nable ai-budget" is
+    what the script just did. Name the flags that set one."""
+    out = _cli(capsys)
+    assert "run `nable ai-budget`" not in out.lower()
+    budget = next(ln for ln in out.splitlines() if ln.strip().startswith("budget"))
+    assert "--plan-cost" in budget and "--spend-cap" in budget
+    assert "--plan-cost" in out.strip().splitlines()[-2]
