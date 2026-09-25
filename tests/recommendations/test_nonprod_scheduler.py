@@ -346,19 +346,57 @@ class TestIdentifyNonprodResources:
         assert (kw["EndTime"] - kw["StartTime"]).total_seconds() / kw["Period"] <= 1440
         assert result["schedulable_instances"][0]["idle_hours_per_week"] == 84.0
 
-    def test_a_failed_read_is_treated_as_no_data(self):
-        """A throttled or denied read is not a quiet week. The instance falls
-        back to the stated nights-and-weekends worst case, and the finding
-        says that figure was assumed rather than measured."""
+    def test_a_failed_read_is_skipped_and_counted_not_assumed_idle(self):
+        """A throttled or denied read is not a quiet week, and it is not the
+        no-data case either. It used to collapse into [] and take the
+        nights-and-weekends worst case (118 idle hours a week), which put a
+        stop schedule in front of a machine nobody had looked at. Now the
+        instance is left out and counted as unread."""
+        answer = _answer_cpu({"i-dev1": [0.5] * 168})
+
+        def cpu(**kw):
+            if kw["Dimensions"][0]["Value"] == "i-dev3":
+                raise RuntimeError("Throttling")
+            return answer(**kw)
+
         mock_cw = MagicMock()
-        mock_cw.get_metric_statistics.side_effect = RuntimeError("Throttling")
+        mock_cw.get_metric_statistics.side_effect = cpu
+
+        result = self._run_dev_instances([
+            _make_ec2_instance("i-dev1", "m5.xlarge", "api-dev", "dev"),
+            _make_ec2_instance("i-dev3", "m5.xlarge", "db-dev", "test"),
+        ], mock_cw)
+
+        assert [i["instance_id"] for i in result["schedulable_instances"]] == ["i-dev1"]
+        assert result["instances_cpu_unread"] == 1
+        meta = result["finding"]["metadata"]
+        assert meta["instances_cpu_unread"] == 1
+        assert meta["instances_with_assumed_idle"] == 0
+        assert any("1 non-prod instance(s) were not assessed" in a
+                   for a in result["finding"]["assumptions"])
+
+    def test_a_scan_where_every_read_failed_is_not_clean(self):
+        mock_cw = MagicMock()
+        mock_cw.get_metric_statistics.side_effect = RuntimeError("AccessDenied")
 
         result = self._run_dev_instances(
             [_make_ec2_instance("i-dev3", "m5.xlarge", "db-dev", "test")], mock_cw)
 
-        inst = result["schedulable_instances"][0]
-        assert inst["idle_hours_per_week"] == 118.0
+        assert result["schedulable_instances"] == []
+        assert result["instances_cpu_unread"] == 1
+
+    def test_an_empty_read_still_takes_the_stated_worst_case(self):
+        """No datapoints from a read that worked is the no-data case, which
+        keeps its nights-and-weekends assumption and says so."""
+        mock_cw = MagicMock()
+        mock_cw.get_metric_statistics.return_value = {"Datapoints": []}
+
+        result = self._run_dev_instances(
+            [_make_ec2_instance("i-dev3", "m5.xlarge", "db-dev", "test")], mock_cw)
+
+        assert result["schedulable_instances"][0]["idle_hours_per_week"] == 118.0
         assert result["finding"]["metadata"]["instances_with_assumed_idle"] == 1
+        assert result["instances_cpu_unread"] == 0
 
     def test_the_default_path_never_calls_get_metric_data(self):
         """GetMetricData bills per metric with no free tier. Reading CPU for a

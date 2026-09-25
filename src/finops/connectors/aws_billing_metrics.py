@@ -232,12 +232,22 @@ def latest_estimated_charges(session: Any = None, *,
             "account. Billing alerts are almost certainly switched off.")
 
     out = EstimatedCharges(total_usd=total[0], as_of=total[1])
+    unread: list[str] = []
     for svc in services:
-        got = latest(series.get(("service", svc)))
+        points = series.get(("service", svc))
+        if points is None:
+            # A failed read is not a $0 service. Left out of by_service like
+            # one, it made the breakdown look complete and sum short of total.
+            unread.append(svc)
+            continue
+        got = latest(points)
         if got and got[0] > 0:
             out.by_service.append(ServiceCharge(service=svc, amount_usd=got[0],
                                                 as_of=got[1]))
-    return out.as_dict()
+    result = out.as_dict()
+    if unread:
+        result["unread_services"] = sorted(unread)
+    return result
 
 
 def is_available(session: Any = None) -> bool:

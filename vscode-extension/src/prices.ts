@@ -67,6 +67,34 @@ const RDS_HOURLY: Record<string, number> = {
   "db.r6g.large": 0.215,"db.r6g.xlarge": 0.43,"db.r7g.large": 0.239,
 };
 
+// RDS for PostgreSQL runs 4-7% above MySQL/MariaDB on most classes. Mirrors
+// aws_prices.RDS_HOURLY_POSTGRES; a test pins every row to the Python table.
+const RDS_HOURLY_POSTGRES: Record<string, number> = {
+  "db.t3.micro": 0.018, "db.t3.small": 0.036,  "db.t3.medium": 0.072,
+  "db.t3.large": 0.145, "db.t3.xlarge": 0.29,  "db.t3.2xlarge": 0.579,
+  "db.t4g.micro": 0.016,"db.t4g.small": 0.032, "db.t4g.medium": 0.065,
+  "db.t4g.large": 0.129,
+  "db.m5.large": 0.178, "db.m5.xlarge": 0.356, "db.m5.2xlarge": 0.712,
+  "db.m5.4xlarge": 1.424,"db.m5.8xlarge": 2.848,"db.m5.12xlarge": 4.272,
+  "db.m6i.large": 0.178,"db.m6i.xlarge": 0.356,"db.m6i.2xlarge": 0.712,
+  "db.m6g.large": 0.159,"db.m6g.xlarge": 0.318,"db.m6g.2xlarge": 0.636,
+  "db.r5.large": 0.25,  "db.r5.xlarge": 0.5,   "db.r5.2xlarge": 1.0,
+  "db.r5.4xlarge": 2.0, "db.r5.8xlarge": 4.0,
+  "db.r6i.large": 0.25, "db.r6i.xlarge": 0.5,  "db.r6i.2xlarge": 1.0,
+  "db.r6g.large": 0.225,"db.r6g.xlarge": 0.45, "db.r6g.2xlarge": 0.899,
+  "db.r7g.large": 0.239,"db.r7g.xlarge": 0.478,"db.r7g.2xlarge": 0.956,
+};
+
+// Mirrors aws_prices.rds_hourly. The engine picks the table; Aurora, SQL
+// Server, Oracle and Db2 bill at other rates and get no figure rather than a
+// MySQL one. With no engine set, the MySQL table is the default.
+export function rdsHourly(instanceClass: string, engine: string): number | undefined {
+  const e = (engine || "").toLowerCase();
+  if (e === "" || e === "mysql" || e === "mariadb") return RDS_HOURLY[instanceClass];
+  if (e === "postgres") return RDS_HOURLY_POSTGRES[instanceClass];
+  return undefined;
+}
+
 // ── ElastiCache ───────────────────────────────────────────────────────────────
 const ELASTICACHE_HOURLY: Record<string, number> = {
   "cache.t3.micro": 0.017,  "cache.t3.small": 0.034,   "cache.t3.medium": 0.068,
@@ -89,16 +117,31 @@ const EBS_PER_GB: Record<string, number> = {
   "st1": 0.045, "sc1": 0.015, "standard": 0.05,
 };
 
+// IOPS and throughput rates, each pinned by a test to its aws_prices constant.
+const EBS_GP3_FREE_IOPS = 3000;
+const EBS_GP3_PER_IOPS_MONTH = 0.005;
+const EBS_GP3_FREE_MIBPS = 125;
+const EBS_GP3_PER_MIBPS_MONTH = 0.04;
+const EBS_IO1_PER_IOPS_MONTH = 0.065;
+const EBS_IO2_TIER1_IOPS = 32000;
+const EBS_IO2_TIER1_PER_IOPS_MONTH = 0.065;
+const EBS_IO2_TIER2_IOPS = 64000;
+const EBS_IO2_TIER2_PER_IOPS_MONTH = 0.0455;
+const EBS_IO2_TIER3_PER_IOPS_MONTH = 0.03185;
+
 function ebsMonthly(volType: string, sizeGb: number, iops: number, throughput: number): number {
-  let m = sizeGb * (EBS_PER_GB[volType] ?? EBS_PER_GB["gp2"]);
-  if (volType === "gp3") {
-    m += Math.max(0, iops - 3000) * 0.005 + Math.max(0, throughput - 125) * 0.04;
-  } else if (volType === "io1") {
-    m += iops * 0.065;
-  } else if (volType === "io2") {
-    m += Math.min(iops, 32000) * 0.065
-      + Math.max(0, Math.min(iops, 64000) - 32000) * 0.0455
-      + Math.max(0, iops - 64000) * 0.03185;
+  // Lowercased like the Python side: "GP3" is gp3, not an unknown type at the gp2 rate.
+  const vt = (volType || "gp2").toLowerCase();
+  let m = sizeGb * (EBS_PER_GB[vt] ?? EBS_PER_GB["gp2"]);
+  if (vt === "gp3") {
+    m += Math.max(0, iops - EBS_GP3_FREE_IOPS) * EBS_GP3_PER_IOPS_MONTH
+      + Math.max(0, throughput - EBS_GP3_FREE_MIBPS) * EBS_GP3_PER_MIBPS_MONTH;
+  } else if (vt === "io1") {
+    m += iops * EBS_IO1_PER_IOPS_MONTH;
+  } else if (vt === "io2") {
+    m += Math.min(iops, EBS_IO2_TIER1_IOPS) * EBS_IO2_TIER1_PER_IOPS_MONTH
+      + Math.max(0, Math.min(iops, EBS_IO2_TIER2_IOPS) - EBS_IO2_TIER1_IOPS) * EBS_IO2_TIER2_PER_IOPS_MONTH
+      + Math.max(0, iops - EBS_IO2_TIER2_IOPS) * EBS_IO2_TIER3_PER_IOPS_MONTH;
   }
   return m;
 }
@@ -141,8 +184,18 @@ export function priceResource(
     case "aws_db_instance":
     case "aws_rds_cluster_instance": {
       const cls = attrs["instance_class"];
-      let h = cls ? RDS_HOURLY[cls] : undefined;
-      if (!h) return cls ? { monthly: 0, detail: `Unknown class: ${cls}` } : null;
+      if (!cls) return null;
+      // A cluster instance is Aurora, which has no table.
+      const engine = (attrs["engine"]
+        || (resourceType === "aws_rds_cluster_instance" ? "aurora" : "")).toLowerCase();
+      let h = rdsHourly(cls, engine);
+      if (!h) {
+        return {
+          monthly: 0,
+          detail: `${cls}${engine ? ` on ${engine}` : ""}: not priced`,
+          note: "Aurora, SQL Server, Oracle and Db2 are not in the price table",
+        };
+      }
       const maz = attrs["multi_az"]?.toLowerCase() === "true";
       if (maz) h *= 2;
       return {
@@ -165,7 +218,7 @@ export function priceResource(
     }
 
     case "aws_ebs_volume": {
-      const volType = attrs["type"] || "gp2";
+      const volType = (attrs["type"] || "gp2").toLowerCase();
       const sizeGb = parseFloat(attrs["size"] || "0");
       const iops = parseFloat(attrs["iops"] || "0") || 0;
       const throughput = parseFloat(attrs["throughput"] || "0") || 0;

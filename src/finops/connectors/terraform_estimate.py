@@ -11,7 +11,8 @@ Usage:
     $ finops estimate plan.json
 
 What it prices:
-    EC2 instances, RDS, Aurora, ElastiCache, EKS, NAT Gateways,
+    EC2 instances, RDS (MySQL, MariaDB, PostgreSQL; Aurora, SQL Server,
+    Oracle and Db2 are listed as not priced), ElastiCache, EKS, NAT Gateways,
     ALB/NLB, ECS Fargate, Lambda, S3, EBS volumes,
     OpenSearch domains, MSK clusters, Redshift nodes.
 
@@ -32,7 +33,7 @@ from typing import Any
 
 from ..aws_prices import (
     CLB_HOURLY, EBS_PER_GB_MONTH, EC2_HOURLY, HOURS_PER_MONTH, NAT_GATEWAY_HOURLY,
-    NAT_GATEWAY_PER_GB, RDS_HOURLY, ebs_volume_monthly, lb_hourly,
+    NAT_GATEWAY_PER_GB, RDS_HOURLY, ebs_volume_monthly, lb_hourly, rds_hourly,
 )
 
 log = logging.getLogger(__name__)
@@ -195,38 +196,64 @@ def _estimate_ec2(rc: ResourceChange) -> CostLine | None:
                     f"{instance_type} @ ${hourly:.4f}/hr", "high")
 
 
-def _estimate_rds(rc: ResourceChange) -> CostLine | None:
+def _rds_rate(cfg: dict, default_engine: str = "") -> tuple[float | None, str]:
+    """(single-AZ hourly rate or None, engine) for one side of a plan change.
+
+    The engine picks the table: RDS for PostgreSQL runs 4-7% above MySQL, and
+    Aurora, SQL Server, Oracle and Db2 have no table, so they come back None
+    rather than borrowing a MySQL rate. A plan that does not carry the engine
+    gets RDS_HOURLY, the MySQL table aws_prices keeps for exactly that case.
+    """
+    class_ = cfg.get("instance_class") or ""
+    engine = str(cfg.get("engine") or default_engine).strip().lower()
+    if engine:
+        return rds_hourly(class_, engine), engine
+    return _RDS_HOURLY.get(class_), engine
+
+
+def _rds_unpriced(rc: ResourceChange, action: str, what: str) -> CostLine:
+    return CostLine(rc.address, rc.type, action, 0.0,
+                    f"{what}: not in nable's RDS price table, not priced", "low")
+
+
+def _estimate_rds(rc: ResourceChange, default_engine: str = "") -> CostLine | None:
     cfg = rc.net_config
     class_ = cfg.get("instance_class", "")
     multi_az = bool(cfg.get("multi_az", False))
-    hourly = _RDS_HOURLY.get(class_, 0.0)
+    hourly, engine = _rds_rate(cfg, default_engine)
+    if rc.is_update:
+        before = rc.before or cfg
+        after = rc.after or cfg
+        before_class = before.get("instance_class", class_)
+        after_class  = after.get("instance_class", class_)
+        before_maz   = bool(before.get("multi_az", False))
+        after_maz    = bool(after.get("multi_az", False))
+        bh, before_engine = _rds_rate(before, default_engine)
+        ah, after_engine = _rds_rate(after, default_engine)
+        note = f"{before_class}{'×2' if before_maz else ''} → {after_class}{'×2' if after_maz else ''}"
+        if bh is None or ah is None:
+            return _rds_unpriced(rc, "change", f"{note} on {after_engine or before_engine or 'mysql'}")
+        delta = (ah * (2 if after_maz else 1) - bh * (2 if before_maz else 1)) * HOURS_PER_MONTH
+        return CostLine(rc.address, rc.type, "change", delta, note, "high" if engine else "medium")
+    if hourly is None:
+        return _rds_unpriced(rc, _action_label(rc),
+                             f"{class_ or 'no instance_class'} on {engine or 'mysql'}")
     if multi_az:
         hourly *= 2
-    if rc.is_update:
-        before_class = (rc.before or {}).get("instance_class", class_)
-        after_class  = (rc.after  or {}).get("instance_class", class_)
-        before_maz   = bool((rc.before or {}).get("multi_az", False))
-        after_maz    = bool((rc.after  or {}).get("multi_az", False))
-        bh = _RDS_HOURLY.get(before_class, 0.0) * (2 if before_maz else 1)
-        ah = _RDS_HOURLY.get(after_class,  0.0) * (2 if after_maz  else 1)
-        delta = (ah - bh) * HOURS_PER_MONTH
-        note = f"{before_class}{'×2' if before_maz else ''} → {after_class}{'×2' if after_maz else ''}"
-        return CostLine(rc.address, rc.type, "change", delta, note, "high")
     monthly = hourly * HOURS_PER_MONTH * _sign(rc)
     az_note = " (Multi-AZ)" if multi_az else ""
+    engine_note = "" if engine else " (engine not in the plan, MySQL rate)"
     return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{class_}{az_note} @ ${hourly:.4f}/hr", "high" if hourly else "low")
+                    f"{class_}{az_note} @ ${hourly:.4f}/hr{engine_note}",
+                    "high" if engine else "medium")
 
 
 def _estimate_aurora(rc: ResourceChange) -> CostLine | None:
-    """Aurora cluster — price per instance in cluster."""
-    cfg = rc.net_config
-    class_ = cfg.get("instance_class", "")
-    # Aurora uses same pricing tiers as RDS roughly
-    hourly = _RDS_HOURLY.get(class_, 0.0) * 1.1  # ~10% premium
-    monthly = hourly * HOURS_PER_MONTH * _sign(rc)
-    return CostLine(rc.address, rc.type, _action_label(rc), monthly,
-                    f"{class_} (Aurora) @ ${hourly:.4f}/hr", "medium")
+    """Aurora cluster instance. Aurora bills at its own per-class rates, and
+    aws_prices has no Aurora table, so this is unpriced rather than the MySQL
+    rate times a guessed 10% premium. rds_hourly answers for Aurora the day
+    that table exists, and this starts pricing without a change here."""
+    return _estimate_rds(rc, default_engine="aurora")
 
 
 def _estimate_elasticache(rc: ResourceChange) -> CostLine | None:

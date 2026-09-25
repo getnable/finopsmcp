@@ -172,7 +172,7 @@ _AURORA_SERVERLESS_V2 = {
 _PRICED_IDLE = {
     "DBInstanceIdentifier": "legacy-reporting",
     "DBInstanceClass": "db.m5.xlarge",        # $0.342/hr * 730 = $249.66/mo
-    "Engine": "postgres",
+    "Engine": "mysql",                       # MySQL table; postgres is 4-7% higher
     "DBInstanceStatus": "available",
     "MultiAZ": False,
 }
@@ -908,7 +908,7 @@ def test_rds_rightsizing_prices_on_the_same_basis_as_its_ec2_sibling(monkeypatch
             return _Paginator([{"DBInstances": [{
                 "DBInstanceIdentifier": "reporting-db",
                 "DBInstanceClass": "db.m5.4xlarge",   # downsizes to db.m5.2xlarge
-                "Engine": "postgres",
+                "Engine": "mysql",
                 "DBInstanceStatus": "available",
                 "MultiAZ": False,
             }]}])

@@ -621,7 +621,7 @@ def test_lambda_reads_ask_each_namespace_by_its_own_dimension_name():
 def _rds_pages(n: int, db_class: str = "db.m5.xlarge") -> list[dict]:
     return [{"DBInstances": [
         {"DBInstanceIdentifier": f"db-{i:04d}", "DBInstanceClass": db_class,
-         "Engine": "postgres", "DBInstanceStatus": "available", "MultiAZ": False}
+         "Engine": "mysql", "DBInstanceStatus": "available", "MultiAZ": False}
         for i in range(n)
     ]}]
 
@@ -712,9 +712,13 @@ def _lb_run():
 
     v2 = [_alb(i) for i in range(300)] + [_alb(i, "network") for i in range(300, 400)]
     classic = [{"LoadBalancerName": f"clb-{i:04d}"} for i in range(200)]
+    # Quiet NLBs report zero new flows. An empty flow series is not read as
+    # idle (see test_waste_lb_and_s3_reads.py), so each one has its zeros.
+    quiet_nlbs = {("NewFlowCount", f"net/lb-{i:04d}/abc"): [0.0] * 14 for i in range(300, 400)}
     cw = _Metrics({
+        **quiet_nlbs,
         ("RequestCount", "app/lb-0001/abc"): [1e6] * 14,       # busy ALB
-        ("ActiveFlowCount", "net/lb-0301/abc"): [50.0] * 14,   # busy NLB
+        ("NewFlowCount", "net/lb-0301/abc"): [5000.0] * 14,    # busy NLB
         ("RequestCount", "clb-0001"): [1e6] * 14,              # busy classic
         ("RequestCount", "app/lb-0002/abc"): "Forbidden",      # unread
         ("RequestCount", "clb-0002"): "InternalError",         # unread

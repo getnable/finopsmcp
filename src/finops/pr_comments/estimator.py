@@ -17,7 +17,8 @@ from typing import Any
 from .parser import ResourceChange
 from ..aws_prices import (
     ALB_PER_MONTH, EBS_PER_GB_MONTH, EC2_MONTHLY, HOURS_PER_MONTH, NAT_GATEWAY_PER_MONTH,
-    NLB_PER_MONTH, RDS_MONTHLY, ebs_volume_monthly, lb_hourly,
+    NLB_PER_MONTH, RDS_HOURLY, RDS_MONTHLY, as_number, ebs_volume_monthly, lb_hourly,
+    rds_hourly,
 )
 from ..recommendations.rate_detector import detect_effective_rates
 
@@ -56,6 +57,13 @@ class CostEstimate:
     confidence: str  # "high" | "medium" | "low"
     notes: list[str] = field(default_factory=list)   # factual context from account
     breakdown: dict[str, float] = field(default_factory=dict)
+
+
+def _text(value: Any) -> str:
+    """An attribute as the diff wrote it, without quotes or a trailing comment."""
+    if value is None:
+        return ""
+    return str(value).split("#", 1)[0].split("//", 1)[0].strip().strip("\"'").strip()
 
 
 def _ec2_monthly(instance_type: str, rate_multiplier: float = 1.0) -> float:
@@ -149,23 +157,58 @@ def estimate_changes(
 
         # RDS
         elif rtype in ("aws_db_instance", "aws_rds_cluster_instance"):
-            itype = props.get("instance_class", "db.t3.medium")
-            base = _RDS_MONTHLY.get(itype, 140.0) * multiplier
-            storage_gb = float(props.get("allocated_storage", 20))
-            storage_cost = storage_gb * 0.115 * multiplier  # gp2 RDS storage
-            monthly = round(base + storage_cost, 2)
-            breakdown["compute"] = round(base, 2)
-            breakdown["storage"] = round(storage_cost, 2)
-            confidence = "high" if itype in _RDS_MONTHLY else "medium"
+            itype = _text(props.get("instance_class"))
+            # A cluster instance is Aurora, which is not in the RDS tables, so
+            # one with no engine in the diff is not priced as MySQL either.
+            engine = _text(props.get("engine")).lower() or (
+                "aurora" if rtype == "aws_rds_cluster_instance" else "")
+            # The engine picks the table: PostgreSQL runs 4-7% above MySQL, and
+            # Aurora, SQL Server, Oracle and Db2 have no table at all. A diff
+            # that does not set the engine gets the MySQL rate, which is what
+            # RDS_HOURLY is for, and says so.
+            hourly = rds_hourly(itype, engine) if engine else RDS_HOURLY.get(itype)
+            if hourly is None:
+                # No figure rather than a made-up one: this used to quote $140
+                # for any class it did not know, on any engine.
+                what = f"{itype} on {engine}" if engine and itype else (itype or "no instance_class")
+                notes.append(f"{what}: not in nable's RDS price table, so not priced")
+                confidence = "low"
+            else:
+                multi_az = _text(props.get("multi_az")).lower() == "true"
+                factor = 2.0 if multi_az else 1.0   # a standby of the same class, and its storage
+                base = hourly * HOURS_PER_MONTH * factor * multiplier
+                storage_gb = as_number(props.get("allocated_storage"), None)
+                if storage_gb is None:
+                    storage_gb = 20.0
+                storage_cost = storage_gb * 0.115 * factor * multiplier  # gp2 RDS storage
+                monthly = round(base + storage_cost, 2)
+                breakdown["compute"] = round(base, 2)
+                breakdown["storage"] = round(storage_cost, 2)
+                confidence = "high" if engine else "medium"
+                if multi_az:
+                    notes.append(f"{itype} Multi-AZ: compute and storage doubled for the standby")
+                if not engine:
+                    notes.append(f"{itype}: engine not set in the diff, priced at the MySQL rate")
 
         # EBS
         elif rtype == "aws_ebs_volume":
-            vol_type = props.get("type") or "gp3"
-            size_gb = float(props.get("size") or props.get("volume_size") or 20)
+            vol_type = _text(props.get("type")) or "gp3"
+            raw_size = props.get("size") or props.get("volume_size")
+            size_gb = as_number(raw_size, None) if raw_size is not None else 20.0
+            confidence = "high"
+            if size_gb is None:
+                notes.append(f"size {_text(raw_size)!r} is not a number, so storage is not priced")
+                size_gb = 0.0
+                confidence = "low"
+            for attr in ("iops", "throughput"):
+                raw = props.get(attr)
+                if raw is not None and as_number(raw, None) is None:
+                    notes.append(f"{attr} {_text(raw)!r} is not a number, priced at the included baseline")
+                    if confidence == "high":
+                        confidence = "medium"
             monthly = round(ebs_volume_monthly(
                 vol_type, size_gb, props.get("iops"), props.get("throughput")) * multiplier, 2)
             breakdown["storage"] = monthly
-            confidence = "high"
 
         # Fixed-cost resources
         elif rtype in _FIXED_MONTHLY:
@@ -179,7 +222,10 @@ def estimate_changes(
         # EKS node group
         elif rtype == "aws_eks_node_group":
             itype = props.get("instance_types", "m5.large").split(",")[0].strip()
-            desired = int(props.get("desired_size", props.get("scaling_config", "1").split()[0] if props.get("scaling_config") else 1))
+            raw_desired = props.get("desired_size") or (
+                (str(props.get("scaling_config") or "").split() or [None])[0])
+            # The same raw text as the EBS attributes: var.nodes must not raise.
+            desired = max(1, int(as_number(raw_desired, None) or 1))
             per_node = _ec2_monthly(itype, multiplier)
             monthly = round(per_node * desired, 2)
             breakdown["nodes"] = monthly
@@ -189,11 +235,11 @@ def estimate_changes(
         else:
             confidence = "low"
 
-        if monthly == 0 and confidence == "low":
-            continue  # skip unknowns with no estimate
+        if monthly == 0 and confidence == "low" and not notes:
+            continue  # skip unknowns with no estimate and nothing to say about them
 
         # For removals, cost is negative (savings)
-        if action == "remove":
+        if action == "remove" and monthly:
             monthly = -monthly
 
         if rates.has_private_pricing and rates.confidence != "low":

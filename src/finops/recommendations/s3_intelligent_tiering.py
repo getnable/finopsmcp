@@ -94,7 +94,16 @@ def _bucket_storage_stats(
     Returns (object_count, total_size_bytes). Both may be None if metrics are
     not available (bucket-level metrics must be explicitly enabled in S3), and
     a series that could not be read counts as not available.
+
+    If ANY of the bucket's series could not be read, both come back None. The
+    size is a sum over six storage classes, and summing the ones that read
+    while one failed returned a partial size as if it were the whole bucket:
+    small enough, next to a full object count, to call a bucket's
+    Intelligent-Tiering waste on the strength of a throttled read.
     """
+    if _bucket_read_failed(series, bucket_name):
+        return None, None
+
     def _latest(key) -> float | None:
         values = series.get(key)
         return values[-1] if values else None   # oldest first
@@ -116,6 +125,13 @@ def _bucket_storage_stats(
         total_size_bytes = size_sum
 
     return object_count, total_size_bytes
+
+
+def _bucket_read_failed(series: dict, bucket_name: str) -> bool:
+    """Whether any of the bucket's size or count series failed to read. A
+    series that read empty ([]) is a real answer: the bucket holds nothing in
+    that class. None, or a series never asked for, is not."""
+    return any(series.get(q.key) is None for q in _bucket_storage_queries(bucket_name))
 
 
 def _has_intelligent_tiering(s3_client: Any, bucket_name: str) -> bool:
@@ -231,7 +247,11 @@ async def audit_s3_intelligent_tiering(
         # < 8%  -> clearly worth it. 8-100% -> marginal (review). >= 100% (or no
         # savings) -> the fee meets/exceeds the benefit, IT is waste here.
         monitoring_pct_of_savings: float | None = None
-        if monthly_monitoring_cost is None:
+        if monthly_monitoring_cost is None and _bucket_read_failed(series, bucket_name):
+            recommendation = "UNKNOWN_metrics_could_not_be_read"
+            roi_summary = ("The bucket's CloudWatch storage metrics could not all be read "
+                           "(throttled or denied), so its Intelligent-Tiering ROI is not assessed.")
+        elif monthly_monitoring_cost is None:
             recommendation = "UNKNOWN_enable_bucket_metrics_for_analysis"
             roi_summary = "Enable S3 bucket-level metrics to assess Intelligent-Tiering ROI."
         elif estimated_storage_savings <= 0:

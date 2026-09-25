@@ -15,13 +15,15 @@ import asyncio
 import logging
 from typing import Any
 
+from ..aws_prices import PUBLIC_IPV4_HOURLY, PUBLIC_IPV4_PER_MONTH
 from .envelope import MEASURED, Finding
 
 log = logging.getLogger(__name__)
 
 # AWS pricing since Feb 1 2024. AWS bills a 730-hour average month (8760/12).
-IPV4_HOURLY_RATE: float = 0.005
-IPV4_MONTHLY_RATE: float = IPV4_HOURLY_RATE * 730  # $3.65/mo
+# Single-sourced in aws_prices; the names stay for anything importing them here.
+IPV4_HOURLY_RATE: float = PUBLIC_IPV4_HOURLY
+IPV4_MONTHLY_RATE: float = PUBLIC_IPV4_PER_MONTH  # $3.65/mo
 
 
 def _make_ec2(session_or_none, region: str):

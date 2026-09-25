@@ -28,6 +28,8 @@ is told is an estimate.
 """
 from __future__ import annotations
 
+import math
+
 # AWS's own convention for a "month" in pricing examples: 365 * 24 / 12. Using
 # 720 (30 days) instead understates every monthly figure by 1.4%, which is
 # invisible per resource and material across a fleet.
@@ -137,16 +139,41 @@ EBS_IO2_IOPS_TIERS: tuple[tuple[float, float], ...] = (
 )
 
 
+def as_number(value: object, default: float | None = 0.0) -> float | None:
+    """A float from whatever an IaC parser handed over, or `default` (0.0).
+
+    The PR-comment parser passes attribute values through as raw text, so a
+    Terraform reference (var.data_iops) or a value with a trailing comment
+    (3000 # burst) reaches the price functions as a string. float() on that
+    raised, and one unreadable attribute cost the whole PR comment. An
+    unreadable quantity is priced as nothing provisioned, which for IOPS and
+    throughput is the free baseline. A caller that needs to tell "not a
+    number" from zero passes default=None.
+    """
+    if value is None or isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        number = float(value)
+    else:
+        text = str(value).split("#", 1)[0].split("//", 1)[0].strip().strip("\"'").strip()
+        try:
+            number = float(text)
+        except ValueError:
+            return default
+    return number if math.isfinite(number) else default
+
+
 def ebs_volume_monthly(vol_type: str | None, size_gb: float,
                        iops: float | None = None, throughput: float | None = None) -> float:
     """List-price monthly cost of one EBS volume: storage plus any billed IOPS
-    and throughput. Unknown types price as gp2, the most common legacy default."""
-    vt = (vol_type or "gp2").lower()
-    total = (size_gb or 0) * EBS_PER_GB_MONTH.get(vt, EBS_PER_GB_MONTH["gp2"])
-    iops = float(iops or 0)
+    and throughput. Unknown types price as gp2, the most common legacy default.
+    A size, IOPS or throughput that is not a number counts as 0."""
+    vt = str(vol_type or "gp2").strip().lower()
+    total = as_number(size_gb) * EBS_PER_GB_MONTH.get(vt, EBS_PER_GB_MONTH["gp2"])
+    iops = as_number(iops)
     if vt == "gp3":
         total += max(0.0, iops - EBS_GP3_FREE_IOPS) * EBS_GP3_PER_IOPS_MONTH
-        total += max(0.0, float(throughput or 0) - EBS_GP3_FREE_MIBPS) * EBS_GP3_PER_MIBPS_MONTH
+        total += max(0.0, as_number(throughput) - EBS_GP3_FREE_MIBPS) * EBS_GP3_PER_MIBPS_MONTH
     elif vt == "io1":
         total += iops * EBS_IO1_PER_IOPS_MONTH
     elif vt == "io2":
@@ -273,7 +300,7 @@ RDS_HOURLY: dict[str, float] = {
     "db.t4g.micro": 0.016, "db.t4g.small": 0.032, "db.t4g.medium": 0.065,
     "db.t4g.large": 0.129,
     "db.m5.large": 0.171, "db.m5.xlarge": 0.342, "db.m5.2xlarge": 0.684,
-    "db.m5.4xlarge": 1.368, "db.m5.8xlarge": 2.74, "db.m5.12xlarge": 4.104,
+    "db.m5.4xlarge": 1.368, "db.m5.8xlarge": 2.736, "db.m5.12xlarge": 4.104,
     "db.m6i.large": 0.171, "db.m6i.xlarge": 0.342, "db.m6i.2xlarge": 0.684,
     "db.m6g.large": 0.152, "db.m6g.xlarge": 0.304, "db.m6g.2xlarge": 0.608,
     "db.r5.large": 0.24, "db.r5.xlarge": 0.48, "db.r5.2xlarge": 0.96,
