@@ -342,3 +342,97 @@ def test_the_spend_summary_promises_nothing_status_does_not_do(tmp_path):
     assert st["verdict_basis"] == "spend"
     assert "Admin key" not in st["summary"] and "exact spend" not in st["summary"]
     assert "estimated at list price of your $100 spend cap" in st["summary"]
+
+
+# ── the per-transcript parse cache ───────────────────────────────────────────
+#
+# The guard re-read every transcript of the month on each tool call when a
+# monthly cap was set. Each transcript's parse is now kept in the data dir and
+# reused while the file is unchanged, or extended when it has only grown.
+
+def _append(f, records, partial=None):
+    with f.open("a") as fh:
+        for r in records:
+            fh.write(json.dumps(r) + "\n")
+        if partial is not None:
+            fh.write(partial)
+
+
+def test_an_unchanged_transcript_is_not_parsed_again(tmp_path, monkeypatch):
+    now = time.time()
+    _write_session(tmp_path / "claude", [_block(now - 60, "m1", "r1", tout=10)])
+    assert ab.read_agent_usage(now - 3600)["messages"] == 1
+    parsed = []
+    real = ab._parse_usage_line
+    monkeypatch.setattr(ab, "_parse_usage_line",
+                        lambda *a: parsed.append(a) or real(*a))
+    u = ab.read_agent_usage(now - 3600)
+    assert (u["messages"], u["output_tokens"], parsed) == (1, 10, [])
+
+
+def test_a_grown_transcript_is_read_from_where_it_stopped(tmp_path, monkeypatch):
+    now = time.time()
+    f = _write_session(tmp_path / "claude", [_block(now - 60, "m1", "r1", tout=10)])
+    ab.read_agent_usage(now - 3600)
+    parsed = []
+    real = ab._parse_usage_line
+    monkeypatch.setattr(ab, "_parse_usage_line",
+                        lambda *a: parsed.append(a) or real(*a))
+    # The same response's next block, a new response, and a line still being written.
+    partial = json.dumps(_block(now - 20, "m3", "r3", tout=7))
+    _append(f, [_block(now - 60, "m1", "r1", tout=99), _block(now - 30, "m2", "r2", tout=5)],
+            partial=partial[:40])
+    u = ab.read_agent_usage(now - 3600)
+    assert len(parsed) == 2                          # only the two new whole lines
+    assert (u["messages"], u["output_tokens"]) == (2, 99 + 5)
+    _append(f, [], partial=partial[40:] + "\n")
+    u = ab.read_agent_usage(now - 3600)
+    assert (u["messages"], u["output_tokens"]) == (3, 99 + 5 + 7)
+
+
+def test_a_rewritten_transcript_is_read_again_whole(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [_block(now - 60, "m1", "r1", tout=10)])
+    ab.read_agent_usage(now - 3600)
+    # Rewritten in place, same size and the same last line position.
+    _write_session(tmp_path / "claude", [_block(now - 60, "m9", "r9", tout=20)])
+    u = ab.read_agent_usage(now - 3600)
+    assert (u["messages"], u["output_tokens"]) == (1, 20)
+    _write_session(tmp_path / "claude", [_block(now - 60, "m8", "r8", tout=3)] * 2)
+    assert ab.read_agent_usage(now - 3600)["output_tokens"] == 3
+
+
+def test_a_response_in_two_transcripts_still_counts_once_from_the_cache(tmp_path):
+    """A resumed session copies the conversation it resumes into its own
+    transcript. The dedupe is per response across files, so the cache keeps
+    each file's responses, not a per-file total."""
+    now = time.time()
+    proj = tmp_path / "claude" / "projects" / "-Users-x-proj"
+    proj.mkdir(parents=True)
+    for name in ("sess-a.jsonl", "sess-b.jsonl"):
+        (proj / name).write_text(json.dumps(_block(now - 60, "m1", "r1", tout=10)) + "\n")
+    for _ in range(2):                               # cold, then from the cache
+        u = ab.read_agent_usage(now - 3600)
+        assert (u["messages"], u["output_tokens"]) == (1, 10)
+
+
+def test_the_cache_serves_every_window_and_session(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _block(now - 7200, "m1", "r1", tout=10, session="sess-a"),
+        _block(now - 60, "m2", "r2", tout=20, session="sess-b"),
+    ])
+    assert ab.read_agent_usage(0)["output_tokens"] == 30
+    assert ab.read_agent_usage(now - 3600)["output_tokens"] == 20      # window from the cache
+    assert ab.read_agent_usage(0)["output_tokens"] == 30
+
+
+def test_the_cache_drops_entries_for_transcripts_that_are_gone(tmp_path):
+    now = time.time()
+    f = _write_session(tmp_path / "claude", [_block(now - 60, "m1", "r1", tout=10)])
+    ab.read_agent_usage(now - 3600)
+    shards = tmp_path / "data" / "ai-budget-tally"
+    assert len(list(shards.iterdir())) == 1
+    f.unlink()
+    assert ab.read_agent_usage(now - 3600)["messages"] == 0
+    assert list(shards.iterdir()) == []

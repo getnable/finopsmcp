@@ -287,61 +287,217 @@ def _responses(proj: Path, since_epoch: float,
     because output_tokens grows as the blocks stream. Keyed on the response, the
     last line wins, and it holds the final output count. A line with no message
     id (older logs) is its own response.
+
+    The same response can sit in more than one transcript (a resumed session
+    copies the conversation it resumes), so the key is shared across files and
+    the last file read wins, as it did before each file's parse was cached.
     """
     seen: dict[Any, dict[str, Any]] = {}
-    for path in _transcripts(proj, session_id):
+    paths = _transcripts(proj, session_id)
+    cache = _TallyCache.open()
+    for path in paths:
         try:
-            if path.stat().st_mtime < since_epoch - 1:
-                continue  # whole file is older than the window
+            st = path.stat()
         except OSError:
             continue
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as fh:
-                for lineno, line in enumerate(fh):
-                    if '"usage"' not in line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except ValueError:
-                        continue
-                    ts = _rec_epoch(rec.get("timestamp"))
-                    if ts is None or ts < since_epoch:
-                        continue
-                    msg = rec.get("message") or {}
-                    usage = msg.get("usage") or {}
-                    if not usage:
-                        continue
-                    ti = int(usage.get("input_tokens", 0) or 0)
-                    to = int(usage.get("output_tokens", 0) or 0)
-                    cw = int(usage.get("cache_creation_input_tokens", 0) or 0)
-                    cr = int(usage.get("cache_read_input_tokens", 0) or 0)
-                    if ti == to == cw == cr == 0:
-                        continue
-                    session = str(rec.get("sessionId") or _path_session(path))
-                    if session_id and session != session_id:
-                        continue
-                    # Claude Code writes its main-thread cache with the 1-hour TTL,
-                    # billed at 2x input against 1.25x for the 5-minute one. The
-                    # split is in usage.cache_creation; anything it does not
-                    # account for is priced as a 5-minute write.
-                    split = usage.get("cache_creation")
-                    cw_1h = 0
-                    if isinstance(split, dict):
-                        cw_1h = min(cw, int(split.get("ephemeral_1h_input_tokens", 0) or 0))
-                    key = ((msg.get("id"), rec.get("requestId")) if msg.get("id")
-                           else (str(path), lineno))
-                    seen[key] = {
-                        "ts": ts, "model": str(msg.get("model", "") or "unknown"),
-                        "input": ti, "output": to, "cache_write": cw, "cache_read": cr,
-                        "cache_write_1h": cw_1h,
-                        "fast": usage.get("speed") == "fast",
-                        "us_only": usage.get("inference_geo") == "us",
-                        "session": session, "cwd": rec.get("cwd"),
-                        "harness": harness_usage.HARNESS_CLAUDE,
-                    }
-        except OSError:
-            continue
+        if st.st_mtime < since_epoch - 1:
+            continue  # whole file is older than the window
+        for key, r in _file_responses(path, st, cache).items():
+            if r["ts"] < since_epoch or (session_id and r["session"] != session_id):
+                continue
+            seen[key] = r
+    if cache is not None and not session_id:
+        cache.prune(paths)
     return list(seen.values())
+
+
+def _parse_usage_line(line: bytes, path: Path, lineno: int) -> tuple[Any, dict] | None:
+    """(response key, record) for one transcript line, or None when the line
+    carries no usage. Nothing here depends on the window or the session asked
+    for, so a file's parse can be kept and reused (see _TallyCache)."""
+    if b'"usage"' not in line:
+        return None
+    try:
+        rec = json.loads(line.decode("utf-8", errors="ignore"))
+    except ValueError:
+        return None
+    if not isinstance(rec, dict):
+        return None
+    ts = _rec_epoch(rec.get("timestamp"))
+    if ts is None:
+        return None
+    msg = rec.get("message") or {}
+    usage = msg.get("usage") or {} if isinstance(msg, dict) else {}
+    if not usage or not isinstance(usage, dict):
+        return None
+    ti = int(usage.get("input_tokens", 0) or 0)
+    to = int(usage.get("output_tokens", 0) or 0)
+    cw = int(usage.get("cache_creation_input_tokens", 0) or 0)
+    cr = int(usage.get("cache_read_input_tokens", 0) or 0)
+    if ti == to == cw == cr == 0:
+        return None
+    session = str(rec.get("sessionId") or _path_session(path))
+    # Claude Code writes its main-thread cache with the 1-hour TTL,
+    # billed at 2x input against 1.25x for the 5-minute one. The
+    # split is in usage.cache_creation; anything it does not
+    # account for is priced as a 5-minute write.
+    split = usage.get("cache_creation")
+    cw_1h = 0
+    if isinstance(split, dict):
+        cw_1h = min(cw, int(split.get("ephemeral_1h_input_tokens", 0) or 0))
+    key = ((msg.get("id"), rec.get("requestId")) if msg.get("id")
+           else (str(path), lineno))
+    return key, {
+        "ts": ts, "model": str(msg.get("model", "") or "unknown"),
+        "input": ti, "output": to, "cache_write": cw, "cache_read": cr,
+        "cache_write_1h": cw_1h,
+        "fast": usage.get("speed") == "fast",
+        "us_only": usage.get("inference_geo") == "us",
+        "session": session, "cwd": rec.get("cwd"),
+        "harness": harness_usage.HARNESS_CLAUDE,
+    }
+
+
+def _file_responses(path: Path, st: os.stat_result,
+                    cache: _TallyCache | None) -> dict[Any, dict[str, Any]]:
+    """Every response one transcript holds, key -> its last line's record.
+
+    From the cache when the file is unchanged; when it has only grown (Claude
+    Code appends), from the cached parse plus the new lines; otherwise, or
+    without a cache, read whole."""
+    entry = cache.get(path) if cache is not None else None
+    out: dict[Any, dict[str, Any]] = {}
+    offset = lines = 0
+    if entry is not None:
+        if entry.unchanged(path, st):
+            return entry.responses
+        if entry.grew(path, st):
+            out, offset, lines = dict(entry.responses), entry.offset, entry.lines
+    tail = b""
+    try:
+        with path.open("rb") as fh:
+            fh.seek(offset)
+            for line in fh:
+                if not line.endswith(b"\n"):
+                    break          # a line still being written: read it next time
+                hit = _parse_usage_line(line, path, lines)
+                if hit is not None:
+                    out[hit[0]] = hit[1]
+                lines += 1
+                offset += len(line)
+                tail = line
+    except OSError:
+        return out
+    if cache is not None:
+        cache.put(path, st, out, offset, lines, tail)
+    return out
+
+
+class _TallyEntry:
+    __slots__ = ("size", "mtime_ns", "ino", "offset", "lines", "tail", "responses")
+
+    def __init__(self, data: dict[str, Any]):
+        self.size = int(data["size"])
+        self.mtime_ns = int(data["mtime_ns"])
+        self.ino = int(data["ino"])
+        self.offset = int(data["offset"])
+        self.lines = int(data["lines"])
+        self.tail = bytes.fromhex(data["tail"])
+        self.responses = {_TallyCache.key_in(k): r for k, r in data["responses"]}
+
+    def _tail_in_place(self, path: Path) -> bool:
+        """The last line the cached parse read still sits where it ended. A
+        cheap guard against a file rewritten in place to the same size within
+        the filesystem's timestamp resolution."""
+        if not self.tail:
+            return True
+        try:
+            with path.open("rb") as fh:
+                fh.seek(self.offset - len(self.tail))
+                return fh.read(len(self.tail)) == self.tail
+        except OSError:
+            return False
+
+    def unchanged(self, path: Path, st: os.stat_result) -> bool:
+        return ((st.st_size, st.st_mtime_ns, st.st_ino) == (self.size, self.mtime_ns, self.ino)
+                and self._tail_in_place(path))
+
+    def grew(self, path: Path, st: os.stat_result) -> bool:
+        """The same file with lines appended (Claude Code only appends to a
+        transcript): same inode, larger, and the parse's last line in place."""
+        return (st.st_ino == self.ino and st.st_size > self.offset and bool(self.tail)
+                and self._tail_in_place(path))
+
+
+class _TallyCache:
+    """Each transcript's parsed responses, kept in the data dir so the guard
+    does not re-read a month of transcripts on every tool call (1.6 s on
+    386 MB of them) when a monthly cap is set.
+
+    One file per transcript under ai-budget-tally/, named by a hash of its
+    path and written atomically, so a growing transcript rewrites only its own
+    entry. An entry is used as-is while the transcript's size, mtime and inode
+    are unchanged, and extended from where it stopped when the file has only
+    grown. Keys stay per response, not per-file totals: the same response can
+    be in two transcripts, and _responses dedupes across files."""
+
+    VERSION = 1
+
+    def __init__(self, root: Path):
+        self.root = root
+
+    @classmethod
+    def open(cls) -> _TallyCache | None:
+        try:
+            root = _data_dir() / "ai-budget-tally"
+            root.mkdir(exist_ok=True)
+            return cls(root)
+        except OSError:
+            return None
+
+    @staticmethod
+    def _name(path: Path) -> str:
+        import hashlib
+        return hashlib.sha256(str(path).encode("utf-8", "surrogateescape")).hexdigest()[:40]
+
+    @staticmethod
+    def key_in(k: list) -> Any:
+        return tuple(k)
+
+    def get(self, path: Path) -> _TallyEntry | None:
+        try:
+            data = json.loads((self.root / f"{self._name(path)}.json").read_text())
+            if data.get("v") != self.VERSION or data.get("path") != str(path):
+                return None
+            return _TallyEntry(data)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return None
+
+    def put(self, path: Path, st: os.stat_result, responses: dict[Any, dict[str, Any]],
+            offset: int, lines: int, tail: bytes) -> None:
+        if not tail:
+            entry = self.get(path)
+            # Nothing new was read: keep the line the old parse ended on.
+            tail = entry.tail if entry is not None and entry.offset == offset else b""
+        data = {"v": self.VERSION, "path": str(path), "size": st.st_size,
+                "mtime_ns": st.st_mtime_ns, "ino": st.st_ino, "offset": offset,
+                "lines": lines, "tail": tail[-256:].hex(),
+                "responses": [[list(k), r] for k, r in responses.items()]}
+        try:
+            harness_usage.write_json_atomic(self.root / f"{self._name(path)}.json", data)
+        except (OSError, TypeError, ValueError):
+            pass
+
+    def prune(self, paths: list[Path]) -> None:
+        """Drop the entries of transcripts that are gone."""
+        keep = {f"{self._name(p)}.json" for p in paths}
+        try:
+            for f in self.root.iterdir():
+                if f.suffix == ".json" and f.name not in keep:
+                    with contextlib.suppress(OSError):
+                        f.unlink()
+        except OSError:
+            pass
 
 
 _SESSIONS_LISTED = 20

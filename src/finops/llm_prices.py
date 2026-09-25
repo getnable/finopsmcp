@@ -23,6 +23,7 @@ negotiated discounts, batch, and credits all move the real number.
 """
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass
 
@@ -195,6 +196,9 @@ _VERTEX_VERSION = re.compile(r"@[a-z0-9]+$")                  # @20250929
 _DATE_SUFFIX = re.compile(r"-20\d{6}$")                       # -20250929
 
 
+# Pure, and asked once per response when the AI budget tallies a month of
+# transcripts: a few distinct model ids, tens of thousands of calls.
+@functools.lru_cache(maxsize=1024)
 def canonical_model(raw: str) -> str:
     """The id a model is known by in MODEL_PRICES, whether or not it is priced.
 
