@@ -6,7 +6,8 @@ subscription or metered API, and what you pay), then remembers. After that, bare
 budget, this session against its cap, burn rate, and what each model and each
 session cost. Flags (--plan-cost / --spend-cap / --tokens / --session-cap) skip
 the questions for scripts. Numbers come from finops.ai_budget: real local token usage from Claude
-Code's session logs. Nothing leaves your machine.
+Code's session logs and Codex CLI's rollouts, split by agent. Nothing leaves your machine, except
+that Cursor's usage is read from its Admin API when CURSOR_ADMIN_API_KEY is set.
 """
 from __future__ import annotations
 
@@ -52,20 +53,45 @@ def _num(raw: str) -> float:
         return 0.0
 
 
+def _count(raw: str) -> int:
+    """argparse type for --tokens: '60m', '500k', '1,500,000', the shorthand
+    the setup questions take. An error, not 0, for anything else."""
+    import argparse
+
+    s = raw.strip().lower().replace(",", "").replace("_", "").replace(" ", "")
+    mult = 1.0
+    if s and s[-1] in "kmb":
+        mult = {"k": 1e3, "m": 1e6, "b": 1e9}[s[-1]]
+        s = s[:-1]
+    try:
+        return int(float(s) * mult)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"not a token count: {raw!r} (e.g. 60m, 500k, 1500000)") from None
+
+
+# What a script with no budget is told, in place of "run nable ai-budget": it
+# just did, and without a terminal there are no questions to answer.
+_SET_WITH_FLAGS = ("Set one with --plan-cost USD (flat plan) or --spend-cap USD (metered "
+                   "API); --tokens N and --session-cap USD work with either.")
+
+
 def add_parser(sub) -> None:
     p = sub.add_parser(
         "ai-budget",
         help="Set and check a local budget for your AI coding agent",
         description="A local budget for your coding agent's own spend. First run asks "
-                    "two questions; after that it just reports. Reads Claude Code usage "
-                    "locally, nothing leaves your machine.",
+                    "two questions; after that it just reports. Reads Claude Code and Codex "
+                    "CLI usage locally, nothing leaves your machine (Cursor usage too, "
+                    "from its Admin API, when CURSOR_ADMIN_API_KEY is set).",
     )
     p.add_argument("--plan-cost", type=float, metavar="USD",
                    help="Flat plan: what you pay per month, any number, e.g. --plan-cost 100")
     p.add_argument("--spend-cap", type=float, metavar="USD",
                    help="Metered API: monthly dollar cap, e.g. --spend-cap 2500")
-    p.add_argument("--tokens", type=int, metavar="N",
-                   help="Usage cap: warn before N billable tokens/month (either mode)")
+    p.add_argument("--tokens", type=_count, metavar="N",
+                   help="Usage cap: warn before N billable tokens/month (either mode), "
+                        "e.g. --tokens 60m")
     p.add_argument("--session-cap", type=float, metavar="USD",
                    help="Per-task cap: what one agent session may spend at list price, "
                         "e.g. --session-cap 40 (0 clears)")
@@ -99,6 +125,9 @@ def _interactive_setup(ab, out) -> None:
     except (EOFError, KeyboardInterrupt):
         print(file=out)
         return
+    except ValueError as e:                     # a negative amount
+        print(f"  {e}", file=out)
+        return
     print(file=out)
 
 
@@ -107,19 +136,47 @@ def run(args) -> int:
 
     out = sys.stdout
 
+    session_cap = getattr(args, "session_cap", None)
+    # A negative cap is a typo, not "clear it" (0 does that). Checked before
+    # anything is written, --reset included.
+    for flag, value in (("--plan-cost", args.plan_cost), ("--spend-cap", args.spend_cap),
+                        ("--tokens", args.tokens), ("--session-cap", session_cap)):
+        if value is not None and value < 0:
+            print(f"  {flag} cannot be negative ({value:g}); pass 0 to clear it, "
+                  f"nothing was saved.", file=sys.stderr)
+            return 2
+
     if getattr(args, "reset", False):
         ab.reset_budget()
 
-    session_cap = getattr(args, "session_cap", None)
     gave_flags = (args.plan_cost is not None or args.spend_cap is not None
                   or args.tokens is not None or session_cap is not None)
+    notes: list[str] = []
     if gave_flags:
-        ab.set_budget(plan_cost=args.plan_cost, spend_cap=args.spend_cap,
+        before = ab.get_budget()["mode"]
+        # A plan cost means a flat plan and a spend cap a metered one, so either
+        # flag alone sets the mode it belongs to. Leaving a metered budget
+        # metered after --plan-cost saved a number nothing would ever read.
+        mode = None
+        if args.plan_cost and args.spend_cap is None:
+            mode = "flat"
+        elif args.spend_cap and args.plan_cost is None:
+            mode = "metered"
+        ab.set_budget(mode=mode, plan_cost=args.plan_cost, spend_cap=args.spend_cap,
                       monthly_tokens=args.tokens, session_cap=session_cap)
+        after = ab.get_budget()["mode"]
+        if before and after != before:
+            notes.append(f"switched from {before} to {after}.")
+        if args.plan_cost and args.spend_cap:
+            gate = "--spend-cap" if after == "metered" else "--plan-cost"
+            notes.append(f"both --plan-cost and --spend-cap given: "
+                         f"{'still' if after == before else 'now'} {after}, so {gate} "
+                         f"is the one that counts. Pass the other alone to switch.")
 
     # First run, nothing set, a real terminal: ask instead of making them read flags.
+    terminal = sys.stdin.isatty() and out.isatty()
     if (not gave_flags and not getattr(args, "json", False)
-            and not ab.get_budget()["mode"] and sys.stdin.isatty() and out.isatty()):
+            and not ab.get_budget()["mode"] and terminal):
         _interactive_setup(ab, out)
 
     st = ab.status()
@@ -133,15 +190,20 @@ def run(args) -> int:
     verdict = st["verdict"]
     vcolor = {"ok": _OK, "warn": _WARN, "over": _OVER}[verdict]
 
+    capped = b["session_cap"] > 0 or bool(b["session_caps"])
     label = st["plan_label"] or {"flat": "subscription", "metered": "metered API"}.get(
-        mode, "per-session cap" if (st.get("session") or {}).get("cap_usd") else "no budget set")
+        mode, "per-session cap" if capped else "no budget set")
     print(_c("nable ai-budget", _BOLD) + _c(f"  ·  {label}", _DIM), file=out)
+    for note in notes:
+        print(_c(f"  {note}", _ACCENT), file=out)
     if not w["source_present"]:
-        # A dead end otherwise. Claude Code is the only provider readable with no
-        # key, so someone on Cursor, Windsurf, Zed or a plain API sees nothing but
+        # A dead end otherwise. Claude Code and Codex are the only agents readable
+        # with no key, so someone on Cursor, Windsurf, Zed or a plain API sees nothing but
         # zeros here and has no reason to look further. Name the next move.
-        print(_c("  no Claude Code usage found yet (looked in ~/.claude/projects).", _DIM), file=out)
-        print(_c("  Not on Claude Code? Meter the provider you pay:", _DIM), file=out)
+        print(_c("  no Claude Code usage found yet (looked in ~/.claude/projects),", _DIM), file=out)
+        print(_c("  and no Codex CLI usage (looked in ~/.codex/sessions).", _DIM), file=out)
+        print(_c("  On a Cursor team? Set CURSOR_ADMIN_API_KEY to read its usage.", _DIM), file=out)
+        print(_c("  Another agent? Meter the provider you pay:", _DIM), file=out)
         print("  " + _c("nable connect openai", _ACCENT) + _c("   (or anthropic, openrouter,", _DIM), file=out)
         print(_c("                          litellm, modal, together, replicate, cohere, mistral)", _DIM), file=out)
 
@@ -164,10 +226,14 @@ def run(args) -> int:
         row("cost / 1M", f"~${lst:,.2f} at list price (est.)")
 
     sub = st["subsidy"]
-    pct = (st["pct_of_budget"] or 0) * 100
+    # The month's rows show the month's standing. st["verdict"] can be the
+    # session's (a session past its cap), which belongs on the session row.
+    m_verdict = st.get("month_verdict", verdict)
+    m_color = {"ok": _OK, "warn": _WARN, "over": _OVER}[m_verdict]
     if mode == "metered" and b["spend_cap"] > 0:
+        pct = st["est_usd_mtd_list_price"] / b["spend_cap"] * 100
         row("spend cap", f"~${st['est_usd_mtd_list_price']:,.0f} est of ${b['spend_cap']:,.0f}  ·  "
-                         f"{_c(verdict.upper(), vcolor)} ({pct:.0f}%)")
+                         f"{_c(m_verdict.upper(), m_color)} ({pct:.0f}%)")
     elif mode == "flat" and b["plan_cost"] > 0:
         # Always confirm the configured plan, even with no usage yet. The subsidy
         # multiple only appears once there is usage to value against it.
@@ -175,11 +241,14 @@ def run(args) -> int:
                  if sub and sub.get("multiple") else "")
         row("your plan", f"${b['plan_cost']:,.0f}/mo flat{extra}")
     if b["monthly_tokens"] > 0:
+        on_tokens = st.get("month_verdict_basis", st["verdict_basis"]) == "tokens"
         row("usage cap", f"{_tok(st['billable_tokens_mtd'])} of {_tok(b['monthly_tokens'])} tokens  ·  "
-                         f"{_c(verdict.upper() if st['verdict_basis'] == 'tokens' else 'tracking', vcolor if st['verdict_basis'] == 'tokens' else _DIM)}"
+                         f"{_c(m_verdict.upper() if on_tokens else 'tracking', m_color if on_tokens else _DIM)}"
                          f" ({st['billable_tokens_mtd']/b['monthly_tokens']*100:.0f}%)")
     if not mode:
-        row("budget", _c("not set · run `nable ai-budget` to set one", _DIM))
+        row("budget", _c("not set · run `nable ai-budget` to set one" if terminal else
+                         "not set · pass --plan-cost USD (flat plan) or --spend-cap USD "
+                         "(metered API)", _DIM))
     sess = st.get("session")
     if sess and (sess["messages"] or sess["cap_usd"]):
         # "latest session" when the id is a guess from transcript times rather
@@ -194,18 +263,25 @@ def run(args) -> int:
         else:
             row(lbl, f"{spent} · {sess['messages']} msgs  "
                      + _c("· no session cap (--session-cap USD)", _DIM))
+    elif b["session_cap"] > 0:
+        # No session to measure yet. Still confirm the cap that was just saved.
+        row("session cap", f"${b['session_cap']:,.2f} for every session  ·  "
+                           + _c("no session usage yet", _DIM))
     row("burn rate", f"~{_tok(st['burn_tokens_per_hour'])} tokens/hour")
 
     _breakdown(st, out, month=getattr(args, "month", False))
 
     print(file=out)
-    print("  " + _c(st["summary"], vcolor), file=out)
+    summary = st["summary"] if terminal else st["summary"].replace(ab.SET_BUDGET_HINT,
+                                                                   _SET_WITH_FLAGS)
+    print("  " + _c(summary, vcolor), file=out)
     print(_c("  local · exact token counts · dollars are list-price estimates at each "
              "model's rate, not your bill", _DIM), file=out)
     return 0
 
 
 _TOP_SESSIONS = 5
+_HARNESS_LABELS = {"claude-code": "Claude Code", "codex": "Codex CLI", "cursor": "Cursor"}
 
 
 def _breakdown(st: dict, out, month: bool) -> None:
@@ -217,6 +293,13 @@ def _breakdown(st: dict, out, month: bool) -> None:
     total = u["usd_equivalent"] or 0.0
     unpriced = u.get("unpriced_models") or {}
     print(file=out)
+    harnesses = u.get("cost_by_harness") or {}
+    if harnesses:
+        print(_c(f"  by agent, {period}", _DIM), file=out)
+        hwidth = max(len(_HARNESS_LABELS.get(h, h)) for h in harnesses)
+        for h, usd in harnesses.items():
+            share = f"{usd / total * 100:3.0f}%" if total else "  -"
+            print(f"    {_HARNESS_LABELS.get(h, h).ljust(hwidth)}  {_usd(usd)}  {share}", file=out)
     print(_c(f"  by model, {period}", _DIM), file=out)
     width = max(len(m) for m in u["cost_by_model"])
     for model, usd in u["cost_by_model"].items():
@@ -233,11 +316,14 @@ def _breakdown(st: dict, out, month: bool) -> None:
     print(_c(f"  by session, {period}{more}", _DIM), file=out)
     cur = st.get("session") or {}
     this_id = cur.get("id") if cur.get("id_source") != "latest_activity" else None
+    several = len(harnesses) > 1
     for sid, v in shown:
         tag = _c("  (this session)", _ACCENT) if sid == this_id else ""
+        agent = (f"  {_HARNESS_LABELS.get(v.get('harness'), v.get('harness') or '-')}"
+                 if several else "")
         print(f"    {_usd(v['usd_equivalent'])}  {(v.get('project') or '-')[:18].ljust(18)}"
               f"  {sid[:8]}  {_span(v['first_activity'], v['last_activity'])}"
-              f"  {v['messages']} msgs{tag}", file=out)
+              f"  {v['messages']} msgs{agent}{tag}", file=out)
 
 
 def _usd(usd: float) -> str:

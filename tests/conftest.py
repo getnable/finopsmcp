@@ -60,6 +60,19 @@ def _no_ambient_service_creds(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_agent_usage(monkeypatch, tmp_path_factory):
+    """The AI budget reads every agent harness on the machine: Claude Code's
+    transcripts (tests point CLAUDE_CONFIG_DIR at a sandbox), Codex CLI's
+    rollouts under CODEX_HOME, and Cursor's Admin API when a key is set. A dev
+    box with a real ~/.codex, a Codex session id in its environment, or a
+    Cursor key must not leak its usage (or a network call) into a unit test.
+    Tests that exercise those readers set their own values on top."""
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path_factory.mktemp("codex-home")))
+    for var in ("CODEX_SESSION_ID", "CURSOR_ADMIN_API_KEY", "CURSOR_ADMIN_USER_EMAIL"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _no_test_may_spend_money():
     """Hard block on every billed AWS API call for the whole test session.

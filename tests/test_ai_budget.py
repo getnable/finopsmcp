@@ -280,3 +280,65 @@ def test_empty_state_names_a_next_step_for_non_claude_code_users(capsys):
     assert "nable connect openai" in out, "empty state offers no next step"
     for provider in ("anthropic", "openrouter", "litellm", "mistral"):
         assert provider in out, f"{provider} missing from the connect hint"
+
+
+def test_the_fallback_cache_rates_follow_the_fallback_input_rate(tmp_path, monkeypatch):
+    """Someone who sets FINOPS_AI_USD_PER_MTOK_IN to what their model costs
+    should not have its cache writes and reads priced at Sonnet's rates."""
+    monkeypatch.setenv("FINOPS_AI_USD_PER_MTOK_IN", "10")
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 60, cwrite=1_000_000, cread=1_000_000, model="claude-nova-9"),
+    ])
+    # 1.25x input to write, 0.1x input to read: $12.50 + $1.00.
+    assert ab.read_agent_usage(now - 3600)["usd_equivalent"] == 13.5
+    monkeypatch.setenv("FINOPS_AI_USD_PER_MTOK_CACHE_READ", "0.5")
+    assert ab.read_agent_usage(now - 3600)["usd_equivalent"] == 13.0
+
+
+def test_the_unpriced_note_names_every_rate_it_used(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 60, tin=1_000_000, model="claude-nova-9"),
+    ])
+    note = ab.read_agent_usage(now - 3600)["unpriced_note"]
+    assert "FINOPS_AI_USD_PER_MTOK_IN/OUT" in note
+    assert "FINOPS_AI_USD_PER_MTOK_CACHE_WRITE" in note
+    assert "FINOPS_AI_USD_PER_MTOK_CACHE_READ" in note
+
+
+def test_the_headline_says_how_much_rests_on_a_fallback_rate(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [
+        _assistant(now - 60, tin=1_000_000, tout=1_000_000, model="claude-nova-9"),  # $18
+        _assistant(now - 30, tin=1_000_000, model="claude-haiku-4-5"),               # $1
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["unpriced_usd"] == 18.0
+    st = ab.status()
+    assert "includes ~$18.00 priced at a fallback rate" in st["summary"]
+    ab.set_budget(spend_cap=100)
+    assert "includes ~$18.00 priced at a fallback rate" in ab.status()["summary"]
+    assert "includes ~$18.00 priced at a fallback rate" in ab.check()["reason"]
+
+
+def test_no_fallback_note_when_every_model_is_priced(tmp_path):
+    now = time.time()
+    _write_session(tmp_path / "claude", [_assistant(now - 30, tin=1_000_000,
+                                                    model="claude-haiku-4-5")])
+    assert ab.read_agent_usage(now - 3600)["unpriced_usd"] == 0.0
+    assert "fallback" not in ab.status()["summary"]
+
+
+def test_the_spend_summary_promises_nothing_status_does_not_do(tmp_path):
+    """status() estimates at list price from local logs. It never reads a
+    provider's billing, so it must not tell anyone an Admin key would make the
+    figure exact."""
+    now = time.time()
+    _write_session(tmp_path / "claude", [_assistant(now - 30, tin=1_000_000,
+                                                    model="claude-haiku-4-5")])
+    ab.set_budget(spend_cap=100)
+    st = ab.status()
+    assert st["verdict_basis"] == "spend"
+    assert "Admin key" not in st["summary"] and "exact spend" not in st["summary"]
+    assert "estimated at list price of your $100 spend cap" in st["summary"]

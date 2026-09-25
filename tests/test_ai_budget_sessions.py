@@ -299,3 +299,174 @@ def test_every_session_from_the_tool(claude):
     out = asyncio.run(srv.set_ai_budget(session_cap=25, every_session=True))
     assert out["session_cap_applies_to"] == "every_session"
     assert ab.get_budget()["session_cap"] == 25.0
+
+
+# ── a guessed session is never presented as a known one ──────────────────────
+
+def test_a_guessed_session_is_named_as_a_guess(claude):
+    """No id passed and none in the environment: "this session" is the one whose
+    transcript was written last. That is a guess, and the text says so."""
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 1_000_000, 1_000_000)])  # $24
+    ab.set_budget(session_cap=20)
+    st = ab.status()
+    assert st["session"]["id_source"] == "latest_activity"
+    assert "session guessed from the most recently active transcript" in st["summary"]
+    assert "this session" not in st["summary"]
+    chk = ab.check()
+    assert "session guessed from the most recently active transcript" in chk["reason"]
+    assert "session guessed from the most recently active transcript" in chk["recommendation"]
+
+
+def test_a_known_session_reads_as_this_session(claude, monkeypatch):
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 1_000_000, 1_000_000)])
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-a")
+    ab.set_budget(session_cap=20)
+    chk = ab.check()
+    assert "this session's $20.00 cap" in chk["reason"]
+    assert "guessed" not in chk["reason"] + chk["recommendation"]
+
+
+def test_the_tool_will_not_cap_a_guessed_session(claude):
+    """Capping "this session" by a guess would cap whichever agent wrote last.
+    Refused, and nothing in the call is saved."""
+    from finops import server as srv
+
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 1_000_000)])
+    out = asyncio.run(srv.set_ai_budget(session_cap=40, spend_cap=100))
+    assert "error" in out and "session_id" in out["error"]
+    b = ab.get_budget()
+    assert (b["session_cap"], b["session_caps"], b["spend_cap"]) == (0.0, {}, 0.0)
+
+    out = asyncio.run(srv.set_ai_budget(session_cap=40, session_id="sess-a"))
+    assert out["session_cap_applies_to"] == {"session_id": "sess-a", "id_source": "argument"}
+
+
+def test_the_tool_will_not_cap_every_session_when_it_meant_one(claude):
+    """With no transcript at all the call used to fall through to capping every
+    session, which is not what was asked."""
+    from finops import server as srv
+
+    out = asyncio.run(srv.set_ai_budget(session_cap=40))
+    assert "error" in out
+    assert ab.get_budget()["session_cap"] == 0.0
+
+
+def test_the_spend_cap_row_is_the_month_and_the_session_row_is_the_session(claude, capsys,
+                                                                            monkeypatch):
+    """A session over its cap makes the overall verdict OVER. The monthly spend
+    cap row must still say where the month stands: $24 of $100 is 24%, OK."""
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 1_000_000, 1_000_000)])  # $24
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-a")
+    ab.set_budget(spend_cap=100, monthly_tokens=10_000_000)
+    ab.set_budget(session_cap=20, session_id="sess-a")
+    st = ab.status()
+    assert (st["verdict"], st["verdict_basis"]) == (ab.BUDGET_OVER, "session")
+    assert (st["month_verdict"], st["month_pct_of_budget"]) == (ab.BUDGET_OK, 0.24)
+    out = _cli(capsys)
+    spend = next(ln for ln in out.splitlines() if "spend cap" in ln)
+    assert "~$24 est of $100" in spend and "OK (24%)" in spend and "OVER" not in spend
+    usage = next(ln for ln in out.splitlines() if "usage cap" in ln)
+    assert "(20%)" in usage and "OVER" not in usage
+    session = next(ln for ln in out.splitlines() if "this session" in ln and "cap" in ln)
+    assert "OVER (120%)" in session
+
+
+# ── `nable ai-budget` flags say what they saved ──────────────────────────────
+
+def _run_cli(**flags):
+    import argparse
+
+    from finops import cli_ai_budget as cli
+
+    ns = {"plan_cost": None, "spend_cap": None, "tokens": None, "session_cap": None,
+          "month": False, "reset": False, "json": False}
+    ns.update(flags)
+    return cli.run(argparse.Namespace(**ns))
+
+
+def test_the_session_cap_flag_confirms_the_cap_before_any_transcript(claude, capsys):
+    out = _cli(capsys, session_cap=40)
+    assert ab.get_budget()["session_cap"] == 40.0
+    assert "per-session cap" in out.splitlines()[0]
+    line = next(ln for ln in out.splitlines() if "every session" in ln)
+    assert "session cap" in line and "$40.00" in line
+
+
+def test_plan_cost_on_a_metered_budget_switches_it_to_flat_and_says_so(claude, capsys):
+    ab.set_budget(spend_cap=100)
+    out = _cli(capsys, plan_cost=20)
+    b = ab.get_budget()
+    assert (b["mode"], b["plan_cost"]) == ("flat", 20.0)
+    assert "switched from metered to flat" in out
+
+
+def test_spend_cap_on_a_flat_budget_switches_it_to_metered_and_says_so(claude, capsys):
+    ab.set_budget(plan_cost=20)
+    out = _cli(capsys, spend_cap=100)
+    assert ab.get_budget()["mode"] == "metered"
+    assert "switched from flat to metered" in out
+
+
+def test_both_flags_keep_the_mode_and_say_which_one_counts(claude, capsys):
+    ab.set_budget(spend_cap=100)
+    out = _cli(capsys, plan_cost=20, spend_cap=200)
+    assert ab.get_budget()["mode"] == "metered"
+    assert "still metered" in out
+
+
+@pytest.mark.parametrize("flag", ["session_cap", "spend_cap", "plan_cost", "tokens"])
+def test_a_negative_value_is_rejected_not_cleared(claude, capsys, flag):
+    ab.set_budget(session_cap=40, spend_cap=100, monthly_tokens=1000)
+    before = ab.get_budget()
+    assert _run_cli(**{flag: -5}) == 2
+    captured = capsys.readouterr()
+    assert "negative" in captured.err and "nothing was saved" in captured.err
+    after = ab.get_budget()
+    assert {k: after[k] for k in ("session_cap", "spend_cap", "plan_cost", "monthly_tokens")} == (
+        {k: before[k] for k in ("session_cap", "spend_cap", "plan_cost", "monthly_tokens")})
+
+
+def test_set_budget_rejects_a_negative_cap(claude):
+    with pytest.raises(ValueError):
+        ab.set_budget(session_cap=-1)
+    from finops import server as srv
+
+    out = asyncio.run(srv.set_ai_budget(session_cap=-1, every_session=True))
+    assert "error" in out and "negative" in out["error"]
+
+
+def _parse(*argv):
+    import argparse
+
+    from finops import cli_ai_budget as cli
+
+    parser = argparse.ArgumentParser()
+    cli.add_parser(parser.add_subparsers())
+    return parser.parse_args(["ai-budget", *argv])
+
+
+@pytest.mark.parametrize("raw,tokens", [("60m", 60_000_000), ("60k", 60_000),
+                                        ("1,500,000", 1_500_000), ("2.5M", 2_500_000),
+                                        ("0", 0)])
+def test_tokens_takes_the_shorthand_the_setup_questions_take(raw, tokens):
+    assert _parse("--tokens", raw).tokens == tokens
+
+
+def test_tokens_rejects_what_is_not_a_number(capsys):
+    with pytest.raises(SystemExit):
+        _parse("--tokens", "lots")
+    assert "--tokens" in capsys.readouterr().err
+
+
+def test_a_script_with_no_budget_is_told_the_flags(claude, capsys):
+    """Not a terminal, so no questions are asked, and "run nable ai-budget" is
+    what the script just did. Name the flags that set one."""
+    out = _cli(capsys)
+    assert "run `nable ai-budget`" not in out.lower()
+    budget = next(ln for ln in out.splitlines() if ln.strip().startswith("budget"))
+    assert "--plan-cost" in budget and "--spend-cap" in budget
+    assert "--plan-cost" in out.strip().splitlines()[-2]

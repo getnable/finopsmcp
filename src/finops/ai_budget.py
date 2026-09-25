@@ -23,15 +23,17 @@ stops the agent; it tells you where you stand so you decide.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import llm_prices, token_budget
+from . import harness_usage, llm_prices, token_budget
 
 # ── Verdicts (mirror policy.py's vocabulary) ─────────────────────────────────
 BUDGET_OK = "ok"        # comfortably under budget
@@ -51,16 +53,34 @@ _WINDOW_HOURS = float(os.getenv("FINOPS_AI_WINDOW_HOURS", "5"))
 # to this blended rate, Sonnet 4.6's by default, and is reported as unpriced rather
 # than silently folded in. Configurable for the model you run.
 _BLEND = llm_prices.MODEL_PRICES["claude-sonnet-4-6"]
-_FALLBACK = llm_prices.ModelPrice(
-    model="fallback", provider="fallback",
-    input=float(os.getenv("FINOPS_AI_USD_PER_MTOK_IN", str(_BLEND.input))),
-    output=float(os.getenv("FINOPS_AI_USD_PER_MTOK_OUT", str(_BLEND.output))),
-    cache_write_5m=float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE",
-                                   str(_BLEND.cache_write_5m))),
-    cache_write_1h=float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE_1H",
-                                   str(_BLEND.cache_write_1h))),
-    cache_read=float(os.getenv("FINOPS_AI_USD_PER_MTOK_CACHE_READ", str(_BLEND.cache_read))),
-)
+
+# Cache rates as multiples of the input rate: a 5-minute write 1.25x, a 1-hour
+# write 2x, a read 0.1x, the ratios llm_prices carries for Anthropic's models.
+# Derived from FINOPS_AI_USD_PER_MTOK_IN, so setting the input rate you pay
+# moves them with it, unless each is set on its own.
+_CACHE_RATES = (("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE", 1.25),
+                ("FINOPS_AI_USD_PER_MTOK_CACHE_WRITE_1H", 2.0),
+                ("FINOPS_AI_USD_PER_MTOK_CACHE_READ", 0.1))
+
+
+def _env_rate(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    try:
+        return float(raw) if raw else default
+    except ValueError:
+        return default
+
+
+def _fallback() -> llm_prices.ModelPrice:
+    """The rate an unpriced model is charged at, read from the environment now."""
+    inp = _env_rate("FINOPS_AI_USD_PER_MTOK_IN", _BLEND.input)
+    (w5, m5), (w1, m1), (rd, mr) = _CACHE_RATES
+    return llm_prices.ModelPrice(
+        model="fallback", provider="fallback",
+        input=inp, output=_env_rate("FINOPS_AI_USD_PER_MTOK_OUT", _BLEND.output),
+        cache_write_5m=_env_rate(w5, inp * m5), cache_write_1h=_env_rate(w1, inp * m1),
+        cache_read=_env_rate(rd, inp * mr))
+
 
 def _data_dir() -> Path:
     d = Path(os.getenv("FINOPS_DATA_DIR") or (Path.home() / ".nable"))
@@ -121,7 +141,13 @@ def set_budget(mode: str | None = None, plan_cost: float | None = None,
     the mode. monthly_tokens is an optional usage cap for either. Any subset.
 
     session_cap with a session_id caps that one session; without one it is the
-    cap for every session. 0 clears it."""
+    cap for every session. 0 clears it. A negative value is an error (it used
+    to clear the cap silently), and nothing is saved."""
+    for name, value in (("plan_cost", plan_cost), ("spend_cap", spend_cap),
+                        ("monthly_tokens", monthly_tokens), ("session_cap", session_cap)):
+        if value is not None and value < 0:
+            raise ValueError(f"{name} cannot be negative ({value:g}); pass 0 to clear it, "
+                             f"nothing was saved.")
     b = get_budget()
     if mode in ("flat", "metered"):
         b["mode"] = mode
@@ -173,29 +199,54 @@ def _claude_projects_dir() -> Path:
 
 
 def read_agent_usage(since_epoch: float) -> dict[str, Any]:
-    """Tally Claude Code token usage across all local sessions since `since_epoch`.
+    """Tally agent token usage across all local sessions since `since_epoch`.
 
-    Exact counts, read locally. Skips log files whose mtime predates the window so a
-    long history stays cheap. Returns totals, a per-model split of tokens and of
-    list-price dollars, the models priced at the fallback rate, the costliest
-    sessions, and first/last activity.
+    Every harness the guard hooks: Claude Code transcripts and Codex CLI
+    rollouts, read locally, plus Cursor's Admin API when CURSOR_ADMIN_API_KEY
+    is set (harness_usage). Exact counts. Skips log files whose mtime predates
+    the window so a long history stays cheap. Returns totals, a per-model and
+    per-harness split of tokens and of list-price dollars, the models priced at
+    the fallback rate, the costliest sessions, and first/last activity.
     """
     proj = _claude_projects_dir()
-    if not proj.is_dir():
-        return _tally([], source_present=False)
-    return _tally(_responses(proj, since_epoch), source_present=True)
+    claude = proj.is_dir()
+    responses = _responses(proj, since_epoch) if claude else []
+    return _tally(responses + _other_harnesses(since_epoch), source_present=claude,
+                  since_epoch=since_epoch)
 
 
 def read_session_usage(session_id: str) -> dict[str, Any]:
-    """Everything one Claude Code session has used, from its first response.
+    """Everything one session has used, from its first response.
 
-    A session is the sessionId Claude Code stamps on every transcript line, so
-    the subagents it spawned count toward it: they are part of the same task.
+    A Claude Code session is the sessionId it stamps on every transcript line,
+    and a Codex session is the root thread id its rollouts carry, so in both the
+    subagents it spawned count toward it: they are part of the same task. A
+    Cursor session is a conversation, when its Admin API is connected.
     """
-    proj = _claude_projects_dir()
-    if not proj.is_dir() or not session_id:
+    if not session_id:
         return _tally([], source_present=False)
-    return _tally(_responses(proj, 0, session_id=session_id), source_present=True)
+    proj = _claude_projects_dir()
+    claude = proj.is_dir()
+    responses = _responses(proj, 0, session_id=session_id) if claude else []
+    return _tally(responses + _other_harnesses(0, session_id=session_id),
+                  source_present=claude)
+
+
+def _other_harnesses(since_epoch: float, session_id: str | None = None) -> list[dict[str, Any]]:
+    """Codex and Cursor responses. A reader that fails counts nothing rather
+    than taking the Claude Code numbers down with it."""
+    out: list[dict[str, Any]] = []
+    if session_id is None or _SAFE_SESSION_ID.match(session_id):
+        with contextlib.suppress(*_READER_ERRORS):
+            out.extend(harness_usage.codex_responses(since_epoch, session_id=session_id))
+    with contextlib.suppress(*_READER_ERRORS):
+        out.extend(harness_usage.cursor_responses(since_epoch, session_id=session_id,
+                                                  month_start=_month_start_epoch()))
+    return out
+
+
+# What reading a malformed log can raise. Anything else is a bug worth seeing.
+_READER_ERRORS = (OSError, ValueError, TypeError, KeyError, AttributeError)
 
 
 # Claude Code names a session's transcript <project>/<sessionId>.jsonl and puts its
@@ -279,6 +330,7 @@ def _responses(proj: Path, since_epoch: float,
                         "fast": usage.get("speed") == "fast",
                         "us_only": usage.get("inference_geo") == "us",
                         "session": session, "cwd": rec.get("cwd"),
+                        "harness": harness_usage.HARNESS_CLAUDE,
                     }
         except OSError:
             continue
@@ -288,10 +340,16 @@ def _responses(proj: Path, since_epoch: float,
 _SESSIONS_LISTED = 20
 
 
-def _response_usd(r: dict[str, Any]) -> tuple[float, bool]:
-    """(list-price USD, priced) for one response. Unpriced means the fallback rate."""
+def _response_usd(r: dict[str, Any],
+                  fallback: llm_prices.ModelPrice | None = None) -> tuple[float, bool]:
+    """(list-price USD, priced) for one response. Unpriced means the fallback rate.
+
+    A record that carries its own `usd` (Cursor reports what each request cost
+    at the model's rate) is taken at that figure."""
+    if isinstance(r.get("usd"), (int, float)):
+        return float(r["usd"]), True
     price = llm_prices.price_for(r["model"])
-    usd = (price or _FALLBACK).cost(
+    usd = (price or fallback or _fallback()).cost(
         input_tokens=r["input"], output_tokens=r["output"],
         cache_write_5m_tokens=r["cache_write"] - r["cache_write_1h"],
         cache_write_1h_tokens=r["cache_write_1h"], cache_read_tokens=r["cache_read"],
@@ -299,11 +357,16 @@ def _response_usd(r: dict[str, Any]) -> tuple[float, bool]:
     return usd, price is not None
 
 
-def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, Any]:
+def _tally(responses: list[dict[str, Any]], source_present: bool,
+           since_epoch: float | None = None) -> dict[str, Any]:
     tin = tout = cwrite = cread = 0
     usd_total = 0.0
     by_model: dict[str, int] = {}
     usd_by_model: dict[str, float] = {}
+    usd_by_harness: dict[str, float] = {}
+    tokens_by_harness: dict[str, int] = {}
+    unpriced_usd = 0.0
+    fallback = _fallback()
     unpriced: dict[str, int] = {}
     sessions: dict[str, dict[str, Any]] = {}
     first_ts: float | None = None
@@ -313,17 +376,22 @@ def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, A
         tin += ti; tout += to; cwrite += cw; cread += cr
         model = r["model"]
         by_model[model] = by_model.get(model, 0) + ti + to + cw + cr
-        usd, priced = _response_usd(r)
+        usd, priced = _response_usd(r, fallback)
         usd_total += usd
         usd_by_model[model] = usd_by_model.get(model, 0.0) + usd
+        harness = r.get("harness") or harness_usage.HARNESS_CLAUDE
+        usd_by_harness[harness] = usd_by_harness.get(harness, 0.0) + usd
+        tokens_by_harness[harness] = tokens_by_harness.get(harness, 0) + ti + to + cw
         if not priced:
             unpriced[model] = unpriced.get(model, 0) + ti + to + cw
+            unpriced_usd += usd
         ts = r["ts"]
         first_ts = ts if first_ts is None else min(first_ts, ts)
         last_ts = ts if last_ts is None else max(last_ts, ts)
         sess = sessions.setdefault(r["session"], {
             "usd_equivalent": 0.0, "billable_tokens": 0, "messages": 0,
-            "first_activity": ts, "last_activity": ts, "project": None})
+            "first_activity": ts, "last_activity": ts, "project": None,
+            "harness": harness})
         sess["usd_equivalent"] += usd
         sess["billable_tokens"] += ti + to + cw
         sess["messages"] += 1
@@ -352,6 +420,7 @@ def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, A
         # dollars are in usd_equivalent at the fallback rate, and named here so a
         # figure built on a guessed rate is never presented as a list price.
         "unpriced_models": dict(sorted(unpriced.items(), key=lambda kv: -kv[1])),
+        "unpriced_usd": round(unpriced_usd, 2),
         # The costliest sessions, each one task's worth of agent work. Capped so a
         # month of sessions cannot swamp an MCP response; session_count is all.
         "by_session": {sid: {**v, "usd_equivalent": round(v["usd_equivalent"], 2)}
@@ -359,16 +428,45 @@ def _tally(responses: list[dict[str, Any]], source_present: bool) -> dict[str, A
                                             key=lambda kv: -kv[1]["usd_equivalent"])
                        [:_SESSIONS_LISTED]},
         "session_count": len(sessions),
+        # Which agent the dollars went to. Harnesses are keyed as
+        # harness_usage names them: claude-code, codex, cursor.
+        "cost_by_harness": {h: round(v, 2) for h, v in
+                            sorted(usd_by_harness.items(), key=lambda kv: -kv[1])},
+        "billable_tokens_by_harness": dict(sorted(tokens_by_harness.items(),
+                                                  key=lambda kv: -kv[1])),
         "prices_as_of": llm_prices.AS_OF,
         "first_activity": first_ts, "last_activity": last_ts,
-        "source_present": source_present,
+        # True when any harness's usage source exists on this machine (Claude
+        # Code transcripts, Codex rollouts) or is connected (Cursor).
+        "source_present": (source_present or harness_usage.codex_present()
+                           or harness_usage.cursor_enabled()),
+        "sources": _sources(source_present),
     }
+    if since_epoch is not None:
+        skipped = harness_usage.codex_compressed_skipped(since_epoch)
+        if skipped:
+            out["codex_compressed_rollouts_skipped"] = skipped
     if unpriced:
+        fb = fallback
         out["unpriced_note"] = (
-            f"{', '.join(unpriced)} priced at the fallback ${_FALLBACK.input:g}/"
-            f"${_FALLBACK.output:g} per 1M in/out; set FINOPS_AI_USD_PER_MTOK_IN/OUT "
-            f"to the rate you pay.")
+            f"{', '.join(unpriced)} priced at the fallback ${fb.input:g}/${fb.output:g} "
+            f"per 1M in/out, ${fb.cache_write_5m:g}/${fb.cache_write_1h:g} per 1M cache "
+            f"writes (5m/1h) and ${fb.cache_read:g} per 1M cache reads; set "
+            f"FINOPS_AI_USD_PER_MTOK_IN/OUT to the rate you pay. The cache rates follow "
+            f"the input rate unless FINOPS_AI_USD_PER_MTOK_CACHE_WRITE, "
+            f"FINOPS_AI_USD_PER_MTOK_CACHE_WRITE_1H or FINOPS_AI_USD_PER_MTOK_CACHE_READ "
+            f"is set.")
     return out
+
+
+def _sources(claude: bool) -> dict[str, Any]:
+    cursor: Any = False
+    if harness_usage.cursor_enabled():
+        cursor = {"scope": harness_usage.cursor_email() or "team",
+                  **harness_usage.cursor_status()}
+    return {harness_usage.HARNESS_CLAUDE: claude,
+            harness_usage.HARNESS_CODEX: harness_usage.codex_present(),
+            harness_usage.HARNESS_CURSOR: cursor}
 
 
 def _rec_epoch(ts: Any) -> float | None:
@@ -387,22 +485,37 @@ def _month_start_epoch() -> float:
 
 # ── The current session ──────────────────────────────────────────────────────
 
+# Passed as session_id by a caller that knows there is no session it can
+# measure: a Cursor hook without the Admin API that holds Cursor's usage, or a
+# hook payload with no session id. Any other value would be resolved, and the
+# fallback, the latest transcript, may be another agent's session entirely.
+# Not a valid session id (see _SAFE_SESSION_ID), so it can never name one.
+NO_SESSION = "<no-session>"
+
+
 def resolve_session(session_id: str | None = None) -> tuple[str | None, str | None]:
     """(session id, where it came from) for "this session".
 
     In order: an id the caller passed (the guard hook has it in its payload),
     CLAUDE_CODE_SESSION_ID (Claude Code sets it for the processes it starts),
-    then the session whose transcript was written last, which is the one calling
-    when only one agent is running. The source is returned so a guess is never
-    reported as a fact.
+    CODEX_SESSION_ID (Codex CLI sets it for the shell commands it runs), then
+    the session whose Claude transcript or Codex rollout was written last,
+    which is the one calling when only one agent is running. The source is
+    returned so a guess is never reported as a fact. NO_SESSION resolves to
+    no session at all.
     """
+    if session_id == NO_SESSION:
+        return None, None
     if session_id:
         return str(session_id), "argument"
     env = os.getenv("CLAUDE_CODE_SESSION_ID", "").strip()
     if env:
         return env, "env"
+    env = os.getenv("CODEX_SESSION_ID", "").strip()
+    if env:
+        return env, "env"
     proj = _claude_projects_dir()
-    latest: tuple[float, Path] | None = None
+    latest: tuple[float, str] | None = None
     try:
         for path in proj.rglob("*.jsonl"):
             try:
@@ -410,12 +523,17 @@ def resolve_session(session_id: str | None = None) -> tuple[str | None, str | No
             except OSError:
                 continue
             if latest is None or mtime > latest[0]:
-                latest = (mtime, path)
+                latest = (mtime, _path_session(path))
     except OSError:
-        return None, None
+        pass
+    codex = None
+    with contextlib.suppress(*_READER_ERRORS):
+        codex = harness_usage.codex_latest_session()
+    if codex and (latest is None or codex[0] > latest[0]):
+        latest = codex
     if latest is None:
         return None, None
-    return _path_session(latest[1]), "latest_activity"
+    return latest[1], "latest_activity"
 
 
 def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, Any] | None:
@@ -431,6 +549,7 @@ def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, A
         "usd_equivalent": usd, "billable_tokens": u["billable_tokens"],
         "messages": u["messages"],
         "cost_by_model": u["cost_by_model"], "unpriced_models": u["unpriced_models"],
+        "cost_by_harness": u["cost_by_harness"], "unpriced_usd": u["unpriced_usd"],
         "first_activity": u["first_activity"], "last_activity": u["last_activity"],
         "cap_usd": cap or None,
         "cap_scope": ("this_session" if sid in budget["session_caps"]
@@ -439,6 +558,14 @@ def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, A
         "remaining_usd": round(max(0.0, cap - usd), 2) if cap > 0 else None,
         "verdict": _verdict(pct) if pct is not None else None,
     }
+
+
+# Said wherever "this session" is really the latest transcript's session.
+GUESSED_SESSION_NOTE = "session guessed from the most recently active transcript"
+
+
+def _guessed(session: dict[str, Any] | None) -> bool:
+    return bool(session) and session.get("id_source") == "latest_activity"
 
 
 def _verdict(pct: float) -> str:
@@ -450,7 +577,20 @@ _RANK = {BUDGET_OK: 0, BUDGET_WARN: 1, BUDGET_OVER: 2}
 
 # ── Status + gate ────────────────────────────────────────────────────────────
 
-def status(session_id: str | None = None) -> dict[str, Any]:
+def _called_by_guard() -> bool:
+    """Whether status() was called by guard.check_budget_gate.
+
+    The guard runs on every tool call and reads only the verdict, so it should
+    not pay for figures it throws away. guard.py cannot pass for_gate itself
+    yet (it is owned elsewhere), so the caller's module says which it is.
+    """
+    try:
+        return sys._getframe(2).f_globals.get("__name__") == "finops.guard"
+    except ValueError:
+        return False
+
+
+def status(session_id: str | None = None, *, for_gate: bool | None = None) -> dict[str, Any]:
     """Where you stand. Honest by construction: tokens and burn rate are exact
     (read from local logs); dollars are ONLY ever an estimate at list price, never
     your real bill. Two lenses:
@@ -459,12 +599,28 @@ def status(session_id: str | None = None) -> dict[str, Any]:
         much subsidized compute you are pulling for your fixed fee.
     Either can add a per-session cap, which gates this session's own spend; the
     verdict is the worse of the two. `session_id` names the session (see
-    resolve_session for what "this session" means without one)."""
-    now = time.time()
-    window = read_agent_usage(now - _WINDOW_HOURS * 3600)
-    mtd = read_agent_usage(_month_start_epoch())
+    resolve_session for what "this session" means without one).
+
+    for_gate: only the verdict is wanted (the guard, on every tool call), so
+    nothing is read that cannot change it: no transcripts at all when no cap is
+    set, the month only under a monthly cap, the session only under a session
+    cap, never the window. None means "the guard called", detected."""
+    if for_gate is None:
+        for_gate = _called_by_guard()
     budget = get_budget()
     mode = budget["mode"]
+    monthly_cap = (mode == "metered" and budget["spend_cap"] > 0) or budget["monthly_tokens"] > 0
+    session_cap = budget["session_cap"] > 0 or bool(budget["session_caps"])
+    if for_gate and not monthly_cap and not session_cap:
+        # Nothing is capped, so nothing can be over: the verdict needs no reading.
+        return {"verdict": BUDGET_OK, "verdict_basis": "none", "mode": mode,
+                "budget": budget, "pct_of_budget": None, "month_verdict": BUDGET_OK,
+                "month_verdict_basis": "none", "month_pct_of_budget": None,
+                "session": None, "gate_only": True}
+    now = time.time()
+    empty = _tally([], source_present=False)
+    window = empty if for_gate else read_agent_usage(now - _WINDOW_HOURS * 3600)
+    mtd = empty if for_gate and not monthly_cap else read_agent_usage(_month_start_epoch())
 
     tokens_mtd = mtd["billable_tokens"]        # exact
     est_usd_mtd = mtd["usd_equivalent"]        # ESTIMATE at list price, not a bill
@@ -483,10 +639,14 @@ def status(session_id: str | None = None) -> dict[str, Any]:
         pct, basis = tokens_mtd / budget["monthly_tokens"], "tokens"
     if pct is not None:
         verdict = _verdict(pct)
+    # The month's own standing, kept apart from the session's: the overall
+    # verdict below may be the session's, and a row about the month must not
+    # show that.
+    month_verdict, month_pct, month_basis = verdict, pct, basis
 
     # The per-session cap can only make the verdict worse. On a tie the one
     # further past its line is the one to name.
-    session = _session_lens(budget, session_id)
+    session = None if for_gate and not session_cap else _session_lens(budget, session_id)
     if session and session["verdict"] is not None:
         s_rank, m_rank = _RANK[session["verdict"]], _RANK[verdict]
         if basis == "none" or s_rank > m_rank or (
@@ -523,49 +683,87 @@ def status(session_id: str | None = None) -> dict[str, Any]:
         "budget": budget,
         "plan_label": budget["plan_label"],
         "pct_of_budget": round(pct, 3) if pct is not None else None,
+        "month_verdict": month_verdict,
+        "month_verdict_basis": month_basis,
+        "month_pct_of_budget": round(month_pct, 3) if month_pct is not None else None,
         "session": session,
         "headroom": headroom,
         "burn_tokens_per_hour": burn,
         "subsidy": subsidy,
         "cost_per_1m_list": cost_per_1m_list,
         "cost_per_1m_effective": cost_per_1m_effective,
-        "summary": _summary_line(verdict, basis, mode, tokens_mtd, est_usd_mtd, budget,
-                                 subsidy, window, cost_per_1m_effective, session),
+        "summary": _with_fallback_note(
+            _summary_line(verdict, basis, mode, tokens_mtd, est_usd_mtd, budget,
+                          subsidy, window, cost_per_1m_effective, session),
+            {"session": session, "month": mtd, "window": window}),
+        # Set when `session` is a guess, not the caller's own session.
+        "session_note": (f"{GUESSED_SESSION_NOTE}; pass session_id to name yours"
+                         if _guessed(session) else None),
+        # The figures a gate-only status skipped reading are zeros, not usage.
+        "gate_only": for_gate,
     }
 
 
+# How the summary tells someone with no budget to set one. The CLI swaps it for
+# the flags when it is not talking to a terminal (see cli_ai_budget).
+SET_BUDGET_HINT = "Run `nable ai-budget` to set a budget."
+
+
+def _with_fallback_note(line: tuple[str, str], lenses: dict[str, Any]) -> str:
+    """The summary, plus how much of the dollars it quotes rest on a fallback
+    rate, whenever any do. The lens is the one the line is about."""
+    text, lens = line
+    usd = (lenses.get(lens) or {}).get("unpriced_usd") or 0.0
+    if usd > 0:
+        text += f" This includes ~${usd:,.2f} priced at a fallback rate (see unpriced_models)."
+    return text
+
+
 def _summary_line(verdict, basis, mode, tokens_mtd, est_usd, budget, subsidy, window,
-                  eff_per_1m, session=None) -> str:
+                  eff_per_1m, session=None) -> tuple[str, str]:
+    """(summary, the lens it is about: "session", "month" or "window")."""
     tag = {BUDGET_OK: "on track", BUDGET_WARN: "approaching your budget",
            BUDGET_OVER: "over budget"}[verdict]
     if basis == "session":
+        if _guessed(session):
+            return (f"~${session['usd_equivalent']:,.2f} of the latest session's "
+                    f"${session['cap_usd']:,.2f} cap used (estimated at list price; "
+                    f"{GUESSED_SESSION_NOTE}), {tag}."), "session"
         return (f"~${session['usd_equivalent']:,.2f} of this session's "
-                f"${session['cap_usd']:,.2f} cap used (estimated at list price), {tag}.")
+                f"${session['cap_usd']:,.2f} cap used (estimated at list price), "
+                f"{tag}."), "session"
+    return _month_summary(tag, basis, mode, tokens_mtd, est_usd, budget, subsidy, window,
+                          eff_per_1m)
+
+
+def _month_summary(tag, basis, mode, tokens_mtd, est_usd, budget, subsidy, window,
+                   eff_per_1m) -> tuple[str, str]:
     if basis == "spend":
         return (f"~${est_usd:,.0f} estimated at list price of your "
-                f"${budget['spend_cap']:,.0f} spend cap, {tag}. "
-                f"Connect an Admin key for exact spend.")
+                f"${budget['spend_cap']:,.0f} spend cap, {tag}."), "month"
     if basis == "tokens":
-        return f"{tokens_mtd:,} of {budget['monthly_tokens']:,} tokens this month, {tag}."
+        return (f"{tokens_mtd:,} of {budget['monthly_tokens']:,} tokens this month, "
+                f"{tag}."), "month"
     if subsidy and subsidy["multiple"]:
         extra = f" ~${eff_per_1m:g}/1M effective." if eff_per_1m else ""
         return (f"You pay ${subsidy['plan_cost_usd']:,.0f}/mo and have pulled "
                 f"~${est_usd:,.0f} of compute (estimated at list price), "
-                f"~{subsidy['multiple']:g}x your plan.{extra} The provider covers the rest.")
+                f"~{subsidy['multiple']:g}x your plan.{extra} The provider covers the "
+                f"rest."), "month"
     # A budget IS configured but there is no usage to measure against yet. Confirm
     # it, never tell someone to set a budget they just set (found dogfooding).
     if mode == "flat" and budget["plan_cost"] > 0:
         return (f"Your ${budget['plan_cost']:,.0f}/mo plan is set. No agent usage recorded yet "
-                f"this month; the numbers fill in as your agent runs.")
+                f"this month; the numbers fill in as your agent runs."), "month"
     if mode == "metered" and budget["spend_cap"] > 0:
         return (f"Your ${budget['spend_cap']:,.0f}/mo spend cap is set. No agent usage recorded "
-                f"yet this month.")
+                f"yet this month."), "month"
     if budget["monthly_tokens"] > 0:
         return (f"Usage cap of {budget['monthly_tokens']:,} tokens/mo is set. No agent usage "
-                f"recorded yet this month.")
+                f"recorded yet this month."), "month"
     return (f"{window['billable_tokens']:,} tokens in the last {_WINDOW_HOURS:g}h "
             f"(~${window['usd_equivalent']:,.0f} at list price). "
-            f"Run `nable ai-budget` to set a budget.")
+            f"{SET_BUDGET_HINT}"), "window"
 
 
 def check(estimated_next_tokens: int = 0, session_id: str | None = None) -> dict[str, Any]:
@@ -589,13 +787,18 @@ def check(estimated_next_tokens: int = 0, session_id: str | None = None) -> dict
     if st["verdict_basis"] == "session":
         s = st["session"]
         left, cap = s["remaining_usd"], s["cap_usd"]
+        whose, who = ("the latest session's", "The latest session") if _guessed(s) else (
+            "this session's", "This session")
         rec = {
-            BUDGET_OK: f"Proceed. ~${left:,.2f} of this session's ${cap:,.2f} cap left.",
-            BUDGET_WARN: (f"Proceed with a tight scope: ~${left:,.2f} of this session's "
+            BUDGET_OK: f"Proceed. ~${left:,.2f} of {whose} ${cap:,.2f} cap left.",
+            BUDGET_WARN: (f"Proceed with a tight scope: ~${left:,.2f} of {whose} "
                           f"${cap:,.2f} cap left."),
-            BUDGET_OVER: (f"This session is past its ${cap:,.2f} cap. Confirm with the "
+            BUDGET_OVER: (f"{who} is past its ${cap:,.2f} cap. Confirm with the "
                           f"human before continuing."),
         }[verdict]
+        if _guessed(s):
+            rec += (f" ({GUESSED_SESSION_NOTE}; pass session_id so the cap is measured "
+                    f"against your own session.)")
     elif st["mode"] == "metered":
         rec = {
             BUDGET_OK: "Proceed.",

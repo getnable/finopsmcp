@@ -85,3 +85,54 @@ def test_the_gate_passes_the_id_through_and_keeps_the_no_id_call(monkeypatch):
     guard.gate_command("ls -la", session_id="sess-x")
     guard.gate_command("ls -la")
     assert seen == [{"session_id": "sess-x"}, {}]
+
+
+# ── the guard reads only what can change its verdict ─────────────────────────
+
+def _count_reads(monkeypatch):
+    reads = {"agent": 0, "session": 0}
+    agent, session = ab.read_agent_usage, ab.read_session_usage
+
+    def counting_agent(*a, **kw):
+        reads["agent"] += 1
+        return agent(*a, **kw)
+
+    def counting_session(*a, **kw):
+        reads["session"] += 1
+        return session(*a, **kw)
+
+    monkeypatch.setattr(ab, "read_agent_usage", counting_agent)
+    monkeypatch.setattr(ab, "read_session_usage", counting_session)
+    return reads
+
+
+def test_with_no_budget_the_guard_reads_no_transcript(monkeypatch):
+    """Nothing configured can be over, so a guarded Bash call must not pay for
+    reading a month of transcripts (about 400 ms on 20 MB of them)."""
+    ab.reset_budget()
+    reads = _count_reads(monkeypatch)
+    assert _hook("sess-over") is None
+    assert reads == {"agent": 0, "session": 0}
+
+
+def test_with_only_a_session_cap_the_guard_reads_only_that_session(monkeypatch):
+    reads = _count_reads(monkeypatch)
+    assert _hook("sess-over")["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert reads == {"agent": 0, "session": 1}
+
+
+def test_a_monthly_cap_is_still_read_by_the_guard(monkeypatch):
+    ab.reset_budget()
+    ab.set_budget(spend_cap=30)                   # both sessions: $40 this month
+    reads = _count_reads(monkeypatch)
+    v = _hook("sess-fine")["hookSpecificOutput"]
+    assert v["permissionDecision"] == "ask" and "estimated this month" in (
+        v["permissionDecisionReason"])
+    assert reads["agent"] == 1
+
+
+def test_status_outside_the_guard_still_reads_everything(monkeypatch):
+    ab.reset_budget()
+    st = ab.status()
+    assert st["month_to_date"]["usd_equivalent"] == 40.0
+    assert st["window"]["messages"] == 2
