@@ -127,12 +127,24 @@ US_ONLY_MULTIPLIER = 1.1
 
 # ── OpenAI ────────────────────────────────────────────────────────────────────
 #
-# (input, output, cached input). Only the aliases whose standard rate could be
-# confirmed. Dated snapshots are deliberately absent: gpt-4o-2024-05-13 is
-# $5/$15 while later gpt-4o snapshots are $2.50/$10, so stripping a date is not
-# safe for OpenAI the way it is for Claude. gpt-4-turbo and the dated snapshots
-# the connectors see read as unpriced until someone confirms them.
+# (input, output, cached input). Only the models whose standard rate could be
+# confirmed. A date is never stripped from an OpenAI id: gpt-4o-2024-05-13 is
+# $5/$15 while later gpt-4o snapshots are $2.50/$10, so that is not safe for
+# OpenAI the way it is for Claude. A dated snapshot billed at its alias's rate
+# is listed by name in ALIASES instead; gpt-4-turbo and any other snapshot read
+# as unpriced until someone confirms them.
+#
+# The gpt-5 and gpt-4.1 rows are list prices supplied with the 2026-09-25
+# review (the pricing pages were not reachable from where they were added).
+# Re-read them from OPENAI_SOURCE on the next update.
 _OPENAI: dict[str, tuple[float, float, float | None]] = {
+    "gpt-5":         (1.25,  10.00, 0.125),
+    "gpt-5-codex":   (1.25,  10.00, 0.125),
+    "gpt-5-mini":    (0.25,  2.00,  0.025),
+    "gpt-5-nano":    (0.05,  0.40,  0.005),
+    "gpt-4.1":       (2.00,  8.00,  0.50),
+    "gpt-4.1-mini":  (0.40,  1.60,  0.10),
+    "gpt-4.1-nano":  (0.10,  0.40,  0.025),
     "gpt-4o":        (2.50,  10.00, 1.25),
     "gpt-4o-mini":   (0.15,  0.60,  0.075),
     "o1":            (15.00, 60.00, 7.50),
@@ -156,6 +168,21 @@ ALIASES: dict[str, str] = {
     "claude-sonnet-4-0": "claude-sonnet-4",
     # bedrock_routing and llm_costs have always said Haiku 3.5 this way round.
     "claude-haiku-3-5": "claude-3-5-haiku",
+    # OpenAI dated snapshots billed at their alias's rate. Named one by one
+    # (see _OPENAI): gpt-4o-2024-05-13 is not here because it is not $2.50/$10.
+    "gpt-4o-2024-08-06": "gpt-4o",
+    "gpt-4o-2024-11-20": "gpt-4o",
+    "gpt-4o-mini-2024-07-18": "gpt-4o-mini",
+    "o1-2024-12-17": "o1",
+    "o3-2025-04-16": "o3",
+    "o3-mini-2025-01-31": "o3-mini",
+    "o4-mini-2025-04-16": "o4-mini",
+    "gpt-4.1-2025-04-14": "gpt-4.1",
+    "gpt-4.1-mini-2025-04-14": "gpt-4.1-mini",
+    "gpt-4.1-nano-2025-04-14": "gpt-4.1-nano",
+    "gpt-5-2025-08-07": "gpt-5",
+    "gpt-5-mini-2025-08-07": "gpt-5-mini",
+    "gpt-5-nano-2025-08-07": "gpt-5-nano",
 }
 
 # ── resolving a model id ─────────────────────────────────────────────────────
@@ -192,6 +219,22 @@ def canonical_model(raw: str) -> str:
         s = s.removesuffix("-latest")
         s = _DATE_SUFFIX.sub("", s)
     return ALIASES.get(s, s)
+
+
+_OPENAI_ID = re.compile(r"^(gpt-|chatgpt-|codex-|o\d+(-|$))")
+
+
+def provider_of(raw: str) -> str | None:
+    """The provider ("anthropic" or "openai") of a model id nable can tell by
+    its name, priced or not, else None. What an unpriced model's fallback rate needs:
+    OpenAI bills a cache write as ordinary input, Anthropic at a premium."""
+    price = price_for(raw)
+    if price is not None:
+        return price.provider
+    s = canonical_model(raw)
+    if "claude" in s:
+        return "anthropic"
+    return "openai" if _OPENAI_ID.match(s) else None
 
 
 def price_for(raw: str) -> ModelPrice | None:

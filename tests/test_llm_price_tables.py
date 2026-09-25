@@ -76,6 +76,52 @@ def test_openai_rows():
             assert p.cache_write_5m is None and p.cache_write_1h is None
 
 
+# (input, output, cached input) per million tokens, standard tier.
+_OPENAI_LISTED = {
+    "gpt-5": (1.25, 10, 0.125),
+    "gpt-5-codex": (1.25, 10, 0.125),
+    "gpt-5-mini": (0.25, 2, 0.025),
+    "gpt-5-nano": (0.05, 0.40, 0.005),
+    "gpt-4.1": (2, 8, 0.50),
+    "gpt-4.1-mini": (0.40, 1.60, 0.10),
+    "gpt-4.1-nano": (0.10, 0.40, 0.025),
+}
+
+
+@pytest.mark.parametrize("model,row", sorted(_OPENAI_LISTED.items()))
+def test_the_gpt_5_and_gpt_4_1_families_are_priced(model, row):
+    p = MODEL_PRICES[model]
+    assert (p.input, p.output, p.cache_read) == row and p.provider == "openai"
+
+
+@pytest.mark.parametrize("snapshot,alias", [
+    # The two snapshots the old openai_usage table priced, and the ones the
+    # connectors meet most, each billed at its alias's rate.
+    ("gpt-4o-2024-11-20", "gpt-4o"), ("gpt-4o-mini-2024-07-18", "gpt-4o-mini"),
+    ("gpt-4o-2024-08-06", "gpt-4o"), ("o3-2025-04-16", "o3"),
+    ("o4-mini-2025-04-16", "o4-mini"), ("gpt-4.1-2025-04-14", "gpt-4.1"),
+    ("gpt-5-2025-08-07", "gpt-5"), ("openai/gpt-5-mini-2025-08-07", "gpt-5-mini"),
+])
+def test_same_price_dated_snapshots_are_named_one_by_one(snapshot, alias):
+    assert price_for(snapshot) is MODEL_PRICES[alias]
+
+
+def test_an_openai_cache_write_is_billed_as_input():
+    # OpenAI has no cache-write premium; Anthropic's 1.25x must not leak in.
+    p = MODEL_PRICES["gpt-5"]
+    assert p.cost(cache_write_5m_tokens=1_000_000) == pytest.approx(1.25)
+    assert p.cost(cache_write_1h_tokens=1_000_000) == pytest.approx(1.25)
+
+
+@pytest.mark.parametrize("raw,provider", [
+    ("gpt-9-turbo", "openai"), ("o7-mini", "openai"), ("codex-mini-latest", "openai"),
+    ("gpt-5", "openai"), ("claude-nova-9", "anthropic"), ("claude-haiku-4-5", "anthropic"),
+    ("llama-3-70b", None), ("unknown", None), ("opus-model", None),
+])
+def test_provider_of_tells_openai_from_anthropic_unpriced_or_not(raw, provider):
+    assert llm_prices.provider_of(raw) == provider
+
+
 def test_the_table_says_when_and_where():
     assert date.fromisoformat(llm_prices.AS_OF)
     assert set(llm_prices.SOURCES) == {p.provider for p in MODEL_PRICES.values()}

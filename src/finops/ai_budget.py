@@ -24,6 +24,7 @@ stops the agent; it tells you where you stand so you decide.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import os
 import re
@@ -349,12 +350,25 @@ def _response_usd(r: dict[str, Any],
     if isinstance(r.get("usd"), (int, float)):
         return float(r["usd"]), True
     price = llm_prices.price_for(r["model"])
-    usd = (price or fallback or _fallback()).cost(
+    rate = price or fallback or _fallback()
+    if price is None and _openai_billed(r):
+        # OpenAI bills no cache-write premium: a write is ordinary input.
+        rate = dataclasses.replace(rate, cache_write_5m=None, cache_write_1h=None)
+    usd = rate.cost(
         input_tokens=r["input"], output_tokens=r["output"],
         cache_write_5m_tokens=r["cache_write"] - r["cache_write_1h"],
         cache_write_1h_tokens=r["cache_write_1h"], cache_read_tokens=r["cache_read"],
         fast=r["fast"], us_only=r["us_only"])
     return usd, price is not None
+
+
+def _openai_billed(r: dict[str, Any]) -> bool:
+    """Whether an unpriced response is an OpenAI model's: by its name, or a
+    Codex response whose model name says nothing either way."""
+    provider = llm_prices.provider_of(r["model"])
+    if provider is not None:
+        return provider == "openai"
+    return r.get("harness") == harness_usage.HARNESS_CODEX
 
 
 def _tally(responses: list[dict[str, Any]], source_present: bool,
@@ -451,7 +465,8 @@ def _tally(responses: list[dict[str, Any]], source_present: bool,
         out["unpriced_note"] = (
             f"{', '.join(unpriced)} priced at the fallback ${fb.input:g}/${fb.output:g} "
             f"per 1M in/out, ${fb.cache_write_5m:g}/${fb.cache_write_1h:g} per 1M cache "
-            f"writes (5m/1h) and ${fb.cache_read:g} per 1M cache reads; set "
+            f"writes (5m/1h; an OpenAI model's cache writes at the input rate, as "
+            f"OpenAI bills them) and ${fb.cache_read:g} per 1M cache reads; set "
             f"FINOPS_AI_USD_PER_MTOK_IN/OUT to the rate you pay. The cache rates follow "
             f"the input rate unless FINOPS_AI_USD_PER_MTOK_CACHE_WRITE, "
             f"FINOPS_AI_USD_PER_MTOK_CACHE_WRITE_1H or FINOPS_AI_USD_PER_MTOK_CACHE_READ "

@@ -228,13 +228,42 @@ def test_a_model_llm_prices_does_not_know_is_reported_unpriced(codex):
     now = time.time()
     _rollout(codex, ROOT, [
         _meta(now - 300, ROOT, session=ROOT),
-        _turn(now - 290, "gpt-5-codex"),
+        _turn(now - 290, "gpt-9-codex"),
         _record(now - 280, "resp-1", _usage(inp=1_000_000, out=0)),
     ])
     u = ab.read_agent_usage(now - 3600)
-    assert u["unpriced_models"] == {"gpt-5-codex": 1_000_000}
-    assert "gpt-5-codex" in u["unpriced_note"]
+    assert u["unpriced_models"] == {"gpt-9-codex": 1_000_000}
+    assert "gpt-9-codex" in u["unpriced_note"]
     assert u["usd_equivalent"] > 0          # at the fallback rate, and said so
+
+
+def test_gpt_5_codex_is_priced_at_its_list_rate(codex):
+    """Codex's default model read as unpriced and was billed at the Sonnet
+    fallback, about twice its list price."""
+    now = time.time()
+    _rollout(codex, ROOT, [
+        _meta(now - 300, ROOT, session=ROOT),
+        _turn(now - 290, "gpt-5-codex"),
+        _record(now - 280, "resp-1", _usage(inp=1_000_000, cached=800_000, out=100_000)),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    assert u["unpriced_models"] == {}
+    # 200k fresh at $1.25 + 800k cached at $0.125 + 100k out at $10
+    assert u["cost_by_model"] == {"gpt-5-codex": round(0.25 + 0.1 + 1.0, 2)}
+
+
+def test_an_unpriced_openai_model_pays_no_cache_write_premium(codex):
+    """OpenAI bills a cache write as ordinary input. The fallback's 1.25x write
+    rate is Anthropic's, so an unpriced OpenAI model must not be charged it."""
+    now = time.time()
+    _rollout(codex, ROOT, [
+        _meta(now - 300, ROOT, session=ROOT),
+        _turn(now - 290, "gpt-9-codex"),
+        _record(now - 280, "resp-1", _usage(inp=1_000_000, cache_write=1_000_000)),
+    ])
+    u = ab.read_agent_usage(now - 3600)
+    # The fallback input rate ($3, Sonnet 4.6's) on the write, not $3.75.
+    assert u["usd_equivalent"] == 3.0
 
 
 def test_the_model_is_the_one_the_responses_turn_ran(codex):
