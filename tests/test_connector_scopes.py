@@ -37,7 +37,7 @@ def test_no_scope_documents_a_source_that_does_not_exist():
 @pytest.mark.parametrize("slug", sorted(cs.CONNECTOR_SCOPES))
 def test_scope_entries_are_complete(slug):
     scope = cs.CONNECTOR_SCOPES[slug]
-    assert scope.grade in (cs.SCOPED, cs.ROLE, cs.ACCOUNT)
+    assert scope.grade in (cs.SCOPED, cs.INVENTORY, cs.ROLE, cs.ACCOUNT)
     assert scope.credential and scope.permission, slug
     assert scope.calls, f"{slug} claims a scope but names nothing it calls with it"
 

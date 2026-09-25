@@ -104,11 +104,12 @@ BASE_ACTIONS: list[tuple[str, str]] = [
 
 # Only on `--spend`, and only because each request is BILLED at $0.01. The
 # default scan never calls Cost Explorer, which is the whole reason this is a
-# separate list rather than folded into the policy above.
+# separate list rather than folded into the policy above. The spend breakdown
+# and the Bedrock leg of the AI view both read through GetCostAndUsage alone;
+# GetCostForecast and GetDimensionValues were listed here and nothing on the
+# `--spend` path calls them.
 SPEND_ACTIONS: list[tuple[str, str]] = [
     ("ce.get_cost_and_usage", "ce:GetCostAndUsage"),
-    ("ce.get_cost_forecast", "ce:GetCostForecast"),
-    ("ce.get_dimension_values", "ce:GetDimensionValues"),
 ]
 
 # A verb that changes anything. The manifest is a promise that none appear, and
