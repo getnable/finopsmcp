@@ -101,6 +101,20 @@ def test_unknown_dimension_is_an_argparse_error(stub, capsys):
     assert e.value.code == 2
 
 
+@pytest.mark.parametrize("days", ["0", "-3", "seven"])
+def test_days_below_one_is_an_argparse_error_not_thirty(stub, capsys, days):
+    """--days 0 used to become 30 through `or 30`."""
+    with pytest.raises(SystemExit) as e:
+        setup_wizard.main(["ai-costs", "--days", days])
+    assert e.value.code == 2 and "days" not in stub
+
+
+def test_the_header_names_the_window_that_was_read(stub, capsys):
+    stub["answer"] = {**READ, "period": "2026-09-25 to 2026-09-25", "days": 1}
+    setup_wizard_main(["ai-costs", "--by", "team", "--days", "1"])
+    assert "last 1 day (2026-09-25 to 2026-09-25)" in capsys.readouterr().out
+
+
 # helpers ------------------------------------------------------------------
 
 def setup_wizard_main(argv):

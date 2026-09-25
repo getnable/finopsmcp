@@ -220,6 +220,29 @@ def test_tool_adds_ai_unit_economics_when_the_total_is_whole(monkeypatch):
     assert "Bedrock" in out["unit_economics"]["basis"]
 
 
+def test_days_reads_that_many_days_end_date_included(monkeypatch):
+    """days=7 read eight days (end - 7 through end, both whole), and unit
+    economics then scaled that eight-day total by 30/7."""
+    seen = []
+    mods = {"openai": openai_usage, "anthropic": anthropic_usage,
+            "litellm": litellm, "langfuse": langfuse}
+    for mod in mods.values():
+        monkeypatch.setattr(mod, "get_cost_attribution",
+                            lambda dim, s, e: seen.append((s, e)) or NOT_CONFIGURED)
+    out = attr.get_ai_cost_attribution("project", days=7, end_date=date(2026, 9, 25))
+    assert set(seen) == {(date(2026, 9, 19), date(2026, 9, 25))}
+    assert out["period"] == "2026-09-19 to 2026-09-25" and out["days"] == 7
+
+
+def test_unit_economics_divides_by_the_days_the_result_covers():
+    from finops.connectors.llm_unit_economics import attribution_unit_economics
+    result = {"total_usd": 80.0, "days": 8,
+              "by_provider": {"openai": {"source": "cost_api", "total_usd": 80.0}}}
+    econ = attribution_unit_economics(result, {"paying_customers": 100}, days=7)
+    assert econ["total_ai_cost_usd"] == 300.0          # $80 over 8 days, x 30 / 8
+    assert "from 8 days" in econ["basis"]
+
+
 def test_tool_skips_unit_economics_on_an_estimate(monkeypatch):
     monkeypatch.setattr("finops.demo_data.is_demo", lambda: False)
 

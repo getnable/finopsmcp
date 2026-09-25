@@ -366,8 +366,10 @@ def attribution_unit_economics(
     across providers or tags), nothing failed or was left out, every source is
     the provider's own dollar figure rather than a partial estimate, and there
     are stored business metrics to divide by. Otherwise None. The period total
-    is scaled to 30 days so it lines up with monthly metrics.
+    is scaled to 30 days so it lines up with monthly metrics, by the days the
+    result actually covers (its own `days`) when it says, else `days`.
     """
+    days = attribution.get("days") or days
     total = attribution.get("total_usd")
     if total is None or attribution.get("partial") or attribution.get("error"):
         return None
