@@ -268,7 +268,7 @@ def test_without_the_cost_api_the_usage_report_is_an_estimate(monkeypatch):
 
 
 def test_a_standard_key_alone_is_unread_not_zero(monkeypatch):
-    _admin_env(monkeypatch, {"ANTHROPIC_API_KEY": "sk-ant-api-x"})
+    _admin_env(monkeypatch, {"ANTHROPIC_API_KEY": "sk-ant-api-x"})  # pragma: allowlist secret
 
     def no_call(*a_, **k_):
         raise AssertionError("a standard key cannot read either report")
