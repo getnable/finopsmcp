@@ -915,6 +915,12 @@ def _summary_to_dict(summary: CostSummary) -> dict:
             f"Amounts are in {currency}, not USD. nable does not convert currencies; "
             f"the figures and any '$' formatting reflect {currency} values."
         )
+    from .connectors.base import no_rows_message, returned_no_rows
+    if returned_no_rows(summary):
+        # Read, and nothing came back. Distinct from a $0 bill (below): the
+        # caller must not present total_usd as what was spent.
+        d["no_rows"] = True
+        d["no_rows_note"] = no_rows_message(summary.provider)
     if getattr(summary, "_zero_spend_account", False):
         d["note"] = (
             "Cost Explorer is connected and returning data, but this account has $0.00 in "

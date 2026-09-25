@@ -34,6 +34,32 @@ class CostSummary:
                                    # nable does not convert — non-USD is surfaced, not relabeled.
 
 
+def returned_no_rows(summary: Any) -> bool:
+    """True when the provider answered but sent back no cost rows at all.
+
+    That is not a $0 bill. A $0 bill is rows that sum to zero (AWS flags it as
+    _zero_spend_account); no rows is Cost Explorer not yet backfilled, a
+    billing export that has not landed, or a query that matched nothing, and
+    the tools used to print both as "$0.00".
+    """
+    if getattr(summary, "_zero_spend_account", False) is True:
+        return False
+    return (not getattr(summary, "entries", None)
+            and not getattr(summary, "by_service", None)
+            and not getattr(summary, "total_usd", 0))
+
+
+def no_rows_message(provider: str) -> str:
+    """What to tell a reader when `provider` was read and returned no cost rows."""
+    name = {"aws": "AWS Cost Explorer", "gcp": "GCP billing", "azure": "Azure Cost Management"}.get(
+        provider, provider)
+    hint = (" On a new account Cost Explorer can take up to 24 hours after it is "
+            "enabled to show data; check Billing > Cost Explorer in the AWS console."
+            if provider == "aws" else "")
+    return (f"{name} was read but returned no cost rows for this period, so "
+            f"there is no spend figure to report.{hint}")
+
+
 def combined_currency(summaries: list[CostSummary]) -> str:
     """The currency label for a merge of per-account summaries.
 

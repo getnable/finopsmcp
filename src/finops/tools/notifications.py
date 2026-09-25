@@ -173,6 +173,10 @@ async def export_cost_report(
         from ..open_file import open_local_file
         open_local_file(output["html"])
 
+    from ..reporting.exporter import cost_data_unread
+    cost_sections = {k: collected[k] for k in ("cost_summary", "services") if k in collected}
+    not_read = {k: why for k, v in cost_sections.items() if (why := cost_data_unread(v))}
+
     result = {
         "title": title,
         "period": f"{period_start} to {period_end}",
@@ -184,6 +188,15 @@ async def export_cost_report(
             + (f"CSVs: {output.get('csv_dir', '')}." if "csv_dir" in output else "")
         ),
     }
+    if cost_sections:
+        result["cost_data_read"] = len(not_read) < len(cost_sections)
+    if not_read:
+        result["sections_not_read"] = not_read
+        if not result.get("cost_data_read", True):
+            result["message"] = (
+                "No cost data was read, so the report carries no spend figures. "
+                f"{next(iter(not_read.values()))} This is not a finding of zero spend. "
+                + result["message"])
     if "html" in output:
         result["tip"] = "Open the HTML file in your browser, then use File → Print → Save as PDF to create a PDF."
 

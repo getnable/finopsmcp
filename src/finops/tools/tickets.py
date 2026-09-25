@@ -366,8 +366,15 @@ async def export_board_summary(period_days: int = 30) -> dict:
 
     econ = await _srv.get_unit_economics(period_days=period_days)
     if econ.get("error"):
+        # No board-ready markdown full of $0.00 when no cost data was read.
+        if econ.get("error") == "no_cost_data":
+            econ = {**econ, "board_summary_written": False}
         return econ
     change = await _srv.explain_cost_change(compare_days=period_days)
+    if isinstance(change, dict) and (
+            change.get("error") or change.get("comparison_unavailable")):
+        # A change against a period that was not read is not a change.
+        change = {}
 
     ue = econ.get("unit_economics", {})
     runway = econ.get("runway", {})
@@ -405,6 +412,8 @@ async def export_board_summary(period_days: int = 30) -> dict:
     lines.append("## Infrastructure & AI Spend")
     lines.append("")
     lines.append(f"- **Total infra + AI cost ({period_days}d):** {econ.get('total_infrastructure_cost', 'n/a')}")
+    if econ.get("partial_warning"):
+        lines.append(f"- **Coverage:** {econ['partial_warning']}")
     if isinstance(change, dict) and change.get("cost_change", {}).get("now"):
         cc = change["cost_change"]
         lines.append(f"- **Spend vs last period:** {cc.get('now')} ({cc.get('pct', 'n/a')})")

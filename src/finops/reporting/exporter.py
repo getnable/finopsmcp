@@ -234,6 +234,32 @@ def _stat_box(label: str, value: str, color: str = _SLATE) -> str:
     )
 
 
+def cost_data_unread(data: Any) -> str | None:
+    """Why a cost section holds no cost data, or None when it does.
+
+    A tool that could not read the bill returns an error dict (or, when the
+    provider answered with no rows, says so); summing it gave "Total Spend $0".
+    """
+    if not isinstance(data, dict):
+        return None
+    if data.get("error"):
+        return str(data.get("message") or data.get("error"))
+    if data.get("no_cost_rows"):
+        return str(data.get("no_rows_note") or "The provider returned no cost rows.")
+    return None
+
+
+def _notice(text: str, color: str = _AMBER) -> str:
+    return (
+        f"<div style='background:#fff;border:1px solid {color};border-radius:8px;"
+        f"padding:16px 20px;font-size:14px;color:{_SLATE}'>{_html.escape(text)}</div>"
+    )
+
+
+def _unread_notice(reason: str) -> str:
+    return _notice(f"No cost data was read: {reason} This is not a finding of zero spend.")
+
+
 def _change_badge(pct: float) -> str:
     if pct > 10:
         color, arrow = _RED, "↑"
@@ -270,7 +296,9 @@ def build_html_report(
     sections_html = ""
 
     # ── Cost summary stats ─────────────────────────────────────────────────────
-    if cost_summary:
+    if cost_summary and (why := cost_data_unread(cost_summary)):
+        sections_html += _section("Cost Summary", _unread_notice(why))
+    elif cost_summary:
         total = cost_summary.get("grand_total_usd", 0)
         by_prov = cost_summary.get("by_provider", {})
         stats_html = "<div style='display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px'>"
@@ -292,10 +320,14 @@ def build_html_report(
             prov_rows,
             ["left", "right", "right"],
         )
+        if cost_summary.get("partial_warning"):
+            table += _notice(str(cost_summary["partial_warning"]))
         sections_html += _section("Cost Summary", stats_html + table)
 
     # ── Top services ───────────────────────────────────────────────────────────
-    if services:
+    if services and (why := cost_data_unread(services)):
+        sections_html += _section("Top Services", _unread_notice(why))
+    elif services:
         by_svc = services.get("by_service", services.get("grand_by_service", {}))
         total_svc = sum(by_svc.values()) if by_svc else 1
         rows = [
@@ -483,7 +515,12 @@ def write_report(
     ts = _ts()
     # Allowlist, not a denylist: replacing only "/" let a "\\" or "..\\"
     # in a model-supplied title escape the exports directory on Windows.
-    safe_title = re.sub(r"[^a-z0-9_-]+", "_", title.lower())[:40] or "report"
+    safe_title = re.sub(r"[^a-z0-9_-]+", "_", title.lower()).strip("_")
+    # 40 characters cut the default title's end date to "2026-09-". Keep the
+    # whole of a normal title and, past 80, cut at a word boundary.
+    if len(safe_title) > 80:
+        safe_title = safe_title[:80].rsplit("_", 1)[0]
+    safe_title = safe_title or "report"
     base = _export_dir() / f"{safe_title}_{ts}"
     output: dict[str, str] = {}
 
@@ -504,6 +541,9 @@ def write_report(
         output["html"] = str(path)
 
     if "csv" in formats:
+        # A section that read nothing has no rows to write; an empty CSV with a
+        # Total USD column reads as zero.
+        sections = {k: v for k, v in sections.items() if not cost_data_unread(v)}
         csv_files: dict[str, str] = {}
         if "cost_summary" in sections and sections["cost_summary"]:
             csv_files["cost_summary"] = cost_summary_csv(sections["cost_summary"])

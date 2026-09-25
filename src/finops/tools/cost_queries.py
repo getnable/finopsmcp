@@ -1199,6 +1199,10 @@ async def get_unit_economics(period_days: int = 30) -> dict:
 
     active = await _srv._active()
     total_cost, by_provider, by_service = await _srv._gather_costs(active, start, end)
+    # Unit economics over a cost nobody read is "$0.00 per customer" and "0% of
+    # MRR (healthy)": refuse instead, and say what was not read.
+    if (unread := _unread_costs(active, by_provider)) is not None:
+        return unread
 
     econ = compute_unit_economics(total_cost, metrics)
 
@@ -1226,6 +1230,10 @@ async def get_unit_economics(period_days: int = 30) -> dict:
             "mean for the business in plain English."
         ),
     }
+    _failed = {n: p.get("error") for n, p in by_provider.items()
+               if isinstance(p, dict) and p.get("error")}
+    if _failed:
+        out.update(_partial([n for n in by_provider if n not in _failed], _failed))
     if metrics.get("_source") in ("stripe", "stored+stripe"):
         out["metrics_source"] = (
             f"MRR and paying customers pulled live from Stripe "
@@ -1283,8 +1291,13 @@ async def explain_cost_change(
     prev_start = prev_end - _srv.timedelta(days=compare_days)
 
     active = await _srv._active()
-    cost_now, _, by_service_now = await _srv._gather_costs(active, period_start, period_end)
-    cost_before, _, by_service_before = await _srv._gather_costs(active, prev_start, prev_end)
+    cost_now, prov_now, by_service_now = await _srv._gather_costs(active, period_start, period_end)
+    if (unread := _unread_costs(active, prov_now)) is not None:
+        # "Costs went down $0.00 (unknown %)" was the answer when nothing was read.
+        return unread
+    cost_before, prov_before, by_service_before = await _srv._gather_costs(
+        active, prev_start, prev_end)
+    prior_unread = _unread_costs(active, prov_before)
 
     # Use latest metrics for "now" and the oldest available for "before"
     metrics_now = latest[0]
@@ -1319,6 +1332,15 @@ async def explain_cost_change(
     deltas.sort(key=lambda d: -abs(d["change_usd"]))
     top_drivers = deltas[:5]
     explanation["cost_drivers"] = top_drivers
+
+    if prior_unread is not None:
+        # The current period was read; the one before it was not, so there is
+        # no real change to report, only this period's spend.
+        explanation["comparison_unavailable"] = True
+        explanation["comparison_note"] = (
+            f"The previous period ({prev_start} to {prev_end}) could not be read: "
+            f"{prior_unread.get('message', '')} The change against it is not a real "
+            "comparison.")
 
     if not enough_history:
         explanation["history_note"] = (
@@ -2220,6 +2242,44 @@ def _no_cost_data(failed: dict, noun: str = "provider") -> dict:
         "note": (f"No {noun} returned cost data, so nable has no total to "
                  "report. This is not a finding of zero spend."),
     }
+
+
+_NOT_ZERO = "This is not a finding of zero spend."
+
+
+def _unread_costs(targets: dict, by_provider: dict) -> dict | None:
+    """The refusal for a cost total nothing stands behind, or None.
+
+    Three ways to have read nothing: no provider connected, every provider
+    failed, or every provider answered with no cost rows. Each of them summed
+    to $0.00 and was reported as if it were the bill.
+    """
+    if not targets:
+        return {
+            "error": "no_cost_data",
+            "message": (
+                "No cost provider is connected, so no cost data was read. Connect "
+                "one right here in the chat: call connect_aws, connect_gcp or "
+                "connect_azure."),
+            "note": f"No cost data was read. {_NOT_ZERO}",
+        }
+    failed = {n: p.get("error") for n, p in by_provider.items()
+              if isinstance(p, dict) and p.get("error")}
+    ok = [n for n in by_provider if n not in failed]
+    if failed and not ok:
+        return _no_cost_data(failed)
+    empty = [n for n in ok if by_provider[n].get("no_rows")]
+    if ok and len(empty) == len(ok):
+        out: dict = {
+            "error": "no_cost_data",
+            "message": " ".join(by_provider[n].get("no_rows_note", "") for n in empty).strip(),
+            "providers_with_no_rows": empty,
+            "note": f"Every provider was read but returned no cost rows. {_NOT_ZERO}",
+        }
+        if failed:
+            out["failed_providers"] = failed
+        return out
+    return None
 
 
 def _partial(ok, failed: dict, noun: str = "provider") -> dict:

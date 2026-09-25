@@ -580,6 +580,13 @@ async def generate_account_dashboard(
             last_month_total = last_summary.total_usd
             same_period_total = same_total
 
+            # Read, and nothing came back for either month: that is not a
+            # $0.00 bill, and "Spend this month: $0.00 (+$0.00)" said it was.
+            from ..connectors.base import no_rows_message, returned_no_rows
+            if returned_no_rows(last_summary) and (
+                    elapsed_days <= 0 or returned_no_rows(this_summary)):
+                raise LookupError(no_rows_message("aws"))
+
             # Top-5 services, month to date against the same days of last month
             all_svcs = set(this_by_svc) | set(same_by_svc)
             svc_list = sorted(all_svcs, key=lambda s: -this_by_svc.get(s, 0))
@@ -592,7 +599,8 @@ async def generate_account_dashboard(
         except Exception as e:
             # Surface it: the dashboard still renders, but spend says it is
             # unavailable and why, instead of $0.
-            aws_error = f"AWS cost data could not be read: {e}"
+            aws_error = (str(e) if isinstance(e, LookupError)
+                         else f"AWS cost data could not be read: {e}")
             this_month_total = last_month_total = same_period_total = None
             top_services = []
 
