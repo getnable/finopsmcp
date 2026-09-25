@@ -160,6 +160,29 @@ def _print_header() -> None:
     _blank()
 
 
+def _plan_lines() -> list[str]:
+    """The plan, stated for today. The welcome printed "7-day free trial, all
+    features unlocked" whatever day it was shown on, including after the trial
+    had ended on a reinstall. Reads the plan table in license.py."""
+    try:
+        from .license import checkout_url, get_status, plan_label, trial_line
+        st = get_status()
+    except Exception:
+        return []
+    line = trial_line(st)
+    if st.mode == "trial":
+        return [green("✓") + bold(f"  {line}")]
+    if st.mode == "free":
+        out = [green("✓") + bold("  Free plan: every cost query, scan and connector.")]
+        if line:
+            out.append(dim(f"   {line}"))
+        out.append(dim(f"   {plan_label('pro')}: {checkout_url('pro')}"))
+        return out
+    if st.mode in ("pro", "team", "enterprise"):
+        return [green("✓") + bold(f"  {plan_label(st.mode)} active.")]
+    return []
+
+
 # ── One-time welcome (auto-shown on first run) ─────────────────────────────────
 
 def _is_interactive_install() -> bool:
@@ -264,8 +287,8 @@ def show_welcome() -> None:
     _blank()
     _line(_rule())
     _blank()
-    _line(green("✓") + bold("  7-day free trial, all features unlocked."))
-    _line(dim("   No credit card required."))
+    for ln in _plan_lines():
+        _line(ln)
     _blank()
     _line(f"  Docs  →  {link('https://getnable.com/docs')}")
     _blank()

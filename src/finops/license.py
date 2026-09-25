@@ -781,8 +781,8 @@ def require_team(feature: str) -> dict | None:
         "error": f"{friendly} requires the Team plan.",
         "plan": s.mode,
         "upgrade": (
-            f"The conversational Slack bot and chat remediation are part of nable Team "
-            f"($1,000/mo flat, unlimited seats). Start a free trial or see plans: {_UPGRADE_URL} "
+            f"The conversational Slack bot and chat remediation are part of nable "
+            f"{plan_label('team')}. Team checkout: {_CHECKOUT_URL} (all plans: {_UPGRADE_URL}). "
             f"Then sign in: {_ACTIVATE_CMD}"
         ),
     }
@@ -822,21 +822,16 @@ def require_pro(feature: str) -> dict | None:
     # Free tier — explain what they're missing and how to unlock it
     friendly = feature.replace("_", " ")
 
-    # Craft a contextual upgrade message based on whether trial expired recently
-    if s.mode == "free" and s.issued:
-        try:
-            trial_start = date.fromisoformat(s.issued)
-            days_since_expiry = (date.today() - trial_start).days - _TRIAL_DAYS
-            if 0 < days_since_expiry <= 30:
-                urgency = (
-                    f"Your {_TRIAL_DAYS}-day trial ended {days_since_expiry} day{'s' if days_since_expiry != 1 else ''} ago. "
-                )
-            else:
-                urgency = ""
-        except Exception:
-            urgency = ""
+    # Say why this user is locked out. The trial starts on first run, so a user
+    # who reaches a gate on the free tier has already had it; offering them a
+    # "7-day free trial" was new-customer copy they could not act on. A key that
+    # expired (a lapsed subscription) or does not validate says that instead.
+    if s.mode == "invalid" and s.expires:
+        why = f"Your license key expired on {s.expires}. Renew to turn Pro back on."
+    elif s.mode == "invalid":
+        why = f"The license key on this machine did not validate: {s.message}"
     else:
-        urgency = ""
+        why = trial_line(s) or f"Your {_TRIAL_DAYS}-day Pro trial has ended. Free stays on."
 
     # Build a concise FOMO block showing everything Team unlocks
     _TEAM_FEATURES = [
@@ -859,8 +854,8 @@ def require_pro(feature: str) -> dict | None:
             continue
         marker = "▶" if key == feature else " "
         lines.append(f"  {marker} {desc}")
-    lines.append(f"\n  You hit this because '{friendly}' requires Pro.")
-    lines.append(f"\n  → 7-day free trial: {_PRO_CHECKOUT_URL}")
+    lines.append(f"\n  You hit this because '{friendly}' requires Pro. {why}")
+    lines.append(f"\n  → {plan_label('pro')}: {_PRO_CHECKOUT_URL}")
     lines.append(f"  → Already subscribed? Sign in:  {_ACTIVATE_CMD}")
 
     return {

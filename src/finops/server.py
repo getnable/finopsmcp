@@ -584,11 +584,12 @@ async def connection_status() -> str:
             "no restart. Prefer a guided terminal setup? Run 'uvx nable' instead."
         )
 
+    from .license import checkout_url, plan_label, plan_name, trial_line
     lic = get_status()
     if lic.mode == "trial":
         plan_line = (
-            f"Plan: Team trial: {lic.days_remaining} day{'s' if lic.days_remaining != 1 else ''} remaining. "
-            f"All features unlocked. Subscribe at {_UPGRADE_URL} to keep Team features ($25/mo)."
+            f"Plan: {trial_line(lic)} "
+            f"Keep Pro after the trial: {plan_label('pro')}, {checkout_url('pro')}"
         )
     elif lic.mode == "free":
         plan_line = (
@@ -598,8 +599,8 @@ async def connection_status() -> str:
             f"email digests, commitment recommendations, and org rollup. "
             f"Upgrade at {_UPGRADE_URL}."
         )
-    elif lic.mode == "pro":
-        plan_line = f"Plan: Team: {lic.email}"
+    elif lic.mode in ("pro", "team", "enterprise"):
+        plan_line = f"Plan: {plan_name(lic.mode)}: {lic.email}"
     else:
         plan_line = f"Plan: {lic.mode}"
 
@@ -1393,6 +1394,70 @@ def _denied_action(msg: str) -> str:
 
 
 
+_BANNER_FREE = [
+    "✓  Cost queries across AWS, Azure, GCP & 10+ SaaS connectors",
+    "✓  Anomaly detection, on request",
+    "✓  Rightsizing recommendations",
+    "✓  Budgets, forecasts & spend alerts",
+    "✓  Kubernetes cost analysis",
+    "✓  PR cost comments",
+    "✓  Connector health & savings tracking",
+]
+_BANNER_PRO = [
+    "   🎫  Ticket auto-creation  (Jira · Linear · GitHub Issues)",
+    "   📧  Email and Slack reports, sent on request",
+    "   💰  RI / Savings Plan recommendations with $ ROI",
+    "   🏢  Org-wide multi-account rollup & OU breakdown",
+    "   🔍  Line-item CUR data, per-resource & RI waste",
+    "   📈  Unit economics, cost per customer, % of MRR",
+]
+
+
+def _plan_banner_lines(status) -> list[str]:
+    """The MCP server's start banner, named from the plan table in license.py.
+
+    It greeted a Pro key as "nable Team", a Team key as the free tier, and gave
+    the trial deadline as "Subscribe before day N", a number with no calendar
+    behind it. The name and the date now come from the one table."""
+    from .license import checkout_url, fmt_day, plan_label, plan_name, trial_last_day
+
+    W = 62
+    border = "─" * W
+    out: list[str] = []
+    mode = status.mode
+    if mode in ("pro", "team", "enterprise"):
+        until = f"  ·  through {status.expires}" if getattr(status, "expires", "") else ""
+        out += [f"\n  {border}", f"  nable {plan_name(mode)}  ·  {status.email}{until}", f"  {border}"]
+        out += [f"  {f}" for f in _BANNER_FREE]
+        out.append(f"  {'─' * W}")
+        out += [f"  {t.replace('   ', '', 1)}" for t in _BANNER_PRO]
+        out.append(f"  {border}\n")
+    elif mode == "trial":
+        days = status.days_remaining
+        last = trial_last_day(status)
+        through = f", through {fmt_day(last)}" if last else ""
+        out += [f"\n  {border}",
+                f"  nable {plan_name('trial')}  ·  {days} day{'s' if days != 1 else ''} left{through}",
+                f"  {border}"]
+        out += [f"  {f}" for f in _BANNER_FREE]
+        out += [f"  {t.replace('   ', '', 1)}" for t in _BANNER_PRO]
+        out.append(f"  {'─' * W}")
+        when = f" after {fmt_day(last)}" if last else ""
+        out.append(f"  Keep Pro{when}: {plan_label('pro')}")
+        out.append(f"  {checkout_url('pro')}")
+        out.append(f"  {border}\n")
+    else:
+        out += [f"\n  {border}", "  nable  ·  free tier", f"  {border}"]
+        out += [f"  {f}" for f in _BANNER_FREE]
+        out.append(f"  {'─' * W}")
+        out.append("  Locked on free tier  ↓")
+        out += [f"  {t}" for t in _BANNER_PRO]
+        out.append(f"  {'─' * W}")
+        out.append(f"  {plan_label('pro')}  →  {checkout_url('pro')}")
+        out.append(f"  {border}\n")
+    return out
+
+
 def main() -> None:
     import contextlib
     import logging
@@ -1447,26 +1512,6 @@ def main() -> None:
     set_current_identity(ident)
 
     status = get_status()
-    W = 62
-    border = "─" * W
-
-    _FREE = [
-        "✓  Cost queries across AWS, Azure, GCP & 10+ SaaS connectors",
-        "✓  Anomaly detection, on request",
-        "✓  Rightsizing recommendations",
-        "✓  Budgets, forecasts & spend alerts",
-        "✓  Kubernetes cost analysis",
-        "✓  PR cost comments",
-        "✓  Connector health & savings tracking",
-    ]
-    _TEAM = [
-        "   🎫  Ticket auto-creation  (Jira · Linear · GitHub Issues)",
-        "   📧  Email and Slack reports, sent on request",
-        "   💰  RI / Savings Plan recommendations with $ ROI",
-        "   🏢  Org-wide multi-account rollup & OU breakdown",
-        "   🔍  Line-item CUR data, per-resource & RI waste",
-        "   📈  Unit economics, cost per customer, % of MRR",
-    ]
 
     # This banner is for a human. On the MCP-server path (the only path that
     # reaches here, the TTY case returned above) stdout is the JSON-RPC channel
@@ -1474,44 +1519,8 @@ def main() -> None:
     # mcp.run() can corrupt it so the client silently loads no tools. Route the
     # whole banner to stderr, where it still shows in the client's server logs.
     with contextlib.redirect_stdout(sys.stderr):
-        if status.mode == "pro":
-            print(f"\n  {border}")
-            print(f"  nable Team  ·  {status.email}")
-            print(f"  {border}")
-            for f in _FREE:
-                print(f"  {f}")
-            print(f"  {'─' * (W - 0)}")
-            for t in _TEAM:
-                print(f"  {t.replace('   ', '', 1)}")
-            print(f"  {border}\n")
-
-        elif status.mode == "trial":
-            days = status.days_remaining
-            print(f"\n  {border}")
-            print(f"  nable Team trial  ·  {days} day{'s' if days != 1 else ''} remaining  ·  all features unlocked")
-            print(f"  {border}")
-            for f in _FREE:
-                print(f"  {f}")
-            for t in _TEAM:
-                print(f"  {t.replace('   ', '', 1)}")
-            print(f"  {'─' * W}")
-            print(f"  Subscribe before day {30 - (30 - days) + 1} to keep Team features:")
-            print(f"  {_UPGRADE_URL}")
-            print(f"  {border}\n")
-
-        else:
-            print(f"\n  {border}")
-            print("  nable  ·  free tier")
-            print(f"  {border}")
-            for f in _FREE:
-                print(f"  {f}")
-            print(f"  {'─' * W}")
-            print("  Locked on free tier  ↓")
-            for t in _TEAM:
-                print(f"  {t}")
-            print(f"  {'─' * W}")
-            print(f"  First month free → {_UPGRADE_URL}")
-            print(f"  {border}\n")
+        for line in _plan_banner_lines(status):
+            print(line)
 
     # Warn if running in Postgres mode without auth enforcement
     if os.getenv("DATABASE_URL") and os.getenv("FINOPS_REQUIRE_AUTH") != "1":

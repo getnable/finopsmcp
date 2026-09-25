@@ -1839,20 +1839,20 @@ def setup_slack_bot() -> None:
     # setup, not on the first @mention. Cost queries, anomalies and one-way
     # alerts are free; the two-way @nable bot is Team-only (trial passes).
     try:
-        from .license import check_license
+        from .license import check_license, checkout_url, plan_label, plan_name
         st = check_license()
         if st.is_team:
             if getattr(st, "mode", "") == "trial" and st.days_remaining > 0:
-                _ok(f"Team trial active ({st.days_remaining} day"
-                    f"{'s' if st.days_remaining != 1 else ''} left). The @nable bot is unlocked.")
+                _ok(f"Trial active ({st.days_remaining} day"
+                    f"{'s' if st.days_remaining != 1 else ''} left). The @nable bot is unlocked "
+                    "for the trial.")
             else:
-                _ok("Pro plan active. The @nable bot is unlocked.")
+                _ok(f"{plan_name(st.mode)} plan active. The @nable bot is unlocked.")
         else:
-            _warn("The conversational @nable bot is a nable Team feature "
-                  "($1,000/mo flat, unlimited seats), with a 7-day free trial.")
+            _warn(f"The conversational @nable bot is a nable {plan_label('team')} feature.")
             print("    Cost queries, anomalies and one-way alerts are free. The two-way bot is not.")
-            print("    Start a trial or activate a key:  finops setup license")
-            print("    Plans:  https://getnable.com/#pricing")
+            print(f"    Team checkout:  {checkout_url('team')}")
+            print("    Then sign in:   finops login")
         print()
     except Exception:
         pass
@@ -3589,33 +3589,37 @@ def _run_license_status() -> None:
     Called by: finops setup license-status
                finops license-status
     """
-    from .license import check_license, _UPGRADE_URL
+    from .license import (
+        _TRIAL_DAYS, _UPGRADE_URL, check_license, checkout_url, plan_label, trial_line,
+    )
 
     status = check_license()
 
     print("\n  nable license status\n")
 
-    mode_display = {
-        "pro":     "\033[32mTeam (Pro)\033[0m",
-        "trial":   "\033[33mTrial\033[0m",
-        "free":    "\033[90mFree\033[0m",
-        "invalid": "\033[31mInvalid\033[0m",
-    }.get(status.mode, status.mode)
+    color = {"pro": "32", "team": "32", "enterprise": "32", "trial": "33",
+             "free": "90", "invalid": "31"}.get(status.mode)
+    label = "Invalid" if status.mode == "invalid" else plan_label(status.mode)
+    mode_display = f"\033[{color}m{label}\033[0m" if color else label
 
     print(f"  Plan:    {mode_display}")
     if status.email:
         print(f"  Email:   {status.email}")
-    if status.issued:
+    if status.issued and status.mode not in ("trial", "free"):
         print(f"  Issued:  {status.issued}")
-    if status.days_remaining >= 0:
-        print(f"  Trial:   {status.days_remaining} day(s) remaining")
+    if status.expires:
+        print(f"  Expires: {status.expires}")
+    line = trial_line(status)
+    if line:
+        print(f"  Trial:   {line}")
+    elif status.mode == "trial" and status.days_remaining >= 0:
+        print(f"  Trial:   {status.days_remaining} day(s) remaining of {_TRIAL_DAYS}")
     print(f"  Message: {status.message}")
 
-    if status.mode == "free":
-        print(f"\n  Upgrade at: {_UPGRADE_URL}")
-        print("  Then run:   finops setup license FINOPS-2-...\n")
-    elif status.mode == "trial":
-        print(f"\n  Upgrade before trial ends: {_UPGRADE_URL}\n")
+    if status.mode in ("free", "trial", "invalid"):
+        print(f"\n  {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}")
+        print("  Then run:   finops login\n")
     else:
         print()
 

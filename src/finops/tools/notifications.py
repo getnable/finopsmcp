@@ -7,6 +7,7 @@ import-order coupling exists."""
 from __future__ import annotations
 
 from .. import server as _srv
+from ..license import checkout_url as _checkout_url, plan_label as _plan_label
 
 
 @_srv.mcp.tool()
@@ -482,7 +483,7 @@ def subscribe_to_report(
         email_note = None
         if email_addresses and _srv.require_pro("scheduled_email_digests") is not None:
             email_note = (
-                f"This is a Team feature ($25/mo). Upgrade at {_srv._UPGRADE_URL} to unlock email delivery. "
+                f"Email delivery is a {_plan_label('pro')} feature. Upgrade at {_checkout_url('pro')} to unlock it. "
                 f"The subscription will be created with Slack delivery only."
             )
             email_addresses = []  # clear emails on free tier

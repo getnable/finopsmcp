@@ -7,6 +7,7 @@ import-order coupling exists."""
 from __future__ import annotations
 
 from .. import server as _srv
+from ..license import checkout_url, plan_label, plan_name, trial_line
 
 
 def _month_pair(today):
@@ -155,8 +156,8 @@ async def list_connected_providers() -> dict:
             "plan": "trial",
             "days_remaining": status.days_remaining,
             "note": (
-                f"Team trial active: {status.days_remaining} day{'s' if status.days_remaining != 1 else ''} remaining. "
-                f"All features unlocked. Subscribe at {_srv._UPGRADE_URL} before trial ends to keep Team features."
+                f"{trial_line(status)} Keep Pro after the trial: {plan_label('pro')}, "
+                f"{checkout_url('pro')}"
             ),
         }
     elif status.mode == "free":
@@ -170,8 +171,9 @@ async def list_connected_providers() -> dict:
                 f"and org rollup. Upgrade at {_srv._UPGRADE_URL}."
             ),
         }
-    elif status.mode == "pro":
-        result["_plan"] = {"plan": "pro", "email": status.email}
+    elif status.mode in ("pro", "team", "enterprise"):
+        result["_plan"] = {"plan": status.mode, "name": plan_name(status.mode),
+                           "email": status.email, "expires": status.expires}
 
     return result
 
