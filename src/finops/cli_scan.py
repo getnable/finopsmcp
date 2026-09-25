@@ -554,7 +554,10 @@ def _failed_check_lines(report: dict) -> list[str]:
             continue
         code = f.get("error_code", "")
         if f.get("partial"):
-            what = f"{f.get('count', 0)} {f.get('unit', 'resources')} unread, {code}"
+            n, unit = f.get("count", 0), f.get("unit", "resources")
+            if n == 1 and unit.endswith("s"):
+                unit = unit[:-1]
+            what = f"{n} {unit} unread, {code}"
         else:
             what = f"{code} in {f.get('region', '?')}"
         bits = partly.setdefault(check, [])

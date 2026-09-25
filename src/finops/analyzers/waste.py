@@ -131,6 +131,24 @@ def _metric_call() -> str:
             else "cloudwatch.get_metric_statistics")
 
 
+def _note_unread(findings: CheckFindings, failed: dict, unit: str, metric: str) -> None:
+    """Record the metric reads that failed, by error code, with how many
+    resources each left unassessed.
+
+    A resource whose metric could not be read is skipped, never called idle:
+    unread is not idle. But skipping it quietly made a denied
+    cloudwatch:GetMetricStatistics drop every NAT gateway and load balancer
+    finding while the scan reported clean. The skip stays; the silence goes.
+    """
+    by_code: dict[str, int] = {}
+    for code in failed.values():
+        by_code[code] = by_code.get(code, 0) + 1
+    for code, n in sorted(by_code.items()):
+        findings.note_failure(
+            _metric_call(), code, count=n, unit=unit,
+            effect=f"{metric} not read, so these were not assessed (unread is not idle)")
+
+
 # ── EBS volumes ───────────────────────────────────────────────────────────────
 
 def _gp2_to_gp3_savings(size_gb: float) -> float:
@@ -389,7 +407,7 @@ def check_nat_gateways(
     Detect NAT Gateways with low throughput — they still cost ~$32/mo in fixed
     charges even with zero traffic. If a NAT GW processes <1 GB/day it's likely idle.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         paginator = ec2_client.get_paginator("describe_nat_gateways")
@@ -407,11 +425,13 @@ def check_nat_gateways(
     nats = [nat for page in pages for nat in page.get("NatGateways", [])]
 
     # BytesOutToDestination (egress through NAT GW), one batched read for all
+    failed: dict = {}
     sums = fetch_metric_values(cw_client, [
         MetricQuery(nat["NatGatewayId"], "AWS/NATGateway", "BytesOutToDestination",
                     (("NatGatewayId", nat["NatGatewayId"]),), "Sum", period_seconds)
         for nat in nats
-    ], start, now)
+    ], start, now, failures=failed)
+    _note_unread(findings, failed, "NAT gateways", "traffic (BytesOutToDestination)")
 
     for nat in nats:
         nat_id = nat["NatGatewayId"]
@@ -1096,7 +1116,7 @@ def check_idle_ec2(
     """
     _APPROX_MONTHLY_PER_VCPU = 15.0  # very rough: $15/vCPU/month on-demand
 
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         paginator = ec2_client.get_paginator("describe_instances")
@@ -1127,11 +1147,13 @@ def check_idle_ec2(
     # CPU for every candidate, then NetworkOut only where CPU came back low:
     # the same reads the per-resource loop made, so the free path spends no
     # more requests and the opt-in path bills no more metrics than it must.
+    cpu_failed: dict = {}
     cpu_series = fetch_metric_values(cw_client, [
         MetricQuery(inst["InstanceId"], "AWS/EC2", "CPUUtilization",
                     (("InstanceId", inst["InstanceId"]),), "Average", 3600)  # hourly
         for inst in candidates
-    ], start, now)
+    ], start, now, failures=cpu_failed)
+    _note_unread(findings, cpu_failed, "instances", "CPUUtilization")
 
     low_cpu: list[tuple[dict, float, float]] = []
     for inst in candidates:
@@ -1155,11 +1177,13 @@ def check_idle_ec2(
     # per-collection-interval samples (Statistics=Average) would return mean
     # bytes-per-sample, ~12x too low against a per-hour threshold, so the guard
     # would never fire. Use Sum.
+    net_failed: dict = {}
     net_series = fetch_metric_values(cw_client, [
         MetricQuery(inst["InstanceId"], "AWS/EC2", "NetworkOut",
                     (("InstanceId", inst["InstanceId"]),), "Sum", 3600)
         for inst, _, _ in low_cpu
-    ], start, now)
+    ], start, now, failures=net_failed)
+    _note_unread(findings, net_failed, "instances", "NetworkOut")
 
     for inst, avg_cpu, max_cpu in low_cpu:
         inst_id = inst["InstanceId"]
@@ -1263,7 +1287,7 @@ def check_rds_rightsizing(
 
     Excludes Aurora Serverless (scales automatically) and read replicas.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         paginator = rds_client.get_paginator("describe_db_instances")
@@ -1289,11 +1313,13 @@ def check_rds_rightsizing(
                 continue
             candidates.append(db)
 
+    failed: dict = {}
     series = fetch_metric_values(cw_client, [
         MetricQuery(db["DBInstanceIdentifier"], "AWS/RDS", "CPUUtilization",
                     (("DBInstanceIdentifier", db["DBInstanceIdentifier"]),), "Average", 3600)
         for db in candidates
-    ], start, now)
+    ], start, now, failures=failed)
+    _note_unread(findings, failed, "databases", "CPUUtilization")
 
     for db in candidates:
         db_id = db["DBInstanceIdentifier"]
@@ -1364,7 +1390,7 @@ def check_rds_idle(
     Detect RDS instances with near-zero database connections over the lookback
     period. Zero-connection instances are likely unused and can be stopped or deleted.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
 
     try:
         paginator = rds_client.get_paginator("describe_db_instances")
@@ -1381,11 +1407,13 @@ def check_rds_idle(
         if db.get("DBInstanceStatus", "") == "available"
     ]
 
+    failed: dict = {}
     series = fetch_metric_values(cw_client, [
         MetricQuery(db["DBInstanceIdentifier"], "AWS/RDS", "DatabaseConnections",
                     (("DBInstanceIdentifier", db["DBInstanceIdentifier"]),), "Maximum", 86400)
         for db in candidates
-    ], start, now)
+    ], start, now, failures=failed)
+    _note_unread(findings, failed, "databases", "DatabaseConnections")
 
     for db in candidates:
         db_id = db["DBInstanceIdentifier"]
@@ -1494,7 +1522,7 @@ def check_idle_load_balancers(
     Load balancers with fewer than request_threshold total requests over
     lookback_days are flagged as idle. They still incur the hourly LCU base cost.
     """
-    findings: list[dict] = []
+    findings = CheckFindings()
     listing_errors: list[Exception] = []
 
     now = datetime.now(timezone.utc)
@@ -1548,7 +1576,9 @@ def check_idle_load_balancers(
             ("classic", i), "AWS/ELB", "RequestCount",
             (("LoadBalancerName", lb.get("LoadBalancerName", "")),), "Sum", 86400,
         ))
-    series = fetch_metric_values(cw_client, queries, start, now)
+    failed: dict = {}
+    series = fetch_metric_values(cw_client, queries, start, now, failures=failed)
+    _note_unread(findings, failed, "load balancers", "request and flow counts")
 
     for i, lb in enumerate(v2_lbs):
         lb_name = lb.get("LoadBalancerName", "")
@@ -1996,12 +2026,14 @@ def check_ecs_task_rightsizing(
                     continue
                 services.append((cluster_name, svc, allocated_cpu, allocated_memory_mb))
 
+    failed: dict = {}
     series = fetch_metric_values(cw_client, [
         MetricQuery(i, "ECS/ContainerInsights", "CpuUtilized",
                     (("ClusterName", cluster_name), ("ServiceName", svc.get("serviceName", ""))),
                     "Average", 3600)
         for i, (cluster_name, svc, _, _) in enumerate(services)
-    ], start, now)
+    ], start, now, failures=failed)
+    _note_unread(findings, failed, "services", "CpuUtilized")
 
     for i, (cluster_name, svc, allocated_cpu, allocated_memory_mb) in enumerate(services):
         svc_name = svc.get("serviceName", "")
