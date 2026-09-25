@@ -2900,8 +2900,9 @@ def doctor() -> dict[str, Any]:
     ledger["unrecorded"] = lost
     if lost["count"]:
         gaps.append(f"{lost['count']} verdict(s) answered but not recorded, last at "
-                    f"{lost['last']}: the ledger file was locked by another process or "
-                    "replaced by something that is not a file")
+                    f"{lost['last']}: the ledger file was locked by another process, "
+                    "replaced by something that is not a file (a symlink, a FIFO), or "
+                    "could not be written (permissions, a full disk)")
         fix(f"check what holds {ledger['path']} (lsof), then remove {lost['path']}",
             "records the guard could not write")
     budgets = budget_status()

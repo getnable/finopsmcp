@@ -30,6 +30,7 @@ much: a lost detail in a summary costs nothing, a leaked key costs a rotation.
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -97,6 +98,9 @@ def ledger_path() -> Path:
 # `bypass=`: a lost detail in a summary costs nothing, a leaked password does.
 _SECRET_WORD = (r"(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|PASS|PW|CREDENTIAL|AUTH"
                 r"|SIGNATURE)")
+# A value an earlier rule already redacted, or an auth scheme whose token
+# the bearer rule has.
+_TAKEN = r"(?!\s*(?:\[REDACTED|(?:bearer|basic|digest)\s))"
 _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     # PEM private keys, whole block (or to the end if the block is cut off).
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)",
@@ -107,6 +111,19 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     # db.password=...`): the lookbehind anchors it without spending a character.
     (re.compile(rf"(?<![A-Za-z0-9_])([A-Za-z0-9_]*{_SECRET_WORD}[A-Za-z0-9_]*)="
                 r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1=[REDACTED]"),
+    # `aws configure set aws_secret_access_key VALUE`: the value, whatever it
+    # starts with (a secret key can start with "/", which reads as a path).
+    (re.compile(r"(\baws\s+configure\s+set\s+(?:--profile\s+\S+\s+)?"
+                r"\S*(?:secret|token|password)\S*\s+)(\"[^\"]*\"|'[^']*'|\S+)",
+                re.IGNORECASE), r"\1[REDACTED]"),
+    # `aws ssm put-parameter --value ...`: the value of a parameter is often a
+    # secret whatever --type says, so it is always dropped.
+    (re.compile(r"(\baws\s+ssm\s+put-parameter\b[^|;&]*?(?<!\S)--value)(\s+|=)"
+                r"(\"[^\"]*\"|'[^']*'|\S+)", re.IGNORECASE), r"\1\2[REDACTED]"),
+    # `pulumi config set [--secret] KEY VALUE`: VALUE, when --secret says it is
+    # one or KEY names one. Runs before the flag rule below, which reads
+    # `--secret KEY` as a flag and its value.
+    (re.compile(r"\bpulumi\s+config\s+set\b[^|;&]*"), lambda m: _pulumi_config(m.group(0))),
     # --password x, --master-user-password=x, --api-key x, --auth-token x.
     (re.compile(r"(?<![A-Za-z0-9-])(--[A-Za-z0-9-]*(?:password|passwd|pass|pw|secret|token|key"
                 r"|credential|signature)[A-Za-z0-9-]*)(=|\s+)"
@@ -130,6 +147,8 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})"),
      "[REDACTED-GITHUB-TOKEN]"),
     (re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}"), "[REDACTED-API-KEY]"),
+    (re.compile(r"\bglpat-[A-Za-z0-9_-]{16,}"), "[REDACTED-GITLAB-TOKEN]"),
+    (re.compile(r"\bdop_v1_[A-Fa-f0-9]{32,}"), "[REDACTED-DIGITALOCEAN-TOKEN]"),
     (re.compile(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{12,}"), "[REDACTED-API-KEY]"),
     (re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"), "[REDACTED-API-KEY]"),
     (re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|ANPA|ANVA|AIPA)[A-Z0-9]{16}\b"),
@@ -140,7 +159,46 @@ _REDACTIONS: list[tuple[re.Pattern[str], Any]] = [
     # not one per letter (redact must stay linear: see _REDACT_INPUT_MAX).
     (re.compile(r"(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:)[^@\s]+@"),  # pragma: allowlist secret
      r"\1[REDACTED]@"),
+    # The rules below run last, so a bearer or prefixed token above has
+    # already taken its part; they leave a value that starts with one alone.
+    # A header whose name says it carries a credential: -H "X-Api-Key: ...",
+    # --header 'PRIVATE-TOKEN: ...', -H "Cookie: ...". The whole quoted value.
+    (re.compile(rf"((?<!\S)(?:-H|--header)(?:\s+|=)[\"'][^\"':]*"
+                rf"(?:key|token|auth|secret|passw|cookie|signature)[^\"':]*:\s*){_TAKEN}"
+                r"[^\"']+", re.IGNORECASE), r"\1[REDACTED]"),
+    # KEY: value where KEY names a secret, the JSON and YAML spelling:
+    # {"MasterUserPassword":"..."}, 'password': '...', client_secret: xyz.
+    # A key right after `:` or `/` is part of an ARN or a path
+    # (arn:aws:secretsmanager:...:secret:name), not a key; an unquoted key
+    # needs a space after its colon, as YAML does, so host:port stays.
+    (re.compile(rf"(?<![A-Za-z0-9_.:/-])(\\?[\"'])([A-Za-z0-9_.-]*{_SECRET_WORD}[A-Za-z0-9_.-]*)"
+                rf"(\\?[\"']\s*:\s*){_TAKEN}(\\?\"[^\"\\]*\\?\"|'[^']*'|[^\s\"',}}\]]+)",
+                re.IGNORECASE), r"\1\2\3[REDACTED]"),
+    (re.compile(rf"(?<![A-Za-z0-9_.:/\\-])([A-Za-z0-9_.-]*{_SECRET_WORD}[A-Za-z0-9_.-]*"
+                rf":\s+){_TAKEN}(\"[^\"]*\"|'[^']*'|[^\s\"',}}\]]+)", re.IGNORECASE),
+     r"\1[REDACTED]"),
 ]
+
+# pulumi config set: flags that take a value, so neither is KEY or VALUE.
+_PULUMI_VALUE_FLAGS = frozenset({"-s", "--stack", "-C", "--cwd", "--config-file"})
+
+
+def _pulumi_config(segment: str) -> str:
+    tokens = segment.split(" ")
+    positional: list[int] = []
+    skip = False
+    for i, t in enumerate(tokens[3:], start=3):
+        if skip:
+            skip = False
+        elif t.startswith("-"):
+            skip = t in _PULUMI_VALUE_FLAGS
+        elif t:
+            positional.append(i)
+    secret = "--secret" in tokens or (
+        positional and re.search(_SECRET_WORD, tokens[positional[0]], re.IGNORECASE))
+    if secret and len(positional) >= 2:
+        tokens[positional[1]] = "[REDACTED]"
+    return " ".join(tokens)
 # Long high-entropy runs: base64 or url-safe tokens (AWS secret keys, GitHub
 # and Slack tokens, JWT segments). A run counts when it mixes upper case, lower
 # case and digits, which a hex digest, a path or a resource name rarely does.
@@ -300,6 +358,12 @@ def append(entry: dict[str, Any]) -> bool:
         finally:
             os.close(fd)
         return True
+    except OSError as e:
+        # A symlink in the ledger's place (ELOOP, from O_NOFOLLOW), a file
+        # made read-only (EACCES), a full disk (ENOSPC): the verdict was
+        # answered and nothing records it, so it is counted like a lock.
+        _note_unrecorded(entry, errno.errorcode.get(e.errno or 0, "os_error"))
+        return False
     except Exception:
         return False
 
@@ -314,12 +378,28 @@ def _ends_with_newline(fd: int) -> bool:
 
 # ── read ──────────────────────────────────────────────────────────────────────
 
+def _symlink_target(path: Path) -> str | None:
+    """Where the ledger points when it is a symlink, else None. append() never
+    writes through one (O_NOFOLLOW), so a ledger swapped for a link to a
+    frozen copy still verifies while every new verdict goes unrecorded."""
+    try:
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            return os.readlink(path)
+    except OSError:
+        pass
+    return None
+
+
 def verify(path: Path | None = None, *, at_line: int | None = None) -> dict[str, Any]:
     """Walk the chain. ok is False at the first line that does not parse or
     whose `prev` is not the hash of the line before it. With `at_line`, the
-    chain hash after that line is returned as hash_at (see check())."""
+    chain hash after that line is returned as hash_at (see check()).
+    `symlink` is where the ledger points when it is a symlink."""
     path = path or ledger_path()
     out: dict[str, Any] = {"ok": True, "records": 0, "head": GENESIS, "path": str(path)}
+    link = _symlink_target(path)
+    if link is not None:
+        out["symlink"] = link
     if not path.exists():
         return out
     prev = GENESIS
@@ -398,7 +478,12 @@ def check(path: Path | None = None) -> dict[str, Any]:
     at = anchor["records"] if anchor else None
     res = verify(path, at_line=at)
     warnings: list[str] = []
-    if anchor and at:
+    if res.get("symlink") is not None:
+        warnings.append(f"the ledger is a symlink to {res['symlink']}: the guard never writes "
+                        "through one, so no verdict since it was replaced has been recorded")
+    # A chain broken mid-file stops the count at the break, which is not the
+    # end being cut off; the break itself is the finding then.
+    if anchor and at and res["ok"]:
         seen = anchor.get("seen_at") or "the last check"
         if res["records"] < at:
             gone = "the file is empty or gone" if res["records"] == 0 else (
@@ -427,6 +512,9 @@ def recent(minutes: float, *, path: Path | None = None, now: datetime | None = N
     unreadable file: the caller decides what a failed read means."""
     path = path or ledger_path()
     since = (now or datetime.now(UTC)) - timedelta(minutes=minutes)
+    if _symlink_target(path) is not None:
+        # What append() refuses to write, the history checks must not trust.
+        raise OSError(errno.ELOOP, "the ledger is a symlink", str(path))
     try:
         fh = path.open("rb")
     except FileNotFoundError:
@@ -484,6 +572,8 @@ def read(days: float | None = None, path: Path | None = None) -> list[dict[str, 
                 ts = datetime.fromisoformat(rec["ts"])
             except (ValueError, KeyError, TypeError):
                 continue
+            if ts.tzinfo is None:
+                continue                   # not a time append() wrote; cannot be compared
             if since is None or ts >= since:
                 out.append(rec)
     return out
@@ -508,6 +598,8 @@ def _repeats(recs: list[dict[str, Any]]) -> set[int]:
         try:
             ts = datetime.fromisoformat(r["ts"])
         except (KeyError, TypeError, ValueError):
+            continue
+        if ts.tzinfo is None:
             continue
         last = seen.get(key)
         if last is not None and timedelta(0) <= ts - last <= _REPEAT_WINDOW:
