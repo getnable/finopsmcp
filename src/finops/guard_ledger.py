@@ -522,6 +522,98 @@ def _positive(x: Any) -> float:
     return float(x) if isinstance(x, (int, float)) and x > 0 else 0.0
 
 
+# ── export ────────────────────────────────────────────────────────────────────
+
+def parse_since(text: str | None, *, now: datetime | None = None) -> datetime | None:
+    """`24h`, `7d`, `30m`, `2w`, or an ISO date or timestamp (UTC unless it
+    says otherwise); None for None or empty. Raises ValueError on anything else."""
+    if not text:
+        return None
+    text = text.strip()
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([mhdw])", text, re.IGNORECASE)
+    if m:
+        unit = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}[m.group(2).lower()]
+        return (now or datetime.now(UTC)) - timedelta(**{unit: float(m.group(1))})
+    ts = datetime.fromisoformat(text)
+    return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+
+
+def export_records(since: datetime | None = None,
+                   path: Path | None = None) -> list[dict[str, Any]]:
+    """Every record (newer than `since`), each with its place in the chain:
+    `chain` = {line, hash (sha256 of this line, what the next record's prev
+    must equal), prev, ok (prev matches the line before)}. Unparseable lines
+    are exported as {"unparseable": true} with their chain fields, so a gap is
+    visible to whoever reads the export."""
+    path = path or ledger_path()
+    out: list[dict[str, Any]] = []
+    if not path.exists():
+        return out
+    prev = GENESIS
+    with path.open("rb") as fh:
+        for n, raw in enumerate(fh, start=1):
+            line = raw.rstrip(b"\n")
+            digest = _sha(line)
+            try:
+                rec = json.loads(line)
+                if not isinstance(rec, dict):
+                    raise ValueError
+            except ValueError:
+                rec = {"unparseable": True}
+            chain = {"line": n, "hash": digest, "prev": rec.get("prev"),
+                     "ok": rec.get("prev") == prev}
+            prev = digest
+            if since is not None:
+                try:
+                    if datetime.fromisoformat(rec["ts"]) < since:
+                        continue
+                except (KeyError, TypeError, ValueError):
+                    pass                   # no readable time: keep it, it is evidence
+            out.append({**rec, "chain": chain})
+    return out
+
+
+_CEF_SEVERITY = {"deny": 8, "fail_open": 7, "ask": 5, "warn": 3, "allow": 1}
+
+
+def _cef_header(value: Any) -> str:
+    return str(value).replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _cef_value(value: Any) -> str:
+    return (str(value).replace("\\", "\\\\").replace("=", "\\=")
+            .replace("\r", "\\r").replace("\n", "\\n"))
+
+
+def to_cef(rec: dict[str, Any], version: str) -> str:
+    """One ArcSight CEF line for an exported record."""
+    decision = rec.get("decision") or ("unparseable" if rec.get("unparseable") else "unknown")
+    action = rec.get("action_type") or ""
+    chain = rec.get("chain") or {}
+    ext: list[tuple[str, Any]] = []
+    try:
+        ext.append(("rt", int(datetime.fromisoformat(rec["ts"]).timestamp() * 1000)))
+    except (KeyError, TypeError, ValueError):
+        pass
+    ext += [("act", decision), ("cat", action)]
+    labelled = [("cs1", "command", rec.get("command")), ("cs2", "harness", rec.get("harness")),
+                ("cs3", "session", rec.get("session")), ("cs4", "chainHash", chain.get("hash")),
+                ("cs5", "prevHash", chain.get("prev")), ("cs6", "tool", rec.get("tool")),
+                ("cfp1", "monthlyUsd", rec.get("monthly_usd")),
+                ("cn1", "ledgerLine", chain.get("line")),
+                ("flexString1", "chainOk", str(chain.get("ok", "")).lower())]
+    for key, label, value in labelled:
+        if value is not None and value != "":
+            ext += [(f"{key}Label", label), (key, value)]
+    if rec.get("reason"):
+        ext.append(("msg", rec["reason"]))
+    name = f"guard {decision}" + (f" {action}" if action else "")
+    head = "|".join(_cef_header(x) for x in (
+        "CEF:0", "nable", "guard", version, decision, name,
+        _CEF_SEVERITY.get(decision, 5)))
+    return head + "|" + " ".join(f"{k}={_cef_value(v)}" for k, v in ext)
+
+
 def summarize(days: float = 30, path: Path | None = None, *,
               session: str | None = None) -> dict[str, Any]:
     """What `nable guard report` prints: counts, dollars at stake, the biggest,

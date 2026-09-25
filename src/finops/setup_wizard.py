@@ -2456,6 +2456,10 @@ def _run_guard(parsed) -> None:
         _guard_reconcile(parsed)
         return
 
+    if action == "export":
+        _guard_export(parsed)
+        return
+
     if action == "verify-log":
         from . import guard_ledger
         result = guard_ledger.check()
@@ -2786,6 +2790,59 @@ def _guard_reconcile(parsed) -> None:
     for line in textwrap.wrap(r["matching"], 76):
         print(dim(f"  {line}"))
     print()
+
+
+def _guard_export(parsed) -> None:
+    """`nable guard export`: the verified ledger, one record a line, for a SIEM.
+
+    Every record carries `chain` (its line, its own hash, the prev it claims
+    and whether that matches), so the receiver can re-verify the chain and
+    anchor the last hash. A ledger that does not verify (broken chain, or
+    records gone since the last check) is refused unless --force, and then
+    each record says whether its link held."""
+    import json
+
+    from . import __version__, guard_ledger
+
+    def err(msg: str) -> None:
+        print(f"nable guard export: {msg}", file=sys.stderr)
+
+    fmt = getattr(parsed, "guard_format", "jsonl") or "jsonl"
+    try:
+        since = guard_ledger.parse_since(getattr(parsed, "guard_since", None))
+    except ValueError:
+        err("--since takes 24h, 7d, 30m, 2w, or an ISO date or timestamp")
+        raise SystemExit(2) from None
+    check = guard_ledger.check()
+    problems = ([f"the chain breaks at line {check['broken_at']}: {check['problem']}"]
+                if not check["ok"] else []) + check["warnings"]
+    force = getattr(parsed, "guard_force", False)
+    if problems and not force:
+        for p in problems:
+            err(p)
+        err("refusing to export a ledger that does not verify. `nable guard verify-log` "
+            "has the details; --force exports it anyway, each record flagged with "
+            "chain.ok.")
+        raise SystemExit(1)
+    for p in problems:
+        err(f"exporting anyway (--force): {p}")
+    records = guard_ledger.export_records(since)
+    if fmt == "cef":
+        lines = [guard_ledger.to_cef(r, __version__) for r in records]
+    else:
+        lines = [json.dumps(r, sort_keys=True, separators=(",", ":"), default=str)
+                 for r in records]
+    body = "".join(line + "\n" for line in lines)
+    out = getattr(parsed, "guard_out", None)
+    if out:
+        target = Path(out).expanduser()
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(body)
+        err(f"{len(lines)} record(s) written to {target} ({fmt}); "
+            f"chain head {check['head']}")
+    else:
+        sys.stdout.write(body)
 
 
 def _run_credits(parsed) -> None:
@@ -3201,7 +3258,7 @@ def main(args: list[str] | None = None) -> None:
     guard_p = sub.add_parser("guard", help="Agent cost guardrail: auto-check infra commands against your policy")
     guard_p.add_argument("guard_action", choices=["install", "uninstall", "status", "hook", "check",
                                                   "try", "report", "verify-log", "doctor",
-                                                  "reconcile"],
+                                                  "reconcile", "export"],
                          nargs="?", default="status")
     guard_p.add_argument("--global", dest="guard_global", action="store_true",
                          help="Install into ~/.claude/settings.json instead of this project")
@@ -3226,6 +3283,16 @@ def main(args: list[str] | None = None) -> None:
     guard_p.add_argument("--tolerance-minutes", dest="guard_tolerance", type=float, default=5,
                          help="With 'reconcile': how long after a verdict an event may "
                               "still match it (default 5)")
+    guard_p.add_argument("--since", dest="guard_since", default=None, metavar="WHEN",
+                         help="With 'export': only records since then (24h, 7d, or an ISO "
+                              "date or timestamp)")
+    guard_p.add_argument("--format", dest="guard_format", choices=["jsonl", "cef"],
+                         default="jsonl", help="With 'export': JSON lines (default) or CEF")
+    guard_p.add_argument("--out", dest="guard_out", default=None, metavar="PATH",
+                         help="With 'export': write here (created 0600) instead of stdout")
+    guard_p.add_argument("--force", dest="guard_force", action="store_true",
+                         help="With 'export': export a ledger that does not verify, each "
+                              "record flagged")
     guard_p.add_argument("--session", dest="guard_session", default=None, metavar="ID",
                          help="With 'report': only this agent session (the hook payload's "
                               "session id, as report lists them)")
