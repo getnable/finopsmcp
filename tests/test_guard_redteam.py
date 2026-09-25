@@ -139,7 +139,10 @@ NEW_RULE_FILLS = ["helm -n ", "doctl ", "cdk ", "sam ", "pulumi ", "kubectl repl
                   "aws s3 sync ", "aws ec2 --region x ", "--region x ", "alias a=b; ",
                   "alias tf=terraform; tf ", "python3 -c ", "boto3 ", "base64 -d ",
                   "| sh ", "TERRAFORM ", "Terraform ", "workspace ", "--terminate-instances ",
-                  "cancel-spot-fleet-requests ", "--destroy "]
+                  "cancel-spot-fleet-requests ", "--destroy ",
+                  "aws rds modify-db-instance ", "aws autoscaling update-auto-scaling-group ",
+                  "aws eks update-nodegroup-config ", "InstanceType=m5.large ",
+                  "--instance-type Value=", "desiredSize=4 "]
 
 
 @pytest.mark.parametrize("fill", NEW_RULE_FILLS)
@@ -158,3 +161,139 @@ def test_the_new_rules_grow_linearly():
     _, small = _timed(g.classify_command, cmd[: MB // 4])
     _, big = _timed(g.classify_command, cmd)
     assert big < 8 * max(small, 0.01), "4x the input may not cost 16x (quadratic)"
+
+
+# ── 2. expensive changes the classifier did not know ──────────────────────────
+
+from finops.aws_prices import EC2_HOURLY, RDS_HOURLY  # noqa: E402
+
+APPLY = ("two_way", "infra_apply")
+
+
+def _monthly(hourly: float, n: int = 1) -> float:
+    return round(hourly * n * 730, 2)
+
+
+@pytest.mark.parametrize("cmd", [
+    "aws rds modify-db-instance --db-instance-identifier db --db-instance-class db.r5.2xlarge",
+    "aws ec2 modify-instance-attribute --instance-id i-1 --instance-type p4d.24xlarge",
+    "aws ec2 modify-instance-attribute --instance-id i-1 --instance-type Value=p4d.24xlarge",
+    "aws ec2 modify-instance-attribute --instance-id i-1 --attribute instanceType --value m5.large",
+    "aws ec2 request-spot-instances --instance-count 50 --launch-specification file://spec.json",
+    "aws ec2 request-spot-fleet --spot-fleet-request-config file://c.json",
+    "aws ec2 create-fleet --cli-input-json file://fleet.json",
+    "aws autoscaling set-desired-capacity --auto-scaling-group-name gpu --desired-capacity 100",
+    "aws autoscaling update-auto-scaling-group --auto-scaling-group-name g --desired-capacity 50",
+    "aws autoscaling create-auto-scaling-group --auto-scaling-group-name g --max-size 9",
+    "aws eks update-nodegroup-config --cluster-name c --nodegroup-name g "
+    "--scaling-config desiredSize=40",
+    "aws eks create-nodegroup --cluster-name c --nodegroup-name g --instance-types m5.large",
+])
+def test_expensive_changes_are_classified(cmd):
+    assert g.classify_command(cmd) == APPLY, cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "aws rds modify-db-instance --db-instance-identifier db --backup-retention-period 7",
+    "aws ec2 modify-instance-attribute --instance-id i-1 --disable-api-termination",
+    "aws autoscaling describe-auto-scaling-groups",
+    "aws eks describe-nodegroup --cluster-name c --nodegroup-name g",
+])
+def test_their_cheap_neighbours_are_not(cmd):
+    assert g.classify_command(cmd) is None, cmd
+
+
+def test_an_rds_class_change_prices_the_new_class():
+    est = g.estimate_command_monthly_cost(
+        "aws rds modify-db-instance --db-instance-identifier db "
+        "--db-instance-class db.r5.2xlarge --apply-immediately")
+    assert est["monthly_usd"] == _monthly(RDS_HOURLY["db.r5.2xlarge"])
+    assert "db.r5.2xlarge" in est["line"] and "current class" in est["basis"]
+
+
+def test_an_rds_class_change_to_multi_az_prices_the_standby():
+    est = g.estimate_command_monthly_cost(
+        "aws rds modify-db-instance --db-instance-identifier db "
+        "--db-instance-class db.r5.2xlarge --multi-az")
+    assert est["monthly_usd"] == _monthly(RDS_HOURLY["db.r5.2xlarge"], 2)
+
+
+@pytest.mark.parametrize("flag", ["--instance-type p4d.24xlarge",
+                                  "--instance-type Value=p4d.24xlarge",
+                                  '--instance-type {"Value": "p4d.24xlarge"}',
+                                  "--attribute instanceType --value p4d.24xlarge"])
+def test_an_instance_type_change_prices_the_new_type(flag):
+    est = g.estimate_command_monthly_cost(
+        f"aws ec2 modify-instance-attribute --instance-id i-1 {flag}")
+    assert est["monthly_usd"] == _monthly(EC2_HOURLY["p4d.24xlarge"])
+
+
+def test_an_instance_type_change_to_p4d_asks():
+    v = g.gate_command("aws ec2 modify-instance-attribute --instance-id i-1 "
+                       "--instance-type p4d.24xlarge", record=False)
+    assert v["decision"] == "ask" and v["action_type"] == "infra_apply"
+
+
+@pytest.mark.parametrize("cmd,n", [
+    ("aws ec2 run-instances --instance-type p4d.24xlarge --min-count 1 --max-count 8", 8),
+    ("aws ec2 run-instances --instance-type p4d.24xlarge --max-count=8", 8),
+    ("aws ec2 run-instances --instance-type p4d.24xlarge --min-count 3", 3),
+    ("aws ec2 run-instances --instance-type p4d.24xlarge --count 2:6", 6),
+])
+def test_run_instances_prices_the_max_count(cmd, n):
+    """It launches up to the max, so the max is what a human is authorising."""
+    est = g.estimate_command_monthly_cost(cmd)
+    assert est["count"] == n
+    assert est["monthly_usd"] == _monthly(EC2_HOURLY["p4d.24xlarge"], n)
+
+
+def test_a_spot_request_with_a_visible_type_is_a_labelled_ceiling():
+    est = g.estimate_command_monthly_cost(
+        'aws ec2 request-spot-instances --instance-count 4 '
+        '--launch-specification {"InstanceType": "p4d.24xlarge", "ImageId": "ami-1"}')
+    assert est["count"] == 4
+    assert est["monthly_usd"] == _monthly(EC2_HOURLY["p4d.24xlarge"], 4)
+    assert "spot prices vary" in est["line"]
+
+
+def test_a_spot_request_without_a_type_gets_no_figure():
+    assert g.estimate_command_monthly_cost(
+        "aws ec2 request-spot-instances --instance-count 50 "
+        "--launch-specification file://spec.json") is None
+
+
+def test_a_fleet_with_a_visible_type_and_capacity_is_priced():
+    est = g.estimate_command_monthly_cost(
+        "aws ec2 create-fleet --launch-template-configs "
+        "LaunchTemplateSpecification={LaunchTemplateId=lt-1},Overrides=[{InstanceType=m5.large}] "
+        "--target-capacity-specification TotalTargetCapacity=20,DefaultTargetCapacityType=on-demand")
+    assert est["count"] == 20
+    assert est["monthly_usd"] == _monthly(EC2_HOURLY["m5.large"], 20)
+
+
+def test_a_nodegroup_with_a_type_and_size_is_priced():
+    est = g.estimate_command_monthly_cost(
+        "aws eks create-nodegroup --cluster-name c --nodegroup-name g "
+        "--instance-types m5.large --scaling-config minSize=1,maxSize=30,desiredSize=10")
+    assert est["count"] == 10
+    assert est["monthly_usd"] == _monthly(EC2_HOURLY["m5.large"], 10)
+
+
+@pytest.mark.parametrize("cmd", [
+    "aws autoscaling set-desired-capacity --auto-scaling-group-name gpu --desired-capacity 100",
+    "aws eks update-nodegroup-config --cluster-name c --nodegroup-name g "
+    "--scaling-config desiredSize=40",
+])
+def test_a_scale_without_an_instance_type_gets_no_invented_figure(cmd):
+    assert g.estimate_command_monthly_cost(cmd) is None
+
+
+@pytest.mark.parametrize("cmd", [
+    "aws autoscaling set-desired-capacity --auto-scaling-group-name gpu --desired-capacity 100",
+    "aws rds modify-db-instance --db-instance-identifier db --db-instance-class db.r5.large",
+])
+def test_strict_mode_and_prod_context_reach_them(cmd, monkeypatch):
+    assert g.gate_command(cmd, record=False) is None
+    assert g.gate_command(f"{cmd} --profile prod", record=False)["decision"] == "ask"
+    monkeypatch.setenv("FINOPS_GUARD_STRICT", "1")
+    assert g.gate_command(cmd, record=False)["decision"] == "ask"

@@ -164,6 +164,18 @@ _TWO_WAY_CLASSIFIERS: list[tuple[str, str]] = [
     # Launches the pricers below can put a figure on. Unclassified, they could
     # never reach the policy's dollar threshold however large they were.
     (r"\baws\s+rds\s+create-db-instance\b", "infra_apply"),
+    # Changes that resize what is already running, or launch capacity by other
+    # verbs than run-instances. Reversible, but a class change to
+    # db.r6g.16xlarge or a desired capacity of 100 is a bill like any launch.
+    ("rds-class-change", "infra_apply"),
+    ("ec2-type-change", "infra_apply"),
+    (r"\baws\s+ec2\s+(?:request-spot-instances|request-spot-fleet|create-fleet)(?!\S)",
+     "infra_apply"),
+    (r"\baws\s+autoscaling\s+(?:set-desired-capacity|create-auto-scaling-group)(?!\S)",
+     "infra_apply"),
+    ("asg-capacity-change", "infra_apply"),
+    (r"\baws\s+eks\s+create-nodegroup(?!\S)", "infra_apply"),
+    ("eks-nodegroup-scaling", "infra_apply"),
     (r"\bgcloud\s+(?:\S+\s+)*compute\s+instances\s+create\b", "infra_apply"),
     (r"\baz\s+(?:\S+\s+)*vm\s+create\b", "infra_apply"),
 ]
@@ -419,6 +431,15 @@ _SPECIAL_RULES = {r.pattern: r for r in (
                   r"\s--force(?:=true)?(?!\S)", flag_anywhere=True),
     _VerbWithFlag("spot-fleet-terminate", r"\baws\s+ec2\s+cancel-spot-fleet-requests(?!\S)",
                   r"", r"\s--terminate-instances(?!\S)"),
+    _VerbWithFlag("rds-class-change", r"\baws\s+rds\s+modify-db-instance(?!\S)", r"",
+                  r"\s--(?:db-instance-class|multi-az)(?![^\s=])"),
+    _VerbWithFlag("ec2-type-change", r"\baws\s+ec2\s+modify-instance-attribute(?!\S)", r"",
+                  r"\s--instance-type(?![^\s=])|\s--attribute[\s=]instanceType(?!\S)"),
+    _VerbWithFlag("asg-capacity-change",
+                  r"\baws\s+autoscaling\s+update-auto-scaling-group(?!\S)", r"",
+                  r"\s--(?:desired-capacity|min-size|max-size)(?![^\s=])"),
+    _VerbWithFlag("eks-nodegroup-scaling", r"\baws\s+eks\s+update-nodegroup-config(?!\S)",
+                  r"", r"\s--scaling-config(?![^\s=])"),
     _TfCliArgsDestroy(), _PythonBoto3Delete(), _Base64ToShell(),
 )}
 
@@ -469,11 +490,22 @@ def _strict() -> bool:
 _ON_DEMAND_BASIS = "on-demand us-east-1 list price"
 
 _RUN_INSTANCES_RE = re.compile(r"\baws\s+ec2\s+run-instances\b")
-_INSTANCE_TYPE_RE = re.compile(r"--instance-type[=\s]+([a-z0-9]+\.[a-z0-9]+)")
+# `--instance-type m5.large`, and the AttributeValue forms
+# modify-instance-attribute takes: `Value=m5.large`, `{"Value": "m5.large"}`.
+_INSTANCE_TYPE_RE = re.compile(
+    r"--instance-type[=\s]+(?:\{?\s*Value\s*[=:]\s*)?([a-z0-9]+\.[a-z0-9]+)")
+# An instance type inside a JSON or shorthand structure (a launch
+# specification, fleet overrides), quotes already stripped.
+_STRUCT_TYPE_RE = re.compile(r"\bInstanceType\s*[=:]\s*([a-z0-9]+\.[a-z0-9]+)")
 # `--count 8` or the min:max form `--count 2:8`; price the max, because the
 # guard's job is the ceiling a human is about to authorise, not the floor.
 _COUNT_RE = re.compile(r"--count[=\s]+(\d+)(?::(\d+))?")
 _RDS_CREATE_RE = re.compile(r"\baws\s+rds\s+create-db-instance\b")
+_RDS_MODIFY_RE = re.compile(r"\baws\s+rds\s+modify-db-instance\b")
+_EC2_MODIFY_RE = re.compile(r"\baws\s+ec2\s+modify-instance-attribute\b")
+_SPOT_RE = re.compile(r"\baws\s+ec2\s+request-spot-instances\b")
+_FLEET_RE = re.compile(r"\baws\s+ec2\s+create-fleet\b")
+_NODEGROUP_CREATE_RE = re.compile(r"\baws\s+eks\s+create-nodegroup\b")
 _SAVINGS_PLAN_RE = re.compile(r"\baws\s+savingsplans\s+create-savings-plan\b")
 _RESERVED_RE = re.compile(r"\baws\s+ec2\s+purchase-reserved-instances-offering\b")
 # JSON ({"Amount": 1200, ...}, quotes already stripped) and shorthand
@@ -518,29 +550,92 @@ def _hours_per_month() -> float:
     return HOURS_PER_MONTH
 
 
-def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
-    m = _INSTANCE_TYPE_RE.search(cmd)
-    if not m:
+def _price_ec2(itype: str | None, count: int, *, basis: str = _ON_DEMAND_BASIS,
+               lead: str = "") -> dict[str, Any] | None:
+    """`count` instances of `itype` at the EC2 table's rate, or None."""
+    if not itype:
         return None
-    itype = m.group(1)
     from .aws_prices import EC2_HOURLY
     hourly = EC2_HOURLY.get(itype)
     if not hourly:
         return None
-    count = 1
-    cm = _COUNT_RE.search(cmd)
-    if cm:
-        count = max(int(cm.group(1)), int(cm.group(2) or 0)) or 1
+    count = max(count, 1)
     monthly = hourly * count * _hours_per_month()
     return {
         "monthly_usd": round(monthly, 2),
         "hourly_usd": hourly,
         "instance_type": itype,
         "count": count,
-        "basis": _ON_DEMAND_BASIS,
-        "line": (f"{count}x {itype} at {_rate(hourly)}/hr ({_ON_DEMAND_BASIS}) "
+        "basis": basis,
+        "line": (f"{lead}{count}x {itype} at {_rate(hourly)}/hr ({basis}) "
                  f"is ~${monthly:,.0f}/mo"),
     }
+
+
+def _int_flag(cmd: str, name: str) -> int:
+    return int(_num(_flag(cmd, name)) or 0)
+
+
+def _price_run_instances(cmd: str, **_: Any) -> dict[str, Any] | None:
+    m = _INSTANCE_TYPE_RE.search(cmd)
+    if not m:
+        return None
+    # It launches up to --max-count (or the max of `--count min:max`), so the
+    # max is what a human is authorising; --min-count alone is the count.
+    count = _int_flag(cmd, "max-count") or _int_flag(cmd, "min-count")
+    cm = _COUNT_RE.search(cmd)
+    if cm:
+        count = max(count, int(cm.group(1)), int(cm.group(2) or 0))
+    return _price_ec2(m.group(1), count or 1)
+
+
+def _price_instance_type_change(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """modify-instance-attribute to a new type: the new type's full rate. The
+    current type is not in the command, so nothing is subtracted, and the
+    basis says so."""
+    m = _INSTANCE_TYPE_RE.search(cmd)
+    itype = m.group(1) if m else None
+    if itype is None and re.search(r"--attribute[=\s]instanceType(?!\S)", cmd):
+        itype = _flag(cmd, "value")
+    return _price_ec2(itype, 1, lead="resized to ",
+                      basis=f"{_ON_DEMAND_BASIS}, before subtracting the current type, "
+                            "which the command does not name")
+
+
+_SPOT_BASIS = (f"the {_ON_DEMAND_BASIS} as a ceiling; spot prices vary with demand and are "
+               "usually well below it, so this is an estimate, not a quote")
+
+
+def _price_spot(cmd: str, **_: Any) -> dict[str, Any] | None:
+    m = _STRUCT_TYPE_RE.search(cmd)
+    return _price_ec2(m.group(1) if m else None, _int_flag(cmd, "instance-count") or 1,
+                      basis=_SPOT_BASIS, lead="spot request for ")
+
+
+def _price_fleet(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """create-fleet with its capacity and ONE instance type on the command
+    line. A fleet over several types launches whichever mix it can get, so
+    that gets no figure rather than a guessed one."""
+    types = set(_STRUCT_TYPE_RE.findall(cmd))
+    cap = re.search(r"\bTotalTargetCapacity\s*[=:]\s*(\d+)", cmd)
+    if len(types) != 1 or not cap:
+        return None
+    spot = re.search(r"\bDefaultTargetCapacityType\s*[=:]\s*spot\b", cmd)
+    return _price_ec2(types.pop(), int(cap.group(1)), lead="fleet of ",
+                      basis=_SPOT_BASIS if spot else _ON_DEMAND_BASIS)
+
+
+def _price_nodegroup(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """create-nodegroup at its desired size, the nodes it starts with."""
+    types = _flag(cmd, "instance-types")
+    desired = re.search(r"\bdesiredSize\s*[=:]\s*(\d+)", cmd)
+    if not types or not desired:
+        return None
+    most = re.search(r"\bmaxSize\s*[=:]\s*(\d+)", cmd)
+    basis = _ON_DEMAND_BASIS + (f"; the group may scale to {most.group(1)} nodes"
+                                if most and most.group(1) != desired.group(1) else "")
+    return _price_ec2(types.split(",")[0], int(desired.group(1)), basis=basis,
+                      lead="a node group of ")
 
 
 def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
@@ -564,6 +659,34 @@ def _price_rds(cmd: str, **_: Any) -> dict[str, Any] | None:
         "count": 2 if multi_az else 1,
         "basis": basis,
         "line": (f"{cls} {engine}{' Multi-AZ' if multi_az else ''} at {_rate(hourly)}/hr"
+                 f"{' x2 for the standby' if multi_az else ''} ({basis}) "
+                 f"is ~${monthly:,.0f}/mo"),
+    }
+
+
+def _price_rds_class_change(cmd: str, **_: Any) -> dict[str, Any] | None:
+    """modify-db-instance to a new class: the new class's full rate. Neither
+    the engine nor the current class is in the command, so the figure is the
+    MySQL/MariaDB rate for the new class, nothing subtracted, and the basis
+    says both."""
+    cls = _flag(cmd, "db-instance-class")
+    if not cls:
+        return None
+    from .aws_prices import RDS_HOURLY
+    hourly = RDS_HOURLY.get(cls)
+    if not hourly:
+        return None
+    multi_az = _has_flag(cmd, "multi-az")
+    monthly = hourly * (2 if multi_az else 1) * _hours_per_month()
+    basis = (f"{_ON_DEMAND_BASIS} for MySQL/MariaDB (the engine is not in the command), "
+             "instance hours only, before subtracting the current class")
+    return {
+        "monthly_usd": round(monthly, 2),
+        "hourly_usd": hourly,
+        "instance_type": cls,
+        "count": 2 if multi_az else 1,
+        "basis": basis,
+        "line": (f"resized to {cls}{' Multi-AZ' if multi_az else ''} at {_rate(hourly)}/hr"
                  f"{' x2 for the standby' if multi_az else ''} ({basis}) "
                  f"is ~${monthly:,.0f}/mo"),
     }
@@ -794,6 +917,11 @@ def _price_planfile(cmd: str, *, cwd: str | None = None, **_: Any) -> dict[str, 
 _PRICERS: list[tuple[Any, Any]] = [
     (_RUN_INSTANCES_RE, _price_run_instances),
     (_RDS_CREATE_RE, _price_rds),
+    (_RDS_MODIFY_RE, _price_rds_class_change),
+    (_EC2_MODIFY_RE, _price_instance_type_change),
+    (_SPOT_RE, _price_spot),
+    (_FLEET_RE, _price_fleet),
+    (_NODEGROUP_CREATE_RE, _price_nodegroup),
     (_SAVINGS_PLAN_RE, _price_savings_plan),
     (_RESERVED_RE, _price_reserved_instances),
     (_GCE_CREATE_RE, _price_gce),
