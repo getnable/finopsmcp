@@ -229,7 +229,7 @@ def test_cost_summary_carries_the_map(monkeypatch):
 def test_llm_keys_advertise_the_llm_cost_tools():
     """An AI-spend user with OPENAI_API_KEY set saw no LLM cost tool at all:
     every llm tool was tier 2, so "what are we spending on OpenAI" had no door."""
-    listed = {t.name for t in _advertised(OPENAI_API_KEY="sk-test")}
+    listed = {t.name for t in _advertised(OPENAI_API_KEY="sk-test")}  # pragma: allowlist secret
     assert "get_llm_costs" in listed
     assert "get_llm_cost_by_model" in listed
 
