@@ -7,7 +7,32 @@ from finops.capabilities import render_capabilities, has_cloud, has_llm, CATALOG
 def test_no_providers_prompts_to_connect():
     out = render_capabilities(set())
     assert "Nothing's connected" in out
-    assert "setup aws" in out
+    # In chat, not in a terminal: the server instructions say "Do not make the
+    # user leave for a terminal", and this copy used to do exactly that.
+    assert "connect_aws" in out
+    assert "uvx finops-mcp setup" not in out
+
+
+def test_detailed_lists_tool_names_even_when_nothing_is_connected():
+    """The server instructions tell the model to call what_can_nable_do(
+    detailed=True) for the full map before concluding nable cannot do
+    something. With nothing connected it returned the connect prompt alone."""
+    out = render_capabilities(set(), detailed=True)
+    assert "Nothing's connected" in out
+    for g in CATALOG:
+        assert g["title"] in out
+        for tool in g["tools"]:
+            assert tool in out, tool
+
+
+def test_tool_count_claim_does_not_call_sending_tools_read_only():
+    """Some tools send Slack messages, email, tickets and pull requests."""
+    for connected in (set(), {"aws"}, {"aws", "openai", "llm"}):
+        out = render_capabilities(connected)
+        assert "read-only tools" not in out, out
+        assert "Everything is read-only" not in out
+    out = render_capabilities({"aws"})
+    assert "only when you ask" in out
 
 
 def test_aws_only_shows_aws_groups_and_nudges_llm():
