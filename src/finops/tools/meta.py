@@ -1010,11 +1010,24 @@ def set_ai_budget(mode: str | None = None,
 
     session_cap is a per-task cap in dollars at list price, for "this task may spend
     at most $40". It caps the current session (subagents included) unless
-    every_session is true, which makes it the cap for every session. 0 clears it."""
+    every_session is true, which makes it the cap for every session. 0 clears it.
+    The current session must be known, from session_id or the agent's own
+    environment; a cap on a guessed session is refused and nothing is saved."""
     from ..ai_budget import resolve_session, set_budget
     sid, source = (None, None)
     if session_cap is not None and not every_session:
         sid, source = resolve_session(session_id or None)
+        # Only a session named by the caller or by the agent's own environment
+        # is "this session". The latest transcript may be another agent's, and
+        # no session at all is not a reason to cap every session.
+        if source not in ("argument", "env"):
+            return {
+                "error": ("session_cap needs to know which session to cap: pass "
+                          "session_id (Claude Code sets CLAUDE_CODE_SESSION_ID, Codex "
+                          "CODEX_SESSION_ID), or every_session=true to cap every "
+                          "session. Nothing was saved."),
+                "guessed_session_id": sid,
+            }
     budget = set_budget(mode=mode, plan_cost=plan_cost, spend_cap=spend_cap,
                         monthly_tokens=monthly_tokens, plan_label=plan_label,
                         session_cap=session_cap, session_id=sid)

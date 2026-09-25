@@ -525,6 +525,14 @@ def _session_lens(budget: dict[str, Any], session_id: str | None) -> dict[str, A
     }
 
 
+# Said wherever "this session" is really the latest transcript's session.
+GUESSED_SESSION_NOTE = "session guessed from the most recently active transcript"
+
+
+def _guessed(session: dict[str, Any] | None) -> bool:
+    return bool(session) and session.get("id_source") == "latest_activity"
+
+
 def _verdict(pct: float) -> str:
     return BUDGET_OVER if pct >= 1.0 else (BUDGET_WARN if pct >= _WARN_AT else BUDGET_OK)
 
@@ -615,6 +623,9 @@ def status(session_id: str | None = None) -> dict[str, Any]:
         "cost_per_1m_effective": cost_per_1m_effective,
         "summary": _summary_line(verdict, basis, mode, tokens_mtd, est_usd_mtd, budget,
                                  subsidy, window, cost_per_1m_effective, session),
+        # Set when `session` is a guess, not the caller's own session.
+        "session_note": (f"{GUESSED_SESSION_NOTE}; pass session_id to name yours"
+                         if _guessed(session) else None),
     }
 
 
@@ -623,6 +634,10 @@ def _summary_line(verdict, basis, mode, tokens_mtd, est_usd, budget, subsidy, wi
     tag = {BUDGET_OK: "on track", BUDGET_WARN: "approaching your budget",
            BUDGET_OVER: "over budget"}[verdict]
     if basis == "session":
+        if _guessed(session):
+            return (f"~${session['usd_equivalent']:,.2f} of the latest session's "
+                    f"${session['cap_usd']:,.2f} cap used (estimated at list price; "
+                    f"{GUESSED_SESSION_NOTE}), {tag}.")
         return (f"~${session['usd_equivalent']:,.2f} of this session's "
                 f"${session['cap_usd']:,.2f} cap used (estimated at list price), {tag}.")
     if basis == "spend":
@@ -673,13 +688,18 @@ def check(estimated_next_tokens: int = 0, session_id: str | None = None) -> dict
     if st["verdict_basis"] == "session":
         s = st["session"]
         left, cap = s["remaining_usd"], s["cap_usd"]
+        whose, who = ("the latest session's", "The latest session") if _guessed(s) else (
+            "this session's", "This session")
         rec = {
-            BUDGET_OK: f"Proceed. ~${left:,.2f} of this session's ${cap:,.2f} cap left.",
-            BUDGET_WARN: (f"Proceed with a tight scope: ~${left:,.2f} of this session's "
+            BUDGET_OK: f"Proceed. ~${left:,.2f} of {whose} ${cap:,.2f} cap left.",
+            BUDGET_WARN: (f"Proceed with a tight scope: ~${left:,.2f} of {whose} "
                           f"${cap:,.2f} cap left."),
-            BUDGET_OVER: (f"This session is past its ${cap:,.2f} cap. Confirm with the "
+            BUDGET_OVER: (f"{who} is past its ${cap:,.2f} cap. Confirm with the "
                           f"human before continuing."),
         }[verdict]
+        if _guessed(s):
+            rec += (f" ({GUESSED_SESSION_NOTE}; pass session_id so the cap is measured "
+                    f"against your own session.)")
     elif st["mode"] == "metered":
         rec = {
             BUDGET_OK: "Proceed.",

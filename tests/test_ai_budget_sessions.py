@@ -299,3 +299,56 @@ def test_every_session_from_the_tool(claude):
     out = asyncio.run(srv.set_ai_budget(session_cap=25, every_session=True))
     assert out["session_cap_applies_to"] == "every_session"
     assert ab.get_budget()["session_cap"] == 25.0
+
+
+# ── a guessed session is never presented as a known one ──────────────────────
+
+def test_a_guessed_session_is_named_as_a_guess(claude):
+    """No id passed and none in the environment: "this session" is the one whose
+    transcript was written last. That is a guess, and the text says so."""
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 1_000_000, 1_000_000)])  # $24
+    ab.set_budget(session_cap=20)
+    st = ab.status()
+    assert st["session"]["id_source"] == "latest_activity"
+    assert "session guessed from the most recently active transcript" in st["summary"]
+    assert "this session" not in st["summary"]
+    chk = ab.check()
+    assert "session guessed from the most recently active transcript" in chk["reason"]
+    assert "session guessed from the most recently active transcript" in chk["recommendation"]
+
+
+def test_a_known_session_reads_as_this_session(claude, monkeypatch):
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 1_000_000, 1_000_000)])
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-a")
+    ab.set_budget(session_cap=20)
+    chk = ab.check()
+    assert "this session's $20.00 cap" in chk["reason"]
+    assert "guessed" not in chk["reason"] + chk["recommendation"]
+
+
+def test_the_tool_will_not_cap_a_guessed_session(claude):
+    """Capping "this session" by a guess would cap whichever agent wrote last.
+    Refused, and nothing in the call is saved."""
+    from finops import server as srv
+
+    now = time.time()
+    _write(claude, "sess-a", [_rec(now - 90, "sess-a", "m1", 1_000_000)])
+    out = asyncio.run(srv.set_ai_budget(session_cap=40, spend_cap=100))
+    assert "error" in out and "session_id" in out["error"]
+    b = ab.get_budget()
+    assert (b["session_cap"], b["session_caps"], b["spend_cap"]) == (0.0, {}, 0.0)
+
+    out = asyncio.run(srv.set_ai_budget(session_cap=40, session_id="sess-a"))
+    assert out["session_cap_applies_to"] == {"session_id": "sess-a", "id_source": "argument"}
+
+
+def test_the_tool_will_not_cap_every_session_when_it_meant_one(claude):
+    """With no transcript at all the call used to fall through to capping every
+    session, which is not what was asked."""
+    from finops import server as srv
+
+    out = asyncio.run(srv.set_ai_budget(session_cap=40))
+    assert "error" in out
+    assert ab.get_budget()["session_cap"] == 0.0
