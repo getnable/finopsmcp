@@ -3599,12 +3599,11 @@ def _run_license_setup(key: str = "") -> None:
         # Non-zero, so a script activating a key can tell it did not take.
         raise SystemExit(1)
 
-    # Store in vault AND write to env file for Claude Desktop
+    # The vault is the one copy; the server reads it there. An older key an
+    # earlier release copied into an editor config would outrank it, so clear it.
     vault = Vault.default()
     vault.store("FINOPS_LICENSE_KEY", key)
-
-    # Also try to write directly into the Claude Desktop config
-    _inject_license_into_claude_config(key)
+    _strip_license_from_editor_configs()
 
     name = plan_name(status.mode)
     print(f"\n  ✓  {name} plan active, {status.email or 'license validated'}")
@@ -3765,7 +3764,7 @@ def _run_login(email: str = "") -> None:
     if status.mode == "invalid":
         _err(f"The license we received did not validate: {status.message}")
         return
-    _inject_license_into_claude_config(key)
+    _strip_license_from_editor_configs()
 
     from .license import plan_label, plan_name
     print(f"\n  ✓  Signed in as {status.email or email}")
@@ -3785,54 +3784,148 @@ def _run_login(email: str = "") -> None:
 
 
 def _run_logout() -> None:
-    """Remove the stored license from this machine. Called by: finops logout"""
+    """Remove the stored license from this machine: the vault copy, and any copy
+    an earlier release wrote into an editor's MCP config. Called by: finops logout"""
     from .license import clear_license
     clear_license()
-    print("\n  ✓  Signed out. Pro features are off on this machine.")
+    cleaned = _strip_license_from_editor_configs()
+    print("\n  ✓  Signed out. The license is removed from this machine's vault.")
+    for client, path in cleaned:
+        print(f"  ✓  Removed the license key from {client}: {path}")
+    if cleaned:
+        print("  Restart those editors so their nable server drops the key.")
+    if os.environ.get("FINOPS_LICENSE_KEY", "").strip():
+        _warn("FINOPS_LICENSE_KEY is still set in this shell's environment, and it "
+              "outranks the vault. Unset it (and remove it from your shell profile) "
+              "to finish signing out.")
     print("  Sign back in any time with: finops login\n")
 
 
-def _inject_license_into_claude_config(key: str) -> None:
-    """
-    Try to write FINOPS_LICENSE_KEY directly into claude_desktop_config.json
-    so the user doesn't have to manually edit it.
-    """
+# ── Editor configs nable writes ───────────────────────────────────────────────
+# The license key lives in the local vault and the server reads it from there.
+# It used to be copied in plaintext into claude_desktop_config.json as
+# env.FINOPS_LICENSE_KEY, where an env key outranks the vault, so `nable
+# logout` left Claude Desktop on Pro and the key sat in a file people paste into
+# bug reports. Nothing writes it into an editor config any more, and logout and
+# uninstall clean up every copy an earlier release wrote.
+
+def _claude_desktop_config_paths() -> "list[Path]":
+    appdata = os.environ.get("APPDATA", "")
+    paths = [
+        Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+        Path.home() / "AppData" / "Roaming" / "Claude" / "claude_desktop_config.json",
+        Path.home() / ".config" / "Claude" / "claude_desktop_config.json",
+        Path.home() / ".config" / "claude-desktop" / "claude_desktop_config.json",
+    ]
+    if appdata:
+        paths.insert(1, Path(appdata) / "Claude" / "claude_desktop_config.json")
+    seen: list = []
+    for p in paths:
+        if p not in seen:
+            seen.append(p)
+    return seen
+
+
+def _editor_config_paths() -> "list[tuple[str, Path]]":
+    """Every MCP config nable writes or tells the user to write: Claude Desktop,
+    Cursor, and Claude Code's user config (`claude mcp add -s user`)."""
+    out = [("Claude Desktop", p) for p in _claude_desktop_config_paths()]
+    out.append(("Cursor", Path.home() / ".cursor" / "mcp.json"))
+    out.append(("Claude Code", Path.home() / ".claude.json"))
+    return out
+
+
+def _is_nable_server(name: str, entry: object) -> bool:
+    n = (name or "").lower()
+    if n in ("nable", "finops") or "finops" in n or n.startswith("nable"):
+        return True
+    if isinstance(entry, dict):
+        cmd = " ".join(str(x) for x in [entry.get("command", "")] + list(entry.get("args") or []))
+        return "finops-mcp" in cmd
+    return False
+
+
+def _server_maps(doc: dict) -> "list[dict]":
+    """The mcpServers maps in a config: the top level, plus Claude Code's
+    per-project ones in ~/.claude.json."""
+    maps = []
+    top = doc.get("mcpServers")
+    if isinstance(top, dict):
+        maps.append(top)
+    projects = doc.get("projects")
+    if isinstance(projects, dict):
+        for proj in projects.values():
+            if isinstance(proj, dict) and isinstance(proj.get("mcpServers"), dict):
+                maps.append(proj["mcpServers"])
+    return maps
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Replace a config in one step: a crash leaves the old file, never half a
+    new one. Keeps the file's mode and writes through a symlink, not over it."""
     import json
-    import platform
-
-    if platform.system() == "Darwin":
-        config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
-    elif platform.system() == "Windows":
-        config_path = Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
-    else:
-        config_path = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
-
+    import stat
+    import tempfile
+    target = path.resolve() if path.is_symlink() else path
+    mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o600
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
     try:
-        if not config_path.exists():
-            return
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, indent=2) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
-        config = json.loads(config_path.read_text())
-        servers = config.get("mcpServers", {})
 
-        updated = False
-        for server_name, server_cfg in servers.items():
-            if "finops" in server_name.lower() or "nable" in server_name.lower():
-                env = server_cfg.setdefault("env", {})
-                env["FINOPS_LICENSE_KEY"] = key
-                updated = True
+def _edit_editor_configs(edit) -> "list[tuple[str, Path]]":
+    """Apply edit(servers_map) -> bool to every nable-written config that exists
+    and parses. Writes only a file that changed; leaves an unparseable one as it
+    is. Returns (client, path) for each file changed."""
+    import json
+    changed = []
+    for client, path in _editor_config_paths():
+        try:
+            if not path.is_file():
+                continue
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        hit = False
+        for servers in _server_maps(doc):
+            hit = bool(edit(servers)) or hit
+        if hit:
+            try:
+                _atomic_write_json(path, doc)
+                changed.append((client, path))
+            except OSError as e:
+                _warn(f"Could not update {path}: {e.strerror or e}")
+    return changed
 
-        if updated:
-            config_path.write_text(json.dumps(config, indent=2))
-            config_path.chmod(0o600)
-            print("  ✓  Written to Claude Desktop config automatically.")
-        else:
-            print("  →  Add to your Claude Desktop config manually:")
-            print(f'       "FINOPS_LICENSE_KEY": "{key}"')
-            _warn("This is your license key. Keep it private: not in screen-shares or public gists.")
-    except Exception:
-        print("  →  Add to your Claude Desktop config manually:")
-        print(f'       "FINOPS_LICENSE_KEY": "{key}"')
-        _warn("This is your license key. Keep it private: not in screen-shares or public gists.")
+
+def _strip_license_from_editor_configs() -> "list[tuple[str, Path]]":
+    """Remove FINOPS_LICENSE_KEY from nable's entries in the editor configs."""
+    def _edit(servers: dict) -> bool:
+        hit = False
+        for name, entry in servers.items():
+            if not (_is_nable_server(name, entry) and isinstance(entry, dict)):
+                continue
+            env = entry.get("env")
+            if isinstance(env, dict) and "FINOPS_LICENSE_KEY" in env:
+                del env["FINOPS_LICENSE_KEY"]
+                if not env:
+                    entry.pop("env", None)
+                hit = True
+        return hit
+    return _edit_editor_configs(_edit)
 
 
 def _inject_aws_into_claude_config(access_key: str, secret_key: str, region: str) -> None:
@@ -4200,13 +4293,7 @@ def _build_mcp_server_entry() -> "tuple[dict, str]":
     else:
         mcp_entry = {"command": finops_bin}
         display_cmd = finops_bin
-    try:
-        from .security.vault import Vault
-        _val = Vault.default().get("FINOPS_LICENSE_KEY")
-        if _val:
-            mcp_entry["env"] = {"FINOPS_LICENSE_KEY": _val}
-    except Exception:
-        pass
+    # No license key in the entry: the server reads it from the vault.
     return mcp_entry, display_cmd
 
 
@@ -4228,6 +4315,11 @@ def _merge_write_mcpservers(config_path: Path, mcp_entry: dict) -> bool:
     entry = dict(mcp_entry)
     if isinstance(existing, dict) and existing.get("env"):
         entry["env"] = {**existing["env"], **entry.get("env", {})}
+    if isinstance(entry.get("env"), dict):
+        # A key an earlier release wrote here would outrank the vault.
+        entry["env"].pop("FINOPS_LICENSE_KEY", None)
+        if not entry["env"]:
+            entry.pop("env")
     servers.pop("finops", None)
     servers["nable"] = entry
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4411,23 +4503,14 @@ def _configure_claude_desktop_inner() -> bool:
 
     config.setdefault("mcpServers", {})
 
-    # Pull non-secret config from the vault into the env block.
-    # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are intentionally excluded:
-    # the MCP server loads them from the vault at startup via load_vault_to_env(),
-    # so they never need to appear in plaintext in claude_desktop_config.json.
-    vault_env: dict[str, str] = {}
-    try:
-        from .security.vault import Vault
-        _v = Vault.default()
-        for _k in ("FINOPS_LICENSE_KEY",):
-            _val = _v.get(_k)
-            if _val:
-                vault_env[_k] = _val
-    except Exception:
-        pass
-
-    if vault_env:
-        mcp_entry["env"] = {**vault_env, **mcp_entry.get("env", {})}
+    # Nothing secret goes into the env block. The MCP server loads credentials
+    # and the license key from the vault at startup (load_vault_to_env and
+    # license.check_license), so none of them needs to sit in plaintext in
+    # claude_desktop_config.json. A license key there outranked the vault and
+    # survived `nable logout`, so an entry still carrying one is rewritten.
+    stale_key = "FINOPS_LICENSE_KEY" in ((config["mcpServers"].get("nable")
+                                          or config["mcpServers"].get("finops") or {})
+                                         .get("env") or {})
 
     # Standardize on "nable" (the product name). Read either key so we can
     # migrate a legacy "finops" entry without leaving both registered.
@@ -4438,7 +4521,7 @@ def _configure_claude_desktop_inner() -> bool:
     # Only short-circuit when the entry is ALREADY under the new "nable" key. If it
     # exists only under the legacy "finops" key, fall through to the migration below
     # (pop "finops", register "nable") even when the command is otherwise identical.
-    if existing_base == new_base and not vault_env and "nable" in config["mcpServers"]:
+    if existing_base == new_base and not stale_key and "nable" in config["mcpServers"]:
         _ok(f"Claude Desktop already configured: {display_cmd}")
         return True
 
@@ -4450,8 +4533,8 @@ def _configure_claude_desktop_inner() -> bool:
     _notes = []
     if uvx_bin:
         _notes.append("uvx mode: works on corporate machines without PATH changes")
-    if vault_env:
-        _notes.append(f"including {len(vault_env)} credential(s) from vault")
+    if stale_key:
+        _notes.append("removes a license key an earlier release wrote here (the vault holds it)")
     if existing:
         _notes.append("updates existing entry")
     for _note in _notes:
@@ -4470,9 +4553,11 @@ def _configure_claude_desktop_inner() -> bool:
         _print_manual_config(mcp_entry)
         return False
 
-    # Preserve any env keys already in the existing entry that we're not overwriting
+    # Preserve any env keys already in the existing entry that we're not
+    # overwriting, except a license key an earlier release wrote there.
     if existing.get("env"):
-        merged_env = {**existing["env"], **mcp_entry.get("env", {})}
+        merged_env = {k: v for k, v in {**existing["env"], **mcp_entry.get("env", {})}.items()
+                      if k != "FINOPS_LICENSE_KEY"}
         if merged_env:
             mcp_entry["env"] = merged_env
 

@@ -719,8 +719,10 @@ def store_license(key: str) -> LicenseStatus:
 
 
 def clear_license() -> None:
-    """Remove the locally stored license (used by `finops logout`). An explicit
-    FINOPS_LICENSE_KEY env var, if set, is left untouched."""
+    """Remove the locally stored license (used by `finops logout`, which also
+    removes copies earlier releases wrote into editor MCP configs). An explicit
+    FINOPS_LICENSE_KEY in the process environment is left untouched; logout
+    warns about it."""
     global _status
     try:
         from .security.vault import Vault
