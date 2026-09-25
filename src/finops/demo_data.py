@@ -1374,9 +1374,33 @@ def demo_bridge_result(name: str, args: dict[str, Any] | None) -> dict[str, Any]
     if hit is not None:
         return hit
     return {
+        "_demo_mode": True,
         "demo_mode": True,
         "note": (
             "This is the StreamCo sample environment, so that specific detail isn't in the sample "
             "dataset. Ask about total spend, cost drivers, spend by service / team / account / region, "
             "anomalies, rightsizing, commitments, budgets, forecast, savings, or AI and LLM cost."),
     }
+
+
+DEMO_TEXT_HEADER = "Sample data (demo mode): the StreamCo sample environment, not your account."
+
+
+def render_text(value: Any) -> str:
+    """A demo answer as text, for a tool whose declared return type is str.
+
+    The demo layer answers in dicts, and a tool declared `-> str` fails output
+    validation on a dict, so the model saw a pydantic error instead of the
+    sample. The text always opens with the sample-data label so no reader can
+    take it for their own numbers."""
+    if isinstance(value, str):
+        body = value
+    elif isinstance(value, dict) and set(value) <= {"_demo_mode", "demo_mode", "note"}:
+        body = str(value.get("note", ""))
+    else:
+        import json
+
+        body = json.dumps(value, indent=2, default=str)
+    if body.lower().startswith("sample data"):
+        return body
+    return f"{DEMO_TEXT_HEADER}\n\n{body}".rstrip()

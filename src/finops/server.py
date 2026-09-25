@@ -300,6 +300,40 @@ def _first_run_onboarding_directive() -> dict:
         ),
     }
 
+
+def _declared_return(fn) -> type | None:
+    """str, list or dict when that is what `fn` is declared to return, else None.
+
+    FastMCP validates a tool's result against its return annotation, so the
+    annotation is a contract the demo layer has to keep too."""
+    import typing
+
+    try:
+        hint = typing.get_type_hints(fn).get("return")
+    except Exception:
+        hint = getattr(fn, "__annotations__", {}).get("return")
+    if isinstance(hint, str):
+        return {"str": str, "list": list, "dict": dict}.get(hint.split("[", 1)[0].strip())
+    origin = typing.get_origin(hint) or hint
+    return origin if origin in (str, list, dict) else None
+
+
+def _demo_as_declared(fn, value):
+    """A demo answer in the shape `fn` promises.
+
+    The demo layer answers in dicts. 22 tools are declared `-> str` or `-> list`,
+    and for those a dict failed output validation, so a demo user asking for a
+    full audit or a CSV export got a pydantic error instead of the sample."""
+    want = _declared_return(fn)
+    if want is str and not isinstance(value, str):
+        from .demo_data import render_text
+        return render_text(value)
+    if want is list and not isinstance(value, list):
+        return [value]
+    if want is dict and not isinstance(value, dict):
+        return {"result": value, "_demo_mode": True}
+    return value
+
 # ── Extras gating ───────────────────────────────────────────────────────────────
 # Every registered tool's definition is loaded into the model's context by the MCP
 # client, so 183 tools cost every user roughly 25-30k tokens per session before
@@ -402,7 +436,7 @@ def _instrumented_tool(*dargs, **dkwargs):
                 if is_demo():
                     _demo = demo_bridge_result(fn.__name__, kwargs or {})
                     if _demo is not None:
-                        return _demo
+                        return _demo_as_declared(fn, _demo)
             except Exception as _exc:   # never let the guard break a real call
                 log.debug("demo guard skipped for %s: %s", fn.__name__, _exc)
 
