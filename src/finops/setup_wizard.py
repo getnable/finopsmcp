@@ -3518,14 +3518,18 @@ def _run_license_setup(key: str = "") -> None:
     Called by: finops setup license FINOPS-2-xxx
                 finops setup license   (interactive, prompts for key)
     """
-    from .license import validate_key, _UPGRADE_URL, _CHECKOUT_URL
+    from .license import (
+        PRO_FEATURE_COPY, TEAM_FEATURE_COPY, _UPGRADE_URL, checkout_url,
+        locked_features, plan_label, plan_name, validate_key,
+    )
     from .security.vault import Vault
 
-    print("\n  nable Pro license activation\n")
+    print("\n  nable license activation\n")
 
     # If key not passed as arg, prompt
     if not key:
-        print(f"  Subscribe at: {_CHECKOUT_URL}")
+        print(f"  Subscribe to {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}")
         print("  After checkout your license key is shown on the confirmation page")
         print("  and emailed to you. It starts with FINOPS-2-\n")
         key = _prompt("  Paste your license key").strip()
@@ -3539,11 +3543,10 @@ def _run_license_setup(key: str = "") -> None:
 
     if status.mode == "invalid":
         _err(f"Invalid key: {status.message}")
-        print(f"\n  Subscribe at: {_CHECKOUT_URL}\n")
-        return
-
-    if status.mode not in ("pro", "trial"):
-        _warn(f"Key validated but returned unexpected plan: {status.mode}")
+        print(f"\n  Subscribe to {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}\n")
+        # Non-zero, so a script activating a key can tell it did not take.
+        raise SystemExit(1)
 
     # Store in vault AND write to env file for Claude Desktop
     vault = Vault.default()
@@ -3552,19 +3555,23 @@ def _run_license_setup(key: str = "") -> None:
     # Also try to write directly into the Claude Desktop config
     _inject_license_into_claude_config(key)
 
-    print(f"\n  ✓  Pro plan active, {status.email or 'license validated'}")
+    name = plan_name(status.mode)
+    print(f"\n  ✓  {name} plan active, {status.email or 'license validated'}")
     print("  ✓  Key stored in vault.")
-    print(f"  ✓  Plan: {status.mode.upper()}")
+    print(f"  ✓  Plan: {plan_label(status.mode)}")
     if status.issued:
         print(f"  ✓  Issued: {status.issued}")
+    if status.expires:
+        print(f"  ✓  Valid through: {status.expires}")
     print()
-    print("  Restart Claude Desktop to activate Team features:")
-    print("    • Ticket auto-creation (Jira, Linear, GitHub Issues)")
-    print("    • Email reports and digests, sent on request")
-    print("    • Commitment purchase recommendations")
-    print("    • Org-wide multi-account rollup")
-    print("    • Business metrics and unit economics")
-    print()
+    unlocked = [PRO_FEATURE_COPY[f] for f in locked_features()]
+    if status.is_team:
+        unlocked += list(TEAM_FEATURE_COPY.values())
+    if unlocked:
+        print(f"  Restart Claude Desktop to turn on {name}:")
+        for item in unlocked:
+            print(f"    • {item}")
+        print()
 
     try:
         from . import telemetry as _tel
@@ -3693,7 +3700,9 @@ def _run_login(email: str = "") -> None:
 
     if not key or plan == "free":
         _warn(f"No active subscription found for {email}.")
-        print(f"\n  Get Pro at: {_UPGRADE_URL}")
+        from .license import checkout_url, plan_label
+        print(f"\n  Get {plan_label('pro')}: {checkout_url('pro')}")
+        print(f"  Team and other plans: {_UPGRADE_URL}")
         print("  Subscribed with a different email? Run 'finops login' with that one.\n")
         return
 
@@ -3703,11 +3712,14 @@ def _run_login(email: str = "") -> None:
         return
     _inject_license_into_claude_config(key)
 
+    from .license import plan_label, plan_name
     print(f"\n  ✓  Signed in as {status.email or email}")
-    print(f"  ✓  Plan: {status.mode.upper()}")
+    print(f"  ✓  Plan: {plan_label(status.mode)}")
+    if status.expires:
+        print(f"  ✓  Valid through: {status.expires}")
     print("  ✓  License stored on this machine. Nothing to copy or remember.")
     print()
-    print("  Restart Claude Desktop (or your MCP client) to pick up Pro.")
+    print(f"  Restart Claude Desktop (or your MCP client) to pick up {plan_name(status.mode)}.")
     print()
 
     try:
