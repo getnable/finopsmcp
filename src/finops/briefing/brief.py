@@ -77,9 +77,22 @@ class BriefItem:
 
     @property
     def title(self) -> str:
-        return str(self.finding.get("title")
-                   or self.finding.get("issue")
-                   or self.finding.get("resource_id") or "Finding")
+        explicit = self.finding.get("title") or self.finding.get("issue")
+        if explicit:
+            return str(explicit)
+        # A bare resource id ("vol-6a323b9ec9a87d57d") told the reader nothing
+        # about what it was or where. Say what kind of finding, which resource,
+        # and the region to look in.
+        rid = str(self.finding.get("resource_id") or "")
+        region = str(self.finding.get("region")
+                     or (self.finding.get("metadata") or {}).get("region") or "")
+        label = _FINDING_LABELS.get(str(self.finding.get("waste_type") or ""))
+        if not label:
+            wt = str(self.finding.get("waste_type") or "").replace("_", " ").strip()
+            label = wt[:1].upper() + wt[1:] if wt else ""
+        parts = [p for p in (label, rid) if p]
+        head = " ".join(parts) or "Finding"
+        return f"{head} ({region})" if region else head
 
     def in_words(self, *, include_map: bool = True) -> str:
         """The explanation for someone who does not read AWS resource ids.
@@ -94,7 +107,8 @@ class BriefItem:
         self-contained.
         """
         bits = []
-        why = str(self.finding.get("why") or self.finding.get("reason") or "").strip()
+        why = str(self.finding.get("why") or self.finding.get("reason")
+                  or self.finding.get("detail") or "").strip()
         if why:
             bits.append(why.rstrip("."))
 
@@ -136,6 +150,13 @@ class Brief:
     # how "we scanned everything" becomes a lie nobody notices for a quarter.
     gaps: list[str] = field(default_factory=list)
     scanned: dict[str, Any] = field(default_factory=dict)
+    # Findings that WERE checked but did not make the cut. Kept apart from
+    # `gaps`: listing them under "what nable could not check" said the
+    # opposite of what happened.
+    not_shown: list[str] = field(default_factory=list)
+    # "scheduled" for the overnight job, "on_demand" for `nable brief`. The
+    # header said "Overnight run" either way.
+    trigger: str = "scheduled"
 
     @property
     def actionable(self) -> list[BriefItem]:
@@ -180,6 +201,8 @@ class Brief:
             "investigation_count": len(self.investigations),
             "items": [i.to_dict() for i in self.items],
             "gaps": list(self.gaps),
+            "not_shown": list(self.not_shown),
+            "trigger": self.trigger,
             "scanned": dict(self.scanned),
             "executed": False,
             "note": "nable drafts changes. It does not make them.",
@@ -188,16 +211,72 @@ class Brief:
 
 # ── the drafted fix ───────────────────────────────────────────────────────────
 
+# What a waste finding is, in words, for its title.
+_FINDING_LABELS: dict[str, str] = {
+    "unattached_ebs_volume": "Unattached EBS volume",
+    "gp2_should_migrate_to_gp3": "gp2 volume cheaper as gp3",
+    "old_unmanaged_snapshot": "Old EBS snapshot",
+    "unassociated_elastic_ip": "Unused Elastic IP",
+    "idle_nat_gateway": "Idle NAT gateway",
+    "idle_load_balancer": "Idle load balancer",
+    "idle_ec2_low_cpu": "Idle EC2 instance",
+    "rds_idle_no_connections": "Idle RDS instance",
+    "rds_overprovisioned": "Oversized RDS instance",
+    "excessive_rds_backup_retention": "RDS instance keeping extra backups",
+    "log_group_infinite_retention": "Log group kept forever",
+    "s3_incomplete_multipart_uploads": "S3 bucket holding abandoned uploads",
+    "s3_suboptimal_storage_class": "S3 bucket in a costlier storage class",
+    "ecr_old_untagged_images": "ECR repo with old untagged images",
+    "ecs_overprovisioned_cpu": "ECS service with unused CPU",
+    "lambda_memory_overprovisioned": "Lambda function with unused memory",
+    "lambda_zero_invocations": "Lambda function never invoked",
+}
+
+# The waste analyzers name resource types for people ("EBS Volume"); the
+# cleanup planners key on their own names. Map by the finding's waste_type,
+# which says what the change is, not only what the resource is.
+_PLANNER_FOR_WASTE: dict[str, str] = {
+    "unattached_ebs_volume": "ebs_volume",
+    "unassociated_elastic_ip": "elastic_ip",
+    "old_unmanaged_snapshot": "snapshot",
+}
+
+
+def _region_flag(region: str) -> str:
+    return f" --region {region}" if region else ""
+
+
+def _draft_simple(finding: dict, rid: str, region: str) -> dict[str, Any] | None:
+    """Changes that need no judgment beyond the finding itself."""
+    wt = str(finding.get("waste_type") or "")
+    if wt == "gp2_should_migrate_to_gp3" and rid:
+        return {
+            "summary": f"Change {rid} from gp2 to gp3, in place.",
+            "steps": [("Run the command below. The volume stays attached and in use "
+                       "while it changes.")],
+            "commands": [f"aws ec2 modify-volume --volume-id {rid} --volume-type gp3"
+                         + _region_flag(region)],
+            "reversible": True,
+            "caveat": ("A volume can be modified once every six hours, and the change "
+                       "takes a while to finish on a large volume."),
+        }
+    return None
+
+
 def _draft_fix(finding: dict, rmap: ResourceMap) -> dict[str, Any]:
     """The concrete change, or an honest statement that we cannot draft one.
 
     Reuses the cleanup planners so there is exactly one place that knows how to
     phrase a delete, and it is the place that also refuses to run it.
     """
-    rtype = rmap.resource_type
     rid = rmap.resource_id
     region = str((finding.get("metadata") or {}).get("region")
                  or finding.get("region") or "")
+    rtype = _PLANNER_FOR_WASTE.get(str(finding.get("waste_type") or ""), rmap.resource_type)
+
+    simple = _draft_simple(finding, rid, region)
+    if simple:
+        return simple
 
     # Rightsizing carries a target type; that is a change, not a delete.
     current = (finding.get("current_type") or finding.get("instance_type")
@@ -233,8 +312,30 @@ def _draft_fix(finding: dict, rmap: ResourceMap) -> dict[str, Any]:
     if plan:
         confirm = (f"Confirm nothing depends on {rid}." if rmap.isolated is not True
                    else f"nable checked every relationship it tracks: nothing references {rid}.")
+        if rtype == "ebs_volume":
+            # Snapshot first: the snapshot costs a fraction of the volume and
+            # makes the delete undoable.
+            return {
+                "summary": f"Snapshot {rid}, then delete it.",
+                "steps": [confirm,
+                          "Take a snapshot, wait for it to complete, then delete the volume."],
+                "commands": [
+                    (f"aws ec2 create-snapshot --volume-id {rid}{_region_flag(region)} "
+                     f"--description 'nable: before deleting {rid}'"),
+                    (f"aws ec2 wait snapshot-completed --filters Name=volume-id,Values={rid}"
+                     f"{_region_flag(region)}"),
+                    plan["command"],
+                ],
+                # The delete itself cannot be undone; the snapshot lets you make
+                # a new volume with the same data.
+                "reversible": False,
+                "caveat": ("The delete cannot be undone, but the snapshot restores the "
+                           "data to a new volume. It bills at snapshot rates until you "
+                           "delete it too."),
+            }
+        verb = "Release" if rtype == "elastic_ip" else "Delete"
         return {
-            "summary": f"Delete {rid}.",
+            "summary": f"{verb} {rid}.",
             "steps": [confirm, "Run the command below."],
             "commands": [plan["command"]],
             "reversible": False,
@@ -315,6 +416,7 @@ def build_brief(
     scanned: dict[str, Any] | None = None,
     limit: int = 10,
     now: datetime | None = None,
+    trigger: str = "scheduled",
 ) -> Brief:
     """Assemble the brief. Critique runs FIRST, so a retracted figure can never
     reach the ranking, the headline, or the drafted fix.
@@ -340,15 +442,15 @@ def build_brief(
 
     items.sort(key=lambda i: (-i.rank_score, i.title))
 
-    all_gaps = list(gaps or [])
+    not_shown: list[str] = []
     if len(items) > limit:
         dropped = items[limit:]
         held = sum(i.monthly_usd or 0.0 for i in dropped)
-        all_gaps.append(
-            f"{len(dropped)} further finding(s) worth about ${held:,.0f}/mo are not "
-            f"shown here. They are in the full report.")
+        not_shown.append(
+            f"{len(dropped)} further finding(s) worth about ${held:,.0f}/mo were "
+            f"checked and ranked below these. `nable scan --json` lists every one.")
         items = items[:limit]
 
     stamp = (now or datetime.now(timezone.utc)).isoformat()
-    return Brief(generated_at=stamp, items=items, gaps=all_gaps,
-                 scanned=dict(scanned or {}))
+    return Brief(generated_at=stamp, items=items, gaps=list(gaps or []),
+                 scanned=dict(scanned or {}), not_shown=not_shown, trigger=trigger)

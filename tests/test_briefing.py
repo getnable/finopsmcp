@@ -197,8 +197,9 @@ def test_truncation_is_reported_not_silent():
                  estimated_monthly_savings_usd=100.0 + i) for i in range(15)]
     b = build_brief(many, today=TODAY, use_llm=False, limit=5, now=NOW)
     assert len(b.items) == 5
-    assert any("not shown here" in g for g in b.gaps)
-    assert any("10 further finding" in g for g in b.gaps)
+    # Checked and ranked lower, which is not "could not check".
+    assert not any("further finding" in g for g in b.gaps)
+    assert any("10 further finding" in g and "checked" in g for g in b.not_shown)
 
 
 def test_the_brief_never_claims_it_did_anything():
@@ -213,8 +214,10 @@ def test_the_brief_never_claims_it_did_anything():
 def test_a_delete_is_drafted_as_a_command_and_marked_irreversible():
     b = build_brief([_vol()], today=TODAY, use_llm=False, now=NOW)
     fix = b.items[0].drafted_fix
-    assert fix["commands"] == [
-        "aws ec2 delete-volume --volume-id vol-1 --region us-east-1"]
+    # Snapshot first, then the delete.
+    assert fix["commands"][0].startswith(
+        "aws ec2 create-snapshot --volume-id vol-1 --region us-east-1")
+    assert fix["commands"][-1] == "aws ec2 delete-volume --volume-id vol-1 --region us-east-1"
     assert fix["reversible"] is False
 
 
